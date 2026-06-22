@@ -3,11 +3,9 @@ import torch
 
 from fme.core.tensors import (
     assert_dict_allclose,
-    fold_ensemble_tensor,
     fold_sized_ensemble_dim,
     repeat_interleave_batch_dim,
     unfold_ensemble_dim,
-    unfold_ensemble_tensor,
 )
 from fme.core.typing_ import EnsembleTensorDict
 
@@ -107,24 +105,3 @@ def test_unfold_ensemble_dim_increases_dimensionality():
     assert set(unfolded.keys()) == {"a"}
     assert unfolded["a"].shape == (2, 3, 4, 8)
     torch.testing.assert_close(unfolded["a"], a.reshape(2, 3, 4, 8))
-
-
-@pytest.mark.parametrize("n_ensemble", [1, 3])
-def test_fold_unfold_ensemble_tensor_round_trip(n_ensemble: int):
-    # [batch, ensemble, channel, lat, lon] -> [batch*ensemble, ...] -> back.
-    t = torch.randn(2, n_ensemble, 4, 5, 6)
-    folded = fold_ensemble_tensor(t, n_ensemble)
-    assert folded.shape == (2 * n_ensemble, 4, 5, 6)
-    torch.testing.assert_close(unfold_ensemble_tensor(folded, n_ensemble), t)
-
-
-def test_fold_ensemble_tensor_block_order_matches_unfold_ensemble_dim():
-    # fold_ensemble_tensor must use the same block ordering as the dict-level
-    # unfold/fold helpers so a single tensor and a tensor dict stay aligned.
-    n_batch, n_ensemble = 3, 2
-    t = torch.randn(n_batch, n_ensemble, 4, 8)
-    folded = fold_ensemble_tensor(t, n_ensemble)
-    # member e of base sample b lands at row b * n_ensemble + e
-    for b in range(n_batch):
-        for e in range(n_ensemble):
-            torch.testing.assert_close(folded[b * n_ensemble + e], t[b, e])

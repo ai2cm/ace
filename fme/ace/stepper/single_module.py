@@ -505,8 +505,8 @@ def process_prediction_generator_list(
     this stacks over time into ``[batch, ensemble, time, *spatial]`` and folds
     the ensemble back into the batch only at this storage boundary (BatchData
     holds the folded ``data`` + ``n_ensemble``). Attaches the terminal
-    stepper_state (from the last entry in ``output_list``) so it can propagate
-    to the next ``Stepper.predict`` call.
+    stepper_state (from the last entry in ``output_list``, already in the folded
+    layout) so it can propagate to the next ``Stepper.predict`` call.
     """
     output_dicts = [item[0] for item in output_list]
     terminal_state = output_list[-1][1] if output_list else None
@@ -520,9 +520,7 @@ def process_prediction_generator_list(
         horizontal_dims=horizontal_dims,
         labels=labels,
         n_ensemble=n_ensemble,
-        stepper_state=(
-            None if terminal_state is None else terminal_state.fold_ensemble(n_ensemble)
-        ),
+        stepper_state=terminal_state,
     )
 
 
@@ -1101,8 +1099,8 @@ class Stepper:
             n_forward_steps,
             optimizer,
             forcing_data.labels,
-            data_mask=forcing_data.ensemble_data_mask,
-            stepper_state=ic_batch_data.ensemble_stepper_state,
+            data_mask=forcing_data.data_mask,
+            stepper_state=ic_batch_data.stepper_state,
         )
 
     @property
@@ -1113,33 +1111,32 @@ class Stepper:
 
     def predict_generator(
         self,
-        ic_data: TensorMapping,
-        forcing_data: TensorMapping,
+        ic_dict: TensorMapping,
+        forcing_dict: TensorMapping,
         n_forward_steps: int,
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
-        # All tensors carry an explicit [batch, ensemble, time, *spatial] layout
-        # (e.g. BatchData.ensemble_data / ensemble_data_mask / ensemble_stepper_
-        # state). The ensemble dimension is never folded into the batch outside
-        # the nn.Module call, which folds transiently inside the Step; the
-        # generator yields the same explicit layout. The time dimension is thus
-        # one past TIME_DIM (the ensemble dim is inserted before it).
+        # ic/forcing carry an explicit [batch, ensemble, time, *spatial] layout
+        # (BatchData.ensemble_data); the Step folds the ensemble into the batch
+        # internally and yields the same explicit layout. data_mask and
+        # stepper_state stay in their folded [batch*ensemble, ...] layout. The
+        # ensemble dim sits before time here, so time is at TIME_DIM + 1.
         time_dim = self.TIME_DIM + 1
-        state = {k: ic_data[k].squeeze(time_dim) for k in ic_data}
+        state = {k: ic_dict[k].squeeze(time_dim) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
                 k: (
-                    forcing_data[k][:, :, step]
+                    forcing_dict[k].select(time_dim, step)
                     if k not in self._step_obj.next_step_forcing_names
-                    else forcing_data[k][:, :, step + 1]
+                    else forcing_dict[k].select(time_dim, step + 1)
                 )
                 for k in self._input_only_names
             }
             next_step_input_dict = {
-                k: forcing_data[k][:, :, step + 1]
+                k: forcing_dict[k].select(time_dim, step + 1)
                 for k in self._step_obj.next_step_input_names
             }
             input_data = {**state, **input_forcing}
@@ -1683,8 +1680,8 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
-            data_mask=forcing_ensemble_data.ensemble_data_mask,
-            stepper_state=input_ensemble_data.ensemble_stepper_state,
+            data_mask=forcing_ensemble_data.data_mask,
+            stepper_state=input_ensemble_data.stepper_state,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

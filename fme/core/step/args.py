@@ -11,19 +11,17 @@ class StepArgs:
 
     Parameters:
         input: Mapping from variable name to tensor of shape
-            [n_batch, n_ensemble, n_lat, n_lon]. This data is used as input for
-            pytorch module(s) and is assumed to contain all input variables and
-            be denormalized. The ensemble dimension is folded into the batch
-            only for the module call; the rest of the step sees it explicitly.
+            [n_batch, n_lat, n_lon]. This data is used as input for pytorch
+            module(s) and is assumed to contain all input variables
+            and be denormalized.
         next_step_input_data: Mapping from variable name to tensor of shape
-            [n_batch, n_ensemble, n_lat, n_lon]. This must contain the necessary
-            input data at the output timestep, such as might be needed to
-            prescribe sea surface temperature or use a corrector.
-        labels: Labels for each batch member, folded as [n_batch * n_ensemble]
-            to match the folded module call.
+            [n_batch, n_lat, n_lon]. This must contain the necessary input
+            data at the output timestep, such as might be needed to prescribe
+            sea surface temperature or use a corrector.
+        labels: Labels for each batch member.
         data_mask: Per-variable, per-sample masks indicating variable
-            presence. Keys are variable names, values are [n_batch, n_ensemble]
-            bool tensors where True means present and False means masked.
+            presence. Keys are variable names, values are [n_batch] bool
+            tensors where True means present and False means masked.
         stepper_state: Per-sample state carried across step calls (e.g.
             corrector references seeded from the IC). ``None`` if no state
             has been seeded yet. The step returns an updated stepper_state

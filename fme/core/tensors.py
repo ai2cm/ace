@@ -48,26 +48,6 @@ def add_ensemble_dim(d: TensorMapping, repeats: int = 1) -> EnsembleTensorDict:
     )
 
 
-def fold_ensemble_tensor(t: torch.Tensor, n_ensemble: int) -> torch.Tensor:
-    """Fold a leading ``[batch, ensemble]`` dimension pair of a single tensor
-    into one ``[batch * ensemble]`` sample dimension.
-
-    The inverse of :func:`unfold_ensemble_tensor`. Used to hand a
-    ``[batch, ensemble, channel, *spatial]`` tensor to an ``nn.Module`` that
-    expects a folded ``[sample, channel, *spatial]`` batch.
-    """
-    return t.reshape(t.shape[0] * n_ensemble, *t.shape[2:])
-
-
-def unfold_ensemble_tensor(t: torch.Tensor, n_ensemble: int) -> torch.Tensor:
-    """Unfold the leading ``[batch * ensemble]`` sample dimension of a single
-    tensor into an explicit ``[batch, ensemble]`` pair.
-
-    The inverse of :func:`fold_ensemble_tensor`.
-    """
-    return t.reshape(t.shape[0] // n_ensemble, n_ensemble, *t.shape[1:])
-
-
 def fold_sized_ensemble_dim(d: EnsembleTensorDict, n_ensemble: int) -> TensorDict:
     """
     Take a tensor dict with an explicit ensemble dimension and fold it into a

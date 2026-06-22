@@ -1065,7 +1065,7 @@ def test_step_with_data_mask():
     )
     data_mask = {
         "forcing_shared": torch.tensor(
-            [[True], [True], [False], [False]], device=fme.get_device()
+            [True, True, False, False], device=fme.get_device()
         ),
     }
     output_no_mask, _ = step.step(
@@ -1177,7 +1177,7 @@ def test_step_with_include_channel_mask_inputs():
     )
     data_mask = {
         "forcing_shared": torch.tensor(
-            [[True], [True], [False], [False]], device=fme.get_device()
+            [True, True, False, False], device=fme.get_device()
         ),
     }
     output_no_mask, _ = step.step(
@@ -1241,7 +1241,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         ),
     )
     all_unmasked = {
-        name: torch.ones(n_samples, 1, dtype=torch.bool, device=fme.get_device())
+        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
         for name in step.input_names
     }
     output_all_unmasked, _ = step.step(
@@ -1515,7 +1515,7 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     data_mask = {
-        "surface_temperature": torch.tensor([[True], [False]], device=fme.get_device()),
+        "surface_temperature": torch.tensor([True, False], device=fme.get_device()),
     }
     with pytest.raises(ValueError, match="masked"):
         step.step(

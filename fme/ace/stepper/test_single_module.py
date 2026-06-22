@@ -1273,10 +1273,8 @@ class _RecordingCorrector(CorrectorABC):
         self.call_count += 1
         self.seen_states.append(corrector_state)
         if corrector_state is None or corrector_state.global_dry_air_mass is None:
-            # The corrector sees data with an explicit [batch, ensemble, ...]
-            # leading pair, so the per-sample state keeps that pair too:
-            # [batch, ensemble, 1, 1].
-            seed = input_data["a"].mean(dim=(-1, -2), keepdim=True)
+            n = input_data["a"].shape[0]
+            seed = input_data["a"].mean(dim=(-1, -2), keepdim=True).reshape(n, 1, 1)
             corrector_state = CorrectorState(global_dry_air_mass=seed)
         else:
             corrector_state = CorrectorState(
@@ -1312,10 +1310,7 @@ def test_predict_threads_stepper_state_across_calls():
     pres_after_1 = ic_after_1.stepper_state.corrector_state.global_dry_air_mass
     assert pres_after_1 is not None
     # n_steps invocations after seeding: seed + (n_steps - 1) increments.
-    # ``seeded_1`` is in the corrector-facing [batch, ensemble, 1, 1] frame;
-    # the returned state is folded to [batch*ensemble, 1, 1], so fold the
-    # expectation (flatten the leading pair) before comparing.
-    expected = (seeded_1 + float(n_steps - 1)).flatten(0, 1)
+    expected = seeded_1 + float(n_steps - 1)
     torch.testing.assert_close(pres_after_1, expected)
 
     # Second predict: feed back the prognostic state from call 1; corrector
@@ -1325,11 +1320,7 @@ def test_predict_threads_stepper_state_across_calls():
     first_state_call_2 = recording_corrector.seen_states[seen_before_call_2]
     assert first_state_call_2 is not None
     assert first_state_call_2.global_dry_air_mass is not None
-    # The state the corrector sees is unfolded ([batch, ensemble, 1, 1]); the
-    # returned state from call 1 is folded. Fold before comparing.
-    torch.testing.assert_close(
-        first_state_call_2.global_dry_air_mass.flatten(0, 1), pres_after_1
-    )
+    torch.testing.assert_close(first_state_call_2.global_dry_air_mass, pres_after_1)
 
     ic_after_2 = new_state_2.as_batch_data()
     assert ic_after_2.stepper_state is not None
@@ -2652,7 +2643,7 @@ def test_step_masked_nan_input_does_not_raise():
     n_samples = 2
     input_data = {x: torch.rand(n_samples, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
     input_data["b"][1] = torch.nan
-    data_mask = {"b": torch.tensor([[True], [False]], dtype=torch.bool, device=DEVICE)}
+    data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
     output, _ = stepper.step(
         StepArgs(
             input=input_data,
