@@ -170,51 +170,83 @@ class MockComponentData:
 
 @dataclasses.dataclass
 class MockCoupledData:
-    ocean: MockComponentData
-    ice: MockComponentData
-    atmosphere: MockComponentData
+    ocean: MockComponentData | None = None
+    ice: MockComponentData | None = None
+    atmosphere: MockComponentData | None = None
 
     @property
     def n_times_ocean(self):
+        assert self.ocean is not None
         return len(self.ocean.ds["time"])
 
     @property
     def n_times_ice(self):
+        assert self.ice is not None
         return len(self.ice.ds["time"])
 
     @property
     def n_times_atmosphere(self):
+        assert self.atmosphere is not None
         return len(self.atmosphere.ds["time"])
 
     @property
     def img_shape(self) -> tuple[int, int]:
-        # NOTE: assumes atmosphere and ice have same img_shape
-        return self.ocean.ds[next(iter(self.ocean.ds.data_vars))].shape[-2:]
+        if self.ocean is not None:
+            # NOTE: assumes atmosphere and ice have same img_shape
+            return self.ocean.ds[next(iter(self.ocean.ds.data_vars))].shape[-2:]
+        elif self.ice is not None:
+            # NOTE: assumes atmosphere has same img_shape
+            return self.ice.ds[next(iter(self.ice.ds.data_vars))].shape[-2:]
 
     @property
     def hcoord(self) -> CoupledHorizontalCoordinates:
+        ocean_hcoord = None
+        ice_hcoord = None
+        atmos_hcoord = None
+        if self.ocean is not None:
+            ocean_hcoord = self.ocean.hcoord
+        if self.ice is not None:
+            ice_hcoord = self.ice.hcoord
+        if self.atmosphere is not None:
+            atmos_hcoord = self.atmosphere.hcoord
         return CoupledHorizontalCoordinates(
-            ocean=self.ocean.hcoord,
-            ice=self.ice.hcoord,
-            atmosphere=self.atmosphere.hcoord,
+            ocean=ocean_hcoord,
+            ice=ice_hcoord,
+            atmosphere=atmos_hcoord,
         )
 
     @property
     def vcoord(self) -> CoupledVerticalCoordinate:
+        ocean_vcoord = None
+        ice_vcoord = None
+        atmos_vcoord = None
+        if self.ocean is not None:
+            ocean_vcoord = self.ocean.vcoord
+        if self.ice is not None:
+            ice_vcoord = self.ice.vcoord
+        if self.atmosphere is not None:
+            atmos_vcoord = self.atmosphere.vcoord
         return CoupledVerticalCoordinate(
-            ocean=cast(OptionalDepthCoordinate, self.ocean.vcoord),
-            ice=cast(OptionalDepthCoordinate, self.ice.vcoord),
-            atmosphere=cast(
-                OptionalHybridSigmaPressureCoordinate, self.atmosphere.vcoord
-            ),
+            ocean=ocean_vcoord,
+            ice=ice_vcoord,
+            atmosphere=atmos_vcoord
         )
 
     @property
     def dataset_config(self) -> CoupledDatasetConfig:
+        ocean_dir = None
+        ice_dir = None
+        atmos_dir = None
+        if self.ocean is not None:
+            ocean_dir = XarrayDataConfig(str(self.ocean.data_dir))
+        if self.ice is not None:
+            ice_dir = XarrayDataConfig(str(self.ice.data_dir))
+        if self.atmosphere is not None:
+            atmos_dir = XarrayDataConfig(str(self.atmosphere.data_dir))
         return CoupledDatasetConfig(
-            ocean=XarrayDataConfig(str(self.ocean.data_dir)),
-            ice=XarrayDataConfig(str(self.ice.data_dir)),
-            atmosphere=XarrayDataConfig(str(self.atmosphere.data_dir)),
+            ocean=ocean_dir,
+            ice=ice_dir,
+            atmosphere=atmos_dir,
         )
 
     def get_dataset_config_with_kwargs(
@@ -223,25 +255,34 @@ class MockCoupledData:
         ice_kwargs: dict[str, Any] | None = None,
         atmos_kwargs: dict[str, Any] | None = None,
     ) -> CoupledDatasetConfig:
+        ocean_dir = None
+        ice_dir = None
+        atmos_dir = None
         if ocean_kwargs is None:
             ocean_kwargs = {}
         if ice_kwargs is None:
             ice_kwargs = {}
         if atmos_kwargs is None:
             atmos_kwargs = {}
-        return CoupledDatasetConfig(
-            ocean=XarrayDataConfig(
-                data_path=str(self.ocean.data_dir),
+        if self.ocean is not None:
+            ocean_dir = XarrayDataConfig(
+                str(self.ocean.data_dir),
                 **ocean_kwargs,
-            ),
-            ice=XarrayDataConfig(
-                data_path=str(self.ice.data_dir),
+            )
+        if self.ice is not None:
+            ice_dir = XarrayDataConfig(
+                str(self.ice.data_dir),
                 **ice_kwargs,
-            ),
-            atmosphere=XarrayDataConfig(
-                data_path=str(self.atmosphere.data_dir),
+            )
+        if self.atmosphere is not None:
+            atmos_dir = XarrayDataConfig(
+                str(self.atmosphere.data_dir),
                 **atmos_kwargs,
-            ),
+            )
+        return CoupledDatasetConfig(
+            ocean=ocean_dir,
+            ice=ice_dir,
+            atmosphere=atmos_dir,
         )
 
     def build_dataset_info(self) -> CoupledDatasetInfo:
@@ -252,24 +293,30 @@ class MockCoupledData:
         """
         from fme.core.dataset_info import DatasetInfo
 
-        ocean_info = DatasetInfo(
-            horizontal_coordinates=self.ocean.hcoord,
-            vertical_coordinate=self.ocean.vcoord,
-            spatial_mask_provider=self.ocean.spatial_mask_provider,
-            timestep=self.ocean.timestep,
-        )
-        ice_info = DatasetInfo(
-            horizontal_coordinates=self.ice.hcoord,
-            vertical_coordinate=self.ice.vcoord,
-            spatial_mask_provider=self.ice.spatial_mask_provider,
-            timestep=self.ice.timestep,
-        )
-        atmos_info = DatasetInfo(
-            horizontal_coordinates=self.atmosphere.hcoord,
-            vertical_coordinate=self.atmosphere.vcoord,
-            spatial_mask_provider=self.atmosphere.spatial_mask_provider,
-            timestep=self.atmosphere.timestep,
-        )
+        ocean_info = None
+        if self.ocean is not None:
+            ocean_info = DatasetInfo(
+                horizontal_coordinates=self.ocean.hcoord,
+                vertical_coordinate=self.ocean.vcoord,
+                spatial_mask_provider=self.ocean.spatial_mask_provider,
+                timestep=self.ocean.timestep,
+            )
+        ice_info = None
+        if self.ice is not None:
+            ice_info = DatasetInfo(
+                horizontal_coordinates=self.ice.hcoord,
+                vertical_coordinate=self.ice.vcoord,
+                spatial_mask_provider=self.ice.spatial_mask_provider,
+                timestep=self.ice.timestep,
+            )
+        atmos_info = None
+        if self.atmosphere is not None:
+            atmos_info = DatasetInfo(
+                horizontal_coordinates=self.atmosphere.hcoord,
+                vertical_coordinate=self.atmosphere.vcoord,
+                spatial_mask_provider=self.atmosphere.spatial_mask_provider,
+                timestep=self.atmosphere.timestep,
+            )
         return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info, ice=ice_info)
 
 

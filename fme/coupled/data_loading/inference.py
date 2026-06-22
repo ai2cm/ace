@@ -161,6 +161,11 @@ class InferenceDataset(torch.utils.data.Dataset):
         elif config.dataset.ocean is None:
             if config.dataset.ice is not None:
                 assert ice_reqs is not None
+                if initial_time is not None:
+                    first_ic_time = sorted(initial_time)[0].values[0]
+                    config.dataset.ice.update_subset(
+                        TimeSlice(start_time=first_ic_time)
+                    )
                 ice, ice_properties = config.dataset.ice.build(
                     ice_reqs.names, ice_reqs.n_timesteps_schedule
                 )
