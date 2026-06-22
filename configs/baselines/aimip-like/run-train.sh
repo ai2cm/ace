@@ -160,5 +160,6 @@ run_training() {
 # =============================================================================
 
 # --- Wave: RH/qsat moisture eval (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling.yaml"    "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling-rs0"    1 ai2/ace high "ai2/jupiter ai2/titan"
-run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# --- LAUNCHED 2026-06-22 to ai2/ace from commit 2d1738dc6 (2 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
+# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling.yaml"    "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling-rs0"    1 ai2/ace high "ai2/jupiter ai2/titan"
+# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
