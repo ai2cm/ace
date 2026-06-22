@@ -26,6 +26,7 @@ from fme.core.step.args import StepArgs
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.stepper_state import StepperState
+from fme.core.tensors import fold_ensemble_tensor, unfold_ensemble_tensor
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -456,14 +457,22 @@ class FCN3Step(StepABC):
             surface_tensor = self.surface_input_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
+            # The module expects a single folded [batch*ensemble, channel,
+            # *spatial] sample dimension; fold the explicit ensemble dim in and
+            # unfold the outputs back to [batch, ensemble, ...].
+            n_ensemble = atmosphere_tensor.shape[1]
             atmosphere_output_tensor, surface_output_tensor = wrapper(self.module)(
-                atmosphere_tensor, surface_tensor, forcing_tensor
+                fold_ensemble_tensor(atmosphere_tensor, n_ensemble),
+                fold_ensemble_tensor(surface_tensor, n_ensemble),
+                fold_ensemble_tensor(forcing_tensor, n_ensemble),
             )
             atmosphere_output = self.atmosphere_output_packer.unpack(
-                atmosphere_output_tensor, axis=self.CHANNEL_DIM
+                unfold_ensemble_tensor(atmosphere_output_tensor, n_ensemble),
+                axis=self.CHANNEL_DIM,
             )
             surface_output = self.surface_output_packer.unpack(
-                surface_output_tensor, axis=self.CHANNEL_DIM
+                unfold_ensemble_tensor(surface_output_tensor, n_ensemble),
+                axis=self.CHANNEL_DIM,
             )
             return {
                 **atmosphere_output,

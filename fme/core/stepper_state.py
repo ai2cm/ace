@@ -56,6 +56,32 @@ class StepperState:
             ),
         )
 
+    def unfold_ensemble(self, n_ensemble: int) -> "StepperState":
+        """Unfold a folded ``[batch * ensemble, ...]`` state into an explicit
+        ``[batch, ensemble, ...]`` leading pair. Inverse of
+        :meth:`fold_ensemble`.
+        """
+        return StepperState(
+            corrector_state=(
+                None
+                if self.corrector_state is None
+                else self.corrector_state.unfold_ensemble(n_ensemble)
+            ),
+        )
+
+    def fold_ensemble(self, n_ensemble: int) -> "StepperState":
+        """Fold an explicit ``[batch, ensemble, ...]`` state back into a folded
+        ``[batch * ensemble, ...]`` sample dimension. Inverse of
+        :meth:`unfold_ensemble`.
+        """
+        return StepperState(
+            corrector_state=(
+                None
+                if self.corrector_state is None
+                else self.corrector_state.fold_ensemble(n_ensemble)
+            ),
+        )
+
     def sample_dim_size(self) -> int | None:
         """Return the leading (sample) dim of any non-None sub-state, or None."""
         if self.corrector_state is not None:

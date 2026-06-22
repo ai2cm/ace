@@ -36,7 +36,13 @@ from fme.core.step.secondary_decoder import (
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.stepper_state import StepperState
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.tensors import (
+    fold_ensemble_tensor,
+    fold_sized_ensemble_dim,
+    unfold_ensemble_dim,
+    unfold_ensemble_tensor,
+)
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -396,15 +402,23 @@ class SingleModuleStep(StepABC):
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
-            output_tensor = self.module.wrap_module(wrapper)(
-                input_tensor,
+            # The module expects a single folded [batch*ensemble, channel,
+            # *spatial] sample dimension; fold the explicit ensemble dim in and
+            # unfold the outputs back to [batch, ensemble, ...]. Labels stay
+            # folded ([batch*ensemble, ...]) and so already match the module.
+            n_ensemble = input_tensor.shape[1]
+            folded_output = self.module.wrap_module(wrapper)(
+                fold_ensemble_tensor(input_tensor, n_ensemble),
                 labels=args.labels,
             )
-            output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
-            secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+            output_dict = self.out_packer.unpack(
+                unfold_ensemble_tensor(folded_output, n_ensemble),
+                axis=self.CHANNEL_DIM,
             )
-            output_dict.update(secondary_output_dict)
+            secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
+                folded_output.detach()  # detach avoids changing base outputs
+            )
+            output_dict.update(unfold_ensemble_dim(secondary_output_dict, n_ensemble))
             return output_dict
 
         return step_with_adjustments(
@@ -490,8 +504,13 @@ def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> Tenso
     result = dict(input_norm)
     for name, mask in data_mask.items():
         if name in result:
-            # mask shape: [batch], data shape: [batch, ...spatial...]
-            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
+            # mask shape: [*leading], data shape: [*leading, *spatial], where
+            # leading is [batch] or [batch, ensemble]. Append singleton spatial
+            # dims so the mask broadcasts over the spatial dims regardless of how
+            # many leading (sample/ensemble) dims there are.
+            broadcast_mask = mask.view(
+                *mask.shape, *([1] * (result[name].ndim - mask.ndim))
+            )
             result[name] = torch.where(broadcast_mask, result[name], 0.0)
     return result
 
@@ -510,10 +529,14 @@ def _build_channel_mask_dict(
 
     Args:
         in_names: Input variable names.
-        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
+        data_mask: Per-variable boolean masks of shape ``[*leading]`` (i.e.
+            ``[batch]`` or ``[batch, ensemble]``), or None.
         packed_input: The packed input tensor, used to infer shape and device.
+            Its leading (non-channel, non-spatial) dims define the mask shape.
     """
-    batch = packed_input.shape[0]
+    # leading dims = everything except the channel (-3) and spatial (-2, -1)
+    # dims, i.e. [batch] or [batch, ensemble].
+    leading = packed_input.shape[:-3]
     spatial = packed_input.shape[-2:]
     device = packed_input.device
     result: TensorDict = {}
@@ -524,11 +547,22 @@ def _build_channel_mask_dict(
         source = extra_channel_source_field(name)
         lookup_name = source if source is not None else name
         if data_mask is not None and lookup_name in data_mask:
-            mask_1d = data_mask[lookup_name].to(device=device, dtype=torch.float)
-            result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
+            mask = data_mask[lookup_name].to(device=device, dtype=torch.float)
+            result[name] = mask.view(*leading, 1, 1).expand(*leading, *spatial)
         else:
-            result[name] = torch.ones(batch, *spatial, device=device)
+            result[name] = torch.ones(*leading, *spatial, device=device)
     return result
+
+
+def _ensemble_size(data: TensorMapping) -> int:
+    """Return the size of the explicit ensemble dimension (dim 1) of a
+    ``[batch, ensemble, *spatial]`` tensor mapping.
+
+    Returns 1 for an empty mapping (no ensemble structure to read).
+    """
+    for v in data.values():
+        return v.shape[1]
+    return 1
 
 
 def step_with_adjustments(
@@ -548,16 +582,24 @@ def step_with_adjustments(
     """
     Step the model forward one timestep given input data.
 
+    Tensors carry an explicit ``[n_batch, n_ensemble, *spatial]`` leading
+    dimension pair. The per-sample adjustments here (normalization, global mean
+    removal, corrector, ocean) operate transparently on that layout; only the
+    network module call folds the ensemble into the batch dimension (see the
+    ``network_calls`` closures), since the modules expect a single sample
+    dimension.
+
     Args:
         input: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from the
-            initial timestep. In practice this contains the ML inputs.
+            [n_batch, n_ensemble, *spatial] containing denormalized data from
+            the initial timestep. In practice this contains the ML inputs.
         next_step_input_data: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from
+            [n_batch, n_ensemble, *spatial] containing denormalized data from
             the output timestep. In practice this contains the necessary data
             at the output timestep for the ocean model and corrector.
         network_calls: Callable[[TensorMapping], TensorDict] that takes a
-            normalized input and returns a normalized output.
+            normalized input and returns a normalized output, both with an
+            explicit ensemble dimension.
         normalizer: The normalizer to use.
         corrector: The corrector to use at the end of each step.
         ocean: The ocean model to use.
@@ -584,16 +626,38 @@ def step_with_adjustments(
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
+    n_ensemble = _ensemble_size(input)
     gmr_state: GlobalMeanRemovalState | None = None
     if global_mean_removal is not None:
-        network_input, gmr_state = global_mean_removal.forward_transform(
-            input, data_mask
+        # Global mean removal reduces every dimension after the leading sample
+        # dimension, so it must see a single folded sample dimension rather than
+        # a [batch, ensemble] pair (otherwise it would average across ensemble
+        # members and mis-shape the offsets). Each ensemble member is an
+        # independent sample for mean removal, so fold the pair into one
+        # dimension, transform, and unfold back to the [batch, ensemble] layout.
+        # This keeps the transform byte-identical to the pre-ensemble code path
+        # and agnostic to the spatial rank.
+        folded_input = fold_sized_ensemble_dim(
+            EnsembleTensorDict(dict(input)), n_ensemble
         )
-        input_norm = normalizer.normalize(network_input)
+        folded_mask = (
+            fold_sized_ensemble_dim(EnsembleTensorDict(dict(data_mask)), n_ensemble)
+            if data_mask is not None
+            else None
+        )
+        network_input, gmr_state = global_mean_removal.forward_transform(
+            folded_input, folded_mask
+        )
+        input_norm = normalizer.normalize(
+            unfold_ensemble_dim(network_input, n_ensemble)
+        )
         # Synthetic GMR channels are produced in normalized space; merge
         # them in after normalization so the network sees a single uniform
         # input dict.
-        input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
+        extras = unfold_ensemble_dim(
+            global_mean_removal.extras_normalized(gmr_state), n_ensemble
+        )
+        input_norm = {**input_norm, **extras}
     else:
         input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
@@ -602,7 +666,13 @@ def step_with_adjustments(
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
         assert gmr_state is not None
-        output = global_mean_removal.inverse_transform(output, gmr_state)
+        output = unfold_ensemble_dim(
+            global_mean_removal.inverse_transform(
+                fold_sized_ensemble_dim(EnsembleTensorDict(dict(output)), n_ensemble),
+                gmr_state,
+            ),
+            n_ensemble,
+        )
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None

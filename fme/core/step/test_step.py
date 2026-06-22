@@ -476,13 +476,19 @@ HAS_NEXT_STEP_FORCING_NAME_CASES = [
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, int], n_samples: int
+    names: list[str],
+    img_shape: tuple[int, int],
+    n_samples: int,
+    n_ensemble: int = 1,
 ) -> TensorDict:
+    # The step operates on an explicit [batch, ensemble, *spatial] leading
+    # pair; build inputs with that ensemble dimension (size 1 by default).
     data_dict = {}
     device = fme.get_device()
     for name in names:
         data_dict[name] = torch.rand(
             n_samples,
+            n_ensemble,
             *img_shape,
             device=device,
         )
@@ -527,8 +533,8 @@ def test_label_conditioned_step():
     h_sl, w_sl = dist.get_local_slices(DEFAULT_IMG_SHAPE)
     local_h = DEFAULT_IMG_SHAPE[0] if h_sl == slice(None) else h_sl.stop - h_sl.start
     local_w = DEFAULT_IMG_SHAPE[1] if w_sl == slice(None) else w_sl.stop - w_sl.start
-    assert output["diagnostic_main"].shape == (1, local_h, local_w)
-    assert output["diagnostic_rad"].shape == (1, local_h, local_w)
+    assert output["diagnostic_main"].shape == (1, 1, local_h, local_w)
+    assert output["diagnostic_rad"].shape == (1, 1, local_h, local_w)
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
@@ -727,7 +733,7 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         step.next_step_input_names, img_shape, n_samples
     )
     prescribed_value = torch.full(
-        (n_samples,) + img_shape, 42.0, device=fme.get_device()
+        (n_samples, 1) + img_shape, 42.0, device=fme.get_device()
     )
     next_step_input_data["diagnostic_main"] = prescribed_value
     output, _ = step.step(
@@ -897,8 +903,8 @@ def test_secondary_module_full_field_and_residual():
     )
     assert "prog" in output
     assert "diag" in output
-    assert output["prog"].shape == (2, *img_shape)
-    assert output["diag"].shape == (2, *img_shape)
+    assert output["prog"].shape == (2, 1, *img_shape)
+    assert output["diag"].shape == (2, 1, *img_shape)
 
 
 @pytest.mark.parallel
@@ -992,8 +998,8 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
     )
-    assert output["prog_a"].shape == (2, *img_shape)
-    assert output["prog_b"].shape == (2, *img_shape)
+    assert output["prog_a"].shape == (2, 1, *img_shape)
+    assert output["prog_b"].shape == (2, 1, *img_shape)
 
 
 def test_apply_input_mask_zeros_masked_variables():
@@ -1059,7 +1065,7 @@ def test_step_with_data_mask():
     )
     data_mask = {
         "forcing_shared": torch.tensor(
-            [True, True, False, False], device=fme.get_device()
+            [[True], [True], [False], [False]], device=fme.get_device()
         ),
     }
     output_no_mask, _ = step.step(
@@ -1079,7 +1085,7 @@ def test_step_with_data_mask():
         ),
     )
     for name in ["diagnostic_main", "diagnostic_rad"]:
-        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        assert output_with_mask[name].shape == (n_samples, 1, *img_shape)
         torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
         assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
 
@@ -1171,7 +1177,7 @@ def test_step_with_include_channel_mask_inputs():
     )
     data_mask = {
         "forcing_shared": torch.tensor(
-            [True, True, False, False], device=fme.get_device()
+            [[True], [True], [False], [False]], device=fme.get_device()
         ),
     }
     output_no_mask, _ = step.step(
@@ -1191,7 +1197,7 @@ def test_step_with_include_channel_mask_inputs():
         ),
     )
     for name in ["diagnostic_main", "diagnostic_rad"]:
-        assert output_with_mask[name].shape == (n_samples, *img_shape)
+        assert output_with_mask[name].shape == (n_samples, 1, *img_shape)
         torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
         assert not torch.allclose(output_with_mask[name][2:], output_no_mask[name][2:])
 
@@ -1235,7 +1241,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         ),
     )
     all_unmasked = {
-        name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
+        name: torch.ones(n_samples, 1, dtype=torch.bool, device=fme.get_device())
         for name in step.input_names
     }
     output_all_unmasked, _ = step.step(
@@ -1247,7 +1253,7 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
         ),
     )
     for name in ["diagnostic_main", "diagnostic_rad"]:
-        assert output_no_mask[name].shape == (n_samples, *img_shape)
+        assert output_no_mask[name].shape == (n_samples, 1, *img_shape)
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
 
 
@@ -1309,7 +1315,7 @@ def test_step_shared_global_mean_removal():
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
     )
     for name in out_names:
-        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+        assert output[name].shape == (n_samples, 1, *DEFAULT_IMG_SHAPE)
 
 
 def test_step_shared_global_mean_removal_with_extra_channels():
@@ -1334,7 +1340,7 @@ def test_step_shared_global_mean_removal_with_extra_channels():
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
     )
     for name in out_names:
-        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+        assert output[name].shape == (n_samples, 1, *DEFAULT_IMG_SHAPE)
 
 
 def test_step_per_channel_global_mean_removal():
@@ -1349,7 +1355,7 @@ def test_step_per_channel_global_mean_removal():
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
     )
     for name in step.output_names:
-        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+        assert output[name].shape == (n_samples, 1, *DEFAULT_IMG_SHAPE)
 
 
 def test_step_per_channel_global_mean_removal_with_extra_channels():
@@ -1369,7 +1375,7 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
     )
     for name in step.output_names:
-        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+        assert output[name].shape == (n_samples, 1, *DEFAULT_IMG_SHAPE)
 
 
 def _assert_global_mean_removal_affects_output(removal, in_names, out_names, means):
@@ -1488,7 +1494,7 @@ def test_step_per_channel_global_mean_removal_with_channel_masks():
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
     )
     for name in out_names:
-        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+        assert output[name].shape == (n_samples, 1, *DEFAULT_IMG_SHAPE)
 
 
 def test_step_shared_global_mean_removal_raises_on_masked_reference():
@@ -1509,7 +1515,7 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     data_mask = {
-        "surface_temperature": torch.tensor([True, False], device=fme.get_device()),
+        "surface_temperature": torch.tensor([[True], [False]], device=fme.get_device()),
     }
     with pytest.raises(ValueError, match="masked"):
         step.step(
