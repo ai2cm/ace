@@ -44,7 +44,7 @@ from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
-from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
+from fme.core.tensors import add_ensemble_dim, fold_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingHistory, TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -1075,8 +1075,22 @@ class CoupledStepper:
                 f"{self.n_ic_timesteps} timesteps, got "
                 f"{initial_condition.ocean_data.as_batch_data().n_timesteps}."
             )
-        atmos_ic_state = initial_condition.atmosphere_data
-        ocean_ic_state = initial_condition.ocean_data
+        # The coupled stepper drives its components over a flat batch*ensemble
+        # dimension (the outer ensemble is reconstructed only at the coupled
+        # loss). The component initial conditions come from broadcast data and
+        # carry n_ensemble>1; reset to a flat view so they match the freshly
+        # built component forcings (n_ensemble=1) when the component Stepper
+        # reads BatchData.ensemble_data.
+        atmos_ic_state = PrognosticState(
+            dataclasses.replace(
+                initial_condition.atmosphere_data.as_batch_data(), n_ensemble=1
+            )
+        )
+        ocean_ic_state = PrognosticState(
+            dataclasses.replace(
+                initial_condition.ocean_data.as_batch_data(), n_ensemble=1
+            )
+        )
 
         n_outer_steps = forcing_data.ocean_data.n_timesteps - self.n_ic_timesteps
 
@@ -1114,7 +1128,15 @@ class CoupledStepper:
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                atmos_step, _ = next(atmos_generator)
+                # The component Stepper yields the explicit [batch, ensemble,
+                # *spatial] layout; the coupled stepper still threads folded
+                # component state internally (a separate follow-up to migrate),
+                # and drives the components over a flat batch (their BatchData
+                # has n_ensemble=1, so the yielded ensemble dim is size 1). Fold
+                # that dim back in using its own size, not the outer ensemble.
+                atmos_step = fold_ensemble_dim(
+                    EnsembleTensorDict(next(atmos_generator)[0])
+                )[0]
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
@@ -1144,17 +1166,23 @@ class CoupledStepper:
                 time=ocean_window.time,
                 labels=ocean_window.labels,
             )
-            # predict and yield a single ocean step
-            ocean_step, _ = next(
-                iter(
-                    self.ocean.get_prediction_generator(
-                        ocean_ic_state,
-                        ocean_forcings,
-                        n_forward_steps=1,
-                        optimizer=optimizer,
-                    )
+            # predict a single ocean step; fold the explicit [batch, ensemble,
+            # *spatial] yield back into the folded layout the coupled stepper
+            # threads internally (see the atmosphere step above).
+            ocean_step = fold_ensemble_dim(
+                EnsembleTensorDict(
+                    next(
+                        iter(
+                            self.ocean.get_prediction_generator(
+                                ocean_ic_state,
+                                ocean_forcings,
+                                n_forward_steps=1,
+                                optimizer=optimizer,
+                            )
+                        )
+                    )[0]
                 )
-            )
+            )[0]
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
@@ -1191,19 +1219,31 @@ class CoupledStepper:
         output_list: list[ComponentStepPrediction],
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
+        # process_prediction_generator_list consumes the explicit
+        # [batch, ensemble, *spatial] layout. The coupled stepper still carries
+        # folded component data internally (a separate follow-up to migrate),
+        # so unfold it at this boundary.
+        atmos_n_ensemble = forcing_data.atmosphere_data.n_ensemble
+        ocean_n_ensemble = forcing_data.ocean_data.n_ensemble
         atmos_data = process_prediction_generator_list(
-            [(x.data, None) for x in output_list if x.realm == "atmosphere"],
+            [
+                (unfold_ensemble_dim(x.data, n_ensemble=atmos_n_ensemble), None)
+                for x in output_list
+                if x.realm == "atmosphere"
+            ],
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
-            n_ensemble=forcing_data.atmosphere_data.n_ensemble,
         )
         ocean_data = process_prediction_generator_list(
-            [(x.data, None) for x in output_list if x.realm == "ocean"],
+            [
+                (unfold_ensemble_dim(x.data, n_ensemble=ocean_n_ensemble), None)
+                for x in output_list
+                if x.realm == "ocean"
+            ],
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,
-            n_ensemble=forcing_data.ocean_data.n_ensemble,
         )
         return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmos_data)
 

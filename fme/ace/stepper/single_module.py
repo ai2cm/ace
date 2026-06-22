@@ -482,21 +482,6 @@ def stack_list_of_tensor_dicts(
     return stack_dict
 
 
-def _repeat_interleaved_tensor_mapping(
-    mask: TensorMapping | None, n_ensemble: int
-) -> TensorMapping | None:
-    """Expand a per-base-sample mask to the folded ensemble batch dimension.
-
-    Each row is repeated ``n_ensemble`` times (interleaved), matching
-    ``broadcast_ensemble``, so ensemble members of a base sample share the
-    same mask. Returns ``None`` unchanged so the no-dropout path stays a clean
-    pass-through.
-    """
-    if mask is None:
-        return None
-    return {k: v.repeat_interleave(n_ensemble, dim=0) for k, v in mask.items()}
-
-
 def process_ensemble_prediction_generator_list(
     output_list: list[EnsembleTensorDict],
 ) -> EnsembleTensorDict:
@@ -511,26 +496,33 @@ def process_ensemble_prediction_generator_list(
 def process_prediction_generator_list(
     output_list: list[tuple[TensorDict, StepperState | None]],
     time: xr.DataArray,
-    n_ensemble: int,
     labels: BatchLabels | None = None,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     """Stack per-step outputs into a single BatchData.
 
-    Attaches the terminal stepper_state (from the last entry in
-    ``output_list``) to the returned BatchData so it can propagate to the
-    next ``Stepper.predict`` call.
+    The generator yields the explicit ``[batch, ensemble, *spatial]`` layout;
+    this stacks over time into ``[batch, ensemble, time, *spatial]`` and folds
+    the ensemble back into the batch only at this storage boundary (BatchData
+    holds the folded ``data`` + ``n_ensemble``). Attaches the terminal
+    stepper_state (from the last entry in ``output_list``) so it can propagate
+    to the next ``Stepper.predict`` call.
     """
     output_dicts = [item[0] for item in output_list]
     terminal_state = output_list[-1][1] if output_list else None
-    output_timeseries = stack_list_of_tensor_dicts(output_dicts, time_dim=1)
+    output_timeseries = EnsembleTensorDict(
+        stack_list_of_tensor_dicts(output_dicts, time_dim=2)
+    )
+    folded_data, n_ensemble = fold_ensemble_dim(output_timeseries)
     return BatchData.new_on_device(
-        data=output_timeseries,
+        data=folded_data,
         time=time,
         horizontal_dims=horizontal_dims,
         labels=labels,
         n_ensemble=n_ensemble,
-        stepper_state=terminal_state,
+        stepper_state=(
+            None if terminal_state is None else terminal_state.fold_ensemble(n_ensemble)
+        ),
     )
 
 
@@ -1111,17 +1103,14 @@ class Stepper:
                 "Initial condition and forcing data must have the same labels, "
                 f"got {ic_batch_data.labels} and {forcing_data.labels}."
             )
-        ic_dict = ic_batch_data.data
-        forcing_dict = forcing_data.data
         return self.predict_generator(
-            ic_dict,
-            forcing_dict,
+            ic_batch_data.ensemble_data,
+            forcing_data.ensemble_data,
             n_forward_steps,
             optimizer,
             forcing_data.labels,
-            data_mask=forcing_data.data_mask,
-            stepper_state=ic_batch_data.stepper_state,
-            n_ensemble=ic_batch_data.n_ensemble,
+            data_mask=forcing_data.ensemble_data_mask,
+            stepper_state=ic_batch_data.ensemble_stepper_state,
         )
 
     @property
@@ -1132,60 +1121,36 @@ class Stepper:
 
     def predict_generator(
         self,
-        ic_dict: TensorMapping,
-        forcing_dict: TensorMapping,
+        ic_data: TensorMapping,
+        forcing_data: TensorMapping,
         n_forward_steps: int,
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
         input_dropout_mask: TensorMapping | None = None,
-        n_ensemble: int = 1,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
-        # The Step operates on an explicit [batch, ensemble, *spatial] leading
-        # pair (folding the ensemble into the batch only for the network module
-        # call). The data, masks and state arrive folded as [batch*ensemble,
-        # ...]; unfold them before each Step call and fold the yielded outputs
-        # back, so the external contract of this generator stays folded.
-        unfolded_mask = (
-            unfold_ensemble_dim(dict(data_mask), n_ensemble)
-            if data_mask is not None
-            else None
-        )
-        unfolded_dropout_mask = (
-            unfold_ensemble_dim(dict(input_dropout_mask), n_ensemble)
-            if input_dropout_mask is not None
-            else None
-        )
-        stepper_state = (
-            stepper_state.unfold_ensemble(n_ensemble)
-            if stepper_state is not None
-            else None
-        )
-        # Time-slice the (still folded) forcing/IC, then unfold each per-step
-        # slice; this keeps the time dim at TIME_DIM rather than shifting it.
-        state: TensorDict = unfold_ensemble_dim(
-            {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}, n_ensemble
-        )
+        # All tensors carry an explicit [batch, ensemble, time, *spatial] layout
+        # (e.g. BatchData.ensemble_data / ensemble_data_mask / ensemble_stepper_
+        # state). The ensemble dimension is never folded into the batch outside
+        # the nn.Module call, which folds transiently inside the Step; the
+        # generator yields the same explicit layout. The time dimension is thus
+        # one past TIME_DIM (the ensemble dim is inserted before it).
+        time_dim = self.TIME_DIM + 1
+        state = {k: ic_data[k].squeeze(time_dim) for k in ic_data}
         for step in range(n_forward_steps):
-            input_forcing = unfold_ensemble_dim(
-                {
-                    k: (
-                        forcing_dict[k][:, step]
-                        if k not in self._step_obj.next_step_forcing_names
-                        else forcing_dict[k][:, step + 1]
-                    )
-                    for k in self._input_only_names
-                },
-                n_ensemble,
-            )
-            next_step_input_dict = unfold_ensemble_dim(
-                {
-                    k: forcing_dict[k][:, step + 1]
-                    for k in self._step_obj.next_step_input_names
-                },
-                n_ensemble,
-            )
+            input_forcing = {
+                k: (
+                    forcing_data[k][:, :, step]
+                    if k not in self._step_obj.next_step_forcing_names
+                    else forcing_data[k][:, :, step + 1]
+                )
+                for k in self._input_only_names
+            }
+            next_step_input_dict = {
+                k: forcing_data[k][:, :, step + 1]
+                for k in self._step_obj.next_step_input_names
+            }
             input_data = {**state, **input_forcing}
 
             def checkpoint(module):
@@ -1197,18 +1162,13 @@ class Stepper:
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
-                        data_mask=unfolded_mask,
+                        data_mask=data_mask,
                         stepper_state=stepper_state,
-                        input_dropout_mask=unfolded_dropout_mask,
+                        input_dropout_mask=input_dropout_mask,
                     ),
                     wrapper=checkpoint,
                 )
-            yield (
-                fold_sized_ensemble_dim(EnsembleTensorDict(state), n_ensemble),
-                stepper_state.fold_ensemble(n_ensemble)
-                if stepper_state is not None
-                else None,
-            )
+            yield state, stepper_state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
     def predict(
@@ -1274,7 +1234,6 @@ class Stepper:
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
             labels=forcing.labels,
-            n_ensemble=forcing.n_ensemble,
         )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
@@ -1726,27 +1685,31 @@ class TrainStepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
-        # Sample and broadcast the synthetic input-dropout mask for the ensemble batch.
+        # Sample the synthetic input-dropout mask per base sample and broadcast
+        # it across the ensemble as an explicit [batch, ensemble] layout: the
+        # dropped channels are shared across ensemble members of a base sample
+        # but independent across the batch.
         sample_tensor = next(iter(input_batch_data.data.values()))
-        input_dropout_mask = _repeat_interleaved_tensor_mapping(
-            self._stepper.make_input_dropout_mask(
-                batch_size=sample_tensor.shape[0],
-                device=sample_tensor.device,
-            ),
-            n_ensemble,
+        dropout_mask = self._stepper.make_input_dropout_mask(
+            batch_size=sample_tensor.shape[0],
+            device=sample_tensor.device,
+        )
+        input_dropout_mask = (
+            add_ensemble_dim(dropout_mask, repeats=n_ensemble)
+            if dropout_mask is not None
+            else None
         )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
         output_generator = self._stepper.predict_generator(
-            input_ensemble_data.data,
-            forcing_ensemble_data.data,
+            input_ensemble_data.ensemble_data,
+            forcing_ensemble_data.ensemble_data,
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
-            data_mask=forcing_ensemble_data.data_mask,
-            stepper_state=input_ensemble_data.stepper_state,
+            data_mask=forcing_ensemble_data.ensemble_data_mask,
+            stepper_state=input_ensemble_data.ensemble_stepper_state,
             input_dropout_mask=input_dropout_mask,
-            n_ensemble=n_ensemble,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1761,8 +1724,10 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step, _ = next(output_iterator)
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                # The generator yields the explicit [batch, ensemble, *spatial]
+                # layout directly.
+                raw_gen_step, _ = next(output_iterator)
+                gen_step = EnsembleTensorDict(raw_gen_step)
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
                     {
