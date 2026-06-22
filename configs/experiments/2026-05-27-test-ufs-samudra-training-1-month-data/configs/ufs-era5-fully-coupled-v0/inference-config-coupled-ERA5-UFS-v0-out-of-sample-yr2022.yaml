@@ -2,7 +2,7 @@ experiment_dir: /results
 n_coupled_steps: 147
 coupled_steps_in_memory: 1
 checkpoint_path: /ckpt.tar
-n_ensemble_per_ic: 1
+n_ensemble_per_ic: 4
 logging:
   log_to_screen: true
   log_to_wandb: true
