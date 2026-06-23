@@ -6,7 +6,7 @@
 set -e
 
 
-CONFIG_FILENAME="ace-evaluator-control-oldtopo.yaml"
+CONFIG_FILENAME="ace-evaluator-control.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -27,7 +27,7 @@ MODEL_CHECKPOINT_DATASETS=("01KQD8NF9HQD1QY2X0S132YH72" "01KQD8NMEYCVQ835WQV751M
 
 for seed in {0..0}; do
     #job_name="evaluate-4k-ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="evaluate-ace2s-shieldplus-on-xshield-oldtopo-seed${seed}"
+    job_name="evaluate-ace2s-shieldplus-on-xshield-seed${seed}"
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \
