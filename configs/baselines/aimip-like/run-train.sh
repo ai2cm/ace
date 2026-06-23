@@ -87,4 +87,5 @@ run_training() {
 # Validation (1994 + 2014) and all inference eval loops are identical to v2 for a
 # clean A/B on the data range vs the v2 baseline (rs6b7nyr). seed 0, ~120 epochs.
 # =============================================================================
-run_training "train-4deg-daily-v2-era5-only-pre1979.yaml" "train-4deg-daily-v2-era5-only-pre1979-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# --- LAUNCHED 2026-06-22 to ai2/ace from commit 14347c4fc (1 job, 1 GPU, jupiter+titan high). Line commented to prevent re-submission; see experiment record for beaker/wandb links. ---
+# run_training "train-4deg-daily-v2-era5-only-pre1979.yaml" "train-4deg-daily-v2-era5-only-pre1979-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
