@@ -75,3 +75,24 @@ run_training() {
 
 # --- v2 baseline, seed 0 (1 GPU; Jupiter+Titan, high) ---
 run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# fd-CRPS loss-weight perturbations off the v2 baseline (control = v2 default,
+# c9d0e1 — crps 0.9 / energy 0.1, no fd-CRPS term). Identical to v2 except the
+# loss kwargs: each re-introduces the finite-difference CRPS term (levels 2),
+# and c5d5e0 also drops the energy score. Notation c·d·e = crps_weight /
+# finite_difference_crps_weight / energy_score_weight. See
+# research/investigations/2026-06-23-fd-crps-coherence-weighting.md.
+# =============================================================================
+
+# --- c7d2e1: crps 0.7 / fd-crps 0.2 / energy 0.1, fd levels 2 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-c7d2e1.yaml" "train-4deg-daily-v2-era5-only-c7d2e1-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- c4d4e2: crps 0.4 / fd-crps 0.4 / energy 0.2, fd levels 2 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-c4d4e2.yaml" "train-4deg-daily-v2-era5-only-c4d4e2-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- c5d4e1: crps 0.5 / fd-crps 0.4 / energy 0.1, fd levels 2 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-c5d4e1.yaml" "train-4deg-daily-v2-era5-only-c5d4e1-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- c5d5e0: crps 0.5 / fd-crps 0.5 / energy 0.0, fd levels 2 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-c5d5e0.yaml" "train-4deg-daily-v2-era5-only-c5d5e0-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
