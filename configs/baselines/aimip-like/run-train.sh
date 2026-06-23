@@ -75,3 +75,17 @@ run_training() {
 
 # --- v2 baseline, seed 0 (1 GPU; Jupiter+Titan, high) ---
 run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# v2 ERA5-only residual baseline, no explicit CO2 input (AIMIP conditions).
+#
+# Identical recipe to the v2 baseline above except `global_mean_co2` is dropped
+# from both `in_names` and `next_step_forcing_names`, and the degenerate
+# `long_46year_constant_co2` inference (no CO2 input -> no CO2 to hold constant)
+# is removed. Estimates how the baseline performs under AIMIP, which provides no
+# CO2 forcing channel. See research investigation
+# 2026-06-23-v2-baseline-without-co2-input.
+# =============================================================================
+
+# --- v2 no-CO2, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-no-co2.yaml" "train-4deg-daily-v2-era5-only-no-co2-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
