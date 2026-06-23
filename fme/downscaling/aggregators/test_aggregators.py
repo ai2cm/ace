@@ -5,10 +5,11 @@ import wandb
 import xarray as xr
 
 from fme.core import get_device, metrics
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
-from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatchData
+from fme.downscaling.data import BatchData, PairedBatchData
 
 from .. import metrics_and_maths
 from ..models import ModelOutputs
@@ -264,16 +265,14 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
     prediction = {"x": torch.ones(*fine_shape, device=get_device())}
     target = {"x": torch.ones(*fine_shape, device=get_device())}
     coarse = {"x": torch.ones(*coarse_shape, device=get_device())}
-    fine_coordinates = BatchedLatLonCoordinates(
-        lat=torch.randn(n_batch, n_lat),
-        lon=torch.randn(n_batch, n_lon),
-        dims=["batch", "lat", "lon"],
-    ).to_device()
-    coarse_coordinates = BatchedLatLonCoordinates(
-        lat=torch.randn(n_batch, coarse_n_lat),
-        lon=torch.randn(n_batch, coarse_n_lon),
-        dims=["batch", "lat", "lon"],
-    ).to_device()
+    fine_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-80.0, 80.0, n_lat),
+        lon=torch.linspace(0.0, 360.0, n_lon),
+    ).to(get_device())
+    coarse_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-80.0, 80.0, coarse_n_lat),
+        lon=torch.linspace(0.0, 360.0, coarse_n_lon),
+    ).to(get_device())
     time = xr.DataArray(torch.zeros(n_batch), dims=["batch"])
     batch = PairedBatchData(
         fine=BatchData(target, time, fine_coordinates),
@@ -314,15 +313,15 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
         aggregator.get_wandb(prefix="test")
         ds_paired = aggregator.get_dataset()
         np.testing.assert_array_equal(
-            ds_paired.lat.values, batch.fine.latlon_coordinates[0].lat.cpu().numpy()
+            ds_paired.lat.values, batch.fine.latlon_coordinates.lat.cpu().numpy()
         )
         np.testing.assert_array_equal(
-            ds_paired.lon.values, batch.fine.latlon_coordinates[0].lon.cpu().numpy()
+            ds_paired.lon.values, batch.fine.latlon_coordinates.lon.cpu().numpy()
         )
 
         no_target_aggregator = NoTargetAggregator(
             downscale_factor=downscale_factor,
-            latlon_coordinates=batch.fine.latlon_coordinates[0],
+            latlon_coordinates=batch.fine.latlon_coordinates,
         )
         no_target_aggregator.record_batch(
             prediction=prediction, coarse=coarse, time=batch.fine.time
@@ -330,10 +329,10 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
         no_target_aggregator.get_wandb(prefix="test_no_target")
         ds = no_target_aggregator.get_dataset()
         np.testing.assert_array_equal(
-            ds.lat.values, batch.fine.latlon_coordinates[0].lat.cpu().numpy()
+            ds.lat.values, batch.fine.latlon_coordinates.lat.cpu().numpy()
         )
         np.testing.assert_array_equal(
-            ds.lon.values, batch.fine.latlon_coordinates[0].lon.cpu().numpy()
+            ds.lon.values, batch.fine.latlon_coordinates.lon.cpu().numpy()
         )
 
 

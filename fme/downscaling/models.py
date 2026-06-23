@@ -415,8 +415,8 @@ class DiffusionModel:
     def _get_fine_interval_from_batch(
         self, batch: BatchData
     ) -> tuple[ClosedInterval, ClosedInterval]:
-        coarse_lat = batch.latlon_coordinates.lat[0]
-        coarse_lon = batch.latlon_coordinates.lon[0]
+        coarse_lat = batch.latlon_coordinates.lat
+        coarse_lon = batch.latlon_coordinates.lon
         fine_lat_interval = adjust_fine_coord_range(
             batch.lat_interval,
             full_coarse_coord=coarse_lat,
