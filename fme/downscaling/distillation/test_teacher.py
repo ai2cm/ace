@@ -292,6 +292,31 @@ def test_moe_dispatch_routes_by_sigma():
     assert torch.all(teacher._dispatch(x, cond, torch.tensor([5.0])) == 20.0)
 
 
+def test_moe_dispatch_handles_dtype_mismatch():
+    """The EDM sampler runs with float64 latents while experts return float32
+    (autocast).  _dispatch must reconcile dtypes (index_put is strict), and the
+    result takes the input (destination) dtype."""
+    teacher = AceDiffusionTeacher(_build_moe_model())
+
+    class _Float32Stub:
+        def __init__(self, val: float) -> None:
+            self.val = val
+
+        def __call__(self, x, x_lr, sigma):
+            return torch.full_like(x, self.val, dtype=torch.float32)
+
+    teacher._moe_experts = [_Float32Stub(10.0), _Float32Stub(20.0)]  # type: ignore[list-item]
+    teacher._moe_sigma_ranges = [(0.1, 0.5), (0.5, 1.0)]
+
+    x = torch.zeros(4, 1, 2, 2, dtype=torch.float64)
+    cond = torch.zeros(4, 1, 2, 2, dtype=torch.float64)
+    out = teacher._dispatch(x, cond, torch.tensor([0.2, 0.4, 0.7, 0.9]))
+
+    assert out.dtype == torch.float64
+    assert torch.all(out[:2] == 10.0)
+    assert torch.all(out[2:] == 20.0)
+
+
 def test_moe_teacher_forward_shape():
     """MoE teacher forward returns an x0 of the input shape via dispatch."""
     teacher = AceDiffusionTeacher(_build_moe_model())

@@ -358,7 +358,11 @@ class AceDiffusionTeacher(FastGenNetwork):
             # Pass the scalar t directly when broadcasting (it broadcasts over
             # the selected subset); otherwise index t to preserve its shape.
             sigma_sel = t if broadcast else t[sel]
-            out[sel] = module(x_t[sel], cond_sel, sigma_sel)
+            # Cast to out's dtype: the EDM sampler's latents are float64 while
+            # the module returns float32 (autocast), and index_put requires an
+            # exact dtype match (unlike the arithmetic the non-MoE path relied
+            # on, which promotes implicitly).
+            out[sel] = module(x_t[sel], cond_sel, sigma_sel).to(out.dtype)
 
         for (lo, hi), module in zip(self._moe_sigma_ranges, self._moe_experts):
             sel = remaining & (route >= lo) & (route <= hi)
