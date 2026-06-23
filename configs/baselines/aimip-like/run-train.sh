@@ -84,7 +84,7 @@ run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only
 # `long_46year_constant_co2` inference (no CO2 input -> no CO2 to hold constant)
 # is removed. Estimates how the baseline performs under AIMIP, which provides no
 # CO2 forcing channel. See research investigation
-# 2026-06-23-v2-baseline-without-co2-input.
+# 2026-06-23-v2-baseline-no-co2.
 # =============================================================================
 
 # --- v2 no-CO2, seed 0 (1 GPU; Jupiter+Titan, high) ---
