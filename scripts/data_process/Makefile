@@ -268,11 +268,11 @@ compute_cm4_trial_run_atmosphere_stats:
 
 .PHONY: cm4_picontrol_atmosphere_8layer_200yr
 cm4_picontrol_atmosphere_8layer_200yr:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)deg-8layer-200yr.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)-8layer-200yr.yaml
 
 .PHONY: cm4_1pctCO2_atmosphere_8layer_140yr
 cm4_1pctCO2_atmosphere_8layer_140yr:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)deg-8layer-140yr.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)-8layer-140yr.yaml
 
 .PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
 cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
