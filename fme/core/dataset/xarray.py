@@ -362,24 +362,55 @@ def _get_spatial_mask_provider(
 
 
 @dataclasses.dataclass
+class StaticFieldFromFileConfig:
+    """Source for overwriting a field with a static horizontal field from a file.
+
+    Used to substitute one dataset's static forcing (e.g. surface topography)
+    into another dataset that shares the same horizontal grid, without copying
+    the full dataset.
+
+    Parameters:
+        path: Path to a netCDF or zarr file containing the field.
+        name: Name of the variable in the file. Defaults to the name of the
+            target variable being overwritten.
+        engine: xarray engine used to open the file (e.g. "netcdf4", "zarr").
+    """
+
+    path: str
+    name: str | None = None
+    engine: str = "netcdf4"
+
+
+@dataclasses.dataclass
 class OverwriteConfig:
     """Configuration to overwrite field values in XarrayDataset.
 
     Parameters:
         constant: Fill field with constant value.
         multiply_scalar: Multiply field by scalar value.
+        from_file: Overwrite field with a static horizontal field loaded from a
+            file. Any leading (e.g. time) dimensions in the file are reduced by
+            taking the first index; the resulting 2D field must match the
+            dataset's horizontal shape and is broadcast over time.
     """
 
     constant: Mapping[str, float] = dataclasses.field(default_factory=dict)
     multiply_scalar: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    from_file: Mapping[str, StaticFieldFromFileConfig] = dataclasses.field(
+        default_factory=dict
+    )
 
     def __post_init__(self):
-        key_overlap = set(self.constant.keys()) & set(self.multiply_scalar.keys())
-        if key_overlap:
-            raise ValueError(
-                "OverwriteConfig cannot have the same variable in both constant "
-                f"and multiply_scalar: {key_overlap}"
-            )
+        seen: set[str] = set()
+        for mode in (self.constant, self.multiply_scalar, self.from_file):
+            overlap = seen & set(mode.keys())
+            if overlap:
+                raise ValueError(
+                    "OverwriteConfig cannot specify the same variable in more "
+                    f"than one overwrite mode: {overlap}"
+                )
+            seen |= set(mode.keys())
+        self._static_field_cache: dict[tuple[str, str], torch.Tensor] = {}
 
     def apply(self, tensors: TensorDict) -> TensorDict:
         for var, fill_value in self.constant.items():
@@ -392,11 +423,48 @@ class OverwriteConfig:
             tensors[var] = data * torch.tensor(
                 multiplier, dtype=data.dtype, device=data.device
             )
+        for var, source in self.from_file.items():
+            data = tensors[var]
+            field = self._load_static_field(var, source)
+            if field.shape != data.shape[-2:]:
+                raise ValueError(
+                    f"Static field for '{var}' loaded from {source.path} has "
+                    f"horizontal shape {tuple(field.shape)}, which does not match "
+                    f"the dataset horizontal shape {tuple(data.shape[-2:])}."
+                )
+            tensors[var] = (
+                field.to(dtype=data.dtype, device=data.device)
+                .broadcast_to(data.shape)
+                .clone()
+            )
         return tensors
+
+    def _load_static_field(
+        self, var: str, source: StaticFieldFromFileConfig
+    ) -> torch.Tensor:
+        name = source.name or var
+        key = (source.path, name)
+        if key not in self._static_field_cache:
+            ds = xr.open_dataset(source.path, engine=source.engine)
+            try:
+                da = ds[name]
+                # reduce any leading (e.g. time) dims to obtain a 2D field,
+                # assuming the horizontal dims are the trailing two
+                while da.ndim > 2:
+                    da = da.isel({da.dims[0]: 0})
+                field = torch.as_tensor(np.asarray(da.values))
+            finally:
+                ds.close()
+            self._static_field_cache[key] = field
+        return self._static_field_cache[key]
 
     @property
     def variables(self):
-        return set(self.constant.keys()) | set(self.multiply_scalar.keys())
+        return (
+            set(self.constant.keys())
+            | set(self.multiply_scalar.keys())
+            | set(self.from_file.keys())
+        )
 
 
 @dataclasses.dataclass

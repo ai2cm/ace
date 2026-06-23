@@ -28,6 +28,7 @@ from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
     GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD,
     OverwriteConfig,
+    StaticFieldFromFileConfig,
     XarrayDataConfig,
     XarrayDataset,
     XarraySubset,
@@ -835,6 +836,67 @@ def test_overwrite(mock_monthly_netcdfs):
         dataset_overwrite["foo"], torch.ones_like(dataset["foo"]) * const
     )
     assert torch.equal(dataset_overwrite["bar"], dataset["bar"] * multiple)
+
+
+def test_overwrite_from_file(mock_monthly_netcdfs, tmp_path):
+    # static field to inject, matching the dataset's 4x8 horizontal grid
+    field = np.arange(4 * 8, dtype=np.float32).reshape(4, 8)
+    static_path = str(tmp_path / "static_foo.nc")
+    xr.Dataset({"foo": xr.DataArray(field, dims=("lat", "lon"))}).to_netcdf(static_path)
+
+    names = mock_monthly_netcdfs.var_names.all_names
+    n_timesteps = 2
+    dataset = xarray_dataset_constructor(
+        XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir), names, n_timesteps
+    )[0][0]
+
+    overwrite_config = OverwriteConfig(
+        from_file={"foo": StaticFieldFromFileConfig(path=static_path, engine="netcdf4")}
+    )
+    dataset_overwrite = xarray_dataset_constructor(
+        XarrayDataConfig(
+            data_path=mock_monthly_netcdfs.tmpdir, overwrite=overwrite_config
+        ),
+        names,
+        n_timesteps,
+    )[0][0]
+
+    expected = torch.as_tensor(field).to(dataset["foo"].dtype)
+    assert dataset_overwrite["foo"].dtype == dataset["foo"].dtype
+    assert dataset_overwrite["foo"].shape == dataset["foo"].shape
+    # the static field is broadcast over every timestep
+    for t in range(dataset_overwrite["foo"].shape[0]):
+        assert torch.equal(dataset_overwrite["foo"][t], expected)
+    # other variables are untouched
+    assert torch.equal(dataset_overwrite["bar"], dataset["bar"])
+
+
+def test_overwrite_from_file_shape_mismatch_raises(mock_monthly_netcdfs, tmp_path):
+    # wrong horizontal shape (3x3 instead of 4x8) should raise on apply
+    field = np.zeros((3, 3), dtype=np.float32)
+    static_path = str(tmp_path / "bad_foo.nc")
+    xr.Dataset({"foo": xr.DataArray(field, dims=("lat", "lon"))}).to_netcdf(static_path)
+
+    overwrite_config = OverwriteConfig(
+        from_file={"foo": StaticFieldFromFileConfig(path=static_path, engine="netcdf4")}
+    )
+    names = mock_monthly_netcdfs.var_names.all_names
+    with pytest.raises(ValueError, match="does not match"):
+        xarray_dataset_constructor(
+            XarrayDataConfig(
+                data_path=mock_monthly_netcdfs.tmpdir, overwrite=overwrite_config
+            ),
+            names,
+            2,
+        )[0][0]
+
+
+def test_overwrite_config_rejects_duplicate_variable():
+    with pytest.raises(ValueError, match="more than one overwrite mode"):
+        OverwriteConfig(
+            constant={"foo": 1.0},
+            from_file={"foo": StaticFieldFromFileConfig(path="unused.nc")},
+        )
 
 
 def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
