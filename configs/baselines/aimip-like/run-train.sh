@@ -4,9 +4,11 @@ set -e
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
-# NB: do NOT set WANDB_USERNAME here. The beaker run env already carries the
-# correct value; overriding it with the beaker account name misattributes the
-# wandb run to the service account.
+# NB: WANDB_USERNAME must be set to the human owner (mcgibbon), NOT the beaker
+# account (jeremym) — the SA API key carries no username, so without this the run
+# is attributed to nobody, and setting it to the beaker account misattributes it
+# to the service account. It is set explicitly on the gantry --env below.
+WANDB_USERNAME=mcgibbon
 
 cd "$REPO_ROOT"
 
@@ -41,6 +43,7 @@ run_training() {
     --priority "$PRIORITY" \
     "${cluster_args[@]}" \
     --env WANDB_NAME="$job_name" \
+    --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
