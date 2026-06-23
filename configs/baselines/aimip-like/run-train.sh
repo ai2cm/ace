@@ -71,4 +71,20 @@ run_training() {
 # =============================================================================
 
 # --- v2 baseline, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched (wandb rs6b7nyr); commented here so this branch's pre-1979
+# variant launches without re-submitting the baseline.
+# run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# Pre-1979 ERA5 stability test on the v2 stitched baseline (seed 0).
+# Task: research/tasks/2026-06-16-test-whether-including-pre-1979-era5-lets-a-residual-model-train-stably.md
+# Goal: 2026-06-11-stable-long-rollouts
+#
+# v2 baseline (1979-2013, stitched) with the pre-1979 back-extension (1940-1978)
+# prepended to the train_loader, split into ~5-year streams at the stitch
+# boundaries the global-mean 1-step finite-difference diagnostic found
+# (specific_total_water_0 steps on Jan-1 of 1944/1949/1954/1959/1964/1969/1974).
+# Validation (1994 + 2014) and all inference eval loops are identical to v2 for a
+# clean A/B on the data range vs the v2 baseline (rs6b7nyr). seed 0, ~120 epochs.
+# =============================================================================
+run_training "train-4deg-daily-v2-era5-only-pre1979.yaml" "train-4deg-daily-v2-era5-only-pre1979-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
