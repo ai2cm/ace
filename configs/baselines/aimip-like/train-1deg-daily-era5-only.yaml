@@ -258,7 +258,7 @@ inference:
   - name: long_46year
     weight: 0.0
     epochs:
-      start: 0
+      start: 4
       step: 5
     n_forward_steps: 16794
     forward_steps_in_memory: 73
@@ -305,7 +305,7 @@ inference:
   - name: long_46year_constant_co2
     weight: 0.0
     epochs:
-      start: 0
+      start: 4
       step: 5
     n_forward_steps: 16794
     forward_steps_in_memory: 73
