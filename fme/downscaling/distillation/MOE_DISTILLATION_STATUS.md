@@ -170,6 +170,61 @@ fine-detail metrics lag** (`spec_mae_hi_*`, `PRATEsfc` tails).
 
 ---
 
+## Design note: which expert should the discriminator use? (open, undecided)
+
+The GAN here is a **projected / feature-space discriminator**, not a pixel GAN.
+A sample (real = teacher x0, fake = student output) is re-noised to a random
+`t`, run through the teacher UNet encoder, and the activation at the **single
+deepest/bottleneck block** (`feature_indices={deepest_idx}`) is captured via
+hook and fed to `Discriminator_EDM` (`fastgen_train.py:447-455`;
+`f_distill.py:146-154`; real side `dmd2.py:277`). Notes:
+
+- Real and fake use the **same backbone**, so the comparison is consistent
+  (not mismatched) regardless of which expert it is.
+- It taps **only the bottleneck**, so it is structurally a **coarse/global**
+  critic, not a fine-texture one (skip-connection high-res features never reach
+  it). GAN weight is small (`gan_loss_weight_gen=1e-3`) — a stabilizer.
+
+**The concern (raised 2026-06-23):** the backbone is currently **expert 1**
+(coarse-structure specialist), but **expert 0** is the detail refiner that
+holds the fine information. Whether expert 1 makes sense is **`t`-dependent**:
+
+- **Low `t`** (detail survives the perturbation): this is where detail-realism
+  artifacts show and where the GAN adds value — want **expert 0** (detail-
+  sensitive, in-domain). Expert 1 here is out-of-domain *and* detail-blind.
+- **High `t`** (sample ≈ pure noise): detail is destroyed anyway, only coarse
+  structure remains — and **expert 0 is now far out of its training domain**
+  (never saw σ=2000), so its features get unreliable. Expert 1 is in-domain.
+
+So neither expert is universally right, same as the score term. Can't simply
+dispatch the backbone by `t`: the experts have **different bottleneck channel
+counts (128 vs 256)** and the discriminator head has a fixed `in_channels`
+(would need two discriminators or a projection).
+
+**Three separable roles** were bundled into `primary = expert 1`; they need not
+agree:
+
+| Role | Best expert | Why |
+|---|---|---|
+| Student init | Expert 1 | bigger net; first 2-step gen step starts at σ≈2000 (coarse-from-noise) |
+| In-loss score (`teacher_x0`) | dispatch both | routes by σ cleanly (Run 3 fix) |
+| Discriminator backbone | arguably Expert 0 | detail-sensitive where the GAN helps; but out-of-domain at high `t` |
+
+`_primary_ace_module` (feature extractor) does **not** have to be the module the
+student is copied from — these can be decoupled.
+
+**Candidate change (not yet decided):** decouple the discriminator backbone from
+student init — use **expert 0** as the feature extractor **and gate the GAN loss
+to low/mid `t`** (where detail matters and expert 0 is in-domain), while the
+dispatched score term (Run 3) handles correctness across all σ. Keep student
+init = expert 1. Two per-expert discriminators is the faithful-but-overkill
+alternative at this GAN weight.
+
+Status: **noted for decision; no code change yet.** Priority is behind the
+Run 3 score-term fix (the score term is the primary driver; the GAN is 1e-3).
+
+---
+
 ## Local dev notes
 
 - Use the `fme` conda env. FastGen is the `FastGen/` submodule, **not**
