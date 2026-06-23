@@ -26,10 +26,9 @@ from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
 import torch
-from torch.nn.parallel import DistributedDataParallel as DDP
-
 from fastgen.networks.network import FastGenNetwork
 from fastgen.networks.noise_schedule import EDMNoiseSchedule
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 if TYPE_CHECKING:
     from fme.downscaling.models import DiffusionModel
@@ -94,37 +93,47 @@ class AceDiffusionTeacher(FastGenNetwork):
     Notes:
     -----
     - ``forward()`` returns an x0 prediction (``net_pred_type = "x0"``).
-    - For a ``DenoisingMoEPredictor`` the sigma-dispatch module is used for
-      all forward passes, so the correct expert is routed at every noise level.
-      The primary expert's UNet is used for encoder-feature introspection
-      (DMD2 discriminator wiring).
+    - For a ``DenoisingMoEPredictor`` the original teacher instance routes each
+      sample to the expert whose sigma range contains its noise level (see
+      ``_dispatch``), so x0-target generation and scoring use the correct
+      expert at every noise level.  Deepcopies (student / frozen teacher copy)
+      drop the expert list and use the single high-noise expert they were
+      initialised from.  That high-noise expert's UNet is also used for
+      encoder-feature introspection (DMD2 discriminator wiring).
     """
 
     def __init__(self, model: DiffusionModel | DenoisingMoEPredictor) -> None:
         from fme.core.distributed.non_distributed import DummyWrapper
         from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
+        def _unwrap(m: torch.nn.Module) -> torch.nn.Module:
+            # Unwrap DDP / DummyWrapper to reach the bare UNetDiffusionModule.
+            raw = m.module if isinstance(m, DDP) else m
+            if isinstance(raw, DummyWrapper):
+                raw = raw.module
+            return raw
+
         if isinstance(model, DenoisingMoEPredictor):
             sigma_min = model._sigma_schedule_min
             sigma_max = model._sigma_schedule_max
             churn = model._churn
             num_steps = model._num_diffusion_generation_steps
-            sigma_data = model._primary.sigma_data
-            # Use the primary expert's bare module for forward passes and for
-            # student initialisation (deepcopy).  The primary expert covers the
-            # full sigma schedule well enough for distillation; the student is
-            # a single model that approximates the full MoE with fewer steps.
-            primary_raw = (
-                model._primary.module.module
-                if isinstance(model._primary.module, DDP)
-                else model._primary.module
+            # Keep every expert's bare module alongside its sigma range so
+            # target generation and scoring route to the correct expert at
+            # every noise level (see ``_dispatch``).  ``model._experts`` and
+            # ``model._sigma_ranges`` are sorted by sigma ascending.
+            expert_modules = [_unwrap(e.module) for e in model._experts]
+            moe_sigma_ranges: list[tuple[float, float]] | None = list(
+                model._sigma_ranges
             )
-            if isinstance(primary_raw, DummyWrapper):
-                primary_raw = primary_raw.module
-            ace_module: torch.nn.Module = primary_raw
-            moe_experts: list[torch.nn.Module] | None = [
-                e.module for e in model._experts
-            ]
+            # Initialise the student / discriminator feature extractor from the
+            # HIGH-noise expert (the last, highest-sigma range).  The student's
+            # first generation step starts near sigma_max, so the high-noise
+            # expert is the better single-expert initialisation; it is also the
+            # larger network, which the auto-derived discriminator inherits.
+            ace_module: torch.nn.Module = expert_modules[-1]
+            sigma_data = model._experts[-1].sigma_data
+            moe_experts: list[torch.nn.Module] | None = expert_modules
         else:
             cfg = model.config
             sigma_min = cfg.sigma_min
@@ -132,15 +141,10 @@ class AceDiffusionTeacher(FastGenNetwork):
             churn = cfg.churn
             num_steps = cfg.num_diffusion_generation_steps
             sigma_data = model.sigma_data
-            # Unwrap DDP / DummyWrapper so FastGen can re-wrap the bare module.
             # Module chain: DiffusionModel.module → DummyWrapper → UNetDiffusionModule
-            raw_module = (
-                model.module.module if isinstance(model.module, DDP) else model.module
-            )
-            if isinstance(raw_module, DummyWrapper):
-                raw_module = raw_module.module
-            ace_module = raw_module
+            ace_module = _unwrap(model.module)
             moe_experts = None
+            moe_sigma_ranges = None
 
         super().__init__(
             net_pred_type="x0",
@@ -150,9 +154,10 @@ class AceDiffusionTeacher(FastGenNetwork):
         )
         self._ace_module = ace_module
         self._primary_ace_module = ace_module
-        # Store the MoE predictor ONLY on the original instance so that
+        # Store the MoE experts ONLY on the original instance so that
         # deepcopies (student / teacher copy) don't carry all expert weights.
         self._moe_experts = moe_experts
+        self._moe_sigma_ranges = moe_sigma_ranges
 
         # Stash sampling hyperparameters.
         self._sigma_min = sigma_min
@@ -320,6 +325,56 @@ class AceDiffusionTeacher(FastGenNetwork):
                 h.remove()
 
     # ------------------------------------------------------------------
+    # MoE sigma dispatch
+    # ------------------------------------------------------------------
+
+    def _dispatch(
+        self,
+        x_t: torch.Tensor,
+        condition: Any,
+        t: torch.Tensor,
+    ) -> torch.Tensor:
+        """Route each sample to the expert whose sigma range contains its
+        noise level.
+
+        Used by MoE teachers so x0-target generation and the teacher score use
+        the correct expert at every sigma.  Matches ``_SigmaDispatchModule``
+        semantics: ranges are inclusive, a sigma on a shared boundary routes to
+        the lower-sigma expert, and a sigma outside the union of ranges routes
+        to the nearest boundary expert.
+
+        Handles both per-sample ``t`` (shape ``[B]`` or ``[B, 1, 1, 1]``) and a
+        single scalar ``t`` broadcast across the batch (the EDM sampler path).
+        """
+        assert self._moe_experts is not None and self._moe_sigma_ranges is not None
+        t_flat = t.reshape(-1)
+        broadcast = t_flat.numel() == 1
+        route = t_flat.expand(x_t.shape[0]) if broadcast else t_flat
+        out = torch.empty_like(x_t)
+        remaining = torch.ones(x_t.shape[0], dtype=torch.bool, device=x_t.device)
+
+        def _run(module: torch.nn.Module, sel: torch.Tensor) -> None:
+            cond_sel = condition[sel] if condition is not None else None
+            # Pass the scalar t directly when broadcasting (it broadcasts over
+            # the selected subset); otherwise index t to preserve its shape.
+            sigma_sel = t if broadcast else t[sel]
+            out[sel] = module(x_t[sel], cond_sel, sigma_sel)
+
+        for (lo, hi), module in zip(self._moe_sigma_ranges, self._moe_experts):
+            sel = remaining & (route >= lo) & (route <= hi)
+            if sel.any():
+                _run(module, sel)
+                remaining = remaining & ~sel
+        if remaining.any():
+            below = remaining & (route < self._moe_sigma_ranges[0][0])
+            if below.any():
+                _run(self._moe_experts[0], below)
+            above = remaining & ~below
+            if above.any():
+                _run(self._moe_experts[-1], above)
+        return out
+
+    # ------------------------------------------------------------------
     # FastGenNetwork abstract interface
     # ------------------------------------------------------------------
 
@@ -364,7 +419,10 @@ class AceDiffusionTeacher(FastGenNetwork):
         """
         if not feature_indices:
             with torch.amp.autocast(x_t.device.type, dtype=torch.bfloat16):
-                x0 = self._ace_module(x_t, condition, t)
+                if self._moe_experts is not None:
+                    x0 = self._dispatch(x_t, condition, t)
+                else:
+                    x0 = self._ace_module(x_t, condition, t)
             if return_logvar:
                 logvar = self.logvar_scalar.expand(x_t.shape[0])
                 return x0, logvar
@@ -408,9 +466,12 @@ class AceDiffusionTeacher(FastGenNetwork):
 
         n_steps = num_steps if num_steps > 0 else self._default_num_steps
         device_type = noise.device.type
+        # MoE teachers route each sampler step to the expert covering its sigma;
+        # single-model teachers (and student copies) use their one net.
+        net = self._dispatch if self._moe_experts is not None else self._ace_module
         with torch.no_grad(), torch.amp.autocast(device_type, dtype=torch.bfloat16):
             generated, _ = stochastic_sampler(
-                self._ace_module,
+                net,
                 noise,
                 condition,
                 num_steps=n_steps,

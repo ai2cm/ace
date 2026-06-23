@@ -13,6 +13,7 @@ from fme.downscaling.data import StaticInputs
 from fme.downscaling.distillation.fastgen_teacher import AceDiffusionTeacher
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
 
 def _get_monotonic_coordinate(size: int, stop: float) -> torch.Tensor:
@@ -58,6 +59,24 @@ def _build_small_model(
         downscale_factor=2,
         full_fine_coords=fine_coords,
         static_inputs=static_inputs,
+    )
+
+
+def _build_moe_model(
+    sigma_ranges=((0.1, 0.5), (0.5, 1.0)),
+) -> DenoisingMoEPredictor:
+    """Two-expert MoE with independent (identically configured) experts.
+
+    Sigma routing is driven by the predictor's ``sigma_ranges``, not the
+    experts' own configs, so identical experts are sufficient and keep them
+    metadata-compatible.
+    """
+    experts = [_build_small_model() for _ in sigma_ranges]
+    return DenoisingMoEPredictor(
+        experts=experts,
+        sigma_ranges=[tuple(r) for r in sigma_ranges],
+        num_diffusion_generation_steps=3,
+        churn=0.0,
     )
 
 
@@ -208,3 +227,79 @@ def test_lazy_deepcopy_roundtrip():
     # Freeze one does not affect the other
     teacher_copy.freeze()
     assert any(p.requires_grad for p in student._ace_module.parameters())
+
+
+def test_moe_teacher_initialises_from_high_noise_expert():
+    """The student / feature extractor is the highest-sigma expert, and every
+    expert is retained for sigma dispatch on the original instance."""
+    model = _build_moe_model(sigma_ranges=((0.1, 0.5), (0.5, 1.0)))
+    teacher = AceDiffusionTeacher(model)
+
+    assert teacher._moe_sigma_ranges == [(0.1, 0.5), (0.5, 1.0)]
+    assert teacher._moe_experts is not None
+    assert len(teacher._moe_experts) == 2
+    # Primary (student init + discriminator feature extractor) is the
+    # high-noise expert, i.e. the last entry in the ascending expert list.
+    assert teacher._ace_module is teacher._moe_experts[-1]
+
+
+def test_moe_teacher_deepcopy_drops_experts():
+    """Deepcopies (student / frozen teacher) keep only the single high-noise
+    expert so the student trains as one network."""
+    import copy
+
+    teacher = AceDiffusionTeacher(_build_moe_model())
+    student = copy.deepcopy(teacher)
+
+    assert student._moe_experts is None
+    # The student still carries the high-noise expert's weights to train from.
+    assert any(p.requires_grad for p in student._ace_module.parameters())
+
+
+def test_moe_dispatch_routes_by_sigma():
+    """``_dispatch`` sends each sample to the expert whose inclusive sigma
+    range contains it; boundaries go to the lower-sigma expert and
+    out-of-range sigmas go to the nearest boundary expert."""
+    teacher = AceDiffusionTeacher(_build_moe_model())
+
+    class _Stub:
+        def __init__(self, val: float) -> None:
+            self.val = val
+
+        def __call__(self, x, x_lr, sigma):
+            return torch.full_like(x, self.val)
+
+    teacher._moe_experts = [_Stub(10.0), _Stub(20.0)]  # type: ignore[list-item]
+    teacher._moe_sigma_ranges = [(0.1, 0.5), (0.5, 1.0)]
+
+    B, C, H, W = 4, 1, 2, 2
+    x = torch.zeros(B, C, H, W)
+    cond = torch.zeros(B, 1, H, W)
+
+    # Per-sample sigmas spanning both ranges.
+    t = torch.tensor([0.2, 0.4, 0.7, 0.9])
+    out = teacher._dispatch(x, cond, t)
+    assert torch.all(out[:2] == 10.0)
+    assert torch.all(out[2:] == 20.0)
+
+    # Shared boundary sigma routes to the lower-sigma expert.
+    assert torch.all(teacher._dispatch(x, cond, torch.full((B,), 0.5)) == 10.0)
+
+    # Scalar sigma broadcasts across the batch (the EDM sampler path).
+    assert torch.all(teacher._dispatch(x, cond, torch.tensor(0.8)) == 20.0)
+
+    # Sigma above the union of ranges falls back to the highest expert.
+    assert torch.all(teacher._dispatch(x, cond, torch.tensor([5.0])) == 20.0)
+
+
+def test_moe_teacher_forward_shape():
+    """MoE teacher forward returns an x0 of the input shape via dispatch."""
+    teacher = AceDiffusionTeacher(_build_moe_model())
+
+    B, C, H, W = 2, 1, 16, 32
+    x_t = torch.randn(B, C, H, W)
+    t = torch.tensor([0.2, 0.9])  # one sample per expert range
+    condition = torch.randn(B, 1, H, W)
+
+    x0 = teacher(x_t, t, condition=condition)
+    assert x0.shape == (B, C, H, W)
