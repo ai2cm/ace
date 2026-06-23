@@ -91,15 +91,21 @@ Both on Beaker workspace `ai2/climate-titan`, wandb project `ai2cm/fastgen`.
 
 | Run | What | Beaker experiment | Commit |
 |---|---|---|---|
-| **Run 1** — noise fix only | `ACE_SIGMA_MAX=2000`, `ACE_C_OUT=4` | `01KVTPTSTSC9V4Z99TP374WC43` (`…-sigmafix-moe-teacher`) | `8cdf58a3d` |
-| **Run 2** — noise + dispatch + capacity | Run 1 + MoE dispatch + student from expert 1 | `01KVTQV9N2QMCEDGCK035KDSJH` (`…-dispatch-moe-teacher`) | `3a2dced4e` |
+| **Run 1** — noise fix only | `ACE_SIGMA_MAX=2000`, `ACE_C_OUT=4` | `01KVTPTSTSC9V4Z99TP374WC43` (`…-sigmafix-moe-teacher`) — **running** | `8cdf58a3d` |
+| **Run 2** — noise + dispatch + capacity | Run 1 + MoE dispatch + student from expert 1 | `01KVV3RZ8GVTSA2QA8M65AQMJ1` (`…-dispatch-v2-moe-teacher`) — relaunched | `19d5f0467` |
+| ~~Run 2 (first attempt)~~ | crashed: `_dispatch` index_put dtype mismatch (float64 latents vs float32 module output) | ~~`01KVTQV9N2QMCEDGCK035KDSJH`~~ exit 1 | `3a2dced4e` |
+
+Fix for the crash: cast module output to `out.dtype` in `_dispatch` (commit
+`19d5f0467`); the EDM sampler runs float64 latents while experts return float32
+under autocast, and `index_put` requires an exact dtype match. Regression test
+`test_moe_dispatch_handles_dtype_mismatch` added.
 
 ### How to check the latest runs
 
 Beaker status:
 ```bash
-conda run -n fme beaker experiment get 01KVTPTSTSC9V4Z99TP374WC43
-conda run -n fme beaker experiment get 01KVTQV9N2QMCEDGCK035KDSJH
+conda run -n fme beaker experiment get 01KVTPTSTSC9V4Z99TP374WC43  # run 1 (sigmafix)
+conda run -n fme beaker experiment get 01KVV3RZ8GVTSA2QA8M65AQMJ1  # run 2 (dispatch-v2)
 # or browse: https://beaker.org/ex/<id>  and  https://beaker.org/ws/ai2/climate-titan
 ```
 
