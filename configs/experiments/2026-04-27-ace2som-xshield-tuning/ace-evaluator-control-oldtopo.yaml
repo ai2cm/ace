@@ -27,7 +27,7 @@ loader:
         HGTsfc:
           # TODO: set to the pretraining (shieldplus) dataset on the cluster.
           # Must share the same 1deg grid as the xSHIELD data above.
-          path: /climate-default/REPLACE-WITH-OLD-PRETRAINING-DATASET.zarr
+          path:  /climate-default/2026-06-08-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0001.zarr
           name: HGTsfc
           engine: zarr
   num_data_workers: 16

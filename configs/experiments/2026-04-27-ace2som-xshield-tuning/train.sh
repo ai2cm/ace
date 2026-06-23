@@ -22,6 +22,7 @@ cd $REPO_ROOT
 PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N1CJC3H")
 
 PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
+POSEMB_TUNED=("01KVRAQRJRPARFT7CRC5R87WVS")
 
 # tuned on XSHiELD, 1-1, seed 0
 #TUNED_DATASET=01KQD8NF9HQD1QY2X0S132YH72
@@ -34,9 +35,9 @@ PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
 
 #       --dataset $TUNED_DATASET:/pre-trained-weights \
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
-for seed in {1..1}; do
+for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-shieldplus-tune-xshield-10yr-control-seed${seed}"
+    job_name="ace2s-shieldplus-tune-xshield-10yr-control-posemb-tuned-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -56,7 +57,7 @@ for seed in {1..1}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
+        --dataset ${POSEMB_TUNED[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
