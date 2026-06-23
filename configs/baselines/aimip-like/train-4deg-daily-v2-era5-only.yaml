@@ -4,16 +4,18 @@ save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
 ema_checkpoint_save_epochs:
-  start: 1
+  start: 5
   step: 5
 max_epochs: 120
 ema:
   decay: 0.999
+train_aggregator:
+  ensemble_metrics: true
 inference:
   - name: 10year
     weight: 0.0
     epochs:
-      start: 0
+      start: 1
       step: 2
     n_forward_steps: 3652
     forward_steps_in_memory: 73
@@ -95,7 +97,7 @@ inference:
   - name: 10year_insample
     weight: 1.0
     epochs:
-      start: 0
+      start: 1
       step: 2
     n_forward_steps: 3652
     forward_steps_in_memory: 73
@@ -258,7 +260,7 @@ inference:
   - name: long_46year
     weight: 0.0
     epochs:
-      start: 0
+      start: 4
       step: 5
     n_forward_steps: 16794
     forward_steps_in_memory: 73
@@ -305,7 +307,7 @@ inference:
   - name: long_46year_constant_co2
     weight: 0.0
     epochs:
-      start: 0
+      start: 4
       step: 5
     n_forward_steps: 16794
     forward_steps_in_memory: 73
