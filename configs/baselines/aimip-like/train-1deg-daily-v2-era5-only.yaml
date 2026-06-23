@@ -359,7 +359,7 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 8
-  num_data_workers: 4
+  num_data_workers: 8
   prefetch_factor: 4
   time_buffer: 1
   dataset:
@@ -411,7 +411,7 @@ validation:
     batch_size: 32
     num_data_workers: 8
     prefetch_factor: 2
-    time_buffer: 1
+    time_buffer: 16
     dataset:
       strict: false
       concat:
