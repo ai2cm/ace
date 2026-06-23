@@ -8,13 +8,16 @@ import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.fill import SmoothFloodFill
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
 from .build_context import MetricBuildContext
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator
+from .spectrum import get_spectrum_bias_metrics
 
 
 @dataclasses.dataclass
@@ -263,6 +266,7 @@ class TimeMeanEvaluatorAggregator:
         reference_means: xr.Dataset | None = None,
         channel_mean_names: Sequence[str] | None = None,
         log_variables: frozenset[str] | None = None,
+        report_spectrum_bias: bool = True,
     ):
         """
         Args:
@@ -279,11 +283,16 @@ class TimeMeanEvaluatorAggregator:
             log_variables: If provided, only include per-variable entries in
                 get_logs and get_dataset for these variables. All variables
                 are still recorded so that channel_mean is computed correctly.
+            report_spectrum_bias: When True (default), emit spectral norm-bias
+                scalars on the power spectrum of the denormalized time-mean
+                field. Only applies when ``target="denorm"``.
         """
         self._ops = ops
         self._horizontal_dims = horizontal_dims
         self._target = target
         self._dist = Distributed.get_instance()
+        self._report_spectrum_bias = report_spectrum_bias
+        self._nan_fill_fn = SmoothFloodFill(num_steps=4)
         if variable_metadata is None:
             self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
@@ -379,8 +388,39 @@ class TimeMeanEvaluatorAggregator:
                 ]
             logs.update({metric_name: sum(values_to_average) / len(values_to_average)})
 
+        logs.update(self._get_time_mean_spectrum_bias_logs(preds))
+
         if len(label) != 0:
             return {f"{label}/{key}": logs[key] for key in logs}
+        return logs
+
+    def _get_time_mean_spectrum_bias_logs(
+        self, preds: list[_TargetGenPair]
+    ) -> dict[str, float]:
+        if self._target != "denorm" or not self._report_spectrum_bias:
+            return {}
+        if self._dist.world_size != self._dist.total_data_parallel_ranks:
+            return {}
+        try:
+            sht = self._ops.get_real_sht()
+        except (NotImplementedError, ValueError):
+            return {}
+
+        logs: dict[str, float] = {}
+        for pred in preds:
+            should_log = self._log_variables is None or pred.name in self._log_variables
+            if not should_log:
+                continue
+            if pred.gen.shape[-2:] != (sht.nlat, sht.nlon):
+                continue
+            gen_field = self._nan_fill_fn(pred.gen, pred.name)
+            target_field = self._nan_fill_fn(pred.target, pred.name)
+            gen_spec = spherical_power_spectrum(gen_field, sht)
+            target_spec = spherical_power_spectrum(target_field, sht)
+            for suffix, value in get_spectrum_bias_metrics(
+                gen_spec, target_spec
+            ).items():
+                logs[f"{suffix}/{pred.name}"] = value
         return logs
 
     def _get_caption(self, key: str, name: str) -> str:
@@ -436,6 +476,7 @@ class TimeMeanMetricConfig:
     channel_mean_names: list[str] | None = None
     enabled: bool = True
     strict: bool = False
+    report_spectrum_bias: bool = True
 
     def __post_init__(self):
         if self.name is None:
@@ -464,5 +505,6 @@ class TimeMeanMetricConfig:
             log_variables=(
                 frozenset(self.variables) if self.variables is not None else None
             ),
+            report_spectrum_bias=self.report_spectrum_bias,
         )
         return MetricBuildResult(aggregator=agg)

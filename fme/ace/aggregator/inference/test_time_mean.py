@@ -2,12 +2,27 @@ import numpy as np
 import torch
 
 from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
+from fme.ace.aggregator.inference.spectrum import get_spectrum_bias_metrics
 from fme.ace.aggregator.inference.time_mean import (
     TimeMeanAggregator,
     TimeMeanEvaluatorAggregator,
 )
 from fme.core.device import get_device
+from fme.core.fill import SmoothFloodFill
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.metrics import spherical_power_spectrum
+
+
+def get_gridded_operations(nlat: int, nlon: int):
+    return LatLonOperations(torch.ones(nlat, nlon, device=get_device()))
+
+
+SPECTRUM_BIAS_SUFFIXES = [
+    "smallest_scale_norm_bias",
+    "positive_norm_bias",
+    "negative_norm_bias",
+    "mean_abs_norm_bias",
+]
 
 
 def test_rmse_of_time_mean_all_channels():
@@ -303,3 +318,90 @@ def test_aggregator_mean_values():
         ds["gen_map-a"].values,
         (data["a"].cpu().numpy().mean(axis=(0, 1))),
     )
+
+
+def test_time_mean_spectrum_bias_metrics():
+    torch.manual_seed(0)
+    nlat, nlon = 8, 16
+    ops = get_gridded_operations(nlat, nlon)
+    agg = TimeMeanEvaluatorAggregator(
+        ops,
+        horizontal_dims=["lat", "lon"],
+        target="denorm",
+    )
+    gen_data = {"a": torch.randn(2, 3, nlat, nlon, device=get_device())}
+    target_data = {"a": torch.randn(2, 3, nlat, nlon, device=get_device())}
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+    logs = agg.get_logs(label="time_mean")
+
+    for suffix in SPECTRUM_BIAS_SUFFIXES:
+        assert f"time_mean/{suffix}/a" in logs
+
+    sht = ops.get_real_sht()
+    nan_fill = SmoothFloodFill(num_steps=4)
+    gen_mean = agg._gen_agg.get_data()["a"]
+    target_mean = agg._target_agg.get_data()["a"]
+    expected = get_spectrum_bias_metrics(
+        spherical_power_spectrum(nan_fill(gen_mean, "a"), sht),
+        spherical_power_spectrum(nan_fill(target_mean, "a"), sht),
+    )
+    for suffix, value in expected.items():
+        torch.testing.assert_close(logs[f"time_mean/{suffix}/a"], value)
+
+
+def test_time_mean_spectrum_bias_not_emitted_for_norm():
+    torch.manual_seed(0)
+    nlat, nlon = 8, 16
+    agg = TimeMeanEvaluatorAggregator(
+        get_gridded_operations(nlat, nlon),
+        horizontal_dims=["lat", "lon"],
+        target="norm",
+    )
+    gen_data = {"a": torch.randn(2, 3, nlat, nlon, device=get_device())}
+    target_data = {"a": torch.randn(2, 3, nlat, nlon, device=get_device())}
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+    logs = agg.get_logs(label="time_mean_norm")
+    assert not any(suffix in key for key in logs for suffix in SPECTRUM_BIAS_SUFFIXES)
+
+
+def test_time_mean_spectrum_bias_report_spectrum_bias_false():
+    torch.manual_seed(0)
+    nlat, nlon = 8, 16
+    agg = TimeMeanEvaluatorAggregator(
+        get_gridded_operations(nlat, nlon),
+        horizontal_dims=["lat", "lon"],
+        target="denorm",
+        report_spectrum_bias=False,
+    )
+    gen_data = {"a": torch.randn(2, 3, nlat, nlon, device=get_device())}
+    target_data = {"a": torch.randn(2, 3, nlat, nlon, device=get_device())}
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data,
+            prediction_norm=gen_data,
+            target=target_data,
+            target_norm=target_data,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+    logs = agg.get_logs(label="time_mean")
+    assert not any(suffix in key for key in logs for suffix in SPECTRUM_BIAS_SUFFIXES)

@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-xshield-10yr-pos-embed-only.yaml"
+CONFIG_FILENAME="tune-xshield-10yr-control.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -13,6 +13,7 @@ WANDB_GROUP=ace
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
 STATS_DATASET=andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
+#STATS_DATASET=andrep/2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr-stats
 SEED_OFFSET=10
 
 cd $REPO_ROOT
@@ -33,9 +34,9 @@ PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
 
 #       --dataset $TUNED_DATASET:/pre-trained-weights \
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
-for seed in {0..0}; do
+for seed in {1..1}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-shieldplus-tune-xshield-10yr-control-lrscheduler-seed${seed}"
+    job_name="ace2s-shieldplus-tune-xshield-10yr-control-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -45,7 +46,7 @@ for seed in {0..0}; do
         --description 'Run ACE training' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/climate-titan \
-        --priority high \
+        --priority urgent \
         --preemptible \
         --cluster ai2/titan \
         --env WANDB_NAME=$job_name \

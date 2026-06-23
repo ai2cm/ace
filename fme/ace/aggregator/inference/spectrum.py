@@ -242,16 +242,32 @@ def _get_spectrum_metrics(
                 f"Expected 1-dimensional power spectrum for {name}, "
                 f"got {gen_spectrum[name].shape}"
             )
-        metrics[f"smallest_scale_norm_bias/{name}"] = get_smallest_scale_power_bias(
-            gen_spectrum[name], target_spectrum[name]
-        )
-        positive_bias, negative_bias = get_positive_and_negative_power_bias(
-            gen_spectrum[name], target_spectrum[name]
-        )
-        if report_directional_bias:
-            metrics[f"positive_norm_bias/{name}"] = positive_bias
-            metrics[f"negative_norm_bias/{name}"] = negative_bias
-        metrics[f"mean_abs_norm_bias/{name}"] = abs(positive_bias) + abs(negative_bias)
+        for suffix, value in get_spectrum_bias_metrics(
+            gen_spectrum[name],
+            target_spectrum[name],
+            report_directional_bias=report_directional_bias,
+        ).items():
+            metrics[f"{suffix}/{name}"] = value
+    return metrics
+
+
+def get_spectrum_bias_metrics(
+    gen_spectrum: torch.Tensor,
+    target_spectrum: torch.Tensor,
+    report_directional_bias: bool = True,
+) -> dict[str, float]:
+    """Return per-metric-suffix bias values for one variable's 1-D spectra."""
+    metrics: dict[str, float] = {}
+    metrics["smallest_scale_norm_bias"] = get_smallest_scale_power_bias(
+        gen_spectrum, target_spectrum
+    )
+    positive_bias, negative_bias = get_positive_and_negative_power_bias(
+        gen_spectrum, target_spectrum
+    )
+    if report_directional_bias:
+        metrics["positive_norm_bias"] = positive_bias
+        metrics["negative_norm_bias"] = negative_bias
+    metrics["mean_abs_norm_bias"] = abs(positive_bias) + abs(negative_bias)
     return metrics
 
 
