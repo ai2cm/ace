@@ -79,15 +79,21 @@ if [[ "$MOE_TEACHER" == "true" ]]; then
     TEACHER_CKPT_FLAG="--teacher-moe-checkpoint /checkpoints/bundled_moe_multivariate.ckpt"
     JOB_NAME="${JOB_NAME}-moe-teacher"
     VAL_DATASET=/climate-default/2026-06-09-distillation-teacher-moe-multivar-val-dataset/conus_multivar_val_2023.zarr
-    # MoE teacher training parameters: 5 output variables (u10/v10/PRMSL/
-    # PRATEsfc/T2m), sigma ~ loguniform on [0.005, 200], generated with 18
+    # MoE teacher training parameters: 4 output variables (u10/v10/PRMSL/
+    # PRATEsfc), sigma ~ loguniform on [0.005, 2000], generated with 18
     # diffusion steps.  The spike configs read the ACE_* env vars.
+    #
+    # The MoE teacher has two experts split at sigma=200: a low-noise expert
+    # [0.005, 200] and a high-noise expert [200, 2000].  ACE_SIGMA_MAX must be
+    # the full schedule maximum (2000), not the expert boundary (200) -- the
+    # student's inference sigma grid spans the full range, so its first
+    # generation step starts near sigma=2000 and must be trained there.
     TEACHER_NUM_STEPS=18
     TEACHER_ENV_FLAGS=(
-        --env ACE_C_OUT=5
+        --env ACE_C_OUT=4
         --env ACE_NOISE_DIST=loguniform
         --env ACE_SIGMA_MIN=0.005
-        --env ACE_SIGMA_MAX=200.0
+        --env ACE_SIGMA_MAX=2000.0
     )
 else
     # Default single-model teacher, trained with sigma ~ lognormal(-1.2, 1.8)
