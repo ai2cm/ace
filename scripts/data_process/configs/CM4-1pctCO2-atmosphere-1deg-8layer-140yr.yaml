@@ -79,7 +79,7 @@ dataset_computation:
       - total_vapor_sensible_heat_flux
       - downward_longwave_radiative_flux
       - net_surface_longwave_radiative_flux
-    full_state_soil.zarr:      
+    full_state_soil.zarr:
       # below are vertically resolved soil layer variables -- need to be coarsened
       - total_moisture_content_of_soil_layer
       - temperature_of_soil_layer
