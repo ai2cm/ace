@@ -4,7 +4,7 @@ save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
 ema_checkpoint_save_epochs:
-  start: 1
+  start: 5
   step: 5
 max_epochs: 60
 ema:
