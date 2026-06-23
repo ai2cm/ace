@@ -96,3 +96,23 @@ run_training "train-4deg-daily-v2-era5-only-c5d4e1.yaml" "train-4deg-daily-v2-er
 
 # --- c5d5e0: crps 0.5 / fd-crps 0.5 / energy 0.0, fd levels 2 (1 GPU; Jupiter+Titan, high) ---
 run_training "train-4deg-daily-v2-era5-only-c5d5e0.yaml" "train-4deg-daily-v2-era5-only-c5d5e0-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# Energy-score per-sample spectral whitening (-eswhiten) variants of the
+# energy-bearing fd-CRPS arms above. Identical to each named arm except the loss
+# adds `energy_score_whitening: per_sample` (EnergyScoreLoss option, default
+# whitening_eps_frac 0.02). Tests whether whitening the (already spectral, per-mode)
+# energy score further sharpens coherence / lowers 1-step CRPS on top of fd-CRPS.
+# The e0 arm (c5d5e0) is excluded — no energy-score term to whiten. The eswhiten
+# control is the v1 arm wandb 8a24de9j (energy-score-spectral-whitening A/B). See
+# research/investigations/2026-06-23-fd-crps-coherence-weighting.md.
+# =============================================================================
+
+# --- c7d2e1-eswhiten: crps 0.7 / fd-crps 0.2 / energy 0.1 + eswhiten (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-c7d2e1-eswhiten.yaml" "train-4deg-daily-v2-era5-only-c7d2e1-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- c4d4e2-eswhiten: crps 0.4 / fd-crps 0.4 / energy 0.2 + eswhiten (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-c4d4e2-eswhiten.yaml" "train-4deg-daily-v2-era5-only-c4d4e2-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- c5d4e1-eswhiten: crps 0.5 / fd-crps 0.4 / energy 0.1 + eswhiten (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-c5d4e1-eswhiten.yaml" "train-4deg-daily-v2-era5-only-c5d4e1-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
