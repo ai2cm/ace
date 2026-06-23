@@ -74,4 +74,21 @@ run_training() {
 # =============================================================================
 
 # --- v2 baseline, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched and running as wandb oshj5u79 / beaker 01KVTHCVW0DB3F4Q8CNTV8ZRB7
+# (relaunched 2026-06-23 @ 6e8cf916f). Commented out so this script does not
+# relaunch it; uncomment to launch a fresh v2 seed.
+# run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# v2 ERA5-only residual baseline + total-energy-budget corrector (challenger).
+#
+# Identical to the v2 baseline recipe except the atmosphere corrector adds
+# total_energy_budget_correction (method: constant_temperature,
+# constant_unaccounted_heating: 0.0). Evaluates whether enabling the energy
+# corrector improves the v2 4°/daily baseline; if it pans out it forks a v2
+# successor. unaccounted_heating is 0 per the current-runs convention (the 6.62
+# W/m**2 ERA5 1979-2008 residual is NOT applied here).
+# =============================================================================
+
+# --- v2 + energy corrector, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-energy-corrector.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
