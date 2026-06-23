@@ -13,7 +13,7 @@ inference:
   - name: 10year
     weight: 0.0
     epochs:
-      start: 0
+      start: 1
       step: 2
     n_forward_steps: 3652
     forward_steps_in_memory: 73
@@ -95,7 +95,7 @@ inference:
   - name: 10year_insample
     weight: 1.0
     epochs:
-      start: 0
+      start: 1
       step: 2
     n_forward_steps: 3652
     forward_steps_in_memory: 73
