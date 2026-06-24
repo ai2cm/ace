@@ -97,6 +97,8 @@ class SingleModuleStepConfig(StepConfigABC):
         self.crps_training = None  # unused, kept for backwards compatibility
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
+        if self.input_dropout is not None:
+            self.input_dropout.validate_names(self.in_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -440,7 +442,9 @@ class SingleModuleStep(StepABC):
         if not self.module.torch_module.training:
             return None
         names = self.in_packer.names
-        mask = self._config.input_dropout.sample_mask(len(names), batch_size, device)
+        mask = self._config.input_dropout.sample_mask(
+            len(names), batch_size, device, channel_names=list(names)
+        )
         # The mask is per-sample with no spatial dim, so it cannot be sliced
         # per-tile. Under spatial/model parallelism every co-rank holds the same
         # samples but advances torch.rand independently; broadcast the spatial
