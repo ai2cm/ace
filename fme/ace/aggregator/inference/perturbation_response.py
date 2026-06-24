@@ -27,6 +27,7 @@ import xarray as xr
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
@@ -298,7 +299,9 @@ class PerturbationResponseAggregator(
 
     def _group_time_mean(self) -> list[dict[str, torch.Tensor]]:
         dist = Distributed.get_instance()
-        counts = dist.reduce_sum(self._counts.clone())
+        # Counts must be on the compute device for the distributed reduce
+        # (e.g. NCCL all_reduce rejects CPU tensors); the group sums already are.
+        counts = dist.reduce_sum(self._counts.clone().to(get_device())).cpu()
         means: list[dict[str, torch.Tensor]] = []
         for g in range(self._n_groups):
             group_sums = self._sums[g]
