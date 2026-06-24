@@ -66,6 +66,9 @@ run_training() {
     -- bash -c "set -e && python -m fme.ace.validate_config --config_type train '$CONFIG_PATH' && torchrun --nproc_per_node '$N_GPUS' -m fme.ace.train '$CONFIG_PATH'"
 }
 
-# Active runs.
-run_training "train-4deg-daily-cmip6-mpi-single-all.yaml" "train-4deg-daily-cmip6-mpi-single-all-rs0" 1
-run_training "train-4deg-daily-cmip6-mpi-single-lowrisk.yaml" "train-4deg-daily-cmip6-mpi-single-lowrisk-rs0" 1
+# Runs (comment out everything except the current launch target, per the
+# run-1 convention, so re-running this script doesn't duplicate live jobs).
+# -all and -lowrisk launched 2026-06-24 (256b11433); -no-residual added after.
+# run_training "train-4deg-daily-cmip6-mpi-single-all.yaml" "train-4deg-daily-cmip6-mpi-single-all-rs0" 1
+# run_training "train-4deg-daily-cmip6-mpi-single-lowrisk.yaml" "train-4deg-daily-cmip6-mpi-single-lowrisk-rs0" 1
+run_training "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual.yaml" "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual-rs0" 1
