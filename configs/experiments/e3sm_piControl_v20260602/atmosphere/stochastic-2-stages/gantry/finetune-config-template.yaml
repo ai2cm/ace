@@ -155,6 +155,7 @@ stepper:
           spectral_transform: sht
           affine_norms: true
       corrector:
+        corrector_disabled_epochs: 1
         total_energy_budget_correction:
           method: constant_temperature
           constant_unaccounted_heating: 0.09
