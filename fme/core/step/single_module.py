@@ -10,6 +10,7 @@ from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -21,12 +22,20 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.global_mean_removal import (
+    GlobalMeanRemoval,
+    GlobalMeanRemovalConfigUnion,
+    GlobalMeanRemovalState,
+    NoGlobalMeanRemoval,
+    extra_channel_source_field,
+)
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
     SecondaryDecoderConfig,
 )
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -58,6 +67,10 @@ class SingleModuleStepConfig(StepConfigABC):
             ``len(in_names)`` additional float channels (1.0 = present, 0.0 =
             masked) after the regular input channels, doubling the total input
             channel count.
+        global_mean_removal: Optional configuration for removing global means
+            from fields before normalization and restoring them after
+            denormalization. Supports shared (single reference field) or
+            per-channel removal, with optional extra input channels.
     """
 
     builder: ModuleSelector
@@ -73,9 +86,12 @@ class SingleModuleStepConfig(StepConfigABC):
     prescribed_prognostic_names: list[str] = dataclasses.field(default_factory=list)
     residual_prediction: bool = False
     include_channel_mask_inputs: bool = False
+    global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.global_mean_removal is not None:
+            self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
             if name not in self.out_names:
                 raise ValueError(
@@ -257,11 +273,24 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
-        n_in_channels = len(config.in_names)
+        if config.global_mean_removal is not None:
+            self._global_mean_removal: GlobalMeanRemoval = (
+                config.global_mean_removal.build(
+                    normalizer=normalizer, in_names=config.in_names
+                )
+            )
+        else:
+            self._global_mean_removal = NoGlobalMeanRemoval()
+        # Synthetic GMR channels are packed alongside real inputs so they
+        # flow through the packer and channel-mask machinery uniformly.
+        packed_in_names = (
+            list(config.in_names) + self._global_mean_removal.extra_channel_names
+        )
+        n_in_channels = len(packed_in_names)
         if config.include_channel_mask_inputs:
             n_in_channels *= 2
         n_out_channels = len(config.out_names)
-        self.in_packer = Packer(config.in_names)
+        self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
@@ -349,25 +378,19 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
-
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
-
-        Returns:
-            The denormalized output data at the next time step.
-        """
-
+    ) -> tuple[TensorDict, StepperState | None]:
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            # Fail loud if a NaN survives masking/normalization to the network
+            # input (cf. PR #1262). Gated on grad-enabled so the no_grad
+            # inference/eval rollout hot path pays no device-sync cost.
+            if torch.is_grad_enabled() and torch.isnan(input_tensor).any():
+                _raise_input_nan_error(input_norm)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_names, args.data_mask, input_tensor
+                    self.in_packer.names, args.data_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
@@ -394,20 +417,34 @@ class SingleModuleStep(StepABC):
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            global_mean_removal=self._global_mean_removal,
+            data_mask=args.data_mask,
+            stepper_state=args.stepper_state,
         )
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
+
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
 
     def get_state(self):
         """
         Returns:
             The state of the stepper.
         """
-        state = {
+        state: dict[str, Any] = {
             "module": self.module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -424,6 +461,23 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
+        self._corrector.load_state(state.get("corrector", {}))
+
+
+def _raise_input_nan_error(input_norm: TensorMapping) -> None:
+    """Raise a located error naming the input variable(s) that still hold NaN.
+
+    Called only once the cheap packed-tensor NaN check has fired, so the
+    per-variable scan here is off the hot path.
+    """
+    nan_names = sorted(k for k, v in input_norm.items() if torch.isnan(v).any())
+    raise ValueError(
+        "NaN found in network input for variable(s) "
+        f"{nan_names} after input masking and normalization. An input/forcing "
+        "variable likely contains NaN that is not covered by data_mask; ensure "
+        "the data_mask passed to the stepper includes every input variable that "
+        "may be masked (cf. PR #1262), or enable fill_nans_on_normalize."
+    )
 
 
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
@@ -464,8 +518,13 @@ def _build_channel_mask_dict(
     device = packed_input.device
     result: TensorDict = {}
     for name in in_names:
-        if data_mask is not None and name in data_mask:
-            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
+        # GMR sentinel channels share their source field's mask: the extra
+        # value is already zeroed in forward_transform when the source is
+        # masked, so the mask channel must agree rather than default to 1.
+        source = extra_channel_source_field(name)
+        lookup_name = source if source is not None else name
+        if data_mask is not None and lookup_name in data_mask:
+            mask_1d = data_mask[lookup_name].to(device=device, dtype=torch.float)
             result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
         else:
             result[name] = torch.ones(batch, *spatial, device=device)
@@ -477,12 +536,15 @@ def step_with_adjustments(
     next_step_input_data: TensorMapping,
     network_calls: Callable[[TensorDict], TensorDict],
     normalizer: StandardNormalizer,
-    corrector: CorrectorABC,
+    corrector: CorrectorABC | None,
     ocean: Ocean | None,
     residual_prediction: bool,
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
-) -> TensorDict:
+    global_mean_removal: GlobalMeanRemoval | None = None,
+    data_mask: TensorMapping | None = None,
+    stepper_state: StepperState | None = None,
+) -> tuple[TensorDict, StepperState | None]:
     """
     Step the model forward one timestep given input data.
 
@@ -503,19 +565,53 @@ def step_with_adjustments(
         prognostic_names: Names of prognostic variables.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).
+        global_mean_removal: Optional transform that removes per-sample
+            global means before normalization and restores them after
+            denormalization. When provided, ``forward_transform`` is called
+            before the normalizer and ``inverse_transform`` after
+            denormalization but before the corrector/ocean/prescribed steps,
+            so those adjustments operate in physical space.
+        data_mask: Per-variable boolean masks passed to
+            ``global_mean_removal.forward_transform``.
+        stepper_state: Per-sample state carried across step calls. The
+            corrector's slice (``stepper_state.corrector_state``) is passed to
+            the corrector and any updates are written back into a returned
+            ``StepperState``. Pass-through unchanged when no corrector is set.
 
     Returns:
-        The denormalized output data at the next time step.
+        A tuple ``(output, stepper_state)`` where ``output`` is the
+        denormalized data at the next time step.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
-    input_norm = normalizer.normalize(input)
+    gmr_state: GlobalMeanRemovalState | None = None
+    if global_mean_removal is not None:
+        network_input, gmr_state = global_mean_removal.forward_transform(
+            input, data_mask
+        )
+        input_norm = normalizer.normalize(network_input)
+        # Synthetic GMR channels are produced in normalized space; merge
+        # them in after normalization so the network sees a single uniform
+        # input dict.
+        input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
+    else:
+        input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    if global_mean_removal is not None:
+        assert gmr_state is not None
+        output = global_mean_removal.inverse_transform(output, gmr_state)
     if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
+        corrector_state: CorrectorState | None = (
+            stepper_state.corrector_state if stepper_state is not None else None
+        )
+        output, corrector_state = corrector(
+            input, output, next_step_input_data, corrector_state
+        )
+        if corrector_state is not None:
+            stepper_state = StepperState(corrector_state=corrector_state)
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -525,4 +621,4 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output
+    return output, stepper_state

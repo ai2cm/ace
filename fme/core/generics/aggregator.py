@@ -1,8 +1,24 @@
 import abc
+import dataclasses
 from typing import Any, Generic, TypeVar
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
 T = TypeVar("T", contravariant=True)
+
+
+@dataclasses.dataclass
+class AggregatorSummary:
+    """Summary returned by training/validation aggregators.
+
+    Attributes:
+        logs: Metrics dict suitable for wandb logging.
+        loss: Scalar to minimize for best-validation checkpoint selection,
+            or ``None`` if this aggregator does not contribute to checkpoint
+            selection.
+    """
+
+    logs: dict[str, float]
+    loss: float | None
 
 
 class AggregatorABC(abc.ABC, Generic[T]):
@@ -11,7 +27,7 @@ class AggregatorABC(abc.ABC, Generic[T]):
         pass
 
     @abc.abstractmethod
-    def get_logs(self, label: str) -> dict[str, float]:
+    def get_summary(self, label: str) -> AggregatorSummary:
         pass
 
     @abc.abstractmethod
@@ -21,6 +37,21 @@ class AggregatorABC(abc.ABC, Generic[T]):
 
 InferenceLog = dict[str, Any]
 InferenceLogs = list[InferenceLog]
+
+
+@dataclasses.dataclass
+class InferenceSummary:
+    """Summary returned by inference aggregators.
+
+    Attributes:
+        logs: Metrics dict suitable for wandb logging.
+        loss: Scalar to minimize for best-inference checkpoint selection,
+            or ``None`` if this aggregator does not contribute to checkpoint
+            selection.
+    """
+
+    logs: InferenceLog
+    loss: float | None
 
 
 class InferenceAggregatorABC(abc.ABC, Generic[PS, T]):
@@ -53,7 +84,7 @@ class InferenceAggregatorABC(abc.ABC, Generic[PS, T]):
         pass
 
     @abc.abstractmethod
-    def get_summary_logs(self) -> InferenceLog:
+    def get_summary(self) -> InferenceSummary:
         pass
 
     @abc.abstractmethod

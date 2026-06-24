@@ -9,7 +9,6 @@ from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.loss import StepLossConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.registry.module import ModuleSelector
-from fme.coupled.loss import LossContributionsConfig
 
 from .data_loading.data_typing import CoupledVerticalCoordinate
 from .stepper import (
@@ -139,13 +138,11 @@ def test_stepper_gradient_accumulation_integration():
     assert ocean_module.mock_caller.call_count == 2
 
 
+@pytest.mark.medium_duration
 @pytest.mark.parametrize("from_coupled_stepper_state", [True, False])
 def test_stepper_parameter_init_integration(
-    tmp_path: pathlib.Path, from_coupled_stepper_state: bool, very_fast_only: bool
+    tmp_path: pathlib.Path, from_coupled_stepper_state: bool
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag1"]
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag1", "o_diag2"]
     atmos_in_names = ["a_prog1", "a_prog2", "a_sfc_temp", "ocean_frac", "o_prog"]
@@ -258,7 +255,7 @@ def _build_train_stepper_and_data(atmos_n_steps):
         ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=atmos_n_steps),
+            n_steps=atmos_n_steps,
         ),
     )
     # 2 ocean steps, 4 atmos steps (inner_steps=2)
@@ -282,7 +279,7 @@ def _build_train_stepper_and_data(atmos_n_steps):
 
 @pytest.mark.parametrize("atmos_n_steps", [1, 2])
 def test_unoptimized_steps_detached(atmos_n_steps):
-    """Steps beyond loss_contributions.n_steps should not require grad
+    """Steps beyond n_steps should not require grad
     (produced under torch.no_grad) while optimized steps should."""
     train_stepper, coupled_data, _, _ = _build_train_stepper_and_data(atmos_n_steps)
     data = coupled_data.data
@@ -326,11 +323,11 @@ def test_optimize_last_step_only_with_gradient_accumulation():
         n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(optimize_last_step_only=True),
+            optimize_last_step_only=True,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(optimize_last_step_only=True),
+            optimize_last_step_only=True,
         ),
     )
     n_forward_times_ocean = 2
@@ -400,12 +397,12 @@ def test_outer_steps_truncated_to_loss_horizon():
         n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(weight=0.0),
+            loss_weight=0.0,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
             # atmos n_steps=2 → atmos_outer = ceil(2 / 2) = 1
-            loss_contributions=LossContributionsConfig(n_steps=2),
+            n_steps=2,
         ),
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
@@ -458,19 +455,19 @@ def test_coupled_train_stepper_config_rejects_all_null_loss():
             n_coupled_steps=1,
             ocean=ComponentTrainingConfig(
                 loss=StepLossConfig(type="MSE"),
-                loss_contributions=LossContributionsConfig(weight=0.0),
+                loss_weight=0.0,
             ),
             atmosphere=ComponentTrainingConfig(
                 loss=StepLossConfig(type="MSE"),
-                loss_contributions=LossContributionsConfig(n_steps=0),
+                n_steps=0,
             ),
         )
 
 
 def test_coupled_train_stepper_config_rejects_all_null_stochastic_loss():
     """When both realms use a TimeLengthProbabilities sampler whose only
-    outcome is steps=0, both loss_contributions are null and the config
-    should raise a ValueError."""
+    outcome is steps=0, both losses are null and the config should raise
+    a ValueError."""
     from fme.ace.stepper.time_length_probabilities import (
         TimeLengthProbabilities,
         TimeLengthProbability,
@@ -484,11 +481,11 @@ def test_coupled_train_stepper_config_rejects_all_null_stochastic_loss():
             n_coupled_steps=2,
             ocean=ComponentTrainingConfig(
                 loss=StepLossConfig(type="MSE"),
-                loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+                n_steps=zero_only_sampler,
             ),
             atmosphere=ComponentTrainingConfig(
                 loss=StepLossConfig(type="MSE"),
-                loss_contributions=LossContributionsConfig(n_steps=zero_only_sampler),
+                n_steps=zero_only_sampler,
             ),
         )
 
@@ -514,11 +511,11 @@ def test_outer_steps_clamped_to_one_when_both_realms_sample_zero():
         n_coupled_steps=2,
         ocean=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=sampler),
+            n_steps=sampler,
         ),
         atmosphere=ComponentTrainingConfig(
             loss=StepLossConfig(type="MSE"),
-            loss_contributions=LossContributionsConfig(n_steps=sampler),
+            n_steps=sampler,
         ),
     )
     train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
