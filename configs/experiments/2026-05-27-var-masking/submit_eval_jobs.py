@@ -28,7 +28,7 @@ WANDB_GROUP = "ace2-var-masking-eval-2026-06-17"
 
 CHECKPOINTS = [
     ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
-    ("training_checkpoints/ckpt.tar", "-lastepoch"),
+    ("training_checkpoints/best_ckpt.tar", "-besttrain"),
 ]
 
 CONFIGS = sorted(
