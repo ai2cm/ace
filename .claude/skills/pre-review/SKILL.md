@@ -91,18 +91,25 @@ Quick scan for patterns that AI-generated code drops in and human reviewers cons
 
 ### 9. Builder pattern pass
 
-We generally follow a "builder pattern" for configuration in this repo: dataclasses we load using dacite (a `Config`), usually paired with an implementation class that the config's `build()` constructs. The rules to check are:
+We generally follow a "builder pattern" for configuration in this repo: dataclasses we load using dacite (a `Config`), usually paired with an implementation class that the config's `build()` constructs.
+The rules to check are:
  - **Field privacy.** Config dataclass fields should be treated as private and only used in methods on that class, even though they are not prefixed with `_`. Reading `config.some_field` from anywhere else (an implementation class, a free function, or another config) is a violation; expose what callers need as a `@property` or method.
  - **Builder constructs sub-objects.** When a builder `Config` class is paired with an implementation class, the builder should construct sub-objects from any sub-configuration fields and pass those to the implementation class, rather than the implementation class building those sub-objects. The implementation class receives built collaborators, never a sub-config to build itself.
 
-Exceptions to the field-privacy rule:
- - **Leaf-config carve.** A config may be passed to the one implementation class its `build()` constructs, and that impl may read the config's fields — but only if the config is a **leaf**, i.e. none of its fields are themselves dataclasses. `list[Config]`, `dict[str, Config]`, and `Config | None` all count as dataclass fields, so they make a config non-leaf. A non-leaf config must not be handed to its impl; its `build()` builds the sub-objects (per the second rule) and may pack the scalars the impl needs into a separate, plain (non-dacite) leaf dataclass passed as an argument.
- - **Parent/sibling reads are not exempt.** A config reading another config's fields — even one it directly contains — is still a violation. Fix it with a public `@property` on the child for a derived value (e.g. `loss.requires_ensemble` rather than `loss.type == "EnsembleLoss"`), or a `validate(...)` method on the child for an invariant (e.g. `metric.validate(required_target="denorm")`). The parent then goes through that sanctioned API.
- - **Tests are exempt** — a test reading a config's fields is not a violation.
+Exceptions:
+ - A config may be passed to the one implementation class its `build()` constructs, and that impl may read the config's fields — but only if the config is a **leaf**, i.e. none of its fields are themselves dataclasses. `list[Config]`, `dict[str, Config]`, and `Config | None` all make a config non-leaf. A non-leaf config must not be handed to its impl; its `build()` builds the sub-objects (per the second rule) and may pack the scalars the impl needs into a separate, non-dacite-loaded leaf dataclass passed as an argument.
+ - A test reading a config's fields should be avoided if easy to do so, but is not a violation.
 
-For top-level entrypoints the same idea applies as **build-then-execute**: a run-config consumed by a free function (e.g. `run_*_from_config`) that reads the config as a parameter bag is a violation. The config's `build()` should assemble the runtime object(s); a thin entrypoint then performs the process side-effects (IO, logging, distributed setup) and invokes the built object. Pure assembly (which reads the config) belongs in `build()`; the side-effecting shell operates on built objects and explicit values, not the config.
+A config reading another config's fields — even one it directly contains — is still a violation.
+Fix it with a public `@property` on the child for a derived value (e.g. `loss.requires_ensemble` rather than `loss.type == "EnsembleLoss"`), or a `validate(...)` method on the child for an invariant (e.g. `metric.validate(required_target="denorm")`). The parent then goes through that sanctioned API.
 
-Pre-existing violations of these rules are allowed, but new violations should be flagged, including refactors to existing classes that introduce new violations.
+These rules still apply for top-level entrypoints. A run-config consumed by a free function (e.g. `run_*_from_config`) that reads the config as a parameter bag is a violation, unless that config is a leaf (it almost certainly isn't).
+Instead of the config having a .build() method, it should likely have a .run() method that performs all building and side-effects, then calls a free function that takes the built objects and explicit values as arguments.
+The free function should not read the config class itself.
+The config's `build()` should assemble the runtime object(s); a thin entrypoint then performs the process side-effects (IO, logging, distributed setup) and invokes the built object.
+Pure assembly (which reads the config) belongs in `build()`; the side-effecting shell operates on built objects and explicit values, not the config.
+
+Pre-existing violations of these builder pattern rules are allowed, but new violations should be flagged, including refactors to existing classes that introduce new violations.
 
 ## After audit passes
 
