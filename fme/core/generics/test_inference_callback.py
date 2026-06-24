@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fme.core.generics.aggregator import InferenceAggregatorABC
+from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceSummary
 from fme.core.generics.data import SimpleInferenceData
 from fme.core.generics.inference import BatchedPredictor
 from fme.core.generics.trainer import InferenceTask, build_inference_callback
@@ -72,8 +72,8 @@ class _CapturingAggregator(InferenceAggregatorABC):
         self.batches.append(data)
         return []
 
-    def get_summary_logs(self):
-        return dict(self._summary)
+    def get_summary(self) -> InferenceSummary:
+        return InferenceSummary(logs=dict(self._summary), loss=None)
 
     def flush_diagnostics(self, subdir):
         self.flush_calls.append(subdir)
@@ -179,8 +179,8 @@ def test_distinct_concurrent_groups_run_separately():
     with patch(
         "fme.core.generics.trainer.inference_one_epoch",
         side_effect=[
-            {"a/time_mean_norm/rmse/channel_mean": 0.1},
-            {"b/time_mean_norm/rmse/channel_mean": 0.2},
+            InferenceSummary(logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=None),
+            InferenceSummary(logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=None),
         ],
     ) as mock_inference:
         logs, error = callback(epoch=1)
@@ -215,8 +215,8 @@ def test_no_predictor_factory_runs_everything_sequentially():
     with patch(
         "fme.core.generics.trainer.inference_one_epoch",
         side_effect=[
-            {"a/time_mean_norm/rmse/channel_mean": 0.1},
-            {"b/time_mean_norm/rmse/channel_mean": 0.2},
+            InferenceSummary(logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=None),
+            InferenceSummary(logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=None),
         ],
     ) as mock_inference:
         logs, error = callback(epoch=1)

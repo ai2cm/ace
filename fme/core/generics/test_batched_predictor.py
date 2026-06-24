@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from fme.core.generics.aggregator import InferenceAggregatorABC
+from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceSummary
 from fme.core.generics.data import SimpleInferenceData
 from fme.core.generics.inference import (
     BatchedPredictor,
@@ -235,8 +235,8 @@ class _FakeAggregator(InferenceAggregatorABC[FakePS, FakeSD]):
         self.batches.append(data)
         return []
 
-    def get_summary_logs(self):
-        return {}
+    def get_summary(self) -> InferenceSummary:
+        return InferenceSummary(logs={}, loss=None)
 
     def flush_diagnostics(self, subdir):
         pass

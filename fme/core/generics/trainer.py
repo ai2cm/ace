@@ -1029,7 +1029,7 @@ def _run_inference_tasks_concurrent(
         logging.info(f"Starting flush of reduced diagnostics to disk for {task.name!r}")
         aggregator.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
         logging.info(f"Getting inline inference aggregator logs for {task.name!r}")
-        logs = aggregator.get_summary_logs()
+        logs = aggregator.get_summary().logs
         out[task.name] = {f"{task.name}/{k}": v for k, v in logs.items()}
     return out
 
