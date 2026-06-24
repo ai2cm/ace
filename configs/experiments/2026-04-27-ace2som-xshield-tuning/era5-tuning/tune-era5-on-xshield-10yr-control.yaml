@@ -25,7 +25,16 @@ inference:
       engine: zarr
     num_data_workers: 8
   aggregator:
-    log_histograms: true
+    #log_histograms: true
+    histogram:
+      enabled: true
+      variables:
+        - PRATEsfc
+        - TMP2m
+        - PRMSL
+        - UGRD10m
+        - VGRD10m
+        - PRESsfc
 logging:
   log_to_screen: true
   log_to_wandb: true
