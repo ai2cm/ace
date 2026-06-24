@@ -30,7 +30,7 @@ import yaml
 WANDB_PROJECT = "VarMasking5"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v5"  # stripped from wandb run names before comparison
+WANDB_SUFFIX = "-v6"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = (
     "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
 )
