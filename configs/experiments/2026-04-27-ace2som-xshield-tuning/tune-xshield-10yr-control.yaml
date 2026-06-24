@@ -37,7 +37,6 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 4
   time_buffer: 1
-  sample_with_replacement: 250
   dataset:
     concat:
     - data_path: /climate-default/
@@ -105,7 +104,6 @@ stepper_training:
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
-      finite_difference_crps_weight: 0.1
 stepper:
   step:
     type: single_module
