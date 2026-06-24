@@ -100,7 +100,7 @@ def test_response_diagnostics_recover_known_structure():
 
     assert summary.loss is None
 
-    p = "perturbation_response/p4K"
+    p = "p4K"
     # Land warms 2 K, ocean 1 K -> ratio 2 in every band.
     for band in ("tropics", "subtropics", "midlatitudes"):
         assert logs[f"{p}/land_warming/{band}"] == pytest.approx(2.0)
@@ -129,9 +129,9 @@ def test_zero_response_gives_zero_warming_and_nan_ratio():
     agg = _build_aggregator(group_onehot)
     agg.record_batch(data)
     logs = agg.get_summary().logs
-    assert logs["perturbation_response/p4K/land_warming/tropics"] == pytest.approx(0.0)
-    assert logs["perturbation_response/p4K/ocean_warming/tropics"] == pytest.approx(0.0)
-    assert np.isnan(logs["perturbation_response/p4K/land_ocean_warming_ratio/tropics"])
+    assert logs["p4K/land_warming/tropics"] == pytest.approx(0.0)
+    assert logs["p4K/ocean_warming/tropics"] == pytest.approx(0.0)
+    assert np.isnan(logs["p4K/land_ocean_warming_ratio/tropics"])
 
 
 def test_accumulates_across_windows():
@@ -142,9 +142,7 @@ def test_accumulates_across_windows():
     agg.record_batch(_paired_data(group_onehot))
     agg.record_batch(_paired_data(group_onehot))
     logs = agg.get_summary().logs
-    assert logs[
-        "perturbation_response/p4K/land_ocean_warming_ratio/tropics"
-    ] == pytest.approx(2.0)
+    assert logs["p4K/land_ocean_warming_ratio/tropics"] == pytest.approx(2.0)
 
 
 def test_more_than_one_perturbation_not_implemented():

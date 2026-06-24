@@ -338,8 +338,9 @@ class PerturbationResponseAggregator(
         logs: dict[str, float] = {}
         baseline = means[0]
         for g in range(1, self._n_groups):
-            label = self._labels[g]
-            prefix = f"perturbation_response/{label}"
+            # Keyed by the perturbation label only; the inline-inference callback
+            # adds the task-name prefix (e.g. "perturbation_response/").
+            prefix = self._labels[g]
             response = {
                 name: (means[g][name] - baseline[name]).to(torch.float64)
                 for name in cfg.recorded_names

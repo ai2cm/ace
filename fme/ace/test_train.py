@@ -15,6 +15,10 @@ import yaml
 
 import fme
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.inference.perturbation_response import (
+    LatitudeBand,
+    PerturbationResponseAggregatorConfig,
+)
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.ace.aggregator.one_step.map import OneStepMapMetricConfig
 from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
@@ -23,6 +27,7 @@ from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
+from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
@@ -62,6 +67,8 @@ from fme.ace.train.train import main as train_main
 from fme.ace.train.train_config import (
     InlineInferenceConfig,
     InlineValidationConfig,
+    LabeledPerturbation,
+    PerturbationResponseInferenceConfig,
     TrainBuilders,
     TrainConfig,
 )
@@ -168,6 +175,7 @@ def _get_test_yaml_files(
     batch_size: int = 2,
     sample_with_replacement: int | None = 10,
     lr_tuning: LRTuningConfig | None = None,
+    with_perturbation_inference: bool = False,
 ):
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
@@ -321,6 +329,54 @@ def _get_test_yaml_files(
     else:
         n_forward_steps_arg = n_forward_steps
 
+    perturbation_inference_configs: list[PerturbationResponseInferenceConfig] = []
+    if with_perturbation_inference:
+        perturbation_inference_configs = [
+            PerturbationResponseInferenceConfig(
+                loader=InferenceDataLoaderConfig(
+                    dataset=XarrayDataConfig(
+                        data_path=str(valid_data_path),
+                        spatial_dimensions=spatial_dimensions_str,
+                        labels=[] if conditional else None,
+                    ),
+                    start_indices=InferenceInitialConditionIndices(
+                        first=0,
+                        n_initial_conditions=2,
+                        interval=1,
+                    ),
+                ),
+                n_forward_steps=inference_forward_steps,
+                forward_steps_in_memory=2,
+                perturbations=[
+                    LabeledPerturbation(
+                        label="p4K",
+                        perturbation=SSTPerturbation(
+                            sst=[
+                                PerturbationSelector(
+                                    type="constant",
+                                    config={"amplitude": 4.0},
+                                )
+                            ]
+                        ),
+                    )
+                ],
+                aggregator=PerturbationResponseAggregatorConfig(
+                    near_surface_temperature_name="surface_temperature",
+                    column_temperature_names=[
+                        "specific_total_water_0",
+                        "specific_total_water_1",
+                    ],
+                    vertical_surface_index=1,
+                    vertical_upper_index=0,
+                    latitude_bands=[
+                        LatitudeBand(name="all", lat_min=0.0, lat_max=90.0)
+                    ],
+                    tropical_lat_max=90.0,
+                    ocean_fraction_name=mask_name,
+                ),
+            )
+        ]
+
     if crps_training:
         loss = StepLossConfig(
             type="EnsembleLoss",
@@ -422,6 +478,7 @@ def _get_test_yaml_files(
             n_forward_steps=n_forward_steps_arg,
         ),
         inference=inference_configs,
+        perturbation_inference=perturbation_inference_configs,
         validate_using_ema=validate_using_ema,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
@@ -506,6 +563,7 @@ def _setup(
     multi_validation: bool = False,
     use_variable_masking: bool = False,
     lr_tuning: LRTuningConfig | None = None,
+    with_perturbation_inference: bool = False,
 ):
     if not path.exists():
         path.mkdir()
@@ -617,6 +675,7 @@ def _setup(
         multi_validation=multi_validation,
         partial_train_data_path=partial_data_dir,
         lr_tuning=lr_tuning,
+        with_perturbation_inference=with_perturbation_inference,
     )
     return train_config_filename, inference_config_filename
 
@@ -1093,6 +1152,48 @@ def test_train_without_inline_inference(tmp_path):
     assert "val_extra/mean/loss" in epoch_logs
     val_extra_output = tmp_path / "results" / "output" / "val_extra" / "epoch_0001"
     assert val_extra_output.exists()
+
+
+def test_train_with_perturbation_inference(tmp_path):
+    train_config, _ = _setup(
+        tmp_path,
+        "SphericalFourierNeuralOperatorNet",
+        log_to_wandb=True,
+        n_time=10,
+        inference_forward_steps=2,
+        save_per_epoch_diagnostics=True,
+        skip_inline_inference=True,
+        with_perturbation_inference=True,
+    )
+    with mock_wandb() as wandb:
+        train_main(yaml_config=train_config)
+        epoch_logs = wandb.get_logs()[-1]
+
+    response_keys = [
+        k for k in epoch_logs if k.startswith("perturbation_response/p4K/")
+    ]
+    assert response_keys, "expected perturbation_response metrics in the epoch log"
+    assert "perturbation_response/p4K/land_ocean_warming_ratio/all" in epoch_logs
+    assert (
+        "perturbation_response/p4K/vertical_warming_ratio_tropical_ocean" in epoch_logs
+    )
+    assert (
+        "perturbation_response/p4K/column_warming/specific_total_water_0" in epoch_logs
+    )
+    # diagnostic-only: must not contribute to checkpoint selection
+    assert np.isinf(epoch_logs["best_inference_error"])
+
+    diagnostics = (
+        tmp_path
+        / "results"
+        / "output"
+        / "perturbation_response"
+        / "epoch_0001"
+        / "perturbation_response_diagnostics.nc"
+    )
+    assert diagnostics.exists()
+    ds = xr.open_dataset(diagnostics, decode_timedelta=False)
+    assert "p4K__surface_temperature" in ds
 
 
 def test_lr_tuning_with_loss_schedule(tmp_path):

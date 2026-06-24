@@ -60,10 +60,12 @@ import fme
 from fme.ace.aggregator import TrainAggregator
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.gridded_data import InferenceGriddedData
+from fme.ace.data_loading.perturbation_pair import build_perturbation_pair_data
 from fme.ace.stepper import TrainOutput, TrainStepper
 from fme.ace.train.train_config import (
     InlineInferenceConfig,
     InlineValidationConfig,
+    PerturbationResponseInferenceConfig,
     TrainBuilders,
     TrainConfig,
 )
@@ -187,6 +189,12 @@ def get_inference_callback(
     stepper: TrainStepper,
     output_dir: str,
     save_per_epoch_diagnostics: bool,
+    perturbation_inference_entries: Sequence[
+        tuple[
+            PerturbationResponseInferenceConfig, InferenceGriddedData, DatasetInfo, str
+        ]
+    ] = (),
+    perturbation_inference_epoch_sets: Sequence[set[int]] = (),
 ) -> InferenceCallback:
     tasks: list[InferenceTask] = []
     for i, (entry_config, data, entry_dataset_info, name) in enumerate(
@@ -210,11 +218,86 @@ def get_inference_callback(
             )
         )
 
+    for i, (
+        perturbation_config,
+        perturbation_data,
+        perturbation_dataset_info,
+        perturbation_name,
+    ) in enumerate(perturbation_inference_entries):
+        paired_data, aggregator_factory = _make_perturbation_response_task(
+            entry_config=perturbation_config,
+            data=perturbation_data,
+            entry_dataset_info=perturbation_dataset_info,
+            name=perturbation_name,
+            stepper=stepper,
+            output_dir=output_dir,
+            save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+        )
+        tasks.append(
+            InferenceTask(
+                name=perturbation_name,
+                data=paired_data,
+                aggregator_factory=aggregator_factory,
+                epoch_set=frozenset(perturbation_inference_epoch_sets[i]),
+                weight=0.0,  # diagnostic only; never affects checkpoint selection
+            )
+        )
+
+    all_epochs = sorted(
+        set(inference_epochs).union(*perturbation_inference_epoch_sets)
+        if perturbation_inference_epoch_sets
+        else set(inference_epochs)
+    )
     return build_inference_callback(
         tasks=tasks,
-        inference_epochs=inference_epochs,
+        inference_epochs=all_epochs,
         stepper=stepper,
     )
+
+
+def _make_perturbation_response_task(
+    entry_config: PerturbationResponseInferenceConfig,
+    data: InferenceGriddedData,
+    entry_dataset_info: DatasetInfo,
+    name: str,
+    stepper: TrainStepper,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+):
+    """Build paired control/perturbed data and the response-aggregator factory."""
+    surface_temperature_name = stepper.surface_temperature_name
+    ocean_fraction_name = stepper.ocean_fraction_name
+    if surface_temperature_name is None or ocean_fraction_name is None:
+        raise ValueError(
+            "perturbation-response inference requires the stepper to define "
+            "surface_temperature_name and ocean_fraction_name."
+        )
+    lats, lons = data.horizontal_coordinates.meshgrid
+    labeled = entry_config.perturbations[0]
+    paired_data, group_onehot = build_perturbation_pair_data(
+        initial_condition=data.initial_condition,
+        loader=data.loader,
+        perturbation=labeled.perturbation,
+        surface_temperature_name=surface_temperature_name,
+        ocean_fraction_name=ocean_fraction_name,
+        lats=lats,
+        lons=lons,
+        perturb_initial_condition_full_field=(
+            entry_config.perturb_initial_condition_full_field
+        ),
+    )
+
+    def factory():
+        return entry_config.aggregator.build(
+            dataset_info=entry_dataset_info,
+            perturbation_labels=entry_config.perturbation_labels,
+            group_onehot=group_onehot,
+            n_timesteps=entry_config.n_forward_steps,
+            output_dir=os.path.join(output_dir, name),
+            save_diagnostics=save_per_epoch_diagnostics,
+        )
+
+    return paired_data, factory
 
 
 def _make_ace_aggregator_factory(
@@ -267,6 +350,10 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     inference_entries = builder.get_inference_data(variable_metadata)
     inference_epochs = config.get_inference_epochs()
     inference_epoch_sets = config.get_inference_epoch_sets()
+    perturbation_inference_entries = builder.get_perturbation_inference_data(
+        variable_metadata
+    )
+    perturbation_inference_epoch_sets = config.get_perturbation_inference_epoch_sets()
 
     dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
@@ -315,6 +402,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         stepper=stepper,
         output_dir=config.output_dir,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        perturbation_inference_entries=perturbation_inference_entries,
+        perturbation_inference_epoch_sets=perturbation_inference_epoch_sets,
     )
 
     do_gc_collect = fme.get_device() != torch.device("cpu")

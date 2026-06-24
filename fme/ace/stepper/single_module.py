@@ -1776,6 +1776,14 @@ class TrainStepper(
     def loss_names(self) -> list[str]:
         return self._stepper.loss_names
 
+    @property
+    def surface_temperature_name(self) -> str | None:
+        return self._stepper.surface_temperature_name
+
+    @property
+    def ocean_fraction_name(self) -> str | None:
+        return self._stepper.ocean_fraction_name
+
     def predict_paired(
         self,
         initial_condition: PrognosticState,

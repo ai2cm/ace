@@ -12,12 +12,16 @@ from fme.ace.aggregator import (
     LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
 )
+from fme.ace.aggregator.inference.perturbation_response import (
+    PerturbationResponseAggregatorConfig,
+)
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.data_loading.perturbation import SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import TrainStepper
 from fme.ace.stepper.single_module import (
@@ -154,6 +158,104 @@ class InlineInferenceConfig:
 
 
 @dataclasses.dataclass
+class LabeledPerturbation:
+    """A named SST perturbation for the perturbation-response eval.
+
+    Parameters:
+        label: Label used in wandb log keys for this perturbation's response.
+        perturbation: The SST perturbation applied to the perturbed members.
+    """
+
+    label: str
+    perturbation: SSTPerturbation
+
+
+@dataclasses.dataclass
+class PerturbationResponseInferenceConfig:
+    """Configuration for an inline perturbation-response evaluation.
+
+    At each evaluated checkpoint this runs a single rollout carrying an
+    unperturbed baseline and a perturbed climate as separate batch members,
+    differences their time-means, and logs structural warming-response
+    diagnostics (see ``PerturbationResponseAggregatorConfig``). It does not
+    contribute to checkpoint selection.
+
+    Parameters:
+        loader: Data loader for the (unperturbed) initial condition and forcing.
+            Must not itself specify perturbations; the perturbation is given by
+            ``perturbations``.
+        n_forward_steps: Number of forward steps to take.
+        forward_steps_in_memory: Number of forward steps to take before
+            re-reading data from disk.
+        perturbations: Labeled SST perturbations. Exactly one is supported for
+            now (baseline + one perturbed group).
+        aggregator: Configuration of the perturbation-response aggregator.
+        epochs: Epochs on which to run. By default runs every epoch.
+        name: Name used as wandb log prefix and output subdirectory. If None,
+            defaults to "perturbation_response" for a single config and
+            "perturbation_response_{i}" when there are multiple.
+        perturb_initial_condition_full_field: If True, the initial-condition
+            perturbation is applied over the whole field; if False, only over
+            the ocean (the forcing perturbation is always ocean-masked).
+    """
+
+    loader: InferenceDataLoaderConfig
+    n_forward_steps: int
+    forward_steps_in_memory: int
+    perturbations: list[LabeledPerturbation]
+    aggregator: PerturbationResponseAggregatorConfig = dataclasses.field(
+        default_factory=lambda: PerturbationResponseAggregatorConfig()
+    )
+    epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
+    name: str | None = None
+    perturb_initial_condition_full_field: bool = True
+
+    def __post_init__(self):
+        if self.loader.perturbations is not None:
+            raise ValueError(
+                "PerturbationResponseInferenceConfig.loader must be unperturbed; "
+                "specify the perturbation via the perturbations field instead."
+            )
+        if len(self.perturbations) != 1:
+            raise NotImplementedError(
+                "perturbation-response evaluation currently supports exactly one "
+                f"perturbation, got {len(self.perturbations)}."
+            )
+        labels = [p.label for p in self.perturbations]
+        if len(labels) != len(set(labels)):
+            raise ValueError(f"Duplicate perturbation labels: {labels}")
+        dist = Distributed.get_instance()
+        if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
+            raise ValueError(
+                "Number of inference initial conditions must be divisible by the "
+                "number of parallel workers, got "
+                f"{self.loader.start_indices.n_initial_conditions} and "
+                f"{dist.world_size}."
+            )
+
+    @property
+    def using_labels(self) -> bool:
+        return self.loader.using_labels
+
+    @property
+    def perturbation_labels(self) -> list[str]:
+        return [p.label for p in self.perturbations]
+
+    def get_base_inference_data(
+        self,
+        window_requirements: DataRequirements,
+        initial_condition: PrognosticStateDataRequirements,
+    ) -> InferenceGriddedData:
+        """Build the unperturbed base inference data; pairing happens later."""
+        return get_inference_data(
+            config=self.loader,
+            total_forward_steps=self.n_forward_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition,
+        )
+
+
+@dataclasses.dataclass
 class TrainConfig:
     """
     Configuration for training a model.
@@ -232,6 +334,9 @@ class TrainConfig:
     inference: InlineInferenceConfig | list[InlineInferenceConfig] = dataclasses.field(
         default_factory=list
     )
+    perturbation_inference: (
+        PerturbationResponseInferenceConfig | list[PerturbationResponseInferenceConfig]
+    ) = dataclasses.field(default_factory=list)
     stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
     )
@@ -292,6 +397,28 @@ class TrainConfig:
                 raise ValueError(
                     f"train_loader and inference {inference_name!r} loader "
                     "must both use labels or both not use labels"
+                )
+        resolved_perturbation_names = self.perturbation_inference_names
+        all_inference_names = resolved_inference_names + resolved_perturbation_names
+        if len(all_inference_names) != len(set(all_inference_names)):
+            raise ValueError(
+                f"Duplicate inference names across inference and "
+                f"perturbation_inference: {all_inference_names}"
+            )
+        perturbation_reserved_overlap = (
+            set(resolved_perturbation_names) & self._RESERVED_NAMES
+        )
+        if perturbation_reserved_overlap:
+            raise ValueError(
+                f"Perturbation inference names {sorted(perturbation_reserved_overlap)} "
+                f"collide with reserved names {sorted(self._RESERVED_NAMES)}"
+            )
+        for i, perturbation_entry in enumerate(self.perturbation_inference_list):
+            if self.train_loader.using_labels != perturbation_entry.using_labels:
+                raise ValueError(
+                    f"train_loader and perturbation_inference "
+                    f"{resolved_perturbation_names[i]!r} loader must both use labels "
+                    "or both not use labels"
                 )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
@@ -390,6 +517,25 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "output")
 
+    @property
+    def perturbation_inference_list(self) -> list[PerturbationResponseInferenceConfig]:
+        if isinstance(self.perturbation_inference, PerturbationResponseInferenceConfig):
+            return [self.perturbation_inference]
+        return self.perturbation_inference
+
+    @property
+    def perturbation_inference_names(self) -> list[str]:
+        entries = self.perturbation_inference_list
+        names = []
+        for i, entry in enumerate(entries):
+            if entry.name is not None:
+                names.append(entry.name)
+            elif len(entries) == 1:
+                names.append("perturbation_response")
+            else:
+                names.append(f"perturbation_response_{i}")
+        return names
+
     def get_inference_epoch_sets(self) -> list[set[int]]:
         inference = self.inference_list
         if not inference:
@@ -403,6 +549,14 @@ class TrainConfig:
         if not epoch_sets:
             return []
         return sorted(set().union(*epoch_sets))
+
+    def get_perturbation_inference_epoch_sets(self) -> list[set[int]]:
+        entries = self.perturbation_inference_list
+        if not entries:
+            return []
+        start_epoch = 0 if self.evaluate_before_training else 1
+        all_epochs = list(range(start_epoch, self.max_epochs + 1))
+        return [set(all_epochs[entry.epochs.slice]) for entry in entries]
 
 
 class TrainBuilders:
@@ -463,6 +617,46 @@ class TrainBuilders:
                 )
             )
             data = entry.get_inference_data(
+                window_requirements=window_requirements,
+                initial_condition=self.config.stepper_config.get_prognostic_state_data_requirements(),
+            )
+            dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+            entries.append((entry, data, dataset_info, name))
+        return entries
+
+    def get_perturbation_inference_data(
+        self,
+        variable_metadata: Mapping[str, VariableMetadata],
+    ) -> list[
+        tuple[
+            PerturbationResponseInferenceConfig,
+            InferenceGriddedData,
+            DatasetInfo,
+            str,
+        ]
+    ]:
+        """Build the unperturbed base inference data for each perturbation entry.
+
+        The control/perturbed pairing is applied in ``build_trainer``, where the
+        stepper's surface-temperature and ocean-fraction variable names are
+        available.
+        """
+        names = self.config.perturbation_inference_names
+        entries: list[
+            tuple[
+                PerturbationResponseInferenceConfig,
+                InferenceGriddedData,
+                DatasetInfo,
+                str,
+            ]
+        ] = []
+        for entry, name in zip(self.config.perturbation_inference_list, names):
+            window_requirements = (
+                self.config.stepper_config.get_evaluation_window_data_requirements(
+                    entry.forward_steps_in_memory
+                )
+            )
+            data = entry.get_base_inference_data(
                 window_requirements=window_requirements,
                 initial_condition=self.config.stepper_config.get_prognostic_state_data_requirements(),
             )
