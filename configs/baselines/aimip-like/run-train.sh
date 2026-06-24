@@ -74,4 +74,24 @@ run_training() {
 # =============================================================================
 
 # --- v2 baseline, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched and running as wandb oshj5u79 / beaker 01KVTHCVW0DB3F4Q8CNTV8ZRB7
+# (relaunched 2026-06-23 @ 6e8cf916f). Commented out so this script does not
+# relaunch it; uncomment to launch a fresh v2 seed.
+# run_training "train-4deg-daily-v2-era5-only.yaml" "train-4deg-daily-v2-era5-only-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# v2 ERA5-only NO-RESIDUAL ablation (matched control).
+#
+# Identical to the v2 baseline above EXCEPT residual_prediction: false — the
+# network predicts the full next-state field instead of the delta. Everything
+# else (recipe, stitched train window, loss, residual-scaled loss
+# normalization, eval methods) is held fixed, isolating the contribution of the
+# residual-prediction forward step. Mirrors Jeremy's established matched-control
+# methodology (the 2026-06-05 residual-prediction-configuration controls flip
+# exactly this one line). Note: the stitched train window was motivated by
+# residual targets, so its effect may be smaller here; it is kept fixed to keep
+# this a single-variable ablation.
+# =============================================================================
+
+# --- v2 no-residual ablation, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-no-residual.yaml" "train-4deg-daily-v2-era5-only-no-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
