@@ -247,10 +247,14 @@ class WeightedMappingLoss:
         target_tensors = self.packer.pack(
             self.normalizer.normalize(target_dict), axis=self.channel_dim
         )
-        nan_mask = target_tensors.isnan()
-        if nan_mask.any():
-            predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
-            target_tensors = torch.where(nan_mask, 0.0, target_tensors)
+        # Check for NaNs in both prediction and target tensors
+        target_nan_mask = target_tensors.isnan()
+        predict_nan_mask = predict_tensors.isnan()
+        combined_nan_mask = target_nan_mask | predict_nan_mask
+        
+        if combined_nan_mask.any():
+            predict_tensors = torch.where(combined_nan_mask, 0.0, predict_tensors)
+            target_tensors = torch.where(combined_nan_mask, 0.0, target_tensors)
 
         result = self.loss(predict_tensors, target_tensors)
         input_ndim = predict_tensors.ndim

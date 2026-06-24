@@ -30,7 +30,7 @@ from ..utils import (
     running_monthly_mean,
 )
 
-SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS"]
+SEA_SURFACE_TEMPERATURE_NAMES = ["sst", "surface_temperature", "TS", "tos"]
 
 
 class RegionalIndexAggregator:

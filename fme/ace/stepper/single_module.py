@@ -38,6 +38,7 @@ from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.ice import IceConfig
 from fme.core.labels import BatchLabels
 from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
 from fme.core.normalizer import (
@@ -95,6 +96,7 @@ class SingleModuleStepperConfig:
         normalization: The normalization configuration.
         parameter_init: The parameter initialization configuration.
         ocean: The ocean configuration.
+        ice: The ice configuration.
         loss: The loss configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
@@ -121,6 +123,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: ParameterInitializationConfig()
     )
     ocean: OceanConfig | None = None
+    ice: IceConfig | None = None
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
@@ -307,6 +310,7 @@ class SingleModuleStepperConfig:
                 residual=residual_normalization,
             ),
             ocean=self.ocean,
+            ice=self.ice,
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
             prescribed_prognostic_names=self.prescribed_prognostic_names,
@@ -732,6 +736,12 @@ class StepperConfig:
 
     def get_ocean(self) -> OceanConfig | None:
         return self.step.get_ocean()
+    
+    def replace_ice(self, ice: IceConfig | None):
+        self.step.replace_ice(ice)
+
+    def get_ice(self) -> IceConfig | None:
+        return self.step.get_ice()
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint).
@@ -900,6 +910,10 @@ class Stepper:
     @property
     def ocean_fraction_name(self) -> str | None:
         return self._step_obj.ocean_fraction_name
+    
+    @property
+    def sea_ice_fraction_name(self) -> str | None:
+        return self._step_obj.sea_ice_fraction_name
 
     def prescribe_sst(
         self,
@@ -917,6 +931,23 @@ class Stepper:
                 be prescribed onto the generated one according to the mask.
         """
         return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
+    
+    def prescribe_ice_ts(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe ice surface temperature onto the generated surface temperature field.
+
+        Args:
+            mask_data: Source for the prescriber mask field.
+            gen_data: Contains the generated surface temperature field.
+            target_data: Contains the target surface temperature that will
+                be prescribed onto the generated one according to the mask.
+        """
+        return self._step_obj.prescribe_ice_ts(mask_data, gen_data, target_data)
 
     @property
     def training_dataset_info(self) -> DatasetInfo:
@@ -969,6 +1000,20 @@ class Stepper:
             ocean: The new ocean model configuration or None.
         """
         self._config.replace_ocean(ocean)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
+
+    def replace_ice(self, ice: IceConfig | None):
+        """
+        Replace the ice model with a new one.
+
+        Args:
+            ice: The new ice model configuration or None.
+        """
+        self._config.replace_ice(ice)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
         )
@@ -1842,6 +1887,8 @@ class StepperOverrideConfig:
     Parameters:
         ocean: Ocean configuration to override that used in producing a serialized
             stepper.
+        ice: Ice configuration to override that used in producing a serialized
+            stepper.
         multi_call: MultiCall configuration to override that used in producing a
             serialized stepper.
         derived_forcings: Derived forcings configuration to override that used in
@@ -1851,6 +1898,7 @@ class StepperOverrideConfig:
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
+    ice: Literal["keep"] | IceConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
@@ -1917,6 +1965,12 @@ def load_stepper(
             "Overriding training ocean configuration with a new ocean configuration."
         )
         stepper.replace_ocean(override_config.ocean)
+
+    if override_config.ice != "keep":
+        logging.info(
+            "Overriding training ice configuration with a new ice configuration."
+        )
+        stepper.replace_ice(override_config.ice)
 
     if override_config.multi_call != "keep":
         logging.info(

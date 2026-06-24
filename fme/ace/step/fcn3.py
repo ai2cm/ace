@@ -17,6 +17,7 @@ from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.ice import Ice, IceConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -156,6 +157,7 @@ class FCN3StepConfig(StepConfigABC):
         out_names: Names of output variables.
         normalization: The normalization configuration.
         ocean: The ocean configuration.
+        ice: The ice configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         residual_prediction: Whether to use residual prediction.
@@ -170,6 +172,7 @@ class FCN3StepConfig(StepConfigABC):
     surface_diagnostic_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
     ocean: OceanConfig | None = None
+    ice: IceConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
@@ -252,9 +255,13 @@ class FCN3StepConfig(StepConfigABC):
         either in `input` or `next_step_input_data`.
         """
         if self.ocean is None:
-            return self.in_names
+            names = self.in_names
         else:
-            return list(set(self.in_names).union(self.ocean.forcing_names))
+            names = list(set(self.in_names).union(self.ocean.forcing_names))
+        if self.ice is None:
+            return names
+        else:
+            return list(set(names).union(self.ice.forcing_names))
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
@@ -275,6 +282,8 @@ class FCN3StepConfig(StepConfigABC):
         result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
             result = result.union(self.ocean.forcing_names)
+        if self.ice is not None:
+            result = result.union(self.ice.forcing_names)
         result = result.union(self.prescribed_prognostic_names)
         return list(result)
 
@@ -293,6 +302,18 @@ class FCN3StepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
+    
+    def replace_ice(self, ice: IceConfig | None):
+        """
+        Replace the ice model with a new one.
+
+        Args:
+            ice: The new ice model configuration or None.
+        """
+        self.ice = ice
+
+    def get_ice(self) -> IceConfig | None:
+        return self.ice
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
@@ -373,6 +394,12 @@ class FCN3Step(StepABC):
             )
         else:
             self.ocean = None
+        if config.ice is not None:
+            self.ice: Ice | None = config.ice.build(
+                config.in_names, config.out_names, timestep
+            )
+        else:
+            self.ice = None
         module: nn.Module = config.builder.build(
             n_atmo_channels=len(config.atmosphere_prognostic_names)
             + len(config.atmosphere_diagnostic_names),
@@ -411,12 +438,20 @@ class FCN3Step(StepABC):
     def surface_temperature_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.surface_temperature_name
+        if self._config.ice is not None:
+            return self._config.ice.surface_temperature_name
         return None
 
     @property
     def ocean_fraction_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
+        return None
+    
+    @property
+    def sea_ice_fraction_name(self) -> str | None:
+        if self._config.ice is not None:
+            return self._config.ice.sea_ice_fraction_name
         return None
 
     def prescribe_sst(
@@ -431,6 +466,19 @@ class FCN3Step(StepABC):
                 "sea surface temperature."
             )
         return self.ocean.prescriber(mask_data, gen_data, target_data)
+    
+    def prescribe_ice_ts(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        if self.ice is None:
+            raise RuntimeError(
+                "The Ice interface is missing but required to prescribe "
+                "ice surface temperature."
+            )
+        return self.ice.prescriber(mask_data, gen_data, target_data)
 
     @property
     def modules(self) -> nn.ModuleList:
@@ -477,6 +525,7 @@ class FCN3Step(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
+            ice=self.ice,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,

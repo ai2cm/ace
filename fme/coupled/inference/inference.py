@@ -69,39 +69,107 @@ class CoupledInitialConditionConfig:
 
     Parameters:
         ocean: Configuration for the ocean initial conditions.
+        ice: Configuration for the ice initial conditions.
         atmosphere: Configuration for the atmosphere initial conditions.
         start_indices: Indices to use for selecting initial conditions,
             should correspond to the ocean initial condition dataset.
     """
 
-    ocean: ComponentInitialConditionConfig
-    atmosphere: ComponentInitialConditionConfig
+    ocean: ComponentInitialConditionConfig | None = None
+    ice: ComponentInitialConditionConfig | None = None
+    atmosphere: ComponentInitialConditionConfig | None = None
     start_indices: StartIndices | None = None
 
     def get_initial_condition(
         self,
-        ocean_prognostic_names: Sequence[str],
-        atmosphere_prognostic_names: Sequence[str],
         n_ensemble_per_ic: int,
+        ocean_prognostic_names: Sequence[str] | None = None,
+        ice_prognostic_names: Sequence[str] | None = None,
+        atmosphere_prognostic_names: Sequence[str] | None = None,
     ) -> CoupledPrognosticState:
-        ocean = self.ocean.get_dataset(self.start_indices)
-        # time is a required variable but not necessarily a dimension
-        sample_dim_name = ocean.time.dims[0]
-        atmos = self.atmosphere.get_dataset().sel(
-            {sample_dim_name: ocean[sample_dim_name]}
-        )
-        return CoupledPrognosticState(
-            ocean_data=get_initial_condition(
-                ds=ocean,
-                prognostic_names=ocean_prognostic_names,
-                n_ensemble=n_ensemble_per_ic,
-            ),
-            atmosphere_data=get_initial_condition(
-                ds=atmos,
-                prognostic_names=atmosphere_prognostic_names,
-                n_ensemble=n_ensemble_per_ic,
-            ),
-        )
+        if self.atmosphere is None:
+            ocean = self.ocean.get_dataset(self.start_indices)
+            # time is a required variable but not necessarily a dimension
+            sample_dim_name = ocean.time.dims[0]
+            ice = self.ice.get_dataset().sel(
+                {sample_dim_name: ocean[sample_dim_name]}
+            )
+            return CoupledPrognosticState(
+                ocean_data=get_initial_condition(
+                    ds=ocean,
+                    prognostic_names=ocean_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+                ice_data=get_initial_condition(
+                    ds=ice,
+                    prognostic_names=ice_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+            )
+        elif self.ice is None:
+            ocean = self.ocean.get_dataset(self.start_indices)
+            # time is a required variable but not necessarily a dimension
+            sample_dim_name = ocean.time.dims[0]
+            atmos = self.atmosphere.get_dataset().sel(
+                {sample_dim_name: ocean[sample_dim_name]}
+            )
+            return CoupledPrognosticState(
+                ocean_data=get_initial_condition(
+                    ds=ocean,
+                    prognostic_names=ocean_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+                atmosphere_data=get_initial_condition(
+                    ds=atmos,
+                    prognostic_names=atmosphere_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+            )
+        elif self.ocean is None:
+            ice = self.ice.get_dataset(self.start_indices)
+            # time is a required variable but not necessarily a dimension
+            sample_dim_name = ice.time.dims[0]
+            atmos = self.atmosphere.get_dataset().sel(
+                {sample_dim_name: ice[sample_dim_name]}
+            )
+            return CoupledPrognosticState(
+                ice_data=get_initial_condition(
+                    ds=ice,
+                    prognostic_names=ice_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+                atmosphere_data=get_initial_condition(
+                    ds=atmos,
+                    prognostic_names=atmosphere_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+            )
+        else:
+            ocean = self.ocean.get_dataset(self.start_indices)
+            sample_dim_name = ocean.time.dims[0]
+            ice = self.ice.get_dataset().sel(
+                {sample_dim_name: ocean[sample_dim_name]}
+            )
+            atmos = self.atmosphere.get_dataset().sel(
+                {sample_dim_name: ocean[sample_dim_name]}
+            )
+            return CoupledPrognosticState(
+                ocean_data=get_initial_condition(
+                    ds=ocean,
+                    prognostic_names=ocean_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+                ice_data=get_initial_condition(
+                    ds=ice,
+                    prognostic_names=ice_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+                atmosphere_data=get_initial_condition(
+                    ds=atmos,
+                    prognostic_names=atmosphere_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
+            )
 
 
 @dataclasses.dataclass
@@ -170,6 +238,16 @@ class InferenceConfig:
                 raise ValueError(
                     f"Ocean time_coarsen config invalid with error: {str(err)}"
                 )
+        if self.data_writer.ice.time_coarsen is not None:
+            try:
+                self.data_writer.ice.time_coarsen.validate(
+                    self.coupled_steps_in_memory * data.n_inner_steps,
+                    self.n_coupled_steps * data.n_inner_steps,
+                )
+            except ValueError as err:
+                raise ValueError(
+                    f"Ice time_coarsen config invalid with error: {str(err)}"
+                )
         if self.data_writer.atmosphere.time_coarsen is not None:
             try:
                 self.data_writer.atmosphere.time_coarsen.validate(
@@ -185,14 +263,17 @@ class InferenceConfig:
         dataset_metadata = DatasetMetadata.from_env()
         coupled_dataset_metadata = {
             "ocean": dataset_metadata,
+            "ice": dataset_metadata,
             "atmosphere": dataset_metadata,
         }
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             initial_condition_times=data.initial_time.to_numpy(),
             n_timesteps_ocean=self.n_coupled_steps,
+            n_timesteps_ice=self.n_coupled_steps * data.n_inner_steps,
             n_timesteps_atmosphere=self.n_coupled_steps * data.n_inner_steps,
             ocean_timestep=data.ocean_timestep,
+            ice_timestep=data.ice_timestep,
             atmosphere_timestep=data.atmosphere_timestep,
             variable_metadata=variable_metadata,
             coords=data.coords,
@@ -234,6 +315,7 @@ def run_inference_from_config(config: InferenceConfig):
     logging.info("Loading initial condition data")
     initial_condition = config.initial_condition.get_initial_condition(
         ocean_prognostic_names=stepper_config.ocean.stepper.prognostic_names,
+        ice_prognostic_names=stepper_config.ice.stepper.prognostic_names,
         atmosphere_prognostic_names=stepper_config.atmosphere.stepper.prognostic_names,
         n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
@@ -251,15 +333,26 @@ def run_inference_from_config(config: InferenceConfig):
     aggregator_config: InferenceAggregatorConfig = config.aggregator
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
-    n_timesteps_ocean = config.n_coupled_steps + stepper.ocean.n_ic_timesteps
-    n_timesteps_atmosphere = (
-        config.n_coupled_steps * stepper.n_inner_steps
-        + stepper.atmosphere.n_ic_timesteps
-    )
+    n_timesteps_ocean = None
+    n_timesteps_ice = None
+    n_timesteps_atmos = None
+    if stepper.ocean is not None:
+        n_timesteps_ocean = config.n_coupled_steps + stepper.ocean.n_ic_timesteps
+    if stepper.ice is not None:
+        n_timesteps_ice = (
+            config.n_coupled_steps * stepper.n_inner_steps
+            + stepper.ice.n_ic_timesteps
+        )
+    if stepper.atmosphere is not None:
+        n_timesteps_atmos = (
+            config.n_coupled_steps * stepper.n_inner_steps
+            + stepper.atmosphere.n_ic_timesteps
+        )
     aggregator = aggregator_config.build(
         dataset_info=dataset_info,
         n_timesteps_ocean=n_timesteps_ocean,
-        n_timesteps_atmosphere=n_timesteps_atmosphere,
+        n_timesteps_ice=n_timesteps_ice,
+        n_timesteps_atmosphere=n_timesteps_atmos,
         output_dir=config.experiment_dir,
     )
 

@@ -49,6 +49,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         self._loader = loader
         self._properties = properties.to_device()
         self._ocean = self._properties.ocean
+        self._ice = self._properties.ice
         self._atmosphere = self._properties.atmosphere
         self._sampler = sampler
         self._batch_size: int | None = None
@@ -78,21 +79,38 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def dataset_info(self) -> CoupledDatasetInfo:
-        return CoupledDatasetInfo(
-            ocean=DatasetInfo(
+        ocean = None
+        ice = None
+        atmosphere = None
+        if self._ocean is not None:
+            ocean = DatasetInfo(
                 horizontal_coordinates=self._ocean.horizontal_coordinates,
                 vertical_coordinate=self._ocean.vertical_coordinate,
                 spatial_mask_provider=self._ocean.spatial_mask_provider,
                 timestep=self._ocean.timestep,
                 variable_metadata=self._properties.variable_metadata,
-            ),
-            atmosphere=DatasetInfo(
+            )
+        if self._atmosphere is not None:
+            atmosphere = DatasetInfo(
                 horizontal_coordinates=self._atmosphere.horizontal_coordinates,
                 vertical_coordinate=self._atmosphere.vertical_coordinate,
                 spatial_mask_provider=self._atmosphere.spatial_mask_provider,
                 timestep=self._atmosphere.timestep,
                 variable_metadata=self._properties.variable_metadata,
-            ),
+            )
+        if self._ice is not None:
+            ice = DatasetInfo(
+                horizontal_coordinates=self._ice.horizontal_coordinates,
+                vertical_coordinate=self._ice.vertical_coordinate,
+                spatial_mask_provider=self._ice.spatial_mask_provider,
+                timestep=self._ice.timestep,
+                variable_metadata=self._properties.variable_metadata,
+            )
+
+        return CoupledDatasetInfo(
+            ocean=ocean,
+            atmosphere=atmosphere,
+            ice=ice,
         )
 
     @property
@@ -109,12 +127,36 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def coords(self) -> CoupledCoords:
-        return CoupledCoords(
-            ocean_vertical=self._ocean.vertical_coordinate.coords,
-            atmosphere_vertical=self._atmosphere.vertical_coordinate.coords,
-            ocean_horizontal=dict(self._ocean.horizontal_coordinates.coords),
-            atmosphere_horizontal=dict(self._atmosphere.horizontal_coordinates.coords),
-        )
+        if self._atmosphere is None:
+            return CoupledCoords(
+                ocean_vertical=self._ocean.vertical_coordinate.coords,
+                ice_vertical=self._ice.vertical_coordinate.coords,
+                ocean_horizontal=dict(self._ocean.horizontal_coordinates.coords),
+                ice_horizontal=dict(self._ice.horizontal_coordinates.coords),
+            )
+        elif self._ice is None:
+            return CoupledCoords(
+                ocean_vertical=self._ocean.vertical_coordinate.coords,
+                atmosphere_vertical=self._atmosphere.vertical_coordinate.coords,
+                ocean_horizontal=dict(self._ocean.horizontal_coordinates.coords),
+                atmosphere_horizontal=dict(self._atmosphere.horizontal_coordinates.coords),
+            )
+        elif self._ocean is None:
+            return CoupledCoords(
+                ice_vertical=self._ice.vertical_coordinate.coords,
+                atmosphere_vertical=self._atmosphere.vertical_coordinate.coords,
+                ice_horizontal=dict(self._ice.horizontal_coordinates.coords),
+                atmosphere_horizontal=dict(self._atmosphere.horizontal_coordinates.coords),
+            )
+        else:
+            return CoupledCoords(
+                ocean_vertical=self._ocean.vertical_coordinate.coords,
+                ice_vertical=self._ice.vertical_coordinate.coords,
+                atmosphere_vertical=self._atmosphere.vertical_coordinate.coords,
+                ocean_horizontal=dict(self._ocean.horizontal_coordinates.coords),
+                ice_horizontal=dict(self._ice.horizontal_coordinates.coords),
+                atmosphere_horizontal=dict(self._atmosphere.horizontal_coordinates.coords),
+            )
 
     @property
     def n_samples(self) -> int:
@@ -182,6 +224,10 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
     @property
     def atmosphere_properties(self) -> DatasetProperties:
         return self._properties.atmosphere
+    
+    @property
+    def ice_properties(self) -> DatasetProperties:
+        return self._properties.ice
 
     @property
     def ocean_properties(self) -> DatasetProperties:
@@ -208,31 +254,53 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
 
     @property
     def dataset_info(self) -> CoupledDatasetInfo:
-        ocean = DatasetInfo(
-            horizontal_coordinates=self._properties.ocean.horizontal_coordinates,
-            vertical_coordinate=self._properties.ocean.vertical_coordinate,
-            spatial_mask_provider=self._properties.ocean.spatial_mask_provider,
-            timestep=self.ocean_timestep,
-        )
-        atmosphere = DatasetInfo(
-            horizontal_coordinates=self._properties.atmosphere.horizontal_coordinates,
-            vertical_coordinate=self._properties.atmosphere.vertical_coordinate,
-            spatial_mask_provider=self._properties.atmosphere.spatial_mask_provider,
-            timestep=self.atmosphere_timestep,
-        )
-        return CoupledDatasetInfo(ocean=ocean, atmosphere=atmosphere)
+        ocean = None
+        ice = None
+        atmosphere = None
+        if self._properties.ocean is not None:
+            ocean = DatasetInfo(
+                horizontal_coordinates=self._properties.ocean.horizontal_coordinates,
+                vertical_coordinate=self._properties.ocean.vertical_coordinate,
+                spatial_mask_provider=self._properties.ocean.spatial_mask_provider,
+                timestep=self.ocean_timestep,
+            )
+        if self._properties.atmosphere is not None:
+            atmosphere = DatasetInfo(
+                horizontal_coordinates=self._properties.atmosphere.horizontal_coordinates,
+                vertical_coordinate=self._properties.atmosphere.vertical_coordinate,
+                spatial_mask_provider=self._properties.atmosphere.spatial_mask_provider,
+                timestep=self.atmosphere_timestep,
+            )
+        if self._properties.ice is not None:
+            ice = DatasetInfo(
+                horizontal_coordinates=self._properties.ice.horizontal_coordinates,
+                vertical_coordinate=self._properties.ice.vertical_coordinate,
+                spatial_mask_provider=self._properties.ice.spatial_mask_provider,
+                timestep=self.ice_timestep,
+            )
+        return CoupledDatasetInfo(ocean=ocean, atmosphere=atmosphere, ice=ice)
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
-    def ocean_timestep(self) -> datetime.timedelta:
-        return self._properties.ocean_timestep
+    def ocean_timestep(self) -> datetime.timedelta | None:
+        if self._properties.ocean is not None:
+            return self._properties.ocean_timestep
+        return None
+    
+    @property
+    def ice_timestep(self) -> datetime.timedelta | None:
+        if self._properties.ice is not None:
+            return self._properties.ice_timestep
+        return None
 
     @property
-    def atmosphere_timestep(self) -> datetime.timedelta:
-        return self._properties.atmosphere_timestep
+    def atmosphere_timestep(self) -> datetime.timedelta | None:
+        if self._properties.atmosphere is not None:
+            return self._properties.atmosphere_timestep
+        return None
 
     @property
     def n_inner_steps(self) -> int:
@@ -252,13 +320,50 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
 
     @property
     def initial_time(self) -> xr.DataArray:
-        atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
-        ocean_data = self.initial_condition.as_batch_data().ocean_data
-        atmosphere_initial_time = atmosphere_data.time.isel(time=0)
-        ocean_initial_time = ocean_data.time.isel(time=0)
-        np.testing.assert_array_equal(
-            atmosphere_initial_time,
-            ocean_initial_time,
-            err_msg="Atmosphere and ocean initial times must be the same",
-        )
-        return atmosphere_initial_time
+        if self._properties.atmosphere is None:
+            ocean_data = self.initial_condition.as_batch_data().ocean_data
+            ocean_initial_time = ocean_data.time.isel(time=0)
+            ice_data = self.initial_condition.as_batch_data().ice_data
+            ice_initial_time = ice_data.time.isel(time=0)
+            np.testing.assert_array_equal(
+                ice_initial_time,
+                ocean_initial_time,
+                err_msg="Ice and ocean initial times must be the same",
+            )
+            return ice_initial_time
+        elif self._properties.ice is None:
+            ocean_data = self.initial_condition.as_batch_data().ocean_data
+            ocean_initial_time = ocean_data.time.isel(time=0)
+            atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
+            atmosphere_initial_time = atmosphere_data.time.isel(time=0)
+            np.testing.assert_array_equal(
+                atmosphere_initial_time,
+                ocean_initial_time,
+                err_msg="Atmosphere and ocean initial times must be the same",
+            )
+            return atmosphere_initial_time
+        elif self._properties.ocean is None:
+            ice_data = self.initial_condition.as_batch_data().ice_data
+            ice_initial_time = ice_data.time.isel(time=0)
+            atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
+            atmosphere_initial_time = atmosphere_data.time.isel(time=0)
+            np.testing.assert_array_equal(
+                atmosphere_initial_time,
+                ice_initial_time,
+                err_msg="Atmosphere and ice initial times must be the same",
+            )
+            return atmosphere_initial_time
+        else:
+            ocean_data = self.initial_condition.as_batch_data().ocean_data
+            ocean_initial_time = ocean_data.time.isel(time=0)
+            ice_data = self.initial_condition.as_batch_data().ice_data
+            ice_initial_time = ice_data.time.isel(time=0)
+            atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
+            atmosphere_initial_time = atmosphere_data.time.isel(time=0)
+            np.testing.assert_array_equal(
+                atmosphere_initial_time,
+                ocean_initial_time,
+                ice_initial_time,
+                err_msg="Atmosphere, ice, and ocean initial times must be the same",
+            )
+            return atmosphere_initial_time

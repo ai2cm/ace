@@ -418,6 +418,10 @@ class TrainBuilders:
     @property
     def ocean_timestep(self) -> datetime.timedelta:
         return self.config.stepper.ocean_timestep
+    
+    @property
+    def ice_timestep(self) -> datetime.timedelta:
+        return self.config.stepper.ice_timestep
 
     def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledTrainStepper:
         return self.config.stepper_training.get_train_stepper(

@@ -57,8 +57,10 @@ N_LAT = 5
 N_LON = 5
 LON, LAT = torch.linspace(0, 360, N_LON), torch.linspace(-89.5, 89.5, N_LAT)
 OCEAN_TIMEDELTA = "2D"
+ICE_TIMEDELTA = "1D"
 ATMOS_TIMEDELTA = "1D"
 OCEAN_TIMESTEP = datetime.timedelta(days=2)
+ICE_TIMESTEP = datetime.timedelta(days=1)
 ATMOS_TIMESTEP = datetime.timedelta(days=1)
 
 
@@ -1193,27 +1195,32 @@ class TimesTwo(torch.nn.Module):
 
 
 def get_stepper_config(
-    ocean_in_names: list[str],
-    ocean_out_names: list[str],
-    atmosphere_in_names: list[str],
-    atmosphere_out_names: list[str],
+    ocean_in_names: list[str] | None = None,
+    ocean_out_names: list[str] | None = None,
+    ice_in_names: list[str] | None = None,
+    ice_out_names: list[str] | None = None,
+    atmosphere_in_names: list[str] | None = None,
+    atmosphere_out_names: list[str] | None = None,
     sst_name_in_ocean_data: str = "sst",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: ModuleSelector | None = None,
     atmosphere_builder: ModuleSelector | None = None,
     ocean_timedelta: str = OCEAN_TIMEDELTA,
+    ice_timedelta: str = ICE_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
-    assert sst_name_in_ocean_data in ocean_in_names
-    assert sst_name_in_ocean_data in ocean_out_names
-    assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
-    assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
-    assert ocean_fraction_name in atmosphere_in_names
+    if (ocean_in_names is not None) & (ocean_out_names is not None):
+        assert sst_name_in_ocean_data in ocean_in_names
+        assert sst_name_in_ocean_data in ocean_out_names
+    if (atmosphere_in_names is not None) & (atmosphere_out_names is not None):
+        assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
+        assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
+        assert ocean_fraction_name in atmosphere_in_names
 
     ocean_norm_names = set(ocean_in_names + ocean_out_names)
     atmos_norm_names = set(atmosphere_in_names + atmosphere_out_names)

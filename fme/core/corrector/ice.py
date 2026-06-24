@@ -180,12 +180,51 @@ class IceBudgetCorrectionConfig:
             out[key] = x_in[key] + timestep * (budgets[0] + budgets[1] + budgets[2])
 
         return {key: value.float() for key, value in out.items()}
+    
+@dataclasses.dataclass
+class AlbedoCorrectionConfig:
+    """
+    Make sure that upward shortwave, and hence surface albedo,
+    are greater than or equal to zero and also upward shorwave
+    is zero when the incoming shortwave is below an etol threshold.
+    """
+
+    upward_shortwave_name: str = "SWUP"
+    downward_shortwave_name: str = "SWDN"
+
+    def __call__(
+        self, gen_data: TensorMapping, forcing_data: TensorMapping
+    ) -> TensorDict:
+        force = {**forcing_data}
+        out = {**gen_data}
+
+        force = {key: value.double() for key, value in forcing_data.items()}
+        out = {key: value.double() for key, value in gen_data.items()}
+
+        etol = 1e-3
+        swdn = force[self.downward_shortwave_name]
+        swup = out[self.upward_shortwave_name]
+        
+        # Ensure swup >= 0
+        swup = torch.clamp(swup, min=0.0)
+        
+        # When incoming radiation is negligible, set outgoing to zero
+        swup = torch.where(swdn < etol, 0.0, swup)
+        
+        # For physical albedo constraint: albedo = swup/swdn <= 1
+        # This means swup <= swdn, so clamp swup to not exceed swdn
+        swup = torch.where(swdn >= etol, torch.clamp(swup, max=swdn), swup)
+        
+        out[self.upward_shortwave_name] = swup
+        return {key: value.float() for key, value in out.items()}
+
 
 
 @CorrectorSelector.register("ice_corrector")
 @dataclasses.dataclass
 class IceCorrectorConfig(CorrectorConfigABC):
     budget_correction: IceBudgetCorrectionConfig | None = None
+    albedo_correction: AlbedoCorrectionConfig | None = None
 
     def _get_corrector(
         self,
@@ -223,5 +262,7 @@ class IceCorrector(CorrectorABC):
         timestep = self._timestep.total_seconds()
         if self._config.budget_correction is not None:
             gen_data = self._config.budget_correction(gen_data, input_data, timestep)
+        if self._config.albedo_correction is not None:
+            gen_data = self._config.albedo_correction(gen_data, forcing_data)
 
         return dict(gen_data), corrector_state

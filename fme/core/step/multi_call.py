@@ -286,6 +286,10 @@ class MultiCallStep(StepABC):
     @property
     def ocean_fraction_name(self) -> str | None:
         return self._wrapped_step.ocean_fraction_name
+    
+    @property
+    def sea_ice_fraction_name(self) -> str | None:
+        return self._wrapped_step.sea_ice_fraction_name
 
     def prescribe_sst(
         self,
@@ -294,6 +298,14 @@ class MultiCallStep(StepABC):
         target_data: TensorMapping,
     ) -> TensorDict:
         return self._wrapped_step.prescribe_sst(mask_data, gen_data, target_data)
+    
+    def prescribe_ice_ts(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        return self._wrapped_step.prescribe_ice_ts(mask_data, gen_data, target_data)
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()

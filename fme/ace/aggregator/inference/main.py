@@ -378,6 +378,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
     log_nino34_index: bool = True
+    log_enso_coeff: bool = True
     log_ipo_index: bool = True
     log_step_means: list[StepMeanEntry] = dataclasses.field(
         default_factory=lambda: [StepMeanEntry(step=20)]

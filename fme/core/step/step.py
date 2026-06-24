@@ -8,6 +8,7 @@ import torch
 from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
+from fme.core.ice import IceConfig
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
@@ -108,6 +109,13 @@ class StepConfigABC(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def replace_ice(self, ice: IceConfig | None):
+        pass
+
+    @abc.abstractmethod
+    def get_ice(self) -> IceConfig | None:
+        pass
+
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
 
@@ -212,8 +220,15 @@ class StepSelector(StepConfigABC):
         self._step_config_instance.replace_ocean(ocean)
         self.config = dataclasses.asdict(self._step_config_instance)
 
+    def replace_ice(self, ice: IceConfig | None):
+        self._step_config_instance.replace_ice(ice)
+        self.config = dataclasses.asdict(self._step_config_instance)
+
     def get_ocean(self) -> OceanConfig | None:
         return self._step_config_instance.get_ocean()
+    
+    def get_ice(self) -> IceConfig | None:
+        return self._step_config_instance.get_ice()
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self._step_config_instance.replace_prescribed_prognostic_names(names)
@@ -337,6 +352,14 @@ class StepABC(abc.ABC):
         """
         pass
 
+    @property
+    @abc.abstractmethod
+    def sea_ice_fraction_name(self) -> str | None:
+        """
+        Name of the sea ice fraction variable, if one is available.
+        """
+        pass
+
     @abc.abstractmethod
     def prescribe_sst(
         self,
@@ -346,6 +369,18 @@ class StepABC(abc.ABC):
     ) -> TensorDict:
         """
         Prescribe target_data SST onto gen_data according to mask_data.
+        """
+        pass
+
+    @abc.abstractmethod
+    def prescribe_ice_ts(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        """
+        Prescribe target_data ice surface temperature onto gen_data according to mask_data.
         """
         pass
 

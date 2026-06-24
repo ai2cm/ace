@@ -3,12 +3,16 @@ import datetime
 from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 
+import dacite
 import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.constants import (
+    DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
     LATENT_HEAT_OF_VAPORIZATION,
+    LATENT_HEAT_OF_FREEZING,
+    REFERENCE_SALINITY_PSU,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
@@ -109,6 +113,26 @@ class SurfaceEnergyFluxCorrectionConfig:
     method: Literal["residual_prediction", "prescribed"]
 
 
+@dataclasses.dataclass
+class OceanSaltContentBudgetConfig:
+    """Configuration for ocean salt content budget correction.
+
+    Parameters:
+        method: Method to use for salt content budget correction. The available
+            option is "constant_salinity", which enforces conservation of salt
+            content by adding a uniform concentration correction (PSU) to each
+            ocean layer, computed by dividing the global salt deficit by the
+            local column mass (reference density times sea floor depth).
+        constant_unaccounted_salt_flux: Area-weighted global mean
+            column-integrated salt flux in g/m**2/s to be added to the surface
+            boundary flux when conserving the salt content. This can be useful
+            for correcting errors in salt budget in target data.
+    """
+
+    method: Literal["constant_salinity"]
+    constant_unaccounted_salt_flux: float = 0.0
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
@@ -116,6 +140,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
+    ocean_salt_content_correction: OceanSaltContentBudgetConfig | None = None
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -206,6 +231,7 @@ class OceanCorrector(CorrectorABC):
 def _compute_ocean_net_surface_energy_flux(
     forcing_data: TensorMapping,
     sst: torch.Tensor,
+    sss: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute the net surface energy flux into the ocean from atmospheric
     forcing variables and the sea surface temperature.
@@ -213,20 +239,36 @@ def _compute_ocean_net_surface_energy_flux(
     This extends the atmosphere net surface energy flux with SST-dependent
     heat transport by precipitation and evaporation.
     """
-    atmos = AtmosphereData(forcing_data)
+    net_surface_radiative_flux = (
+        forcing_data['SWDN'] 
+        - forcing_data['SWUP']
+        + forcing_data['LWDN']
+        - forcing_data['LWUP']
+    )
+    net_surface_turbulent_heat_flux = (
+        - forcing_data['LH'] 
+        - forcing_data['SH']
+    )
     base_flux = (
-        atmos.net_surface_energy_flux
-    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+        net_surface_radiative_flux
+        + net_surface_turbulent_heat_flux
+        - forcing_data['SNOWFL'] * LATENT_HEAT_OF_FREEZING
+    )
     mass_heat_flux = (
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (
-            atmos.precipitation_rate
-            + atmos.frozen_precipitation_rate
-            - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
+            forcing_data['RAIN']
+            + forcing_data['SNOWFL']
+            - (forcing_data['LH'] / LATENT_HEAT_OF_VAPORIZATION)
         )  # missing: + river runoff + calving
-        * (sst - FREEZING_TEMPERATURE_KELVIN)
+        * ((sst+273.15) - (-0.054*sss+273.15))
     )
-    return base_flux + mass_heat_flux
+
+    #siconc = torch.clamp(forcing_data['siconc'],min=0,max=1)
+    #ice_bottom_melt = forcing_data['BMELT'] * siconc
+    #ice_top_melt = forcing_data['TMELT'] * siconc
+
+    return base_flux + mass_heat_flux# - ice_bottom_melt# - ice_top_melt
 
 
 def _correct_hfds(
@@ -244,18 +286,20 @@ def _correct_hfds(
         residual_prediction: gen_hfds + ocean_fraction * net_flux
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     """
-    input = OceanData(input_data)
-    forcing = OceanData(forcing_data)
-    ocean_fraction = input.ocean_fraction
+    siconc = torch.clamp(forcing_data['siconc'],min=0,max=1)
+    ocean_fraction = (
+        1 - forcing_data['land_fraction'] 
+        - siconc*(1-forcing_data['land_fraction'])
+    )
     net_flux = _compute_ocean_net_surface_energy_flux(
-        forcing_data, input.sea_surface_temperature
+        forcing_data, input_data['tos'], input_data['sos']
     )
     out = dict(gen_data)
     if "hfds" in gen_data:
         hfds_name = "hfds"
     else:
         hfds_name = "hfds_total_area"
-        net_flux = net_flux * forcing.sea_surface_fraction
+        net_flux = net_flux * forcing_data['sea_surface_fraction']
     gen_hfds = gen_data[hfds_name]
     if method == "residual_prediction":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds
@@ -343,8 +387,67 @@ def _force_conserve_ocean_heat_content(
     for k in range(n_levels):
         name = f"thetao_{k}"
         gen.data[name] = gen.data[name] * heat_content_correction_ratio
-    if "sst" in gen.data:
-        gen.data["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
-        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
+    if "tos" in gen.data:
+        gen.data["tos"] = gen.data["tos"] * heat_content_correction_ratio
+    return gen.data
+
+
+def _force_conserve_ocean_salt_content(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    area_weighted_mean: AreaWeightedMean,
+    vertical_coordinate: HasOceanDepthIntegral,
+    timestep_seconds: float,
+    global_mean_depth: torch.Tensor,
+    method: Literal["constant_salinity"] = "constant_salinity",
+    unaccounted_salt_flux: float = 0.0,
+) -> TensorDict:
+    if method != "constant_salinity":
+        raise NotImplementedError(
+            f"Method {method!r} not implemented for ocean salt content conservation"
+        )
+    if "wfo" in gen_data and "wfo" in forcing_data:
+        raise ValueError(
+            "Water flux into sea water cannot be present in both gen_data and "
+            "forcing_data."
+        )
+    input = OceanData(input_data, vertical_coordinate)
+    gen = OceanData(gen_data, vertical_coordinate)
+    global_gen_salt_content = area_weighted_mean(
+        gen.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    global_input_salt_content = area_weighted_mean(
+        input.ocean_salt_content,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    try:
+        wfo = gen_data['wfo']
+    except KeyError:
+        wfo = input_data['wfo']
+    sfdsi = forcing_data['SALTF']
+
+    virtual_salt_flux = -REFERENCE_SALINITY_PSU * wfo * forcing_data['sea_surface_fraction']
+    salt_flux = 1000.0 * sfdsi  # kg/m2/s -> g/m2/s
+    total_surface_flux = virtual_salt_flux + salt_flux  # g/m2/s
+    salt_flux_global_mean = area_weighted_mean(
+        total_surface_flux,
+        keepdim=True,
+        name="ocean_salt_content",
+    )
+    salt_deficit = (
+        global_input_salt_content
+        + (salt_flux_global_mean + unaccounted_salt_flux) * timestep_seconds
+        - global_gen_salt_content
+    )  # g/m2
+    salinity_correction = salt_deficit / (
+        DENSITY_OF_SEA_WATER_CM4 * global_mean_depth
+    )  # g/kg
+    n_levels = gen.sea_water_salinity.shape[-1]
+    for k in range(n_levels):
+        name = f"so_{k}"
+        gen.data[name] = gen.data[name] + salinity_correction
     return gen.data

@@ -54,27 +54,33 @@ def test_standalone_checkpoints_config_init_args():
 
 def save_coupled_stepper(
     base_dir: pathlib.Path,
-    ocean_in_names: list[str],
-    ocean_out_names: list[str],
-    atmos_in_names: list[str],
-    atmos_out_names: list[str],
     dataset_info: CoupledDatasetInfo,
+    ocean_in_names: list[str] | None = None,
+    ocean_out_names: list[str] | None = None,
+    ice_in_names: list[str] | None = None,
+    ice_out_names: list[str] | None = None,
+    atmos_in_names: list[str] | None = None,
+    atmos_out_names: list[str] | None = None,
     sst_name_in_ocean_data: str = "sst",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     save_standalone_component_checkpoints: bool = False,
     ocean_timedelta: str = "2D",
+    ice_timedelta: str = "1D",
     atmosphere_timedelta: str = "1D",
 ) -> str | StandaloneComponentCheckpointsConfig:
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
+        ice_in_names=ice_in_names,
+        ice_out_names=ice_out_names,
         atmosphere_in_names=atmos_in_names,
         atmosphere_out_names=atmos_out_names,
         sst_name_in_ocean_data=sst_name_in_ocean_data,
         sfc_temp_name_in_atmosphere_data=sfc_temp_name_in_atmosphere_data,
         ocean_fraction_name=ocean_fraction_name,
         ocean_timedelta=ocean_timedelta,
+        ice_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
     )
     if save_standalone_component_checkpoints:

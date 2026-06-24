@@ -13,6 +13,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.ice import Ice, IceConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -47,6 +48,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         next_step_forcing_names: Names of forcing variables which come from
             the output timestep.
         ocean: The ocean configuration.
+        ice: The ice configuration.
         corrector: The corrector configuration.
         detach_radiation: Whether to detach the output of the radiation model before
             passing it to the main model. The radiation outputs returned by
@@ -64,6 +66,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     normalization: NetworkAndLossNormalizationConfig
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     ocean: OceanConfig | None = None
+    ice: IceConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
@@ -205,10 +208,12 @@ class SeparateRadiationStepConfig(StepConfigABC):
             + self.shared_forcing_names
             + self.radiation_only_forcing_names
         )
-        if self.ocean is None:
-            return ml_in_names
-        else:
-            return list(set(ml_in_names).union(self.ocean.forcing_names))
+        if self.ocean is not None:
+            ml_in_names = list(set(ml_in_names).union(self.ocean.forcing_names))
+        if self.ice is not None:
+            ml_in_names = list(set(ml_in_names).union(self.ice.forcing_names))
+
+        return ml_in_names
 
     @property
     def output_names(self) -> list[str]:
@@ -222,9 +227,11 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
         input_only_names = set(self.input_names).difference(self.output_names)
-        if self.ocean is None:
-            return list(input_only_names)
-        return list(input_only_names.union(self.ocean.forcing_names))
+        if self.ocean is not None:
+            input_only_names = list(input_only_names.union(self.ocean.forcing_names))
+        if self.ice is not None:
+            input_only_names = list(input_only_names.union(self.ice.forcing_names))
+        return list(input_only_names)
 
     @property
     def loss_names(self) -> list[str]:
@@ -235,6 +242,12 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
+    
+    def replace_ice(self, ice: IceConfig | None):
+        self.ice = ice
+
+    def get_ice(self) -> IceConfig | None:
+        return self.ice
 
     def load(self):
         self.normalization.load()
@@ -282,6 +295,14 @@ class SeparateRadiationStep(StepABC):
             )
         else:
             self.ocean = None
+        if config.ice is not None:
+            self.ice: Ice | None = config.ice.build(
+                config.input_names,
+                config.output_names,
+                timestep,
+            )
+        else:
+            self.ice = None
         module = config.builder.build(
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
@@ -313,12 +334,20 @@ class SeparateRadiationStep(StepABC):
     def surface_temperature_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.surface_temperature_name
+        if self._config.ice is not None:
+            return self._config.ice.surface_temperature_name
         return None
 
     @property
     def ocean_fraction_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
+        return None
+    
+    @property
+    def sea_ice_fraction_name(self) -> str | None:
+        if self._config.ice is not None:
+            return self._config.ice.sea_ice_fraction_name
         return None
 
     def prescribe_sst(
@@ -333,6 +362,19 @@ class SeparateRadiationStep(StepABC):
                 "sea surface temperature."
             )
         return self.ocean.prescriber(mask_data, gen_data, target_data)
+    
+    def prescribe_ice_ts(
+        self,
+        mask_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> TensorDict:
+        if self.ice is None:
+            raise RuntimeError(
+                "The Ice interface is missing but required to prescribe "
+                "ice surface temperature."
+            )
+        return self.ice.prescriber(mask_data, gen_data, target_data)
 
     @property
     def normalizer(self) -> StandardNormalizer:
@@ -391,6 +433,7 @@ class SeparateRadiationStep(StepABC):
             normalizer=self.normalizer,
             corrector=self._corrector,
             ocean=self.ocean,
+            ice=self.ice,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             stepper_state=args.stepper_state,

@@ -1,0 +1,44 @@
+#!/bin/bash
+#SBATCH --job-name=OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU
+#SBATCH --output=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/logs/slurm-%j.out
+#SBATCH --error=/scratch/cimes/wg4031/fme/train/OM4_FloeNet_6h_5docn_nexStep_seed711_4GPU/logs/slurm-%j.err
+#SBATCH --mem=250G
+#SBATCH --mail-user=wg4031@princeton.edu
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
+#SBATCH --partition=cimes
+#SBATCH --time=48:00:00
+#SBATCH -C h200
+
+set -e
+source /scratch/cimes/wg4031/miniconda3/etc/profile.d/conda.sh
+conda deactivate
+conda activate fme
+
+# Set master node information
+export PYTHONPATH=/home/wg4031/ace/:$PYTHONPATH
+export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_PORT=28600
+
+export FME_TRAIN_DIR=/scratch/cimes/wg4031/fme/train
+export FME_VALID_DIR=/scratch/cimes/wg4031/fme/valid
+export FME_STATS_DIR=/scratch/cimes/wg4031/fme/stats
+export FME_CHECKPOINT_DIR=/scratch/cimes/wg4031/fme/checkpoint
+export FME_OUTPUT_DIR=/scratch/cimes/wg4031/fme/output
+export FME_IMAGE=/scratch/cimes/wg4031/fme/image
+
+export WANDB_NAME=$SLURM_JOB_NAME
+export WANDB_MODE=offline
+
+# Debug info
+echo "MASTER_ADDR: $MASTER_ADDR"
+echo "MASTER_PORT: $MASTER_PORT"
+echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
+echo "SLURM_NTASKS_PER_NODE: $SLURM_NTASKS_PER_NODE"
+echo "SLURM_NNODES: $SLURM_NNODES"
+
+#Run the training script
+torchrun --nnodes=$SLURM_NNODES --nproc_per_node=$SLURM_NTASKS_PER_NODE \
+    --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT \
+    -m fme.ace.train /home/wg4031/ace/configs/wg_testing/train/FloeNet_6h_5docn_nexStep_seed711.yaml
