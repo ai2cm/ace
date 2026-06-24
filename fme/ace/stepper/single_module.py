@@ -24,6 +24,10 @@ from fme.ace.stepper.parameter_init import (
     WeightsAndHistoryLoader,
     null_weights_and_history,
 )
+from fme.ace.stepper.resolution_curriculum import (
+    ResolutionCurriculum,
+    TargetResolutionCurriculumConfig,
+)
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import (
     NullPostProcessFn,
@@ -1424,6 +1428,12 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        target_resolution_curriculum: Optional spectral-truncation curriculum on
+            the loss target. Low-passes the target with a cutoff that increases
+            over epochs, to gradually condition the high-wavenumber response when
+            fine-tuning a checkpoint pretrained on lower-effective-resolution data
+            onto sharper data. Disabled by default. Requires a lat-lon
+            (equiangular or legendre-gauss) grid.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1433,6 +1443,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    target_resolution_curriculum: TargetResolutionCurriculumConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1556,6 +1567,31 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+        self._resolution_curriculum = self._build_resolution_curriculum(config)
+
+    def _build_resolution_curriculum(
+        self, config: TrainStepperConfig
+    ) -> ResolutionCurriculum | None:
+        if config.target_resolution_curriculum is None:
+            return None
+        dataset_info = self._stepper.training_dataset_info
+        horizontal = dataset_info.horizontal_coordinates
+        if horizontal is None or horizontal.grid not in (
+            "equiangular",
+            "legendre-gauss",
+        ):
+            found = None if horizontal is None else horizontal.grid
+            raise ValueError(
+                "target_resolution_curriculum requires a lat-lon (equiangular or "
+                f"legendre-gauss) grid, got {found}."
+            )
+        nlat, nlon = dataset_info.img_shape
+        return ResolutionCurriculum(
+            config.target_resolution_curriculum,
+            nlat=nlat,
+            nlon=nlon,
+            grid=horizontal.grid,
+        )
 
     def train_on_batch(
         self,
@@ -1588,6 +1624,8 @@ class TrainStepper(
                 and the normalized batch data.
         """
         self._loss_schedule.init_for_epoch(data.epoch)
+        if self._resolution_curriculum is not None:
+            self._resolution_curriculum.init_for_epoch(data.epoch)
         n_data_steps = data.time.shape[1] - self.n_ic_timesteps
         n_loss_steps = self._loss_schedule.sample(n_data_steps)
         metrics: dict[str, float] = {}
@@ -1707,6 +1745,8 @@ class TrainStepper(
         weighted_sums: dict[str, torch.Tensor],
         total_counts: dict[str, int],
     ) -> torch.Tensor:
+        if self._resolution_curriculum is not None:
+            target_step = self._resolution_curriculum.filter_target(target_step)
         step_loss = self._loss_obj(
             gen_step,
             target_step,
@@ -1785,10 +1825,14 @@ class TrainStepper(
 
     def set_eval(self) -> None:
         self._loss_schedule.set_eval()
+        if self._resolution_curriculum is not None:
+            self._resolution_curriculum.set_eval()
         self._stepper.set_eval()
 
     def set_train(self) -> None:
         self._loss_schedule.set_train()
+        if self._resolution_curriculum is not None:
+            self._resolution_curriculum.set_train()
         self._stepper.set_train()
 
 
