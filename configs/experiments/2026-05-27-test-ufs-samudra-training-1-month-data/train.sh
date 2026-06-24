@@ -2,9 +2,9 @@
 
 set -e
 
-JOB_NAME="cm4-samudra-1pct-ocean-train-using-ufs-var-subset"
+JOB_NAME="cm4-samudra-1pct-ocean-train-using-ufs-var-subset-ohc-hdfs-correctors"
 JOB_GROUP="ufs-replay-ocean"
-CONFIG_FILENAME="train_test_full_data-cm4.yaml"
+CONFIG_FILENAME="samudra-pretraining-cm4.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
