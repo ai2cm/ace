@@ -1,0 +1,92 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 40
+inference:
+  n_forward_steps: 7300
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+      - '2014-01-01T00:00:00'
+      #- '2014-02-15T00:00:00'
+      - '2014-04-01T00:00:00'
+      #- '2014-05-15T00:00:00'
+      - '2014-07-01T00:00:00'
+      #- '2014-08-15T00:00:00'
+      - '2014-10-01T00:00:00'
+      #- '2014-11-15T00:00:00'
+    dataset:
+      data_path: /climate-default/
+      file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      engine: zarr
+    num_data_workers: 8
+  aggregator:
+    log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2som-xshield-tuning
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 1
+  sample_with_replacement: 250
+  dataset:
+    concat:
+    - data_path: /climate-default/
+      file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      engine: zarr
+      subset:
+        stop_time: '2022-12-31'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 4
+    prefetch_factor: 2
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2025-09-16-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01'
+        stop_time: '2023-07-01'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  parameter_init:
+    weights_path: /ckpt.tar
+  n_ensemble: 2
+  n_forward_steps:
+    outcomes:
+    - steps: 1
+      probability: 0.6
+    - steps: 2
+      probability: 0.2
+    - steps: 4
+      probability: 0.1
+    - steps: 12
+      probability: 0.05
+    - steps: 20
+      probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    weights: {}
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  checkpoint_path: /ckpt.tar

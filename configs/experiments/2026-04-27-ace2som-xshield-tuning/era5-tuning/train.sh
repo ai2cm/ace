@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-xshield-10yr-resolution-curriculum.yaml"
+CONFIG_FILENAME="tune-era5-on-xshield-10yr-control.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -12,32 +12,18 @@ WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_GROUP=ace
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
-STATS_DATASET=andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
+STATS_DATASET=andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019
 #STATS_DATASET=andrep/2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr-stats
 SEED_OFFSET=10
 
 cd $REPO_ROOT
 
-# two different ACE2SOM seeds
-PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N1CJC3H")
+# ERA5 pretraining https://beaker.org/orgs/ai2/workspaces/ace/work/01KSN76D3GQ7MVP058Y2Z2TGKE
+PRE_TRAINED_WEIGHTS_DATASETS=("01KSVC6YS7C18SGYV4VPZYZ232")
 
-PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
-POSEMB_TUNED=("01KVRAQRJRPARFT7CRC5R87WVS")
-
-# tuned on XSHiELD, 1-1, seed 0
-#TUNED_DATASET=01KQD8NF9HQD1QY2X0S132YH72
-
-# tuned on 5-1 split, seed 0
-#PRE_TRAINED_WEIGHTS_DATASETS_5_1=("01KQG2R8RCWH1ZJS0FK3P9Z8C4" "01KQG2RE1A9BC3G0JD46T3HM18")
-
-
-# --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
-
-#       --dataset $TUNED_DATASET:/pre-trained-weights \
-#        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-shieldplus-tune-xshield-10yr-control-res-curriculum-seed${seed}"
+    job_name="ace2s-era5-tune-xshield-10yr-control-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
