@@ -392,9 +392,13 @@ class IpoIndexMetricConfig:
                 f"ipo_index metric requires > ~{MIN_YEARS_FOR_FILTERED_TPI} years "
                 f"of data, got {total_duration.days} days"
             )
+        # Localize so the region weights match the (possibly spatially
+        # scattered) data and localized area weights; identity without spatial
+        # parallelism.
+        local_coordinates = ctx.horizontal_coordinates.localize()
         return MetricBuildResult(
             aggregator=PairedIPOIndexAggregator(
-                lat=ctx.horizontal_coordinates.lat,
-                lon=ctx.horizontal_coordinates.lon,
+                lat=local_coordinates.lat,
+                lon=local_coordinates.lon,
             )
         )

@@ -379,11 +379,15 @@ class EnsoIndexMetricConfig:
                 f"enso_index metric requires > ~2 years of data, "
                 f"got {total_duration.days} days"
             )
+        # Localize so the region weights match the (possibly spatially
+        # scattered) data and localized area weights; identity without spatial
+        # parallelism.
+        local_coordinates = ctx.horizontal_coordinates.localize()
         nino34_region = LatLonRegion(
             lat_bounds=NINO34_LAT,
             lon_bounds=NINO34_LON,
-            lat=ctx.horizontal_coordinates.lat,
-            lon=ctx.horizontal_coordinates.lon,
+            lat=local_coordinates.lat,
+            lon=local_coordinates.lon,
         )
         return MetricBuildResult(
             aggregator=PairedRegionalIndexAggregator(

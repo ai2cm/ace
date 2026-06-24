@@ -767,11 +767,15 @@ class InferenceAggregatorConfig:
             and isinstance(gridded_operations, LatLonOperations)
             and n_timesteps * dataset_info.timestep > APPROXIMATELY_TWO_YEARS
         ):
+            # Localize so the region weights match the (possibly spatially
+            # scattered) data and localized area weights; identity without
+            # spatial parallelism.
+            local_coordinates = horizontal_coordinates.localize()
             nino34_region = LatLonRegion(
                 lat_bounds=NINO34_LAT,
                 lon_bounds=NINO34_LON,
-                lat=horizontal_coordinates.lat,
-                lon=horizontal_coordinates.lon,
+                lat=local_coordinates.lat,
+                lon=local_coordinates.lon,
             )
             aggregators["enso_index"] = RegionalIndexAggregator(
                 regional_weights=nino34_region.regional_weights,
