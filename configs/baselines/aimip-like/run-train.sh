@@ -91,4 +91,20 @@ run_training() {
 # =============================================================================
 
 # --- v2 + energy corrector, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-energy-corrector.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched (wandb-tracked; beaker 01KVTX5W42793TVEWC8P19A4E9). Commented
+# out so this script does not relaunch it; uncomment to launch a fresh seed.
+# run_training "train-4deg-daily-v2-era5-only-energy-corrector.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# v2 ERA5-only residual baseline + total-energy-budget corrector WITH
+# unaccounted heating (challenger sibling).
+#
+# Identical to the energy-corrector challenger above except
+# constant_unaccounted_heating is set to 6.62 W/m**2 (the ERA5 1979-2008
+# column-integrated energy residual) instead of 0.0. Pairs with the
+# unaccounted_heating=0 run to isolate the effect of applying the residual
+# heating term under the constant_temperature total-energy budget correction.
+# =============================================================================
+
+# --- v2 + energy corrector + unaccounted heating 6.62, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
