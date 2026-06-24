@@ -109,32 +109,20 @@ conda run -n fme beaker experiment get 01KVV3RZ8GVTSA2QA8M65AQMJ1  # run 2 (disp
 # or browse: https://beaker.org/ex/<id>  and  https://beaker.org/ws/ai2/climate-titan
 ```
 
-Latest distillation runs in wandb (newest first):
+wandb progress — use the committed helper
+[`check_runs.py`](check_runs.py) (pure wandb; runs in the plain `fme` env, does
+**not** import fastgen):
 ```bash
-conda run -n fme python - <<'PY'
-import wandb
-api = wandb.Api()
-runs = api.runs("ai2cm/fastgen", order="-created_at")
-for r in list(runs)[:15]:
-    print(r.id, r.state, r.name)
-PY
-```
+# list the most recent runs (id | state | step | name)
+conda run -n fme python -m fme.downscaling.distillation.check_runs --list
 
-Pull validation metrics for a run (compare against the flat baselines above):
-```bash
-conda run -n fme python - <<'PY'
-import wandb
-api = wandb.Api()
-r = api.run("ai2cm/fastgen/<run_id>")
-keys = ["val/crps_PRMSL","val/crps_PRATEsfc","val/crps_eastward_wind_at_ten_meters",
-        "val/spec_mae_mean","val/spec_mae_hi_PRATEsfc","val/tail_99.99_PRATEsfc"]
-h = r.history(keys=keys, samples=2000, pandas=True)
-for k in keys:
-    if k in h:
-        s = h[k].dropna()
-        if len(s): print(f"{k:42s} first={s.iloc[0]:.4g} best={s.min():.4g} last={s.iloc[-1]:.4g}")
-PY
+# compare metrics across runs (current two + an old flat baseline)
+conda run -n fme python -m fme.downscaling.distillation.check_runs \
+    syz25njv r9lerxok z5usj8so
 ```
+Current wandb run ids: **`syz25njv`** = sigmafix (run 1), **`r9lerxok`** =
+dispatch-v2 (run 2). Default metric set mirrors the flat-CRPS diagnosis;
+override with `--keys`.
 
 Run launcher (re-run / new variant):
 ```bash
@@ -143,6 +131,33 @@ conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.s
 ```
 `gantry` lives in the `fme` conda env; it clones the **pushed** commit, so
 commit + push before launching.
+
+### Interim observations (2026-06-23, sigmafix ~step 7.4k / dispatch-v2 ~step 4.5k)
+
+Both running; dispatch-v2 is younger (~35% of sigmafix's progress) so its read
+is preliminary.
+
+- **sigmafix ≈ the old flat runs.** crps_PRMSL 7.13→best 7.00→7.08, crps_PRATEsfc
+  flat, spec_mae improves then degrades — basically identical to `z5usj8so`.
+  Confirms the prediction: **the noise-max fix alone does ~nothing**, because it
+  only changes the *sampled* noise levels, not the teacher *targets* (still
+  expert-0-extrapolated in this run). Useful as a clean negative control.
+- **dispatch-v2 is qualitatively different and healthier where expected:**
+  - `spec_mae_mean` 0.715 → ~0.54 **monotonic, no late degradation** — unlike
+    every prior run. Encouraging.
+  - `crps_PRMSL` → best 6.91 (vs the old ~7.00 floor), trending down.
+  - `crps_PRATEsfc` ~5.6–5.8e-5, **flat** (≈ or slightly worse than sigmafix).
+  - `f_distill_loss` higher (~1.1–1.4 plateau vs sigmafix's ~0.15) — **expected**,
+    the dispatched targets are sharper/harder so absolute loss isn't comparable;
+    it plateaued, not diverging. `gan_loss_gen` creeping up (0.70→0.84) — watch.
+- **Pattern matches the Run-3 limitation exactly:** coarse/large-scale (PRMSL,
+  spectra) improves while fine-scale precip (PRATEsfc) lags — consistent with the
+  student + in-loss score term anchored to **expert 1** (good at high σ/coarse,
+  out-of-domain at low σ/fine). **If PRATEsfc stays flat as dispatch-v2 matures,
+  that is the trigger to do Run 3** (separate full-dispatch teacher config).
+- **What to watch next:** spec_mae keeps declining without a late blow-up; PRMSL
+  keeps dropping; PRATEsfc starts moving (good) or stays flat (→ Run 3);
+  f_distill_loss / gan_loss_gen stay bounded.
 
 ---
 
