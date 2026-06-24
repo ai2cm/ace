@@ -223,8 +223,12 @@ class PerturbationResponseAggregator(
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
 
-        lats, _ = horizontal_coordinates.meshgrid
-        self._abs_lat = torch.abs(lats)  # [n_lat, n_lon]
+        # Localize the latitude grid to this rank's spatial chunk so the band
+        # and land/ocean masks line up with the (possibly spatially scattered)
+        # recorded data and the localized area weights. Identity when there is
+        # no spatial (model) parallelism.
+        lats, _ = horizontal_coordinates.localize().meshgrid
+        self._abs_lat = torch.abs(lats)  # [local_lat, local_lon]
 
         # Per-group running spatial sums (summed over members and time) and the
         # per-group count of (member, timestep) samples. Reduced across ranks at
