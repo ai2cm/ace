@@ -191,10 +191,20 @@ class IceCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "IceCorrector":
-        return IceCorrector(
-            self,
+        return self._build(
             dataset_info.gridded_operations,
             dataset_info.timestep,
+        )
+
+    def _build(
+        self,
+        gridded_operations: GriddedOperations,
+        timestep: datetime.timedelta,
+    ) -> "IceCorrector":
+        return IceCorrector(
+            budget_correction=self.budget_correction,
+            gridded_operations=gridded_operations,
+            timestep=timestep,
         )
 
 
@@ -205,11 +215,11 @@ class IceCorrector(CorrectorABC):
 
     def __init__(
         self,
-        config: IceCorrectorConfig,
+        budget_correction: IceBudgetCorrectionConfig | None,
         gridded_operations: GriddedOperations,
         timestep: datetime.timedelta,
     ):
-        self._config = config
+        self._budget_correction = budget_correction
         self._gridded_operations = gridded_operations
         self._timestep = timestep
 
@@ -221,7 +231,7 @@ class IceCorrector(CorrectorABC):
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
         timestep = self._timestep.total_seconds()
-        if self._config.budget_correction is not None:
-            gen_data = self._config.budget_correction(gen_data, input_data, timestep)
+        if self._budget_correction is not None:
+            gen_data = self._budget_correction(gen_data, input_data, timestep)
 
         return dict(gen_data), corrector_state

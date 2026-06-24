@@ -109,6 +109,22 @@ class SurfaceEnergyFluxCorrectionConfig:
     method: Literal["residual_prediction", "prescribed"]
 
 
+@dataclasses.dataclass
+class OceanCorrectorParams:
+    """Plain (non-dacite) scalar parameters passed to ``OceanCorrector``.
+
+    Built by ``OceanCorrectorConfig._build`` so the corrector does not need to
+    read the (non-leaf) config. The surface-energy-flux and ocean-heat-content
+    sub-configs are flattened to their scalar fields; each ``*_method`` is
+    ``None`` exactly when the corresponding correction is disabled.
+    """
+
+    force_positive_names: list[str]
+    surface_energy_flux_method: Literal["residual_prediction", "prescribed"] | None
+    ocean_heat_content_method: Literal["scaled_temperature"] | None
+    ocean_heat_content_unaccounted_heating: float
+
+
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
@@ -145,23 +161,54 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "OceanCorrector":
-        return OceanCorrector(
-            self,
+        return self._build(
             dataset_info.gridded_operations,
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
+        )
+
+    def _build(
+        self,
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: HasOceanDepthIntegral | None,
+        timestep: datetime.timedelta,
+    ) -> "OceanCorrector":
+        flux_correction = self.surface_energy_flux_correction
+        ohc_correction = self.ocean_heat_content_correction
+        params = OceanCorrectorParams(
+            force_positive_names=self.force_positive_names,
+            surface_energy_flux_method=(
+                None if flux_correction is None else flux_correction.method
+            ),
+            ocean_heat_content_method=(
+                None if ohc_correction is None else ohc_correction.method
+            ),
+            ocean_heat_content_unaccounted_heating=(
+                0.0
+                if ohc_correction is None
+                else ohc_correction.constant_unaccounted_heating
+            ),
+        )
+        return OceanCorrector(
+            params=params,
+            sea_ice_fraction_correction=self.sea_ice_fraction_correction,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
         )
 
 
 class OceanCorrector(CorrectorABC):
     def __init__(
         self,
-        config: OceanCorrectorConfig,
+        params: OceanCorrectorParams,
+        sea_ice_fraction_correction: SeaIceFractionConfig | None,
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
     ):
-        self._config = config
+        self._params = params
+        self._sea_ice_fraction_correction = sea_ice_fraction_correction
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
@@ -173,18 +220,18 @@ class OceanCorrector(CorrectorABC):
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        if len(self._config.force_positive_names) > 0:
-            gen_data = force_positive(gen_data, self._config.force_positive_names)
-        if self._config.sea_ice_fraction_correction is not None:
-            gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
-        if self._config.surface_energy_flux_correction is not None:
+        if len(self._params.force_positive_names) > 0:
+            gen_data = force_positive(gen_data, self._params.force_positive_names)
+        if self._sea_ice_fraction_correction is not None:
+            gen_data = self._sea_ice_fraction_correction(gen_data, input_data)
+        if self._params.surface_energy_flux_method is not None:
             gen_data = _correct_hfds(
                 input_data,
                 gen_data,
                 forcing_data,
-                method=self._config.surface_energy_flux_correction.method,
+                method=self._params.surface_energy_flux_method,
             )
-        if self._config.ocean_heat_content_correction is not None:
+        if self._params.ocean_heat_content_method is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
                     "Ocean heat content correction is turned on, but no vertical "
@@ -197,8 +244,8 @@ class OceanCorrector(CorrectorABC):
                 self._gridded_operations.area_weighted_mean,
                 self._vertical_coordinate,
                 self._timestep.total_seconds(),
-                self._config.ocean_heat_content_correction.method,
-                self._config.ocean_heat_content_correction.constant_unaccounted_heating,
+                self._params.ocean_heat_content_method,
+                self._params.ocean_heat_content_unaccounted_heating,
             )
         return dict(gen_data), corrector_state
 

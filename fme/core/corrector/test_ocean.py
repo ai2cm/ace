@@ -6,7 +6,6 @@ import torch
 from fme import get_device
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
-    OceanCorrector,
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
     SeaIceFractionConfig,
@@ -43,7 +42,7 @@ def test_ocean_corrector_force_positive():
     config = OceanCorrectorConfig(force_positive_names=["so_0", "so_1"])
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = OceanCorrector(config, ops, _VERTICAL_COORD, timestep)
+    corrector = config._build(ops, _VERTICAL_COORD, timestep)
     input_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
     input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
@@ -71,7 +70,7 @@ def test_ocean_corrector_has_no_negative_ocean_fraction():
     gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     gen_data["sea_ice_fraction"] = torch.randn(IMG_SHAPE, device=DEVICE) * 0.5
     gen_data["sea_ice_fraction"][_LAT, _LON] = -0.5
-    corrector = OceanCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
     violation = (input_data["land_fraction"] + gen_data["sea_ice_fraction"]) > 1.0
     assert violation.any()
     negative_sea_ice_fraction = gen_data["sea_ice_fraction"] < 0.0
@@ -103,7 +102,7 @@ def test_ocean_corrector_has_negative_ocean_fraction():
     gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     gen_data["sea_ice_fraction"] = torch.randn(IMG_SHAPE, device=DEVICE) * 0.5
     gen_data["sea_ice_fraction"][_LAT, _LON] = -0.5
-    corrector = OceanCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
     violation = (input_data["land_fraction"] + gen_data["sea_ice_fraction"]) > 1.0
     assert violation.any()
     negative_sea_ice_fraction = gen_data["sea_ice_fraction"] < 0.0
@@ -135,7 +134,7 @@ def test_zero_where_ice_free_names():
         "sea_ice_fraction": torch.rand(IMG_SHAPE, device=DEVICE),
         "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
     }
-    corrector = OceanCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
     gen_data_corrected, _ = corrector(input_data, gen_data, {}, None)
     sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
     thickness = gen_data_corrected["HI"]
@@ -161,7 +160,7 @@ def test_zero_where_ice_free_names_multiple_variables():
         "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
         "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
     }
-    corrector = OceanCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
     gen_data_corrected, _ = corrector(input_data, gen_data, {}, None)
     sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
     for name in ["HI", "HS"]:
@@ -222,7 +221,7 @@ def test_surface_energy_flux_correction_resid():
     )
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = OceanCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
 
     sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
     gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
@@ -264,7 +263,7 @@ def test_surface_energy_flux_correction_prescribed():
     )
     ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = OceanCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
 
     sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
     gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
@@ -363,7 +362,7 @@ def test_ocean_heat_content_correction(hfds_type):
     }
     input_data = OceanData(input_data_dict, depth_coordinate)
     gen_data = OceanData(gen_data_dict, depth_coordinate)
-    corrector = OceanCorrector(config, ops, depth_coordinate, timestep)
+    corrector = config._build(ops, depth_coordinate, timestep)
     gen_data_corrected_dict, _ = corrector(
         input_data_dict, gen_data_dict, forcing_data_dict, None
     )

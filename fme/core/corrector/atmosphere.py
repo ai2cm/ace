@@ -39,6 +39,32 @@ class EnergyBudgetConfig:
     constant_unaccounted_heating: float = 0.0
 
 
+@dataclasses.dataclass
+class AtmosphereCorrectorParams:
+    """Plain (non-dacite) scalar parameters passed to ``AtmosphereCorrector``.
+
+    Built by ``AtmosphereCorrectorConfig._build`` so the corrector does not need
+    to read the (non-leaf) config. The energy budget sub-config is flattened to
+    its scalar fields; ``total_energy_budget_method`` is ``None`` exactly when the
+    correction is disabled.
+    """
+
+    conserve_dry_air: bool
+    zero_global_mean_moisture_advection: bool
+    moisture_budget_correction: (
+        Literal[
+            "precipitation",
+            "evaporation",
+            "advection_and_precipitation",
+            "advection_and_evaporation",
+        ]
+        | None
+    )
+    force_positive_names: list[str]
+    total_energy_budget_method: Literal["constant_temperature"] | None
+    total_energy_budget_unaccounted_heating: float
+
+
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
 class AtmosphereCorrectorConfig(CorrectorConfigABC):
@@ -145,23 +171,52 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "AtmosphereCorrector":
-        return AtmosphereCorrector(
-            self,
+        return self._build(
             dataset_info.gridded_operations,
             dataset_info.atmosphere_vertical_coordinate,
             dataset_info.timestep,
+        )
+
+    def _build(
+        self,
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: HasAtmosphereVerticalIntegral | None,
+        timestep: datetime.timedelta,
+    ) -> "AtmosphereCorrector":
+        energy_budget = self.total_energy_budget_correction
+        params = AtmosphereCorrectorParams(
+            conserve_dry_air=self.conserve_dry_air,
+            zero_global_mean_moisture_advection=(
+                self.zero_global_mean_moisture_advection
+            ),
+            moisture_budget_correction=self.moisture_budget_correction,
+            force_positive_names=self.force_positive_names,
+            total_energy_budget_method=(
+                None if energy_budget is None else energy_budget.method
+            ),
+            total_energy_budget_unaccounted_heating=(
+                0.0
+                if energy_budget is None
+                else energy_budget.constant_unaccounted_heating
+            ),
+        )
+        return AtmosphereCorrector(
+            params=params,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
         )
 
 
 class AtmosphereCorrector(CorrectorABC):
     def __init__(
         self,
-        config: AtmosphereCorrectorConfig,
+        params: AtmosphereCorrectorParams,
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasAtmosphereVerticalIntegral | None,
         timestep: datetime.timedelta,
     ):
-        self._config = config
+        self._params = params
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
 
@@ -179,11 +234,11 @@ class AtmosphereCorrector(CorrectorABC):
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
         gen_data = dict(gen_data)
-        if len(self._config.force_positive_names) > 0:
+        if len(self._params.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
-            gen_data = force_positive(gen_data, self._config.force_positive_names)
-        if self._config.conserve_dry_air:
+            gen_data = force_positive(gen_data, self._params.force_positive_names)
+        if self._params.conserve_dry_air:
             if self._vertical_coordinate is None:
                 raise ValueError(
                     "conserve_dry_air is set to True, but no vertical coordinate is "
@@ -204,12 +259,12 @@ class AtmosphereCorrector(CorrectorABC):
                 vertical_coordinate=self._vertical_coordinate,
                 precision=self._dry_air_precision,
             )
-        if self._config.zero_global_mean_moisture_advection:
+        if self._params.zero_global_mean_moisture_advection:
             gen_data = _force_zero_global_mean_moisture_advection(
                 gen_data=gen_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
             )
-        if self._config.moisture_budget_correction is not None:
+        if self._params.moisture_budget_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
                     "Moisture budget correction is turned on, but no vertical "
@@ -221,9 +276,9 @@ class AtmosphereCorrector(CorrectorABC):
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinate,
                 timestep_seconds=self._timestep_seconds,
-                terms_to_modify=self._config.moisture_budget_correction,
+                terms_to_modify=self._params.moisture_budget_correction,
             )
-        if self._config.total_energy_budget_correction is not None:
+        if self._params.total_energy_budget_method is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
                     "Energy budget correction is turned on, but no vertical coordinate"
@@ -236,8 +291,8 @@ class AtmosphereCorrector(CorrectorABC):
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinate,
                 timestep_seconds=self._timestep_seconds,
-                method=self._config.total_energy_budget_correction.method,
-                unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
+                method=self._params.total_energy_budget_method,
+                unaccounted_heating=self._params.total_energy_budget_unaccounted_heating,
             )
         return gen_data, corrector_state
 
