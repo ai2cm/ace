@@ -700,7 +700,15 @@ class BatchData:
                 f"n_ensemble={self.n_ensemble} and cannot be broadcast."
             )
         data = repeat_interleave_batch_dim(self.data, n_ensemble)
-        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        # Repeat-interleave the time coordinate to match the block ordering of
+        # ``repeat_interleave_batch_dim`` (and of the labels/data_mask below):
+        # sample s lands at positions [s * n_ensemble, (s + 1) * n_ensemble). A
+        # plain ``xr.concat([time] * n_ensemble)`` would instead tile the samples
+        # ([s0, s1, ..., s0, s1, ...]), misaligning data and time whenever the
+        # samples carry distinct times (e.g. inference ICs at different start
+        # dates with n_ensemble_per_ic > 1).
+        n_samples = self.time.sizes["sample"]
+        time = self.time.isel(sample=np.repeat(np.arange(n_samples), n_ensemble))
         if self.labels is None:
             labels = None
         else:
@@ -786,7 +794,11 @@ class PairedData:
             )
         prediction = repeat_interleave_batch_dim(self.prediction, n_ensemble)
         reference = repeat_interleave_batch_dim(self.reference, n_ensemble)
-        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        # Match the block ordering of repeat_interleave_batch_dim (see
+        # BatchData.broadcast_ensemble): repeat-interleave time per sample rather
+        # than tiling, so data and time stay aligned for distinct-time samples.
+        n_samples = self.time.sizes["sample"]
+        time = self.time.isel(sample=np.repeat(np.arange(n_samples), n_ensemble))
         if self.labels is None:
             labels = None
         else:

@@ -19,7 +19,11 @@ from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import Aggregator, GenerationAggregator
+from fme.downscaling.aggregators import (
+    Aggregator,
+    GenerationAggregator,
+    GenerationSummary,
+)
 from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
@@ -141,11 +145,6 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "metrics/relative_crps_bicubic"
-        self._best_histogram_tail_name = (
-            "histogram/prediction_frac_of_target/99.9999th-percentile"
-        )
-
     def _get_batch_generator(
         self,
         data: PairedGriddedData,
@@ -239,7 +238,7 @@ class Trainer:
         else:
             yield
 
-    def valid_one_epoch(self) -> dict[str, float]:
+    def valid_one_epoch(self) -> GenerationSummary:
         self.model.module.eval()
         if (
             self.patch_data
@@ -260,8 +259,6 @@ class Trainer:
                 self.model.downscale_factor,
                 percentiles=[99.99, 99.9999],
                 include_positional_comparisons=include_positional_comparisons,
-                histogram_ckpt_selection_metric=self._best_histogram_tail_name,
-                best_ckpt_selection_metric=self._best_valid_loss_name,
             )
             batch: PairedBatchData
             validation_batch_generator = self._get_batch_generator(
@@ -291,16 +288,13 @@ class Trainer:
 
         wandb = WandB.get_instance()
         validation_metrics = validation_aggregator.get_wandb(prefix="validation")
-        generation_metrics = generation_aggregator.get_wandb(prefix="generation")
+        generation_summary = generation_aggregator.get_summary(prefix="generation")
 
         wandb.log(
-            {**generation_metrics, **validation_metrics},
+            {**generation_summary.logs, **validation_metrics},
             self.num_batches_seen,
         )
-        channel_mean_checkpoint_metrics = (
-            generation_aggregator.get_checkpoint_selection_metrics()
-        )
-        return channel_mean_checkpoint_metrics
+        return generation_summary
 
     @property
     def resuming(self) -> bool:
@@ -308,37 +302,35 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_best_checkpoint(self, valid_metrics: dict[str, float]) -> None:
-        if self.best_checkpoint_path is not None:
-            if self.validate_using_ema:
-                best_checkpoint_context = self._ema_context
-            else:
-                best_checkpoint_context = contextlib.nullcontext  # type: ignore
-            # Best checkpoint is hard coded to use validation CRPS channel mean
-            if valid_metrics[self._best_valid_loss_name] < self.best_valid_loss:
-                logging.info("Saving best checkpoint")
-                self.best_valid_loss = valid_metrics[self._best_valid_loss_name]
-                with best_checkpoint_context():
-                    _save_checkpoint(self, self.best_checkpoint_path)
-            else:
-                logging.info(
-                    "Validation loss did not improve, will not overwrite "
-                    "best checkpoint."
-                )
-        if self.best_histogram_tail_checkpoint_path is not None:
-            histogram_tail_metric = valid_metrics[self._best_histogram_tail_name]
-            if histogram_tail_metric < self.best_histogram_tail_metric:
-                logging.info("Saving checkpoint for best histogram tail.")
-                self.best_histogram_tail_metric = histogram_tail_metric
-                with best_checkpoint_context():
-                    _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
-            else:
-                logging.info(
-                    "Histogram tail metric did not improve, will not overwrite "
-                    "best histogram tail checkpoint."
-                )
-        else:
+    def save_best_checkpoint(self, summary: GenerationSummary) -> None:
+        if self.best_checkpoint_path is None:
             raise ValueError("Best checkpoint path is not set")
+        if self.validate_using_ema:
+            best_checkpoint_context = self._ema_context
+        else:
+            best_checkpoint_context = contextlib.nullcontext  # type: ignore
+        if summary.validation_loss < self.best_valid_loss:
+            logging.info("Saving best checkpoint")
+            self.best_valid_loss = summary.validation_loss
+            with best_checkpoint_context():
+                _save_checkpoint(self, self.best_checkpoint_path)
+        else:
+            logging.info(
+                "Validation loss did not improve, will not overwrite "
+                "best checkpoint."
+            )
+        if self.best_histogram_tail_checkpoint_path is None:
+            raise ValueError("Best checkpoint path is not set")
+        if summary.histogram_tail_metric < self.best_histogram_tail_metric:
+            logging.info("Saving checkpoint for best histogram tail.")
+            self.best_histogram_tail_metric = summary.histogram_tail_metric
+            with best_checkpoint_context():
+                _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
+        else:
+            logging.info(
+                "Histogram tail metric did not improve, will not overwrite "
+                "best histogram tail checkpoint."
+            )
 
     def save_epoch_checkpoints(self) -> None:
         if self.epoch_checkpoint_path is not None:
@@ -378,10 +370,10 @@ class Trainer:
             wandb.log({"epoch": epoch}, step=self.num_batches_seen)
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
-                valid_metrics = self.valid_one_epoch()
+                generation_summary = self.valid_one_epoch()
                 valid_end = time.time()
                 if dist.is_root():
-                    self.save_best_checkpoint(valid_metrics)
+                    self.save_best_checkpoint(generation_summary)
             else:
                 valid_end = train_end
             if dist.is_root():

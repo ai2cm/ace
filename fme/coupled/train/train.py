@@ -92,9 +92,12 @@ def get_validate_stepper_callback(
     # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
     # own stepper, so this callback manages its own EMA via run_validation_loop
     # rather than relying on the Trainer's validation_context().
-    def validate_stepper(stepper: TrainStepperABC, ema: EMATracker) -> float:
+    def validate_stepper(
+        stepper: TrainStepperABC, ema: EMATracker, epoch: int
+    ) -> float:
         weighted_loss = 0.0
         for entry_config, data, name in validation_entries:
+            data.set_epoch(epoch)
             aggregator = OneStepAggregator(
                 dataset_info=dataset_info,
                 save_diagnostics=False,
@@ -108,12 +111,10 @@ def get_validate_stepper_callback(
                 ema=ema,
                 validate_using_ema=validate_using_ema,
             )
-            logs = aggregator.get_logs(label=name)
             if entry_config.weight > 0:
-                metric_key = f"{name}/mean/loss"
-                loss = logs.get(metric_key)
-                if loss is not None:
-                    weighted_loss += entry_config.weight * loss
+                summary = aggregator.get_summary(label=name)
+                if summary.loss is not None:
+                    weighted_loss += entry_config.weight * summary.loss
         return weighted_loss
 
     return validate_stepper
