@@ -179,8 +179,12 @@ def test_distinct_concurrent_groups_run_separately():
     with patch(
         "fme.core.generics.trainer.inference_one_epoch",
         side_effect=[
-            InferenceSummary(logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=None),
-            InferenceSummary(logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=None),
+            InferenceSummary(
+                logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=None
+            ),
+            InferenceSummary(
+                logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=None
+            ),
         ],
     ) as mock_inference:
         logs, error = callback(epoch=1)
@@ -215,8 +219,12 @@ def test_no_predictor_factory_runs_everything_sequentially():
     with patch(
         "fme.core.generics.trainer.inference_one_epoch",
         side_effect=[
-            InferenceSummary(logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=None),
-            InferenceSummary(logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=None),
+            InferenceSummary(
+                logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=None
+            ),
+            InferenceSummary(
+                logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=None
+            ),
         ],
     ) as mock_inference:
         logs, error = callback(epoch=1)
