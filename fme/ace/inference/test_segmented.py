@@ -277,3 +277,14 @@ def test_run_segmented_inference(tmp_path, monkeypatch):
             with open(os.path.join(segment_dir, WRITTEN_WANDB_NAME_FILENAME)) as f:
                 assert f.read() == f"run_name-segment_{i:04d}"
         assert mock.call_count == 3
+
+
+def test_segmented_inference_rejects_ensemble(tmp_path):
+    # Ensemble inference is unsupported with segmented inference: a segment's
+    # restart already carries the broadcasted ensemble as its sample dimension,
+    # so later segments cannot re-broadcast it consistently. The config should be
+    # rejected up front rather than silently re-interpreted.
+    config = _get_mock_config(str(tmp_path))
+    config.n_ensemble_per_ic = 3
+    with pytest.raises(ValueError, match="n_ensemble_per_ic"):
+        run_segmented_inference(config, 3)
