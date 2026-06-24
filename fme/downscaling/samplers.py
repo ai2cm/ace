@@ -187,6 +187,7 @@ def fastgen_sampler(
     schedule_num_steps: int = 1000,
     min_step_percent: float = 0.002,
     max_step_percent: float = 0.998,
+    skip_noise_scale: bool = False,
 ) -> tuple[Tensor, list[Tensor]]:
     """Predict-x0-then-renoise sampler for FastGen-distilled students.
 
@@ -211,7 +212,9 @@ def fastgen_sampler(
         returning an x0 estimate of shape ``(B, C_out, H, W)``.
     latents : Tensor
         Initial zero-mean unit-variance Gaussian noise. Shape
-        ``(B, C_out, H, W)``.
+        ``(B, C_out, H, W)``. When ``skip_noise_scale=True`` this is instead
+        the already-noised initial state at the first schedule sigma (see
+        ``skip_noise_scale``).
     img_lr : Tensor
         Conditioning tensor of shape ``(B, C_cond, H, W)``.
     num_steps : int
@@ -221,6 +224,15 @@ def fastgen_sampler(
         If True (default), re-noise with a fresh Gaussian draw at each step
         (matches FastGen training, which uses SDE re-noising). If False,
         re-noise with the implied epsilon ``(x - x_pred) / sigma`` (ODE).
+    skip_noise_scale : bool
+        If False (default), ``latents`` is unit-variance noise and the initial
+        state is ``latents * t_list[0]``. If True, ``latents`` is taken to be
+        the pre-noised initial state directly (no scaling) -- used when feeding
+        a state built elsewhere, e.g. a clean field re-noised to ``sigma_max``
+        for validating a single-segment student. The caller is responsible for
+        building it at the first schedule sigma ``t_list[0]`` (which is close
+        to but, with the default ``max_step_percent`` < 1, not exactly
+        ``sigma_max``).
     """
     if img_lr.shape[0] != latents.shape[0]:
         raise ValueError(
@@ -243,7 +255,9 @@ def fastgen_sampler(
     t_list = sigmas[indices].clone()
     t_list[-1] = 0.0
 
-    x = latents.to(compute_dtype) * t_list[0]
+    x = latents.to(compute_dtype)
+    if not skip_noise_scale:
+        x = x * t_list[0]
     latent_steps = [x.to(latents.dtype)]
     x_pred = x
 

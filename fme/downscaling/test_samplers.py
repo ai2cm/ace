@@ -199,6 +199,44 @@ def test_fastgen_sampler_one_step_matches_net_call() -> None:
     torch.testing.assert_close(out, expected.to(out.dtype), rtol=1e-5, atol=1e-5)
 
 
+def test_fastgen_sampler_skip_noise_scale_uses_latents_directly() -> None:
+    """skip_noise_scale=True feeds ``latents`` in as the initial state unscaled.
+
+    With num_steps=1 the single denoising step then evaluates the net on the
+    pre-noised state itself (at t_list[0]) rather than on ``latents * t_list[0]``.
+    """
+    device = get_device()
+    B, C_out, C_lr, H, W = 2, 3, 2, 4, 4
+    torch.manual_seed(0)
+    img_lr = torch.randn(B, C_lr, H, W, device=device)
+    net = TinyDeterministicNet(c_out=C_out, c_lr=C_lr).to(device).eval()
+
+    sigma_max = 200.0
+    # A pre-noised initial state the caller built itself (e.g. a clean field
+    # re-noised to sigma_max), passed in verbatim.
+    x_init = torch.randn(B, C_out, H, W, device=device) * sigma_max
+
+    out, latent_steps = fastgen_sampler(
+        net=net,
+        latents=x_init,
+        img_lr=img_lr,
+        num_steps=1,
+        sigma_min=0.002,
+        sigma_max=sigma_max,
+        rho=7.0,
+        skip_noise_scale=True,
+    )
+
+    t_list = _fastgen_reference_t_list(1, 0.002, sigma_max, 7.0).to(device)
+    # Initial state is x_init unscaled; net is evaluated on it at t_list[0].
+    expected = net(x_init, img_lr, t_list[0])
+
+    torch.testing.assert_close(
+        latent_steps[0], x_init, rtol=0, atol=0
+    )  # no scaling applied
+    torch.testing.assert_close(out, expected.to(out.dtype), rtol=1e-5, atol=1e-5)
+
+
 def test_fastgen_sampler_calls_net_at_fastgen_sigmas() -> None:
     """The net is called once per step at the first num_steps sigmas of t_list."""
     device = get_device()
