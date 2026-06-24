@@ -1,9 +1,8 @@
 """Submit evaluator-suite jobs for the VarMasking5 checkpoints.
 
-Each generated evaluator suite is run against three checkpoints from the
+Each generated evaluator suite is run against two checkpoints from the
 corresponding training result dataset:
 
-  - training_checkpoints/best_ckpt.tar -> -besttrain
   - training_checkpoints/best_inference_ckpt.tar -> -bestinf
   - training_checkpoints/ckpt.tar -> -lastepoch
 """
@@ -28,7 +27,6 @@ RUN_SCRIPT = HERE / "run-ace-eval.sh"
 WANDB_GROUP = "ace2-var-masking-eval-2026-06-17"
 
 CHECKPOINTS = [
-    ("training_checkpoints/best_ckpt.tar", "-besttrain"),
     ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
     ("training_checkpoints/ckpt.tar", "-lastepoch"),
 ]
