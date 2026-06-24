@@ -8,7 +8,11 @@ from torch import Tensor
 
 from fme.core.device import get_device
 from fme.core.testing.regression import validate_tensor_dict
-from fme.downscaling.samplers import fastgen_sampler, stochastic_sampler
+from fme.downscaling.samplers import (
+    boundary_aligned_t_list,
+    fastgen_sampler,
+    stochastic_sampler,
+)
 
 
 class TinyDeterministicNet(torch.nn.Module):
@@ -295,6 +299,69 @@ def test_fastgen_sampler_sde_vs_ode_differ() -> None:
         sde=False,
     )
     assert not torch.allclose(out_sde, out_ode)
+
+
+def test_boundary_aligned_t_list_one_step_each() -> None:
+    """Two ranges, 1 step each -> [hi_query, lo_query, 0], strictly descending."""
+    ranges = [(0.005, 200.0), (200.0, 2000.0)]
+    t = boundary_aligned_t_list(ranges, [1, 1])
+
+    assert t.shape == (3,)
+    assert t[-1].item() == 0.0
+    assert t[0] > t[1] > t[2]
+    # First query falls in the high range, second in the low range, so a
+    # sigma-dispatch keyed on each node routes high then low.
+    assert 200.0 <= t[0].item() <= 2000.0
+    assert 0.0 < t[1].item() <= 200.0
+
+
+def test_boundary_aligned_t_list_extra_low_step() -> None:
+    """Low student with 2 steps adds one interior node: total = 1 + 2 + final 0."""
+    ranges = [(0.005, 200.0), (200.0, 2000.0)]
+    t = boundary_aligned_t_list(ranges, [2, 1])
+
+    assert t.shape == (4,)
+    assert t[-1].item() == 0.0
+    assert torch.all(t[:-1] > 0)
+    assert torch.all(t[:-1] - t[1:] > 0)  # strictly descending
+    # One high query (>200), two low queries (<=200).
+    assert t[0].item() > 200.0
+    assert t[1].item() <= 200.0 and t[2].item() < t[1].item()
+
+
+def test_boundary_aligned_t_list_raises_on_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="equal length"):
+        boundary_aligned_t_list([(0.005, 200.0), (200.0, 2000.0)], [1])
+
+
+def test_fastgen_sampler_explicit_t_list_dispatch_cascade() -> None:
+    """A boundary-aligned t_list + sigma-dispatch net routes each step correctly.
+
+    Demonstrates the student bundle at the sampler level: the high-noise net is
+    queried once (at its >200 node) and the low-noise net once (at its <=200
+    node), i.e. the handoff happens at the range boundary.
+    """
+    device = get_device()
+    B, C_out, H, W = 1, 1, 4, 4
+    hi = SigmaCapturingNet(c_out=C_out).to(device).eval()
+    lo = SigmaCapturingNet(c_out=C_out).to(device).eval()
+
+    def dispatch(x: Tensor, x_lr: Tensor, sigma: Tensor) -> Tensor:
+        # Boundary (sigma == 200) routes to the lower-noise net, matching
+        # _SigmaDispatchModule's "smallest sigma_max wins" convention.
+        net = hi if float(sigma.item()) > 200.0 else lo
+        return net(x, x_lr, sigma)
+
+    t_list = boundary_aligned_t_list(
+        [(0.005, 200.0), (200.0, 2000.0)], [1, 1], device=device
+    )
+    latents = torch.zeros(B, C_out, H, W, device=device)
+    img_lr = torch.zeros(B, 1, H, W, device=device)
+
+    fastgen_sampler(dispatch, latents, img_lr, t_list=t_list)
+
+    assert len(hi.sigmas_called) == 1 and hi.sigmas_called[0] > 200.0
+    assert len(lo.sigmas_called) == 1 and lo.sigmas_called[0] <= 200.0
 
 
 def test_fastgen_sampler_raises_on_batch_mismatch() -> None:

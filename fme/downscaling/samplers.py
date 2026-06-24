@@ -174,6 +174,93 @@ def stochastic_sampler(
     return x_next.to(latents.dtype), latent_steps
 
 
+def _fastgen_t_list(
+    num_steps: int,
+    sigma_min: float,
+    sigma_max: float,
+    rho: float = 7.0,
+    schedule_num_steps: int = 1000,
+    min_step_percent: float = 0.002,
+    max_step_percent: float = 0.998,
+    device: torch.device | str = "cpu",
+    dtype: torch.dtype = torch.float64,
+) -> Tensor:
+    """Rho-spaced predict-x0 sigma schedule (length ``num_steps + 1``, last 0).
+
+    Replicates FastGen's ``EDMNoiseSchedule.get_t_list``: a precomputed
+    rho-spaced sigma array of length ``schedule_num_steps`` sampled at
+    ``num_steps + 1`` indices linearly spanning
+    ``[max_step_percent, min_step_percent] * schedule_num_steps``, with the
+    final timestep clamped to 0. Note ``t_list[0]`` is close to but, with the
+    default ``max_step_percent`` < 1, not exactly ``sigma_max``.
+    """
+    ramp = torch.linspace(0.0, 1.0, schedule_num_steps, dtype=dtype, device=device)
+    min_inv_rho = sigma_min ** (1.0 / rho)
+    max_inv_rho = sigma_max ** (1.0 / rho)
+    sigmas = torch.flip(
+        (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho, dims=[0]
+    )
+    min_step = int(min_step_percent * schedule_num_steps)
+    max_step = int(max_step_percent * schedule_num_steps)
+    indices = torch.linspace(max_step, min_step, num_steps + 1, device=device).long()
+    t_list = sigmas[indices].clone()
+    t_list[-1] = 0.0
+    return t_list
+
+
+def boundary_aligned_t_list(
+    sigma_ranges: list[tuple[float, float]],
+    steps_per_range: list[int],
+    rho: float = 7.0,
+    schedule_num_steps: int = 1000,
+    min_step_percent: float = 0.002,
+    max_step_percent: float = 0.998,
+    device: torch.device | str = "cpu",
+    dtype: torch.dtype = torch.float64,
+) -> Tensor:
+    """Predict-x0 schedule for a sigma-dispatched bundle of single-segment students.
+
+    Each student covers one inclusive sigma range and is queried only at the
+    sigmas it was distilled against. In descending sigma order, this visits each
+    student's query nodes (its own ``_fastgen_t_list`` minus the trailing 0),
+    then a final 0. Used with a sigma-dispatch ``net`` in ``fastgen_sampler``:
+    step ``i`` at sigma ``t_list[i]`` routes to the student whose range contains
+    it, and re-noising hands each student's x0 to the next student's query sigma
+    -- the boundary handoff. ``steps_per_range`` aligns with ``sigma_ranges`` and
+    sets each student's step count (e.g. 1 for the high-noise student, 1 or 2 for
+    the low-noise one).
+
+    ``sigma_ranges`` need not be pre-sorted; ranges are processed high to low.
+    """
+    if len(sigma_ranges) != len(steps_per_range):
+        raise ValueError(
+            "sigma_ranges and steps_per_range must have equal length, got "
+            f"{len(sigma_ranges)} vs {len(steps_per_range)}."
+        )
+    if not sigma_ranges:
+        raise ValueError("sigma_ranges must be non-empty.")
+    order = sorted(
+        range(len(sigma_ranges)), key=lambda i: sigma_ranges[i][0], reverse=True
+    )
+    query_nodes = []
+    for i in order:
+        lo, hi = sigma_ranges[i]
+        seg = _fastgen_t_list(
+            steps_per_range[i],
+            lo,
+            hi,
+            rho=rho,
+            schedule_num_steps=schedule_num_steps,
+            min_step_percent=min_step_percent,
+            max_step_percent=max_step_percent,
+            device=device,
+            dtype=dtype,
+        )
+        query_nodes.append(seg[:-1])  # drop the trailing 0; it is added once below
+    zero = torch.zeros(1, device=device, dtype=dtype)
+    return torch.cat([*query_nodes, zero])
+
+
 def fastgen_sampler(
     net: torch.nn.Module,
     latents: Tensor,
@@ -188,6 +275,7 @@ def fastgen_sampler(
     min_step_percent: float = 0.002,
     max_step_percent: float = 0.998,
     skip_noise_scale: bool = False,
+    t_list: Tensor | None = None,
 ) -> tuple[Tensor, list[Tensor]]:
     """Predict-x0-then-renoise sampler for FastGen-distilled students.
 
@@ -233,6 +321,13 @@ def fastgen_sampler(
         building it at the first schedule sigma ``t_list[0]`` (which is close
         to but, with the default ``max_step_percent`` < 1, not exactly
         ``sigma_max``).
+    t_list : Tensor | None
+        Explicit descending sigma schedule (length ``num_steps + 1``, final
+        entry 0). When None (default) it is built from ``num_steps`` /
+        ``sigma_min`` / ``sigma_max`` / ``rho`` via ``_fastgen_t_list``; those
+        arguments are ignored when ``t_list`` is given. Pass a
+        ``boundary_aligned_t_list`` here together with a sigma-dispatch ``net``
+        to run a bundle of single-segment students as one cascade.
     """
     if img_lr.shape[0] != latents.shape[0]:
         raise ValueError(
@@ -243,17 +338,20 @@ def fastgen_sampler(
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
     device = latents.device
 
-    ramp = torch.linspace(0.0, 1.0, schedule_num_steps, dtype=compute_dtype, device=device)
-    min_inv_rho = sigma_min ** (1.0 / rho)
-    max_inv_rho = sigma_max ** (1.0 / rho)
-    sigmas = torch.flip(
-        (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho, dims=[0]
-    )
-    min_step = int(min_step_percent * schedule_num_steps)
-    max_step = int(max_step_percent * schedule_num_steps)
-    indices = torch.linspace(max_step, min_step, num_steps + 1, device=device).long()
-    t_list = sigmas[indices].clone()
-    t_list[-1] = 0.0
+    if t_list is None:
+        t_list = _fastgen_t_list(
+            num_steps,
+            sigma_min,
+            sigma_max,
+            rho=rho,
+            schedule_num_steps=schedule_num_steps,
+            min_step_percent=min_step_percent,
+            max_step_percent=max_step_percent,
+            device=device,
+            dtype=compute_dtype,
+        )
+    else:
+        t_list = t_list.to(device=device, dtype=compute_dtype)
 
     x = latents.to(compute_dtype)
     if not skip_noise_scale:
