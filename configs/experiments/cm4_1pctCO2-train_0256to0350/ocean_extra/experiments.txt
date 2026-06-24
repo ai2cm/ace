@@ -60,26 +60,21 @@ ace-samudra-coupled-cm4-8ez70kzy-decoupled_samudra|||trained|best_inference_ckpt
 # result, so launch needs no re-resolution. Prepared by agent; James launches.
 
 # -- OHC-off cohort --
-1pct_nosmooth_0256to0350-precorrector_optim|rs0|01KT2SR554EEX28Q567HDGB6D9|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KT4H5BESHYQCPF90C2P9G287|ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-precorrector_optim|rs0|01KT2SR554EEX28Q567HDGB6D9|trained|best_inference_ckpt|high|--min-runtime 30m||01KT4H5BESHYQCPF90C2P9G287|ai2/ace|a100+h100|
 
 # -- OHC-on cohort --
-1pct_nosmooth_0256to0350-plusOHC|rs0|01KTSH40JGFAJH2KE7V68Q3AXB|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KTYWZW4QCSEP763H3DNFHEE3|ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-plusOHC|rs0|01KTSH40JGFAJH2KE7V68Q3AXB|trained|best_inference_ckpt|high|--min-runtime 30m||01KTYWZW4QCSEP763H3DNFHEE3|ai2/ace|a100+h100|
 
 # OHC-on cohort ANCHOR (gqmfjs2j): standalone ocean-only ICx1 was missing
 # (only a 140yr eval exists). Needed so issue-02 OHC-on deltas have an anchor.
 # NOTE: beyond issue 01's original missing-eval list -- launch is James's call.
-1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|run_ICx1|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-hfds_prescribed-ft_correctOHC|rs0|01KKDHDK6TDS01C8X4VBVDT94C|trained|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
 
 # -- Forcing ablations (vs no_correctors baseline; issue 05) --
-1pct_nosmooth_0256to0350-no_up-no_correctors|rs0|01KTWCT15287251H5ZTH67Q571|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KV4C3P7P4X5J13XBPDMM6NBT|ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-no_up-no_correctors|rs0|01KTWCT15287251H5ZTH67Q571|trained|best_inference_ckpt|high|--min-runtime 30m||01KV4C3P7P4X5J13XBPDMM6NBT|ai2/ace|a100+h100|
 
-1pct_nosmooth_0256to0350-no_sw-no_correctors|rs0|01KTWCW8TCSVF0CDVRJG1WE1NH|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KV1TWGHVYRFNKCNXEK1R9M5F|ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-no_sw-no_correctors|rs0|01KTWCW8TCSVF0CDVRJG1WE1NH|trained|best_inference_ckpt|high|--min-runtime 30m||01KV1TWGHVYRFNKCNXEK1R9M5F|ai2/ace|a100+h100|
 
-1pct_nosmooth_0256to0350-no_down-no_correctors|rs0|01KTWD07W9GEG0N9RFNRWC0DED|run_ICx1|best_inference_ckpt|high|--min-runtime 30m||01KV78NE3P15KYQJK22VFYEKK6|ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-no_down-no_correctors|rs0|01KTWD07W9GEG0N9RFNRWC0DED|trained|best_inference_ckpt|high|--min-runtime 30m||01KV78NE3P15KYQJK22VFYEKK6|ai2/ace|a100+h100|
 
-# no_lw-no_correctors: training STILL RUNNING [2026-06-16] (beaker
-# 01KTWCXWNYRWTX1AGYFDMCN1CK, wandb pny4vw6x). Row prepared but NOT armed --
-# status is "wait_ICx1" so evaluate.sh skips it. James: once training
-# finalizes, change "wait_ICx1" -> "run_ICx1" (col 9 left empty so the result
-# dataset auto-resolves from the final job) and launch.
-1pct_nosmooth_0256to0350-no_lw-no_correctors|rs0|01KTWCXWNYRWTX1AGYFDMCN1CK|wait_ICx1|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
+1pct_nosmooth_0256to0350-no_lw-no_correctors|rs0|01KTWCXWNYRWTX1AGYFDMCN1CK|run_ICx1|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|a100+h100|
