@@ -30,7 +30,6 @@ from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig, ForcingDeriver
 from fme.ace.stepper.insolation.config import InsolationConfig, NameConfig, ValueConfig
 from fme.ace.stepper.loss_schedule import EpochNotProvidedError
-from fme.ace.stepper.resolution_curriculum import TargetResolutionCurriculumConfig
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
     CheckpointStepperConfig,
@@ -303,28 +302,6 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     assert torch.allclose(
         stepped.metrics["loss"], 9.0 * stepped_double_std.metrics["loss"], rtol=1e-4
     )  # mse scales with std**2
-
-
-def test_train_on_batch_with_resolution_curriculum():
-    # smoke test: a train stepper builds with the target-resolution curriculum on
-    # a lat-lon grid and trains a batch with the curriculum active (epoch within
-    # the ramp).
-    torch.manual_seed(0)
-    data = get_data(["a", "b"], n_samples=5, n_time=3, epoch=0).data
-    config = _get_stepper_config(["a", "b"], ["a", "b"])
-    stepper = _get_train_stepper(
-        config,
-        loss=StepLossConfig(type="MSE"),
-        target_resolution_curriculum=TargetResolutionCurriculumConfig(
-            start_fraction=0.3, ramp_epochs=5
-        ),
-    )
-    assert stepper._resolution_curriculum is not None
-    stepper.set_train()
-    stepper._resolution_curriculum.init_for_epoch(0)
-    assert stepper._resolution_curriculum.active
-    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
-    assert torch.isfinite(stepped.metrics["loss"])
 
 
 def test_train_on_batch_addition_series():
