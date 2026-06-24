@@ -12,6 +12,10 @@ from fme.ace.aggregator.inference.main import (
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
+from fme.ace.aggregator.inference.perturbation_response import (
+    LatitudeBand,
+    PerturbationResponseAggregatorConfig,
+)
 from fme.ace.aggregator.inference.reduced import MeanMetricConfig
 from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
 from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
@@ -134,8 +138,10 @@ from .train.train_config import (
     EMAConfig,
     InlineInferenceConfig,
     InlineValidationConfig,
+    LabeledPerturbation,
     LoggingConfig,
     OptimizationConfig,
+    PerturbationResponseInferenceConfig,
     TrainConfig,
 )
 
