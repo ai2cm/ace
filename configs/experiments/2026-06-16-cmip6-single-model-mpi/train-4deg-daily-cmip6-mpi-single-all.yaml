@@ -1,0 +1,424 @@
+# Single-model CMIP6 smoke test: MPI-ESM1-2-LR, historical 1979-2014,
+# single member (r1i1p1f1), in-sample. Run A: ALL daily vars incl. monthly (amon/omon/simon) + spiky daily diagnostics.
+#
+# Architecture from the v2 4deg-daily ERA5 baseline
+# (configs/baselines/aimip-like/train-4deg-daily-v2-era5-only.yaml @ 6e8cf916f):
+# single_module step, NoiseConditionedSFNO embed_dim 512 / 8-layer,
+# filter_num_groups 16 x spectral_ratio 0.125, residual_prediction,
+# clip_latent_global_means, global_mean_removal (shared, append_as_input),
+# EnsembleLoss crps 0.9 / energy 0.1 (n_ensemble 2), FusedAdam lr 1e-4.
+# Data layer + loader params from the cmip6 multi-model run-1
+# (configs/experiments/2026-06-01-cmip6-daily-multimodel/). Single-source
+# normalization = MPI's own 1979-2014 per-source stats (incl. residual).
+# corrector.conserve_dry_air OFF (flattened plev). Forcings/statics input-only;
+# every other MPI daily variable is prognostic (in+out, run-1 foundation framing).
+#
+# arg: --gpus 1
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_every_n_batches: 5000
+validate_using_ema: true
+ema_checkpoint_save_epochs:
+  start: 5
+  step: 5
+max_epochs: 50
+evaluate_before_training: false
+train_evaluation_samples: 2000
+ema:
+  decay: 0.999
+train_aggregator:
+  ensemble_metrics: true
+inference:
+- name: inf_insample_weather_5day
+  weight: 1.0
+  n_forward_steps: 5
+  forward_steps_in_memory: 5
+  n_ensemble_per_ic: 5
+  loader:
+    start_indices:
+      times:
+      - '1980-03-01T12:00:00'
+      - '1980-09-01T12:00:00'
+      - '1990-03-01T12:00:00'
+      - '1990-09-01T12:00:00'
+      - '2000-03-01T12:00:00'
+      - '2000-09-01T12:00:00'
+      - '2010-03-01T12:00:00'
+      - '2010-09-01T12:00:00'
+    dataset:
+      data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/MPI-ESM1-2-LR/historical/r1i1p1f1
+      labels:
+      - MPI-ESM1-2-LR.p1
+      file_pattern: data.*.nc
+      engine: netcdf4
+    num_data_workers: 8
+  aggregator:
+    step_means:
+    - step: 5
+      target: denorm
+      name: day_5
+    - step: 5
+      target: norm
+      name: day_5_norm
+    ensembles:
+    - step: 5
+      name: day_5_ensemble
+    power_spectrum:
+      report_directional_bias: false
+      plot_variables: &id001
+      - ua10
+      - hus10
+      - zg10
+      - h500
+      - PRATEsfc
+    histogram:
+      enabled: false
+    zonal_mean:
+      enabled: false
+    enso_index:
+      enabled: false
+    enso_coefficient:
+      enabled: false
+    ipo_index:
+      enabled: false
+    annual:
+      enabled: false
+- name: inf_insample_long_1979_2014
+  weight: 0.0
+  epochs:
+    start: 4
+    step: 5
+  n_forward_steps: 12775
+  forward_steps_in_memory: 73
+  n_ensemble_per_ic: 1
+  loader:
+    start_indices:
+      times:
+      - '1979-03-01T12:00:00'
+      - '1979-06-01T12:00:00'
+      - '1979-09-01T12:00:00'
+      - '1979-12-01T12:00:00'
+    dataset:
+      data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/MPI-ESM1-2-LR/historical/r1i1p1f1
+      labels:
+      - MPI-ESM1-2-LR.p1
+      file_pattern: data.*.nc
+      engine: netcdf4
+    num_data_workers: 8
+  aggregator:
+    step_means:
+    - step: 5
+      target: denorm
+      name: day_5
+    - step: 5
+      target: norm
+      name: day_5_norm
+    ensembles: []
+    power_spectrum:
+      report_directional_bias: false
+      plot_variables: *id001
+    histogram:
+      enabled: true
+      variables:
+      - PRATEsfc
+      - hus10
+      - hus50
+      - ua10
+      percentile_variables:
+      - PRATEsfc
+    zonal_mean:
+      variables:
+      - TMP2m
+      - surface_temperature
+      - hus250
+      - ua250
+      - ua10
+      - zg10
+    annual:
+      variables:
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - PRATEsfc
+      - h500
+      - psl
+      - surface_temperature
+      - PRESsfc
+      - sfcWind
+      - DLWRFsfc
+      - DSWRFsfc
+      - ULWRFtoa
+      - USWRFtoa
+      - SHTFLsfc
+      - LHTFLsfc
+      - oday_tos
+      - ua10
+      - ua250
+      - ua700
+      - va10
+      - va250
+      - va700
+      - hus10
+      - hus250
+      - hus700
+      - zg10
+      - zg250
+      - zg1000
+    enso_index:
+      enabled: true
+    enso_coefficient:
+      enabled: true
+    ipo_index:
+      enabled: true
+validation:
+- name: val_insample
+  weight: 1.0
+  loader:
+    batch_size: 32
+    num_data_workers: 8
+    prefetch_factor: 2
+    time_buffer: 16
+    dataset:
+      data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+      engine: netcdf4
+      source_ids:
+      - MPI-ESM1-2-LR
+      experiments:
+      - historical
+      realizations:
+      - 1
+      time_keeps:
+      - source_ids:
+        - MPI-ESM1-2-LR
+        experiments:
+        - historical
+        keep_start: '1979-01-01'
+        keep_end: '2014-12-31'
+      subsample_step: 5
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: cmip6
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 16
+  time_buffer_pool_size: 32
+  dataset:
+    data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+    engine: netcdf4
+    source_ids:
+    - MPI-ESM1-2-LR
+    experiments:
+    - historical
+    realizations:
+    - 1
+    time_keeps:
+    - source_ids:
+      - MPI-ESM1-2-LR
+      experiments:
+      - historical
+      keep_start: '1979-01-01'
+      keep_end: '2014-12-31'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 1
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      residual_prediction: true
+      builder:
+        type: NoiseConditionedSFNO
+        conditional: true
+        config:
+          embed_dim: 512
+          noise_embed_dim: 32
+          noise_type: isotropic
+          filter_type: linear
+          affine_norms: true
+          normalize_big_skip: true
+          filter_num_groups: 16
+          spectral_ratio: 0.125
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          clip_latent_global_means: true
+      normalization:
+        network:
+          global_means_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/per_source_normalization_1979-2014/MPI-ESM1-2-LR/centering.nc
+          global_stds_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/per_source_normalization_1979-2014/MPI-ESM1-2-LR/scaling.nc
+          fill_nans_on_normalize: true
+        residual:
+          global_means_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/per_source_normalization_1979-2014/MPI-ESM1-2-LR/residual_centering.nc
+          global_stds_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/per_source_normalization_1979-2014/MPI-ESM1-2-LR/residual_scaling.nc
+          fill_nans_on_normalize: true
+      corrector:
+        conserve_dry_air: false
+      global_mean_removal:
+        kind: shared
+        append_as_input: true
+      in_names:
+      - HGTsfc
+      - land_fraction
+      - log_input4mips_co2
+      - input4mips_so2
+      - input4mips_bc
+      - luh2_forest
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - PRATEsfc
+      - h500
+      - psl
+      - sfcWind
+      - surface_temperature
+      - TMP700
+      - PRESsfc
+      - oday_tos
+      - oday_sos
+      - oday_omldamax
+      - oday_tossq
+      - siday_sithick
+      - DLWRFsfc
+      - DSWRFsfc
+      - DSWRFtoa
+      - LHTFLsfc
+      - SHTFLsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - USWRFsfc
+      - USWRFtoa
+      - UCLWRFtoa
+      - UCSWRFsfc
+      - UCSWRFtoa
+      - DCLWRFsfc
+      - DCSWRFsfc
+      - wap500
+      - amon_ts
+      - omon_hfds
+      - omon_zos
+      - simon_sitemptop
+      - simon_sea_ice_fraction
+      - simon_ocean_fraction
+      - ua10
+      - ua50
+      - ua100
+      - ua250
+      - ua500
+      - ua700
+      - ua850
+      - ua1000
+      - va10
+      - va50
+      - va100
+      - va250
+      - va500
+      - va700
+      - va850
+      - va1000
+      - hus10
+      - hus50
+      - hus100
+      - hus250
+      - hus500
+      - hus700
+      - hus850
+      - hus1000
+      - zg10
+      - zg50
+      - zg100
+      - zg250
+      - zg500
+      - zg700
+      - zg850
+      - zg1000
+      out_names:
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - PRATEsfc
+      - h500
+      - psl
+      - sfcWind
+      - surface_temperature
+      - TMP700
+      - PRESsfc
+      - oday_tos
+      - oday_sos
+      - oday_omldamax
+      - oday_tossq
+      - siday_sithick
+      - DLWRFsfc
+      - DSWRFsfc
+      - DSWRFtoa
+      - LHTFLsfc
+      - SHTFLsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - USWRFsfc
+      - USWRFtoa
+      - UCLWRFtoa
+      - UCSWRFsfc
+      - UCSWRFtoa
+      - DCLWRFsfc
+      - DCSWRFsfc
+      - wap500
+      - amon_ts
+      - omon_hfds
+      - omon_zos
+      - simon_sitemptop
+      - simon_sea_ice_fraction
+      - simon_ocean_fraction
+      - ua10
+      - ua50
+      - ua100
+      - ua250
+      - ua500
+      - ua700
+      - ua850
+      - ua1000
+      - va10
+      - va50
+      - va100
+      - va250
+      - va500
+      - va700
+      - va850
+      - va1000
+      - hus10
+      - hus50
+      - hus100
+      - hus250
+      - hus500
+      - hus700
+      - hus850
+      - hus1000
+      - zg10
+      - zg50
+      - zg100
+      - zg250
+      - zg500
+      - zg700
+      - zg850
+      - zg1000
