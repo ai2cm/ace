@@ -27,7 +27,7 @@ import pathlib
 
 import yaml
 
-WANDB_PROJECT = "VarMasking4"
+WANDB_PROJECT = "VarMasking5"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
 WANDB_SUFFIX = "-v4"  # stripped from wandb run names before comparison
