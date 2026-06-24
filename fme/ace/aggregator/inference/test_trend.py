@@ -75,10 +75,10 @@ def test_trend_logs_contain_maps_and_rmse():
     agg = TrendEvaluatorAggregator(_ops(), horizontal_dims=["lat", "lon"])
     agg.record_batch(_linear_batch(slope_target=2.0, slope_gen=-1.5))
     logs = agg.get_logs(label="trend")
-    assert "trend/trend_maps/a" in logs
-    assert "trend/trend_difference_map/a" in logs
+    assert "trend/maps/a" in logs
+    assert "trend/difference_map/a" in logs
     # constant trends differing by 3.5 everywhere -> area-weighted RMSE is 3.5
-    assert logs["trend/rmse/a"] == pytest.approx(3.5, rel=1e-3)
+    assert logs["trend/weighted_rmse/a"] == pytest.approx(3.5, rel=1e-3)
 
 
 def test_trend_streaming_matches_single_batch():

@@ -18,6 +18,10 @@ from ..plotting import plot_paneled_data
 from .build_context import MetricBuildContext, MetricNotSupportedError, maybe_filter
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
+# A fixed Julian year (365.25 days) is used for the slope's per-year units
+# regardless of the data calendar; this introduces a small (~1.5%) scaling
+# error for non-365.25-day calendars (e.g. CMIP6 360-day), which is fine for
+# a diagnostic trend.
 SECONDS_PER_YEAR = 365.25 * 24 * 60 * 60
 # A fixed reference epoch is used (rather than each sample's start time) so the
 # running sums stay consistent across batches and distributed ranks without
@@ -60,11 +64,11 @@ class TrendEvaluatorAggregator:
     """
 
     _image_captions = {
-        "trend_maps": (
+        "maps": (
             "{name} linear trend; (left) target and (right) generated "
             "[{units} / year]"
         ),
-        "trend_difference_map": (
+        "difference_map": (
             "{name} linear trend difference (generated - target) [{units} / year]"
         ),
     }
@@ -207,18 +211,18 @@ class TrendEvaluatorAggregator:
         for name in gen_trends:
             target_map = target_trends[name]
             gen_map = gen_trends[name]
-            images[f"trend_maps/{name}"] = plot_paneled_data(
+            images[f"maps/{name}"] = plot_paneled_data(
                 [[target_map.cpu().numpy(), gen_map.cpu().numpy()]],
                 diverging=True,
-                caption=self._caption("trend_maps", name),
+                caption=self._caption("maps", name),
             )
             difference = gen_map - target_map
-            images[f"trend_difference_map/{name}"] = plot_paneled_data(
+            images[f"difference_map/{name}"] = plot_paneled_data(
                 [[difference.cpu().numpy()]],
                 diverging=True,
-                caption=self._caption("trend_difference_map", name),
+                caption=self._caption("difference_map", name),
             )
-            metrics[f"rmse/{name}"] = float(
+            metrics[f"weighted_rmse/{name}"] = float(
                 self._ops.area_weighted_rmse(
                     predicted=gen_map.to(torch.float32),
                     truth=target_map.to(torch.float32),
