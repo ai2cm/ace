@@ -339,7 +339,6 @@ stepper:
       - zg50
       - zg100
       - zg250
-      - zg500
       - zg700
       - zg850
       - zg1000
@@ -400,7 +399,6 @@ stepper:
       - zg50
       - zg100
       - zg250
-      - zg500
       - zg700
       - zg850
       - zg1000
