@@ -292,7 +292,6 @@ def _make_perturbation_response_task(
             dataset_info=entry_dataset_info,
             perturbation_labels=entry_config.perturbation_labels,
             group_onehot=group_onehot,
-            n_timesteps=entry_config.n_forward_steps,
             output_dir=os.path.join(output_dir, name),
             save_diagnostics=save_per_epoch_diagnostics,
         )

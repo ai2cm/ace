@@ -136,7 +136,6 @@ class PerturbationResponseAggregatorConfig:
         dataset_info: DatasetInfo,
         perturbation_labels: Sequence[str],
         group_onehot: torch.Tensor,
-        n_timesteps: int,
         output_dir: str | None = None,
         save_diagnostics: bool = False,
     ) -> "PerturbationResponseAggregator":
@@ -387,7 +386,12 @@ class PerturbationResponseAggregator(
         if not self._save_diagnostics:
             return
         assert self._output_dir is not None
+        # _group_time_mean is a collective (all-reduce) and must run on every
+        # rank; only the root rank then writes the (rank-identical) result, to
+        # avoid a multi-writer race on the shared path.
         means = self._group_time_mean()
+        if not Distributed.get_instance().is_root():
+            return
         baseline = means[0]
         data_vars = {}
         for g in range(1, self._n_groups):

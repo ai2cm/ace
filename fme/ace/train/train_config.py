@@ -180,6 +180,12 @@ class PerturbationResponseInferenceConfig:
     diagnostics (see ``PerturbationResponseAggregatorConfig``). It does not
     contribute to checkpoint selection.
 
+    Initial-condition ensembles (``n_ensemble_per_ic > 1``) are not supported:
+    the baseline/perturbed members occupy the batch dimension directly.
+
+    Spatial (model) parallelism is supported via per-rank-localized masks;
+    the diagnostics are reduced across data-parallel ranks.
+
     Parameters:
         loader: Data loader for the (unperturbed) initial condition and forcing.
             Must not itself specify perturbations; the perturbation is given by
