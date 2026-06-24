@@ -4,6 +4,12 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.constants import (
+    FREEZING_TEMPERATURE_KELVIN,
+    LATENT_HEAT_OF_FREEZING,
+    LATENT_HEAT_OF_VAPORIZATION,
+    SPECIFIC_HEAT_OF_SEA_WATER_CM4,
+)
 from fme.core.coordinates import DepthCoordinate
 from fme.core.corrector.ocean import (
     OceanCorrector,
@@ -297,6 +303,204 @@ def test_surface_energy_flux_correction_prescribed():
     torch.testing.assert_close(
         corrected["hfds"][open_ocean_row, :], net_flux[open_ocean_row, :]
     )
+
+
+_DEFAULT_GRANULAR_NAMES = [
+    "sfc_down_sw_radiative_flux",
+    "sfc_up_sw_radiative_flux",
+    "sfc_down_lw_radiative_flux",
+    "sfc_up_lw_radiative_flux",
+    "latent_heat_flux",
+    "sensible_heat_flux",
+    "precipitation_rate",
+    "frozen_precipitation_rate",
+]
+
+
+def _surface_flux_test_setup():
+    """Return (input_data, gen_data, forcing_data, ocean_fraction, sst)
+    suitable for surface_energy_flux_correction tests."""
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+    gen_data = {
+        "sst": sst,
+        "hfds": gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+    ocean_fraction = 1 - land_fraction - sea_ice_fraction
+    return input_data, gen_data, forcing_data, ocean_fraction, sst
+
+
+def test_surface_energy_flux_correction_default_omitted_kwarg():
+    """Omitting `names` defaults to "default" and matches the legacy formula."""
+    config = SurfaceEnergyFluxCorrectionConfig(method="prescribed")
+    assert config.names == "default"
+
+
+def test_surface_energy_flux_correction_full_granular_list_matches_default():
+    """Listing all 8 granular names reproduces the legacy default. Tolerances
+    accommodate fp32 reassociation between the legacy single-expression sum
+    and the atomic per-term sum."""
+    input_data, gen_data, forcing_data, _, sst = _surface_flux_test_setup()
+    default_flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, sst, names="default"
+    )
+    granular_flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, sst, names=_DEFAULT_GRANULAR_NAMES
+    )
+    torch.testing.assert_close(granular_flux, default_flux, rtol=1e-5, atol=1e-4)
+
+
+def test_surface_energy_flux_correction_buckets_plus_mass_terms_matches_default():
+    """`net_surface_energy_flux` plus the three mass-flux variables also
+    reproduces the legacy default. Validates atomic-contribution dedup of the
+    `lhf_turbulent` and `frozen_precip_latent` terms shared between the bucket
+    and the granular names."""
+    input_data, gen_data, forcing_data, _, sst = _surface_flux_test_setup()
+    default_flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, sst, names="default"
+    )
+    bucket_flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data,
+        sst,
+        names=[
+            "net_surface_energy_flux",
+            "precipitation_rate",
+            "latent_heat_flux",
+            "frozen_precipitation_rate",
+        ],
+    )
+    torch.testing.assert_close(bucket_flux, default_flux, rtol=1e-5, atol=1e-4)
+
+
+def test_surface_energy_flux_correction_subset_radiative_only():
+    """Listing only the four radiative names yields sw_down - sw_up + lw_down -
+    lw_up applied via the prescribed-method correction."""
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed",
+            names=[
+                "sfc_down_sw_radiative_flux",
+                "sfc_up_sw_radiative_flux",
+                "sfc_down_lw_radiative_flux",
+                "sfc_up_lw_radiative_flux",
+            ],
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrector(config, ops, None, timestep)
+    input_data, gen_data, forcing_data, ocean_fraction, _ = _surface_flux_test_setup()
+    expected_net_flux = (
+        forcing_data["DSWRFsfc"]
+        - forcing_data["USWRFsfc"]
+        + forcing_data["DLWRFsfc"]
+        - forcing_data["ULWRFsfc"]
+    )
+    expected_hfds = expected_net_flux * ocean_fraction + gen_data["hfds"] * (
+        1 - ocean_fraction
+    )
+    corrected = corrector(input_data, gen_data, forcing_data)
+    torch.testing.assert_close(corrected["hfds"], expected_hfds)
+
+
+def test_surface_energy_flux_correction_bucket_only():
+    """`names=["net_surface_energy_flux"]` matches `atmos.net_surface_energy_flux`
+    with no mass-heat contributions."""
+    from fme.core.atmosphere_data import AtmosphereData
+
+    input_data, gen_data, forcing_data, _, sst = _surface_flux_test_setup()
+    flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, sst, names=["net_surface_energy_flux"]
+    )
+    expected = AtmosphereData(forcing_data).net_surface_energy_flux
+    torch.testing.assert_close(flux, expected)
+
+
+def test_surface_energy_flux_correction_bucket_without_frozen_precip():
+    """`names=["net_surface_energy_flux_without_frozen_precip"]` matches the
+    corresponding AtmosphereData property."""
+    from fme.core.atmosphere_data import AtmosphereData
+
+    input_data, gen_data, forcing_data, _, sst = _surface_flux_test_setup()
+    flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data,
+        sst,
+        names=["net_surface_energy_flux_without_frozen_precip"],
+    )
+    expected = AtmosphereData(
+        forcing_data
+    ).net_surface_energy_flux_without_frozen_precip
+    torch.testing.assert_close(flux, expected)
+
+
+def test_surface_energy_flux_correction_subset_latent_only():
+    """`names=["latent_heat_flux"]` includes both turbulent and mass-heat terms."""
+    input_data, gen_data, forcing_data, _, sst = _surface_flux_test_setup()
+    flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, sst, names=["latent_heat_flux"]
+    )
+    lhf = forcing_data["LHTFLsfc"]
+    expected = -lhf - SPECIFIC_HEAT_OF_SEA_WATER_CM4 * (
+        lhf / LATENT_HEAT_OF_VAPORIZATION
+    ) * (sst - FREEZING_TEMPERATURE_KELVIN)
+    torch.testing.assert_close(flux, expected)
+
+
+def test_surface_energy_flux_correction_subset_frozen_precip_only():
+    """`names=["frozen_precipitation_rate"]` includes both the latent-of-fusion
+    and mass-heat terms."""
+    input_data, gen_data, forcing_data, _, sst = _surface_flux_test_setup()
+    flux = _compute_ocean_net_surface_energy_flux(
+        forcing_data, sst, names=["frozen_precipitation_rate"]
+    )
+    fp = forcing_data["total_frozen_precipitation_rate"]
+    expected = -LATENT_HEAT_OF_FREEZING * fp + SPECIFIC_HEAT_OF_SEA_WATER_CM4 * fp * (
+        sst - FREEZING_TEMPERATURE_KELVIN
+    )
+    torch.testing.assert_close(flux, expected)
+
+
+def test_surface_energy_flux_correction_missing_forcing_variable_raises():
+    """If a name is requested but the underlying atmosphere variable is absent
+    from the forcing data, raise a RuntimeError that names the missing
+    variable, the atomic term, and the requested names list."""
+    _, _, forcing_data, _, sst = _surface_flux_test_setup()
+    forcing_data_missing = {k: v for k, v in forcing_data.items() if k != "DSWRFsfc"}
+    with pytest.raises(
+        RuntimeError, match="missing variable 'sfc_down_sw_radiative_flux'"
+    ):
+        _compute_ocean_net_surface_energy_flux(
+            forcing_data_missing,
+            sst,
+            names=["sfc_down_sw_radiative_flux"],
+        )
+
+
+def test_surface_energy_flux_correction_unknown_name_raises():
+    """Bogus name is rejected by __post_init__ with a 'not recognized' message."""
+    with pytest.raises(ValueError, match="not recognized atmospheric surface"):
+        SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed", names=["not_a_real_flux_name"]
+        )
+
+
+def test_surface_energy_flux_correction_recognized_but_unsupported_raises():
+    """A recognized atmospheric surface variable that is not a flux term is
+    rejected with a 'not yet supported' message."""
+    with pytest.raises(ValueError, match="not yet supported as flux terms"):
+        SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed", names=["surface_pressure"]
+        )
 
 
 @pytest.mark.parametrize(
