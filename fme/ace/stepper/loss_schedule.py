@@ -72,6 +72,10 @@ class LossSchedule:
             return n_data_steps
 
     @property
+    def is_training(self) -> bool:
+        return self._is_training
+
+    @property
     def has_sampler(self) -> bool:
         return self._train_sampler is not None
 
