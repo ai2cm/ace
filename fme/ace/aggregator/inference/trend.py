@@ -142,39 +142,52 @@ class TrendEvaluatorAggregator:
         target = {name: tensor[:, time_slice] for name, tensor in data.target.items()}
         self._add_running_sums(self._target_sum_y, self._target_sum_ty, target, t)
 
-    def _compute_trends(
-        self, sum_y: TensorDict, sum_ty: TensorDict
-    ) -> TensorDict | None:
-        """Reduce sufficient statistics across ranks and finalize the slopes.
-
-        Returns ``None`` on non-root ranks.
+    @staticmethod
+    def _reduce_running_sums(
+        dist: Distributed, sum_y: TensorDict, sum_ty: TensorDict
+    ) -> tuple[list[str], torch.Tensor, torch.Tensor]:
+        """Reduce the per-variable running sums across ranks, stacked in a
+        rank-deterministic (sorted) order.
         """
+        names = sorted(sum_y.keys())
+        reduced_y = dist.reduce_sum(torch.stack([sum_y[name] for name in names], dim=0))
+        reduced_ty = dist.reduce_sum(
+            torch.stack([sum_ty[name] for name in names], dim=0)
+        )
+        return names, reduced_y, reduced_ty
+
+    def _get_trends(self) -> tuple[TensorDict | None, TensorDict | None]:
+        """Reduce sufficient statistics across ranks and finalize the target
+        and generated slopes. Returns ``(None, None)`` on non-root ranks.
+
+        All collectives are issued unconditionally and in the same order on
+        every rank, before the ``is_root`` early-return, to avoid deadlock.
+        """
+        if not self._gen_sum_y:
+            raise ValueError("No data has been recorded yet.")
         dist = Distributed.get_instance()
-        # reduce additive sufficient statistics across data-parallel ranks;
-        # clone first so repeated get_logs/get_dataset calls stay correct.
+        # The time-regressor statistics are shared between target and generated,
+        # so reduce them once. Clone first so repeated get_logs/get_dataset
+        # calls stay correct (reduce_sum mutates its argument in place).
         n = dist.reduce_sum(self._n.clone())
         sum_t = dist.reduce_sum(self._sum_t.clone())
         sum_tt = dist.reduce_sum(self._sum_tt.clone())
-        names = sorted(sum_y.keys())
-        stacked_y = dist.reduce_sum(torch.stack([sum_y[name] for name in names], dim=0))
-        stacked_ty = dist.reduce_sum(
-            torch.stack([sum_ty[name] for name in names], dim=0)
+        gen = self._reduce_running_sums(dist, self._gen_sum_y, self._gen_sum_ty)
+        target = self._reduce_running_sums(
+            dist, self._target_sum_y, self._target_sum_ty
         )
         if not dist.is_root():
-            return None
+            return None, None
         denom = n * sum_tt - sum_t * sum_t
-        trends: TensorDict = {}
-        for i, name in enumerate(names):
-            numerator = n * stacked_ty[i] - sum_t * stacked_y[i]
-            trends[name] = numerator / denom
-        return trends
 
-    def _get_trends(self) -> tuple[TensorDict | None, TensorDict | None]:
-        if not self._gen_sum_y:
-            raise ValueError("No data has been recorded yet.")
-        target_trends = self._compute_trends(self._target_sum_y, self._target_sum_ty)
-        gen_trends = self._compute_trends(self._gen_sum_y, self._gen_sum_ty)
-        return target_trends, gen_trends
+        def slopes(reduced: tuple[list[str], torch.Tensor, torch.Tensor]) -> TensorDict:
+            names, sum_y, sum_ty = reduced
+            return {
+                name: (n * sum_ty[i] - sum_t * sum_y[i]) / denom
+                for i, name in enumerate(names)
+            }
+
+        return slopes(target), slopes(gen)
 
     def _caption(self, key: str, name: str) -> str:
         if name in self._variable_metadata:
@@ -281,9 +294,13 @@ class TrendMetricConfig:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
-        if ctx.n_timesteps < 2:
+        # The initial condition is dropped when it is the first recorded
+        # timestep, so require at least two forward steps to leave >= 2 points
+        # for the regression (otherwise the slope is an undefined 0/0).
+        if ctx.n_forward_steps < 2:
             raise MetricNotSupportedError(
-                f"trend metric requires at least 2 timesteps, got {ctx.n_timesteps}"
+                "trend metric requires at least 2 forward steps, got "
+                f"{ctx.n_forward_steps}"
             )
         agg: SubAggregator = TrendEvaluatorAggregator(
             ctx.ops,
