@@ -17,7 +17,7 @@ import subprocess
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
-WANDB_PROJECT = "VarMasking5"
+WANDB_PROJECT = "VarMasking6"
 WANDB_GROUP = "ace2-var-masking-cooldown-2026-06-17"
 
 CONFIGS = sorted(

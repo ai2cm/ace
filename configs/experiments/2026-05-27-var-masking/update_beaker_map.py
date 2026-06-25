@@ -23,7 +23,7 @@ import subprocess
 HERE = pathlib.Path(__file__).parent
 DEFAULT_MAP = HERE / "wandb_to_beaker_map.json"
 WANDB_ENTITY = "ai2cm"
-WANDB_PROJECT = "VarMasking5"
+WANDB_PROJECT = "VarMasking6"
 
 EXPERIMENT_RE = re.compile(r"beaker\.org/ex/([0-9A-Za-z]+)")
 

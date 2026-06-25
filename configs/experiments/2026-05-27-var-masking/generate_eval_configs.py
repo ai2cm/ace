@@ -1,4 +1,4 @@
-"""Generate evaluator suite configs for the VarMasking5 training runs.
+"""Generate evaluator suite configs for the VarMasking6 training runs.
 
 Each suite config contains all inline inference entries from the corresponding
 training config.  submit_eval_jobs.py submits one job per checkpoint, and that
@@ -199,6 +199,7 @@ def main() -> None:
         if p.name.startswith(CONFIG_PREFIX)
         and not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
+        and not p.name.endswith("-bestinfcooldown.yaml")
     )
 
     for source_path in source_configs:

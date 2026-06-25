@@ -1,4 +1,4 @@
-"""Submit evaluator-suite jobs for the VarMasking5 checkpoints.
+"""Submit evaluator-suite jobs for the VarMasking6 checkpoints.
 
 Each generated evaluator suite is run against three checkpoints from the
 corresponding training result dataset:
