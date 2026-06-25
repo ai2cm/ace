@@ -1,7 +1,9 @@
 import torch
 
+from fme.core.corrector.state import CorrectorState
 from fme.core.labels import BatchLabels
 from fme.core.step.args import StepArgs
+from fme.core.stepper_state import StepperState
 
 
 def test_apply_input_process_func_propagates_metadata():
@@ -13,11 +15,17 @@ def test_apply_input_process_func_propagates_metadata():
         "a": torch.ones(n_batch, dtype=torch.bool),
         "b": torch.zeros(n_batch, dtype=torch.bool),
     }
+    stepper_state = StepperState(
+        corrector_state=CorrectorState(
+            global_dry_air_mass=torch.ones(n_batch, 1, 1),
+        ),
+    )
     args = StepArgs(
         input=input_data,
         next_step_input_data=next_step,
         labels=labels,
         data_mask=data_mask,
+        stepper_state=stepper_state,
     )
 
     def double(tensors):
@@ -35,8 +43,15 @@ def test_apply_input_process_func_propagates_metadata():
     assert result.data_mask is not None
     for name in data_mask:
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
+    assert result.stepper_state is stepper_state
 
-    known_attrs = {"input", "next_step_input_data", "labels", "data_mask"}
+    known_attrs = {
+        "input",
+        "next_step_input_data",
+        "labels",
+        "data_mask",
+        "stepper_state",
+    }
     actual_attrs = {
         name
         for name in vars(result)

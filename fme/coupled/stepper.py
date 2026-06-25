@@ -42,7 +42,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.ocean import OceanConfig
-from fme.core.ocean_data import OceanData
+from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
@@ -85,11 +85,18 @@ class CoupledOceanFractionConfig:
     Configuration for computing ocean fraction from the ocean-predicted sea ice
     fraction.
 
+    The configured land fraction name is used to read the atmosphere forcing,
+    then passed to OceanData as its canonical land_fraction field. The configured
+    sea ice fraction name must be registered in OCEAN_FIELD_NAME_PREFIXES as
+    either sea_ice_fraction or ocean_sea_ice_fraction.
+
     Parameters:
         sea_ice_fraction_name: Name of the sea ice fraction field in the ocean
-            data. Must be an ocean prognostic variable. If the atmosphere uses
-            the same name as an ML forcing then the generated sea ice fraction
-            is also passed as an input to the atmosphere.
+            data. Must be an ocean prognostic variable and must be registered in
+            OCEAN_FIELD_NAME_PREFIXES as either sea_ice_fraction or
+            ocean_sea_ice_fraction. If the atmosphere uses the same name as an
+            ML forcing then the generated sea ice fraction is also passed as an
+            input to the atmosphere.
         land_fraction_name: Name of the land fraction field in the atmosphere
             data. If needed, will be passed to the ocean stepper as a forcing.
         sea_ice_fraction_name_in_atmosphere: Name of the sea ice fraction field in
@@ -100,6 +107,21 @@ class CoupledOceanFractionConfig:
     sea_ice_fraction_name: str
     land_fraction_name: str
     sea_ice_fraction_name_in_atmosphere: str | None = None
+
+    def __post_init__(self):
+        self._get_canonical_sea_ice_fraction_name()
+
+    def _get_canonical_sea_ice_fraction_name(self) -> str:
+        sea_ice_frac_name = self.sea_ice_fraction_name
+        if sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["sea_ice_fraction"]:
+            return "sea_ice_fraction"
+        elif sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["ocean_sea_ice_fraction"]:
+            return "ocean_sea_ice_fraction"
+        else:
+            raise ValueError(
+                f"CoupledOceanFractionConfig expected {sea_ice_frac_name} to be "
+                "registered in OCEAN_FIELD_NAME_PREFIXES as a sea ice fraction."
+            )
 
     def validate_ocean_prognostic_names(self, prognostic_names: Iterable[str]):
         if self.sea_ice_fraction_name not in prognostic_names:
@@ -152,7 +174,12 @@ class CoupledOceanFractionConfig:
         # fill nans with 0s
         sea_ice_frac = torch.nan_to_num(forcings_from_ocean[sea_ice_frac_name])
         land_frac = atmos_forcing_data[land_frac_name]
-        return OceanData({land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac})
+        return OceanData(
+            {
+                "land_fraction": land_frac,
+                self._get_canonical_sea_ice_fraction_name(): sea_ice_frac,
+            }
+        )
 
 
 def _load_stepper_weights_and_history_factory(
@@ -805,6 +832,10 @@ class CoupledStepper:
         self.atmosphere.set_eval()
         self.ocean.set_eval()
 
+    def set_epoch(self, epoch: int) -> None:
+        self.atmosphere.set_epoch(epoch)
+        self.ocean.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
@@ -1083,7 +1114,7 @@ class CoupledStepper:
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                atmos_step = next(atmos_generator)
+                atmos_step, _ = next(atmos_generator)
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
@@ -1114,7 +1145,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
+            ocean_step, _ = next(
                 iter(
                     self.ocean.get_prediction_generator(
                         ocean_ic_state,
@@ -1161,14 +1192,14 @@ class CoupledStepper:
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
-            [x.data for x in output_list if x.realm == "atmosphere"],
+            [(x.data, None) for x in output_list if x.realm == "atmosphere"],
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
             n_ensemble=forcing_data.atmosphere_data.n_ensemble,
         )
         ocean_data = process_prediction_generator_list(
-            [x.data for x in output_list if x.realm == "ocean"],
+            [(x.data, None) for x in output_list if x.realm == "ocean"],
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,
@@ -1780,6 +1811,9 @@ class CoupledTrainStepper(
     def set_eval(self):
         self._stepper.set_eval()
         self._loss.set_eval()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._stepper.set_epoch(epoch)
 
     def get_state(self) -> dict[str, Any]:
         return self._stepper.get_state()

@@ -58,6 +58,7 @@ from fme.core.step.multi_call import (
 )
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
+from fme.core.stepper_state import StepperState
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -357,6 +358,13 @@ class TrainOutput(TrainOutputABC):
                     f"target_data can only have one ensemble member, got {v.shape[1]}"
                 )
 
+    @property
+    def n_ensemble(self) -> int:
+        """The number of ensemble members in the generated data."""
+        for v in self.gen_data.values():
+            return v.shape[1]
+        raise ValueError("gen_data is empty, ensemble member count is not defined")
+
     def ensemble_derive_func(
         self, data: EnsembleTensorDict, forcing_data: TensorMapping
     ) -> EnsembleTensorDict:
@@ -486,19 +494,28 @@ def process_ensemble_prediction_generator_list(
 
 
 def process_prediction_generator_list(
-    output_list: list[TensorDict],
+    output_list: list[tuple[TensorDict, StepperState | None]],
     time: xr.DataArray,
     n_ensemble: int,
     labels: BatchLabels | None = None,
     horizontal_dims: list[str] | None = None,
 ) -> BatchData:
-    output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
+    """Stack per-step outputs into a single BatchData.
+
+    Attaches the terminal stepper_state (from the last entry in
+    ``output_list``) to the returned BatchData so it can propagate to the
+    next ``Stepper.predict`` call.
+    """
+    output_dicts = [item[0] for item in output_list]
+    terminal_state = output_list[-1][1] if output_list else None
+    output_timeseries = stack_list_of_tensor_dicts(output_dicts, time_dim=1)
     return BatchData.new_on_device(
         data=output_timeseries,
         time=time,
         horizontal_dims=horizontal_dims,
         labels=labels,
         n_ensemble=n_ensemble,
+        stepper_state=terminal_state,
     )
 
 
@@ -1023,7 +1040,7 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> tuple[TensorDict, StepperState | None]:
         """
         Step the model forward one timestep given input data.
 
@@ -1032,11 +1049,13 @@ class Stepper:
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A tuple ``(output, stepper_state)`` where ``output`` is the
+            denormalized data at the next time step and ``stepper_state`` is
+            the per-sample state to thread into the next call (or ``None``).
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output)
+        output, stepper_state = self._step_obj.step(args=args, wrapper=wrapper)
+        return self._output_process_func(output), stepper_state
 
     def get_prediction_generator(
         self,
@@ -1044,7 +1063,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[TensorDict, None, None]:
+    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1061,7 +1080,7 @@ class Stepper:
             optimizer: The optimizer to use for updating the module.
 
         Returns:
-            Generator yielding the output data at each timestep.
+            Generator yielding (output, stepper_state) tuples at each timestep.
         """
         ic_batch_data = initial_condition.as_batch_data()
         if ic_batch_data.labels != forcing_data.labels:
@@ -1078,6 +1097,7 @@ class Stepper:
             optimizer,
             forcing_data.labels,
             data_mask=forcing_data.data_mask,
+            stepper_state=ic_batch_data.stepper_state,
         )
 
     @property
@@ -1094,7 +1114,8 @@ class Stepper:
         optimizer: OptimizationABC,
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
-    ) -> Generator[TensorDict, None, None]:
+        stepper_state: StepperState | None = None,
+    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1115,16 +1136,17 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state = self.step(
+                state, stepper_state = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
                         data_mask=data_mask,
+                        stepper_state=stepper_state,
                     ),
                     wrapper=checkpoint,
                 )
-            yield state
+            yield state, stepper_state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
     def predict(
@@ -1209,6 +1231,7 @@ class Stepper:
             horizontal_dims=data.horizontal_dims,
             labels=data.labels,
             n_ensemble=data.n_ensemble,
+            stepper_state=data.stepper_state,
         )
         return data, prognostic_state
 
@@ -1383,12 +1406,20 @@ class Stepper:
         return stepper
 
     def set_eval(self) -> None:
-        for module in self.modules:
-            module.eval()
+        self._step_obj.eval()
 
     def set_train(self) -> None:
+        self._step_obj.train()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._step_obj.set_epoch(epoch)
         for module in self.modules:
-            module.train()
+            for submodule in module.modules():
+                request_reset = getattr(
+                    submodule, "request_latent_global_mean_envelope_reset", None
+                )
+                if callable(request_reset):
+                    request_reset()
 
 
 @dataclasses.dataclass
@@ -1641,7 +1672,8 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
-            data_mask=input_ensemble_data.data_mask,
+            data_mask=forcing_ensemble_data.data_mask,
+            stepper_state=input_ensemble_data.stepper_state,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1656,7 +1688,7 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step = next(output_iterator)
+                gen_step, _ = next(output_iterator)
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
@@ -1669,7 +1701,7 @@ class TrainStepper(
                     gen_step=gen_step,
                     target_step=target_step,
                     step=step,
-                    data_mask=input_batch_data.data_mask,
+                    data_mask=data.data_mask,
                     optimize=optimize_step,
                     metrics=metrics,
                     weighted_sums=weighted_sums,
@@ -1773,6 +1805,9 @@ class TrainStepper(
     def set_train(self) -> None:
         self._loss_schedule.set_train()
         self._stepper.set_train()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._stepper.set_epoch(epoch)
 
 
 def get_serialized_stepper_vertical_coordinate(
