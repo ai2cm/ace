@@ -1357,6 +1357,7 @@ def main():
             n_ocean - n_usable,
         )
         ds_ocean = ds_ocean.isel(time=slice(0, n_usable))
+    ds_ocean = _clean_ocean_dataset(ds_ocean)
     logging.info("Ocean dataset: %s", dict(ds_ocean.sizes))
 
     # Atmosphere: need 3-hourly data spanning the full ocean range + buffer
