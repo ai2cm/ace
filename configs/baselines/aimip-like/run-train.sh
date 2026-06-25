@@ -94,4 +94,20 @@ run_training() {
 # =============================================================================
 
 # --- v2 no-residual ablation, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-no-residual.yaml" "train-4deg-daily-v2-era5-only-no-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched and running as wandb znnaox7t / beaker 01KVWYW6KKM2K8PY6MWXJVNQ6R
+# (launched 2026-06-24 @ ffad57e3). Commented out so this script does not relaunch it.
+# run_training "train-4deg-daily-v2-era5-only-no-residual.yaml" "train-4deg-daily-v2-era5-only-no-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# v2 ERA5-only NO-RESIDUAL, NO-CO2 ablation (CO2-input A/B partner of znnaox7t).
+#
+# Identical to the v2 no-residual config above EXCEPT global_mean_co2 is dropped
+# from in_names and next_step_forcing_names, and the degenerate
+# long_46year_constant_co2 inference is removed. With its CO2-carrying sibling
+# (znnaox7t) it forms a clean CO2 on/off A/B within the no-residual family, for
+# the +4K constant-SST-perturbation eval (does the explicit CO2 input change the
+# uniform-warming extrapolation response?).
+# =============================================================================
+
+# --- v2 no-residual no-CO2 ablation, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-no-residual-no-co2.yaml" "train-4deg-daily-v2-era5-only-no-residual-no-co2-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
