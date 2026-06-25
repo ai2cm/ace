@@ -804,6 +804,23 @@ python make_presence.py --config configs/pilot.yaml
   levels inherit the lowest above-surface level's value, handling any
   number of consecutive masked bottom levels. `mask_source` recorded
   in `index.parquet`.
+
+  **Known v2 bug (found 2026-06-25, single-model MPI shakedown).** For source
+  models that *pre-fill* below-ground plev cells with a finite value instead of
+  NaN (e.g. MPI-ESM1-2-LR), the NaN-union primary derivation finds nothing, so
+  the mask falls back to `zg < orog` computed *after* regrid — which is
+  misaligned with the source's fill footprint (~69% agreement; ~16% of filled
+  cells land in genuinely-valid columns at storm-track/polar lats) — and the
+  nearest-above-vertical fill never fires, so the on-disk near-surface field
+  keeps a flat, mask-misaligned fill that trained emulators reproduce as sharp
+  valid/invalid disconnects (also: absolute `zg` leaks orography aloft). **Fix**
+  (single-model line) scoped in the research task
+  `2026-06-25-reprocess-mpi-esm1-2-lr-with-source-grid-masking-and-retrain-thickness-loss-masking-residual-off`:
+  determine the mask on the **source grid** (pre-regrid, regardless of source
+  NaN) + NaN-aware regrid carrying a fractional-coverage mask, with per-cell
+  loss-masking and a surface-anchored layer-thickness representation on the
+  training side. Dataset *state/issues* are now tracked in the research
+  `datasets/cmip6-daily-pilot` record (migrating off these pipeline docs).
 - **Issue 6 — Chunking.** Matches the `scripts/data_process`
   convention: inner zarr v3 chunks of `time=1` (per-timestep), outer
   shards of `time=365` (~one shard per year per variable). Per-shard
