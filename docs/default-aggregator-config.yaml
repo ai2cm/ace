@@ -100,5 +100,10 @@ aggregator:
     name: ipo_index
     enabled: true
     strict: false
+  trend:
+    variables: null
+    name: trend
+    enabled: false
+    strict: false
   monthly_reference_data: null
   time_mean_reference_data: null

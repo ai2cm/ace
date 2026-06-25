@@ -38,6 +38,7 @@ from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
+from .trend import TrendMetricConfig
 from .utils import LatLonRegion
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
@@ -63,6 +64,7 @@ MetricConfig = (
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
+    | TrendMetricConfig
 )
 
 
@@ -199,6 +201,8 @@ class InferenceEvaluatorAggregatorConfig:
         enso_index: ENSO index metrics.
         enso_coefficient: ENSO regression coefficient metrics.
         ipo_index: Interdecadal Pacific Oscillation index metrics.
+        trend: Per-grid-cell linear trend (slope vs. time) map metrics.
+            Disabled by default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -247,6 +251,7 @@ class InferenceEvaluatorAggregatorConfig:
     ipo_index: IpoIndexMetricConfig = dataclasses.field(
         default_factory=IpoIndexMetricConfig
     )
+    trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
@@ -287,6 +292,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_index,
             self.enso_coefficient,
             self.ipo_index,
+            self.trend,
         ]
         return [m for m in all_metrics if m.enabled]
 
