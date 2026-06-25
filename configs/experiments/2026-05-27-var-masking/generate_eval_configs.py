@@ -11,12 +11,22 @@ import json
 import pathlib
 
 import yaml
-from generate_masking_configs import CONFIG_PREFIX, WANDB_PREFIX, WANDB_SUFFIX
+from generate_masking_configs import (
+    CONFIG_PREFIX,
+    WANDB_ENTITY,
+    WANDB_PREFIX,
+    WANDB_PROJECT,
+    WANDB_SUFFIX,
+)
 
 HERE = pathlib.Path(__file__).parent
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
+
+# Per-checkpoint name suffixes appended to the eval suite run name by
+# submit_eval_jobs.py (one wandb run per checkpoint variant).
+CHECKPOINT_NAME_SUFFIXES = ("-bestinf", "-besttrain")
 
 # Mapping of training run name -> Beaker result dataset ID, loaded from the
 # source map. Consumed by submit_eval_jobs.py to locate each run's checkpoints.
@@ -40,6 +50,20 @@ def source_config_to_eval_suite_config(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(CONFIG_PREFIX)
     return f"{EVAL_SUITE_CONFIG_PREFIX}{suffix}.yaml"
+
+
+def _fetch_wandb_run_names() -> set[str]:
+    import wandb  # lazy import: only needed with --delete-if-in-wandb
+
+    api = wandb.Api()
+    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
+    return {run.name for run in runs}
+
+
+def _eval_run_names(out_path: pathlib.Path) -> list[str]:
+    """wandb run names submit_eval_jobs.py creates for this eval suite config."""
+    suite_run_name = eval_suite_config_to_run_name(out_path.name)
+    return [f"{suite_run_name}{suffix}" for suffix in CHECKPOINT_NAME_SUFFIXES]
 
 
 def _inference_entries(train_cfg: dict) -> list[dict]:
@@ -122,7 +146,16 @@ def _write_config(
     source_run_name: str,
     source_dataset_id: str,
     existing_only: bool,
+    wandb_run_names: set[str] | None = None,
 ) -> None:
+    if wandb_run_names is not None:
+        if all(name in wandb_run_names for name in _eval_run_names(out_path)):
+            if out_path.exists():
+                out_path.unlink()
+                print(f"Deleted {out_path.name} (runs exist in wandb)")
+            else:
+                print(f"Skipped {out_path.name} (runs exist in wandb, no file)")
+            return
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
         return
@@ -141,6 +174,7 @@ def generate_eval_config(
     inference_names: list[str] | None,
     checkpoint_path: str,
     existing_only: bool,
+    wandb_run_names: set[str] | None = None,
 ) -> None:
     source_run_name = source_config_to_run_name(source_path.name)
     source_dataset_id = source_map.get(source_run_name)
@@ -158,7 +192,14 @@ def generate_eval_config(
         checkpoint_path=checkpoint_path,
     )
     out_path = HERE / source_config_to_eval_suite_config(source_path.name)
-    _write_config(cfg, out_path, source_run_name, source_dataset_id, existing_only)
+    _write_config(
+        cfg,
+        out_path,
+        source_run_name,
+        source_dataset_id,
+        existing_only,
+        wandb_run_names,
+    )
 
 
 def main() -> None:
@@ -188,10 +229,24 @@ def main() -> None:
         action="store_true",
         help="Only rewrite evaluator configs that already exist.",
     )
+    parser.add_argument(
+        "--delete-if-in-wandb",
+        action="store_true",
+        help=(
+            f"Delete evaluator configs whose run names already exist in "
+            f"{WANDB_ENTITY}/{WANDB_PROJECT}."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.source_map) as f:
         source_map: dict[str, str] = json.load(f)
+
+    wandb_run_names: set[str] | None = None
+    if args.delete_if_in_wandb:
+        print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
+        wandb_run_names = _fetch_wandb_run_names()
+        print(f"Found {len(wandb_run_names)} existing runs.")
 
     source_configs = sorted(
         p
@@ -208,6 +263,7 @@ def main() -> None:
             inference_names=args.inference_name,
             checkpoint_path=args.checkpoint_path,
             existing_only=args.existing_only,
+            wandb_run_names=wandb_run_names,
         )
 
 
