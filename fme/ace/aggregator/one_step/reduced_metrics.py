@@ -68,6 +68,10 @@ class AreaWeightedReducedMetric:
         self._channel_mean: torch.Tensor | None = None
         self._device = device
         self._channel_mean_names = channel_mean_names
+        # Variables whose target is entirely NaN (e.g. filled by
+        # allow_missing_variables); detected once on the first batch since
+        # missingness is constant, then excluded from the channel mean.
+        self._all_nan_target_names: set[str] | None = None
 
     def _get_channel_mean_names(self, tensors: TensorDict) -> Sequence[str]:
         if self._channel_mean_names is None:
@@ -94,8 +98,19 @@ class AreaWeightedReducedMetric:
                 f"channel_mean_names contains entries not present in the "
                 f"recorded data: {missing}. Available: {sorted(batch_avgs)}."
             )
-        for name in channel_mean_names:
-            self._channel_mean += batch_avgs[name] / len(channel_mean_names)
+        if self._all_nan_target_names is None:
+            self._all_nan_target_names = {
+                name for name in channel_mean_names if torch.isnan(target[name]).all()
+            }
+        # Exclude variables whose target is entirely NaN (e.g. filled by
+        # allow_missing_variables) from the channel mean.
+        included = [
+            name
+            for name in channel_mean_names
+            if name not in self._all_nan_target_names
+        ]
+        for name in included:
+            self._channel_mean += batch_avgs[name] / len(included)
         self._accumulator.add(batch_avgs)
 
     def get(self) -> TensorDict:
