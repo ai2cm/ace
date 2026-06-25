@@ -8,10 +8,14 @@ Usage: $(basename "$0") GS_PATH WEKA_PATH
 Submits a Beaker/Gantry job that copies data from a Google Cloud Storage path
 to a local Weka directory.
 
+If GS_PATH is a single object (file), it is copied with 'gsutil cp' into
+WEKA_PATH. Otherwise the path is treated as a directory and synced with
+'gsutil rsync -r'.
+
 Arguments:
   GS_PATH     The source gs:// path to copy (e.g. gs://vcm-ml-intermediate/data/foo).
   WEKA_PATH   The destination path on Weka (default: /climate-default).
-              The GCS directory name will be appended to this path.
+              The contents of GS_PATH are copied into this path.
 
 Options:
   -h, --help  Show this help message and exit.
@@ -61,4 +65,5 @@ cd "$REPO_ROOT" && gantry run \
     --budget ai2/atec-climate \
     --no-python \
     --install "echo 'skipping installation step'" \
-    -- bash -c "mkdir -p $WEKA_PATH && gsutil -m -o Credentials:gs_service_key_file=/tmp/google_application_credentials.json rsync -r $GS_PATH $WEKA_PATH"
+    --allow-dirty \
+    -- bash -c "GSUTIL_OPTS='-o Credentials:gs_service_key_file=/tmp/google_application_credentials.json'; mkdir -p $WEKA_PATH && if gsutil \$GSUTIL_OPTS -q stat $GS_PATH; then gsutil -m \$GSUTIL_OPTS cp $GS_PATH $WEKA_PATH/; else gsutil -m \$GSUTIL_OPTS rsync -r $GS_PATH $WEKA_PATH; fi"
