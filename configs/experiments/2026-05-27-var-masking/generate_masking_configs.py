@@ -27,7 +27,7 @@ import pathlib
 
 import yaml
 
-WANDB_PROJECT = "VarMasking5"
+WANDB_PROJECT = "VarMasking4"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
 WANDB_SUFFIX = "-v4"  # stripped from wandb run names before comparison
@@ -63,7 +63,14 @@ CO2_CATALOG: dict[str, float | None] = {
 # nc-sfno: mask dose-response at co2-default (uniform 0/5/10/20 + one bernoulli
 # robustness point), then a co2 sweep at each anchor mask. sfno: baseline only.
 # (mask_name, co2_name) pairs.
-ANCHOR_MASKS: list[str] = ["mask10", "mask0.11", "mask20", "mask0.22", "mask30", "mask0.33"]
+ANCHOR_MASKS: list[str] = [
+    "mask10",
+    "mask0.11",
+    "mask20",
+    "mask0.22",
+    "mask30",
+    "mask0.33",
+]
 CO2_ABLATIONS: list[str] = ["co2-0.4", "co2-0.8", "co2-0.9"]
 DOSE_RESPONSE_RUNS: list[tuple[str, str]] = [
     ("mask0", "co2-default"),

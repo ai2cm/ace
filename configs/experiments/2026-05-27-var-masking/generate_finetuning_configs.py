@@ -61,17 +61,25 @@ def _write_config(
     beaker_dataset_id: str | None,
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
+    delete_if_in_wandb: bool = False,
 ) -> None:
-    if existing_only and not out_path.exists():
-        print(f"Skipped {out_path.name}")
-        return
     if wandb_run_names is not None:
         stem = out_path.stem
         if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
             stem = stem[len(CONFIG_PREFIX) :]
         if stem in wandb_run_names:
-            print(f"Skipped {out_path.name} (run exists in wandb)")
+            if delete_if_in_wandb:
+                if out_path.exists():
+                    out_path.unlink()
+                    print(f"Deleted {out_path.name} (run exists in wandb)")
+                else:
+                    print(f"Skipped {out_path.name} (run exists in wandb, no file)")
+            else:
+                print(f"Skipped {out_path.name} (run exists in wandb)")
             return
+    if existing_only and not out_path.exists():
+        print(f"Skipped {out_path.name}")
+        return
     if beaker_dataset_id is not None:
         header = f"# arg: --dataset {beaker_dataset_id}:/checkpoints\n"
     else:
@@ -90,6 +98,7 @@ def generate_finetune_config(
     lr: float,
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
+    delete_if_in_wandb: bool = False,
 ) -> None:
     out_path = HERE / f"{source_path.stem}-v2-finetune.yaml"
 
@@ -117,7 +126,14 @@ def generate_finetune_config(
     cfg["optimization"]["scheduler"] = _build_scheduler(epochs)
     cfg["max_epochs"] = epochs
 
-    _write_config(cfg, out_path, beaker_dataset_id, existing_only, wandb_run_names)
+    _write_config(
+        cfg,
+        out_path,
+        beaker_dataset_id,
+        existing_only,
+        wandb_run_names,
+        delete_if_in_wandb,
+    )
 
 
 def main() -> None:
@@ -165,13 +181,21 @@ def main() -> None:
             f"{WANDB_ENTITY}/{WANDB_PROJECT}."
         ),
     )
+    parser.add_argument(
+        "--delete-if-in-wandb",
+        action="store_true",
+        help=(
+            f"Delete fine-tuning configs whose run name already exists in "
+            f"{WANDB_ENTITY}/{WANDB_PROJECT}."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.source_map) as f:
         source_map: dict[str, str] | None = json.load(f)
 
     wandb_run_names: set[str] | None = None
-    if args.skip_wandb:
+    if args.skip_wandb or args.delete_if_in_wandb:
         print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
@@ -192,6 +216,7 @@ def main() -> None:
             args.lr,
             args.existing_only,
             wandb_run_names,
+            args.delete_if_in_wandb,
         )
 
 

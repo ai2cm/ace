@@ -11,12 +11,21 @@ import json
 import pathlib
 
 import yaml
-from generate_masking_configs import CONFIG_PREFIX, WANDB_PREFIX, WANDB_SUFFIX
+from generate_masking_configs import (
+    CONFIG_PREFIX,
+    WANDB_ENTITY,
+    WANDB_PREFIX,
+    WANDB_PROJECT,
+    WANDB_SUFFIX,
+)
 
 HERE = pathlib.Path(__file__).parent
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
+# Per-checkpoint run-name suffixes appended by submit_eval_jobs.py; one eval
+# suite config produces one wandb run per checkpoint.
+CHECKPOINT_SUFFIXES = ("-besttrain", "-bestinf", "-lastepoch")
 
 # Mapping of training run name -> Beaker result dataset ID, loaded from the
 # source map. Consumed by submit_eval_jobs.py to locate each run's checkpoints.
@@ -116,13 +125,31 @@ def _build_eval_suite_config(
     }
 
 
+def _fetch_wandb_run_names() -> set[str]:
+    import wandb  # lazy import: only needed with --delete-if-in-wandb
+
+    api = wandb.Api()
+    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
+    return {run.name for run in runs}
+
+
 def _write_config(
     cfg: dict,
     out_path: pathlib.Path,
     source_run_name: str,
     source_dataset_id: str,
     existing_only: bool,
+    wandb_run_names: set[str] | None = None,
 ) -> None:
+    if wandb_run_names is not None:
+        expected = {f"{source_run_name}{s}" for s in CHECKPOINT_SUFFIXES}
+        if expected <= wandb_run_names:
+            if out_path.exists():
+                out_path.unlink()
+                print(f"Deleted {out_path.name} (all runs exist in wandb)")
+            else:
+                print(f"Skipped {out_path.name} (all runs exist in wandb, no file)")
+            return
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
         return
@@ -141,6 +168,7 @@ def generate_eval_config(
     inference_names: list[str] | None,
     checkpoint_path: str,
     existing_only: bool,
+    wandb_run_names: set[str] | None = None,
 ) -> None:
     source_run_name = source_config_to_run_name(source_path.name)
     source_dataset_id = source_map.get(source_run_name)
@@ -158,7 +186,14 @@ def generate_eval_config(
         checkpoint_path=checkpoint_path,
     )
     out_path = HERE / source_config_to_eval_suite_config(source_path.name)
-    _write_config(cfg, out_path, source_run_name, source_dataset_id, existing_only)
+    _write_config(
+        cfg,
+        out_path,
+        source_run_name,
+        source_dataset_id,
+        existing_only,
+        wandb_run_names,
+    )
 
 
 def main() -> None:
@@ -188,10 +223,24 @@ def main() -> None:
         action="store_true",
         help="Only rewrite evaluator configs that already exist.",
     )
+    parser.add_argument(
+        "--delete-if-in-wandb",
+        action="store_true",
+        help=(
+            f"Delete evaluator configs whose runs (all {len(CHECKPOINT_SUFFIXES)} "
+            f"checkpoints) already exist in {WANDB_ENTITY}/{WANDB_PROJECT}."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.source_map) as f:
         source_map: dict[str, str] = json.load(f)
+
+    wandb_run_names: set[str] | None = None
+    if args.delete_if_in_wandb:
+        print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
+        wandb_run_names = _fetch_wandb_run_names()
+        print(f"Found {len(wandb_run_names)} existing runs.")
 
     source_configs = sorted(
         p
@@ -199,6 +248,7 @@ def main() -> None:
         if p.name.startswith(CONFIG_PREFIX)
         and not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
+        and not p.name.endswith("-bestinfcooldown.yaml")
     )
 
     for source_path in source_configs:
@@ -208,6 +258,7 @@ def main() -> None:
             inference_names=args.inference_name,
             checkpoint_path=args.checkpoint_path,
             existing_only=args.existing_only,
+            wandb_run_names=wandb_run_names,
         )
 
 
