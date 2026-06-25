@@ -35,7 +35,7 @@ CONFIGS = sorted(
 
 def config_to_job_name(config_filename: str) -> str:
     # ace-train-config-4deg-AIMIP-nc-sfno-mask10-uniform-co2-default.yaml
-    # → ace2-var-mask-nc-sfno-mask10-uniform-co2-default-v5
+    # → ace2-var-mask-nc-sfno-mask10-uniform-co2-default-v6
     stem = pathlib.Path(config_filename).stem  # strip .yaml
     suffix = stem.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"

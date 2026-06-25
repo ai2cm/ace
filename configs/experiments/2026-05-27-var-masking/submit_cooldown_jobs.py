@@ -33,8 +33,8 @@ def config_to_job_name(config_filename: str) -> str:
     for cooldown_suffix in ("-bestinfcooldown", "-cooldown"):
         if suffix.endswith(cooldown_suffix):
             base = suffix.removesuffix(cooldown_suffix)
-            return f"ace2-var-mask-{base}-v5{cooldown_suffix}"
-    return f"ace2-var-mask-{suffix}-v5-cooldown"
+            return f"ace2-var-mask-{base}-v6{cooldown_suffix}"
+    return f"ace2-var-mask-{suffix}-v6-cooldown"
 
 
 def main() -> None:

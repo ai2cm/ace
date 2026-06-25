@@ -18,7 +18,7 @@ HERE = pathlib.Path(__file__).parent
 WANDB_PROJECT = "VarMasking6"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v5"  # stripped from wandb run names before comparison
+WANDB_SUFFIX = "-v6"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = (
     "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
 )
@@ -63,7 +63,7 @@ def _out_path_to_run_name(out_path: pathlib.Path) -> str:
 
     Config stem: {CONFIG_PREFIX}{base}{cooldown_suffix}
     Run name:    {WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}
-    (the -v5 version tag sits before the cooldown suffix).
+    (the -v6 version tag sits before the cooldown suffix).
     """
     stem = out_path.stem
     if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
