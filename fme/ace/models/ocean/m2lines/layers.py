@@ -17,6 +17,37 @@ class BilinearUpsample(torch.nn.Module):
         return self.upsampler(x)
 
 
+class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
+    """Bilinear upsampling that enforces periodicity along the longitude axis.
+
+    A plain bilinear ``Upsample`` interpolates the longitude (width) boundary
+    against a replicated edge column, which leaves a discontinuity at the lon=0
+    seam. Here we pad one column on each longitude edge with the wrapped
+    (circular) neighbor before interpolating, then crop the upsampled padding
+    back off, so the seam is interpolated against its true periodic neighbor.
+    The latitude (height) axis is left unpadded, consistent with the constant
+    padding used for the latitude axis elsewhere in Samudra. The output shape
+    matches ``BilinearUpsample``.
+    """
+
+    def __init__(self, upsampling: int = 2, **kwargs):
+        super().__init__()
+        self.upsampling = upsampling
+
+    def forward(self, x):
+        width = x.shape[-1]
+        padded = torch.nn.functional.pad(x, (1, 1, 0, 0), mode="circular")
+        upsampled = torch.nn.functional.interpolate(
+            padded,
+            scale_factor=self.upsampling,
+            mode="bilinear",
+            align_corners=False,
+        )
+        start = self.upsampling
+        end = start + width * self.upsampling
+        return upsampled[..., start:end]
+
+
 class AvgPool(torch.nn.Module):
     def __init__(
         self,
