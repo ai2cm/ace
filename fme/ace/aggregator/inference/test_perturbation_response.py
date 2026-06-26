@@ -197,3 +197,27 @@ def test_diagnostics_written(tmp_path):
     assert "p4K__air_temperature_7" in ds
     # land cells (cols 2,3) warm by 2 K
     np.testing.assert_allclose(ds["p4K__air_temperature_7"].values[:, 2:], 2.0)
+
+
+def test_response_maps_logged_for_every_field():
+    group_onehot = torch.tensor([[1, 0], [1, 0], [0, 1], [0, 1]], device=get_device())
+    agg = _build_aggregator(group_onehot)
+    agg.record_batch(_paired_data(group_onehot))
+    logs = agg.get_summary().logs
+    # A 2D response map is logged for every predicted field (here the 8 levels).
+    for i in range(8):
+        assert f"p4K/response_map/air_temperature_{i}" in logs
+    # The scalar diagnostics still co-exist in the same logs dict.
+    assert "p4K/land_ocean_warming_ratio/tropics" in logs
+
+
+def test_response_map_variables_restricts_maps():
+    group_onehot = torch.tensor([[1, 0], [0, 1]], device=get_device())
+    config = PerturbationResponseAggregatorConfig(
+        response_map_variables=["air_temperature_7"]
+    )
+    agg = _build_aggregator(group_onehot, config=config)
+    agg.record_batch(_paired_data(group_onehot))
+    logs = agg.get_summary().logs
+    map_keys = [k for k in logs if "/response_map/" in k]
+    assert map_keys == ["p4K/response_map/air_temperature_7"]
