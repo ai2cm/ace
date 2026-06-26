@@ -18,8 +18,8 @@ inference:
   - name: 10year
     weight: 0.0
     epochs:
-      start: 1
-      step: 2
+      start: 0
+      stop: 1
     n_forward_steps: 3652
     forward_steps_in_memory: 73
     n_ensemble_per_ic: 1
@@ -102,8 +102,8 @@ inference:
   - name: 10year_insample
     weight: 1.0
     epochs:
-      start: 1
-      step: 2
+      start: 0
+      stop: 1
     n_forward_steps: 3652
     forward_steps_in_memory: 73
     n_ensemble_per_ic: 1
@@ -271,8 +271,8 @@ inference:
   - name: long_46year
     weight: 0.0
     epochs:
-      start: 4
-      step: 5
+      start: 0
+      stop: 1
     n_forward_steps: 16794
     forward_steps_in_memory: 73
     n_ensemble_per_ic: 1
@@ -320,8 +320,8 @@ inference:
   - name: long_46year_constant_co2
     weight: 0.0
     epochs:
-      start: 4
-      step: 5
+      start: 0
+      stop: 1
     n_forward_steps: 16794
     forward_steps_in_memory: 73
     n_ensemble_per_ic: 1
