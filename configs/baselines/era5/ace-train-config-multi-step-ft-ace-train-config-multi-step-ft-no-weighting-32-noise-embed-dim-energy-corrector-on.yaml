@@ -58,7 +58,7 @@ train_loader:
       subset:
         start_time: '2021-01-01'
 validation_loader:
-  batch_size: 64
+  batch_size: 32
   num_data_workers: 8
   prefetch_factor: 2
   dataset:
