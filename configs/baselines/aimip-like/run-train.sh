@@ -87,4 +87,18 @@ run_training() {
 # Validation (1994 + 2014) and all inference eval loops are identical to v2 for a
 # clean A/B on the data range vs the v2 baseline (rs6b7nyr). seed 0, ~120 epochs.
 # =============================================================================
-run_training "train-4deg-daily-v2-era5-only-pre1979.yaml" "train-4deg-daily-v2-era5-only-pre1979-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched (wandb lbk553vf); commented so this branch launches only the no-residual variant.
+# run_training "train-4deg-daily-v2-era5-only-pre1979.yaml" "train-4deg-daily-v2-era5-only-pre1979-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# No-residual control for the pre-1979 stability test (seed 0).
+# Task: research/tasks/2026-06-26-add-a-no-residual-pre-1979-control-to-attribute-the-residual-instability.md
+# Investigation: research/investigations/2026-06-22-pre1979-era5-residual-stability.md
+#
+# Identical to train-4deg-daily-v2-era5-only-pre1979.yaml (the residual pre-1979
+# run, wandb lbk553vf) EXCEPT residual_prediction: true -> false. Isolates
+# whether the late-training rollout-skill degradation seen on the residual
+# pre-1979 run is residual-specific or a property of the pre-1979 data / longer
+# training. Baseline: no-residual v2 (1979-on), wandb znnaox7t. seed 0, 120 epochs.
+# =============================================================================
+run_training "train-4deg-daily-v2-era5-only-no-residual-pre1979.yaml" "train-4deg-daily-v2-era5-only-no-residual-pre1979-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
