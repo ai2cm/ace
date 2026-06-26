@@ -94,4 +94,25 @@ run_training() {
 # =============================================================================
 
 # --- v2 no-residual ablation, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-no-residual.yaml" "train-4deg-daily-v2-era5-only-no-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched as wandb znnaox7t / beaker 01KVWYW6KKM2K8PY6MWXJVNQ6R; commented out so this script does not relaunch it.
+# run_training "train-4deg-daily-v2-era5-only-no-residual.yaml" "train-4deg-daily-v2-era5-only-no-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# eswhiten cross with residual-prediction (v2 default weights, NO fd-CRPS).
+#
+# Energy-score per-sample spectral whitening (energy_score_whitening:
+# per_sample, EnergyScoreLoss option from the 2026-06-19 spectral-whitening A/B)
+# added to the v2 default loss (crps 0.9 / energy 0.1, no fd-CRPS term). These
+# two complete the {residual, no-residual} x {eswhiten, no-eswhiten} 2x2: the
+# no-eswhiten cells are the v2 baseline (oshj5u79) and the v2 no-residual
+# control (znnaox7t). Isolates the eswhiten effect (the real signal from the
+# fd-CRPS weighting investigation: ~-58% h500 spectral bias with no T0 1-step
+# cost) within the v2 window, crossed with residual prediction on/off. Each is
+# its base config + a single energy_score_whitening: per_sample line.
+# =============================================================================
+
+# --- v2 eswhiten (with residual), seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-eswhiten.yaml" "train-4deg-daily-v2-era5-only-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- v2 no-residual eswhiten, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-no-residual-eswhiten.yaml" "train-4deg-daily-v2-era5-only-no-residual-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
