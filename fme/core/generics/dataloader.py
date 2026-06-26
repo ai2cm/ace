@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable, Iterator
-from typing import Generic, Self, TypeVar, final
+from typing import Generic, Protocol, Self, TypeVar, final, runtime_checkable
 
 import torch
 
@@ -9,6 +9,20 @@ from fme.core.rand import alternate_seed
 
 _T = TypeVar("_T")
 _BD = TypeVar("_BD", covariant=True)  # collate_fn return type, i.e. "batch data"
+
+
+@runtime_checkable
+class _EpochAwareSampler(Protocol):
+    """A sampler whose draw order depends on the training epoch."""
+
+    def set_epoch(self, epoch: int): ...
+
+
+@runtime_checkable
+class _AlternateShuffleSampler(Protocol):
+    """A sampler that can produce an independent draw order on demand."""
+
+    def alternate_shuffle(self): ...
 
 
 class GenericDataLoader(Generic[_BD]):
@@ -121,10 +135,12 @@ class GenericDataLoader(Generic[_BD]):
     @final
     def set_epoch(self, epoch: int):
         self._dataset.set_epoch(epoch)
-        if isinstance(self._sampler, torch.utils.data.DistributedSampler):
+        if isinstance(self._sampler, _EpochAwareSampler):
             self._sampler.set_epoch(epoch)
 
     @final
     def alternate_shuffle(self):
-        if isinstance(self._sampler, torch.utils.data.DistributedSampler):
+        if isinstance(self._sampler, _AlternateShuffleSampler):
+            self._sampler.alternate_shuffle()
+        elif isinstance(self._sampler, torch.utils.data.DistributedSampler):
             self._sampler.set_epoch(alternate_seed(self._sampler.epoch))

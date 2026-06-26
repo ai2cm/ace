@@ -36,6 +36,11 @@ class XarrayConcat(DatasetABC):
         return self._dataset[idx]
 
     @property
+    def member_lengths(self) -> list[int]:
+        """Number of samples contributed by each concatenated member dataset."""
+        return [len(dataset) for dataset in self._wrapped_datasets]
+
+    @property
     def sample_start_times(self):
         return self._sample_start_times
 

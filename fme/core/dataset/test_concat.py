@@ -27,6 +27,17 @@ def test_concat_len():
     assert len(concat_dataset) == sum(len(ds) for ds in datasets)
 
 
+def test_concat_member_lengths():
+    datasets = [
+        MockDataset.new(n_times=n, varnames=["var1"], sample_n_times=3)
+        for n in (10, 12, 8)
+    ]
+    concat_dataset = XarrayConcat(datasets)
+    member_lengths = concat_dataset.member_lengths
+    assert member_lengths == [len(ds) for ds in datasets]
+    assert sum(member_lengths) == len(concat_dataset)
+
+
 def test_concat_getitem_propagates_metadata():
     datasets = [
         MockDataset.new(

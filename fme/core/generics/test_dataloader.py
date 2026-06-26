@@ -1,9 +1,55 @@
+import torch
+
 from fme.core.generics.dataloader import GenericDataLoader
 from fme.core.generics.test_dataset import _Dataset
 
 
 def identity_collate(batch: list[int]) -> list[int]:
     return batch
+
+
+class _EpochSampler(torch.utils.data.Sampler):
+    """Minimal sampler implementing set_epoch and alternate_shuffle."""
+
+    def __init__(self, data_source):
+        self._n = len(data_source)
+        self.epoch = 0
+        self.alternate_calls = 0
+
+    def set_epoch(self, epoch: int):
+        self.epoch = epoch
+
+    def alternate_shuffle(self):
+        self.alternate_calls += 1
+
+    def __iter__(self):
+        return iter(range(self._n))
+
+    def __len__(self):
+        return self._n
+
+
+def test_set_epoch_drives_custom_sampler():
+    dataset = _Dataset(list(range(6)))
+    sampler = _EpochSampler(dataset.torch_dataset)
+    loader = GenericDataLoader(
+        dataset, collate_fn=identity_collate, batch_size=2, sampler=sampler
+    )
+    loader.set_epoch(4)
+    assert dataset.epoch == 4
+    assert sampler.epoch == 4
+
+
+def test_alternate_shuffle_drives_custom_sampler():
+    dataset = _Dataset(list(range(6)))
+    sampler = _EpochSampler(dataset.torch_dataset)
+    loader = GenericDataLoader(
+        dataset, collate_fn=identity_collate, batch_size=2, sampler=sampler
+    )
+    loader.alternate_shuffle()
+    assert sampler.alternate_calls == 1
+    # alternate_shuffle must not advance the scheduled epoch
+    assert sampler.epoch == 0
 
 
 def test_generic_dataloader_subset():
