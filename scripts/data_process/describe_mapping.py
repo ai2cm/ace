@@ -149,11 +149,11 @@ def main(mapping_path: str, verbose: bool):
                     {
                         "name": name,
                         "run": r["run"],
-                        "start": str(r["t0"]),
-                        "end": str(r["t1"]),
+                        "start": fmt_time(r["t0"]),
+                        "end": fmt_time(r["t1"]),
                         "n": r["n"],
                         "dtype": r["dtype"],
-                        "dt": str(r["dt"]),
+                        "dt": fmt_dt(r["dt"]),
                         "uniform": "y" if r["uniform"] else "n",
                     }
                 )
