@@ -14,7 +14,6 @@ from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOpe
 from fme.core.typing_ import TensorMapping
 
 from .atmosphere import (
-    AtmosphereCorrector,
     AtmosphereCorrectorConfig,
     EnergyBudgetConfig,
     _adjust_gen_dry_air_to_target,
@@ -460,7 +459,7 @@ def test_corrector_integration(air_temperature_prefix):
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
+    corrector = config._build(ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data, None)
 
 
@@ -472,7 +471,7 @@ def _build_conserve_dry_air_corrector(tensor_shape):
         torch.ones(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    return AtmosphereCorrector(config, ops, vertical_coord, timestep), vertical_coord
+    return config._build(ops, vertical_coord, timestep), vertical_coord
 
 
 def _global_dry_air_mass(
@@ -551,6 +550,6 @@ def test_conserve_dry_air_requires_vertical_coordinate():
     config = AtmosphereCorrectorConfig(conserve_dry_air=True)
     ops = LatLonOperations(torch.ones(size=(5, 1)).broadcast_to(size=(5, 5)))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = AtmosphereCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
     with pytest.raises(ValueError, match="vertical coordinate"):
         corrector({}, {}, {}, None)

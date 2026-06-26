@@ -1,7 +1,7 @@
 import abc
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Self, final
+from typing import Any, Protocol, Self, final
 
 import dacite
 
@@ -66,6 +66,27 @@ class CorrectorConfigABC(abc.ABC):
     ) -> "CorrectorABC": ...
 
 
+class Correction(Protocol):
+    """A single correction applied to ``gen_data`` by a corrector.
+
+    Each correction is a self-contained callable object that bundles its own
+    parameters and operators (e.g. an area-weighted-mean operator or a vertical
+    coordinate) and applies one conservation/positivity step. A corrector holds
+    an ordered sequence of these and simply applies them in turn, so it does not
+    need to read any config fields itself. The signature mirrors
+    ``CorrectorABC.__call__`` so corrections compose: a correction that does not
+    maintain state passes ``corrector_state`` through unchanged.
+    """
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]: ...
+
+
 class CorrectorABC(abc.ABC):
     def train(self, mode: bool = True) -> "CorrectorABC":
         """Set the corrector to training or evaluation mode.
@@ -119,6 +140,32 @@ class CorrectorABC(abc.ABC):
             A tuple ``(corrected_gen_data, corrector_state)``.
         """
         ...
+
+
+class CorrectionSequence(CorrectorABC):
+    """A corrector that applies an ordered sequence of ``Correction`` objects.
+
+    The sequence (and thus the order in which corrections are applied) is built
+    by the corrector config's ``_build``; the corrector itself only knows to
+    apply each correction in turn.
+    """
+
+    def __init__(self, corrections: list[Correction]):
+        self._corrections = corrections
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        gen_data = dict(gen_data)
+        for correction in self._corrections:
+            gen_data, corrector_state = correction(
+                input_data, gen_data, forcing_data, corrector_state
+            )
+        return dict(gen_data), corrector_state
 
 
 class EpochScheduledCorrector(CorrectorABC):
