@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 1460
+n_forward_steps: 14600
 forward_steps_in_memory: 73
 checkpoint_path: /ckpt.tar
 logging:

@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_forward_steps: 7300
+n_forward_steps: 14600
 forward_steps_in_memory: 73
 checkpoint_path: /ckpt.tar
 logging:
@@ -19,7 +19,15 @@ loader:
   num_data_workers: 16
 aggregator:
   log_zonal_mean_images: false
-  log_histograms: true
+  histogram:
+    enabled: true
+    variables:
+      - PRATEsfc
+      - TMP2m
+      - PRMSL
+      - UGRD10m
+      - VGRD10m
+      - PRESsfc
 data_writer:
   save_prediction_files: false
   save_monthly_files: false

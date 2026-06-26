@@ -1,0 +1,36 @@
+experiment_dir: /climate-default/home/annak/2026-06-25-ace2s-era5-tuned-xshield
+n_forward_steps: 7300
+forward_steps_in_memory: 20
+checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
+logging:
+  project: ace2som-xshield-tuning
+initial_condition:
+  path: /climate-default/2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2014-01-01T00:00:00'
+      #- '2020-01-02T00:00:00'
+      #- '2020-01-03T00:00:00'
+      #- '2020-01-04T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+    engine: zarr
+  num_data_workers: 16
+aggregator: {}
+data_writer:
+  files:
+  - format:
+      name: zarr
+    label: output_6hourly
+    names:
+    - PRATEsfc
+    - UGRD10m
+    - VGRD10m
+    - PRMSL
+    - TMP2m
+    separate_ensemble_members: true
+  save_monthly_files: false
+  save_prediction_files: false

@@ -1,4 +1,4 @@
-experiment_dir: /climate-default/home/annak/2026-05-15-ace2som-4ktuned-outputs-downscaled
+experiment_dir: /climate-default/home/annak/2026-06-25-ace2s-era5-tuned-xshield
 patch:
   divide_generation: true
   composite_prediction: true
