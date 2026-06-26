@@ -18,7 +18,7 @@ class ZeroFractionMetricConfig:
     """Area-weighted fraction of cells at or below a threshold.
 
     Reports, per variable, the area-weighted fraction of cells whose value is
-    ``<= threshold`` for the prediction, the target, and their difference. For
+    ``<= threshold`` for the prediction, and its difference from the target. For
     precipitation (``PRATEsfc``) with the default threshold of 0 this is the
     fraction of exactly-zero (dry) cells, which the existing
     RMSE/bias/histogram metrics do not surface directly — useful for diagnosing
@@ -67,10 +67,10 @@ class ZeroFractionMetricConfig:
 class ZeroFractionAggregator:
     """Accumulates the area-weighted fraction of cells with value ``<= threshold``.
 
-    For each variable it reports the predicted fraction, the target fraction
-    (when a target is available), and their difference (gen - target), averaged
-    over all sample/time entries seen. The metric name is supplied by the
-    caller as the ``label`` prefix in :meth:`get_logs`.
+    For each variable it reports the predicted fraction and, when a target is
+    available, its difference from the target (gen - target), averaged over all
+    sample/time entries seen. The metric name is supplied by the caller as the
+    ``label`` prefix in :meth:`get_logs`.
     """
 
     def __init__(
@@ -128,10 +128,8 @@ class ZeroFractionAggregator:
         logs: dict[str, float] = {}
         for name, value in gen_means.items():
             logs[f"gen/{name}"] = value
-        for name, value in target_means.items():
-            logs[f"target/{name}"] = value
-            if name in gen_means:
-                logs[f"gen_minus_target/{name}"] = gen_means[name] - value
+            if name in target_means:
+                logs[f"gen_minus_target/{name}"] = value - target_means[name]
         if label != "":
             logs = {f"{label}/{k}": v for k, v in logs.items()}
         return logs

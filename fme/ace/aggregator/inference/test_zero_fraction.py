@@ -28,8 +28,9 @@ def test_zero_fraction_counts_exactly_zero_cells():
     agg.record_batch(data)
     logs = agg.get_logs("val")
     assert logs["val/gen/PRATEsfc"] == 0.5
-    assert logs["val/target/PRATEsfc"] == 0.0
     assert logs["val/gen_minus_target/PRATEsfc"] == 0.5
+    # the standalone target fraction is not reported
+    assert "val/target/PRATEsfc" not in logs
 
 
 def test_zero_fraction_no_target():
