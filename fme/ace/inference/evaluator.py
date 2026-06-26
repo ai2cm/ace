@@ -47,7 +47,11 @@ from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.generics.inference import get_record_to_wandb, run_inference
+from fme.core.generics.inference import (
+    WandBStepLogger,
+    get_record_to_wandb,
+    run_inference,
+)
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
@@ -332,13 +336,19 @@ class _Deriver(DeriverABC):
         return data.remove_initial_condition(self._n_ic_timesteps)
 
 
-def run_evaluator_from_config(config: InferenceEvaluatorConfig):
+def run_evaluator_from_config(
+    config: InferenceEvaluatorConfig,
+    log_label: str = "inference",
+    configure_logging: bool = True,
+    logger: WandBStepLogger | None = None,
+):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
 
     with timer.context("initialization"):
         makedirs(config.experiment_dir, exist_ok=True)
-        config.configure_logging(log_filename="inference_out.log")
+        if configure_logging:
+            config.configure_logging(log_filename="inference_out.log")
 
         if fme.using_gpu():
             torch.backends.cudnn.benchmark = True
@@ -448,7 +458,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         )
 
     logging.info("Starting inference")
-    logger = get_record_to_wandb(label="inference")
+    if logger is None:
+        logger = get_record_to_wandb(label=log_label)
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config.prediction_loader,
@@ -471,7 +482,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
-            record_logs=logger.log,
+            record_logs=lambda logs: logger.log(logs, label=log_label),
         )
     else:
         run_inference(
@@ -479,7 +490,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data=data,
             aggregator=aggregator,
             writer=writer,
-            record_logs=logger.log,
+            record_logs=lambda logs: logger.log(logs, label=log_label),
         )
 
     with timer.context("final_writer_flush"):
@@ -503,7 +514,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         "total_steps_per_second": total_steps_per_second,
         **aggregator.get_summary_logs(),
     }
-    logger.log_to_current_step(summary_logs)  # prefix "inference/"
-    logger.log_to_current_step(
-        timer.get_durations(), label=""
-    )  # durations already prefixed
+    logger.log_to_current_step(summary_logs, label=log_label)
+    timer_label = "" if log_label == "inference" else log_label
+    logger.log_to_current_step(timer.get_durations(), label=timer_label)
