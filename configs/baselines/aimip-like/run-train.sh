@@ -107,4 +107,27 @@ run_training() {
 # =============================================================================
 
 # --- v2 + energy corrector + unaccounted heating 6.62, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched (beaker 01KS...; see record). Commented out so this script does
+# not relaunch it; uncomment to launch a fresh seed.
+# run_training "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# v2 ERA5-only baseline + qsat-scaled shared global-mean removal.
+#
+# The qsat-scaling feature (Bolton 1980 saturation-specific-humidity ratio applied
+# to the moisture set on the way into the shared global-mean-removal transform,
+# divided back out on the way out; cherry-picked onto this branch from the
+# original ace#1256 feature). Two runs: the canonical residual recipe + qsat
+# scaling, and a no-residual sibling + qsat scaling. The matched no-residual
+# control WITHOUT qsat scaling is wandb znnaox7t. Diagnoses how qsat scaling
+# affects the specific_total_water_3 trend in the long_46year_constant_co2
+# rollout. qsat_scaled_names matches the v1 qsat run (wandb n4pzvojf):
+# specific_total_water_0-7, LHTFLsfc, PRATEsfc,
+# tendency_of_total_water_path_due_to_advection, Q2m. global_mean_co2 input kept.
+# =============================================================================
+
+# --- v2 + qsat scaling (residual), seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-qsat-scaling.yaml" "train-4deg-daily-v2-era5-only-qsat-scaling-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- v2 + qsat scaling, no residual, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-no-residual-qsat-scaling.yaml" "train-4deg-daily-v2-era5-only-no-residual-qsat-scaling-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
