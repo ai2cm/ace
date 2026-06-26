@@ -42,7 +42,7 @@ DEFAULT_WORKSPACE = "ai2/ace"
 # CPU-only stats job; runs on the same cluster/priority as copy_zarr_to_weka.sh.
 DEFAULT_CLUSTERS = ["ai2/phobos"]
 DEFAULT_PRIORITY = "high"
-DEFAULT_BUDGET = "ai2/ace"
+DEFAULT_BUDGET = "ai2/atec-climate"
 DEFAULT_WEKA = "climate-default:/climate-default"
 GCP_CREDS = "/tmp/google_application_credentials.json"
 
