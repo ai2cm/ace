@@ -325,17 +325,17 @@ class _EnsembleAggregator:
                     names = list(self._channel_mean_names)
                 # Exclude variables whose target was entirely NaN (e.g. filled
                 # by allow_missing_variables) from the channel mean.
-                excluded = self._all_nan_target_names or set()
-                names = [name for name in names if name not in excluded]
+                nan_targets = self._all_nan_target_names or set()
+                names = [name for name in names if name not in nan_targets]
                 if names:
                     scalars = [data[f"{metric}/{key}"] for key in names]
                     data[f"{metric}/channel_mean"] = sum(scalars) / len(scalars)
         if self._report_variables is not None:
-            excluded = all_variable_names - self._report_variables
+            nan_targets = all_variable_names - self._report_variables
             data = {
                 k: v
                 for k, v in data.items()
-                if not any(seg in excluded for seg in k.split("/"))
+                if not any(seg in nan_targets for seg in k.split("/"))
             }
         return data
 
