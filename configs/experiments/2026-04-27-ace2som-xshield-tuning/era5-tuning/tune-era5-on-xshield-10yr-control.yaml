@@ -55,7 +55,7 @@ train_loader:
         stop_time: '2022-12-31'
 validation:
   loader:
-    batch_size: 64
+    batch_size: 32
     num_data_workers: 4
     prefetch_factor: 2
     dataset:
