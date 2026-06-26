@@ -14,59 +14,82 @@ AreaWeightedMean = Callable[..., torch.Tensor]
 
 
 @dataclasses.dataclass
-class DryFractionMetricConfig:
+class ZeroFractionMetricConfig:
     """Area-weighted fraction of cells at or below a threshold.
 
-    Reports, per variable, the area-weighted fraction of "dry" cells (value
-    ``<= threshold``) for the prediction, the target, and their difference. For
+    Reports, per variable, the area-weighted fraction of cells whose value is
+    ``<= threshold`` for the prediction, the target, and their difference. For
     precipitation (``PRATEsfc``) with the default threshold of 0 this is the
-    dry-cell fraction, which existing metrics (RMSE/bias/histogram) do not
-    surface directly — useful for diagnosing a model's dry-cell / drizzle
-    behaviour against the target distribution. Disabled by default.
+    fraction of exactly-zero (dry) cells, which the existing
+    RMSE/bias/histogram metrics do not surface directly — useful for diagnosing
+    a model's dry-cell / drizzle behaviour against the target distribution.
+    Disabled by default.
 
     Parameters:
-        variables: when set, only compute the metric for these variables
-            (typically ``["PRATEsfc"]``).
-        threshold: a cell counts as "dry" when its value is ``<= threshold``.
-            Defaults to 0.0, i.e. exactly-zero for non-negative precipitation.
+        variables: variables to compute the metric for (e.g. ``["PRATEsfc"]``).
+            Must be non-empty when ``enabled``.
+        threshold: a cell counts toward the fraction when its value is
+            ``<= threshold``. Defaults to 0.0. Applied to any variable not
+            listed in ``per_variable_threshold``.
+        per_variable_threshold: optional per-variable thresholds overriding
+            ``threshold`` for the named variables.
         name: log prefix and wandb key prefix.
         enabled: master toggle for the metric.
         strict: raise if the metric can't be built.
     """
 
-    variables: list[str] | None = None
+    variables: list[str] = dataclasses.field(default_factory=list)
     threshold: float = 0.0
-    name: str = "dry_fraction"
+    per_variable_threshold: dict[str, float] = dataclasses.field(default_factory=dict)
+    name: str = "zero_threshold_fraction"
     enabled: bool = False
     strict: bool = True
+
+    def __post_init__(self):
+        if self.enabled and not self.variables:
+            raise ValueError(
+                "ZeroFractionMetricConfig is enabled but no variables were given; "
+                "specify the variables to compute the metric for."
+            )
 
     def get_name(self) -> str:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
-        agg: SubAggregator = DryFractionAggregator(
+        agg: SubAggregator = ZeroFractionAggregator(
             area_weighted_mean=ctx.ops.area_weighted_mean,
             threshold=self.threshold,
+            per_variable_threshold=self.per_variable_threshold,
         )
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
 
 
-class DryFractionAggregator:
-    """Accumulates the area-weighted fraction of dry (``<= threshold``) cells.
+class ZeroFractionAggregator:
+    """Accumulates the area-weighted fraction of cells with value ``<= threshold``.
 
-    For each variable it reports the predicted dry fraction, the target dry
-    fraction (when a target is available), and their difference (gen - target),
-    averaged over all sample/time entries seen.
+    For each variable it reports the predicted fraction, the target fraction
+    (when a target is available), and their difference (gen - target), averaged
+    over all sample/time entries seen. The metric name is supplied by the
+    caller as the ``label`` prefix in :meth:`get_logs`.
     """
 
-    def __init__(self, area_weighted_mean: AreaWeightedMean, threshold: float = 0.0):
+    def __init__(
+        self,
+        area_weighted_mean: AreaWeightedMean,
+        threshold: float = 0.0,
+        per_variable_threshold: dict[str, float] | None = None,
+    ):
         self._area_weighted_mean = area_weighted_mean
         self._threshold = threshold
+        self._per_variable_threshold = per_variable_threshold or {}
         self._dist = Distributed.get_instance()
         self._gen_sum: dict[str, torch.Tensor] = {}
         self._gen_count: dict[str, int] = {}
         self._target_sum: dict[str, torch.Tensor] = {}
         self._target_count: dict[str, int] = {}
+
+    def _threshold_for(self, name: str) -> float:
+        return self._per_variable_threshold.get(name, self._threshold)
 
     def _accumulate(
         self,
@@ -75,11 +98,11 @@ class DryFractionAggregator:
         counts: dict[str, int],
     ) -> None:
         for name, tensor in data.items():
-            dry = (tensor <= self._threshold).to(tensor.dtype)
+            below = (tensor <= self._threshold_for(name)).to(tensor.dtype)
             # area_weighted_mean reduces the horizontal dims, leaving the
             # (sample, time) leading dims; each entry is that snapshot's
-            # area-weighted dry fraction.
-            frac = self._area_weighted_mean(dry, name=name)
+            # area-weighted fraction at or below the threshold.
+            frac = self._area_weighted_mean(below, name=name)
             sums[name] = sums.get(name, frac.new_zeros(())) + frac.sum()
             counts[name] = counts.get(name, 0) + frac.numel()
 
@@ -104,11 +127,11 @@ class DryFractionAggregator:
         target_means = self._reduced_means(self._target_sum, self._target_count)
         logs: dict[str, float] = {}
         for name, value in gen_means.items():
-            logs[f"dry_fraction/gen/{name}"] = value
+            logs[f"gen/{name}"] = value
         for name, value in target_means.items():
-            logs[f"dry_fraction/target/{name}"] = value
+            logs[f"target/{name}"] = value
             if name in gen_means:
-                logs[f"dry_fraction/gen_minus_target/{name}"] = gen_means[name] - value
+                logs[f"gen_minus_target/{name}"] = gen_means[name] - value
         if label != "":
             logs = {f"{label}/{k}": v for k, v in logs.items()}
         return logs
