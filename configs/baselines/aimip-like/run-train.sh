@@ -107,4 +107,22 @@ run_training() {
 # =============================================================================
 
 # --- v2 + energy corrector + unaccounted heating 6.62, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched (wandb w2ilktx7; beaker 01KVX7VP9NQ4PKS86K8QH8N3JM). Commented
+# out so this script does not relaunch it; uncomment to launch a fresh seed.
+# run_training "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-uh6p62-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# v2 ERA5-only residual baseline + total-energy-budget corrector EXCLUDING the
+# top vertical level from the temperature correction (challenger).
+#
+# Identical to the energy-corrector challenger (heating-0) except the
+# total_energy_budget_correction sets exclude_top_levels: 1, so the uniform
+# temperature addition is applied to levels 1-7 only (level 0, the model top, is
+# excluded). The global magnitude of the correction is still computed across all
+# levels. Tests whether excluding the top level removes the positive
+# air_temperature_0 bias the all-levels corrector introduced (vs v2 control
+# oshj5u79) without reintroducing energy-budget drift.
+# =============================================================================
+
+# --- v2 + energy corrector, exclude top level, seed 0 (1 GPU; Jupiter+Titan, high) ---
+run_training "train-4deg-daily-v2-era5-only-energy-corrector-excl-top1.yaml" "train-4deg-daily-v2-era5-only-energy-corrector-excl-top1-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
