@@ -2,6 +2,7 @@ seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
+pre_cooldown_checkpoint_epoch: 142
 validate_using_ema: true
 max_epochs: 150
 ema:
@@ -289,6 +290,10 @@ train_loader:
   prefetch_factor: 4
   time_buffer: 8
   time_buffer_pool_size: 32
+  group_weights:
+    # 28 non-ERA5 members (AMIP=2, random-CO2=9, SOM=17), then 2 ERA5 members.
+    groups: [28, 2]
+    start_value: [0.5, 0.5]
   dataset:
     strict: false
     concat:

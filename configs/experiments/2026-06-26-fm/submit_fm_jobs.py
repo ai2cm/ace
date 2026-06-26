@@ -1,12 +1,12 @@
-"""Submit a gantry training job for each generated var-masking config.
+"""Submit a gantry training job for each nc-sfno foundation model (fm) config.
 
-Each config produced by generate_masking_configs.py is submitted via
-run-ace-train.sh, which validates the config and calls gantry.
+Each nc-sfno config in this directory is submitted via run-ace-train.sh, which
+validates the config and calls gantry.
 
 Usage:
-    python submit_mask_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
-                               [--beaker-cluster CLUSTER [CLUSTER ...]]
-                               [--beaker-priority PRIORITY]
+    python submit_fm_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
+                             [--beaker-cluster CLUSTER [CLUSTER ...]]
+                             [--beaker-priority PRIORITY]
 """
 
 import argparse
@@ -14,28 +14,25 @@ import os
 import pathlib
 import subprocess
 
-from generate_masking_configs import (
-    CONFIG_PREFIX,
-    WANDB_PREFIX,
-    WANDB_PROJECT,
-    WANDB_SUFFIX,
-)
-
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
-WANDB_GROUP = "ace2-var-masking-2026-06-15"
+WANDB_PROJECT = "ace"
+WANDB_PREFIX = "ace2-fm-"
+WANDB_SUFFIX = "-v1"
+WANDB_GROUP = "ace2-fm-2026-06-26"
+CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 
 CONFIGS = sorted(
     path.name
     for path in HERE.glob("*.yaml")
-    if path.name.startswith(CONFIG_PREFIX) and "-mask" in path.name
+    if path.name.startswith(CONFIG_PREFIX) and "nc-sfno" in path.name
 )
 
 
 def config_to_job_name(config_filename: str) -> str:
-    # ace-train-config-4deg-AIMIP-nc-sfno-mask10-uniform-co2-default.yaml
-    # → ace2-var-mask-nc-sfno-mask10-uniform-co2-default-v6
+    # ace-train-config-4deg-AIMIP-nc-sfno-fm.yaml
+    # → ace2-fm-nc-sfno-fm-v1
     stem = pathlib.Path(config_filename).stem  # strip .yaml
     suffix = stem.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
@@ -70,9 +67,7 @@ def main() -> None:
     for config_filename in CONFIGS:
         config_path = HERE / config_filename
         if not config_path.exists():
-            raise FileNotFoundError(
-                f"{config_filename} not found — run generate_masking_configs.py first"
-            )
+            raise FileNotFoundError(f"{config_filename} not found")
         job_name = config_to_job_name(config_filename)
         cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]
         print("Submitting:", " ".join(cmd))
