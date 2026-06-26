@@ -105,5 +105,12 @@ aggregator:
     name: trend
     enabled: false
     strict: false
+  zero_fraction:
+    variables: []
+    threshold: 0.0
+    per_variable_threshold: {}
+    name: zero_threshold_fraction
+    enabled: false
+    strict: true
   monthly_reference_data: null
   time_mean_reference_data: null
