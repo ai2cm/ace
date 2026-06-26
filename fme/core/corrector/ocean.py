@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import torch
@@ -62,6 +62,12 @@ class SeaIceFractionConfig:
         for name in self.zero_where_ice_free_names:
             out[name] = gen_data[name] * (out[self.sea_ice_fraction_name] > 0.0)
         return out
+
+
+# Operation the OceanCorrector applies to enforce sea-ice-fraction constraints;
+# provided by SeaIceFractionConfig.__call__. Passed as a callable (not the config)
+# so the corrector relies only on the operation, not on reading config fields.
+SeaIceFractionCorrection = Callable[[TensorMapping, TensorMapping], TensorDict]
 
 
 @dataclasses.dataclass
@@ -191,7 +197,11 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         )
         return OceanCorrector(
             params=params,
-            sea_ice_fraction_correction=self.sea_ice_fraction_correction,
+            sea_ice_fraction_correction=(
+                None
+                if self.sea_ice_fraction_correction is None
+                else self.sea_ice_fraction_correction.__call__
+            ),
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
@@ -202,7 +212,7 @@ class OceanCorrector(CorrectorABC):
     def __init__(
         self,
         params: OceanCorrectorParams,
-        sea_ice_fraction_correction: SeaIceFractionConfig | None,
+        sea_ice_fraction_correction: SeaIceFractionCorrection | None,
         gridded_operations: GriddedOperations,
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
