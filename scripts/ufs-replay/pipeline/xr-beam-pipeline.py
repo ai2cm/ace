@@ -735,6 +735,11 @@ def _process_chunk(
                 f"Ensure process_time_chunksize is a multiple of "
                 f"time_coarsen_factor and that the time range is aligned."
             )
+        # coarsen().mean() also averages the time coordinate.  The ocean 6h
+        # fields are center-labeled (00Z, 06Z, 12Z, 18Z) covering
+        # 21Z(-1d)–21Z, so the daily-mean label lands naturally at 09Z.
+        # All three datasets share identical times here, so their coarsened
+        # labels match and the downstream merge aligns.
         ds_atmo_6h = ds_atmo_6h.coarsen(
             time=time_coarsen_factor, boundary="trim"
         ).mean()
@@ -742,17 +747,6 @@ def _process_chunk(
             time=time_coarsen_factor, boundary="trim"
         ).mean()
         ds_levels = ds_levels.coarsen(time=time_coarsen_factor, boundary="trim").mean()
-        # Snap daily-mean time labels to 12Z (the natural midpoint of a day).
-        # coarsen().mean() averages the timestamps, giving 09Z for (00,06,12,18).
-        snapped = []
-        for t in ds_ocean_2d.time.values:
-            if isinstance(t, _cftime.datetime):
-                snapped.append(type(t)(t.year, t.month, t.day, 12, 0, 0))
-            else:
-                snapped.append(t)
-        ds_ocean_2d = ds_ocean_2d.assign_coords(time=snapped)
-        ds_levels = ds_levels.assign_coords(time=snapped)
-        ds_atmo_6h = ds_atmo_6h.assign_coords(time=snapped)
 
     # Extract forcing and ice variables
     forcing_names = [k for k in ATMO_FORCING_VARS if k in ds_atmo_6h]
@@ -1411,20 +1405,17 @@ def main():
     )
 
     # --- Output time coordinate ---
-    # Snap daily-mean time labels to 12Z to match _process_chunk.
-    ocean_times = ds_ocean.time.values
+    # Let xarray's coarsen().mean() average the time coordinate, matching
+    # exactly what _process_chunk does per chunk (daily-mean label at 09Z).
     if time_coarsen_factor > 1:
-        n_out = len(ocean_times) // time_coarsen_factor
-        output_time = []
-        for i in range(n_out):
-            group = ocean_times[i * time_coarsen_factor : (i + 1) * time_coarsen_factor]
-            ref = group[0]
-            if isinstance(ref, _cftime.datetime):
-                output_time.append(type(ref)(ref.year, ref.month, ref.day, 12, 0, 0))
-            else:
-                output_time.append(ref)
+        output_time = list(
+            ds_ocean["time"]
+            .coarsen(time=time_coarsen_factor, boundary="trim")
+            .mean()
+            .values
+        )
     else:
-        output_time = list(ocean_times)
+        output_time = list(ds_ocean.time.values)
 
     logging.info(
         "Output time range: %s to %s (%d steps)",
