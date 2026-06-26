@@ -1,6 +1,12 @@
 import pytest
 
-from fme.core.dataset.schedule import IntMilestone, IntSchedule, ValidatedMilestones
+from fme.core.dataset.schedule import (
+    IntMilestone,
+    IntSchedule,
+    ValidatedMilestones,
+    WeightMilestone,
+    WeightSchedule,
+)
 
 
 @pytest.mark.parametrize(
@@ -92,3 +98,51 @@ def test_int_schedule_from_constant():
     schedule = IntSchedule.from_constant(42)
     assert schedule.get_value(0) == 42
     assert schedule.get_value(100) == 42
+
+
+def test_weight_schedule_get_value():
+    schedule = WeightSchedule(
+        start_value=[0.3, 0.5, 0.0, 0.2],
+        milestones=[WeightMilestone(epoch=143, value=[0.0, 0.0, 0.0, 1.0])],
+    )
+    assert schedule.get_value(0) == [0.3, 0.5, 0.0, 0.2]
+    assert schedule.get_value(142) == [0.3, 0.5, 0.0, 0.2]
+    assert schedule.get_value(143) == [0.0, 0.0, 0.0, 1.0]
+    assert schedule.get_value(200) == [0.0, 0.0, 0.0, 1.0]
+
+
+def test_weight_schedule_from_constant():
+    schedule = WeightSchedule.from_constant([1.0, 2.0])
+    assert schedule.get_value(0) == [1.0, 2.0]
+    assert schedule.get_value(50) == [1.0, 2.0]
+
+
+def test_weight_schedule_milestone_length_mismatch_raises():
+    with pytest.raises(ValueError, match="same length as start_value"):
+        WeightSchedule(
+            start_value=[0.5, 0.5],
+            milestones=[WeightMilestone(epoch=1, value=[1.0])],
+        )
+
+
+def test_weight_schedule_negative_weight_raises():
+    with pytest.raises(ValueError, match="non-negative"):
+        WeightSchedule(start_value=[0.5, -0.1], milestones=[])
+
+
+def test_weight_schedule_non_finite_weight_raises():
+    with pytest.raises(ValueError, match="finite"):
+        WeightSchedule(start_value=[float("inf"), 0.5], milestones=[])
+
+
+def test_weight_schedule_all_zero_raises():
+    with pytest.raises(ValueError, match="Sum of weights must be positive"):
+        WeightSchedule(start_value=[0.0, 0.0], milestones=[])
+
+
+def test_weight_schedule_all_zero_milestone_raises():
+    with pytest.raises(ValueError, match="Sum of weights must be positive"):
+        WeightSchedule(
+            start_value=[0.5, 0.5],
+            milestones=[WeightMilestone(epoch=1, value=[0.0, 0.0])],
+        )

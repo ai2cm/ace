@@ -1,4 +1,5 @@
 import dataclasses
+import math
 from bisect import bisect_right
 from collections.abc import Sequence
 from typing import Generic, Protocol, TypeVar
@@ -96,3 +97,63 @@ class IntSchedule:
         return IntSchedule(
             start_value=self.start_value + constant, milestones=new_milestones
         )
+
+
+@dataclasses.dataclass
+class WeightMilestone:
+    """
+    A milestone for a per-group weight schedule.
+    """
+
+    epoch: int
+    value: list[float]
+
+
+def _validate_weights(value: Sequence[float], expected_len: int):
+    if len(value) != expected_len:
+        raise ValueError(
+            "All weight values must have the same length as start_value "
+            f"({expected_len}), got length {len(value)}"
+        )
+    for weight in value:
+        if not math.isfinite(weight):
+            raise ValueError(f"Weights must be finite, got {weight}")
+        if weight < 0:
+            raise ValueError(f"Weights must be non-negative, got {weight}")
+    if sum(value) <= 0:
+        raise ValueError(f"Sum of weights must be positive, got {list(value)}")
+
+
+@dataclasses.dataclass
+class WeightSchedule:
+    """
+    A schedule for a list of per-group weights.
+
+    Weights need not sum to 1; they are normalized at the point of use. Each
+    milestone value must have the same length as ``start_value``, with finite,
+    non-negative entries whose sum is positive.
+    """
+
+    start_value: list[float]
+    milestones: list[WeightMilestone]
+
+    def __post_init__(self):
+        n_groups = len(self.start_value)
+        _validate_weights(self.start_value, n_groups)
+        for milestone in self.milestones:
+            _validate_weights(milestone.value, n_groups)
+        self._validated_milestones: ValidatedMilestones[list[float]] = (
+            ValidatedMilestones(
+                start_value=self.start_value, milestones=self.milestones
+            )
+        )
+
+    @classmethod
+    def from_constant(cls, value: list[float]) -> "WeightSchedule":
+        """
+        Create a WeightSchedule that always returns the same weights.
+        """
+        return cls(start_value=value, milestones=[])
+
+    def get_value(self, epoch: int) -> list[float]:
+        return self._validated_milestones.get_value(epoch)
