@@ -1,7 +1,10 @@
 # Computes pooled normalization statistics over N datasets defined in a single
-# config file (see `stats_config.yaml`). Each entry is a zarr store plus a time
-# slice; the same store may appear multiple times with different slices. Stats
-# are pooled across all entries weighted by number of timesteps, using the same
+# config file (see `stats_config.yaml`). Each entry is a zarr store (or a
+# directory of stores, e.g. an ensemble of `ic_XXXX.zarr` members) plus a time
+# slice; the slice applies to every store the entry resolves to, and the same
+# store may appear multiple times with different slices. Each store gets its own
+# stats; stats are pooled across all of them weighted by number of timesteps,
+# using the same
 # variance-combination math as `combine_stats.py`. The pooled stats are written
 # at the output root as:
 #   centering.nc            (pooled per-variable mean)
@@ -81,13 +84,15 @@ HORIZONTAL_DIMS = [
 ZARR_ROOT_MARKERS = ("zarr.json", ".zmetadata")
 
 
-def _resolve_zarr_store(dataset: str) -> str:
-    """Resolve a config `dataset` entry to a single zarr store path.
+def _resolve_zarr_stores(dataset: str) -> List[str]:
+    """Resolve a config `dataset` entry to the zarr store path(s) it contains.
 
     The entry may point directly at a store, or at a directory that contains one
-    store somewhere beneath it (e.g. `.../era5-.../` holding `....zarr`). In the
-    latter case we recursively search for the store root, raising if zero or more
-    than one is found so the choice is never silent.
+    or more stores somewhere beneath it (e.g. an ensemble directory holding
+    `ic_0001.zarr`, `ic_0002.zarr`, ...). In the latter case we recursively
+    search for every store root and return them all sorted; each store is treated
+    as its own dataset (own stats) and pooled with the rest. Raises if zero stores
+    are found so an empty/typo'd path is never silent.
     """
     dataset = dataset.rstrip("/")
     fs, _ = fsspec.core.url_to_fs(dataset)
@@ -96,7 +101,7 @@ def _resolve_zarr_store(dataset: str) -> str:
         return any(fs.exists(f"{path}/{m}") for m in ZARR_ROOT_MARKERS)
 
     if _is_store(dataset):
-        return dataset
+        return [dataset]
 
     # Recursively find store roots: every path holding a root marker whose parent
     # is not itself part of a store (deduping the per-array markers a store has).
@@ -111,13 +116,7 @@ def _resolve_zarr_store(dataset: str) -> str:
             f"No zarr store found under {dataset!r}; expected a directory with "
             f"one of {ZARR_ROOT_MARKERS} somewhere beneath it."
         )
-    if len(store_roots) > 1:
-        resolved = [fs.unstrip_protocol(r) for r in store_roots]
-        raise ValueError(
-            f"Found multiple zarr stores under {dataset!r}: {resolved}. Point the "
-            f"config `dataset` at a single store."
-        )
-    return fs.unstrip_protocol(store_roots[0])
+    return [fs.unstrip_protocol(r) for r in store_roots]
 
 
 @dataclasses.dataclass
@@ -159,12 +158,10 @@ def _reduction_dims(ds: xr.Dataset) -> List[str]:
     return ["time"] + dims
 
 
-def compute_pair_stats(pair: DatasetPair) -> dict:
-    """Open one dataset, slice in time, and return its centering / full-field /
-    residual stats plus the timestep count used as the pooling weight."""
-    store = _resolve_zarr_store(pair.dataset)
-    if store != pair.dataset.rstrip("/"):
-        logging.info(f"Resolved {pair.dataset} -> {store}")
+def compute_store_stats(store: str, pair: DatasetPair) -> dict:
+    """Open one zarr store, slice it with the pair's time bounds, and return its
+    centering / full-field / residual stats plus the timestep count used as the
+    pooling weight."""
     try:
         import dask
 
@@ -180,13 +177,13 @@ def compute_pair_stats(pair: DatasetPair) -> dict:
     n_samples = len(ds.time)
     if n_samples < 2:
         raise ValueError(
-            f"{pair.dataset} sliced to [{pair.start_time}, {pair.end}] has "
+            f"{store} sliced to [{pair.start_time}, {pair.end}] has "
             f"{n_samples} timesteps; check the time bounds in the config."
         )
 
     dims = _reduction_dims(ds)
     logging.info(
-        f"{pair.dataset} [{pair.start_time}, {pair.end}]: {n_samples} steps, "
+        f"{store} [{pair.start_time}, {pair.end}]: {n_samples} steps, "
         f"reducing over {dims}"
     )
     return {
@@ -282,11 +279,19 @@ def compute(config_yaml: str, output_directory: str):
         output_directory = output_directory[:-1]
 
     per_pair = []
-    for index, pair in enumerate(config.dataset_pairs):
-        stats = compute_pair_stats(pair)
-        per_pair.append(stats)
-        subdir = _pair_subdir(index, pair, stats["store"])
-        write_stats(_stats_files(stats), output_directory + "/" + subdir, config_yaml)
+    index = 0
+    for pair in config.dataset_pairs:
+        stores = _resolve_zarr_stores(pair.dataset)
+        if stores != [pair.dataset.rstrip("/")]:
+            logging.info(f"Resolved {pair.dataset} -> {stores}")
+        for store in stores:
+            stats = compute_store_stats(store, pair)
+            per_pair.append(stats)
+            subdir = _pair_subdir(index, pair, store)
+            write_stats(
+                _stats_files(stats), output_directory + "/" + subdir, config_yaml
+            )
+            index += 1
 
     pooled = pool_stats(per_pair)
 
