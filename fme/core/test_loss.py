@@ -20,6 +20,7 @@ from fme.core.loss import (
     VariableWeightingLoss,
     WeightedMappingLoss,
     _construct_weight_tensor,
+    _masked_spatial_mean,
 )
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
@@ -843,3 +844,166 @@ class TestLossOutputScale:
         )
         scaled = loss.scale(0.0)
         torch.testing.assert_close(scaled.total(), torch.tensor(0.0))
+
+
+def test_masked_spatial_mean_excludes_invalid_cells():
+    """Per-cell mask excludes invalid cells from numerator AND denominator."""
+    device = get_device()
+    loss = torch.tensor([[[[0.0, 0.0], [100.0, 100.0]]]], device=device)  # (1,1,2,2)
+    # mask out the bottom row (the high-error cells)
+    mask_top = torch.tensor([[[[1.0, 1.0], [0.0, 0.0]]]], device=device)
+    out = _masked_spatial_mean(loss, mask_top, (2, 3))
+    torch.testing.assert_close(out, torch.tensor([[0.0]], device=device))
+    # mask out the top row instead -> mean over the two high-error cells
+    mask_bot = torch.tensor([[[[0.0, 0.0], [1.0, 1.0]]]], device=device)
+    out = _masked_spatial_mean(loss, mask_bot, (2, 3))
+    torch.testing.assert_close(out, torch.tensor([[100.0]], device=device))
+    # no mask -> plain mean over all four cells
+    out = _masked_spatial_mean(loss, None, (2, 3))
+    torch.testing.assert_close(out, torch.tensor([[50.0]], device=device))
+
+
+def test_masked_spatial_mean_skips_when_not_on_spatial_grid():
+    """A spatial mask whose trailing dims do not match the loss (e.g. the loss
+    is spectral coefficients) is ignored, falling back to the plain mean."""
+    device = get_device()
+    spectral = torch.tensor(
+        [[[[0.0, 0.0, 0.0], [100.0, 100.0, 100.0]]]], device=device
+    )  # (1,1,2,3)
+    mask = torch.tensor([[[[1.0, 1.0], [0.0, 0.0]]]], device=device)  # (1,1,2,2)
+    out = _masked_spatial_mean(spectral, mask, (2, 3))
+    torch.testing.assert_close(out, spectral.mean(dim=(2, 3)))
+
+
+def test_weighted_mapping_loss_spatial_mask_mse():
+    """End-to-end: a per-variable spatial mask excludes cells from an MSE
+    loss's spatial reduction."""
+    device = get_device()
+    out_names = ["var_0"]
+    normalizer = StandardNormalizer(
+        means={"var_0": torch.as_tensor(0.0)},
+        stds={"var_0": torch.as_tensor(1.0)},
+    )
+    mapping_loss = WeightedMappingLoss(
+        torch.nn.MSELoss(reduction="none"),
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {"var_0": torch.zeros(1, 2, 2, device=device)}
+    # (x - y)^2 = [[0, 0], [100, 100]]
+    y = {"var_0": torch.tensor([[[0.0, 0.0], [10.0, 10.0]]], device=device)}
+    torch.testing.assert_close(
+        mapping_loss(x, y).total(), torch.tensor(50.0, device=device)
+    )
+    mask_top = {"var_0": torch.tensor([[1.0, 1.0], [0.0, 0.0]], device=device)}
+    torch.testing.assert_close(
+        mapping_loss(x, y, spatial_mask=mask_top).total(),
+        torch.tensor(0.0, device=device),
+    )
+    mask_bot = {"var_0": torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device)}
+    torch.testing.assert_close(
+        mapping_loss(x, y, spatial_mask=mask_bot).total(),
+        torch.tensor(100.0, device=device),
+    )
+
+
+def test_weighted_mapping_loss_spatial_mask_absent_is_noop():
+    """Passing no spatial mask (or an empty mapping) is bit-for-bit identical
+    to the existing unmasked path."""
+    torch.manual_seed(0)
+    device = get_device()
+    out_names = ["a", "b"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    mapping_loss = WeightedMappingLoss(
+        torch.nn.MSELoss(reduction="none"),
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {n: torch.randn(3, 4, 4, device=device) for n in out_names}
+    y = {n: torch.randn(3, 4, 4, device=device) for n in out_names}
+    baseline = mapping_loss(x, y).total()
+    torch.testing.assert_close(mapping_loss(x, y, spatial_mask=None).total(), baseline)
+    torch.testing.assert_close(mapping_loss(x, y, spatial_mask={}).total(), baseline)
+
+
+def test_weighted_mapping_loss_spatial_mask_per_variable():
+    """A mask is applied only to the variable(s) named in the mapping; other
+    variables remain unmasked."""
+    device = get_device()
+    out_names = ["a", "b"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    mapping_loss = WeightedMappingLoss(
+        torch.nn.MSELoss(reduction="none"),
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {n: torch.zeros(1, 2, 2, device=device) for n in out_names}
+    sq_err = torch.tensor([[[0.0, 0.0], [100.0, 100.0]]], device=device)
+    y = {n: torch.sqrt(sq_err) for n in out_names}
+    # mask the high-error row of "a" only
+    mask = {"a": torch.tensor([[1.0, 1.0], [0.0, 0.0]], device=device)}
+    channel = mapping_loss(x, y, spatial_mask=mask).get_channel_losses()
+    torch.testing.assert_close(channel["a"].loss, torch.tensor(0.0, device=device))
+    torch.testing.assert_close(channel["b"].loss, torch.tensor(50.0, device=device))
+
+
+def test_spatial_mask_leaves_spectral_energy_score_unmasked():
+    """The energy-score term reduces in spectral space, so a per-cell spatial
+    mask must not change it (the shape guard skips it). This is how the
+    spectral term is handled under per-cell loss masking."""
+    torch.manual_seed(0)
+    device = get_device()
+    n_lat, n_lon = 16, 32
+    out_names = ["a"]
+    normalizer = StandardNormalizer(
+        means={"a": torch.as_tensor(0.0)},
+        stds={"a": torch.as_tensor(1.0)},
+    )
+    config = StepLossConfig(
+        type="EnsembleLoss",
+        kwargs={"crps_weight": 0.0, "energy_score_weight": 1.0},
+    )
+    loss = config.build(
+        LatLonOperations(torch.ones((n_lat, n_lon), device=device)),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    n_batch, n_ens = 4, 2  # energy score is implemented for 2 ensemble members
+    x = {"a": torch.rand(n_batch, n_ens, n_lat, n_lon, device=device)}
+    y = {"a": torch.rand(n_batch, n_ens, n_lat, n_lon, device=device)}
+    # mask out half the grid; the energy score is unaffected by spatial masking
+    mask = torch.ones(n_lat, n_lon, device=device)
+    mask[n_lat // 2 :, :] = 0.0
+    unmasked = loss(x, y, step=0).total()
+    masked = loss(x, y, step=0, spatial_mask={"a": mask}).total()
+    torch.testing.assert_close(masked, unmasked)
+
+
+def test_step_loss_forwards_spatial_mask():
+    """StepLoss.forward threads the spatial mask down to the mapping loss."""
+    device = get_device()
+    out_names = ["var_0"]
+    normalizer = StandardNormalizer(
+        means={"var_0": torch.as_tensor(0.0)},
+        stds={"var_0": torch.as_tensor(1.0)},
+    )
+    config = StepLossConfig(type="MSE")
+    loss = config.build(
+        LatLonOperations(torch.ones((2, 2), device=device)),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {"var_0": torch.zeros(1, 2, 2, device=device)}
+    y = {"var_0": torch.tensor([[[0.0, 0.0], [10.0, 10.0]]], device=device)}
+    mask = {"var_0": torch.tensor([[1.0, 1.0], [0.0, 0.0]], device=device)}
+    out = loss(x, y, step=0, spatial_mask=mask)
+    torch.testing.assert_close(out.total(), torch.tensor(0.0, device=device))

@@ -23,6 +23,33 @@ class ChannelLossInfo:
     count: int
 
 
+def _masked_spatial_mean(
+    loss: torch.Tensor,
+    spatial_mask: torch.Tensor | None,
+    dims: tuple[int, ...],
+) -> torch.Tensor:
+    """Mean of ``loss`` over ``dims``, excluding cells where the per-cell
+    ``spatial_mask`` is zero from both numerator and denominator.
+
+    ``spatial_mask`` is a per-cell validity weight (1 = valid, 0 = invalid)
+    broadcastable against ``loss``. It is applied only when its trailing two
+    dimensions match those of ``loss`` (i.e. ``loss`` is still on the spatial
+    ``(lat, lon)`` grid). This guard means spectrally-reduced components (e.g.
+    the energy score, whose trailing dims are ``(l, m)``) fall back to the
+    plain mean and are left unmasked, which is the intended behavior since a
+    per-cell spatial mask has no meaning in spectral space.
+    """
+    if spatial_mask is None:
+        return loss.mean(dim=dims)
+    if tuple(spatial_mask.shape[-2:]) != tuple(loss.shape[-2:]):
+        # not on the spatial grid (e.g. spectral coefficients) -> no masking
+        return loss.mean(dim=dims)
+    mask = torch.broadcast_to(spatial_mask, loss.shape)
+    numerator = (loss * mask).sum(dim=dims)
+    denominator = mask.sum(dim=dims).clamp(min=1e-8)
+    return numerator / denominator
+
+
 class LossComponent(abc.ABC):
     """A pre-weighted loss tensor that knows how to reduce itself to ``(B, C)``.
 
@@ -42,23 +69,41 @@ class LossComponent(abc.ABC):
         self.loss = loss
 
     @abc.abstractmethod
-    def reduce_to_channel(self) -> torch.Tensor:
-        """Reduce to ``(B, C)`` by meaning over non-batch, non-channel dims."""
+    def reduce_to_channel(
+        self, spatial_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Reduce to ``(B, C)`` by meaning over non-batch, non-channel dims.
+
+        Args:
+            spatial_mask: Optional per-cell validity weight, packed to align
+                with the channel dimension and broadcastable against the loss
+                tensor. Cells where the mask is zero are excluded from the
+                spatial reduction's numerator and denominator.
+        """
 
 
 class StandardLoss(LossComponent):
     """Standard ``(B, C, ...)`` layout with channel at dim 1."""
 
-    def reduce_to_channel(self) -> torch.Tensor:
+    def reduce_to_channel(
+        self, spatial_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         if self.loss.ndim <= 2:
             return self.loss
-        return self.loss.mean(dim=tuple(range(2, self.loss.ndim)))
+        return _masked_spatial_mean(
+            self.loss, spatial_mask, tuple(range(2, self.loss.ndim))
+        )
 
 
 class EnsembleComponentLoss(LossComponent):
     """Ensemble ``(B, E, C, ...)`` layout with channel at dim 2."""
 
-    def reduce_to_channel(self) -> torch.Tensor:
+    def reduce_to_channel(
+        self, spatial_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        # Per-cell spatial masking is not wired for this layout (no current
+        # loss returns it; CRPS/energy collapse the ensemble dim and return
+        # StandardLoss). The mask is accepted for interface parity and ignored.
         dims = tuple(i for i in range(self.loss.ndim) if i not in (0, 2))
         return self.loss.mean(dim=dims) if dims else self.loss
 
@@ -78,10 +123,12 @@ class LossOutput:
         losses: list[LossComponent],
         channel_names: list[str],
         mask: torch.Tensor | None = None,
+        spatial_mask: torch.Tensor | None = None,
     ):
         self._losses = losses
         self._channel_names = channel_names
         self._mask = mask
+        self._spatial_mask = spatial_mask
         self._per_channel: torch.Tensor | None = None
         self._counts: list[int] | None = None
 
@@ -93,7 +140,7 @@ class LossOutput:
         present, so masked-out variables never dilute the result.
         """
         if self._per_channel is None:
-            bc = sum(c.reduce_to_channel() for c in self._losses)
+            bc = sum(c.reduce_to_channel(self._spatial_mask) for c in self._losses)
             assert isinstance(bc, torch.Tensor)
             if bc.ndim == 0:
                 self._per_channel = bc.expand(len(self._channel_names))
@@ -150,6 +197,7 @@ class LossOutput:
             [type(c)(c.loss * weight) for c in self._losses],
             self._channel_names,
             mask=self._mask,
+            spatial_mask=self._spatial_mask,
         )
 
 
@@ -228,6 +276,7 @@ class WeightedMappingLoss:
         predict_dict: TensorMapping,
         target_dict: TensorMapping,
         data_mask: TensorMapping | None = None,
+        spatial_mask: TensorMapping | None = None,
     ) -> LossOutput:
         """
         Args:
@@ -237,6 +286,14 @@ class WeightedMappingLoss:
                 ``[batch]`` indicating which samples have each variable
                 present. Used to exclude masked channels from the loss
                 average.
+            spatial_mask: Optional per-variable per-cell validity weights
+                (1 = valid, 0 = invalid), each broadcastable to the per-cell
+                loss of that variable (e.g. shape ``[lat, lon]`` or
+                ``[batch, lat, lon]``). Invalid cells are excluded from both
+                the numerator and denominator of the loss spatial reduction.
+                Variables absent from the mapping are unmasked. Mask values are
+                taken from stored target-derived fields (not predictions), so
+                there is no gradient/detach concern.
 
         Returns:
             A ``LossOutput`` wrapping pre-weighted loss component tensors.
@@ -258,14 +315,21 @@ class WeightedMappingLoss:
             input_ndim + self.channel_dim if self.channel_dim < 0 else self.channel_dim
         )
 
+        spatial_mask_packed = self._pack_spatial_mask(spatial_mask, predict_tensors)
+
         def _wrap_elementwise(t: torch.Tensor) -> StandardLoss:
             # Element-wise loss tensors have the same shape as the input;
             # the channel position depends on the data layout (ensemble,
             # tile, etc.). Reduce non-(batch, channel) dims here so the
             # downstream component carries a canonical ``(B, C)`` tensor.
             dims = tuple(i for i in range(t.ndim) if i not in (0, cdim))
-            reduced = t.mean(dim=dims) if dims else t
-            return StandardLoss(reduced)
+            if not dims:
+                return StandardLoss(t)
+            # The packed mask has channel at dim 1; only apply it when the
+            # loss tensor shares that layout (the standard (B, C, lat, lon)
+            # case). Ensemble-layout element-wise tensors are not wrapped here.
+            use_mask = spatial_mask_packed if cdim == 1 else None
+            return StandardLoss(_masked_spatial_mean(t, use_mask, dims))
 
         if isinstance(result, list):
             # Inner losses that return raw element-wise tensors (e.g. MSE,
@@ -298,7 +362,35 @@ class WeightedMappingLoss:
             losses=losses,
             channel_names=list(self.packer.names),
             mask=mask,
+            spatial_mask=spatial_mask_packed,
         )
+
+    def _pack_spatial_mask(
+        self,
+        spatial_mask: TensorMapping | None,
+        predict_tensors: torch.Tensor,
+    ) -> torch.Tensor | None:
+        """Pack a per-variable spatial-mask mapping into a single
+        ``(batch, channel, lat, lon)`` tensor aligned with the channel order.
+
+        Each per-variable mask is broadcast to ``(batch, lat, lon)``; variables
+        absent from the mapping default to all-ones (unmasked). Returns ``None``
+        when no masks are supplied so the unmasked path is bit-for-bit
+        unchanged.
+        """
+        if not spatial_mask:
+            return None
+        device = predict_tensors.device
+        batch_size = predict_tensors.shape[0]
+        sample = next(iter(spatial_mask.values()))
+        spatial_shape = (sample.shape[-2], sample.shape[-1])
+        ones = torch.ones(spatial_shape, device=device, dtype=torch.float)
+        per_channel: list[torch.Tensor] = []
+        for name in self.packer.names:
+            m = spatial_mask[name] if name in spatial_mask else ones
+            m = m.to(device=device, dtype=torch.float)
+            per_channel.append(torch.broadcast_to(m, (batch_size, *spatial_shape)))
+        return torch.stack(per_channel, dim=1)
 
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
@@ -759,6 +851,7 @@ class StepLoss(torch.nn.Module):
         target_dict: TensorMapping,
         step: int,
         data_mask: TensorMapping | None = None,
+        spatial_mask: TensorMapping | None = None,
     ) -> LossOutput:
         """
         Args:
@@ -767,14 +860,19 @@ class StepLoss(torch.nn.Module):
             step: The step number, indexed from 0 for the first step.
             data_mask: Optional per-variable boolean masks forwarded to
                 the underlying :class:`WeightedMappingLoss`.
+            spatial_mask: Optional per-variable per-cell validity weights
+                forwarded to the underlying :class:`WeightedMappingLoss`.
 
         Returns:
             A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        return self.loss(predict_dict, target_dict, data_mask=data_mask).scale(
-            step_weight
-        )
+        return self.loss(
+            predict_dict,
+            target_dict,
+            data_mask=data_mask,
+            spatial_mask=spatial_mask,
+        ).scale(step_weight)
 
 
 @dataclasses.dataclass
