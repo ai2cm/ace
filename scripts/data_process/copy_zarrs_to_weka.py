@@ -5,12 +5,18 @@ For each input path, if it ends in .zarr it is copied directly; otherwise it is
 searched recursively for .zarr stores. Each store is copied to
 /climate-default, mirroring the source path (minus the bucket name), by
 submitting a Beaker/Gantry job through gcs_to_weka.sh.
+
+Alternatively, pass --mapping mapping.yaml to copy the dataset/stats paths
+listed under ``dataset_pairs``. Use --dataset-only or --stats-only to restrict
+the copy to one side of each pair.
 """
 
 import argparse
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 WEKA_ROOT = "/climate-default"
 GCS_TO_WEKA = Path(__file__).resolve().parent / "gcs_to_weka.sh"
@@ -34,21 +40,82 @@ def find_zarrs(path: str) -> list[str]:
     return sorted(zarrs)
 
 
-def weka_dest(zarr: str) -> str:
-    """Map gs://bucket/rest/foo.zarr to /climate-default/rest/foo.zarr."""
-    rest = zarr.split("/", 3)[3]  # drop "gs:", "", bucket
+def weka_dest(path: str) -> str:
+    """Map gs://bucket/rest to /climate-default/rest."""
+    rest = path.rstrip("/").split("/", 3)[3]  # drop "gs:", "", bucket
     return f"{WEKA_ROOT}/{rest}"
+
+
+def submit(src: str, dry_run: bool) -> None:
+    """Print and (unless dry_run) submit a gcs_to_weka copy job for src."""
+    dest = weka_dest(src)
+    print(f"  {src} -> {dest}")
+    if not dry_run:
+        subprocess.run([str(GCS_TO_WEKA), src, dest], check=True)
+
+
+def paths_from_mapping(
+    mapping_file: str, dataset_only: bool, stats_only: bool
+) -> list[str]:
+    """Return the dataset/stats gs:// paths listed in a mapping.yaml."""
+    with open(mapping_file) as f:
+        mapping = yaml.safe_load(f)
+    keys = ["dataset", "stats"]
+    if dataset_only:
+        keys = ["dataset"]
+    elif stats_only:
+        keys = ["stats"]
+    paths = []
+    for pair in mapping["dataset_pairs"]:
+        for key in keys:
+            paths.append(pair[key])
+    return paths
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("gs_paths", nargs="+", help="gs:// paths to search")
+    parser.add_argument(
+        "gs_paths", nargs="*", help="gs:// paths to search (omit when using --mapping)"
+    )
+    parser.add_argument(
+        "--mapping",
+        help="mapping.yaml with dataset_pairs to copy instead of gs_paths",
+    )
+    only = parser.add_mutually_exclusive_group()
+    only.add_argument(
+        "--dataset-only",
+        action="store_true",
+        help="with --mapping, copy only the dataset paths",
+    )
+    only.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="with --mapping, copy only the stats paths",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print paths and destinations but do not submit jobs",
     )
     args = parser.parse_args()
+
+    if args.mapping:
+        if args.gs_paths:
+            sys.exit("Error: pass either gs_paths or --mapping, not both")
+        # Mirror each dataset/stats directory wholesale: stats dirs hold .nc
+        # files, not .zarr stores, so scanning for zarrs would skip them.
+        paths = paths_from_mapping(args.mapping, args.dataset_only, args.stats_only)
+        for path in paths:
+            if not path.startswith("gs://"):
+                sys.exit(f"Error: path must start with gs://: {path}")
+            print(f"Copying {path} ...")
+            submit(path, args.dry_run)
+        return
+
+    if args.dataset_only or args.stats_only:
+        sys.exit("Error: --dataset-only/--stats-only require --mapping")
+    if not args.gs_paths:
+        sys.exit("Error: provide gs_paths or --mapping")
 
     for path in args.gs_paths:
         if not path.startswith("gs://"):
@@ -59,10 +126,7 @@ def main() -> None:
             print("  no .zarr stores found")
             continue
         for zarr in zarrs:
-            dest = weka_dest(zarr)
-            print(f"  {zarr} -> {dest}")
-            if not args.dry_run:
-                subprocess.run([str(GCS_TO_WEKA), zarr, dest], check=True)
+            submit(zarr, args.dry_run)
 
 
 if __name__ == "__main__":
