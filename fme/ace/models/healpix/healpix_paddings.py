@@ -62,7 +62,7 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-import torch as th
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def make_hpx_padding_layer(
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"],
     enable_nhwc: bool,
     nside: int | None = None,
-) -> th.nn.Module:
+) -> torch.nn.Module:
     """
     Construct the HEALPix padding submodule for a given mode.
 
@@ -134,7 +134,7 @@ def make_hpx_padding_layer(
     )
 
 
-class HEALPixFoldFaces(th.nn.Module):
+class HEALPixFoldFaces(torch.nn.Module):
     """Merge the HEALPix face dimension into the batch dimension (NCHW layout)."""
 
     def __init__(self, enable_nhwc: bool = False):
@@ -147,7 +147,7 @@ class HEALPixFoldFaces(th.nn.Module):
         super().__init__()
         self.enable_nhwc = enable_nhwc
 
-    def forward(self, tensor: th.Tensor) -> th.Tensor:
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Reshape ``[B, F, C, H, W]`` to ``[B * F, C, H, W]``.
 
@@ -163,15 +163,15 @@ class HEALPixFoldFaces(th.nn.Module):
             ``enable_nhwc`` is True, result uses channels-last memory format.
         """
         N, F, C, H, W = tensor.shape
-        tensor = th.reshape(tensor, shape=(N * F, C, H, W))
+        tensor = torch.reshape(tensor, shape=(N * F, C, H, W))
 
         if self.enable_nhwc:
-            tensor = tensor.to(memory_format=th.channels_last)
+            tensor = tensor.to(memory_format=torch.channels_last)
 
         return tensor
 
 
-class HEALPixUnfoldFaces(th.nn.Module):
+class HEALPixUnfoldFaces(torch.nn.Module):
     """Split the batch axis so the HEALPix face index is its own dimension."""
 
     def __init__(self, num_faces: int = 12, enable_nhwc: bool = False):
@@ -187,7 +187,7 @@ class HEALPixUnfoldFaces(th.nn.Module):
         self.num_faces = num_faces
         self.enable_nhwc = enable_nhwc
 
-    def forward(self, tensor: th.Tensor) -> th.Tensor:
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Reshape ``[B * F, C, H, W]`` to ``[B, F, C, H, W]``.
 
@@ -204,12 +204,12 @@ class HEALPixUnfoldFaces(th.nn.Module):
         """
         NF, C, H, W = tensor.shape
         n_batch = NF // self.num_faces
-        tensor = th.reshape(tensor, shape=(n_batch, self.num_faces, C, H, W))
+        tensor = torch.reshape(tensor, shape=(n_batch, self.num_faces, C, H, W))
 
         return tensor
 
 
-class HEALPixPaddingv2(th.nn.Module):
+class HEALPixPaddingv2(torch.nn.Module):
     """
     Padding layer for data on a HEALPix sphere. This version uses a faster method
     to calculate the padding.
@@ -262,12 +262,12 @@ class HEALPixPaddingv2(th.nn.Module):
         xp = self.fold(xp)
 
         if self.enable_nhwc:
-            xp = xp.to(memory_format=th.channels_last)
+            xp = xp.to(memory_format=torch.channels_last)
 
         return xp
 
 
-class HEALPixPadding(th.nn.Module):
+class HEALPixPadding(torch.nn.Module):
     """
     Karlbauer et al. (2024) HEALPix padding.
 
@@ -305,7 +305,7 @@ class HEALPixPadding(th.nn.Module):
         self.fold = HEALPixFoldFaces(enable_nhwc=self.enable_nhwc)
         self.unfold = HEALPixUnfoldFaces(num_faces=12, enable_nhwc=self.enable_nhwc)
 
-    def forward(self, data: th.Tensor) -> th.Tensor:
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         """
         Pad each face using values from neighboring faces (Karlbauer et al. scheme).
 
@@ -325,8 +325,8 @@ class HEALPixPadding(th.nn.Module):
 
         # Extract the twelve faces (as views of the original tensors)
         f00, f01, f02, f03, f04, f05, f06, f07, f08, f09, f10, f11 = [
-            th.squeeze(x, dim=1)
-            for x in th.split(tensor=data, split_size_or_sections=1, dim=1)
+            torch.squeeze(x, dim=1)
+            for x in torch.split(tensor=data, split_size_or_sections=1, dim=1)
         ]
 
         # Assemble the four padded faces on the northern hemisphere
@@ -403,7 +403,7 @@ class HEALPixPadding(th.nn.Module):
             c=f11, t=f04, tl=f03, lft=f07, bl=f10, b=f10, br=f09, rgt=f08, tr=f08
         )
 
-        res = th.stack(
+        res = torch.stack(
             (p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11), dim=1
         )
 
@@ -411,22 +411,22 @@ class HEALPixPadding(th.nn.Module):
         res = self.fold(res)
 
         if self.enable_nhwc:
-            res = res.to(memory_format=th.channels_last)
+            res = res.to(memory_format=torch.channels_last)
 
         return res
 
     def pn(
         self,
-        c: th.Tensor,
-        t: th.Tensor,
-        tl: th.Tensor,
-        lft: th.Tensor,
-        bl: th.Tensor,
-        b: th.Tensor,
-        br: th.Tensor,
-        rgt: th.Tensor,
-        tr: th.Tensor,
-    ) -> th.Tensor:
+        c: torch.Tensor,
+        t: torch.Tensor,
+        tl: torch.Tensor,
+        lft: torch.Tensor,
+        bl: torch.Tensor,
+        b: torch.Tensor,
+        br: torch.Tensor,
+        rgt: torch.Tensor,
+        tr: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Applies padding to a northern hemisphere face c under consideration of
         its given neighbors according to the strategy of Karlbauer et al. (2024).
@@ -461,11 +461,11 @@ class HEALPixPadding(th.nn.Module):
         d = self.d  # rotation plane: last two spatial dims of each face
 
         # Vertical extent: top row from ``t`` (rotated), bottom from ``b``
-        c = th.cat((t.rot90(1, d)[..., -p:, :], c, b[..., :p, :]), dim=-2)
+        c = torch.cat((t.rot90(1, d)[..., -p:, :], c, b[..., :p, :]), dim=-2)
 
         # Horizontal strips: corners from ``tl`` / ``bl`` / ``tr`` / ``br``,
         # edges from ``lft`` / ``rgt``
-        left = th.cat(
+        left = torch.cat(
             (
                 tl.rot90(2, d)[..., -p:, -p:],
                 lft.rot90(-1, d)[..., -p:],
@@ -473,22 +473,22 @@ class HEALPixPadding(th.nn.Module):
             ),
             dim=-2,
         )
-        right = th.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
+        right = torch.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
 
-        return th.cat((left, c, right), dim=-1)
+        return torch.cat((left, c, right), dim=-1)
 
     def pe(
         self,
-        c: th.Tensor,
-        t: th.Tensor,
-        tl: th.Tensor,
-        lft: th.Tensor,
-        bl: th.Tensor,
-        b: th.Tensor,
-        br: th.Tensor,
-        rgt: th.Tensor,
-        tr: th.Tensor,
-    ) -> th.Tensor:
+        c: torch.Tensor,
+        t: torch.Tensor,
+        tl: torch.Tensor,
+        lft: torch.Tensor,
+        bl: torch.Tensor,
+        b: torch.Tensor,
+        br: torch.Tensor,
+        rgt: torch.Tensor,
+        tr: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Applies padding to an equatorial face c under consideration of its given
         neighbors.
@@ -521,24 +521,24 @@ class HEALPixPadding(th.nn.Module):
         """
         p = self.p
 
-        c = th.cat((t[..., -p:, :], c, b[..., :p, :]), dim=-2)
-        left = th.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
-        right = th.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
+        c = torch.cat((t[..., -p:, :], c, b[..., :p, :]), dim=-2)
+        left = torch.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
+        right = torch.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
 
-        return th.cat((left, c, right), dim=-1)
+        return torch.cat((left, c, right), dim=-1)
 
     def ps(
         self,
-        c: th.Tensor,
-        t: th.Tensor,
-        tl: th.Tensor,
-        lft: th.Tensor,
-        bl: th.Tensor,
-        b: th.Tensor,
-        br: th.Tensor,
-        rgt: th.Tensor,
-        tr: th.Tensor,
-    ) -> th.Tensor:
+        c: torch.Tensor,
+        t: torch.Tensor,
+        tl: torch.Tensor,
+        lft: torch.Tensor,
+        bl: torch.Tensor,
+        b: torch.Tensor,
+        br: torch.Tensor,
+        rgt: torch.Tensor,
+        tr: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Applies padding to a southern hemisphere face c under consideration of
         its given neighbors according to the strategy of Karlbauer et al. (2024).
@@ -572,16 +572,16 @@ class HEALPixPadding(th.nn.Module):
         p = self.p
         d = self.d
 
-        c = th.cat((t[..., -p:, :], c, b.rot90(1, d)[..., :p, :]), dim=-2)
-        left = th.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
-        right = th.cat(
+        c = torch.cat((t[..., -p:, :], c, b.rot90(1, d)[..., :p, :]), dim=-2)
+        left = torch.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
+        right = torch.cat(
             (tr[..., -p:, :p], rgt.rot90(-1, d)[..., :p], br.rot90(2, d)[..., :p, :p]),
             dim=-2,
         )
 
-        return th.cat((left, c, right), dim=-1)
+        return torch.cat((left, c, right), dim=-1)
 
-    def tl(self, top: th.Tensor, lft: th.Tensor) -> th.Tensor:
+    def tl(self, top: torch.Tensor, lft: torch.Tensor) -> torch.Tensor:
         """
         Assembles the top left corner of a center face according to the strategy
         of Karlbauer et al. (2024) in the cases where no according top left face
@@ -600,7 +600,7 @@ class HEALPixPadding(th.nn.Module):
             ``p x p`` top-left corner block for the equatorial ``tl`` slot.
         """
         # Preallocated buffer for the synthetic corner (avoids per-call allocation).
-        ret = th.zeros_like(top)[..., : self.p, : self.p]
+        ret = torch.zeros_like(top)[..., : self.p, : self.p]
 
         # Apex of the corner wedge (average of adjacent edge samples)
         ret[..., -1, -1] = 0.5 * top[..., -1, 0] + 0.5 * lft[..., 0, -1]
@@ -618,7 +618,7 @@ class HEALPixPadding(th.nn.Module):
 
         return ret
 
-    def br(self, b: th.Tensor, r: th.Tensor) -> th.Tensor:
+    def br(self, b: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
         """
         Assembles the bottom right corner of a center face according to the
         strategy of Karlbauer et al. (2024) in the cases where no according
@@ -636,7 +636,7 @@ class HEALPixPadding(th.nn.Module):
         torch.Tensor
             ``p x p`` bottom-right corner block for the equatorial ``br`` slot.
         """
-        ret = th.zeros_like(b)[..., : self.p, : self.p]
+        ret = torch.zeros_like(b)[..., : self.p, : self.p]
 
         ret[..., 0, 0] = 0.5 * b[..., 0, -1] + 0.5 * r[..., -1, 0]
 
@@ -649,7 +649,7 @@ class HEALPixPadding(th.nn.Module):
         return ret
 
 
-class HEALPixPaddingIsolatitude(th.nn.Module):
+class HEALPixPaddingIsolatitude(torch.nn.Module):
     """
     Isolatitude HEALPix padding via **precomputed gather** indices.
 
@@ -693,7 +693,7 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
 
         # Active positions in the 2nd gather source are extremely sparse,
         # get the indices of the active positions
-        pos_v1 = th.nonzero(v1_bool, as_tuple=False).squeeze(1).to(dtype=th.long)
+        pos_v1 = torch.nonzero(v1_bool, as_tuple=False).squeeze(1).to(dtype=torch.long)
         self.register_buffer("_pos_v1", pos_v1, persistent=False)
         self.register_buffer(
             "_index1_pos_v1",
@@ -703,7 +703,7 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
             persistent=False,
         )
 
-    def forward(self, data: th.Tensor) -> th.Tensor:
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
         """
         Gather-based isolatitude pad on folded input.
 
@@ -741,28 +741,28 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
         # and valid1==1 positions are extremely sparse.
         idx0 = (
             self._index0.reshape(-1)
-            .to(device=data.device, dtype=th.long, non_blocking=True)
+            .to(device=data.device, dtype=torch.long, non_blocking=True)
             .clone()
         )
-        g0 = th.index_select(flat, 2, idx0)
+        g0 = torch.index_select(flat, 2, idx0)
 
         pos_v1 = self._pos_v1
         if pos_v1.numel() > 0:
-            p = pos_v1.to(device=data.device, dtype=th.long, non_blocking=True)
+            p = pos_v1.to(device=data.device, dtype=torch.long, non_blocking=True)
             pos_g0 = p.clone()
             pos_out = p.clone()
             g0_sub = g0.index_select(dim=2, index=pos_g0)
 
             idx1 = (
                 self._index1_pos_v1.reshape(-1)
-                .to(device=data.device, dtype=th.long, non_blocking=True)
+                .to(device=data.device, dtype=torch.long, non_blocking=True)
                 .clone()
             )
-            g1_sub = th.index_select(flat, 2, idx1)
+            g1_sub = torch.index_select(flat, 2, idx1)
 
             # out[pos] = g0 + 0.5 * (g1 - g0_sub) at sparse positions
             delta = (g1_sub - g0_sub) * 0.5
-            out_flat = th.index_add(g0, 2, pos_out, delta)
+            out_flat = torch.index_add(g0, 2, pos_out, delta)
         else:
             out_flat = g0
 
@@ -773,7 +773,7 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
             .reshape(BF, C, Hp, Wp)
         )
         if self.enable_nhwc:
-            out = out.to(memory_format=th.channels_last)
+            out = out.to(memory_format=torch.channels_last)
 
         return out
 
@@ -783,7 +783,7 @@ class HEALPixPaddingIsolatitude(th.nn.Module):
 # ------------------------------------------------------------
 
 
-def kth_diag_indices(n: int, k: int) -> tuple[th.Tensor, th.Tensor]:
+def kth_diag_indices(n: int, k: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Row and column indices for the ``k``-th diagonal of an ``n x n`` matrix.
 
@@ -799,7 +799,7 @@ def kth_diag_indices(n: int, k: int) -> tuple[th.Tensor, th.Tensor]:
     tuple of torch.Tensor
         ``(rows, cols)`` such that ``matrix[rows, cols]`` selects that diagonal.
     """
-    rows, cols = th.arange(n), th.arange(n)
+    rows, cols = torch.arange(n), torch.arange(n)
     if k < 0:
         return rows[-k:], cols[:k]
     if k > 0:
@@ -810,16 +810,16 @@ def kth_diag_indices(n: int, k: int) -> tuple[th.Tensor, th.Tensor]:
 def _pn_isolat(
     p: int,
     d: tuple[int, int],
-    c: th.Tensor,
-    t: th.Tensor,
-    tl: th.Tensor,
-    lft: th.Tensor,
-    bl: th.Tensor,
-    b: th.Tensor,
-    br: th.Tensor,
-    rgt: th.Tensor,
-    tr: th.Tensor,
-) -> th.Tensor:
+    c: torch.Tensor,
+    t: torch.Tensor,
+    tl: torch.Tensor,
+    lft: torch.Tensor,
+    bl: torch.Tensor,
+    b: torch.Tensor,
+    br: torch.Tensor,
+    rgt: torch.Tensor,
+    tr: torch.Tensor,
+) -> torch.Tensor:
     """
     Isolatitude padding assembly for a **northern** hemisphere face (shared helper).
 
@@ -839,32 +839,32 @@ def _pn_isolat(
     """
     t = t.rot90(1, dims=d)[..., -p:, :]
     for i in range(p):
-        t[..., -i - 1, :] = th.roll(t[..., -i - 1, :], 2 * i + 1, dims=-1)
+        t[..., -i - 1, :] = torch.roll(t[..., -i - 1, :], 2 * i + 1, dims=-1)
         t[..., -i - 1, : 2 * i + 1] = t[..., -i - 1, 2 * i + 1].unsqueeze(-1)
 
     lft = lft.rot90(-1, dims=d)[..., -p:]
     for i in range(p):
-        lft[..., -i - 1] = th.roll(lft[..., -i - 1], 2 * i + 1, dims=-1)
+        lft[..., -i - 1] = torch.roll(lft[..., -i - 1], 2 * i + 1, dims=-1)
         lft[..., : 2 * i + 1, -i - 1] = lft[..., 2 * i + 1, -i - 1].unsqueeze(-1)
 
-    c = th.cat((t, c, b[..., :p, :]), dim=-2)
-    left = th.cat((tl.rot90(2, d)[..., -p:, -p:], lft, bl[..., :p, -p:]), dim=-2)
-    right = th.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
-    return th.cat((left, c, right), dim=-1)
+    c = torch.cat((t, c, b[..., :p, :]), dim=-2)
+    left = torch.cat((tl.rot90(2, d)[..., -p:, -p:], lft, bl[..., :p, -p:]), dim=-2)
+    right = torch.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
+    return torch.cat((left, c, right), dim=-1)
 
 
 def _pe_isolat(
     p: int,
-    c: th.Tensor,
-    t: th.Tensor,
-    tl: th.Tensor,
-    lft: th.Tensor,
-    bl: th.Tensor,
-    b: th.Tensor,
-    br: th.Tensor,
-    rgt: th.Tensor,
-    tr: th.Tensor,
-) -> th.Tensor:
+    c: torch.Tensor,
+    t: torch.Tensor,
+    tl: torch.Tensor,
+    lft: torch.Tensor,
+    bl: torch.Tensor,
+    b: torch.Tensor,
+    br: torch.Tensor,
+    rgt: torch.Tensor,
+    tr: torch.Tensor,
+) -> torch.Tensor:
     """
     Isolatitude padding for an **equatorial** face (no extra rolls on top/bottom
     strips).
@@ -877,25 +877,25 @@ def _pe_isolat(
         Central face and neighbor face tensors (same semantics as
         ``HEALPixPadding.pe``).
     """
-    c = th.cat((t[..., -p:, :], c, b[..., :p, :]), dim=-2)
-    left = th.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
-    right = th.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
-    return th.cat((left, c, right), dim=-1)
+    c = torch.cat((t[..., -p:, :], c, b[..., :p, :]), dim=-2)
+    left = torch.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
+    right = torch.cat((tr[..., -p:, :p], rgt[..., :p], br[..., :p, :p]), dim=-2)
+    return torch.cat((left, c, right), dim=-1)
 
 
 def _ps_isolat(
     p: int,
     d: tuple[int, int],
-    c: th.Tensor,
-    t: th.Tensor,
-    tl: th.Tensor,
-    lft: th.Tensor,
-    bl: th.Tensor,
-    b: th.Tensor,
-    br: th.Tensor,
-    rgt: th.Tensor,
-    tr: th.Tensor,
-) -> th.Tensor:
+    c: torch.Tensor,
+    t: torch.Tensor,
+    tl: torch.Tensor,
+    lft: torch.Tensor,
+    bl: torch.Tensor,
+    b: torch.Tensor,
+    br: torch.Tensor,
+    rgt: torch.Tensor,
+    tr: torch.Tensor,
+) -> torch.Tensor:
     """
     Isolatitude padding assembly for a **southern** hemisphere face.
 
@@ -914,21 +914,23 @@ def _ps_isolat(
     """
     b = b.rot90(1, d)[..., :p, :]
     for i in range(p):
-        b[..., i, :] = th.roll(b[..., i, :], -(2 * i + 1), dims=-1)
+        b[..., i, :] = torch.roll(b[..., i, :], -(2 * i + 1), dims=-1)
         b[..., i, -(2 * i + 1) :] = b[..., i, -(2 * i + 1) - 1].unsqueeze(-1)
 
     rgt = rgt.rot90(-1, d)[..., :p]
     for i in range(p):
-        rgt[..., i] = th.roll(rgt[..., i], -(2 * i + 1), dims=-1)
+        rgt[..., i] = torch.roll(rgt[..., i], -(2 * i + 1), dims=-1)
         rgt[..., -(2 * i + 1) :, i] = rgt[..., -(2 * i + 1) - 1, i].unsqueeze(-1)
 
-    c = th.cat((t[..., -p:, :], c, b), dim=-2)
-    left = th.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
-    right = th.cat((tr[..., -p:, :p], rgt, br.rot90(2, d)[..., :p, :p]), dim=-2)
-    return th.cat((left, c, right), dim=-1)
+    c = torch.cat((t[..., -p:, :], c, b), dim=-2)
+    left = torch.cat((tl[..., -p:, -p:], lft[..., -p:], bl[..., :p, -p:]), dim=-2)
+    right = torch.cat((tr[..., -p:, :p], rgt, br.rot90(2, d)[..., :p, :p]), dim=-2)
+    return torch.cat((left, c, right), dim=-1)
 
 
-def _tl_isolat(p: int, d: tuple[int, int], top: th.Tensor, lft: th.Tensor) -> th.Tensor:
+def _tl_isolat(
+    p: int, d: tuple[int, int], top: torch.Tensor, lft: torch.Tensor
+) -> torch.Tensor:
     """
     Synthesize the missing **top-left** equatorial corner under isolatitude rules.
 
@@ -946,7 +948,7 @@ def _tl_isolat(p: int, d: tuple[int, int], top: th.Tensor, lft: th.Tensor) -> th
     lft : torch.Tensor
         Face left of the equatorial center face.
     """
-    ret = th.zeros_like(top)[..., :p, :p]
+    ret = torch.zeros_like(top)[..., :p, :p]
     n = 2 * p - 1
     if n + 1 > top.shape[-1]:
         raise ValueError(
@@ -958,10 +960,12 @@ def _tl_isolat(p: int, d: tuple[int, int], top: th.Tensor, lft: th.Tensor) -> th
         diag_indices = kth_diag_indices(p, diag_nums[i])
         for j in range(len(diag_indices[0])):
             ret[..., diag_indices[0][j], diag_indices[1][j]] = fill_val
-    return th.rot90(ret, k=-1, dims=d)
+    return torch.rot90(ret, k=-1, dims=d)
 
 
-def _br_isolat(p: int, d: tuple[int, int], b: th.Tensor, r: th.Tensor) -> th.Tensor:
+def _br_isolat(
+    p: int, d: tuple[int, int], b: torch.Tensor, r: torch.Tensor
+) -> torch.Tensor:
     """
     Synthesize the missing **bottom-right** equatorial corner under isolatitude rules.
 
@@ -979,7 +983,7 @@ def _br_isolat(p: int, d: tuple[int, int], b: th.Tensor, r: th.Tensor) -> th.Ten
     r : torch.Tensor
         Face right of the equatorial center face.
     """
-    ret = th.zeros_like(b)[..., :p, :p]
+    ret = torch.zeros_like(b)[..., :p, :p]
     n = 2 * p - 1
     if n + 1 > b.shape[-1]:
         raise ValueError(
@@ -991,10 +995,12 @@ def _br_isolat(p: int, d: tuple[int, int], b: th.Tensor, r: th.Tensor) -> th.Ten
         diag_indices = kth_diag_indices(p, diag_nums[i])
         for j in range(len(diag_indices[0])):
             ret[..., diag_indices[0][j], diag_indices[1][j]] = fill_val
-    return th.rot90(ret, k=1, dims=d)
+    return torch.rot90(ret, k=1, dims=d)
 
 
-def isolatitude_pad_folded(data: th.Tensor, p: int, enable_nhwc: bool) -> th.Tensor:
+def isolatitude_pad_folded(
+    data: torch.Tensor, p: int, enable_nhwc: bool
+) -> torch.Tensor:
     """
     Apply isolatitude HEALPix padding on **folded** face data.
 
@@ -1020,8 +1026,8 @@ def isolatitude_pad_folded(data: th.Tensor, p: int, enable_nhwc: bool) -> th.Ten
     data = data.reshape(-1, 12, c, h, w)
 
     f00, f01, f02, f03, f04, f05, f06, f07, f08, f09, f10, f11 = [
-        th.squeeze(x, dim=1)
-        for x in th.split(tensor=data, split_size_or_sections=1, dim=1)
+        torch.squeeze(x, dim=1)
+        for x in torch.split(tensor=data, split_size_or_sections=1, dim=1)
     ]
 
     p00 = _pn_isolat(p, d, f00, f01, f02, f03, f03, f04, f08, f05, f01)
@@ -1083,17 +1089,19 @@ def isolatitude_pad_folded(data: th.Tensor, p: int, enable_nhwc: bool) -> th.Ten
     p10 = _ps_isolat(p, d, f10, f07, f02, f06, f09, f09, f08, f11, f11)
     p11 = _ps_isolat(p, d, f11, f04, f03, f07, f10, f10, f09, f08, f08)
 
-    res = th.stack((p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11), dim=1)
+    res = torch.stack(
+        (p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11), dim=1
+    )
     n, _, _, hpad, wpad = res.shape
     res = res.reshape(n * 12, c, hpad, wpad)
     if enable_nhwc:
-        res = res.to(memory_format=th.channels_last)
+        res = res.to(memory_format=torch.channels_last)
     return res
 
 
 def decode_two_channel_identity_to_linear_indices(
-    y0: th.Tensor, y1: th.Tensor
-) -> tuple[th.Tensor, th.Tensor]:
+    y0: torch.Tensor, y1: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Recover two nonnegative integer indices from a redundant two-channel encoding.
 
@@ -1118,12 +1126,12 @@ def decode_two_channel_identity_to_linear_indices(
     ab = (s * s - ss) / 2.0
     disc = (s * s - 4.0 * ab).clamp_min(0.0)
     root = disc.sqrt()
-    a = ((s + root) / 2.0).round().to(th.int64)
-    b = ((s - root) / 2.0).round().to(th.int64)
+    a = ((s + root) / 2.0).round().to(torch.int64)
+    b = ((s - root) / 2.0).round().to(torch.int64)
     return a, b
 
 
-def build_isolatitude_gather_index(p: int, H: int) -> tuple[th.Tensor, th.Tensor]:
+def build_isolatitude_gather_index(p: int, H: int) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute gather indices that reproduce ``isolatitude_pad_folded`` on flat data.
 
@@ -1149,10 +1157,10 @@ def build_isolatitude_gather_index(p: int, H: int) -> tuple[th.Tensor, th.Tensor
         False when both channels collapsed to the same index).
     """
     Hpad = H + 2 * p
-    ids = th.arange(12 * H * H, dtype=th.float64).reshape(12, H, H)
+    ids = torch.arange(12 * H * H, dtype=torch.float64).reshape(12, H, H)
     ch0 = ids
     ch1 = ids * ids
-    x_folded = th.stack((ch0, ch1), dim=1).unsqueeze(0).reshape(12, 2, H, H)
+    x_folded = torch.stack((ch0, ch1), dim=1).unsqueeze(0).reshape(12, 2, H, H)
 
     y_folded = isolatitude_pad_folded(x_folded, p, False)
     y = y_folded.reshape(1, 12, 2, Hpad, Hpad)
@@ -1160,11 +1168,11 @@ def build_isolatitude_gather_index(p: int, H: int) -> tuple[th.Tensor, th.Tensor
     y1 = y[:, :, 1].reshape(-1)
     a_flat, b_flat = decode_two_channel_identity_to_linear_indices(y0, y1)
     n_out = a_flat.numel()
-    index = th.empty(2, n_out, dtype=th.long)
+    index = torch.empty(2, n_out, dtype=torch.long)
     index[0] = a_flat
     index[1] = b_flat
-    valid = th.ones(2, n_out, dtype=th.bool)
+    valid = torch.ones(2, n_out, dtype=torch.bool)
     same = a_flat == b_flat
-    index[1] = th.where(same, th.tensor(-1, dtype=th.long), index[1])
+    index[1] = torch.where(same, torch.tensor(-1, dtype=torch.long), index[1])
     valid[1] = ~same
     return index, valid

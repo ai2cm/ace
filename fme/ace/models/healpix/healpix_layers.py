@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-import torch as th
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ from .healpix_paddings import (
 )
 
 
-class HEALPixLayer(th.nn.Module):
+class HEALPixLayer(torch.nn.Module):
     """
     Apply a base ``torch.nn.Module`` on data laid out as HEALPix faces.
 
@@ -102,7 +102,7 @@ class HEALPixLayer(th.nn.Module):
         # Define a HEALPixPadding layer if padding is necessary
         if padding > 0:
             # Disable native padding for conv layers
-            if issubclass(layer, th.nn.modules.conv._ConvNd):
+            if issubclass(layer, torch.nn.modules.conv._ConvNd):
                 kwargs["padding"] = 0
             padding_layer = make_hpx_padding_layer(
                 padding=padding,
@@ -113,12 +113,12 @@ class HEALPixLayer(th.nn.Module):
             layers.append(padding_layer)
 
         layers.append(layer(**kwargs))
-        self.layers = th.nn.Sequential(*layers)
+        self.layers = torch.nn.Sequential(*layers)
 
         if enable_nhwc:
-            self.layers = self.layers.to(memory_format=th.channels_last)
+            self.layers = self.layers.to(memory_format=torch.channels_last)
 
-    def forward(self, x: th.Tensor) -> th.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Run padding (if configured) and the wrapped layer.
 
