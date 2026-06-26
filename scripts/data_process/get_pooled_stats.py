@@ -33,6 +33,8 @@ import tempfile
 from typing import List, Optional
 
 import dacite
+import dask
+import distributed
 import fsspec
 import xarray as xr
 import yaml
@@ -162,14 +164,8 @@ def compute_store_stats(store: str, pair: DatasetPair) -> dict:
     """Open one zarr store, slice it with the pair's time bounds, and return its
     centering / full-field / residual stats plus the timestep count used as the
     pooling weight."""
-    try:
-        import dask
-
-        with dask.config.set({"array.chunk-size": "128MiB"}):
-            ds = xr.open_zarr(store, chunks={"time": "auto"})
-    except ImportError as e:
-        logging.warning(f"Could not import dask ({e}), chunking is disabled.")
-        ds = xr.open_zarr(store)
+    with dask.config.set({"array.chunk-size": "128MiB"}):
+        ds = xr.open_zarr(store, chunks={"time": "auto"})
 
     ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
     ds = ds.sel(time=slice(pair.start_time, pair.end))
@@ -186,11 +182,20 @@ def compute_store_stats(store: str, pair: DatasetPair) -> dict:
         f"{store} [{pair.start_time}, {pair.end}]: {n_samples} steps, "
         f"reducing over {dims}"
     )
+
+    # Build all three reductions lazily, then compute them together so the zarr is
+    # read from storage only once: the shared dask graph dedups the source reads.
+    centering, scaling_full_field, scaling_residual = dask.compute(
+        ds.mean(dim=dims),
+        ds.std(dim=dims),
+        ds.diff("time").std(dim=dims),
+    )
+
     return {
         "store": store,
-        "centering": ds.mean(dim=dims).compute(),
-        "scaling_full_field": ds.std(dim=dims).compute(),
-        "scaling_residual": ds.diff("time").std(dim=dims).compute(),
+        "centering": centering,
+        "scaling_full_field": scaling_full_field,
+        "scaling_residual": scaling_residual,
         "n_samples": n_samples,
     }
 
@@ -278,27 +283,35 @@ def compute(config_yaml: str, output_directory: str):
     if output_directory.endswith("/"):
         output_directory = output_directory[:-1]
 
-    per_pair = []
-    index = 0
-    for pair in config.dataset_pairs:
-        stores = _resolve_zarr_stores(pair.dataset)
-        if stores != [pair.dataset.rstrip("/")]:
-            logging.info(f"Resolved {pair.dataset} -> {stores}")
-        for store in stores:
-            stats = compute_store_stats(store, pair)
-            per_pair.append(stats)
-            subdir = _pair_subdir(index, pair, store)
-            write_stats(
-                _stats_files(stats), output_directory + "/" + subdir, config_yaml
-            )
-            index += 1
+    # Start a dask distributed client so the per-store reads/reductions run across
+    # many workers, mirroring get_stats.py.
+    client = distributed.Client(n_workers=16)
+    logging.info(f"Started dask distributed client: {client}")
 
-    pooled = pool_stats(per_pair)
+    try:
+        per_pair = []
+        index = 0
+        for pair in config.dataset_pairs:
+            stores = _resolve_zarr_stores(pair.dataset)
+            if stores != [pair.dataset.rstrip("/")]:
+                logging.info(f"Resolved {pair.dataset} -> {stores}")
+            for store in stores:
+                stats = compute_store_stats(store, pair)
+                per_pair.append(stats)
+                subdir = _pair_subdir(index, pair, store)
+                write_stats(
+                    _stats_files(stats), output_directory + "/" + subdir, config_yaml
+                )
+                index += 1
 
-    for name, da in pooled.items():
-        logging.info(f"{name}:\n{da}")
+        pooled = pool_stats(per_pair)
 
-    write_stats(pooled, output_directory, config_yaml)
+        for name, da in pooled.items():
+            logging.info(f"{name}:\n{da}")
+
+        write_stats(pooled, output_directory, config_yaml)
+    finally:
+        client.close()
 
 
 def submit(args):
@@ -337,7 +350,7 @@ def submit(args):
         f"google-credentials:{GCP_CREDS}",
         "--system-python",
         "--install",
-        "pip install 'dask[array]' && pip install --no-deps .",
+        "pip install 'dask[array]' distributed && pip install --no-deps .",
         "--allow-dirty",
     ]
     for cluster in args.beaker_cluster:
