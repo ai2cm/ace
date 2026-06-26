@@ -4,9 +4,11 @@ set -e
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 REPO_ROOT=$(git rev-parse --show-toplevel)
-# NB: do NOT set WANDB_USERNAME here. The beaker run env already carries the
-# correct value; overriding it with the beaker account name misattributes the
-# wandb run to the service account.
+# Set WANDB_USERNAME explicitly: the beaker job env does NOT inherit the shell
+# value, so without this the run logs under the service-account key with a null
+# username (unattributed). 'mcgibbon' is the correct human wandb identity; never
+# 'jeremym' (the beaker account, which misattributes to the service account).
+WANDB_USERNAME=mcgibbon
 
 cd "$REPO_ROOT"
 
@@ -43,6 +45,7 @@ run_training() {
     --no-logs \
     "${cluster_args[@]}" \
     --env WANDB_NAME="$job_name" \
+    --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
@@ -74,10 +77,17 @@ run_training() {
 # =============================================================================
 
 # --- v1 ERA5-only non-residual (shared T-norm + appended GM-T), seed 0 ---
-run_training "train-1deg-daily-v1-era5-only.yaml" "train-1deg-daily-v1-era5-only-rs0" 4
+# [already launched 2026-06-23] run_training "train-1deg-daily-v1-era5-only.yaml" "train-1deg-daily-v1-era5-only-rs0" 4
 
 # --- v1 residual fg16xws64 (sr0.125), seed 0 ---
-run_training "train-1deg-daily-v1-era5-only-fg16-sr0p125-residual.yaml" "train-1deg-daily-v1-era5-only-fg16-sr0p125-residual-rs0" 4
+# [already launched 2026-06-23] run_training "train-1deg-daily-v1-era5-only-fg16-sr0p125-residual.yaml" "train-1deg-daily-v1-era5-only-fg16-sr0p125-residual-rs0" 4
 
 # --- v2 ERA5-only residual (stitched train window), seed 0 ---
-run_training "train-1deg-daily-v2-era5-only.yaml" "train-1deg-daily-v2-era5-only-rs0" 4
+# [already launched 2026-06-23] run_training "train-1deg-daily-v2-era5-only.yaml" "train-1deg-daily-v2-era5-only-rs0" 4
+
+# --- v2 ERA5-only NO-residual (stitched window, residual_prediction off), seed 0 ---
+# 1deg-climate-improvement-transfer investigation: v2 recipe with residual prediction
+# disabled (one-line flip from train-1deg-daily-v2-era5-only.yaml), fg16xws64 +
+# stitched window otherwise held fixed. 1deg analog of the 4deg
+# train-4deg-daily-v2-era5-only-no-residual run (znnaox7t).
+run_training "train-1deg-daily-v2-era5-only-no-residual.yaml" "train-1deg-daily-v2-era5-only-no-residual-rs0" 4
