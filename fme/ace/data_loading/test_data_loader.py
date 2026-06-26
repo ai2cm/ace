@@ -14,7 +14,7 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.config import DataLoaderConfig, GroupWeightsConfig
 from fme.ace.data_loading.dataloader import SlidingWindowDataLoader
 from fme.ace.data_loading.getters import (
     get_forcing_data,
@@ -40,7 +40,7 @@ from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.dataset.schedule import IntMilestone, IntSchedule
+from fme.core.dataset.schedule import IntMilestone, IntSchedule, WeightMilestone
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed.distributed import Distributed
@@ -319,6 +319,102 @@ def test_xarray_loader_sample_with_replacement(tmp_path):
     epoch_samples = list(data.loader)
     assert len(epoch_samples) == 10
     data.set_epoch(1)  # should not raise an error
+
+
+def _make_concat_members(tmp_path, n_members, n_times=5):
+    netcdfs = []
+    for i in range(n_members):
+        member_path = tmp_path / f"member{i}"
+        member_path.mkdir()
+        # distinguish members by their start time (i * 100 days)
+        _create_dataset_on_disk(member_path, n_times=n_times, timestep_start=i * 100)
+        netcdfs.append(member_path)
+    return netcdfs
+
+
+def _min_day_offset(batch_time) -> int:
+    base = cftime.DatetimeProlepticGregorian(1970, 1, 1)
+    return min((t - base).days for t in batch_time.values.ravel())
+
+
+def test_group_weights_cooldown_only_draws_weighted_group(tmp_path):
+    netcdfs = _make_concat_members(tmp_path, n_members=3)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(p)) for p in netcdfs]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        group_weights=GroupWeightsConfig(groups=[1, 1, 1], start_value=[0.0, 0.0, 1.0]),
+    )
+    requirements = DataRequirements(["foo"], 2)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    data.set_epoch(0)
+    # member 2 starts at day 200, so every drawn sample must be at day >= 200
+    for batch in data.loader:
+        assert _min_day_offset(batch.time) >= 200
+
+
+def test_group_weights_milestone_switches_group(tmp_path):
+    netcdfs = _make_concat_members(tmp_path, n_members=2)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(p)) for p in netcdfs]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        group_weights=GroupWeightsConfig(
+            groups=[1, 1],
+            start_value=[1.0, 0.0],
+            milestones=[WeightMilestone(epoch=143, value=[0.0, 1.0])],
+        ),
+    )
+    requirements = DataRequirements(["foo"], 2)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+
+    # before milestone: only member 0 (day < 100)
+    data.set_epoch(142)
+    for batch in data.loader:
+        assert _min_day_offset(batch.time) < 100
+
+    # at milestone (epoch 143, the post-checkpoint cooldown epoch): only member 1
+    data.set_epoch(143)
+    for batch in data.loader:
+        assert _min_day_offset(batch.time) >= 100
+
+
+def test_group_weights_train_false_raises(tmp_path):
+    netcdfs = _make_concat_members(tmp_path, n_members=2)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(p)) for p in netcdfs]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        group_weights=GroupWeightsConfig(groups=[1, 1], start_value=[0.5, 0.5]),
+    )
+    requirements = DataRequirements(["foo"], 2)
+    with pytest.raises(ValueError, match="only supported for training loaders"):
+        get_gridded_data(config, False, requirements)  # type: ignore
+
+
+def test_group_weights_with_time_buffer(tmp_path):
+    netcdfs = _make_concat_members(tmp_path, n_members=2, n_times=8)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(p)) for p in netcdfs]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=2,
+        group_weights=GroupWeightsConfig(groups=[1, 1], start_value=[0.0, 1.0]),
+    )
+    requirements = DataRequirements(["foo"], 2)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    data.set_epoch(0)
+    # group ids mapped through SubsetDataset indices: only member 1 (day >= 100)
+    for batch in data.loader:
+        assert _min_day_offset(batch.time) >= 100
 
 
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):

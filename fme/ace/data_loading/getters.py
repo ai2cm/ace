@@ -1,12 +1,15 @@
 import logging
+import math
 from collections.abc import Sequence
 
 import torch.utils.data
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
+from fme.ace.data_loading.sampler import ScheduledWeightedSampler, build_group_ids
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.dataset import DatasetItem
+from fme.core.dataset.concat import XarrayConcat
+from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.subset import SubsetDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
@@ -72,6 +75,44 @@ def _get_sampler(
     return sampler
 
 
+def _get_weighted_sampler(
+    config: DataLoaderConfig,
+    unsubset_dataset: DatasetABC,
+    dataset: DatasetABC,
+    indices: list[int] | None,
+    train: bool,
+    dist: Distributed,
+) -> ScheduledWeightedSampler:
+    assert config.group_weights is not None
+    if not train:
+        raise ValueError("group_weights is only supported for training loaders")
+    dist.require_no_spatial_parallelism(
+        "group_weights uses weighted sampling, which is not supported with "
+        "spatial parallelism. Spatial co-ranks would draw different samples, "
+        "producing corrupted data after scatter_spatial reassembly."
+    )
+    # group_weights config validation guarantees a ConcatDatasetConfig, so the
+    # built dataset is an XarrayConcat exposing member_lengths.
+    if not isinstance(unsubset_dataset, XarrayConcat):
+        raise ValueError(
+            "group_weights requires a concat dataset, got "
+            f"{type(unsubset_dataset).__name__}"
+        )
+    group_ids = build_group_ids(
+        unsubset_dataset.member_lengths, config.group_weights.groups
+    )
+    if indices is not None:
+        # map group ids through the SubsetDataset reindexing
+        group_ids = group_ids[indices]
+    return ScheduledWeightedSampler(
+        group_ids,
+        config.group_weights.schedule,
+        num_samples_per_rank=math.ceil(len(dataset) / dist.total_data_parallel_ranks),
+        rank=dist.data_parallel_rank,
+        base_seed=dist.get_seed(),
+    )
+
+
 def get_gridded_data(
     config: DataLoaderConfig,
     train: bool,
@@ -94,7 +135,10 @@ def get_gridded_data(
         n_timesteps_preloaded,
         allow_missing_variables=requirements.allow_missing_variables,
     )
+    # capture concat member lengths before any SubsetDataset wrapping
+    unsubset_dataset = dataset
 
+    indices: list[int] | None = None
     if config.time_buffer > 0:
         # include requirements.n_timesteps - 1 steps of overlap so that no samples are
         # skipped at the boundaries of the preloaded timesteps
@@ -104,7 +148,12 @@ def get_gridded_data(
 
     dist = Distributed.get_instance()
 
-    sampler = _get_sampler(dataset, config.sample_with_replacement, train)
+    if config.group_weights is not None:
+        sampler = _get_weighted_sampler(
+            config, unsubset_dataset, dataset, indices, train, dist
+        )
+    else:
+        sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
     if _force_forkserver or (config.zarr_engine_used and config.num_data_workers > 0):
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver

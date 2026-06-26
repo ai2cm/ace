@@ -14,12 +14,16 @@ Key design notes
   total_data_parallel_ranks so no padding occurs unless explicitly tested.
 """
 
+import math
 from typing import cast
 
 import pytest
 import torch
 
+from fme.ace.data_loading.sampler import ScheduledWeightedSampler, build_group_ids
+from fme.core.dataset.schedule import WeightSchedule
 from fme.core.distributed import Distributed
+from fme.core.distributed.distributed import SpatialParallelismNotImplemented
 from fme.core.rand import set_seed
 
 
@@ -135,3 +139,54 @@ def test_get_sampler_seed_reproducibility():
     second = list(dist.get_sampler(dataset, shuffle=True))
 
     assert first == second
+
+
+def _build_weighted_sampler(dist, n_per_member: int = 50):
+    member_lengths = [n_per_member, n_per_member]
+    group_ids = build_group_ids(member_lengths, [1, 1])
+    schedule = WeightSchedule.from_constant([0.5, 0.5])
+    total = sum(member_lengths)
+    num_samples_per_rank = math.ceil(total / dist.total_data_parallel_ranks)
+    return (
+        ScheduledWeightedSampler(
+            group_ids,
+            schedule,
+            num_samples_per_rank=num_samples_per_rank,
+            rank=dist.data_parallel_rank,
+            base_seed=dist.get_seed(),
+        ),
+        num_samples_per_rank,
+        total,
+    )
+
+
+@pytest.mark.parallel
+def test_weighted_sampler_per_rank_distinct_and_size():
+    """
+    ScheduledWeightedSampler draws num_samples_per_rank =
+    ceil(len(dataset) / total_data_parallel_ranks) samples per rank, and
+    distinct data-parallel ranks draw distinct samples. Under spatial
+    parallelism the weighted sampler raises instead.
+    """
+    dist = Distributed.get_instance()
+    set_seed(0)
+
+    if dist.world_size != dist.total_data_parallel_ranks:
+        # spatial parallelism active: require_no_spatial_parallelism must raise
+        with pytest.raises(SpatialParallelismNotImplemented):
+            dist.require_no_spatial_parallelism("group_weights")
+        return
+
+    sampler, num_samples_per_rank, total = _build_weighted_sampler(dist)
+    expected = math.ceil(total / dist.total_data_parallel_ranks)
+    assert num_samples_per_rank == expected
+    local_indices = list(sampler)
+    assert len(local_indices) == expected
+
+    all_indices = dist.gather_object(local_indices)
+    if dist.is_root():
+        assert all_indices is not None
+        gathered = cast(list[list[int]], all_indices)
+        if dist.total_data_parallel_ranks > 1:
+            # different data-parallel ranks must draw different samples
+            assert gathered[0] != gathered[1]
