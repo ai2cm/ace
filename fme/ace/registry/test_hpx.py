@@ -481,7 +481,7 @@ def healpix_padding():
     padding = 2
 
     """Instantiate HEALPixPadding with the specified padding."""
-    return HEALPixPadding(padding=padding, enable_nhwc=False)
+    return HEALPixPadding(padding=padding)
 
 
 def test_healpix_padding_pn(healpix_padding):
@@ -666,10 +666,7 @@ def test_HEALPixPaddingIsolatitude_forward_shape_cuda(padding: int):
 
 @pytest.mark.parametrize("padding", [1, 2, 3, 4, 5])
 @pytest.mark.parametrize("hw", [16, 32, 64])
-@pytest.mark.parametrize("enable_nhwc", [False, True])
-def test_healpix_padding_isolatitude_matches_folded_reference(
-    padding: int, hw: int, enable_nhwc: bool
-):
+def test_healpix_padding_isolatitude_matches_folded_reference(padding: int, hw: int):
     """Gather-based HEALPixPaddingIsolatitude must match isolatitude_pad_folded."""
     if 2 * padding > hw:
         pytest.skip("face size too small for padding (isolatitude corner synthesis)")
@@ -680,8 +677,8 @@ def test_healpix_padding_isolatitude_matches_folded_reference(
     c = 3
     x = torch.randn(batch_size * num_faces, c, hw, hw)
 
-    ref = isolatitude_pad_folded(x, padding, enable_nhwc)
-    y = HEALPixPaddingIsolatitude(padding=padding, nside=hw, enable_nhwc=enable_nhwc)(x)
+    ref = isolatitude_pad_folded(x, padding)
+    y = HEALPixPaddingIsolatitude(padding=padding, nside=hw)(x)
 
     # Gather path uses 0.5 * (g0 + g1) in a form that can differ by ~1 ULP from the
     # reference on some output cells.
@@ -690,17 +687,12 @@ def test_healpix_padding_isolatitude_matches_folded_reference(
 
 @pytest.mark.parametrize("padding", [1, 2])
 @pytest.mark.parametrize("hw", [4, 8])
-@pytest.mark.parametrize("enable_nhwc", [False, True])
-def test_healpix_padding_isolatitude_gradcheck_cpu(
-    padding: int, hw: int, enable_nhwc: bool
-):
+def test_healpix_padding_isolatitude_gradcheck_cpu(padding: int, hw: int):
     """Analytic backward matches finite differences (double precision)."""
     if 2 * padding > hw:
         pytest.skip("face size too small for padding")
 
-    pad = HEALPixPaddingIsolatitude(
-        padding=padding, nside=hw, enable_nhwc=enable_nhwc
-    ).double()
+    pad = HEALPixPaddingIsolatitude(padding=padding, nside=hw).double()
 
     batch_size = 1
     c = 2
@@ -799,7 +791,6 @@ def test_healpix_layer_conv_same_geometry(mode):
         kernel_size=3,
         stride=1,
         padding="same",
-        enable_nhwc=False,
         hpx_padding_mode=mode,
     )
     if mode == "isolatitude":
@@ -829,9 +820,9 @@ def test_healpix_layer_earth2grid():
 
 
 def test_make_hpx_padding_factory_types():
-    p = make_hpx_padding_layer(1, "karlbauer", enable_nhwc=False)
+    p = make_hpx_padding_layer(1, "karlbauer")
     assert p is not None
-    p2 = make_hpx_padding_layer(1, "isolatitude", enable_nhwc=False, nside=8)
+    p2 = make_hpx_padding_layer(1, "isolatitude", nside=8)
     assert p2 is not None
 
 

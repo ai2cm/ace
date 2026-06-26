@@ -421,7 +421,6 @@ class MaxPool(nn.Module):
     def __init__(
         self,
         pooling: int = 2,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -430,7 +429,6 @@ class MaxPool(nn.Module):
         """
         Args:
             pooling: ``MaxPool2d`` kernel size (and stride).
-            enable_nhwc: Use channels-last memory format.
             hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
             nside: Native face height/width for HEALPix padding.
         """
@@ -463,7 +461,6 @@ class AvgPool(nn.Module):
     def __init__(
         self,
         pooling: int = 2,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -472,7 +469,6 @@ class AvgPool(nn.Module):
         """
         Args:
             pooling: ``AvgPool2d`` kernel size (and stride).
-            enable_nhwc: Use channels-last memory format.
             hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
             nside: Native face height/width for HEALPix padding.
         """
@@ -570,7 +566,6 @@ class DealiasedDownsample(nn.Module):
         in_channels: int = 3,
         resample_filter: Sequence[float] | None = None,
         stride: int = 2,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -581,7 +576,6 @@ class DealiasedDownsample(nn.Module):
             in_channels: Number of input channels.
             resample_filter: 1D filter weights for each blur stage.
             stride: Total downsampling factor (must be a power of two).
-            enable_nhwc: Use channels-last memory format.
             hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
             nside: Native face height/width for HEALPix padding.
         """
@@ -651,7 +645,6 @@ class TransposedConvUpsample(nn.Module):
         out_channels: int = 1,
         upsampling: int = 2,
         activation: Optional[CappedGELUConfig] = None,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -663,7 +656,6 @@ class TransposedConvUpsample(nn.Module):
             out_channels: The number of output channels.
             upsampling: Stride size that will be used for upsampling.
             activation: ModuleConfig for the activation function used in upsampling.
-            enable_nhwc: Enable nhwc format, passed to wrapper.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -777,7 +769,6 @@ class SmoothedInterpolateConv(nn.Module):
         scale_factor: int = 2,
         mode: str = "nearest",
         activation: Optional[nn.Module] = None,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -793,7 +784,6 @@ class SmoothedInterpolateConv(nn.Module):
             scale_factor: Interpolation scale factor.
             mode: Interpolation mode for the smoothed upsample step.
             activation: Optional activation module appended after the conv.
-            enable_nhwc: Use channels-last memory format.
             hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
             nside: Face height/width before upsampling (isolatitude gather indices).
             nside_after: Face height/width after upsampling for the conv step; required
@@ -884,7 +874,6 @@ class BasicConvBlock(nn.Module):
         n_layers=1,
         latent_channels=None,
         activation=None,
-        enable_nhwc=False,
         hpx_padding_mode="earth2grid",
         nside=None,
     ):
@@ -897,7 +886,6 @@ class BasicConvBlock(nn.Module):
             n_layers: Number of convolutional layers.
             latent_channels: Number of latent channels.
             activation: ModuleConfig for activation function to use.
-            enable_nhwc: Enable nhwc format, passed to wrapper.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -958,7 +946,6 @@ class ConvNeXtBlock(nn.Module):
         dilation: int = 1,
         upscale_factor: int = 4,
         activation: Optional[CappedGELUConfig] = None,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -975,7 +962,6 @@ class ConvNeXtBlock(nn.Module):
             dilation: Dilation rate for convolutions.
             upscale_factor: Factor by which to upscale the number of latent channels.
             activation: Configuration for the activation function used between layers.
-            enable_nhwc: Whether to enable NHWC format.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -1069,7 +1055,6 @@ class DoubleConvNeXtBlock(nn.Module):
         upscale_factor: int = 4,
         latent_channels: int = 1,
         activation: Optional[CappedGELUConfig] = None,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -1086,7 +1071,6 @@ class DoubleConvNeXtBlock(nn.Module):
             upscale_factor: Factor by which to upscale the number of latent channels (default is 4).
             latent_channels: Number of latent channels used in the block (default is 1).
             activation: Configuration for the activation function used between layers (default is None).
-            enable_nhwc: Whether to enable NHWC format (default is False).
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -1241,7 +1225,6 @@ class SymmetricConvNeXtBlock(nn.Module):
         dilation: int = 1,
         upscale_factor: int = 4,
         activation: Optional[CappedGELUConfig] = None,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -1258,7 +1241,6 @@ class SymmetricConvNeXtBlock(nn.Module):
             upscale_factor: Upscale factor.
             latent_channels: Number of latent channels used in the block (default is 1).
             activation: Configuration for the activation function used between layers (default is None).
-            enable_nhwc: Whether to enable NHWC format (default is False).
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -1360,7 +1342,6 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
         upscale_factor: int = 4,
         n_layers: int = 1,
         activation: Optional[CappedGELUConfig] = None,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -1376,7 +1357,6 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
             upscale_factor: Channel upscale factor inside each block.
             n_layers: Number of stacked ``SymmetricConvNeXtBlock`` modules.
             activation: Optional ``CappedGELUConfig`` between layers.
-            enable_nhwc: Use channels-last memory format.
             hpx_padding_mode: HEALPix padding backend passed to child blocks.
             nside: Native face height/width for HEALPix padding.
         """
@@ -1393,7 +1373,6 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
                     dilation=dilation,
                     upscale_factor=upscale_factor,
                     activation=activation,
-                    enable_nhwc=enable_nhwc,
                     hpx_padding_mode=hpx_padding_mode,
                     nside=nside,
                 )

@@ -77,8 +77,8 @@ class HEALPixLayer(torch.nn.Module):
             Native resolution of each HEALPix face (height = width). Required when
             ``hpx_padding_mode=="isolatitude"``.
         **kwargs
-            Forwarded to ``layer`` after removing ``enable_nhwc`` (e.g. ``in_channels``,
-            ``out_channels``, ``kernel_size``, ``dilation``, ``enable_nhwc``). If ``nside``
+            Forwarded to ``layer`` (e.g. ``in_channels``, ``out_channels``,
+            ``kernel_size``, ``dilation``). If ``nside``
             appears here (e.g. Hydra), it is consumed and overrides the corresponding
             argument.
         """
@@ -88,12 +88,6 @@ class HEALPixLayer(torch.nn.Module):
         if "nside" in kwargs:
             _ns = kwargs.pop("nside")
             nside = int(_ns) if _ns is not None else None
-
-        if "enable_nhwc" in kwargs:
-            enable_nhwc = kwargs["enable_nhwc"]
-            del kwargs["enable_nhwc"]
-        else:
-            enable_nhwc = False
 
         kernel_size = 3 if "kernel_size" not in kwargs else kwargs["kernel_size"]
         dilation = 1 if "dilation" not in kwargs else kwargs["dilation"]
@@ -107,16 +101,12 @@ class HEALPixLayer(torch.nn.Module):
             padding_layer = make_hpx_padding_layer(
                 padding=padding,
                 hpx_padding_mode=hpx_padding_mode,
-                enable_nhwc=enable_nhwc,
                 nside=nside,
             )
             layers.append(padding_layer)
 
         layers.append(layer(**kwargs))
         self.layers = torch.nn.Sequential(*layers)
-
-        if enable_nhwc:
-            self.layers = self.layers.to(memory_format=torch.channels_last)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

@@ -79,7 +79,6 @@ except ImportError:
 def make_hpx_padding_layer(
     padding: int,
     hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"],
-    enable_nhwc: bool,
     nside: int | None = None,
 ) -> torch.nn.Module:
     """
@@ -91,8 +90,6 @@ def make_hpx_padding_layer(
         Symmetric pad width on each face edge (``p >= 1``).
     hpx_padding_mode : Literal["earth2grid", "karlbauer", "isolatitude"]
         Padding strategy to use for the HEALPix padding layer.
-    enable_nhwc : bool
-        Passed to padding modules that support channels-last output.
     nside : int or None, optional
         Native face height/width. Required when ``hpx_padding_mode=="isolatitude"``;
         ignored otherwise.
@@ -114,9 +111,9 @@ def make_hpx_padding_layer(
                 "hpx_padding_mode=earth2grid requires the earth2grid package "
                 f"(have_earth2grid={have_earth2grid})."
             )
-        return HEALPixPaddingv2(padding=padding, enable_nhwc=enable_nhwc)
+        return HEALPixPaddingv2(padding=padding)
     if hpx_padding_mode == "karlbauer":
-        return HEALPixPadding(padding=padding, enable_nhwc=enable_nhwc)
+        return HEALPixPadding(padding=padding)
     if hpx_padding_mode == "isolatitude":
         if nside is None:
             raise ValueError(
@@ -126,7 +123,6 @@ def make_hpx_padding_layer(
         return HEALPixPaddingIsolatitude(
             padding=padding,
             nside=nside,
-            enable_nhwc=enable_nhwc,
         )
     raise ValueError(
         f"Unsupported hpx_padding_mode={hpx_padding_mode!r}; "
@@ -136,16 +132,6 @@ def make_hpx_padding_layer(
 
 class HEALPixFoldFaces(torch.nn.Module):
     """Merge the HEALPix face dimension into the batch dimension (NCHW layout)."""
-
-    def __init__(self, enable_nhwc: bool = False):
-        """
-        Parameters
-        ----------
-        enable_nhwc: bool, optional
-            Use nhwc format instead of nchw format
-        """
-        super().__init__()
-        self.enable_nhwc = enable_nhwc
 
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -159,33 +145,24 @@ class HEALPixFoldFaces(torch.nn.Module):
         Returns:
         -------
         torch.Tensor
-            Four-dimensional tensor with faces stacked on the batch axis. If
-            ``enable_nhwc`` is True, result uses channels-last memory format.
+            Four-dimensional tensor with faces stacked on the batch axis.
         """
         N, F, C, H, W = tensor.shape
-        tensor = torch.reshape(tensor, shape=(N * F, C, H, W))
-
-        if self.enable_nhwc:
-            tensor = tensor.to(memory_format=torch.channels_last)
-
-        return tensor
+        return torch.reshape(tensor, shape=(N * F, C, H, W))
 
 
 class HEALPixUnfoldFaces(torch.nn.Module):
     """Split the batch axis so the HEALPix face index is its own dimension."""
 
-    def __init__(self, num_faces: int = 12, enable_nhwc: bool = False):
+    def __init__(self, num_faces: int = 12):
         """
         Parameters
         ----------
         num_faces: int, optional
             The number of faces on the grid, default 12
-        enable_nhwc: bool, optional
-            If nhwc format is being used, default False
         """
         super().__init__()
         self.num_faces = num_faces
-        self.enable_nhwc = enable_nhwc
 
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -226,19 +203,16 @@ class HEALPixPaddingv2(torch.nn.Module):
     Orientation and arrangement of the HEALPix faces are outlined above.
     """
 
-    def __init__(self, padding: int, enable_nhwc: bool = False):  # pragma: no cover
+    def __init__(self, padding: int):  # pragma: no cover
         """
         Parameters
         ----------
         padding : int
             The padding size
-        enable_nhwc : bool, optional
-            Whether to use channels-last memory format.
         """
         super().__init__()
-        self.enable_nhwc = enable_nhwc
-        self.unfold = HEALPixUnfoldFaces(num_faces=12, enable_nhwc=self.enable_nhwc)
-        self.fold = HEALPixFoldFaces(enable_nhwc=self.enable_nhwc)
+        self.unfold = HEALPixUnfoldFaces(num_faces=12)
+        self.fold = HEALPixFoldFaces()
         self.padding = lambda x: healpix_pad(x, padding=padding)
 
     def forward(self, x):  # pragma: no cover
@@ -259,12 +233,7 @@ class HEALPixPaddingv2(torch.nn.Module):
         """
         x = self.unfold(x)
         xp = self.padding(x)
-        xp = self.fold(xp)
-
-        if self.enable_nhwc:
-            xp = xp.to(memory_format=torch.channels_last)
-
-        return xp
+        return self.fold(xp)
 
 
 class HEALPixPadding(torch.nn.Module):
@@ -284,26 +253,23 @@ class HEALPixPadding(torch.nn.Module):
     docstring.
     """
 
-    def __init__(self, padding: int, enable_nhwc: bool = False):
+    def __init__(self, padding: int):
         """
         Parameters
         ----------
         padding : int
             Symmetric pad width ``p >= 1`` on each face edge.
-        enable_nhwc : bool, optional
-            Match channels-last usage in the surrounding encoder/decoder.
         """
         super().__init__()
         self.p = padding
         self.d = [-2, -1]
-        self.enable_nhwc = enable_nhwc
         if not isinstance(padding, int) or padding < 1:
             raise ValueError(
                 f"invalid value for 'padding', expected int > 0 but got {padding}"
             )
 
-        self.fold = HEALPixFoldFaces(enable_nhwc=self.enable_nhwc)
-        self.unfold = HEALPixUnfoldFaces(num_faces=12, enable_nhwc=self.enable_nhwc)
+        self.fold = HEALPixFoldFaces()
+        self.unfold = HEALPixUnfoldFaces(num_faces=12)
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         """
@@ -408,12 +374,7 @@ class HEALPixPadding(torch.nn.Module):
         )
 
         # [N, 12, C, H', W'] -> [N*12, C, H', W']
-        res = self.fold(res)
-
-        if self.enable_nhwc:
-            res = res.to(memory_format=torch.channels_last)
-
-        return res
+        return self.fold(res)
 
     def pn(
         self,
@@ -661,7 +622,6 @@ class HEALPixPaddingIsolatitude(torch.nn.Module):
         self,
         padding: int,
         nside: int,
-        enable_nhwc: bool = False,
     ):
         """
         Parameters
@@ -671,12 +631,9 @@ class HEALPixPaddingIsolatitude(torch.nn.Module):
         nside : int
             Native face height/width ``H`` (square faces). Gather indices are built for
             this size at init; ``forward`` rejects other ``H``.
-        enable_nhwc : bool, optional
-            Channels-last output when True.
         """
         super().__init__()
         self.p = padding
-        self.enable_nhwc = enable_nhwc
         if not isinstance(nside, int) or nside < 1:
             raise ValueError(f"nside must be a positive int, got {nside!r}")
         self._nside = nside
@@ -772,8 +729,6 @@ class HEALPixPaddingIsolatitude(torch.nn.Module):
             .permute(0, 2, 1, 3, 4)
             .reshape(BF, C, Hp, Wp)
         )
-        if self.enable_nhwc:
-            out = out.to(memory_format=torch.channels_last)
 
         return out
 
@@ -998,9 +953,7 @@ def _br_isolat(
     return torch.rot90(ret, k=1, dims=d)
 
 
-def isolatitude_pad_folded(
-    data: torch.Tensor, p: int, enable_nhwc: bool
-) -> torch.Tensor:
+def isolatitude_pad_folded(data: torch.Tensor, p: int) -> torch.Tensor:
     """
     Apply isolatitude HEALPix padding on **folded** face data.
 
@@ -1013,8 +966,6 @@ def isolatitude_pad_folded(
         Shape ``[N * 12, C, H, W]`` with square faces ``H == W``.
     p : int
         Pad width per edge; output spatial size is ``H + 2 * p``.
-    enable_nhwc : bool
-        If True, return channels-last memory format.
 
     Returns:
     -------
@@ -1093,10 +1044,7 @@ def isolatitude_pad_folded(
         (p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11), dim=1
     )
     n, _, _, hpad, wpad = res.shape
-    res = res.reshape(n * 12, c, hpad, wpad)
-    if enable_nhwc:
-        res = res.to(memory_format=torch.channels_last)
-    return res
+    return res.reshape(n * 12, c, hpad, wpad)
 
 
 def decode_two_channel_identity_to_linear_indices(
@@ -1162,7 +1110,7 @@ def build_isolatitude_gather_index(p: int, H: int) -> tuple[torch.Tensor, torch.
     ch1 = ids * ids
     x_folded = torch.stack((ch0, ch1), dim=1).unsqueeze(0).reshape(12, 2, H, H)
 
-    y_folded = isolatitude_pad_folded(x_folded, p, False)
+    y_folded = isolatitude_pad_folded(x_folded, p)
     y = y_folded.reshape(1, 12, 2, Hpad, Hpad)
     y0 = y[:, :, 0].reshape(-1)
     y1 = y[:, :, 1].reshape(-1)
