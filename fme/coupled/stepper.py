@@ -1400,10 +1400,10 @@ def _process_ensemble_output_list(
 
 
 # Offset added to the distributed/eval seed for the per-batch component-choice
-# RNG. Must differ from TimeLengthProbabilities' reserved 684 and from the
-# small per-schedule offsets (0, 1) used by seed_rng, so the choice RNG never
-# shares a seed with an n_steps sampler.
-_COMPONENT_CHOICE_RNG_OFFSET = 90210
+# RNG. Chosen as 685 -- one past TimeLengthProbabilities' reserved 684, and
+# distinct from the small per-schedule offsets (0, 1) used by seed_rng, so the
+# choice RNG never shares a seed with an n_steps sampler.
+_COMPONENT_CHOICE_RNG_OFFSET = 685
 
 
 class CoupledStepperTrainLoss:
@@ -1449,18 +1449,29 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
-    def sample_n_steps(self) -> None:
+    def sample_from_rng(self) -> None:
+        """Draw this batch's per-component rollout window and the
+        single-component selection, in the required order.
+
+        The single public entry point for per-batch RNG draws so callers can't
+        transpose them: the selection's per-batch null check must see the
+        freshly sampled window, so ``_component_optimization_choice`` has to run
+        after ``_sample_n_steps``.
+        """
+        self._sample_n_steps()
+        self._component_optimization_choice()
+
+    def _sample_n_steps(self) -> None:
         for schedule in self._schedules.values():
             schedule.sample_n_steps()
 
     def seed_rng(self, seed: int) -> None:
         """Reseed the eval-only RNGs deterministically.
 
-        Renamed from ``seed_step_sampler``: besides the per-schedule eval
-        n_steps samplers it now also reseeds the eval component-choice RNG, so
-        each validation pass replays the same single-component selections
-        regardless of the training RNG position. Training RNGs are distributed-
-        seeded lazily and are intentionally left untouched.
+        Reseeds both the per-schedule eval n_steps samplers and the eval
+        component-choice RNG, so each validation pass replays the same
+        single-component selections regardless of the training RNG position.
+        Training RNGs are distributed-seeded lazily and are left untouched.
         """
         for i, schedule in enumerate(self._schedules.values()):
             schedule.seed_rng(seed + i)
@@ -1470,22 +1481,25 @@ class CoupledStepperTrainLoss:
 
     def _init_component_choice_rng(self) -> None:
         """Lazily seed the training component-choice RNG from the distributed
-        seed, mirroring ``TimeLengthProbabilities.initialize_rng``. Identical
-        across ranks (so every rank makes the same selection) and reproducible
-        from the run seed.
+        seed, mirroring ``TimeLengthProbabilities.initialize_rng``. Seeded
+        identically across ranks so every rank makes the same per-batch
+        selection. This does not make the per-batch training sequence
+        reproducible across preemption/resume -- the RNG advances batch-by-batch
+        and its position is not checkpointed, same as the random n_steps
+        sampler.
         """
         if self._component_choice_rng is None:
             self._component_choice_rng = np.random.RandomState(
                 Distributed.get_instance().get_seed() + _COMPONENT_CHOICE_RNG_OFFSET
             )
 
-    def component_optimization_choice(self) -> None:
+    def _component_optimization_choice(self) -> None:
         """Re-draw which single realm is optimized this batch (no-op when the
         flag is disabled).
 
-        Must be called *after* ``sample_n_steps()`` so the per-batch null check
-        reflects the current batch's sampled window. The train vs eval RNG is
-        chosen by training/eval state (mirroring
+        Invoked by ``sample_from_rng`` after ``_sample_n_steps`` so the
+        per-batch null check reflects the current batch's sampled window. The
+        train vs eval RNG is chosen by training/eval state (mirroring
         ``ComponentLossSchedule.sample_n_steps``); the selection itself applies
         in both modes via ``step_is_optimized``.
         """
@@ -1535,7 +1549,7 @@ class CoupledStepperTrainLoss:
         """Minimum number of outer (ocean) steps needed so that every
         component step contributing to the current batch's loss is computed.
 
-        Callers must invoke ``sample_n_steps()`` beforehand for stochastic
+        Callers must invoke ``sample_from_rng()`` beforehand for stochastic
         configs so the value reflects the current batch.
         """
         ocean_required = self._schedules["ocean"].n_required_forward_steps()
@@ -2098,10 +2112,10 @@ class CoupledTrainStepper(
         )
 
         metrics = ComponentStepMetrics()
-        self._loss.sample_n_steps()
-        # Must come after sample_n_steps() so the per-batch null check sees this
-        # batch's sampled window. No-op unless optimize_single_component_per_batch.
-        self._loss.component_optimization_choice()
+        # Draws this batch's rollout window and (when
+        # optimize_single_component_per_batch) the single-component selection,
+        # in the required order.
+        self._loss.sample_from_rng()
         optimization.set_mode(self.modules)
         with optimization.autocast():
             output_list = self._accumulate_loss(

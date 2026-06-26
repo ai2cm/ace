@@ -481,7 +481,7 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
     )
-    coupled_loss.sample_n_steps()
+    coupled_loss._sample_n_steps()
     ocean_schedule.sample_n_steps.assert_called_once()
     atmos_schedule.sample_n_steps.assert_called_once()
 
@@ -713,7 +713,7 @@ def _optimized_realms(loss_obj, n_steps_each=2):
 
 def test_single_component_exactly_one_realm_optimized():
     loss_obj = _single_component_loss()
-    loss_obj.component_optimization_choice()
+    loss_obj._component_optimization_choice()
     # Exactly one realm is eligible after the choice; the other is gated off
     # for every step in its window.
     assert _optimized_realms(loss_obj) == {loss_obj._selected_realm}
@@ -724,7 +724,7 @@ def test_single_component_selection_varies_across_choices():
     loss_obj = _single_component_loss()
     selected = set()
     for _ in range(50):  # ~1e-15 prob of missing a realm under fair 50/50
-        loss_obj.component_optimization_choice()
+        loss_obj._component_optimization_choice()
         selected.add(loss_obj._selected_realm)
     assert selected == {"ocean", "atmosphere"}
 
@@ -736,8 +736,8 @@ def test_single_component_deterministic_for_fixed_seed():
     loss_b = _single_component_loss()
     seq_a, seq_b = [], []
     for _ in range(30):
-        loss_a.component_optimization_choice()
-        loss_b.component_optimization_choice()
+        loss_a._component_optimization_choice()
+        loss_b._component_optimization_choice()
         seq_a.append(loss_a._selected_realm)
         seq_b.append(loss_b._selected_realm)
     assert seq_a == seq_b
@@ -754,8 +754,9 @@ def test_single_component_null_realm_never_selected():
     )
     loss_obj = _single_component_loss(ocean_n_steps=zero_sampler, atmos_n_steps=2)
     for _ in range(20):
-        loss_obj.sample_n_steps()
-        loss_obj.component_optimization_choice()
+        # sample_from_rng samples the window before choosing the realm, so the
+        # realm that is empty this batch (ocean) is never selected.
+        loss_obj.sample_from_rng()
         assert loss_obj._selected_realm == "atmosphere"
         assert _optimized_realms(loss_obj) == {"atmosphere"}
 
@@ -764,7 +765,7 @@ def test_single_component_flag_off_matches_today(steps_thru_atmos_7):
     # Regression guard: flag off reproduces test_coupled_stepper_train_loss.
     loss_obj = _single_component_loss(optimize_single_component_per_batch=False)
     # The (no-op) choice must not change behavior when the flag is off.
-    loss_obj.component_optimization_choice()
+    loss_obj._component_optimization_choice()
     metrics = {}
     for prediction, target_data in steps_thru_atmos_7:
         metrics[f"{prediction.realm}_{prediction.step}"] = loss_obj(
@@ -793,7 +794,7 @@ def test_single_component_active_in_eval():
     loss_obj = _single_component_loss()
     loss_obj.set_eval()
     loss_obj.seed_rng(0)
-    loss_obj.component_optimization_choice()
+    loss_obj._component_optimization_choice()
     selected = loss_obj._selected_realm
     other: Literal["ocean", "atmosphere"] = (
         "ocean" if selected == "atmosphere" else "atmosphere"
@@ -822,7 +823,7 @@ def test_single_component_eval_reproducible_after_seed_eval():
         loss_obj.seed_rng(0)
         seq = []
         for _ in range(30):
-            loss_obj.component_optimization_choice()
+            loss_obj._component_optimization_choice()
             seq.append(loss_obj._selected_realm)
         return seq
 
@@ -830,7 +831,7 @@ def test_single_component_eval_reproducible_after_seed_eval():
     # Advance the (free-running) train RNG to prove eval is independent of it.
     loss_obj.set_train()
     for _ in range(7):
-        loss_obj.component_optimization_choice()
+        loss_obj._component_optimization_choice()
     loss_obj.set_eval()
     second = _draw_sequence()
     assert first == second
