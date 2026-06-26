@@ -57,7 +57,8 @@ from collections.abc import Iterable
 from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.typing_ import TensorMapping
 
-# def force_positive(data, names): ...  # unchanged
+# Existing contents kept unchanged: force_positive(data, names) and the
+# ForcePositive Correction dataclass.
 
 def build_corrector_diagnostics(  # NEW
     input_snapshot: TensorMapping,
@@ -79,6 +80,13 @@ def build_corrector_diagnostics(  # NEW
     }
     return CorrectorDiagnostics(delta=delta)
 ```
+
+The helper takes `touched_names` explicitly so it is unit-testable in isolation.
+A follow-up change supplies that set as the union of the names each enabled
+`Correction` declares it writes (a corrector is a `CorrectionSequence` of
+composable `Correction` objects), and detaches the resulting `delta` at the
+step boundary. None of that is in this PR — this PR only adds the value objects
+and the helper.
 
 ---
 
