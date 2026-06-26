@@ -1,0 +1,9 @@
+# Reproduces the reference stats at
+# gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/
+#   2026-03-19-era5-4deg-8layer-1940-2025/
+# Single dataset, single slice 1990-01-01..2019-12-31 (10957 daily steps), so the
+# pooled output must equal the reference centering / scaling files exactly.
+dataset_pairs:
+  - dataset: gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-1940-2025/
+    start_time: '1990-01-01'
+    stop_time: '2019-12-31'
