@@ -514,6 +514,64 @@ def test_paired_regional_index_aggregator(variable_name):
     assert isinstance(logs[metric_name], float)
 
 
+def test_paired_regional_index_aggregator_all_nan_target():
+    """When the target SST is entirely NaN (e.g. missing from the data), the
+    target index is all-NaN and its power spectrum would receive an empty
+    series. get_logs must not raise; the power-spectrum entry is skipped while
+    prediction-only entries are still emitted."""
+    variable_name = "surface_temperature"
+    n_lat = 10
+    n_lon = 20
+    n_sample = 2
+    n_times = 365 * 4
+    target_data = dict(
+        _get_windowed_data(n_sample, n_times, n_lat, n_lon, sst_name=variable_name)
+    )
+    # The target SST is missing from the data: entirely NaN.
+    target_data[variable_name] = torch.full_like(
+        target_data[variable_name], float("nan")
+    )
+    prediction_data = _get_windowed_data(
+        n_sample, n_times, n_lat, n_lon, time_varying=False, sst_name=variable_name
+    )
+    time = _get_windowed_times((2000, 1, 1, 0, 0, 0), n_sample, n_times)
+    lat_lon_coordinates = LatLonCoordinates(
+        lat=target_data["lat"],
+        lon=target_data["lon"],
+    )
+    region = LatLonRegion(
+        lat=lat_lon_coordinates.lat,
+        lon=lat_lon_coordinates.lon,
+        lat_bounds=(4.5, 6.5),
+        lon_bounds=(9.5, 11.5),
+    )
+    agg = PairedRegionalIndexAggregator(
+        target_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
+        ),
+        prediction_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=lat_lon_coordinates.get_gridded_operations().regional_area_weighted_mean,
+        ),
+    )
+    batch = InferenceBatchData(
+        prediction=prediction_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
+    # Previously raised ValueError: Invalid number of FFT data points (0).
+    logs = agg.get_logs(label="test")
+    # Power-spectrum entry is skipped because the target index is all-NaN...
+    assert f"test/{variable_name}_nino34_index_power_spectrum" not in logs
+    # ...but the prediction-driven index figure is still emitted.
+    assert f"test/{variable_name}_nino34_index" in logs
+
+
 def test_paired_norm_metrics_with_sufficient_data():
     """Verify that _norm keys are produced when target values are valid."""
     n_lat = 10

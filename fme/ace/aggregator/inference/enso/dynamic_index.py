@@ -282,9 +282,14 @@ class PairedRegionalIndexAggregator:
                     target_indices[sst_name],
                 )
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
+            # Both the prediction and target indices must have valid (non-NaN)
+            # values: the target may be entirely NaN if its SST variable is
+            # missing from the data, in which case the power spectrum below
+            # would receive an empty series and raise.
             if (
                 sst_name in prediction_indices
                 and prediction_indices[sst_name].notnull().any().item()
+                and target_indices[sst_name].notnull().any().item()
             ):
                 pred_freq, prediction_power_spectrum = (
                     _calculate_sample_average_power_spectrum(
