@@ -151,6 +151,9 @@ in the default aggregator configuration above.
 .. autoclass:: fme.ace.IpoIndexMetricConfig
    :noindex:
 
+.. autoclass:: fme.ace.TrendMetricConfig
+   :noindex:
+
 .. autoclass:: fme.ace.EnsembleMetricConfig
    :noindex:
 
