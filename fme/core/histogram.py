@@ -152,6 +152,12 @@ class DynamicHistogram:
             value: tensor of values of shape (n_times, n_values) to add to the histogram
             i_time_start: index of the first time to add values to
         """
+        # Skip empty input: a variable that is entirely NaN (e.g. missing from
+        # the data) has all values masked out by the caller, leaving an empty
+        # tensor. torch.min/torch.max raise on empty input, so there is nothing
+        # to add to the histogram.
+        if value.numel() == 0:
+            return
         # add epsilon to ensure all values stay within (and not just equal to)
         # the bin edges, and to avoid the case where vmin == vmax
         vmin = float((torch.min(value) - self._epsilon).cpu().numpy())
@@ -280,6 +286,11 @@ class DynamicHistogramAggregator:
             raise ValueError("No data has been added to the histogram")
         return_dict: dict[str, _Histogram] = {}
         for k, histogram in self.histograms.items():
+            if histogram.bin_edges is None:
+                # No values were recorded for this variable (e.g. it is
+                # entirely NaN / missing from the data), so there is no
+                # histogram to emit. Skip it rather than fail downstream.
+                continue
             counts, bin_edges = trim_zero_bins(
                 histogram.counts.squeeze(self._time_dim),
                 histogram.bin_edges,
@@ -292,6 +303,9 @@ class DynamicHistogramAggregator:
             raise ValueError("No data has been added to the histogram")
         data = {}
         for var_name, histogram in self.histograms.items():
+            if histogram.bin_edges is None:
+                # No values recorded (e.g. entirely NaN / missing variable).
+                continue
             data[var_name] = xr.DataArray(
                 histogram.counts[0, :],
                 dims=("bin",),
@@ -412,6 +426,10 @@ class ComparedDynamicHistograms:
         target_histograms = self.target_aggregator.get_histograms()
         prediction_histograms = self.prediction_aggregator.get_histograms()
         for k in self._variables:
+            # A variable with no recorded values (e.g. entirely NaN / missing
+            # from the data) is dropped by get_histograms; skip it here too.
+            if k not in target_histograms or k not in prediction_histograms:
+                continue
             return_dict[k]["target"] = target_histograms[k]
             return_dict[k]["prediction"] = prediction_histograms[k]
         return return_dict

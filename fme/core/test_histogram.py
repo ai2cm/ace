@@ -259,6 +259,31 @@ def test_compared_dynamic_histogram_with_nans_record_batch():
     assert not np.isnan(wandb_result["prediction/99.0th-percentile/x"])
 
 
+def test_compared_dynamic_histogram_all_nan_variable_record_batch():
+    """A variable that is entirely NaN (e.g. missing from the data) masks out
+    to an empty tensor; record_batch must not raise on it, and the variable
+    with valid data must still be recorded."""
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+
+    target = {
+        "x": torch.ones(2, 2, 8, 16),
+        # "y" is missing from the data: entirely NaN.
+        "y": torch.full((2, 2, 8, 16), float("nan")),
+    }
+    prediction = {"x": torch.rand(2, 2, 8, 16), "y": torch.rand(2, 2, 8, 16)}
+
+    # Previously raised: min(): Expected reduction dim ... for input.numel() == 0
+    histogram.record_batch(target, prediction)
+    wandb_result = histogram.get_wandb()
+    # "x" (valid data) is still recorded...
+    assert not np.isnan(wandb_result["target/99.0th-percentile/x"])
+    assert not np.isnan(wandb_result["prediction/99.0th-percentile/x"])
+    # ...while the entirely-NaN "y" is dropped from the outputs.
+    assert not any("/y" in key for key in wandb_result)
+    assert "y" not in histogram.get_dataset().data_vars
+
+
 @pytest.mark.parametrize(
     "shape",
     [
