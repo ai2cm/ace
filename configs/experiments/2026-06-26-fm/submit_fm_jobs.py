@@ -17,7 +17,7 @@ import subprocess
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
-WANDB_PROJECT = "ace"
+WANDB_PROJECT = "FM"
 WANDB_PREFIX = "ace2-fm-"
 WANDB_SUFFIX = "-v1"
 WANDB_GROUP = "ace2-fm-2026-06-26"
