@@ -410,6 +410,71 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         sum(tensor.sum() for tensor in corrected_gen_data.values()).backward()
 
 
+def test__force_conserve_total_energy_exclude_top_levels():
+    """When top levels are excluded, they receive no temperature addition while
+    the remaining levels receive the same per-level correction magnitude that
+    is computed across all levels regardless of exclusion."""
+    tensor_shape = (5, 5)
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    timestep = datetime.timedelta(seconds=3600)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+
+    common = dict(
+        input_data=input_data,
+        gen_data=gen_data,
+        forcing_data=forcing_data,
+        area_weighted_mean=ops.area_weighted_mean,
+        vertical_coordinate=vertical_coord,
+        timestep_seconds=timestep.total_seconds(),
+        unaccounted_heating=10.0,
+    )
+
+    all_levels = _force_conserve_total_energy(**common, exclude_top_levels=0)
+    excluded = _force_conserve_total_energy(**common, exclude_top_levels=1)
+
+    # level 0 (top) receives no correction when excluded
+    torch.testing.assert_close(
+        excluded["air_temperature_0"], gen_data["air_temperature_0"]
+    )
+
+    # the per-level correction magnitude is unchanged by exclusion: level 1
+    # gets the same addition it would have gotten with no exclusion, since the
+    # global magnitude is computed across all levels regardless.
+    torch.testing.assert_close(
+        excluded["air_temperature_1"], all_levels["air_temperature_1"]
+    )
+
+
+def test_energy_budget_config_rejects_negative_exclude_top_levels():
+    with pytest.raises(ValueError):
+        EnergyBudgetConfig("constant_temperature", exclude_top_levels=-1)
+
+
+def test__force_conserve_total_energy_exclude_too_many_levels_raises():
+    tensor_shape = (5, 5)
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    timestep = datetime.timedelta(seconds=3600)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    with pytest.raises(ValueError):
+        _force_conserve_total_energy(
+            input_data=input_data,
+            gen_data=gen_data,
+            forcing_data=forcing_data,
+            area_weighted_mean=ops.area_weighted_mean,
+            vertical_coordinate=vertical_coord,
+            timestep_seconds=timestep.total_seconds(),
+            exclude_top_levels=3,  # only 2 air_temperature levels exist
+        )
+
+
 def test__force_conserve_energy_doesnt_clobber():
     tensor_shape = (5, 5)
 
