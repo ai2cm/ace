@@ -102,15 +102,19 @@ class AreaWeightedReducedMetric:
             self._all_nan_target_names = {
                 name for name in channel_mean_names if torch.isnan(target[name]).all()
             }
-        # Exclude variables whose target is entirely NaN (e.g. filled by
-        # allow_missing_variables) from the channel mean.
-        included = [
+        # Targets may be entirely NaN if filled by allow_missing_variables
+        non_nan_targets = [
             name
             for name in channel_mean_names
             if name not in self._all_nan_target_names
         ]
-        for name in included:
-            self._channel_mean += batch_avgs[name] / len(included)
+        if not non_nan_targets:
+            raise ValueError(
+                "All target variables are NaN; cannot compute channel mean."
+            )
+        for name in non_nan_targets:
+            self._channel_mean += batch_avgs[name] / len(non_nan_targets)
+
         self._accumulator.add(batch_avgs)
 
     def get(self) -> TensorDict:

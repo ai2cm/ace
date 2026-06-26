@@ -384,8 +384,17 @@ class TimeMeanEvaluatorAggregator:
             channel_mean_names = [
                 name for name in channel_mean_names if name not in all_nan_target_names
             ]
-            values_to_average = [rmse_all_channels[name] for name in channel_mean_names]
-            logs.update({metric_name: sum(values_to_average) / len(values_to_average)})
+            if channel_mean_names:
+                values_to_average = [
+                    rmse_all_channels[name] for name in channel_mean_names
+                ]
+                logs.update(
+                    {metric_name: sum(values_to_average) / len(values_to_average)}
+                )
+            else:
+                raise ValueError(
+                    "All target variables are NaN; cannot compute channel mean."
+                )
 
         if len(label) != 0:
             return {f"{label}/{key}": logs[key] for key in logs}
