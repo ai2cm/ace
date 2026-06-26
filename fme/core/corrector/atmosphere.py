@@ -27,7 +27,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 class AreaWeightedMean(Protocol):
     def __call__(
-        self, data: torch.Tensor, keepdim: bool, name: str | None = None
+        self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
     ) -> torch.Tensor: ...
 
 
