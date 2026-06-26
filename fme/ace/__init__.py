@@ -20,6 +20,7 @@ from fme.ace.aggregator.inference.reduced import MeanMetricConfig
 from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
 from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
 from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
+from fme.ace.aggregator.inference.trend import TrendMetricConfig
 from fme.ace.aggregator.inference.video import VideoMetricConfig
 from fme.ace.aggregator.inference.zonal_mean import ZonalMeanMetricConfig
 from fme.ace.aggregator.one_step import (
