@@ -283,6 +283,11 @@ def compute(config_yaml: str, output_directory: str):
     if output_directory.endswith("/"):
         output_directory = output_directory[:-1]
 
+    # Create the output directory if it doesn't exist. gs:// has no real dirs, so
+    # only local paths need this.
+    if not output_directory.startswith("gs:"):
+        os.makedirs(output_directory, exist_ok=True)
+
     # Start a dask distributed client so the per-store reads/reductions run across
     # many workers, mirroring get_stats.py.
     client = distributed.Client(n_workers=16)
@@ -310,6 +315,10 @@ def compute(config_yaml: str, output_directory: str):
             logging.info(f"{name}:\n{da}")
 
         write_stats(pooled, output_directory, config_yaml)
+
+        # Save the input config alongside the stats so the output is reproducible.
+        copy(config_yaml, output_directory + "/" + os.path.basename(config_yaml))
+        logging.info(f"Wrote {output_directory}/{os.path.basename(config_yaml)}")
     finally:
         client.close()
 
