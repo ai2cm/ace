@@ -12,13 +12,23 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    Correction,
+    CorrectionSequence,
+    CorrectorConfigABC,
+)
 from fme.core.corrector.state import CorrectorState
-from fme.core.corrector.utils import force_positive
+from fme.core.corrector.utils import ForcePositive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+class AreaWeightedMean(Protocol):
+    def __call__(
+        self, data: torch.Tensor, keepdim: bool, name: str | None = None
+    ) -> torch.Tensor: ...
 
 
 @dataclasses.dataclass
@@ -40,29 +50,138 @@ class EnergyBudgetConfig:
 
 
 @dataclasses.dataclass
-class AtmosphereCorrectorParams:
-    """Plain (non-dacite) scalar parameters passed to ``AtmosphereCorrector``.
+class ConserveDryAir:
+    """Correction that pins the global-mean dry-air mass to its IC value.
 
-    Built by ``AtmosphereCorrectorConfig._build`` so the corrector does not need
-    to read the (non-leaf) config. The energy budget sub-config is flattened to
-    its scalar fields; ``total_energy_budget_method`` is ``None`` exactly when the
-    correction is disabled.
+    Bundles the operators needed to apply the dry-air conservation step. The
+    reference dry-air mass is seeded from ``input_data`` the first time it runs
+    and carried across steps via ``corrector_state``.
     """
 
-    conserve_dry_air: bool
-    zero_global_mean_moisture_advection: bool
-    moisture_budget_correction: (
-        Literal[
-            "precipitation",
-            "evaporation",
-            "advection_and_precipitation",
-            "advection_and_evaporation",
-        ]
-        | None
-    )
-    force_positive_names: list[str]
-    total_energy_budget_method: Literal["constant_temperature"] | None
-    total_energy_budget_unaccounted_heating: float
+    area_weighted_mean: AreaWeightedMean
+    vertical_coordinate: HasAtmosphereVerticalIntegral | None
+    precision: torch.dtype
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        if self.vertical_coordinate is None:
+            raise ValueError(
+                "conserve_dry_air is set to True, but no vertical coordinate is "
+                "available."
+            )
+        corrector_state = _seed_global_dry_air_mass(
+            input_data=input_data,
+            corrector_state=corrector_state,
+            area_weighted_mean=self.area_weighted_mean,
+            vertical_coordinate=self.vertical_coordinate,
+            precision=self.precision,
+        )
+        assert corrector_state.global_dry_air_mass is not None
+        gen_data = _adjust_gen_dry_air_to_target(
+            gen_data,
+            target_global_dry_air=corrector_state.global_dry_air_mass,
+            area_weighted_mean=self.area_weighted_mean,
+            vertical_coordinate=self.vertical_coordinate,
+            precision=self.precision,
+        )
+        return gen_data, corrector_state
+
+
+@dataclasses.dataclass
+class ZeroGlobalMeanMoistureAdvection:
+    """Correction that forces zero global-mean moisture advection."""
+
+    area_weighted_mean: AreaWeightedMean
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        gen_data = _force_zero_global_mean_moisture_advection(
+            gen_data=gen_data,
+            area_weighted_mean=self.area_weighted_mean,
+        )
+        return gen_data, corrector_state
+
+
+@dataclasses.dataclass
+class MoistureBudgetCorrection:
+    """Correction that closes the moisture budget via the configured terms."""
+
+    area_weighted_mean: AreaWeightedMean
+    vertical_coordinate: HasAtmosphereVerticalIntegral | None
+    timestep_seconds: float
+    terms_to_modify: Literal[
+        "precipitation",
+        "evaporation",
+        "advection_and_precipitation",
+        "advection_and_evaporation",
+    ]
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        if self.vertical_coordinate is None:
+            raise ValueError(
+                "Moisture budget correction is turned on, but no vertical "
+                "coordinate is available."
+            )
+        gen_data = _force_conserve_moisture(
+            input_data=input_data,
+            gen_data=gen_data,
+            area_weighted_mean=self.area_weighted_mean,
+            vertical_coordinate=self.vertical_coordinate,
+            timestep_seconds=self.timestep_seconds,
+            terms_to_modify=self.terms_to_modify,
+        )
+        return gen_data, corrector_state
+
+
+@dataclasses.dataclass
+class TotalEnergyBudgetCorrection:
+    """Correction that conserves an idealized total energy budget."""
+
+    area_weighted_mean: AreaWeightedMean
+    vertical_coordinate: HasAtmosphereVerticalIntegral | None
+    timestep_seconds: float
+    method: Literal["constant_temperature"]
+    unaccounted_heating: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        if self.vertical_coordinate is None:
+            raise ValueError(
+                "Energy budget correction is turned on, but no vertical coordinate"
+                " is available."
+            )
+        gen_data = _force_conserve_total_energy(
+            input_data=input_data,
+            gen_data=gen_data,
+            forcing_data=forcing_data,
+            area_weighted_mean=self.area_weighted_mean,
+            vertical_coordinate=self.vertical_coordinate,
+            timestep_seconds=self.timestep_seconds,
+            method=self.method,
+            unaccounted_heating=self.unaccounted_heating,
+        )
+        return gen_data, corrector_state
 
 
 @CorrectorSelector.register("atmosphere_corrector")
@@ -183,124 +302,47 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         vertical_coordinate: HasAtmosphereVerticalIntegral | None,
         timestep: datetime.timedelta,
     ) -> "AtmosphereCorrector":
-        energy_budget = self.total_energy_budget_correction
-        params = AtmosphereCorrectorParams(
-            conserve_dry_air=self.conserve_dry_air,
-            zero_global_mean_moisture_advection=(
-                self.zero_global_mean_moisture_advection
-            ),
-            moisture_budget_correction=self.moisture_budget_correction,
-            force_positive_names=self.force_positive_names,
-            total_energy_budget_method=(
-                None if energy_budget is None else energy_budget.method
-            ),
-            total_energy_budget_unaccounted_heating=(
-                0.0
-                if energy_budget is None
-                else energy_budget.constant_unaccounted_heating
-            ),
-        )
-        return AtmosphereCorrector(
-            params=params,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
-        )
-
-
-class AtmosphereCorrector(CorrectorABC):
-    def __init__(
-        self,
-        params: AtmosphereCorrectorParams,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: HasAtmosphereVerticalIntegral | None,
-        timestep: datetime.timedelta,
-    ):
-        self._params = params
-        self._gridded_operations = gridded_operations
-        self._vertical_coordinate = vertical_coordinate
-
-        self._timestep_seconds = timestep.total_seconds()
-        if fme.get_device() == torch.device("mps", 0):
-            self._dry_air_precision = torch.float32
-        else:
-            self._dry_air_precision = torch.float64
-
-    def __call__(
-        self,
-        input_data: TensorMapping,
-        gen_data: TensorMapping,
-        forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        gen_data = dict(gen_data)
-        if len(self._params.force_positive_names) > 0:
+        area_weighted_mean = gridded_operations.area_weighted_mean
+        timestep_seconds = timestep.total_seconds()
+        corrections: list[Correction] = []
+        if len(self.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
-            gen_data = force_positive(gen_data, self._params.force_positive_names)
-        if self._params.conserve_dry_air:
-            if self._vertical_coordinate is None:
-                raise ValueError(
-                    "conserve_dry_air is set to True, but no vertical coordinate is "
-                    "available."
+            corrections.append(ForcePositive(self.force_positive_names))
+        if self.conserve_dry_air:
+            if fme.get_device() == torch.device("mps", 0):
+                precision = torch.float32
+            else:
+                precision = torch.float64
+            corrections.append(
+                ConserveDryAir(area_weighted_mean, vertical_coordinate, precision)
+            )
+        if self.zero_global_mean_moisture_advection:
+            corrections.append(ZeroGlobalMeanMoistureAdvection(area_weighted_mean))
+        if self.moisture_budget_correction is not None:
+            corrections.append(
+                MoistureBudgetCorrection(
+                    area_weighted_mean,
+                    vertical_coordinate,
+                    timestep_seconds,
+                    self.moisture_budget_correction,
                 )
-            corrector_state = _seed_global_dry_air_mass(
-                input_data=input_data,
-                corrector_state=corrector_state,
-                area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinate,
-                precision=self._dry_air_precision,
             )
-            assert corrector_state.global_dry_air_mass is not None
-            gen_data = _adjust_gen_dry_air_to_target(
-                gen_data,
-                target_global_dry_air=corrector_state.global_dry_air_mass,
-                area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinate,
-                precision=self._dry_air_precision,
-            )
-        if self._params.zero_global_mean_moisture_advection:
-            gen_data = _force_zero_global_mean_moisture_advection(
-                gen_data=gen_data,
-                area_weighted_mean=self._gridded_operations.area_weighted_mean,
-            )
-        if self._params.moisture_budget_correction is not None:
-            if self._vertical_coordinate is None:
-                raise ValueError(
-                    "Moisture budget correction is turned on, but no vertical "
-                    "coordinate is available."
+        if self.total_energy_budget_correction is not None:
+            corrections.append(
+                TotalEnergyBudgetCorrection(
+                    area_weighted_mean,
+                    vertical_coordinate,
+                    timestep_seconds,
+                    self.total_energy_budget_correction.method,
+                    self.total_energy_budget_correction.constant_unaccounted_heating,
                 )
-            gen_data = _force_conserve_moisture(
-                input_data=input_data,
-                gen_data=gen_data,
-                area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinate,
-                timestep_seconds=self._timestep_seconds,
-                terms_to_modify=self._params.moisture_budget_correction,
             )
-        if self._params.total_energy_budget_method is not None:
-            if self._vertical_coordinate is None:
-                raise ValueError(
-                    "Energy budget correction is turned on, but no vertical coordinate"
-                    " is available."
-                )
-            gen_data = _force_conserve_total_energy(
-                input_data=input_data,
-                gen_data=gen_data,
-                forcing_data=forcing_data,
-                area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinate,
-                timestep_seconds=self._timestep_seconds,
-                method=self._params.total_energy_budget_method,
-                unaccounted_heating=self._params.total_energy_budget_unaccounted_heating,
-            )
-        return gen_data, corrector_state
+        return AtmosphereCorrector(corrections)
 
 
-class AreaWeightedMean(Protocol):
-    def __call__(
-        self, data: torch.Tensor, keepdim: bool, name: str | None = None
-    ) -> torch.Tensor: ...
+class AtmosphereCorrector(CorrectionSequence):
+    pass
 
 
 def _seed_global_dry_air_mass(

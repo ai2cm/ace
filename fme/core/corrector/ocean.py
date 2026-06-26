@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 
 import torch
@@ -11,14 +11,24 @@ from fme.core.constants import (
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    Correction,
+    CorrectionSequence,
+    CorrectorConfigABC,
+)
 from fme.core.corrector.state import CorrectorState
-from fme.core.corrector.utils import force_positive
+from fme.core.corrector.utils import ForcePositive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral, OceanData
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+class AreaWeightedMean(Protocol):
+    def __call__(
+        self, data: torch.Tensor, keepdim: bool, name: str | None = None
+    ) -> torch.Tensor: ...
 
 
 @dataclasses.dataclass
@@ -62,12 +72,6 @@ class SeaIceFractionConfig:
         for name in self.zero_where_ice_free_names:
             out[name] = gen_data[name] * (out[self.sea_ice_fraction_name] > 0.0)
         return out
-
-
-# Operation the OceanCorrector applies to enforce sea-ice-fraction constraints;
-# provided by SeaIceFractionConfig.__call__. Passed as a callable (not the config)
-# so the corrector relies only on the operation, not on reading config fields.
-SeaIceFractionCorrection = Callable[[TensorMapping, TensorMapping], TensorDict]
 
 
 @dataclasses.dataclass
@@ -116,19 +120,81 @@ class SurfaceEnergyFluxCorrectionConfig:
 
 
 @dataclasses.dataclass
-class OceanCorrectorParams:
-    """Plain (non-dacite) scalar parameters passed to ``OceanCorrector``.
+class SeaIceFractionCorrection:
+    """Correction that enforces sea-ice-fraction constraints.
 
-    Built by ``OceanCorrectorConfig._build`` so the corrector does not need to
-    read the (non-leaf) config. The surface-energy-flux and ocean-heat-content
-    sub-configs are flattened to their scalar fields; each ``*_method`` is
-    ``None`` exactly when the corresponding correction is disabled.
+    Wraps ``SeaIceFractionConfig`` so the corrector applies the operation
+    without reading config fields. ``forcing_data`` and ``corrector_state`` are
+    unused and passed through.
     """
 
-    force_positive_names: list[str]
-    surface_energy_flux_method: Literal["residual_prediction", "prescribed"] | None
-    ocean_heat_content_method: Literal["scaled_temperature"] | None
-    ocean_heat_content_unaccounted_heating: float
+    config: SeaIceFractionConfig
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        return self.config(gen_data, input_data), corrector_state
+
+
+@dataclasses.dataclass
+class SurfaceEnergyFluxCorrection:
+    """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
+
+    method: Literal["residual_prediction", "prescribed"]
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        gen_data = _correct_hfds(
+            input_data,
+            gen_data,
+            forcing_data,
+            method=self.method,
+        )
+        return gen_data, corrector_state
+
+
+@dataclasses.dataclass
+class OceanHeatContentCorrection:
+    """Correction that conserves ocean heat content."""
+
+    area_weighted_mean: AreaWeightedMean
+    vertical_coordinate: HasOceanDepthIntegral | None
+    timestep_seconds: float
+    method: Literal["scaled_temperature"]
+    unaccounted_heating: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        if self.vertical_coordinate is None:
+            raise ValueError(
+                "Ocean heat content correction is turned on, but no vertical "
+                "coordinate is available."
+            )
+        gen_data = _force_conserve_ocean_heat_content(
+            input_data,
+            gen_data,
+            forcing_data,
+            self.area_weighted_mean,
+            self.vertical_coordinate,
+            self.timestep_seconds,
+            self.method,
+            self.unaccounted_heating,
+        )
+        return gen_data, corrector_state
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -179,85 +245,34 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
     ) -> "OceanCorrector":
-        flux_correction = self.surface_energy_flux_correction
-        ohc_correction = self.ocean_heat_content_correction
-        params = OceanCorrectorParams(
-            force_positive_names=self.force_positive_names,
-            surface_energy_flux_method=(
-                None if flux_correction is None else flux_correction.method
-            ),
-            ocean_heat_content_method=(
-                None if ohc_correction is None else ohc_correction.method
-            ),
-            ocean_heat_content_unaccounted_heating=(
-                0.0
-                if ohc_correction is None
-                else ohc_correction.constant_unaccounted_heating
-            ),
-        )
-        return OceanCorrector(
-            params=params,
-            sea_ice_fraction_correction=(
-                None
-                if self.sea_ice_fraction_correction is None
-                else self.sea_ice_fraction_correction.__call__
-            ),
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
-        )
-
-
-class OceanCorrector(CorrectorABC):
-    def __init__(
-        self,
-        params: OceanCorrectorParams,
-        sea_ice_fraction_correction: SeaIceFractionCorrection | None,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: HasOceanDepthIntegral | None,
-        timestep: datetime.timedelta,
-    ):
-        self._params = params
-        self._sea_ice_fraction_correction = sea_ice_fraction_correction
-        self._gridded_operations = gridded_operations
-        self._vertical_coordinate = vertical_coordinate
-        self._timestep = timestep
-
-    def __call__(
-        self,
-        input_data: TensorMapping,
-        gen_data: TensorMapping,
-        forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        if len(self._params.force_positive_names) > 0:
-            gen_data = force_positive(gen_data, self._params.force_positive_names)
-        if self._sea_ice_fraction_correction is not None:
-            gen_data = self._sea_ice_fraction_correction(gen_data, input_data)
-        if self._params.surface_energy_flux_method is not None:
-            gen_data = _correct_hfds(
-                input_data,
-                gen_data,
-                forcing_data,
-                method=self._params.surface_energy_flux_method,
+        area_weighted_mean = gridded_operations.area_weighted_mean
+        timestep_seconds = timestep.total_seconds()
+        corrections: list[Correction] = []
+        if len(self.force_positive_names) > 0:
+            corrections.append(ForcePositive(self.force_positive_names))
+        if self.sea_ice_fraction_correction is not None:
+            corrections.append(
+                SeaIceFractionCorrection(self.sea_ice_fraction_correction)
             )
-        if self._params.ocean_heat_content_method is not None:
-            if self._vertical_coordinate is None:
-                raise ValueError(
-                    "Ocean heat content correction is turned on, but no vertical "
-                    "coordinate is available."
+        if self.surface_energy_flux_correction is not None:
+            corrections.append(
+                SurfaceEnergyFluxCorrection(self.surface_energy_flux_correction.method)
+            )
+        if self.ocean_heat_content_correction is not None:
+            corrections.append(
+                OceanHeatContentCorrection(
+                    area_weighted_mean,
+                    vertical_coordinate,
+                    timestep_seconds,
+                    self.ocean_heat_content_correction.method,
+                    self.ocean_heat_content_correction.constant_unaccounted_heating,
                 )
-            gen_data = _force_conserve_ocean_heat_content(
-                input_data,
-                gen_data,
-                forcing_data,
-                self._gridded_operations.area_weighted_mean,
-                self._vertical_coordinate,
-                self._timestep.total_seconds(),
-                self._params.ocean_heat_content_method,
-                self._params.ocean_heat_content_unaccounted_heating,
             )
-        return dict(gen_data), corrector_state
+        return OceanCorrector(corrections)
+
+
+class OceanCorrector(CorrectionSequence):
+    pass
 
 
 def _compute_ocean_net_surface_energy_flux(
@@ -323,12 +338,6 @@ def _correct_hfds(
             f"Method {method!r} not implemented for surface energy flux correction"
         )
     return out
-
-
-class AreaWeightedMean(Protocol):
-    def __call__(
-        self, data: torch.Tensor, keepdim: bool, name: str | None = None
-    ) -> torch.Tensor: ...
 
 
 def _force_conserve_ocean_heat_content(
