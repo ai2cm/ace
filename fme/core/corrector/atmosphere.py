@@ -33,10 +33,23 @@ class EnergyBudgetConfig:
             to the energy flux into the atmosphere when conserving total energy.
             This can be useful for correcting errors in energy budget in target data.
             The same additional heating is imposed at all time steps and grid cells.
+        exclude_top_levels: Number of topmost vertical levels (level 0, then 0-1,
+            etc.) to exclude from receiving the temperature correction. The global
+            magnitude of the correction is still computed across all levels; the
+            excluded top levels simply do not receive the per-level temperature
+            addition. Defaults to 0 (apply the correction to all levels).
     """
 
     method: Literal["constant_temperature"]
     constant_unaccounted_heating: float = 0.0
+    exclude_top_levels: int = 0
+
+    def __post_init__(self):
+        if self.exclude_top_levels < 0:
+            raise ValueError(
+                "exclude_top_levels must be non-negative, got "
+                f"{self.exclude_top_levels}"
+            )
 
 
 @CorrectorSelector.register("atmosphere_corrector")
@@ -238,6 +251,7 @@ class AtmosphereCorrector(CorrectorABC):
                 timestep_seconds=self._timestep_seconds,
                 method=self._config.total_energy_budget_correction.method,
                 unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
+                exclude_top_levels=self._config.total_energy_budget_correction.exclude_top_levels,
             )
         return gen_data, corrector_state
 
@@ -439,10 +453,16 @@ def _force_conserve_total_energy(
     timestep_seconds: float,
     method: Literal["constant_temperature"] = "constant_temperature",
     unaccounted_heating: float = 0.0,
+    exclude_top_levels: int = 0,
 ) -> TensorDict:
     """Apply a correction to the generated data to conserve total energy.
 
     This function also inserts the unaccounted heating into the generated data.
+
+    The global magnitude of the temperature correction is computed across all
+    vertical levels; ``exclude_top_levels`` only restricts which levels receive
+    the per-level temperature addition, skipping the topmost ``exclude_top_levels``
+    levels (level 0, then 0-1, etc.).
     """
     if method != "constant_temperature":
         raise NotImplementedError(
@@ -480,9 +500,17 @@ def _force_conserve_total_energy(
     energy_to_temp_factor_gm = area_weighted_mean(energy_to_temperature_factor, True)
     temperature_correction = energy_correction / energy_to_temp_factor_gm
 
-    # apply same temperature correction to all vertical layers
+    # apply same temperature correction to all vertical layers, optionally
+    # skipping the topmost `exclude_top_levels` levels (level 0 is the top).
+    # The global magnitude of the correction above was computed across all
+    # levels regardless; this only restricts which levels receive the addition.
     air_temperature_names = gen.get_all_vertical_level_names("air_temperature")
-    for name in air_temperature_names:
+    if exclude_top_levels > len(air_temperature_names):
+        raise ValueError(
+            f"exclude_top_levels ({exclude_top_levels}) exceeds the number of "
+            f"air_temperature levels ({len(air_temperature_names)})."
+        )
+    for name in air_temperature_names[exclude_top_levels:]:
         gen.data[name] = gen.data[name] + temperature_correction
     # filter required here because we merged forcing data into gen above
     return {k: v for k, v in gen.data.items() if k in gen_data}
