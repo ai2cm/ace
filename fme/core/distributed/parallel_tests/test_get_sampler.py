@@ -20,7 +20,11 @@ from typing import cast
 import pytest
 import torch
 
-from fme.ace.data_loading.sampler import ScheduledWeightedSampler, build_group_ids
+from fme.ace.data_loading.sampler import (
+    ScheduledWeightedSampler,
+    build_group_ids,
+    build_member_ids,
+)
 from fme.core.dataset.schedule import WeightSchedule
 from fme.core.distributed import Distributed
 from fme.core.distributed.distributed import SpatialParallelismNotImplemented
@@ -190,3 +194,51 @@ def test_weighted_sampler_per_rank_distinct_and_size():
         if dist.total_data_parallel_ranks > 1:
             # different data-parallel ranks must draw different samples
             assert gathered[0] != gathered[1]
+
+
+@pytest.mark.parallel
+def test_weighted_sampler_realized_fractions_all_reduced():
+    """
+    get_realized_fractions sums counts across data-parallel ranks, so every
+    rank sees the same global fractions, summing to 1 within each namespace.
+    Under spatial parallelism the weighted sampler is unsupported.
+    """
+    dist = Distributed.get_instance()
+    set_seed(0)
+
+    if dist.world_size != dist.total_data_parallel_ranks:
+        with pytest.raises(SpatialParallelismNotImplemented):
+            dist.require_no_spatial_parallelism("group_weights")
+        return
+
+    member_lengths = [500, 500]
+    group_ids = build_group_ids(member_lengths, [1, 1])
+    member_ids = build_member_ids(member_lengths)
+    schedule = WeightSchedule.from_constant([0.5, 0.5])
+    num_samples_per_rank = math.ceil(
+        sum(member_lengths) / dist.total_data_parallel_ranks
+    )
+    sampler = ScheduledWeightedSampler(
+        group_ids,
+        schedule,
+        num_samples_per_rank=num_samples_per_rank,
+        rank=dist.data_parallel_rank,
+        base_seed=dist.get_seed(),
+        sample_member_ids=member_ids,
+        member_labels=["m0", "m1"],
+        group_labels=["g0", "g1"],
+    )
+    list(sampler)  # draw on every rank
+    fractions = sampler.get_realized_fractions()
+
+    # collective reduce makes the result identical on every rank
+    gathered = dist.gather_object(fractions)
+    if dist.is_root():
+        assert gathered is not None
+        for other in gathered[1:]:
+            assert other == gathered[0]
+    assert sum(v for k, v in fractions.items() if k.startswith("group/")) == (
+        pytest.approx(1.0)
+    )
+    assert fractions["group/g0"] == pytest.approx(0.5, abs=0.05)
+    assert fractions["member/m0"] == pytest.approx(0.5, abs=0.05)

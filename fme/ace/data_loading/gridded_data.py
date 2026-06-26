@@ -124,6 +124,9 @@ class GriddedData(GriddedDataABC[BatchData]):
     def log_info(self, name: str):
         self._loader.log_info(name)
 
+    def get_sample_fraction_logs(self) -> dict[str, float]:
+        return self._loader.get_sample_fraction_logs()
+
     def set_epoch(self, epoch: int):
         """
         Set the epoch for the data loader sampler, if it is a distributed sampler.

@@ -102,3 +102,12 @@ class GriddedDataABC(abc.ABC, Generic[BD]):
         Report information about the data using logging.info.
         """
         ...
+
+    def get_sample_fraction_logs(self) -> dict[str, float]:
+        """
+        Fraction of samples drawn from each data source in the current epoch.
+
+        Defaults to empty; loaders with source-weighted sampling override this to
+        report per-source fractions for logging.
+        """
+        return {}

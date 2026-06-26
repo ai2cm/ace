@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.data_loading.sampler import ScheduledWeightedSampler, build_group_ids
+from fme.ace.data_loading.sampler import (
+    ScheduledWeightedSampler,
+    build_group_ids,
+    build_member_ids,
+)
 from fme.core.dataset.schedule import WeightMilestone, WeightSchedule
 
 
@@ -144,3 +148,88 @@ def test_sampler_zero_weight_on_empty_group_allowed():
         gids, schedule, num_samples_per_rank=10, rank=0, base_seed=0
     )
     assert len(list(sampler)) == 10
+
+
+def test_build_member_ids():
+    np.testing.assert_array_equal(
+        build_member_ids([2, 3, 1]), np.array([0, 0, 1, 1, 1, 2])
+    )
+
+
+def _make_member_weighted_sampler(num_samples_per_rank):
+    member_lengths = [100, 100, 100]
+    gids = build_group_ids(member_lengths, [2, 1])  # members 0,1 -> group0; 2 -> group1
+    mids = build_member_ids(member_lengths)
+    schedule = WeightSchedule.from_constant([0.6, 0.4])
+    return ScheduledWeightedSampler(
+        gids,
+        schedule,
+        num_samples_per_rank=num_samples_per_rank,
+        rank=0,
+        base_seed=0,
+        sample_member_ids=mids,
+        member_labels=["amip", "co2", "era5"],
+        group_labels=["other", "era5"],
+    )
+
+
+def test_realized_fractions_empty_before_iteration():
+    sampler = _make_member_weighted_sampler(100)
+    assert sampler.get_realized_fractions() == {}
+
+
+def test_realized_fractions_match_weights():
+    sampler = _make_member_weighted_sampler(40_000)
+    list(sampler)  # trigger the draw
+    fractions = sampler.get_realized_fractions()
+    # groups normalized from [0.6, 0.4]
+    assert fractions["group/other"] == pytest.approx(0.6, abs=0.02)
+    assert fractions["group/era5"] == pytest.approx(0.4, abs=0.02)
+    # within group "other" the two equal-size members split the 0.6 evenly
+    assert fractions["member/amip"] == pytest.approx(0.3, abs=0.02)
+    assert fractions["member/co2"] == pytest.approx(0.3, abs=0.02)
+    assert fractions["member/era5"] == pytest.approx(0.4, abs=0.02)
+    assert sum(v for k, v in fractions.items() if k.startswith("group/")) == (
+        pytest.approx(1.0)
+    )
+    assert sum(v for k, v in fractions.items() if k.startswith("member/")) == (
+        pytest.approx(1.0)
+    )
+
+
+def test_realized_fractions_cooldown_zeroes_other_members():
+    member_lengths = [50, 50]
+    gids = build_group_ids(member_lengths, [1, 1])
+    mids = build_member_ids(member_lengths)
+    schedule = WeightSchedule.from_constant([0.0, 1.0])
+    sampler = ScheduledWeightedSampler(
+        gids,
+        schedule,
+        num_samples_per_rank=2_000,
+        rank=0,
+        base_seed=0,
+        sample_member_ids=mids,
+        member_labels=["other", "era5"],
+        group_labels=["other", "era5"],
+    )
+    list(sampler)
+    fractions = sampler.get_realized_fractions()
+    assert fractions["member/other"] == 0.0
+    assert fractions["member/era5"] == 1.0
+
+
+def test_member_labels_length_mismatch_raises():
+    member_lengths = [10, 10]
+    gids = build_group_ids(member_lengths, [1, 1])
+    mids = build_member_ids(member_lengths)
+    schedule = WeightSchedule.from_constant([0.5, 0.5])
+    with pytest.raises(ValueError, match="member_labels"):
+        ScheduledWeightedSampler(
+            gids,
+            schedule,
+            num_samples_per_rank=10,
+            rank=0,
+            base_seed=0,
+            sample_member_ids=mids,
+            member_labels=["only-one"],
+        )

@@ -140,6 +140,15 @@ class DataLoaderABC(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def get_sample_fraction_logs(self) -> dict[str, float]:
+        """
+        Fraction of samples drawn from each data source in the current epoch.
+
+        Empty if the underlying sampler does not report per-source fractions.
+        """
+        pass
+
 
 class TorchDataLoader(GenericDataLoader[BatchData], DataLoaderABC):
     pass
@@ -299,3 +308,6 @@ class SlidingWindowDataLoader(DataLoaderABC):
         self._loader.alternate_shuffle()
         self._seed = alternate_seed(self._seed)
         self._pooled = None
+
+    def get_sample_fraction_logs(self) -> dict[str, float]:
+        return self._loader.get_sample_fraction_logs()

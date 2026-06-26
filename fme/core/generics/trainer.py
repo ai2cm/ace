@@ -306,6 +306,7 @@ class Trainer:
         self._start_epoch = 0
         self._epochs_trained = self._start_epoch
         self._current_epoch_num_batches_seen = 0
+        self._sample_fraction_logs: dict[str, float] = {}
         self._best_validation_loss = torch.inf
         self._best_inference_error = torch.inf
 
@@ -499,6 +500,7 @@ class Trainer:
                 **valid_logs,
                 **inference_logs,
                 **additional_logs,
+                **self._sample_fraction_logs,
                 **{
                     "lr": lr,
                     "epoch": self._epochs_trained,
@@ -611,6 +613,12 @@ class Trainer:
             ):
                 self._save_restart_checkpoints()
                 self._last_saved_num_batches_seen = self.num_batches_seen
+        # capture realized per-source sample fractions for this epoch's training
+        # draw before alternate_shuffle re-draws for train-data evaluation.
+        self._sample_fraction_logs = {
+            f"train_data_fraction/{key}": value
+            for key, value in self.train_data.get_sample_fraction_logs().items()
+        }
         # evaluate after training on an independent shuffle of the data
         self.train_data.alternate_shuffle()
         aggregator = self._aggregator_builder.get_train_aggregator()

@@ -1,14 +1,19 @@
 import logging
 import math
+import pathlib
 from collections.abc import Sequence
 
 import torch.utils.data
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.dataloader import get_data_loader
-from fme.ace.data_loading.sampler import ScheduledWeightedSampler, build_group_ids
+from fme.ace.data_loading.sampler import (
+    ScheduledWeightedSampler,
+    build_group_ids,
+    build_member_ids,
+)
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.concat import XarrayConcat
+from fme.core.dataset.concat import ConcatDatasetConfig, XarrayConcat
 from fme.core.dataset.dataset import DatasetABC, DatasetItem
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.subset import SubsetDataset
@@ -93,23 +98,34 @@ def _get_weighted_sampler(
     )
     # group_weights config validation guarantees a ConcatDatasetConfig, so the
     # built dataset is an XarrayConcat exposing member_lengths.
-    if not isinstance(unsubset_dataset, XarrayConcat):
+    if not isinstance(unsubset_dataset, XarrayConcat) or not isinstance(
+        config.dataset, ConcatDatasetConfig
+    ):
         raise ValueError(
             "group_weights requires a concat dataset, got "
             f"{type(unsubset_dataset).__name__}"
         )
-    group_ids = build_group_ids(
-        unsubset_dataset.member_lengths, config.group_weights.groups
-    )
+    member_lengths = unsubset_dataset.member_lengths
+    group_ids = build_group_ids(member_lengths, config.group_weights.groups)
+    member_ids = build_member_ids(member_lengths)
     if indices is not None:
-        # map group ids through the SubsetDataset reindexing
+        # map group / member ids through the SubsetDataset reindexing
         group_ids = group_ids[indices]
+        member_ids = member_ids[indices]
+    # label each concat member by its index and file_pattern stem so the wandb
+    # sample-fraction metrics are human-readable and unique.
+    member_labels = [
+        f"{i:02d}-{pathlib.Path(member.file_pattern).stem}"
+        for i, member in enumerate(config.dataset.concat)
+    ]
     return ScheduledWeightedSampler(
         group_ids,
         config.group_weights.schedule,
         num_samples_per_rank=math.ceil(len(dataset) / dist.total_data_parallel_ranks),
         rank=dist.data_parallel_rank,
         base_seed=dist.get_seed(),
+        sample_member_ids=member_ids,
+        member_labels=member_labels,
     )
 
 

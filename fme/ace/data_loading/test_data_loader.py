@@ -417,6 +417,34 @@ def test_group_weights_with_time_buffer(tmp_path):
         assert _min_day_offset(batch.time) >= 100
 
 
+@pytest.mark.parametrize("time_buffer", [0, 2])
+def test_group_weights_sample_fraction_logs(tmp_path, time_buffer):
+    netcdfs = _make_concat_members(tmp_path, n_members=3, n_times=8)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(p)) for p in netcdfs]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=time_buffer,
+        group_weights=GroupWeightsConfig(groups=[2, 1], start_value=[0.5, 0.5]),
+    )
+    requirements = DataRequirements(["foo"], 2)
+    data = get_gridded_data(config, True, requirements)  # type: ignore
+    data.set_epoch(0)
+    # fractions only populate after the sampler is drawn (during iteration)
+    assert data.get_sample_fraction_logs() == {}
+    for _ in data.loader:
+        pass
+    logs = data.get_sample_fraction_logs()
+    group_keys = {k for k in logs if k.startswith("group/")}
+    member_keys = {k for k in logs if k.startswith("member/")}
+    assert len(group_keys) == 2
+    assert len(member_keys) == 3
+    assert sum(logs[k] for k in group_keys) == pytest.approx(1.0)
+    assert sum(logs[k] for k in member_keys) == pytest.approx(1.0)
+
+
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     _create_dataset_on_disk(tmp_path)
     other_path = tmp_path_factory.mktemp("other")
@@ -1260,6 +1288,34 @@ def test_time_buffer(
             for window_times in dataset_window_times
         ]
         assert sum(window_matches) == 1
+
+
+def test_time_buffer_alternate_shuffle_invalidates_pool(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=13)
+    config = DataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        batch_size=1,
+        num_data_workers=0,
+        time_buffer=2,
+        time_buffer_pool_size=2,
+    )
+    requirements = DataRequirements(["foo"], 2)
+    data = get_gridded_data(config, True, requirements)
+    loader = data._loader
+    assert isinstance(loader, SlidingWindowDataLoader)
+
+    for _ in data.loader:
+        pass
+    first_pool = loader._pooled
+    assert first_pool is not None
+
+    data.alternate_shuffle()
+    assert loader._pooled is None
+
+    for _ in data.loader:
+        pass
+    assert loader._pooled is not None
+    assert loader._pooled is not first_pool
 
 
 @pytest.mark.parametrize("time_buffer", [0, 2])

@@ -25,6 +25,13 @@ class _AlternateShuffleSampler(Protocol):
     def alternate_shuffle(self): ...
 
 
+@runtime_checkable
+class _SampleFractionSampler(Protocol):
+    """A sampler that reports the fraction of samples drawn from each source."""
+
+    def get_realized_fractions(self) -> dict[str, float]: ...
+
+
 class GenericDataLoader(Generic[_BD]):
     """
     Wrapper around torch.utils.data.DataLoader, for type safety.
@@ -144,3 +151,10 @@ class GenericDataLoader(Generic[_BD]):
             self._sampler.alternate_shuffle()
         elif isinstance(self._sampler, torch.utils.data.DistributedSampler):
             self._sampler.set_epoch(alternate_seed(self._sampler.epoch))
+
+    @final
+    def get_sample_fraction_logs(self) -> dict[str, float]:
+        """Per-source sample fractions from the sampler, if it reports them."""
+        if isinstance(self._sampler, _SampleFractionSampler):
+            return self._sampler.get_realized_fractions()
+        return {}
