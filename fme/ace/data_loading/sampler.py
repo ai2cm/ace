@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from fme.core.dataset.schedule import WeightSchedule
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.rand import alternate_seed
 
@@ -172,13 +173,20 @@ class ScheduledWeightedSampler(torch.utils.data.Sampler):
         ):
             return {}
         # group_weights forbids spatial parallelism, so an all-reduce over the
-        # world sums exactly over the data-parallel ranks. clone() because
-        # reduce_sum mutates its input in place.
+        # world sums exactly over the data-parallel ranks. Move counts to the
+        # compute device first: the distributed backend (e.g. NCCL) cannot
+        # all-reduce CPU tensors. clone()/.double() because reduce_sum mutates
+        # its input in place.
         dist = Distributed.get_instance()
-        group_counts = dist.reduce_sum(self._last_group_counts.clone().double())
-        member_counts = dist.reduce_sum(self._last_member_counts.clone().double())
+        device = get_device()
+        group_counts = dist.reduce_sum(
+            self._last_group_counts.to(device=device, dtype=torch.double)
+        )
+        member_counts = dist.reduce_sum(
+            self._last_member_counts.to(device=device, dtype=torch.double)
+        )
         total = dist.reduce_sum(
-            torch.tensor(float(self._last_total), dtype=torch.double)
+            torch.tensor(float(self._last_total), dtype=torch.double, device=device)
         ).item()
         logs: dict[str, float] = {}
         for group in range(self._n_groups):

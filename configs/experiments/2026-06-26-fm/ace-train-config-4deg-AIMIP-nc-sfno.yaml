@@ -4,6 +4,7 @@ save_checkpoint: true
 checkpoint_every_n_batches: 5000
 validate_using_ema: true
 max_epochs: 150
+pre_cooldown_checkpoint_epoch: 142
 ema:
   decay: 0.999
 inference:
