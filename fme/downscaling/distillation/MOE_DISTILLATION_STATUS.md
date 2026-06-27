@@ -265,6 +265,41 @@ conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.s
 - ⏳ **Eval**: bundled 2-/3-step student on the same full-teacher val zarr
   (CRPS/spectra/tail). Per-student selection via the fixed-partner cascade.
 
+### Design note: teacher input — bundle+`expert_index` vs. individual checkpoints
+
+The validation **noising type is its own config** (`--val-mode` /
+`validation_mode`), independent of how the teacher is loaded. For the *teacher
+input* there are two possible mechanisms:
+
+1. **Bundle + `--expert-index N`** (chosen, implemented). Load the bundled MoE
+   and select expert N in-memory; the teacher's σ range is pulled from the
+   bundle's **routing config** (`state["sigma_ranges"]` = `[0.005,200]`,
+   `[200,2000]`).
+2. **Individual component teacher via `--teacher-checkpoint`** (pre-existing
+   single-`DiffusionModel` path; needs no `expert_index`). Fully decouples
+   per-expert distillation from the MoE machinery.
+
+**Why (1) was chosen and (2) was *not* extended:** the segment σ ranges live at
+the **MoE level**, stored separately from each expert's own
+`config.sigma_min/sigma_max` (see `DenoisingExpertCheckpointConfig` and
+`serial_denoising.py:324`). A standalone checkpoint loaded via
+`--teacher-checkpoint` takes its range from its **own** config
+(`fastgen_teacher.py:139-140`) — the expert's *training* range, **not guaranteed
+to equal the segment boundary**. That directly breaks `lo_renoise`, which
+re-noises to `student._sigma_max` (must be exactly 200 for Lo). And
+`ACE_SIGMA_MIN/MAX` only drives the *training noise distribution*
+(`sample_t_cfg`), not the single-model teacher's σ range — so there is no
+existing knob to correct it. Approach (1) gets the authoritative segment range
+for free and needs only the bundle (which is what we have on hand; the
+pre-bundle individual checkpoints are not referenced anywhere in this doc).
+
+**Decision (2026-06-27): do not add a teacher σ-range override.** Making (2)
+correct would require an explicit teacher-σ-range override (e.g.
+`--teacher-sigma-min/max`, or feeding `ACE_SIGMA_MIN/MAX` into the single-model
+teacher branch). We deliberately skipped it — bundle+`expert_index` is
+sufficient and avoids the mismatch entirely. Revisit only if we ever need to
+distill from a standalone expert checkpoint that is *not* in a bundle.
+
 ---
 
 ## Root causes found
