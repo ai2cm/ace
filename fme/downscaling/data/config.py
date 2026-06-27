@@ -2,7 +2,7 @@ import dataclasses
 from collections.abc import Sequence
 
 import torch
-from torch.utils.data import DataLoader, Dataset, RandomSampler
+from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
@@ -23,6 +23,10 @@ from fme.downscaling.data.datasets import (
     HorizontalSubsetDataset,
     PairedBatchData,
     PairedGriddedData,
+    PairedVideoBatchData,
+    PairedVideoGriddedData,
+    VideoBatchItemDatasetAdapter,
+    VideoFineCoarsePairedDataset,
 )
 from fme.downscaling.data.utils import (
     ClosedInterval,
@@ -447,6 +451,8 @@ class PairedDataLoaderConfig:
     topography: str | None = None
     sample_with_replacement: int | None = None
     drop_last: bool = False
+    n_timesteps: int = 1
+    time_stride: int | None = None
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
@@ -456,6 +462,26 @@ class PairedDataLoaderConfig:
                 "will be removed in a future release. `StaticInputs` are now stored "
                 "within the model when it is first built and trained."
             )
+        if self.n_timesteps < 1:
+            raise ValueError(f"n_timesteps must be >= 1, got {self.n_timesteps}.")
+        if self.time_stride is not None and self.time_stride < 1:
+            raise ValueError(
+                f"time_stride must be >= 1, got {self.time_stride}."
+            )
+
+    @property
+    def clip_start_stride(self) -> int:
+        """Frames between consecutive video-clip starts (see ``build_video``).
+
+        Defaults to ``n_timesteps - 1`` -- per-day non-overlapping clips that
+        share only their boundary frame (for the 24h/``n_timesteps=9`` setup this
+        is exactly one calendar day). ``time_stride=1`` recovers a full
+        stride-one sliding window; ``time_stride=n_timesteps`` gives fully
+        disjoint clips with no shared frame.
+        """
+        if self.time_stride is not None:
+            return self.time_stride
+        return max(1, self.n_timesteps - 1)
 
     def _first_data_config(
         self,
@@ -596,6 +622,131 @@ class PairedDataLoaderConfig:
             _loader=dataloader,
             coarse_shape=example.coarse.horizontal_shape,
             downscale_factor=example.downscale_factor,
+            dims=example.fine.latlon_coordinates.dims,
+            variable_metadata=variable_metadata,
+            all_times=all_times,
+            fine_coords=get_latlon_coords_from_properties(properties_fine),
+        )
+
+    def build_video(
+        self,
+        train: bool,
+        requirements: DataRequirements,
+        dist: Distributed | None = None,
+    ) -> PairedVideoGriddedData:
+        """Build a paired fine/coarse loader of video clips.
+
+        Each sample is a clip of ``self.n_timesteps`` consecutive frames with an
+        explicit leading time axis (``(T, lat, lon)`` per field), plus per-frame
+        physical-time features for a cBottle-style ``CalendarEmbedding``. The
+        clip length is taken from ``self.n_timesteps`` (not the model's
+        ``requirements.n_timesteps``), so this path leaves the model untouched.
+
+        Consecutive clips are spaced ``self.clip_start_stride`` frames apart.
+        By default (``time_stride=None``) this is ``n_timesteps - 1``, i.e.
+        per-day non-overlapping clips that share only their boundary frame; for
+        a 24h clip at 3-hourly resolution use ``n_timesteps=9`` (endpoints at 0h
+        and 24h plus 7 interior frames). Set ``time_stride=1`` for a full
+        stride-one sliding window, or ``time_stride=n_timesteps`` for fully
+        disjoint clips.
+        """
+        if dist is None:
+            dist = Distributed.get_instance()
+
+        n_timesteps = IntSchedule.from_constant(self.n_timesteps)
+        dataset_fine, properties_fine = build_from_config_sequence(
+            configs=self.fine,
+            names=requirements.fine_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
+        )
+        dataset_coarse, properties_coarse = build_from_config_sequence(
+            configs=self.coarse,
+            names=requirements.coarse_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
+        )
+
+        if not isinstance(
+            properties_coarse.horizontal_coordinates, LatLonCoordinates
+        ) or not isinstance(properties_fine.horizontal_coordinates, LatLonCoordinates):
+            raise ValueError(
+                "Downscaling data loader only supports datasets with latlon coords."
+            )
+        if not dataset_fine.sample_start_times.equals(
+            dataset_coarse.sample_start_times
+        ):
+            raise ValueError(
+                "Fine and coarse datasets must have the same sample start times."
+            )
+        if dataset_fine.sample_n_times != self.n_timesteps:
+            raise ValueError(
+                f"Expected clips of {self.n_timesteps} timesteps, got "
+                f"{dataset_fine.sample_n_times}."
+            )
+        all_times = dataset_fine.sample_start_times
+
+        dataset_fine = self._repeat_if_requested(dataset_fine)
+        dataset_coarse = self._repeat_if_requested(dataset_coarse)
+
+        dataset_fine_subset, dataset_coarse_subset = _build_aligned_subset_pair(
+            dataset_fine=dataset_fine,
+            properties_fine=properties_fine,
+            dataset_coarse=dataset_coarse,
+            properties_coarse=properties_coarse,
+            lat_extent=self.lat_extent,
+            lon_extent=self.lon_extent,
+        )
+
+        fine_adapter = VideoBatchItemDatasetAdapter(
+            dataset_fine_subset,
+            dataset_fine_subset.subset_latlon_coordinates,
+            properties=properties_fine,
+        )
+        coarse_adapter = VideoBatchItemDatasetAdapter(
+            dataset_coarse_subset,
+            dataset_coarse_subset.subset_latlon_coordinates,
+            properties=properties_coarse,
+        )
+
+        paired_dataset = VideoFineCoarsePairedDataset(fine_adapter, coarse_adapter)
+
+        # Subsample the (stride-one) clip starts to the requested clip spacing.
+        stride = self.clip_start_stride
+        dataset: Dataset
+        if stride > 1:
+            keep = list(range(0, len(paired_dataset), stride))
+            dataset = Subset(paired_dataset, keep)
+            all_times = all_times[::stride]
+        else:
+            dataset = paired_dataset
+
+        sampler = self._get_sampler(
+            dataset=dataset, dist=dist, train=train, drop_last=self.drop_last
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=dist.local_batch_size(int(self.batch_size)),
+            num_workers=self.num_data_workers,
+            shuffle=(sampler is None) and train,
+            sampler=sampler,
+            drop_last=True,
+            pin_memory=using_gpu(),
+            collate_fn=PairedVideoBatchData.from_sequence,
+            multiprocessing_context=self._mp_context(),
+            persistent_workers=True if self.num_data_workers > 0 else False,
+        )
+
+        example = dataset[0]
+        variable_metadata = {
+            **fine_adapter.variable_metadata,
+            **coarse_adapter.variable_metadata,
+        }
+        return PairedVideoGriddedData(
+            _loader=dataloader,
+            coarse_shape=example.coarse.horizontal_shape,
+            downscale_factor=example.downscale_factor,
+            n_timesteps=self.n_timesteps,
             dims=example.fine.latlon_coordinates.dims,
             variable_metadata=variable_metadata,
             all_times=all_times,

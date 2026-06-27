@@ -1,0 +1,106 @@
+# Endpoint-conditioned video interpolation on X-SHiELD AMIP 3-hourly data.
+# Temporal-only: fine and coarse point at the SAME store (downscale factor 1);
+# coarse is loaded but ignored by the model. Each clip is a 24h window
+# (n_timesteps: 9 -> endpoints at 0h/24h + 7 interior frames at 3h spacing).
+#
+# Train/val/test split (chronological, whole-year, ~4019 daily clips total):
+#   train: 2013-01-02 .. 2021-12-31   (~3290 clips)
+#   val:   2022-01-01 .. 2022-12-31   (~365 clips)
+#   test:  2023-01-01 .. 2024-01-04   (~370 clips)   <- used by evaluation, not here
+# The split is encoded via each dataset's `subset` TimeSlice; the same zarr is
+# reused, date-limited. Clips never cross a split boundary (a 9-frame clip must
+# fit entirely within the subset), so there is no train/val/test leakage.
+#
+# Normalization means/stds are per-variable global statistics computed from the
+# TRAIN split only (2013-01-02..2021-12-31), subsampled every ~5 days. Computed
+# with toy/compute_norm_stats.py. Recompute if out_names or the train range change.
+experiment_dir: /will/be/overwritten
+max_epochs: 20
+validate_using_ema: true
+validate_interval: 1
+generate_n_samples: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-video-downscaling
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-scratch/andrep
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-scratch/andrep
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 4
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 30
+  lon_extent:
+    start: 0
+    stop: 60
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-scratch/andrep
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-scratch/andrep
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 4
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 30
+  lon_extent:
+    start: 0
+    stop: 60
+model:
+  n_timesteps: 9
+  model_channels: 64
+  n_heads: 4
+  num_freqs: 4
+  sigma_min: 0.002
+  sigma_max: 80.0
+  churn: 0.0
+  num_diffusion_generation_steps: 18
+  out_names:
+    - air_temperature_at_two_meters
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+  normalization:
+    means:
+      air_temperature_at_two_meters: 279.3386
+      eastward_wind_at_ten_meters: -0.0453
+      northward_wind_at_ten_meters: 0.1889
+      PRMSL: 1008.3664
+    stds:
+      air_temperature_at_two_meters: 20.2363
+      eastward_wind_at_ten_meters: 5.5127
+      northward_wind_at_ten_meters: 4.5855
+      PRMSL: 14.9875
