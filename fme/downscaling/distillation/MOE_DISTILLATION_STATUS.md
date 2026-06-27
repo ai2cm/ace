@@ -3,7 +3,7 @@
 Living notes for the multivariate MoE FastGen distillation effort on branch
 `experiment/fastgen-distill`. Pick up here from any clone.
 
-_Last updated: 2026-06-24._
+_Last updated: 2026-06-27._
 
 ---
 
@@ -299,6 +299,80 @@ correct would require an explicit teacher-σ-range override (e.g.
 teacher branch). We deliberately skipped it — bundle+`expert_index` is
 sufficient and avoids the mismatch entirely. Revisit only if we ever need to
 distill from a standalone expert checkpoint that is *not* in a bundle.
+
+---
+
+## Active per-expert runs (submitted 2026-06-27) — CHECK THESE
+
+**Student-Lo distillation is submitted** (commit `fa6b49e9e`). Both step
+variants of the 1-vs-2-step A/B, on Beaker workspace `ai2/climate-titan`, wandb
+project `ai2cm/fastgen`.
+
+| Run | What | Beaker experiment | wandb name |
+|---|---|---|---|
+| **Lo-1step** | expert 0, σ[0.005,200], `student_sample_steps=1`, val=lo_renoise | `01KW5QJ4K6JV2952RFQK9F07JW` | `…-fdistill-with-val-lo-1step-moe-teacher-expert0` |
+| **Lo-2step** | expert 0, σ[0.005,200], `student_sample_steps=2`, val=lo_renoise | `01KW5QJJ39JS5GA9T50NH5PQSZ` | `…-fdistill-with-val-lo-2step-moe-teacher-expert0` |
+
+**Capacity (confirmed, no change needed).** Student-Lo is a deep copy of teacher
+**expert 0** (`expert_index=0` → `_ace_module = expert_modules[0]`): ~32.75M,
+`channel_mult [1,2,2,2,1,1]`, discriminator `in_channels=128`. It already matches
+the teacher-expert parameter count by construction — the multivariate experts are
+the larger nets, and each student inherits its source expert's size. The old
+capacity worry (one student pinned to a single size across the whole σ range) is
+removed structurally by per-expert distillation. **Do not bump capacity.**
+
+### What an agent should check (success criteria)
+
+Use the committed helper (pure wandb, runs in the plain `fme` env — does **not**
+import fastgen):
+```bash
+conda run -n fme python -m fme.downscaling.distillation.check_runs --list   # find ids by name
+conda run -n fme python -m fme.downscaling.distillation.check_runs <id1> <id2>
+conda run -n fme beaker experiment get 01KW5QJ4K6JV2952RFQK9F07JW   # Lo-1step health
+conda run -n fme beaker experiment get 01KW5QJJ39JS5GA9T50NH5PQSZ   # Lo-2step health
+```
+
+1. **Job is healthy and on the new path.** Beaker state `running` (not crashed —
+   the first dispatch-v2 died on a dtype bug, so confirm it survives init). In the
+   logs confirm the per-expert wiring fired:
+   `Single-expert teacher: expert_index=0, sigma range [0.005, 200.0] (no dispatch)`
+   and `BestStudentCheckpointCallback active: … validation_mode=lo_renoise`.
+2. **Validation CRPS improving** (`val/crps_mean` and per-var `crps_PRMSL`,
+   `crps_PRATEsfc`, `crps_eastward_wind`, `crps_northward_wind`) — should fall from
+   init now that the teacher (= expert 0) is in-domain for the whole [0.005,200]
+   range the student is trained on.
+3. **Spectra healthy, esp. PRATEsfc** (`val/spec_mae_*_PRATEsfc`). Fine-scale
+   precip is where the low-noise expert does its work; expect monotone improvement.
+4. **★ Key hypothesis — no PRMSL coarse-spectral collapse.** dispatch-v2 collapsed
+   `spec_mae_lo/mid_PRMSL` ≈ step 7700 because a coarse, out-of-domain (expert-1)
+   critic policed PRMSL across all σ. Lo's discriminator backbone is now **expert 0,
+   in-domain at low σ**, so the collapse should **not** recur. If `spec_mae_lo_PRMSL`
+   / `spec_mae_mid_PRMSL` stay flat/declining through late training, the structural
+   fix is validated. If they climb, the GAN-fix levers still apply per-student
+   (`gan_loss_weight_gen`, `gan_r1_reg_weight`; see "config knobs").
+5. **GAN/score stable** (`gan_loss_gen`, `gan_loss_disc`, `fake_score_loss`,
+   `f_distill_loss`). Watch for the disc-winning signature (`gan_loss_disc`↓ while
+   `gan_loss_gen`↑) that preceded the dispatch-v2 collapse; expected to be milder
+   now that the backbone is in-domain.
+6. **Tail** (`val/tail_*_PRATEsfc` → 1.0). `best_student_tail.ckpt` tracks this
+   separately from CRPS.
+
+**Caveats when reading the metrics:**
+- **CRPS is NOT comparable to the prior from_noise runs.** lo_renoise validates by
+  re-noising the target to σ=200 and denoising back — a different (easier, noise-
+  dominated) task than denoising from σ=2000 to 0. Judge Lo against its own
+  trajectory and spectra, not against dispatch-v2's CRPS numbers.
+- **Checkpoint-selection trap (carry-over watch).** dispatch-v2's CRPS-best
+  checkpoint was the spectrally *worst* one. For Lo, confirm `val/crps_best` and the
+  spectra agree on the same era; if they diverge, prefer the checkpoint with intact
+  spectra and flag it. `best_student.ckpt` = CRPS-selected, `best_student_tail.ckpt`
+  = tail-selected.
+- A/B outcome: compare Lo-1step vs Lo-2step on the val suite; 2-step adds one NFE
+  (total bundle NFE 3 vs 2) and may help the low-σ detail. Pick the better Lo before
+  training Student-Hi (Hi is validated through the **frozen** chosen Lo).
+
+**Next once Lo is selected:** implement `hi_cascade` validation (frozen-Lo arg +
+mode), then submit Student-Hi (`--expert 1`); then the bundle sampler + eval.
 
 ---
 
