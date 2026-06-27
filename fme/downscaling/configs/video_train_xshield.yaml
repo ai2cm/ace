@@ -11,9 +11,13 @@
 # reused, date-limited. Clips never cross a split boundary (a 9-frame clip must
 # fit entirely within the subset), so there is no train/val/test leakage.
 #
-# Normalization means/stds are per-variable global statistics computed from the
-# TRAIN split only (2013-01-02..2021-12-31), subsampled every ~5 days. Computed
-# with toy/compute_norm_stats.py. Recompute if out_names or the train range change.
+# First model uses 4 channels: u10, v10, PRMSL, PRATE (no 2m temperature).
+# Normalization means/stds are per-variable statistics computed from the TRAIN
+# split ONLY, over exactly the training region+period the model sees
+# (2013-01-02..2021-12-31, box lat 0-30 / lon 0-60), subsampled every ~5 days.
+# Recompute (toy/compute_norm_stats.py) if out_names, the box, or train range change.
+# NOTE: PRATEsfc is precipitation -- non-negative and heavy-tailed, so plain
+# mean/std standardization is crude; a log1p transform would help in a later pass.
 experiment_dir: /will/be/overwritten
 max_epochs: 20
 validate_using_ema: true
@@ -89,18 +93,18 @@ model:
   churn: 0.0
   num_diffusion_generation_steps: 18
   out_names:
-    - air_temperature_at_two_meters
     - eastward_wind_at_ten_meters
     - northward_wind_at_ten_meters
     - PRMSL
+    - PRATEsfc
   normalization:
     means:
-      air_temperature_at_two_meters: 279.3386
-      eastward_wind_at_ten_meters: -0.0453
-      northward_wind_at_ten_meters: 0.1889
-      PRMSL: 1008.3664
+      eastward_wind_at_ten_meters: -0.206107
+      northward_wind_at_ten_meters: 0.133348
+      PRMSL: 1009.104862
+      PRATEsfc: 0.000014
     stds:
-      air_temperature_at_two_meters: 20.2363
-      eastward_wind_at_ten_meters: 5.5127
-      northward_wind_at_ten_meters: 4.5855
-      PRMSL: 14.9875
+      eastward_wind_at_ten_meters: 2.845158
+      northward_wind_at_ten_meters: 3.598240
+      PRMSL: 5.558873
+      PRATEsfc: 0.000098
