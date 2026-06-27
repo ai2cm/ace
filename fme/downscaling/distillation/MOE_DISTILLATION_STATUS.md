@@ -231,23 +231,38 @@ path) is the same one required for inference (structural finding 3 above).
 
 ### Remaining work / launch checklist
 
-- Two f-distill runs **in sequence (Lo then Hi)**, each with
-  `config.teacher = config.net =` a single expert (no MoE in the loss):
-  **Student-Lo first** from expert 0 (`min_t=0.005`, `max_t=200`,
-  `student_sample_steps∈{1,2}`); then **Student-Hi** from expert 1 (`min_t=200`,
-  `max_t=2000`, `student_sample_steps=1`), validated through the frozen Lo.
-- Each student auto-derives its discriminator from its own in-domain expert
-  (`in_channels` 128 / 256). GAN-fix levers (R1 reg, weight) apply per-student.
-- No new val dataset: Lo's σ=200 input is the target zarr re-noised on the fly
-  (`x_200 = normalize(target) + 200·ε`).
-- Implement the boundary-aligned fastgen bundle sampler (structural finding 3) for
-  the Hi path; optionally add an `x_init` path to `fastgen_sampler` for Lo (or use
-  the `latents = ε + normalize(target)/200` fold trick).
-- **Rework `BestStudentCheckpointCallback`** to the Lo-first cascade scheme (see
-  "Validation & checkpoint selection" above): Lo validated from the re-noised
-  target; Hi validated end-to-end through frozen Lo. The current single-student
-  sample-to-0 selection is mis-specified for per-expert students.
-- **Eval**: bundled 2-/3-step student on the same full-teacher val zarr
+**Student-Lo is now runnable** (commit `7a48a342a`). Launch:
+```bash
+conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.sh \
+    fdistill --moe-teacher --expert 0 --student-steps 1 --suffix lo-1step
+# (also run --student-steps 2 for the 1-vs-2-step Lo A/B)
+```
+
+- ✅ **Single-expert teacher.** `AceDiffusionTeacher(model, expert_index=…)`
+  selects one expert and restricts the teacher to its own σ range with no
+  dispatch (`config.teacher = config.net =` that expert). Exposed via
+  `--expert-index` / `$ACE_EXPERT_INDEX`; `run.sh --expert <0|1>` sets the σ
+  range + index + val mode. Each student auto-derives its discriminator from its
+  own in-domain expert (`in_channels` 128 / 256).
+- ✅ **lo_renoise validation** (no new dataset). `BestStudentCheckpointCallback`
+  `validation_mode="lo_renoise"` re-noises the target zarr members to the
+  student's `sigma_max` and denoises from there (uses the
+  `student_sampling.sample_student_*` helpers + `skip_noise_scale`). Wired via
+  `--val-mode` / `$ACE_VAL_MODE` (set to `lo_renoise` automatically for
+  `--expert 0`). GAN-fix levers (R1 reg, weight) still apply per-student.
+- ⏳ **Then Student-Hi** from expert 1 (`--expert 1`, `min_t=200`, `max_t=2000`,
+  `student_sample_steps=1`). **Blocked on `hi_cascade` validation**: `--expert 1`
+  currently falls back to `from_noise` (mis-specified — denoises straight to 0).
+  Needs: a `frozen_lo_checkpoint` arg on the callback + a `"hi_cascade"`
+  `validation_mode` that runs `student_sampling.sample_student_hi_cascade`
+  through the frozen Lo from the step above.
+- ⏳ **Bundle sampler** (structural finding 3): generalize
+  `DenoisingMoEPredictor.generate` to a fastgen predict-x0-renoise cascade over a
+  boundary-aligned `t_list` (the primitives `boundary_aligned_t_list` /
+  `sample_student_hi_cascade` already exist). Also: the Lo checkpoint's recorded
+  σ range inherits from the MoE `_primary`, not the expert range — confirm
+  `DenoisingExpertCheckpointConfig`'s explicit range overrides it at bundle time.
+- ⏳ **Eval**: bundled 2-/3-step student on the same full-teacher val zarr
   (CRPS/spectra/tail). Per-student selection via the fixed-partner cascade.
 
 ---
