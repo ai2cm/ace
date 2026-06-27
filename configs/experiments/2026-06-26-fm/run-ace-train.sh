@@ -56,6 +56,7 @@ run_training() {
     --weka climate-default:/climate-default \
     --budget ai2/atec-climate \
     --system-python \
+    --allow-dirty \
     --install "pip install --no-deps ." \
     --allow-dirty \
     "${extra_args[@]}" \
