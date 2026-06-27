@@ -26,9 +26,10 @@ from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
 import torch
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 from fastgen.networks.network import FastGenNetwork
 from fastgen.networks.noise_schedule import EDMNoiseSchedule
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 if TYPE_CHECKING:
     from fme.downscaling.models import DiffusionModel
@@ -100,9 +101,25 @@ class AceDiffusionTeacher(FastGenNetwork):
       drop the expert list and use the single high-noise expert they were
       initialised from.  That high-noise expert's UNet is also used for
       encoder-feature introspection (DMD2 discriminator wiring).
+    - Pass ``expert_index`` to distil a **single expert in-domain** over its
+      own sigma range with no dispatch (per-expert distillation).  The teacher
+      then behaves exactly like a single-model teacher whose sigma range is the
+      chosen expert's range, and the auto-derived discriminator inherits that
+      expert's channel count.
+
+    Args:
+        model: A fully loaded ``DiffusionModel`` or ``DenoisingMoEPredictor``.
+        expert_index: When set, select a single expert of a
+            ``DenoisingMoEPredictor`` (by ascending-sigma index) and restrict
+            the teacher to that expert's own sigma range, disabling dispatch.
+            Only valid for an MoE model.
     """
 
-    def __init__(self, model: DiffusionModel | DenoisingMoEPredictor) -> None:
+    def __init__(
+        self,
+        model: DiffusionModel | DenoisingMoEPredictor,
+        expert_index: int | None = None,
+    ) -> None:
         from fme.core.distributed.non_distributed import DummyWrapper
         from fme.downscaling.predictors.serial_denoising import DenoisingMoEPredictor
 
@@ -114,27 +131,49 @@ class AceDiffusionTeacher(FastGenNetwork):
             return raw
 
         if isinstance(model, DenoisingMoEPredictor):
-            sigma_min = model._sigma_schedule_min
-            sigma_max = model._sigma_schedule_max
             churn = model._churn
             num_steps = model._num_diffusion_generation_steps
-            # Keep every expert's bare module alongside its sigma range so
-            # target generation and scoring route to the correct expert at
-            # every noise level (see ``_dispatch``).  ``model._experts`` and
-            # ``model._sigma_ranges`` are sorted by sigma ascending.
+            # Each expert's bare module alongside its sigma range; ``_experts``
+            # and ``_sigma_ranges`` are sorted by sigma ascending.
             expert_modules = [_unwrap(e.module) for e in model._experts]
-            moe_sigma_ranges: list[tuple[float, float]] | None = list(
-                model._sigma_ranges
-            )
-            # Initialise the student / discriminator feature extractor from the
-            # HIGH-noise expert (the last, highest-sigma range).  The student's
-            # first generation step starts near sigma_max, so the high-noise
-            # expert is the better single-expert initialisation; it is also the
-            # larger network, which the auto-derived discriminator inherits.
-            ace_module: torch.nn.Module = expert_modules[-1]
-            sigma_data = model._experts[-1].sigma_data
-            moe_experts: list[torch.nn.Module] | None = expert_modules
+            expert_sigma_ranges = list(model._sigma_ranges)
+            if expert_index is None:
+                # Full-MoE teacher: keep every expert so target generation and
+                # scoring route to the correct expert at every noise level (see
+                # ``_dispatch``).  Initialise the student / discriminator
+                # feature extractor from the HIGH-noise expert (last, highest
+                # sigma): the student's first generation step starts near
+                # sigma_max, and it is the larger net, which the auto-derived
+                # discriminator inherits.
+                sigma_min = model._sigma_schedule_min
+                sigma_max = model._sigma_schedule_max
+                ace_module: torch.nn.Module = expert_modules[-1]
+                sigma_data = model._experts[-1].sigma_data
+                moe_experts: list[torch.nn.Module] | None = expert_modules
+                moe_sigma_ranges: list[tuple[float, float]] | None = list(
+                    expert_sigma_ranges
+                )
+            else:
+                # Single-expert teacher: distil one expert in-domain over its
+                # OWN sigma range, with no dispatch (per-expert distillation).
+                # The teacher behaves like a single-model teacher; the
+                # auto-derived discriminator inherits this expert's channels.
+                if not 0 <= expert_index < len(expert_modules):
+                    raise ValueError(
+                        f"expert_index {expert_index} out of range for "
+                        f"{len(expert_modules)} experts."
+                    )
+                sigma_min, sigma_max = expert_sigma_ranges[expert_index]
+                ace_module = expert_modules[expert_index]
+                sigma_data = model._experts[expert_index].sigma_data
+                moe_experts = None
+                moe_sigma_ranges = None
         else:
+            if expert_index is not None:
+                raise ValueError(
+                    "expert_index is only valid for a DenoisingMoEPredictor "
+                    "(MoE) teacher; got a single DiffusionModel."
+                )
             cfg = model.config
             sigma_min = cfg.sigma_min
             sigma_max = cfg.sigma_max

@@ -224,6 +224,37 @@ def _parse_args() -> argparse.Namespace:
         "$ACE_TEACHER_MOE_CKPT.",
     )
     parser.add_argument(
+        "--expert-index",
+        type=int,
+        default=(
+            int(os.environ["ACE_EXPERT_INDEX"])
+            if os.environ.get("ACE_EXPERT_INDEX", "") != ""
+            else None
+        ),
+        dest="expert_index",
+        metavar="I",
+        help=(
+            "Distil a single expert (by ascending-sigma index) of an MoE "
+            "teacher in-domain over its own sigma range, with no dispatch. "
+            "Per-expert distillation: 0 = low-noise (Student-Lo), 1 = "
+            "high-noise (Student-Hi). Only valid with --teacher-moe-checkpoint. "
+            "Defaults to $ACE_EXPERT_INDEX (full dispatch when unset)."
+        ),
+    )
+    parser.add_argument(
+        "--val-mode",
+        default=os.environ.get("ACE_VAL_MODE", "from_noise"),
+        dest="val_mode",
+        choices=["from_noise", "lo_renoise"],
+        help=(
+            "How BestStudentCheckpointCallback produces the student ensemble "
+            "for validation. 'from_noise' (default) denoises fresh noise to a "
+            "clean x0 (full-range student); 'lo_renoise' re-noises the teacher "
+            "target to the student's sigma_max and denoises from there "
+            "(per-expert Student-Lo). Defaults to $ACE_VAL_MODE."
+        ),
+    )
+    parser.add_argument(
         "--data-yaml",
         required=True,
         metavar="YAML",
@@ -403,7 +434,20 @@ def main() -> None:
         requirements = ckpt_config.data_requirements
         teacher_model = ckpt_config.build()
         logger.info(f"Teacher loaded from {args.teacher_checkpoint!r}")
-    teacher = AceDiffusionTeacher(teacher_model)
+    if args.expert_index is not None and not isinstance(
+        teacher_model, DenoisingMoEPredictor
+    ):
+        raise ValueError(
+            "--expert-index / $ACE_EXPERT_INDEX requires an MoE teacher "
+            "(--teacher-moe-checkpoint)."
+        )
+    teacher = AceDiffusionTeacher(teacher_model, expert_index=args.expert_index)
+    if args.expert_index is not None:
+        logger.info(
+            f"Single-expert teacher: expert_index={args.expert_index}, "
+            f"sigma range [{teacher._sigma_min}, {teacher._sigma_max}] "
+            "(no dispatch)."
+        )
 
     # ------------------------------------------------------------------
     # 3b. Override input_shape channel count from the teacher.
@@ -609,12 +653,14 @@ def main() -> None:
                 coarse_patch_yx=coarse_patch_yx,
                 student_sample_steps=config.model.student_sample_steps,
                 best_tail_checkpoint_path=best_student_tail_path,
+                validation_mode=args.val_mode,
             )
         )
         logger.info(
             f"BestStudentCheckpointCallback active: val={args.val_dataset}, "
             f"best_ckpt={best_student_path}, "
             f"best_tail_ckpt={best_student_tail_path}, "
+            f"validation_mode={args.val_mode}, "
             f"student_sample_steps={config.model.student_sample_steps}"
         )
 

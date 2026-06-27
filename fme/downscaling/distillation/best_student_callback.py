@@ -156,6 +156,21 @@ class BestStudentCheckpointCallback:
             ratio is closest to 1.0 (minimises ``|ratio - 1|``).  Useful when
             CRPS has plateaued but tail under/over-prediction is still
             evolving.
+        validation_mode: How the student output ensemble is produced before
+            comparing to the teacher zarr (see ``student_sampling``):
+
+            - ``"from_noise"`` (default): an end-to-end student denoises fresh
+              noise over its full sigma range to a clean x0.  Correct for a
+              single full-range student.
+            - ``"lo_renoise"``: a low-noise *segment* student is validated by
+              re-noising the teacher target members to its ``sigma_max`` and
+              denoising from there — no upstream student or live teacher
+              needed.  Requires every output variable to be present in the
+              teacher zarr (the target is re-noised, not just compared).  Use
+              for per-expert Student-Lo.
+
+            ``"hi_cascade"`` (Student-Hi through a frozen Lo) is not yet wired
+            in here; it needs a frozen-Lo checkpoint argument.
 
     To run validation on less data, thin at the data-config level via
     ``subset.step`` in the val YAML (see ``fme.core.dataset.time.TimeSlice``).
@@ -176,6 +191,7 @@ class BestStudentCheckpointCallback:
         tail_hist_ranges: dict[str, tuple[float, float]] | None = None,
         tail_hist_bins: int = 10000,
         best_tail_checkpoint_path: str | None = None,
+        validation_mode: str = "from_noise",
     ) -> None:
         self._tail_percentiles: list[float] = (
             [99.99, 99.9999] if tail_percentiles is None else list(tail_percentiles)
@@ -196,6 +212,12 @@ class BestStudentCheckpointCallback:
         )
         self._tail_hist_bins = tail_hist_bins
         self._best_tail_checkpoint_path = best_tail_checkpoint_path
+        if validation_mode not in ("from_noise", "lo_renoise"):
+            raise ValueError(
+                f"validation_mode must be 'from_noise' or 'lo_renoise', "
+                f"got {validation_mode!r}."
+            )
+        self._validation_mode = validation_mode
         self._best_crps = float("inf")
         # Tracks min |ratio - 1.0| for best_tail_checkpoint_path selection,
         # using the highest (most extreme) percentile in tail_percentiles.
@@ -328,6 +350,74 @@ class BestStudentCheckpointCallback:
             self._teacher_ds = xr.open_zarr(self._val_dataset_path)
         return self._teacher_ds
 
+    def _sample_student_output(
+        self,
+        student: AceDiffusionTeacher,
+        condition: torch.Tensor,
+        teacher_phys: dict[str, torch.Tensor],
+        B: int,
+        H: int,
+        W: int,
+        C_out: int,
+    ) -> torch.Tensor:
+        """Return the student ensemble ``(B, n, C_out, H, W)`` in normalized space.
+
+        Dispatches on ``self._validation_mode``.  ``student._ace_module`` is a
+        ``UNetDiffusionModule`` wrapping ``EDMPrecond`` whose forward signature
+        is ``(x, condition, sigma)`` — the denoiser the sampling helpers expect.
+        """
+        from fme.downscaling.distillation.student_sampling import (
+            sample_student_from_noise,
+            sample_student_lo_renoise,
+        )
+
+        if self._validation_mode == "lo_renoise":
+            target_norm = self._packed_target_norm(teacher_phys)
+            return sample_student_lo_renoise(
+                student._ace_module,
+                condition,
+                target_norm,
+                num_steps=self._student_sample_steps,
+                sigma_min=student._sigma_min,
+                sigma_max=student._sigma_max,
+            )
+        return sample_student_from_noise(
+            student._ace_module,
+            condition,
+            c_out=C_out,
+            n_samples=self._n_student_samples,
+            num_steps=self._student_sample_steps,
+            sigma_min=student._sigma_min,
+            sigma_max=student._sigma_max,
+        )
+
+    def _packed_target_norm(
+        self, teacher_phys: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """Pack+normalize the teacher target members for lo_renoise input.
+
+        The lo_renoise ensemble comes from re-noising distinct teacher members
+        (one ``eps`` draw each), so we take the first ``n_student_samples``
+        members (clamped to what the zarr holds).  Every output variable must
+        be present in the zarr — the full field is re-noised, not just compared.
+
+        Returns:
+            ``(B, n, C_out, H, W)`` normalized packed target.
+        """
+        model = self._teacher_model
+        names = model.out_packer.names
+        missing = [v for v in names if v not in teacher_phys]
+        if missing:
+            raise ValueError(
+                "lo_renoise validation needs every output variable in the "
+                f"teacher zarr to re-noise; missing {missing}."
+            )
+        n_teacher = teacher_phys[names[0]].shape[1]
+        n = min(self._n_student_samples, n_teacher)
+        phys = {v: teacher_phys[v][:, :n] for v in names}  # each (B, n, H, W)
+        norm = model.normalizer.fine.normalize(phys)
+        return model.out_packer.pack(norm, axis=-3)  # (B, n, C_out, H, W)
+
     @torch.no_grad()
     def _compute_validation_crps(
         self, student: AceDiffusionTeacher
@@ -357,11 +447,9 @@ class BestStudentCheckpointCallback:
         import torch.distributed as dist
 
         from fme.downscaling.metrics_and_maths import compute_zonal_power_spectrum
-        from fme.downscaling.samplers import fastgen_sampler
 
         teacher_ds = self._load_teacher_ds()
         teacher_model = self._teacher_model
-        n = self._n_student_samples
 
         if dist.is_available() and dist.is_initialized():
             rank = dist.get_rank()
@@ -457,26 +545,34 @@ class BestStudentCheckpointCallback:
             B, _, H, W = condition.shape
             C_out = len(teacher_model.out_packer.names)
 
-            # Draw n student samples by vectorising over the batch dimension.
-            condition_rep = condition.repeat_interleave(n, dim=0)  # (B*n, C_cond, H, W)
-            noise = torch.randn(B * n, C_out, H, W, device=condition.device)
+            # Fine-resolution lat/lon for this (possibly patched) batch.
+            fine_coords = teacher_model.get_fine_coords_for_batch(batch)
+            fine_lats = fine_coords.lat.cpu().numpy()
+            fine_lons = fine_coords.lon.cpu().numpy()
 
-            # Sample with the FastGen predict-x0-then-renoise loop so the
-            # validation trajectory matches distillation training.
-            # _ace_module is UNetDiffusionModule wrapping EDMPrecond; its
-            # forward signature is (x, condition, sigma) — same as expected
-            # by fastgen_sampler.
-            device_type = noise.device.type
-            with torch.amp.autocast(device_type, dtype=torch.bfloat16):
-                output_norm, _ = fastgen_sampler(
-                    student._ace_module,
-                    noise,
-                    condition_rep,
-                    num_steps=self._student_sample_steps,
-                    sigma_min=student._sigma_min,
-                    sigma_max=student._sigma_max,
+            # Teacher target members (physical units) for every output var that
+            # is present in the zarr, fetched once and reused for both student
+            # input construction (lo_renoise re-noises these) and the metric
+            # comparison below.  Shape per var: (B, n_teacher, H, W).
+            teacher_phys: dict[str, torch.Tensor] = {}
+            for var in teacher_model.out_packer.names:
+                if var not in teacher_ds:
+                    continue
+                teacher_np = (
+                    teacher_ds[var]
+                    .sel(time=times)
+                    .sel(latitude=fine_lats, longitude=fine_lons, method="nearest")
+                    .values
                 )
-            output_norm = output_norm.reshape(B, n, C_out, H, W)
+                teacher_phys[var] = torch.from_numpy(teacher_np).to(
+                    condition.device, dtype=torch.float32
+                )
+
+            # Produce the student output ensemble (B, n, C_out, H, W) per the
+            # configured validation mode (see student_sampling).
+            output_norm = self._sample_student_output(
+                student, condition, teacher_phys, B, H, W, C_out
+            )
 
             # Unpack channel dim (axis=-3) then denormalize → physical units.
             # out_packer.unpack on (B, n, C_out, H, W) with axis=-3 gives
@@ -484,25 +580,11 @@ class BestStudentCheckpointCallback:
             output = teacher_model.normalizer.fine.denormalize(
                 teacher_model.out_packer.unpack(output_norm, axis=-3)
             )
-            # Fine-resolution lat/lon for this (possibly patched) batch.
-            fine_coords = teacher_model.get_fine_coords_for_batch(batch)
-            fine_lats = fine_coords.lat.cpu().numpy()
-            fine_lons = fine_coords.lon.cpu().numpy()
 
             for var, student_tensor in output.items():
-                if var not in teacher_ds:
+                teacher_batch = teacher_phys.get(var)
+                if teacher_batch is None:
                     continue
-
-                # teacher_batch: (B, n_teacher, H_patch, W_patch)
-                teacher_np = (
-                    teacher_ds[var]
-                    .sel(time=times)
-                    .sel(latitude=fine_lats, longitude=fine_lons, method="nearest")
-                    .values
-                )
-                teacher_batch = torch.from_numpy(teacher_np).to(
-                    student_tensor.device, dtype=torch.float32
-                )
 
                 # CRPS per batch element, then accumulate spatial sum.
                 for i in range(B):

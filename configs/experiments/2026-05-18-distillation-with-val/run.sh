@@ -4,7 +4,8 @@
 # Saves best_student.ckpt (ACE format, by validation CRPS) into /results so
 # it is captured as a Beaker dataset artifact alongside the raw .pth files.
 #
-# Usage: ./run.sh <method> [--suffix <variant>] [--moe-teacher]
+# Usage: ./run.sh <method> [--suffix <variant>] [--moe-teacher] \
+#            [--expert <0|1>] [--student-steps <N>]
 #   method:      dmd2 | fdistill | scm
 #   --suffix:    optional training-variant tag appended to JOB_NAME, e.g.
 #                "1step" → ace-downscaling-distillation-fdistill-with-val-1step.
@@ -15,14 +16,25 @@
 #                as the teacher instead of the default single-model checkpoint.
 #                Note: DMD2 + MoE teacher requires additional discriminator
 #                wiring via the primary expert; fdistill/scm are fully supported.
+#   --expert:    per-expert distillation (requires --moe-teacher). Distil a
+#                single expert in-domain over its own sigma range, no dispatch:
+#                  0 = low-noise  Student-Lo, sigma [0.005, 200], val=lo_renoise
+#                  1 = high-noise Student-Hi, sigma [200, 2000]
+#                Expert 1 validation (hi_cascade through a frozen Lo) is not yet
+#                wired in; it falls back to from_noise (mis-specified) — train
+#                Lo first.
+#   --student-steps: override ACE_STUDENT_STEPS (student denoising steps).
+#                Lo: try 1 vs 2; Hi: 1.
 
 set -e
 
-METHOD="${1:?Usage: $0 <dmd2|fdistill|scm> [--suffix <variant>] [--moe-teacher]}"
+METHOD="${1:?Usage: $0 <dmd2|fdistill|scm> [--suffix <variant>] [--moe-teacher] [--expert <0|1>] [--student-steps <N>]}"
 shift
 
 SUFFIX=""
 MOE_TEACHER=false
+EXPERT=""
+STUDENT_STEPS=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --suffix)
@@ -33,12 +45,25 @@ while [[ $# -gt 0 ]]; do
             MOE_TEACHER=true
             shift
             ;;
+        --expert)
+            EXPERT="${2:?--expert requires 0 or 1}"
+            shift 2
+            ;;
+        --student-steps)
+            STUDENT_STEPS="${2:?--student-steps requires a value}"
+            shift 2
+            ;;
         *)
             echo "Unknown arg: $1" >&2
             exit 1
             ;;
     esac
 done
+
+if [[ -n "$EXPERT" && "$MOE_TEACHER" != "true" ]]; then
+    echo "--expert requires --moe-teacher" >&2
+    exit 1
+fi
 
 case "$METHOD" in
     dmd2)
@@ -95,6 +120,31 @@ if [[ "$MOE_TEACHER" == "true" ]]; then
         --env ACE_SIGMA_MIN=0.005
         --env ACE_SIGMA_MAX=2000.0
     )
+
+    # Per-expert distillation: restrict the teacher to one expert over its own
+    # sigma range (no dispatch) and pick the matching validation mode.  The
+    # boundaries match the bundled MoE teacher (expert 0 [0.005, 200], expert 1
+    # [200, 2000]); ACE_SIGMA_MIN/MAX must equal the chosen expert's range so
+    # training noise is sampled in-domain.
+    if [[ -n "$EXPERT" ]]; then
+        case "$EXPERT" in
+            0) E_SIGMA_MIN=0.005; E_SIGMA_MAX=200.0;  E_VAL_MODE=lo_renoise ;;
+            1) E_SIGMA_MIN=200.0; E_SIGMA_MAX=2000.0; E_VAL_MODE=from_noise
+               echo "WARNING: expert 1 (Student-Hi) validation falls back to "\
+                    "from_noise; hi_cascade through a frozen Lo is not yet "\
+                    "wired in. Train Lo (expert 0) first." >&2 ;;
+            *) echo "--expert must be 0 or 1, got $EXPERT" >&2; exit 1 ;;
+        esac
+        TEACHER_ENV_FLAGS=(
+            --env ACE_C_OUT=4
+            --env ACE_NOISE_DIST=loguniform
+            --env ACE_SIGMA_MIN=$E_SIGMA_MIN
+            --env ACE_SIGMA_MAX=$E_SIGMA_MAX
+            --env ACE_EXPERT_INDEX=$EXPERT
+            --env ACE_VAL_MODE=$E_VAL_MODE
+        )
+        JOB_NAME="${JOB_NAME}-expert${EXPERT}"
+    fi
 else
     # Default single-model teacher, trained with sigma ~ lognormal(-1.2, 1.8)
     # on [0.002, 150] (the spike config defaults).
@@ -103,6 +153,12 @@ else
     VAL_DATASET=/climate-default/2026-04-29-distillation-teacher-val-dataset/conus_val_2023.zarr
     TEACHER_NUM_STEPS=15
     TEACHER_ENV_FLAGS=()
+fi
+
+# Optional override of the student denoising-step count (read by the spike
+# config as ACE_STUDENT_STEPS; drives both training and validation sampling).
+if [[ -n "$STUDENT_STEPS" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_STUDENT_STEPS=$STUDENT_STEPS)
 fi
 
 gantry run \

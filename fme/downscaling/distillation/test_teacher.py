@@ -4,6 +4,7 @@
 
 import math
 
+import pytest
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
@@ -241,6 +242,51 @@ def test_moe_teacher_initialises_from_high_noise_expert():
     # Primary (student init + discriminator feature extractor) is the
     # high-noise expert, i.e. the last entry in the ascending expert list.
     assert teacher._ace_module is teacher._moe_experts[-1]
+
+
+def test_moe_teacher_single_expert_selects_in_domain_range():
+    """``expert_index`` restricts the teacher to one expert over its own sigma
+    range with no dispatch (per-expert distillation)."""
+    model = _build_moe_model(sigma_ranges=((0.1, 0.5), (0.5, 1.0)))
+    expert_modules = [e.module for e in model._experts]
+
+    lo = AceDiffusionTeacher(model, expert_index=0)
+    assert lo._moe_experts is None
+    assert lo._moe_sigma_ranges is None
+    assert (lo._sigma_min, lo._sigma_max) == (0.1, 0.5)
+    assert lo._ace_module is expert_modules[0]
+    # The discriminator feature extractor is the same single in-domain expert.
+    assert lo._primary_ace_module is expert_modules[0]
+
+    hi = AceDiffusionTeacher(model, expert_index=1)
+    assert hi._moe_experts is None
+    assert (hi._sigma_min, hi._sigma_max) == (0.5, 1.0)
+    assert hi._ace_module is expert_modules[1]
+
+
+def test_moe_teacher_single_expert_forward_uses_only_that_expert():
+    """A single-expert teacher denoises via its one net (dispatch disabled)."""
+    model = _build_moe_model(sigma_ranges=((0.1, 0.5), (0.5, 1.0)))
+    teacher = AceDiffusionTeacher(model, expert_index=0)
+
+    x_t = torch.randn(2, 1, 8, 8)
+    cond = torch.randn(2, 1, 8, 8)
+    # A sigma outside this expert's range would be dispatched elsewhere by an
+    # MoE teacher; here it must still run the single expert without error.
+    out = teacher.forward(x_t, torch.full((2,), 0.9), condition=cond)
+    assert isinstance(out, torch.Tensor)
+    assert out.shape == x_t.shape
+
+
+def test_expert_index_rejects_out_of_range():
+    model = _build_moe_model(sigma_ranges=((0.1, 0.5), (0.5, 1.0)))
+    with pytest.raises(ValueError, match="out of range"):
+        AceDiffusionTeacher(model, expert_index=2)
+
+
+def test_expert_index_rejects_single_model_teacher():
+    with pytest.raises(ValueError, match="only valid for a DenoisingMoEPredictor"):
+        AceDiffusionTeacher(_build_small_model(), expert_index=0)
 
 
 def test_moe_teacher_deepcopy_drops_experts():
