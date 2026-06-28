@@ -7,7 +7,7 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
+N_GPUS=4
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -28,13 +28,12 @@ run_training() {
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
-    --description 'Run ACE2-ERA5 training' \
+    --description 'Run ACE2S-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
     --preemptible \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -52,4 +51,11 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "ace-train-config.yaml" "ace2-era5-train" "ace2-era5"
+base_name="ace2s"
+
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
+
+# For the finetuning stage take beaker dataset id from the above job and add it to
+# ace-train-config-multi-step-finetuning.yaml then uncomment next line
+
+# run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-rs0"
