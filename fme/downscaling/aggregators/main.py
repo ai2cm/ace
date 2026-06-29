@@ -111,6 +111,18 @@ class LossVsNoiseAggregator:
         total_values: list[torch.Tensor] = []
         total_bins: list[torch.Tensor] = []
         for i, (name, loss) in enumerate(outputs.per_sample_channel_loss.items()):
+            # Register every channel up front (regardless of whether any sample
+            # falls in the sigma range) so that under DDP all ranks accumulate
+            # the same channel set and issue matching `reduce_sum` collectives in
+            # `_get` -- otherwise an out-of-range channel on one rank only would
+            # desync the collectives and deadlock.
+            if name not in self._channel_sum:
+                self._channel_sum[name] = torch.zeros(
+                    self._n_bins, dtype=torch.float32, device=get_device()
+                )
+                self._channel_count[name] = torch.zeros(
+                    self._n_bins, dtype=torch.int64, device=get_device()
+                )
             if sigma.dim() == 1:
                 channel_sigma = sigma.flatten()
             elif sigma.dim() == 2:

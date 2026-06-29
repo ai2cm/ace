@@ -181,6 +181,7 @@ class Conv2d(torch.nn.Module):
         init_bias: float = 0.0,
         fused_conv_bias: bool = False,
         amp_mode: bool = False,
+        periodic: bool = False,
     ):
         if up and down:
             raise ValueError("Both 'up' and 'down' cannot be true at the same time.")
@@ -199,6 +200,10 @@ class Conv2d(torch.nn.Module):
         self.fused_resample = fused_resample
         self.fused_conv_bias = fused_conv_bias
         self.amp_mode = amp_mode
+        # When True, the main 3x3 conv pads circularly in W (longitude) and zero
+        # in H (latitude) instead of symmetric zero padding -- for global lat/lon
+        # fields. Off by default, so the standard (image) path is unchanged.
+        self.periodic = periodic
         init_kwargs = dict(
             mode=init_mode,
             fan_in=in_channels * kernel * kernel,
@@ -290,10 +295,17 @@ class Conv2d(torch.nn.Module):
                     padding=f_pad,
                 )
             if w is not None:  # ask in corrdiff channel whether w will ever be none
-                if self.fused_conv_bias:
-                    x = torch.nn.functional.conv2d(x, w, padding=w_pad, bias=b)
+                if self.periodic and w_pad > 0:
+                    # circular in longitude (W), zero in latitude (H)
+                    x = torch.cat([x[..., -w_pad:], x, x[..., :w_pad]], dim=-1)
+                    x = torch.nn.functional.pad(x, (0, 0, w_pad, w_pad))
+                    pad = 0
                 else:
-                    x = torch.nn.functional.conv2d(x, w, padding=w_pad)
+                    pad = w_pad
+                if self.fused_conv_bias:
+                    x = torch.nn.functional.conv2d(x, w, padding=pad, bias=b)
+                else:
+                    x = torch.nn.functional.conv2d(x, w, padding=pad)
         if b is not None and not self.fused_conv_bias:
             x = x.add_(b.reshape(1, -1, 1, 1))
         return x

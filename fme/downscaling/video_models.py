@@ -1,14 +1,7 @@
 """Endpoint-conditioned video interpolation diffusion (temporal-only).
 
-Task: given a clip of ``T`` frames, the **first and last frames are observed**
-and only the **interior** frames are denoised (cBottle's interpolation masking
-regime). We diffuse the **residual** over a per-frame **temporal linear
-interpolation** of the two (per-channel normalized) endpoints, with **vanilla**
-independent Gaussian noise (no Brownian bridge). The network consumes the time
-axis plus cBottle-style ``CalendarEmbedding`` and ``TemporalAttention``
-(see ``fme/downscaling/modules/video_modules.py``).
-
-This operates on the fine clip only -- coarse conditioning is not used.
+Diffuses the residual over a temporal linear interpolation of observed endpoints;
+only interior frames are denoised. Operates on the fine clip only.
 """
 
 import dataclasses
@@ -33,11 +26,11 @@ from fme.downscaling.noise import (
 )
 from fme.downscaling.requirements import DataRequirements
 
-CHANNEL_AXIS = 1  # (B, C, T, H, W)
+CHANNEL_AXIS = 1
 
 
 def _interior_mask(n_times: int, device: torch.device) -> torch.Tensor:
-    """(1, 1, T, 1, 1): 1 on interior frames, 0 on the observed endpoints."""
+    """(1, 1, T, 1, 1) mask: 1 on interior frames, 0 on observed endpoints."""
     mask = torch.ones(n_times, device=device)
     mask[0] = 0.0
     mask[-1] = 0.0
@@ -45,11 +38,7 @@ def _interior_mask(n_times: int, device: torch.device) -> torch.Tensor:
 
 
 def _linear_interp_endpoints(field: torch.Tensor) -> torch.Tensor:
-    """Per-frame temporal linear interpolation of the two endpoints along the
-    time axis (third-from-last dim).
-
-    Works for ``(T, H, W)``, ``(B, T, H, W)`` and ``(B, C, T, H, W)``.
-    """
+    """Temporal linear interpolation of the two endpoints along the time axis."""
     n_times = field.shape[-3]
     shape = [1] * field.dim()
     shape[-3] = n_times
@@ -61,18 +50,7 @@ def _linear_interp_endpoints(field: torch.Tensor) -> torch.Tensor:
 
 @dataclasses.dataclass
 class VideoDiffusionModelConfig:
-    """Configuration for the temporal-interpolation video diffusion model.
-
-    Parameters:
-        out_names: Variable names to model (the channels of each frame).
-        n_timesteps: Clip length ``T`` (e.g. 9 for a 24h, 3-hourly clip).
-        normalization: Per-channel normalization (means/stds). Optional if a
-            prebuilt normalizer is passed to ``build``.
-        sigma_min/sigma_max/churn/num_diffusion_generation_steps: EDM sampler.
-        model_channels/n_heads/num_freqs: Backbone size.
-        training_noise_distribution: Noise level distribution for training.
-        loss_weight_exponent: Exponent on the EDM noise-level loss weight.
-    """
+    """Configuration for the temporal-interpolation video diffusion model."""
 
     out_names: list[str]
     n_timesteps: int
@@ -84,6 +62,18 @@ class VideoDiffusionModelConfig:
     model_channels: int = 64
     n_heads: int = 4
     num_freqs: int = 4
+    # log-noise embedding for the simple backbone: "positional" or "fourier".
+    noise_embedding_type: str = "positional"
+    # Multi-scale U-Net: one channel multiplier per resolution level (0 = finest).
+    channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2])
+    num_blocks: int = 2
+    # spatial attention levels; temporal attention defaults to all levels (None).
+    attention_levels: list[int] = dataclasses.field(default_factory=lambda: [1, 2])
+    temporal_attention_levels: list[int] | None = None
+    # backbone: "simple" (periodic VideoUNet) or "songunet" (SongUNetv2).
+    backbone: str = "simple"
+    img_resolution: list[int] | None = None  # [H, W], required for songunet
+    attn_resolutions: list[int] | None = None
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
     ) = None
@@ -93,6 +83,8 @@ class VideoDiffusionModelConfig:
     sigma_min_by_channel: dict[str, float] | None = None
     sigma_max_by_channel: dict[str, float] | None = None
     loss_weight_exponent: float = 1.0
+    # Channels modeled in log space via log1p(x*scale); maps channel to scale.
+    log_transform_channels: dict[str, float] | None = None
 
     def __post_init__(self):
         if self.n_timesteps < 3:
@@ -134,6 +126,32 @@ class VideoDiffusionModelConfig:
                 "Specify only one of training_noise_distribution or "
                 "training_noise_distributions."
             )
+        unknown_log = set(self.log_transform_channels or {}) - set(self.out_names)
+        if unknown_log:
+            raise ValueError(
+                "log_transform_channels contains channels not in out_names: "
+                f"{sorted(unknown_log)}"
+            )
+        if any(lvl not in range(len(self.channel_mult)) for lvl in self.attention_levels):
+            raise ValueError(
+                f"attention_levels {self.attention_levels} must index into "
+                f"channel_mult (0..{len(self.channel_mult) - 1})."
+            )
+        for m in self.channel_mult:
+            if (self.model_channels * m) % self.n_heads != 0:
+                raise ValueError(
+                    f"model_channels*{m}={self.model_channels * m} not divisible "
+                    f"by n_heads={self.n_heads}."
+                )
+        if self.backbone not in ("simple", "songunet"):
+            raise ValueError(f"backbone must be 'simple' or 'songunet', got {self.backbone}.")
+        if self.noise_embedding_type not in ("positional", "fourier"):
+            raise ValueError(
+                "noise_embedding_type must be 'positional' or 'fourier', got "
+                f"{self.noise_embedding_type}."
+            )
+        if self.backbone == "songunet" and self.img_resolution is None:
+            raise ValueError("songunet backbone requires img_resolution [H, W].")
 
     @property
     def noise_distribution(self) -> NoiseDistribution:
@@ -179,9 +197,7 @@ class VideoDiffusionModelConfig:
 
     @property
     def data_requirements(self) -> "DataRequirements":
-        # Temporal-only model: fine == coarse (same single-resolution clip). The
-        # data-config ``n_timesteps`` drives the clip length, so the value here
-        # is unused by ``build_video`` and kept at 1.
+        # Temporal-only: fine == coarse; clip length comes from the data config.
         return DataRequirements(
             fine_names=self.out_names,
             coarse_names=self.out_names,
@@ -201,17 +217,42 @@ class VideoDiffusionModelConfig:
             normalizer = self.normalization.build(self.out_names)
 
         n_channels = len(self.out_names)
-        # network input = preconditioned noisy residual (C) + conditioning
-        # (observed endpoint values C + observed-mask 1 + log-sigma C).
+        # noisy residual (C) + endpoint values (C) + mask (1) + log-sigma (C)
         in_channels = 3 * n_channels + 1
-        net = VideoUNet(
-            in_channels=in_channels,
-            out_channels=n_channels,
-            seq_length=self.n_timesteps,
-            model_channels=self.model_channels,
-            n_heads=self.n_heads,
-            num_freqs=self.num_freqs,
-        )
+        if self.backbone == "songunet":
+            from fme.downscaling.modules.video_song_unet import VideoSongUNet
+
+            default_attn = self.img_resolution[0] >> (len(self.channel_mult) - 1)
+            net = VideoSongUNet(
+                in_channels=in_channels,
+                out_channels=n_channels,
+                img_resolution=self.img_resolution,
+                seq_length=self.n_timesteps,
+                model_channels=self.model_channels,
+                channel_mult=tuple(self.channel_mult),
+                num_blocks=self.num_blocks,
+                n_heads=self.n_heads,
+                attn_resolutions=tuple(self.attn_resolutions or [default_attn]),
+                num_freqs=self.num_freqs,
+            )
+        else:
+            net = VideoUNet(
+                in_channels=in_channels,
+                out_channels=n_channels,
+                seq_length=self.n_timesteps,
+                model_channels=self.model_channels,
+                channel_mult=tuple(self.channel_mult),
+                num_blocks=self.num_blocks,
+                n_heads=self.n_heads,
+                attention_levels=tuple(self.attention_levels),
+                temporal_attention_levels=(
+                    None
+                    if self.temporal_attention_levels is None
+                    else tuple(self.temporal_attention_levels)
+                ),
+                num_freqs=self.num_freqs,
+                noise_embedding_type=self.noise_embedding_type,
+            )
         module = VideoEDMPrecond(net, sigma_data=1.0)
         return VideoDiffusionModel(self, module, normalizer, self.out_names)
 
@@ -232,27 +273,46 @@ class VideoDiffusionModel:
         self.out_names = out_names
         self.packer = Packer(out_names)
         self.n_timesteps = config.n_timesteps
+        self.log_transform_channels = dict(config.log_transform_channels or {})
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
 
     def _pack_normalized(self, data: TensorMapping) -> torch.Tensor:
-        normalized = self.normalizer.normalize({k: data[k] for k in self.out_names})
+        selected = {
+            k: torch.log1p(data[k].clamp(min=0.0) * scale)
+            if (scale := self.log_transform_channels.get(k))
+            else data[k]
+            for k in self.out_names
+        }
+        normalized = self.normalizer.normalize(selected)
         return self.packer.pack(normalized, axis=CHANNEL_AXIS)
+
+    def _denormalize_invert(self, packed: torch.Tensor) -> TensorDict:
+        """Denormalize and invert any log1p transform back to physical units."""
+        data = self.normalizer.denormalize(
+            self.packer.unpack(packed, axis=CHANNEL_AXIS)
+        )
+        return {
+            k: (torch.expm1(v) / scale).clamp(min=0.0)
+            if (scale := self.log_transform_channels.get(k))
+            else v
+            for k, v in data.items()
+        }
 
     def _conditioning(
         self, clip: torch.Tensor, interior_mask: torch.Tensor
     ) -> torch.Tensor:
         """Observed-endpoint values + a binary observed mask channel."""
-        observed = 1.0 - interior_mask  # 1 on endpoints
-        observed_values = clip * observed  # endpoint fields, zero interior
+        observed = 1.0 - interior_mask
+        observed_values = clip * observed
         mask_channel = observed.expand(clip.shape[0], 1, -1, clip.shape[-2], clip.shape[-1])
         return torch.cat([observed_values, mask_channel], dim=CHANNEL_AXIS)
 
     def _calendar_inputs(self, batch_fine):
         lon = batch_fine.latlon_coordinates.lon
-        if lon.dim() == 2:  # (B, W) -- all members identical, use first
+        if lon.dim() == 2:  # all members identical, use first
             lon = lon[0]
         return (
             batch_fine.day_of_year.to(get_device()),
@@ -262,7 +322,7 @@ class VideoDiffusionModel:
 
     def train_on_batch(self, batch: PairedVideoBatchData, optimizer) -> ModelOutputs:
         fine = batch.fine
-        clip = self._pack_normalized(fine.data)  # (B, C, T, H, W)
+        clip = self._pack_normalized(fine.data)
         batch_size, _, n_times, _, _ = clip.shape
         baseline = _linear_interp_endpoints(clip)
         residual = clip - baseline  # ~0 at endpoints by construction
@@ -273,7 +333,7 @@ class VideoDiffusionModel:
 
         sigma = self.config.sample_training_noise(batch_size, clip.device)
         sigma = sigma.reshape(batch_size, -1, 1, 1, 1)
-        # vanilla per-pixel Gaussian noise, applied to interior frames only
+        # Gaussian noise on interior frames only
         noised = residual + randn_like(residual) * sigma * interior
 
         denoised = self.module(
@@ -283,7 +343,7 @@ class VideoDiffusionModel:
         weight = (
             (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
         ) ** self.config.loss_weight_exponent
-        sq_err = (denoised - residual) ** 2 * interior  # loss only on interior
+        sq_err = (denoised - residual) ** 2 * interior
         n_interior_elems = interior.expand_as(sq_err).sum()
         loss = (weight * sq_err).sum() / n_interior_elems
 
@@ -297,11 +357,9 @@ class VideoDiffusionModel:
                 .sum(dim=(-3, -2, -1))
                 .clamp(min=1)
             )
-            # pin observed endpoints (residual is 0 there, matching generate)
+            # pin observed endpoints (residual is 0 there)
             full_norm = baseline + denoised * interior
-            prediction = self.normalizer.denormalize(
-                self.packer.unpack(full_norm, axis=CHANNEL_AXIS)
-            )
+            prediction = self._denormalize_invert(full_norm)
             channel_losses = {
                 name: weighted_sq_err[:, i].sum() / per_sample_denominator.sum()
                 for i, name in enumerate(self.out_names)
@@ -363,10 +421,8 @@ class VideoDiffusionModel:
             s_churn=self.config.churn,
         )
         full_norm = baseline + residual
-        generated = self.normalizer.denormalize(
-            self.packer.unpack(full_norm, axis=CHANNEL_AXIS)
-        )
-        # reshape (B*n, T, H, W) -> (B, n, T, H, W)
+        generated = self._denormalize_invert(full_norm)
+        # (B*n, T, H, W) -> (B, n, T, H, W)
         return {
             k: v.reshape(batch_size, n_samples, *v.shape[1:])
             for k, v in generated.items()
@@ -393,12 +449,8 @@ def _video_edm_sample(
     rho: float = 7.0,
     s_churn: float = 0.0,
 ) -> torch.Tensor:
-    """EDM stochastic sampler that keeps the observed endpoints pinned.
-
-    The endpoints' residual is exactly 0 (observed), so we re-zero them after
-    every update -- they are never noised or denoised. Adapted from
-    ``samplers.stochastic_sampler`` for the 5-D tensor + endpoint masking.
-    """
+    """EDM stochastic sampler that keeps the observed endpoints pinned (re-zeroed
+    after every update)."""
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
     sigma_min_t = torch.as_tensor(
         sigma_min, dtype=compute_dtype, device=latents.device
@@ -419,9 +471,7 @@ def _video_edm_sample(
     mask = interior_mask.to(compute_dtype)
 
     def denoise(x, sigma):
-        # ``sigma`` is the per-channel schedule slice of shape (C, 1, 1, 1); the
-        # precond expects a per-(sample, channel) tensor. Broadcast to (B, C) so
-        # c_skip/c_out/c_in are applied per channel and c_noise is per sample.
+        # broadcast per-channel sigma to (B, C) for the precond
         sigma_bc = sigma.reshape(1, -1).expand(x.shape[0], -1).to(torch.float32)
         out = net(
             x.to(torch.float32),

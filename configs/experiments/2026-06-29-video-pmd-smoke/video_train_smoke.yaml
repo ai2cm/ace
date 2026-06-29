@@ -1,8 +1,4 @@
-# Beaker CPU smoke config for the video PMD trainer. Same dataset/split/channels/
-# normalization as fme/downscaling/configs/video_train_xshield.yaml, but tiny +
-# capped so the full train->validate->checkpoint loop runs quickly on CPU.
-# experiment_dir is /results so Beaker/gantry captures checkpoints + logs as the
-# run's result dataset. Launch with run.sh (gantry, --gpus 0).
+# Beaker CPU smoke config for the video PMD trainer (tiny + capped). Launch with run.sh.
 experiment_dir: /results
 max_epochs: 1
 max_train_batches: 3

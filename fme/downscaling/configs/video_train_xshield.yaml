@@ -1,23 +1,5 @@
-# Endpoint-conditioned video interpolation on X-SHiELD AMIP 3-hourly data.
-# Temporal-only: fine and coarse point at the SAME store (downscale factor 1);
-# coarse is loaded but ignored by the model. Each clip is a 24h window
-# (n_timesteps: 9 -> endpoints at 0h/24h + 7 interior frames at 3h spacing).
-#
-# Train/val/test split (chronological, whole-year, ~4019 daily clips total):
-#   train: 2013-01-02 .. 2021-12-31   (~3290 clips)
-#   val:   2022-01-01 .. 2022-12-31   (~365 clips)
-#   test:  2023-01-01 .. 2024-01-04   (~370 clips)   <- used by evaluation, not here
-# The split is encoded via each dataset's `subset` TimeSlice; the same zarr is
-# reused, date-limited. Clips never cross a split boundary (a 9-frame clip must
-# fit entirely within the subset), so there is no train/val/test leakage.
-#
-# First model uses 4 channels: u10, v10, PRMSL, PRATE (no 2m temperature).
-# Normalization means/stds are per-variable statistics computed from the TRAIN
-# split ONLY, over exactly the training region+period the model sees
-# (2013-01-02..2021-12-31, box lat 0-30 / lon 0-60), subsampled every ~5 days.
-# Recompute (toy/compute_norm_stats.py) if out_names, the box, or train range change.
-# NOTE: PRATEsfc is precipitation -- non-negative and heavy-tailed, so plain
-# mean/std standardization is crude; a log1p transform would help in a later pass.
+# Endpoint-conditioned temporal video interpolation on X-SHiELD AMIP 3-hourly data.
+# Train/val/test split is chronological via each dataset's `subset` TimeSlice.
 experiment_dir: /will/be/overwritten
 max_epochs: 20
 validate_using_ema: true
@@ -116,7 +98,7 @@ model:
     - northward_wind_at_ten_meters
     - PRMSL
     - PRATEsfc
-  normalization:
+  normalization:  # train-only; recompute via toy/compute_norm_stats.py if box/range/channels change
     means:
       eastward_wind_at_ten_meters: -0.206107
       northward_wind_at_ten_meters: 0.133348

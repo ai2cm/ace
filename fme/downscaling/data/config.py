@@ -471,14 +471,8 @@ class PairedDataLoaderConfig:
 
     @property
     def clip_start_stride(self) -> int:
-        """Frames between consecutive video-clip starts (see ``build_video``).
-
-        Defaults to ``n_timesteps - 1`` -- per-day non-overlapping clips that
-        share only their boundary frame (for the 24h/``n_timesteps=9`` setup this
-        is exactly one calendar day). ``time_stride=1`` recovers a full
-        stride-one sliding window; ``time_stride=n_timesteps`` gives fully
-        disjoint clips with no shared frame.
-        """
+        """Frames between consecutive video-clip starts; defaults to
+        ``n_timesteps - 1`` (clips sharing only their boundary frame)."""
         if self.time_stride is not None:
             return self.time_stride
         return max(1, self.n_timesteps - 1)
@@ -637,18 +631,7 @@ class PairedDataLoaderConfig:
         """Build a paired fine/coarse loader of video clips.
 
         Each sample is a clip of ``self.n_timesteps`` consecutive frames with an
-        explicit leading time axis (``(T, lat, lon)`` per field), plus per-frame
-        physical-time features for a cBottle-style ``CalendarEmbedding``. The
-        clip length is taken from ``self.n_timesteps`` (not the model's
-        ``requirements.n_timesteps``), so this path leaves the model untouched.
-
-        Consecutive clips are spaced ``self.clip_start_stride`` frames apart.
-        By default (``time_stride=None``) this is ``n_timesteps - 1``, i.e.
-        per-day non-overlapping clips that share only their boundary frame; for
-        a 24h clip at 3-hourly resolution use ``n_timesteps=9`` (endpoints at 0h
-        and 24h plus 7 interior frames). Set ``time_stride=1`` for a full
-        stride-one sliding window, or ``time_stride=n_timesteps`` for fully
-        disjoint clips.
+        explicit leading time axis, spaced ``self.clip_start_stride`` apart.
         """
         if dist is None:
             dist = Distributed.get_instance()

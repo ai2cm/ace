@@ -603,25 +603,13 @@ class PairedBatchData:
             yield PairedBatchData(fine=fine_batch, coarse=coarse_batch)
 
 
-# ---------------------------------------------------------------------------
-# Video (temporal) data containers.
-#
-# These mirror BatchItem / BatchData / PairedBatch* but add an explicit leading
-# time axis so each sample is a clip of ``T`` frames rather than a single image.
-# Each field is (T, lat, lon) at the item level and (batch, T, lat, lon) once
-# collated -- matching cBottle's (B, C, T, X) layout. Every frame also carries
-# the physical-time features (``day_of_year``, ``second_of_day``) consumed by a
-# cBottle-style CalendarEmbedding; see cBottle/PHYSICAL_TIMESTEP_REPORT.md.
-# ---------------------------------------------------------------------------
+# Video (temporal) data containers: clips of ``T`` frames with an explicit
+# leading time axis and per-frame physical-time features.
 
 
 @dataclasses.dataclass
 class VideoBatchItem:
-    """A single downscaling video clip with no leading batch dimension.
-
-    Each data field has shape ``(T, lat, lon)``. ``day_of_year`` and
-    ``second_of_day`` are per-frame physical-time features (UTC, length ``T``).
-    """
+    """A single downscaling video clip (each field ``(T, lat, lon)``)."""
 
     data: TensorMapping
     time: xr.DataArray
@@ -710,12 +698,8 @@ class VideoBatchItem:
 
 
 class VideoBatchItemDatasetAdapter(torch.utils.data.Dataset):
-    """Adapts a (multi-timestep) dataset to return a ``VideoBatchItem``.
-
-    Unlike ``BatchItemDatasetAdapter`` it does **not** squeeze the time axis, so
-    the ``(T, lat, lon)`` clip is preserved, and it attaches the per-frame
-    physical-time features derived from the clip's timestamps.
-    """
+    """Adapts a multi-timestep dataset to return a ``VideoBatchItem``,
+    preserving the time axis and attaching per-frame physical-time features."""
 
     def __init__(
         self,

@@ -13,7 +13,7 @@
 # Run:  bash configs/experiments/2026-06-29-video-pmd-titan/run.sh
 set -e
 
-JOB_NAME="video-pmd-regional-30-60-1degree-24to3"
+JOB_NAME="video-pmd-global-1degree-24to3-v1"
 CONFIG_FILENAME="video_train.yaml"
 WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/titan"
@@ -31,7 +31,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run \
     --name "$JOB_NAME" \
-    --description 'Video interpolation (PMD), regional 30x60 1deg 24h->3h, 4x B200 DDP' \
+    --description 'Video interpolation (PMD), global 1deg 24h->3h, 4x B200 DDP' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \

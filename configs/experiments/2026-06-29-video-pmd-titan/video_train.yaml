@@ -1,11 +1,4 @@
-# Full GPU training: endpoint-conditioned video interpolation (PMD).
-# Regional 30x60, 1-degree, 24h clip (n_timesteps=9), 4 channels.
-# Runs on ai2/titan (4x B200) via DDP (torchrun). Reads data from weka.
-#
-# batch_size is GLOBAL and split across ranks (dist.local_batch_size): 64 / 4
-# GPUs = 16 per GPU. Train/val/test split is chronological (no leakage);
-# normalization is train-only over the region+period. Checkpoints + logs land in
-# /results (captured as the Beaker result dataset).
+# Full GPU training: endpoint-conditioned global video interpolation (PMD), 4x B200 DDP.
 experiment_dir: /results
 max_epochs: 100
 validate_using_ema: true
@@ -18,7 +11,7 @@ logging:
   log_to_wandb: true
   log_to_file: true
   project: ace-temporal-interp
-  name: regional-30-60-1degree-24to3
+  name: global-1degree-24to3-v1
   entity: ai2cm
 optimization:
   lr: 0.0001
@@ -40,15 +33,15 @@ train_data:
       subset:
         start_time: "2013-01-02"
         stop_time: "2021-12-31"
-  batch_size: 64
+  batch_size: 8  # global across ranks
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:
-    start: 0
-    stop: 30
+    start: -88
+    stop: 88
   lon_extent:
     start: 0
-    stop: 60
+    stop: 360
 validation_data:
   n_timesteps: 9
   fine:
@@ -65,15 +58,15 @@ validation_data:
       subset:
         start_time: "2022-01-01"
         stop_time: "2022-12-31"
-  batch_size: 64
+  batch_size: 8
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:
-    start: 0
-    stop: 30
+    start: -88
+    stop: 88
   lon_extent:
     start: 0
-    stop: 60
+    stop: 360
 test_data:
   n_timesteps: 9
   fine:
@@ -90,24 +83,31 @@ test_data:
       subset:
         start_time: "2023-01-01"
         stop_time: "2024-01-04"
-  batch_size: 64
+  batch_size: 8
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:
-    start: 0
-    stop: 30
+    start: -88
+    stop: 88
   lon_extent:
     start: 0
-    stop: 60
+    stop: 360
 model:
   n_timesteps: 9
-  model_channels: 64
-  n_heads: 4
+  model_channels: 128
+  n_heads: 8
   num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
   sigma_min: 0.002
   sigma_max: 150.0
   churn: 0.0
   num_diffusion_generation_steps: 50
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
   training_noise_distributions:
     eastward_wind_at_ten_meters:
       p_mean: -1.2
@@ -119,25 +119,21 @@ model:
       p_mean: -1.2
       p_std: 1.8
     PRATEsfc:
-      p_min: 0.005
-      p_max: 2000.0
-  sigma_min_by_channel:
-    PRATEsfc: 0.005
-  sigma_max_by_channel:
-    PRATEsfc: 2000.0
+      p_mean: -1.2
+      p_std: 1.8
   out_names:
     - eastward_wind_at_ten_meters
     - northward_wind_at_ten_meters
     - PRMSL
     - PRATEsfc
-  normalization:
+  normalization:  # train-only, global domain
     means:
-      eastward_wind_at_ten_meters: -0.206107
-      northward_wind_at_ten_meters: 0.133348
-      PRMSL: 1009.104862
-      PRATEsfc: 0.000014
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
     stds:
-      eastward_wind_at_ten_meters: 2.845158
-      northward_wind_at_ten_meters: 3.598240
-      PRMSL: 5.558873
-      PRATEsfc: 0.000098
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331

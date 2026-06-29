@@ -1,10 +1,4 @@
-"""Training entry point for the endpoint-conditioned video diffusion model.
-
-Mirrors ``fme/downscaling/train.py`` (EMA, preemption-safe checkpointing,
-distributed-aware, W&B logging) but drives the temporal-interpolation
-``VideoDiffusionModel`` over ``PairedVideoGriddedData`` clips. Validation reports
-the denoising loss plus an interior-frame generation MAE.
-"""
+"""Training entry point for the endpoint-conditioned video diffusion model."""
 
 import argparse
 import contextlib
@@ -107,13 +101,7 @@ def restore_checkpoint(trainer: "VideoTrainer") -> None:
 
 @dataclasses.dataclass
 class VideoTrainerConfig:
-    """Configuration for the video diffusion Trainer.
-
-    ``train_data``/``validation_data`` must set ``n_timesteps`` equal to the
-    model's ``n_timesteps`` (the clip length). For temporal-only interpolation
-    the fine and coarse dataset entries point at the same (single-resolution)
-    store -- coarse is loaded but ignored by the model.
-    """
+    """Configuration for the video diffusion Trainer."""
 
     model: VideoDiffusionModelConfig
     optimization: OptimizationConfig
@@ -122,24 +110,19 @@ class VideoTrainerConfig:
     max_epochs: int
     experiment_dir: str
     logging: LoggingConfig
-    # Optional held-out test split. When set, the test set is evaluated every
-    # ``test_interval`` epochs (metrics: MAE/RMSE, relative error, vs the linear
-    # baseline) and a few test examples are visualized on W&B.
+    # Optional held-out test split, evaluated every test_interval epochs.
     test_data: PairedDataLoaderConfig | None = None
     test_interval: int = 10
     save_checkpoints: bool = True
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
-    # Number of val/test examples to visualize (GT/Linear/Pred/diff frame grids)
-    # on W&B. 0 disables. The same first examples are used each time so you can
-    # watch them improve across epochs.
+    # Number of val/test examples to visualize on W&B; 0 disables.
     num_visualization_examples: int = 3
     segment_epochs: int | None = None
     validate_interval: int = 1
     resume_results_dir: str | None = None
-    # Cap batches per train/val epoch (e.g. for CPU smoke tests / debugging).
-    # None means iterate the full loader.
+    # Cap batches per train/val epoch (None iterates the full loader).
     max_train_batches: int | None = None
     max_val_batches: int | None = None
     log_loss_vs_noise: bool = False
@@ -300,11 +283,8 @@ class VideoTrainer:
                 total_loss += outputs.loss.detach().cpu().item()
                 total_gen_mae += self._interior_generation_mae(batch)
                 n_batches += 1
-        # Reduce across ranks so the metric (and best-checkpoint selection)
-        # reflects the whole validation set, not just this rank's shard. All
-        # ranks must reach this collective, so the empty check uses the global
-        # count -- a single empty shard must not raise here while peers continue
-        # to the WandB.log barrier below (that would deadlock).
+        # Reduce across ranks; all ranks must reach this collective (empty check
+        # uses the global count to avoid deadlocking at the WandB.log barrier).
         stats = torch.tensor(
             [total_loss, total_gen_mae, float(n_batches)], device=get_device()
         )
@@ -328,7 +308,7 @@ class VideoTrainer:
         n_times = self.model.n_timesteps
         errors = []
         for name, samples in generated.items():
-            ens_mean = samples.mean(dim=1)  # (B, T, H, W)
+            ens_mean = samples.mean(dim=1)
             truth = batch.fine.data[name].to(ens_mean.device)
             interior = slice(1, n_times - 1)
             errors.append(
@@ -340,8 +320,7 @@ class VideoTrainer:
     def log_validation_visualizations(self) -> None:
         """Log GT-vs-prediction frame grids for a few val examples to W&B.
 
-        Called by ALL ranks so the collective barrier in ``WandB.log`` stays
-        matched; only root builds and logs the figures.
+        Called by all ranks for the WandB.log barrier; only root logs figures.
         """
         if self.config.num_visualization_examples <= 0:
             return
@@ -369,10 +348,8 @@ class VideoTrainer:
     def evaluate_test(self) -> None:
         """Evaluate the held-out test set: metrics + visualizations to W&B.
 
-        Per-channel MAE/RMSE, relative error (% of the channel's train std), and
-        improvement over the temporal linear-interpolation baseline. Metrics are
-        accumulated per rank then summed across ranks (``reduce_sum``) so they
-        reflect the whole test set; only root logs. Called by ALL ranks.
+        Per-channel MAE/RMSE, relative error, and improvement over the linear
+        baseline, summed across ranks. Called by all ranks; only root logs.
         """
         if self.test_data is None:
             return
@@ -391,7 +368,7 @@ class VideoTrainer:
                 )
                 for c, name in enumerate(names):
                     gt = batch.fine.data[name].float()
-                    pred = generated[name].float().mean(dim=1)  # ensemble mean
+                    pred = generated[name].float().mean(dim=1)
                     lin = _linear_interp_endpoints(gt)
                     gi, pi, li = gt[:, interior], pred[:, interior], lin[:, interior]
                     acc[c, 0] += (pi - gi).abs().sum()

@@ -1,7 +1,5 @@
-# CPU smoke config: same dataset/split/channels/normalization as
-# video_train_xshield.yaml, but tiny + capped so the full train loop
-# (train -> validate -> checkpoint) runs end-to-end in minutes on CPU.
-# Run with: FME_FORCE_CPU=1 python -m fme.downscaling.video_train \
+# CPU smoke config (tiny + capped) for video_train_xshield.yaml.
+# Run: FME_FORCE_CPU=1 python -m fme.downscaling.video_train \
 #   fme/downscaling/configs/video_train_xshield_smoke.yaml
 experiment_dir: /tmp/video_smoke
 max_epochs: 1

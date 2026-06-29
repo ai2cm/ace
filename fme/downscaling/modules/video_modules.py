@@ -1,18 +1,7 @@
 """Network building blocks for video (temporal) diffusion downscaling.
 
-This is a compact backbone that implements the two cBottle physical-time
-pathways (see ``cBottle/PHYSICAL_TIMESTEP_REPORT.md``):
-
-* ``CalendarEmbedding`` -- absolute wall-clock time (diurnal + seasonal),
-  longitude-shifted to local solar time, concatenated to the input channels.
-* ``TemporalAttention`` -- self-attention along the frame (``T``) axis with a
-  learned per-head relative-position bias.
-
-Tensors here are 5-D ``(B, C, T, H, W)``. Spatial convolutions use a
-``(1, 3, 3)`` kernel so they act per-frame (no implicit time mixing); all genuine
-temporal reasoning is delegated to ``TemporalAttention``. The backbone is
-intentionally small/single-scale -- it is meant to be correct and swappable, not
-state-of-the-art -- and is wrapped in EDM preconditioning (Karras 2022).
+Compact 5-D ``(B, C, T, H, W)`` backbone with cBottle-style calendar embedding
+and temporal attention, wrapped in EDM preconditioning (Karras 2022).
 """
 
 import math
@@ -21,27 +10,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fme.downscaling.modules.physicsnemo_unets_v2.layers import (
+    FourierEmbedding,
+    PositionalEmbedding,
+)
+
 
 class NoiseEmbedding(nn.Module):
-    """Sinusoidal embedding of the (log) noise level -> MLP."""
+    """Positional (DDPM++) or Fourier (NCSN++) embedding of the log-noise level,
+    mapped through an MLP -- matches HiRO/SongUNet noise conditioning.
+    """
 
-    def __init__(self, dim: int):
+    def __init__(self, dim: int, embedding_type: str = "positional"):
         super().__init__()
         if dim % 2 != 0:
             raise ValueError("NoiseEmbedding dim must be even.")
-        self.dim = dim
+        if embedding_type == "fourier":
+            self.embed: nn.Module = FourierEmbedding(dim)
+        elif embedding_type == "positional":
+            self.embed = PositionalEmbedding(dim)
+        else:
+            raise ValueError(f"unknown noise embedding_type {embedding_type!r}")
         self.mlp = nn.Sequential(nn.Linear(dim, dim), nn.SiLU(), nn.Linear(dim, dim))
 
     def forward(self, c_noise: torch.Tensor) -> torch.Tensor:
-        half = self.dim // 2
-        freqs = torch.exp(
-            -math.log(10000.0)
-            * torch.arange(half, device=c_noise.device, dtype=torch.float32)
-            / max(half - 1, 1)
-        )
-        args = c_noise.float()[:, None] * freqs[None, :]
-        emb = torch.cat([args.cos(), args.sin()], dim=-1)
-        return self.mlp(emb)
+        return self.mlp(self.embed(c_noise.float()))
 
 
 class FrequencyEmbedding(nn.Module):
@@ -60,9 +53,8 @@ class FrequencyEmbedding(nn.Module):
 class CalendarEmbedding(nn.Module):
     """cBottle-style absolute-time embedding (diurnal + seasonal).
 
-    Produces ``(B, 4*num_freqs, T, H, W)`` features that are concatenated to the
-    input channels. ``second_of_day`` is shifted by longitude into local solar
-    time so the diurnal phase is correct per pixel.
+    ``second_of_day`` is shifted by longitude into local solar time so the
+    diurnal phase is correct per pixel.
     """
 
     def __init__(self, num_freqs: int = 4):
@@ -72,50 +64,79 @@ class CalendarEmbedding(nn.Module):
 
     def forward(
         self,
-        day_of_year: torch.Tensor,  # (B, T)
-        second_of_day: torch.Tensor,  # (B, T)
-        lon: torch.Tensor,  # (W,) degrees
+        day_of_year: torch.Tensor,
+        second_of_day: torch.Tensor,
+        lon: torch.Tensor,
         height: int,
     ) -> torch.Tensor:
         lon = lon.to(second_of_day.device, second_of_day.dtype)
-        # local solar time per (frame, longitude)
         local = (second_of_day[:, :, None] + lon[None, None, :] * 86400.0 / 360.0)
-        local = local % 86400.0  # (B, T, W)
-        diurnal = self.embed(local / 86400.0)  # (B, T, W, 2n)
-        diurnal = diurnal.permute(0, 3, 1, 2)  # (B, 2n, T, W)
+        local = local % 86400.0
+        diurnal = self.embed(local / 86400.0)
+        diurnal = diurnal.permute(0, 3, 1, 2)
         diurnal = diurnal.unsqueeze(3).expand(-1, -1, -1, height, -1)
 
-        seasonal = self.embed((day_of_year / 365.25) % 1.0)  # (B, T, 2n)
+        seasonal = self.embed((day_of_year / 365.25) % 1.0)
         seasonal = seasonal.permute(0, 2, 1)[:, :, :, None, None]
         seasonal = seasonal.expand(-1, -1, -1, height, diurnal.shape[-1])
-        return torch.cat([diurnal, seasonal], dim=1)  # (B, 4n, T, H, W)
+        return torch.cat([diurnal, seasonal], dim=1)
+
+
+def _groups(channels: int) -> int:
+    g = min(32, channels)
+    while channels % g != 0:
+        g -= 1
+    return g
+
+
+class PeriodicConv3d(nn.Module):
+    """Per-frame spatial Conv3d, periodic in longitude (W) and zero-padded in
+    latitude (H) for global lat/lon fields.
+    """
+
+    def __init__(self, in_ch, out_ch, kernel=(1, 3, 3), stride=(1, 1, 1)):
+        super().__init__()
+        self.ph = kernel[1] // 2
+        self.pw = kernel[2] // 2
+        self.conv = nn.Conv3d(in_ch, out_ch, kernel, stride=stride, padding=0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.pw:
+            x = torch.cat([x[..., -self.pw :], x, x[..., : self.pw]], dim=-1)
+        if self.ph:
+            x = F.pad(x, (0, 0, self.ph, self.ph))
+        return self.conv(x)
 
 
 class ResBlock(nn.Module):
-    """Per-frame spatial residual block with noise-level conditioning."""
+    """Per-frame spatial residual block with adaptive GroupNorm (AdaGN)
+    noise-level conditioning and ``1/sqrt(2)`` skip scaling (cBottle/EDM style).
+    """
 
-    def __init__(self, channels: int, emb_dim: int):
+    def __init__(self, in_ch: int, out_ch: int, emb_dim: int, skip_scale=2**-0.5):
         super().__init__()
-        groups = min(32, channels)
-        self.norm1 = nn.GroupNorm(groups, channels)
-        self.conv1 = nn.Conv3d(channels, channels, (1, 3, 3), padding=(0, 1, 1))
-        self.emb = nn.Linear(emb_dim, channels)
-        self.norm2 = nn.GroupNorm(groups, channels)
-        self.conv2 = nn.Conv3d(channels, channels, (1, 3, 3), padding=(0, 1, 1))
+        self.norm1 = nn.GroupNorm(_groups(in_ch), in_ch)
+        self.conv1 = PeriodicConv3d(in_ch, out_ch)
+        self.emb = nn.Linear(emb_dim, 2 * out_ch)
+        self.norm2 = nn.GroupNorm(_groups(out_ch), out_ch)
+        self.conv2 = PeriodicConv3d(out_ch, out_ch)
+        self.skip = (
+            nn.Conv3d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+        )
+        self.skip_scale = skip_scale
 
     def forward(self, x: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
         h = self.conv1(F.silu(self.norm1(x)))
-        h = h + self.emb(emb)[:, :, None, None, None]
-        h = self.conv2(F.silu(self.norm2(h)))
-        return x + h
+        scale, shift = self.emb(emb)[:, :, None, None, None].chunk(2, dim=1)
+        h = self.conv2(F.silu(self.norm2(h) * (1 + scale) + shift))
+        return (self.skip(x) + h) * self.skip_scale
 
 
 class TemporalAttention(nn.Module):
     """Self-attention along the time axis with learned relative-position bias.
 
-    Each spatial pixel attends across all ``T`` frames; the per-head bias depends
-    only on the signed frame offset (cBottle ``TemporalAttention``). The output
-    projection is zero-initialized so the block starts as near-identity.
+    Each pixel attends across all ``T`` frames; output projection is
+    zero-initialized so the block starts as near-identity.
     """
 
     def __init__(self, channels: int, n_heads: int, seq_length: int):
@@ -149,7 +170,7 @@ class TemporalAttention(nn.Module):
         attn = torch.einsum("nhqc,nhkc->nhqk", q, k) / math.sqrt(cdim)
         i = torch.arange(T, device=x.device)
         pairwise = (i[:, None] - i[None, :]) + self.seq_length - 1
-        bias = self.relative_embedding[:, pairwise]  # (n_heads, T, T)
+        bias = self.relative_embedding[:, pairwise]
         attn = (attn + bias[None]).softmax(dim=-1)
         out = torch.einsum("nhqk,nhkc->nhqc", attn, v)
         out = out.reshape(B, H, W, self.n_heads, T, cdim)
@@ -157,11 +178,107 @@ class TemporalAttention(nn.Module):
         return x + self.proj(out)
 
 
-class VideoUNet(nn.Module):
-    """Compact single-scale video denoiser network.
+class SpatialAttention(nn.Module):
+    """Multi-head self-attention over the spatial (H*W) plane, per frame.
 
-    Input is the (preconditioned) noisy clip concatenated with conditioning
-    channels; ``CalendarEmbedding`` features are concatenated internally.
+    Cost is O((H*W)^2), so use at coarser levels only; output projection is
+    zero-initialized so the block starts as near-identity.
+    """
+
+    def __init__(self, channels: int, n_heads: int):
+        super().__init__()
+        if channels % n_heads != 0:
+            raise ValueError("channels must be divisible by n_heads.")
+        self.n_heads = n_heads
+        self.norm = nn.GroupNorm(_groups(channels), channels)
+        self.qkv = nn.Conv3d(channels, channels * 3, 1)
+        self.proj = nn.Conv3d(channels, channels, 1)
+        nn.init.zeros_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, C, T, H, W = x.shape
+        cdim = C // self.n_heads
+        qkv = self.qkv(self.norm(x))
+        q, k, v = qkv.chunk(3, dim=1)
+
+        def reshape(t):
+            t = t.reshape(B, self.n_heads, cdim, T, H * W)
+            return t.permute(0, 3, 1, 4, 2).reshape(B * T, self.n_heads, H * W, cdim)
+
+        q, k, v = reshape(q), reshape(k), reshape(v)
+        attn = torch.einsum("nhqc,nhkc->nhqk", q, k) / math.sqrt(cdim)
+        attn = attn.softmax(dim=-1)
+        out = torch.einsum("nhqk,nhkc->nhqc", attn, v)
+        out = out.reshape(B, T, self.n_heads, H, W, cdim)
+        out = out.permute(0, 2, 5, 1, 3, 4).reshape(B, C, T, H, W)
+        return x + self.proj(out)
+
+
+class _BlockAttn(nn.Module):
+    """Optional spatial and/or temporal self-attention for a U-Net block.
+
+    Temporal attention is cheap and runs at every level so time is mixed
+    throughout; spatial attention is restricted to coarse levels.
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        n_heads: int,
+        seq_length: int,
+        spatial: bool,
+        temporal: bool,
+    ):
+        super().__init__()
+        self.spatial = SpatialAttention(channels, n_heads) if spatial else None
+        self.temporal = (
+            TemporalAttention(channels, n_heads, seq_length) if temporal else None
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.spatial is not None:
+            x = self.spatial(x)
+        if self.temporal is not None:
+            x = self.temporal(x)
+        return x
+
+
+class FIRBlur(nn.Module):
+    """Depthwise binomial (FIR) low-pass applied per frame, periodic in longitude.
+
+    Anti-aliases before down-sampling and smooths after up-sampling. The kernel
+    is a fixed constant buffer, so it is identical on every rank (DDP-safe).
+    """
+
+    def __init__(self):
+        super().__init__()
+        f = torch.tensor([1.0, 2.0, 1.0])
+        k = torch.outer(f, f)
+        self.register_buffer("kernel", (k / k.sum())[None, None, None])
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        c = x.shape[1]
+        w = self.kernel.expand(c, 1, 1, 3, 3)
+        x = torch.cat([x[..., -1:], x, x[..., :1]], dim=-1)
+        x = F.pad(x, (0, 0, 1, 1))
+        return F.conv3d(x, w, groups=c)
+
+
+def _resize_spatial(x: torch.Tensor, size, blur: nn.Module | None = None) -> torch.Tensor:
+    """Resize the (H, W) of a (B, C, T, H, W) tensor to ``size`` (keeps T), with
+    an optional FIR low-pass applied only when the size actually changes.
+    """
+    if tuple(x.shape[-2:]) == tuple(size):
+        return x
+    x = F.interpolate(x, size=(x.shape[2], size[0], size[1]), mode="nearest")
+    return blur(x) if blur is not None else x
+
+
+class VideoUNet(nn.Module):
+    """Multi-scale video denoiser: per-frame conv U-Net with spatial + temporal
+    self-attention (cBottle-style). Down/up-sampling changes only (H, W); the
+    time axis is preserved and handled by ``TemporalAttention``.
     """
 
     def __init__(
@@ -170,44 +287,106 @@ class VideoUNet(nn.Module):
         out_channels: int,
         seq_length: int,
         model_channels: int = 64,
+        channel_mult: tuple[int, ...] = (1, 2, 2),
+        num_blocks: int = 2,
         n_heads: int = 4,
+        attention_levels: tuple[int, ...] = (1, 2),
+        temporal_attention_levels: tuple[int, ...] | None = None,
         num_freqs: int = 4,
+        noise_embedding_type: str = "positional",
     ):
         super().__init__()
-        self.noise_embed = NoiseEmbedding(model_channels)
+        self.levels = len(channel_mult)
+        self.num_blocks = num_blocks
+        emb_dim = model_channels
+        self.noise_embed = NoiseEmbedding(model_channels, noise_embedding_type)
+        self.blur = FIRBlur()
         self.calendar = CalendarEmbedding(num_freqs)
-        self.in_conv = nn.Conv3d(
-            in_channels + self.calendar.out_channels,
-            model_channels,
-            (1, 3, 3),
-            padding=(0, 1, 1),
+        chs = [model_channels * m for m in channel_mult]
+        attn_spatial = set(attention_levels)
+        attn_temporal = (
+            set(temporal_attention_levels)
+            if temporal_attention_levels is not None
+            else set(range(self.levels))
         )
-        self.block1 = ResBlock(model_channels, model_channels)
-        self.temporal_attention = TemporalAttention(model_channels, n_heads, seq_length)
-        self.block2 = ResBlock(model_channels, model_channels)
-        self.out_norm = nn.GroupNorm(min(32, model_channels), model_channels)
-        self.out_conv = nn.Conv3d(
-            model_channels, out_channels, (1, 3, 3), padding=(0, 1, 1)
-        )
-        nn.init.zeros_(self.out_conv.weight)
-        nn.init.zeros_(self.out_conv.bias)
+
+        self.in_conv = PeriodicConv3d(in_channels + self.calendar.out_channels, chs[0])
+
+        self.enc_blocks = nn.ModuleList()
+        self.enc_attn = nn.ModuleList()
+        self.downsamples = nn.ModuleList()
+        skip_ch = [chs[0]]
+        ch = chs[0]
+        for level in range(self.levels):
+            for _ in range(num_blocks):
+                self.enc_blocks.append(ResBlock(ch, chs[level], emb_dim))
+                ch = chs[level]
+                self.enc_attn.append(
+                    _BlockAttn(
+                        ch, n_heads, seq_length,
+                        level in attn_spatial, level in attn_temporal,
+                    )
+                )
+                skip_ch.append(ch)
+            if level < self.levels - 1:
+                self.downsamples.append(
+                    PeriodicConv3d(ch, ch, (1, 3, 3), stride=(1, 2, 2))
+                )
+                skip_ch.append(ch)
+
+        self.mid_block1 = ResBlock(ch, ch, emb_dim)
+        self.mid_attn = _BlockAttn(ch, n_heads, seq_length, True, True)
+        self.mid_block2 = ResBlock(ch, ch, emb_dim)
+
+        self.dec_blocks = nn.ModuleList()
+        self.dec_attn = nn.ModuleList()
+        for level in reversed(range(self.levels)):
+            for _ in range(num_blocks + 1):
+                sch = skip_ch.pop()
+                self.dec_blocks.append(ResBlock(ch + sch, chs[level], emb_dim))
+                ch = chs[level]
+                self.dec_attn.append(
+                    _BlockAttn(
+                        ch, n_heads, seq_length,
+                        level in attn_spatial, level in attn_temporal,
+                    )
+                )
+
+        self.out_norm = nn.GroupNorm(_groups(ch), ch)
+        self.out_conv = PeriodicConv3d(ch, out_channels)
+        nn.init.zeros_(self.out_conv.conv.weight)
+        nn.init.zeros_(self.out_conv.conv.bias)
 
     def forward(
         self,
-        x: torch.Tensor,  # (B, C_in, T, H, W)
-        c_noise: torch.Tensor,  # (B,)
-        day_of_year: torch.Tensor,  # (B, T)
-        second_of_day: torch.Tensor,  # (B, T)
-        lon: torch.Tensor,  # (W,)
+        x: torch.Tensor,
+        c_noise: torch.Tensor,
+        day_of_year: torch.Tensor,
+        second_of_day: torch.Tensor,
+        lon: torch.Tensor,
     ) -> torch.Tensor:
-        height = x.shape[-2]
-        calendar = self.calendar(day_of_year, second_of_day, lon, height)
-        h = torch.cat([x, calendar], dim=1)
+        cal = self.calendar(day_of_year, second_of_day, lon, x.shape[-2])
         emb = self.noise_embed(c_noise)
-        h = self.in_conv(h)
-        h = self.block1(h, emb)
-        h = self.temporal_attention(h)
-        h = self.block2(h, emb)
+        h = self.in_conv(torch.cat([x, cal], dim=1))
+
+        skips = [h]
+        idx = 0
+        for level in range(self.levels):
+            for _ in range(self.num_blocks):
+                h = self.enc_attn[idx](self.enc_blocks[idx](h, emb))
+                skips.append(h)
+                idx += 1
+            if level < self.levels - 1:
+                h = self.downsamples[level](self.blur(h))
+                skips.append(h)
+
+        h = self.mid_block2(self.mid_attn(self.mid_block1(h, emb)), emb)
+
+        for idx in range(len(self.dec_blocks)):
+            skip = skips.pop()
+            h = torch.cat([_resize_spatial(h, skip.shape[-2:], self.blur), skip], dim=1)
+            h = self.dec_attn[idx](self.dec_blocks[idx](h, emb))
+
         return self.out_conv(F.silu(self.out_norm(h)))
 
 
@@ -221,8 +400,8 @@ class VideoEDMPrecond(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,  # (B, C_out, T, H, W) noisy residual
-        condition: torch.Tensor | None,  # (B, C_cond, T, H, W)
+        x: torch.Tensor,
+        condition: torch.Tensor | None,
         sigma: torch.Tensor,
         day_of_year: torch.Tensor,
         second_of_day: torch.Tensor,
