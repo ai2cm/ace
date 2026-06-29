@@ -103,6 +103,7 @@ stepper:
     config:
       builder:
         type: NoiseConditionedSFNO
+        allow_missing_variables: true
         config:
           embed_dim: 512
           noise_embed_dim: 32
