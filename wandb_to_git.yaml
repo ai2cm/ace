@@ -1,0 +1,19 @@
+pairs:
+  - wandb: VarMasking
+    beaker: https://beaker.org/ex/01KT76SYM2TSN754TS5SQ81DM6
+    git: ceaa7417fca6a7f3a4960f7aef24d19cdbf97c88
+  - wandb: VarMasking2
+    beaker: https://beaker.org/ex/01KTCZ0NV85ZZ3VV629JNJTAM8
+    git: 8525ae2abdcc05a7d546d1e5a0d25de59f6e2897
+  - wandb: VarMasking3
+    beaker: https://beaker.org/ex/01KTQERMR0P4FAV4PD4RX053Q7
+    git: 8e52947b02d967b2541fe674bd815dc22248377c
+  - wandb: VarMasking4
+    beaker: https://beaker.org/ex/01KW09225ZQFSZD84AFH0RP82N
+    git: 54c489b345d9dce948cff75f3b6418de34e7ca3d
+  - wandb: VarMasking5
+    beaker: https://beaker.org/ex/01KVGH4X8WSJX5QP208WGQ1MDM
+    git: 45db73726c18c19663424fb9e874cdb99ccb582e
+  - wandb: VarMasking6
+    beaker: https://beaker.org/ex/01KW276NPW9SR1S0JTB335410Y
+    git: 17d4a8c5354e8442e09d2b02d5362edcac087edf
