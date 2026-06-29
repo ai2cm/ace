@@ -3,7 +3,7 @@
 Living notes for the multivariate MoE FastGen distillation effort on branch
 `experiment/fastgen-distill`. Pick up here from any clone.
 
-_Last updated: 2026-06-27._
+_Last updated: 2026-06-29._
 
 ---
 
@@ -302,7 +302,54 @@ distill from a standalone expert checkpoint that is *not* in a bundle.
 
 ---
 
-## Active per-expert runs (submitted 2026-06-27) — CHECK THESE
+## ★ RESULT (2026-06-29): per-expert pivot did NOT fix the spectral collapse — GAN-fix runs launched
+
+**Both Lo runs completed** (~30–32k steps, ~44 h; wandb `6xt93hci` = Lo-1step,
+`3vk3or7v` = Lo-2step). Wiring confirmed correct in logs (`expert_index=0,
+sigma range [0.005, 200.0] (no dispatch)`, `validation_mode=lo_renoise`). Two
+findings:
+
+1. **2-step beat 1-step on every axis** — better PRMSL (`crps_PRMSL` 6.89 vs
+   7.06), and far better precip spectra (`spec_mae_mid_PRATEsfc` best 0.017 vs
+   0.077; `spec_mae_hi_PRATEsfc` 0.15 vs 0.43). **2-step is the base going forward.**
+2. **★ The PRMSL coarse-spectral collapse RECURRED in both runs — falsifying the
+   structural hypothesis.** The pivot's key claim was that an in-domain expert-0
+   discriminator would prevent the collapse. It did not. Lo-2step
+   `spec_mae_mid_PRMSL` 0.16→**0.82**, `spec_mae_hi_PRMSL` best 0.046@78%→**0.88**;
+   tails blow up (`tail_99.9999_PRATEsfc` 0.54@1%→**0.96**). Same disc-winning
+   signature as dispatch-v2: `fake_score_loss` spikes late (0.017→0.032),
+   `gan_loss_disc`↓ / `gan_loss_gen`↑.
+   - **Fine-scale precip IS healthy** (`spec_mae_lo/mid_PRATEsfc` → 0.02–0.04) —
+     the pivot fixed the *domain* problem; the collapse is a separate, untouched
+     **GAN-instability** problem.
+   - **Checkpoint-selection trap (again):** the good model is mid-training
+     (~78–88% for 2-step); `best_student.ckpt` (CRPS-selected) and the last
+     checkpoint are spectrally collapsed. Pull a mid-training ckpt before judging.
+   - The GAN-fix levers the doc filed as "should matter less now" are in fact the
+     **primary** lever — none were enabled in these runs (`gan_r1_reg_weight`
+     unset, `gan_loss_weight_gen` 1e-3, no LR decay).
+
+### GAN-fix runs (submitted 2026-06-29, 2-step expert-0 base) — CHECK THESE
+
+Commit `e39c6b237` added env knobs (`ACE_GAN_R1_REG_WEIGHT`,
+`ACE_GAN_LOSS_WEIGHT_GEN`, `ACE_LR_DECAY_STEPS`/`ACE_LR_F_MIN`) surfaced via
+`run.sh --gan-r1 / --gan-weight / --lr-decay-steps`. Both on `ai2/climate-titan`,
+wandb `ai2cm/fastgen`.
+
+| Run | GAN fixes | Beaker experiment | wandb name |
+|---|---|---|---|
+| **Lo-2step-r1** (highest-prob single fix) | R1 reg `0.1` only | `01KWAKEV8SS9RACQH8AA6CGY2Y` | `…-lo-2step-r1-moe-teacher-expert0` |
+| **Lo-2step-allfix** (everything) | R1 `0.1` + `gan_loss_weight_gen 3e-4` + LR decay→5% over 20k steps (max_iter capped 20k) | `01KWAKF2PV0G3E9V418207R7R0` | `…-lo-2step-allfix-moe-teacher-expert0` |
+
+**What to check:** (1) jobs healthy + R1 active — expect a `gan_loss_ar1` metric
+in wandb (logs only when both GAN weights >0); (2) **does `spec_mae_mid/hi_PRMSL`
+stay flat/declining late** instead of climbing to ~0.8 (the whole point); (3)
+`fake_score_loss` / `gan_loss_disc`-vs-`gan_loss_gen` stay balanced (no late
+disc-winning tip); (4) precip spectra stay healthy (they already were); (5) tails
+don't blow up. If R1-only holds the spectra, prefer it (simplest). If only allfix
+works, the LR-decay/weight cut were load-bearing. Compare both at matched steps.
+
+### (superseded) Active per-expert runs (submitted 2026-06-27)
 
 **Student-Lo distillation is submitted** (commit `fa6b49e9e`). Both step
 variants of the 1-vs-2-step A/B, on Beaker workspace `ai2/climate-titan`, wandb
