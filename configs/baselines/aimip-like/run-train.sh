@@ -94,4 +94,23 @@ run_training() {
 # =============================================================================
 
 # --- v2 no-residual ablation, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-no-residual.yaml" "train-4deg-daily-v2-era5-only-no-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched (wandb znnaox7t); commented for the step-match branch.
+# run_training "train-4deg-daily-v2-era5-only-no-residual.yaml" "train-4deg-daily-v2-era5-only-no-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# Step-matched ~400k-step continuations of the 1979-on baselines (seed 0).
+# Task: research/tasks/2026-06-29-step-match-the-1979-on-runs-to-deconfound-training-duration-from-pre-1979-data.md
+# Investigation: research/investigations/2026-06-22-pre1979-era5-residual-stability.md
+#
+# Resume the finished 120-epoch v2 baselines and train to 259 epochs (~401k
+# steps) to match the pre-1979 runs' ~400k steps. The --dataset mount (in each
+# config's `# arg:` header) attaches the prior run's result dataset at
+# /prior-results; resume_results.{existing_dir,resume_wandb} resumes from its
+# checkpoint AND its wandb run id, so the curve continues under the SAME wandb
+# id. If a 1979-on run also degrades past ~186k steps -> the cause is training
+# duration / overtraining; if it stays flat -> the pre-1979 data.
+# =============================================================================
+# residual v2 -> resumes wandb oshj5u79
+run_training "train-4deg-daily-v2-era5-only-resume400k.yaml" "train-4deg-daily-v2-era5-only-resume400k" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# no-residual v2 -> resumes wandb znnaox7t
+run_training "train-4deg-daily-v2-era5-only-no-residual-resume400k.yaml" "train-4deg-daily-v2-era5-only-no-residual-resume400k" 1 ai2/ace high "ai2/jupiter ai2/titan"
