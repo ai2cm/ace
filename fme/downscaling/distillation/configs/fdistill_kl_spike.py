@@ -19,10 +19,9 @@ Adapted from:
 
 import os
 
-from omegaconf import DictConfig
-
 import fastgen.configs.methods.config_f_distill as config_f_distill_default
 from fastgen.configs.callbacks import EMA_CONST_CALLBACKS
+from omegaconf import DictConfig
 
 TEACHER_CKPT_PATH = os.environ.get("ACE_TEACHER_CKPT", "")
 
@@ -44,6 +43,25 @@ STUDENT_STEPS = int(os.environ.get("ACE_STUDENT_STEPS", "2"))
 NOISE_DIST = os.environ.get("ACE_NOISE_DIST", "lognormal")
 SIGMA_MIN = float(os.environ.get("ACE_SIGMA_MIN", "0.002"))
 SIGMA_MAX = float(os.environ.get("ACE_SIGMA_MAX", "150.0"))
+
+# --------------------------------------------------------------- GAN stabilizers
+# The MoE distillation runs collapse the coarse PRMSL spectra late in training
+# with a classic discriminator-winning signature (gan_loss_disc down,
+# gan_loss_gen up, fake_score_loss spike); see MOE_DISTILLATION_STATUS.md.
+# These env knobs expose the standard counter-levers so they can be A/B'd
+# without code edits.  Defaults reproduce the previous (un-stabilized) behavior.
+#
+#  - ACE_GAN_R1_REG_WEIGHT: R1 gradient penalty on the discriminator (the
+#    textbook fix for a disc that's overpowering the generator).  0.0 = off.
+#  - ACE_GAN_LOSS_WEIGHT_GEN: generator-side GAN loss weight (was hard-coded
+#    1e-3); lower it to let forward-KL carry more of the signal.
+#  - ACE_LR_DECAY_STEPS > 0: linearly decay all three LRs to ACE_LR_F_MIN over
+#    this many iters and cap max_iter at the same value (banks the gains before
+#    the GAN tips).  0 = no decay (constant LR, the prior behavior).
+GAN_R1_REG_WEIGHT = float(os.environ.get("ACE_GAN_R1_REG_WEIGHT", "0.0"))
+GAN_LOSS_WEIGHT_GEN = float(os.environ.get("ACE_GAN_LOSS_WEIGHT_GEN", "1e-3"))
+LR_DECAY_STEPS = int(os.environ.get("ACE_LR_DECAY_STEPS", "0"))
+LR_F_MIN = float(os.environ.get("ACE_LR_F_MIN", "0.05"))
 
 
 def create_config():
@@ -88,11 +106,35 @@ def create_config():
     config.model.discriminator_optimizer.lr = 1e-5
     config.model.fake_score_optimizer.lr = 1e-5
 
-    # GAN loss weight at 1e-3 — back to the conservative original.  With
+    # GAN loss weight (default 1e-3, the conservative original).  With
     # STUDENT_STEPS=2 and the loosened ratio clip, the forward-KL term should
     # carry the training signal and we want the GAN to be a stabilizer, not
     # the dominant gradient (which is what 3e-3 + STUDENT_STEPS=1 made it).
-    config.model.gan_loss_weight_gen = 1e-3
+    # Lower via ACE_GAN_LOSS_WEIGHT_GEN to further tame the GAN.
+    config.model.gan_loss_weight_gen = GAN_LOSS_WEIGHT_GEN
+
+    # R1 discriminator regularization (off by default).  Turning it on is the
+    # standard fix for the disc-winning collapse documented for the MoE runs;
+    # logs a `gan_loss_ar1` term when both weights are > 0.  Applied in the
+    # inherited DMD2 fake-score/discriminator update step.
+    config.model.gan_r1_reg_weight = GAN_R1_REG_WEIGHT
+
+    # Optional LR decay (ACE_LR_DECAY_STEPS > 0): linearly decay all three
+    # optimizers' LRs to LR_F_MIN over LR_DECAY_STEPS iters.  Cap max_iter at
+    # the cycle length so LambdaLinearScheduler never indexes past its single
+    # cycle (find_in_interval returns None otherwise → crash) and so the decay
+    # completes by the end of the run.
+    if LR_DECAY_STEPS > 0:
+        for scheduler in (
+            config.model.net_scheduler,
+            config.model.discriminator_scheduler,
+            config.model.fake_score_scheduler,
+        ):
+            scheduler.warm_up_steps = [0]
+            scheduler.cycle_lengths = [LR_DECAY_STEPS]
+            scheduler.f_start = [1.0]
+            scheduler.f_max = [1.0]
+            scheduler.f_min = [LR_F_MIN]
 
     # EMA
     config.model.use_ema = ["ema_9999", "ema_99995"]
@@ -110,6 +152,11 @@ def create_config():
     config.trainer.max_iter = 100_000
     config.trainer.save_ckpt_iter = 130
     config.trainer.logging_iter = 130
+
+    # When LR decay is requested, end the run at the cycle length so the decay
+    # reaches LR_F_MIN and the scheduler never indexes past its single cycle.
+    if LR_DECAY_STEPS > 0:
+        config.trainer.max_iter = LR_DECAY_STEPS
 
     config.log_config.group = ""
 

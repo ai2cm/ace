@@ -25,6 +25,13 @@
 #                Lo first.
 #   --student-steps: override ACE_STUDENT_STEPS (student denoising steps).
 #                Lo: try 1 vs 2; Hi: 1.
+#   --gan-r1:    R1 discriminator regularization weight (ACE_GAN_R1_REG_WEIGHT;
+#                fdistill only). Off by default; the standard fix for the
+#                disc-winning PRMSL spectral collapse (see MOE_DISTILLATION_STATUS.md).
+#   --gan-weight: generator GAN loss weight (ACE_GAN_LOSS_WEIGHT_GEN; default 1e-3).
+#                Lower to let forward-KL carry more of the signal.
+#   --lr-decay-steps: linearly decay all three LRs to ~5% over N iters and cap
+#                max_iter at N (ACE_LR_DECAY_STEPS). 0/unset = constant LR.
 
 set -e
 
@@ -35,6 +42,9 @@ SUFFIX=""
 MOE_TEACHER=false
 EXPERT=""
 STUDENT_STEPS=""
+GAN_R1=""
+GAN_WEIGHT=""
+LR_DECAY_STEPS=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --suffix)
@@ -51,6 +61,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --student-steps)
             STUDENT_STEPS="${2:?--student-steps requires a value}"
+            shift 2
+            ;;
+        --gan-r1)
+            GAN_R1="${2:?--gan-r1 requires a value}"
+            shift 2
+            ;;
+        --gan-weight)
+            GAN_WEIGHT="${2:?--gan-weight requires a value}"
+            shift 2
+            ;;
+        --lr-decay-steps)
+            LR_DECAY_STEPS="${2:?--lr-decay-steps requires a value}"
             shift 2
             ;;
         *)
@@ -159,6 +181,19 @@ fi
 # config as ACE_STUDENT_STEPS; drives both training and validation sampling).
 if [[ -n "$STUDENT_STEPS" ]]; then
     TEACHER_ENV_FLAGS+=(--env ACE_STUDENT_STEPS=$STUDENT_STEPS)
+fi
+
+# Optional GAN-stabilizer knobs (fdistill): R1 reg, generator GAN weight, LR
+# decay.  Read by fdistill_kl_spike.py as ACE_GAN_R1_REG_WEIGHT /
+# ACE_GAN_LOSS_WEIGHT_GEN / ACE_LR_DECAY_STEPS.
+if [[ -n "$GAN_R1" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_GAN_R1_REG_WEIGHT=$GAN_R1)
+fi
+if [[ -n "$GAN_WEIGHT" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_GAN_LOSS_WEIGHT_GEN=$GAN_WEIGHT)
+fi
+if [[ -n "$LR_DECAY_STEPS" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_LR_DECAY_STEPS=$LR_DECAY_STEPS)
 fi
 
 gantry run \
