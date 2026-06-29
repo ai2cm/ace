@@ -21,9 +21,11 @@ WORKSPACE="ai2/chloeh"
 CLUSTER="ai2/phobos"
 WANDB_SECRET="CHLOE_WANDB_API_KEY"   # beaker secret name holding your W&B API key
 
-SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
-CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
-REPO_ROOT=$(git rev-parse --show-toplevel)
+# Resolve the config path relative to the repo root from the script's OWN
+# location, so this works whether invoked from the repo root or the script dir.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CONFIG_PATH="${SCRIPT_DIR#"$REPO_ROOT"/}/$CONFIG_FILENAME"
 cd "$REPO_ROOT"
 
 DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
