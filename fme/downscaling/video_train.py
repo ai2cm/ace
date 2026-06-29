@@ -20,6 +20,7 @@ import torch
 import yaml
 
 from fme.core.cli import prepare_directory, remove_stale_tmp_checkpoints
+from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -31,14 +32,28 @@ from fme.downscaling.data import PairedDataLoaderConfig, PairedVideoBatchData
 from fme.downscaling.video_models import VideoDiffusionModelConfig
 
 
+def _linear_interp_endpoints(field: torch.Tensor) -> torch.Tensor:
+    """Per-frame temporal linear interpolation of the two endpoints along dim -3.
+
+    Works for ``(T, H, W)`` or ``(B, T, H, W)`` (time is the third-from-last dim).
+    """
+    n_times = field.shape[-3]
+    w = torch.linspace(0.0, 1.0, n_times, device=field.device)
+    w = w.reshape((n_times, 1, 1) if field.dim() == 3 else (1, n_times, 1, 1))
+    x0 = field[..., 0:1, :, :]
+    xT = field[..., n_times - 1 : n_times, :, :]
+    return (1 - w) * x0 + w * xT
+
+
 def _video_comparison_figure(gt, pred, name: str, example_idx: int):
-    """3-row (GT / Pred / Pred-GT) x T-frame grid for one variable + example."""
+    """4-row (GT / Linear / Pred / Pred-GT) x T-frame grid for one var + example."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     n_times = gt.shape[0]
+    lin = _linear_interp_endpoints(gt)
     diff = pred - gt
     vmin, vmax = float(gt.min()), float(gt.max())
     if vmax <= vmin:
@@ -46,10 +61,11 @@ def _video_comparison_figure(gt, pred, name: str, example_idx: int):
     dmax = max(float(diff.abs().max()), 1e-6)
     rows = [
         ("GT", gt, dict(vmin=vmin, vmax=vmax, cmap="viridis")),
+        ("Linear", lin, dict(vmin=vmin, vmax=vmax, cmap="viridis")),
         ("Pred", pred, dict(vmin=vmin, vmax=vmax, cmap="viridis")),
         ("Pred-GT", diff, dict(vmin=-dmax, vmax=dmax, cmap="RdBu_r")),
     ]
-    fig, axes = plt.subplots(3, n_times, figsize=(1.4 * n_times, 4.6), squeeze=False)
+    fig, axes = plt.subplots(4, n_times, figsize=(1.4 * n_times, 5.8), squeeze=False)
     for r, (label, data, kw) in enumerate(rows):
         for t in range(n_times):
             ax = axes[r][t]
@@ -115,13 +131,18 @@ class VideoTrainerConfig:
     max_epochs: int
     experiment_dir: str
     logging: LoggingConfig
+    # Optional held-out test split. When set, the test set is evaluated every
+    # ``test_interval`` epochs (metrics: MAE/RMSE, relative error, vs the linear
+    # baseline) and a few test examples are visualized on W&B.
+    test_data: PairedDataLoaderConfig | None = None
+    test_interval: int = 10
     save_checkpoints: bool = True
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
-    # Number of val examples to visualize (GT vs prediction frame grids) on W&B
-    # at each validation. 0 disables. The same first val examples are used each
-    # time so you can watch them improve across epochs.
+    # Number of val/test examples to visualize (GT/Linear/Pred/diff frame grids)
+    # on W&B. 0 disables. The same first examples are used each time so you can
+    # watch them improve across epochs.
     num_visualization_examples: int = 3
     segment_epochs: int | None = None
     validate_interval: int = 1
@@ -132,10 +153,13 @@ class VideoTrainerConfig:
     max_val_batches: int | None = None
 
     def __post_init__(self):
-        for name, data in (
+        datasets = [
             ("train_data", self.train_data),
             ("validation_data", self.validation_data),
-        ):
+        ]
+        if self.test_data is not None:
+            datasets.append(("test_data", self.test_data))
+        for name, data in datasets:
             if data.n_timesteps != self.model.n_timesteps:
                 raise ValueError(
                     f"{name}.n_timesteps ({data.n_timesteps}) must equal "
@@ -152,11 +176,18 @@ class VideoTrainerConfig:
         validation_data = self.validation_data.build_video(
             train=False, requirements=requirements
         )
+        test_data = (
+            self.test_data.build_video(train=False, requirements=requirements)
+            if self.test_data is not None
+            else None
+        )
         model = self.model.build()
         optimization = self.optimization.build(
             modules=[model.module], max_epochs=self.max_epochs
         )
-        return VideoTrainer(model, optimization, train_data, validation_data, self)
+        return VideoTrainer(
+            model, optimization, train_data, validation_data, self, test_data
+        )
 
     def configure_logging(self, log_filename: str):
         config = to_flat_dict(dataclasses.asdict(self))
@@ -166,12 +197,15 @@ class VideoTrainerConfig:
 
 
 class VideoTrainer:
-    def __init__(self, model, optimization, train_data, validation_data, config):
+    def __init__(
+        self, model, optimization, train_data, validation_data, config, test_data=None
+    ):
         self.model = model
         self.optimization = optimization
         self.null_optimization = NullOptimization()
         self.train_data = train_data
         self.validation_data = validation_data
+        self.test_data = test_data
         self.config = config
         self.ema = config.ema.build(self.model.modules)
         self.validate_using_ema = config.validate_using_ema
@@ -315,6 +349,75 @@ class VideoTrainer:
                     plt.close(fig)
         wandb.log(logs, step=self.num_batches_seen)
 
+    @torch.no_grad()
+    def evaluate_test(self) -> None:
+        """Evaluate the held-out test set: metrics + visualizations to W&B.
+
+        Per-channel MAE/RMSE, relative error (% of the channel's train std), and
+        improvement over the temporal linear-interpolation baseline. Metrics are
+        accumulated per rank then summed across ranks (``reduce_sum``) so they
+        reflect the whole test set; only root logs. Called by ALL ranks.
+        """
+        if self.test_data is None:
+            return
+        dist = Distributed.get_instance()
+        wandb = WandB.get_instance()
+        self.model.module.eval()
+        names = self.model.out_names
+        interior = slice(1, self.model.n_timesteps - 1)
+        # per channel: [sum|err_model|, sum err_model^2, sum|err_linear|, count]
+        acc = torch.zeros(len(names), 4, device=get_device())
+        viz = None
+        with self._validation_context():
+            for b, batch in enumerate(self.test_data.loader):
+                generated = self.model.generate(
+                    batch, n_samples=self.config.generate_n_samples
+                )
+                for c, name in enumerate(names):
+                    gt = batch.fine.data[name].float()
+                    pred = generated[name].float().mean(dim=1)  # ensemble mean
+                    lin = _linear_interp_endpoints(gt)
+                    gi, pi, li = gt[:, interior], pred[:, interior], lin[:, interior]
+                    acc[c, 0] += (pi - gi).abs().sum()
+                    acc[c, 1] += (pi - gi).pow(2).sum()
+                    acc[c, 2] += (li - gi).abs().sum()
+                    acc[c, 3] += gi.numel()
+                if b == 0 and dist.is_root():
+                    viz = (batch, generated)
+        dist.reduce_sum(acc)
+
+        logs: dict = {}
+        for c, name in enumerate(names):
+            s_abs, s_sq, s_abs_lin, count = acc[c].tolist()
+            if count == 0:
+                continue
+            mae = s_abs / count
+            rmse = (s_sq / count) ** 0.5
+            mae_linear = s_abs_lin / count
+            std = float(self.model.normalizer.stds[name].item())
+            logs[f"test/{name}/mae"] = mae
+            logs[f"test/{name}/rmse"] = rmse
+            logs[f"test/{name}/rel_mae_pct"] = 100 * mae / std
+            logs[f"test/{name}/rel_rmse_pct"] = 100 * rmse / std
+            logs[f"test/{name}/linear_mae"] = mae_linear
+            logs[f"test/{name}/mae_improvement_vs_linear_pct"] = (
+                100 * (mae_linear - mae) / mae_linear if mae_linear else 0.0
+            )
+
+        if dist.is_root() and wandb.enabled and viz is not None:
+            import matplotlib.pyplot as plt
+
+            batch, generated = viz
+            n = min(self.config.num_visualization_examples, len(batch.fine))
+            for i in range(n):
+                for name in names:
+                    gt = batch.fine.data[name][i].float().cpu()
+                    pred = generated[name][i].float().mean(dim=0).cpu()
+                    fig = _video_comparison_figure(gt, pred, name, i)
+                    logs[f"test_viz/example_{i}/{name}"] = wandb.Image(fig)
+                    plt.close(fig)
+        wandb.log(logs, step=self.num_batches_seen)
+
     def save_best_checkpoint(self, summary: dict[str, float]) -> None:
         if self.best_checkpoint_path is None:
             return
@@ -353,6 +456,8 @@ class VideoTrainer:
                 if dist.is_root() and self.config.save_checkpoints:
                     self.save_best_checkpoint(summary)
                 self.log_validation_visualizations()  # all ranks (barrier-safe)
+            if epoch % self.config.test_interval == 0:
+                self.evaluate_test()  # all ranks (barrier-safe)
             if dist.is_root() and self.config.save_checkpoints:
                 self.save_epoch_checkpoint()
             wandb.log(

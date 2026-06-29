@@ -7,9 +7,10 @@
 # normalization is train-only over the region+period. Checkpoints + logs land in
 # /results (captured as the Beaker result dataset).
 experiment_dir: /results
-max_epochs: 50
+max_epochs: 100
 validate_using_ema: true
 validate_interval: 5
+test_interval: 10
 generate_n_samples: 1
 logging:
   log_to_screen: true
@@ -72,6 +73,31 @@ validation_data:
   lon_extent:
     start: 0
     stop: 60
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 64
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 30
+  lon_extent:
+    start: 0
+    stop: 60
 model:
   n_timesteps: 9
   model_channels: 64
@@ -80,7 +106,7 @@ model:
   sigma_min: 0.002
   sigma_max: 80.0
   churn: 0.0
-  num_diffusion_generation_steps: 18
+  num_diffusion_generation_steps: 50
   out_names:
     - eastward_wind_at_ten_meters
     - northward_wind_at_ten_meters

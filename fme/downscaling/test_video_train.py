@@ -44,6 +44,8 @@ def _trainer_config(tmp_path):
         optimization=OptimizationConfig(lr=1e-3),
         train_data=_data_config(paths),
         validation_data=_data_config(paths),
+        test_data=_data_config(paths),
+        test_interval=1,
         max_epochs=2,
         experiment_dir=str(tmp_path / "exp"),
         logging=LoggingConfig(
