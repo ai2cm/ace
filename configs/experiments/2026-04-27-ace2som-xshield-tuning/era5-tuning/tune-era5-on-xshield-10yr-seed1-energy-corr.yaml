@@ -92,8 +92,8 @@ stepper_training:
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
-    weights:
-      PRATEsfc: 10
+    #weights:
+    #  PRATEsfc: 10
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
