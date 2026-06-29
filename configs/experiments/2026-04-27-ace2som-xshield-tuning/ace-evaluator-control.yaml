@@ -25,7 +25,7 @@ aggregator:
     variables:
       - PRATEsfc
       - TMP2m
-      - PRMSL
+      #- PRMSL
       - UGRD10m
       - VGRD10m
       - PRESsfc

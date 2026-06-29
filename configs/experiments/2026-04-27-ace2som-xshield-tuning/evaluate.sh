@@ -20,11 +20,11 @@ cd $REPO_ROOT
 #MODEL_CHECKPOINT_DATASETS=("01KQD8NF9HQD1QY2X0S132YH72" "01KQD8NMEYCVQ835WQV751MNYP")
 
 # New ERA5 tuned on XSHiELD
-MODEL_CHECKPOINT_DATASETS=("01KVZRJHM9JASMR0TVNNNQRBQR")
+MODEL_CHECKPOINT_DATASETS=("01K9FW2KRSDB52ZDR6GPYM0B9Z")
 
 for seed in {0..0}; do
     #job_name="evaluate-4k-ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="evaluate-ace2s-era5-tuned-on-xshield-seed${seed}"
+    job_name="evaluate-ace2s-era5-tuned-on-xshield-upweight-precip-seed${seed}"
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \
