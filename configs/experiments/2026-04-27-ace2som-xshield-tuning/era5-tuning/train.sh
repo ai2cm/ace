@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-era5-on-xshield-10yr-control-old-weights.yaml"
+CONFIG_FILENAME="tune-era5-on-xshield-10yr-old-weights-upweight-precip5x.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -23,7 +23,7 @@ PRE_TRAINED_WEIGHTS_DATASETS=("01KSVC6YS7C18SGYV4VPZYZ232")
 
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-era5-tune-xshield-10yr-control-old-weights-seed${seed}"
+    job_name="ace2s-era5-tune-xshield-10yr-old-weights-upweight-precip5x-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -32,8 +32,8 @@ for seed in {0..0}; do
         --name $job_name \
         --description 'Run ACE training' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-titan \
-        --priority urgent \
+        --workspace ai2/ace \
+        --priority high \
         --preemptible \
         --cluster ai2/titan \
         --env WANDB_NAME=$job_name \

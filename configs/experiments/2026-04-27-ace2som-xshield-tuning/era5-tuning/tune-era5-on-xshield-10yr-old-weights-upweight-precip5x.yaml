@@ -99,10 +99,10 @@ stepper_training:
       air_temperature_1: 0.5
       eastward_wind_0: 0.5
       northward_wind_0: 0.5
-      specific_total_water_0: 0.05
-      specific_total_water_1: 0.025
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
       specific_total_water_2: 0.5
-      PRATEsfc: 5.0
+      PRATEsfc: 5
       h500: 10
       TMP850: 5
       Q2m: 0.5
