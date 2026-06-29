@@ -1,22 +1,26 @@
 """
 Coarsen the existing daily-mean UFS Replay zarr dataset to 5-day means.
 
-Processes variable-by-variable to keep memory bounded and avoid
-building a massive dask task graph.
+Processes variable-by-variable to keep memory bounded and avoid building a
+massive dask task graph.  The output store is initialized lazily (metadata
+only) so the chunk/shard layout matches the beam pipeline convention
+(time chunk=1, time shard=360, zarr v3), then each time-varying variable is
+filled with a region write.
 
 Usage:
     python coarsen_to_5day.py <input_zarr> <output_zarr> [--factor 5]
 
 Example (GCS):
     python coarsen_to_5day.py \
-        gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-1994-2023.zarr \
-        gs://vcm-ml-intermediate/2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+    gs://vcm-ml-intermediate/2026-06-26-ufs-replay-ocean-1deg-19level-1994-2023.zarr \
+    gs://vcm-ml-intermediate/2026-06-28-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
 """
 
 import argparse
 import logging
 import time
 
+import dask.array as darr
 import numpy as np
 import xarray as xr
 import zarr
@@ -24,7 +28,14 @@ import zarr
 TIME_INVARIANT_PREFIXES = ("mask_", "idepth_")
 TIME_INVARIANT_NAMES = {"land_fraction", "sea_surface_fraction", "deptho", "mask_2d"}
 
-BATCH_SIZE = 500  # timesteps to load at a time (must be divisible by factor)
+# Match the beam pipeline output layout (see run-dataflow.sh:
+# --output_time_chunksize 1 --output_time_shardsize 360).
+TIME_CHUNK = 1
+TIME_SHARD = 360
+
+BATCH_SIZE = 500  # input timesteps to load at a time (divisible by factor)
+
+KEEP_COORDS = {"time", "lat", "lon"}
 
 
 def is_time_invariant(name: str) -> bool:
@@ -33,9 +44,17 @@ def is_time_invariant(name: str) -> bool:
     return any(name.startswith(p) for p in TIME_INVARIANT_PREFIXES)
 
 
+def _drop_stray_coords(ds: xr.Dataset) -> xr.Dataset:
+    """Drop non-dimension coords (cftime, ftime, z_l, …) that otherwise
+    leak into the output encoding as a 'coordinates' attribute."""
+    stray = [c for c in ds.coords if c not in KEEP_COORDS and c not in ds.dims]
+    return ds.drop_vars(stray) if stray else ds
+
+
 def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
     logging.info("Opening %s", input_path)
     ds = xr.open_zarr(input_path)
+    ds = _drop_stray_coords(ds)
 
     n_times = ds.sizes["time"]
     nlat = ds.sizes["lat"]
@@ -54,7 +73,7 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
     if remainder > 0:
         logging.warning("Trimming %d trailing timesteps", remainder)
 
-    # Separate variables
+    # Separate time-varying from time-invariant variables
     time_vars = []
     invariant_vars = []
     for name in ds.data_vars:
@@ -62,71 +81,69 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
             invariant_vars.append(name)
         else:
             time_vars.append(name)
-
     logging.info(
         "Time-varying: %d, time-invariant: %d", len(time_vars), len(invariant_vars)
     )
 
-    # Compute output time coordinate
-    # Load input times and average each group of `factor`
-    in_times = ds.time.values[:usable]
-    out_times = []
-    for i in range(0, usable, factor):
-        t = in_times[i + factor // 2]  # middle day of window
-        if hasattr(t, "year"):
-            import cftime
-
-            if isinstance(t, cftime.datetime):
-                out_times.append(type(t)(t.year, t.month, t.day, 12, 0, 0))
-            else:
-                day = np.datetime64(t, "D")
-                out_times.append(np.datetime64(str(day) + "T12:00:00"))
-        else:
-            out_times.append(t)
-
-    # Initialize output zarr store with a skeleton dataset
-    logging.info("Initializing output store at %s", output_path)
-    time_chunk = min(50, n_out)
-
-    skeleton_vars = {}
-    for name in time_vars:
-        skeleton_vars[name] = xr.DataArray(
-            data=np.empty((0, nlat, nlon), dtype=np.float32),
-            dims=["time", "lat", "lon"],
-            attrs=ds[name].attrs,
-        )
-    for name in invariant_vars:
-        skeleton_vars[name] = ds[name].load()
-
-    skeleton = xr.Dataset(skeleton_vars)
-    skeleton = skeleton.assign_coords(
-        time=xr.DataArray([], dims="time"),
-        lat=ds.lat,
-        lon=ds.lon,
+    # Output time coordinate: average each group of `factor` daily steps,
+    # matching how the beam pipeline derives its time labels.  For an odd
+    # factor this lands on the middle day (preserving the 09Z label).
+    out_times = (
+        ds["time"]
+        .isel(time=slice(0, usable))
+        .coarsen(time=factor, boundary="trim")
+        .mean()
+        .values
     )
 
-    # Write skeleton to create the store structure, then resize
+    # --- Initialize the output store (metadata + coords + invariant vars) ---
+    # Time-varying variables are backed by lazy dask zeros and written with
+    # compute=False, so the zeros are never materialized; we overwrite each
+    # variable's full time range with a region write below.
+    time_shard = min(TIME_SHARD, n_out)
+    logging.info(
+        "Initializing output store at %s (chunk=%d, shard=%d in time)",
+        output_path,
+        TIME_CHUNK,
+        time_shard,
+    )
+
+    skeleton_vars = {}
     encoding = {}
     for name in time_vars:
+        skeleton_vars[name] = (
+            ["time", "lat", "lon"],
+            darr.zeros(
+                (n_out, nlat, nlon),
+                chunks=(time_shard, nlat, nlon),
+                dtype=np.float32,
+            ),
+            dict(ds[name].attrs),
+        )
         encoding[name] = {
-            "chunks": (time_chunk, nlat, nlon),
+            "chunks": (TIME_CHUNK, nlat, nlon),
+            "shards": (time_shard, nlat, nlon),
             "dtype": "float32",
         }
+    for name in invariant_vars:
+        da = ds[name].load()
+        da.encoding = {}
+        skeleton_vars[name] = da
 
-    skeleton.to_zarr(output_path, mode="w", encoding=encoding, consolidated=False)
+    skeleton = xr.Dataset(
+        skeleton_vars,
+        coords={"time": out_times, "lat": ds.lat, "lon": ds.lon},
+    )
+    skeleton.to_zarr(
+        output_path,
+        mode="w",
+        encoding=encoding,
+        compute=False,
+        zarr_format=3,
+        consolidated=False,
+    )
 
-    # Now open the store and resize + write the time coordinate
-    store = zarr.open(output_path, mode="r+")
-    for name in time_vars:
-        store[name].resize((n_out, nlat, nlon))
-    # Write time coordinate
-    if "time" in store:
-        store["time"].resize((n_out,))
-    else:
-        store.create_dataset("time", shape=(n_out,), dtype=object, overwrite=True)
-    store["time"][:] = np.array(out_times)
-
-    # Process time-varying variables one at a time
+    # --- Fill each time-varying variable with a region write ---
     t_start = time.time()
     batch = max(factor, (BATCH_SIZE // factor) * factor)
     logging.info(
@@ -135,32 +152,32 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
 
     for vi, name in enumerate(time_vars):
         var_start = time.time()
+        out_array = np.empty((n_out, nlat, nlon), dtype=np.float32)
         out_idx = 0
 
         for t0 in range(0, usable, batch):
             t1 = min(t0 + batch, usable)
             chunk = ds[name].isel(time=slice(t0, t1)).values  # eager load
-            n_chunk = t1 - t0
-            n_groups = n_chunk // factor
-
-            # Reshape to (n_groups, factor, lat, lon) and mean
+            n_groups = (t1 - t0) // factor
             reshaped = chunk[: n_groups * factor].reshape(n_groups, factor, nlat, nlon)
-            coarsened = reshaped.mean(axis=1).astype(np.float32)
-
-            store[name][out_idx : out_idx + n_groups] = coarsened
+            out_array[out_idx : out_idx + n_groups] = reshaped.mean(axis=1)
             out_idx += n_groups
 
-        elapsed = time.time() - var_start
+        # Region write of the full time range writes complete shards.
+        xr.Dataset({name: (["time", "lat", "lon"], out_array)}).to_zarr(
+            output_path,
+            region={"time": slice(0, n_out)},
+        )
+
         logging.info(
             "  [%d/%d] %s done (%.1fs, wrote %d timesteps)",
             vi + 1,
             len(time_vars),
             name,
-            elapsed,
+            time.time() - var_start,
             out_idx,
         )
 
-    # Consolidate metadata
     zarr.consolidate_metadata(output_path)
 
     total = time.time() - t_start
@@ -171,7 +188,7 @@ def coarsen_dataset(input_path: str, output_path: str, factor: int = 5):
         output_path,
     )
 
-    print(f"\n=== Summary ===")
+    print("\n=== Summary ===")
     print(f"Input:  {n_times} daily timesteps")
     print(f"Output: {n_out} {factor}-day mean timesteps")
     print(f"Time range: {out_times[0]} to {out_times[-1]}")
