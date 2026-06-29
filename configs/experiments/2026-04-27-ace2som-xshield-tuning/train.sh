@@ -3,7 +3,7 @@
 set -e
 
 
-CONFIG_FILENAME="tune-xshield-10yr-resolution-curriculum.yaml"
+CONFIG_FILENAME="tune-xshield-10yr-control.yaml"
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -37,7 +37,7 @@ POSEMB_TUNED=("01KVRAQRJRPARFT7CRC5R87WVS")
 #        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:/pre-trained-weights \
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-shieldplus-tune-xshield-10yr-control-res-curriculum-seed${seed}"
+    job_name="ace2s-shieldplus-tune-xshield-10yr-control-correct-weights-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -46,8 +46,8 @@ for seed in {0..0}; do
         --name $job_name \
         --description 'Run ACE training' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/climate-titan \
-        --priority urgent \
+        --workspace ai2/ace \
+        --priority high \
         --preemptible \
         --cluster ai2/titan \
         --env WANDB_NAME=$job_name \
@@ -57,7 +57,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${POSEMB_TUNED[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
+        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
