@@ -88,6 +88,81 @@ def test_zero_fraction_per_variable_threshold():
     assert logs["gen/b"] == 0.0
 
 
+def test_zero_fraction_maps_disabled_by_default():
+    pred = torch.ones(SHAPE)
+    pred[..., : SHAPE[-1] // 2] = 0.0
+    data = InferenceBatchData(
+        prediction={"PRATEsfc": pred},
+        target={"PRATEsfc": torch.ones(SHAPE)},
+        time=InferenceBatchData.new_test_data().time,
+        i_time_start=0,
+    )
+    agg = ZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
+    agg.record_batch(data)
+    logs = agg.get_logs("")
+    assert not any("map" in key for key in logs)
+    assert len(agg.get_dataset().data_vars) == 0
+
+
+def test_zero_fraction_maps_logged_with_target():
+    # first half of lon is exactly zero in gen; target has no zero cells.
+    pred = torch.ones(SHAPE)
+    pred[..., : SHAPE[-1] // 2] = 0.0
+    data = InferenceBatchData(
+        prediction={"PRATEsfc": pred},
+        target={"PRATEsfc": torch.ones(SHAPE)},
+        time=InferenceBatchData.new_test_data().time,
+        i_time_start=0,
+    )
+    agg = ZeroFractionAggregator(
+        area_weighted_mean=_ops().area_weighted_mean, include_maps=True
+    )
+    agg.record_batch(data)
+    logs = agg.get_logs("val")
+    # scalar metrics still present
+    assert logs["val/gen/PRATEsfc"] == 0.5
+    # side-by-side comparison and error maps logged (as wandb Images)
+    assert "val/gen_target_map/PRATEsfc" in logs
+    assert "val/error_map/PRATEsfc" in logs
+    assert "val/gen_map/PRATEsfc" not in logs  # only when target absent
+
+    ds = agg.get_dataset()
+    gen_map = ds["gen_map-PRATEsfc"].values
+    target_map = ds["target_map-PRATEsfc"].values
+    error_map = ds["error_map-PRATEsfc"].values
+    half = SHAPE[-1] // 2
+    # per-cell fraction of time at/below 0: 1 where gen is zero, else 0
+    assert (gen_map[:, :half] == 1.0).all()
+    assert (gen_map[:, half:] == 0.0).all()
+    assert (target_map == 0.0).all()
+    assert (error_map == gen_map).all()
+
+
+def test_zero_fraction_maps_no_target():
+    pred = torch.zeros(SHAPE)
+    data = InferenceBatchData(
+        prediction={"PRATEsfc": pred},
+        time=InferenceBatchData.new_test_data().time,
+        i_time_start=0,
+    )
+    agg = ZeroFractionAggregator(
+        area_weighted_mean=_ops().area_weighted_mean, include_maps=True
+    )
+    agg.record_batch(data)
+    logs = agg.get_logs("")
+    assert "gen_map/PRATEsfc" in logs
+    assert "gen_target_map/PRATEsfc" not in logs
+    assert "error_map/PRATEsfc" not in logs
+    ds = agg.get_dataset()
+    assert (ds["gen_map-PRATEsfc"].values == 1.0).all()
+    assert "target_map-PRATEsfc" not in ds
+    assert "error_map-PRATEsfc" not in ds
+
+
+def test_zero_fraction_metric_config_include_maps_default_false():
+    assert ZeroFractionMetricConfig().include_maps is False
+
+
 def test_zero_fraction_metric_config_disabled_by_default():
     config = ZeroFractionMetricConfig()
     assert config.enabled is False

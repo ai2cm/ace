@@ -1,12 +1,16 @@
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 
+import matplotlib.pyplot as plt
 import torch
 import xarray as xr
 
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import Image
 
+from ..plotting import plot_paneled_data
 from .build_context import MetricBuildContext, maybe_filter
 from .data import InferenceBatchData, MetricBuildResult, SubAggregator
 
@@ -34,6 +38,10 @@ class ZeroFractionMetricConfig:
         per_variable_threshold: optional per-variable thresholds overriding
             ``threshold`` for the named variables.
         name: log prefix and wandb key prefix.
+        include_maps: if True, also log 2D maps of the per-cell time-mean
+            at-or-below-threshold fraction: a side-by-side generated/target
+            comparison and the generated-minus-target error map. Defaults to
+            False.
         enabled: master toggle for the metric.
         strict: raise if the metric can't be built.
     """
@@ -42,6 +50,7 @@ class ZeroFractionMetricConfig:
     threshold: float = 0.0
     per_variable_threshold: dict[str, float] = dataclasses.field(default_factory=dict)
     name: str = "zero_threshold_fraction"
+    include_maps: bool = False
     enabled: bool = False
     strict: bool = True
 
@@ -60,6 +69,9 @@ class ZeroFractionMetricConfig:
             area_weighted_mean=ctx.ops.area_weighted_mean,
             threshold=self.threshold,
             per_variable_threshold=self.per_variable_threshold,
+            include_maps=self.include_maps,
+            variable_metadata=ctx.variable_metadata,
+            horizontal_dims=ctx.horizontal_coordinates.dims,
         )
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
 
@@ -71,6 +83,12 @@ class ZeroFractionAggregator:
     available, its difference from the target (gen - target), averaged over all
     sample/time entries seen. The metric name is supplied by the caller as the
     ``label`` prefix in :meth:`get_logs`.
+
+    When ``include_maps`` is set it additionally accumulates the per-cell
+    time-mean at-or-below-threshold fraction (the fraction of sample/time
+    entries for which each cell is ``<= threshold``) and, in :meth:`get_logs`,
+    plots a side-by-side generated/target comparison plus the
+    generated-minus-target error map.
     """
 
     def __init__(
@@ -78,15 +96,28 @@ class ZeroFractionAggregator:
         area_weighted_mean: AreaWeightedMean,
         threshold: float = 0.0,
         per_variable_threshold: dict[str, float] | None = None,
+        include_maps: bool = False,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        horizontal_dims: Sequence[str] | None = None,
     ):
         self._area_weighted_mean = area_weighted_mean
         self._threshold = threshold
         self._per_variable_threshold = per_variable_threshold or {}
+        self._include_maps = include_maps
+        self._variable_metadata = variable_metadata or {}
+        self._horizontal_dims = (
+            list(horizontal_dims) if horizontal_dims else ["lat", "lon"]
+        )
         self._dist = Distributed.get_instance()
         self._gen_sum: dict[str, torch.Tensor] = {}
         self._gen_count: dict[str, int] = {}
         self._target_sum: dict[str, torch.Tensor] = {}
         self._target_count: dict[str, int] = {}
+        # per-cell [lat, lon] sums of the at-or-below-threshold indicator
+        self._gen_map_sum: dict[str, torch.Tensor] = {}
+        self._gen_map_count: dict[str, int] = {}
+        self._target_map_sum: dict[str, torch.Tensor] = {}
+        self._target_map_count: dict[str, int] = {}
 
     def _threshold_for(self, name: str) -> float:
         return self._per_variable_threshold.get(name, self._threshold)
@@ -96,6 +127,8 @@ class ZeroFractionAggregator:
         data: TensorMapping,
         sums: dict[str, torch.Tensor],
         counts: dict[str, int],
+        map_sums: dict[str, torch.Tensor],
+        map_counts: dict[str, int],
     ) -> None:
         for name, tensor in data.items():
             below = (tensor <= self._threshold_for(name)).to(tensor.dtype)
@@ -105,12 +138,37 @@ class ZeroFractionAggregator:
             frac = self._area_weighted_mean(below, name=name)
             sums[name] = sums.get(name, frac.new_zeros(())) + frac.sum()
             counts[name] = counts.get(name, 0) + frac.numel()
+            if self._include_maps:
+                # sum the indicator over the (sample, time) leading dims,
+                # leaving a [lat, lon] map; divided by the count later this is
+                # each cell's fraction of entries at or below the threshold.
+                sample_dim, time_dim = 0, 1
+                cell_sum = below.sum(dim=time_dim).sum(dim=sample_dim)
+                if name in map_sums:
+                    map_sums[name] = map_sums[name] + cell_sum
+                else:
+                    map_sums[name] = cell_sum
+                map_counts[name] = map_counts.get(name, 0) + below.size(
+                    sample_dim
+                ) * below.size(time_dim)
 
     @torch.no_grad()
     def record_batch(self, data: InferenceBatchData) -> None:
-        self._accumulate(data.prediction, self._gen_sum, self._gen_count)
+        self._accumulate(
+            data.prediction,
+            self._gen_sum,
+            self._gen_count,
+            self._gen_map_sum,
+            self._gen_map_count,
+        )
         if data.has_target:
-            self._accumulate(data.target, self._target_sum, self._target_count)
+            self._accumulate(
+                data.target,
+                self._target_sum,
+                self._target_count,
+                self._target_map_sum,
+                self._target_map_count,
+            )
 
     def _reduced_means(
         self, sums: dict[str, torch.Tensor], counts: dict[str, int]
@@ -121,19 +179,86 @@ class ZeroFractionAggregator:
             means[name] = self._dist.reduce_mean(local_mean).item()
         return means
 
+    def _reduced_maps(
+        self, sums: dict[str, torch.Tensor], counts: dict[str, int]
+    ) -> dict[str, torch.Tensor]:
+        maps: dict[str, torch.Tensor] = {}
+        for name, total in sums.items():
+            local_map = total / counts[name]
+            maps[name] = self._dist.reduce_mean(local_map)
+        return maps
+
+    def _caption_name_units(self, name: str) -> tuple[str, str]:
+        if name in self._variable_metadata:
+            return (
+                self._variable_metadata[name].display_long_name(name),
+                self._variable_metadata[name].display_units(),
+            )
+        return name, "unknown_units"
+
+    def _map_logs(self) -> dict[str, Image]:
+        gen_maps = self._reduced_maps(self._gen_map_sum, self._gen_map_count)
+        target_maps = self._reduced_maps(self._target_map_sum, self._target_map_count)
+        logs: dict[str, Image] = {}
+        for name, gen_map in gen_maps.items():
+            caption_name, units = self._caption_name_units(name)
+            threshold = self._threshold_for(name)
+            fraction_desc = (
+                f"{caption_name} fraction of time at or below " f"{threshold:g} {units}"
+            )
+            if name in target_maps:
+                target_map = target_maps[name]
+                comparison_image = plot_paneled_data(
+                    [[gen_map.cpu().numpy()], [target_map.cpu().numpy()]],
+                    diverging=False,
+                    caption=f"{fraction_desc}; (top) generated and (bottom) target",
+                )
+                error_image = plot_paneled_data(
+                    [[(gen_map - target_map).cpu().numpy()]],
+                    diverging=True,
+                    caption=f"{fraction_desc} error (generated - target)",
+                )
+                logs[f"gen_target_map/{name}"] = comparison_image
+                logs[f"error_map/{name}"] = error_image
+            else:
+                gen_image = plot_paneled_data(
+                    [[gen_map.cpu().numpy()]],
+                    diverging=False,
+                    caption=f"{fraction_desc}; generated",
+                )
+                logs[f"gen_map/{name}"] = gen_image
+        plt.close("all")
+        return logs
+
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, float]:
+    def get_logs(self, label: str) -> dict[str, float | Image]:
         gen_means = self._reduced_means(self._gen_sum, self._gen_count)
         target_means = self._reduced_means(self._target_sum, self._target_count)
-        logs: dict[str, float] = {}
+        logs: dict[str, float | Image] = {}
         for name, value in gen_means.items():
             logs[f"gen/{name}"] = value
             if name in target_means:
                 logs[f"gen_minus_target/{name}"] = value - target_means[name]
+        if self._include_maps:
+            logs.update(self._map_logs())
         if label != "":
             logs = {f"{label}/{k}": v for k, v in logs.items()}
         return logs
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
-        return xr.Dataset()
+        if not self._include_maps:
+            return xr.Dataset()
+        gen_maps = self._reduced_maps(self._gen_map_sum, self._gen_map_count)
+        target_maps = self._reduced_maps(self._target_map_sum, self._target_map_count)
+        dims = self._horizontal_dims
+        data: dict[str, xr.DataArray] = {}
+        for name, gen_map in gen_maps.items():
+            data[f"gen_map-{name}"] = xr.DataArray(gen_map.cpu(), dims=dims)
+            if name in target_maps:
+                target_map = target_maps[name]
+                data[f"target_map-{name}"] = xr.DataArray(target_map.cpu(), dims=dims)
+                data[f"error_map-{name}"] = xr.DataArray(
+                    (gen_map - target_map).cpu(), dims=dims
+                )
+        return xr.Dataset(data)

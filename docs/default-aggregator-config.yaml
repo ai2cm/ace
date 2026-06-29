@@ -110,6 +110,7 @@ aggregator:
     threshold: 0.0
     per_variable_threshold: {}
     name: zero_threshold_fraction
+    include_maps: false
     enabled: false
     strict: true
   monthly_reference_data: null
