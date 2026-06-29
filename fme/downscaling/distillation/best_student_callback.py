@@ -96,6 +96,59 @@ def _crps_ensemble(
     return accuracy - spread
 
 
+# Per-variable tail config defaults.  The extreme that matters is variable-
+# specific: deep low-pressure systems live in PRMSL's *lower* tail, while wind
+# and precip extremes live in the *upper* tail.  Histogram ranges are in the
+# variables' physical (denormalized) units and must bracket the full
+# distribution so the CDF-integrated quantile is correct (PRMSL in hPa — see
+# scripts/downscaling/plot_events.py UNITS).
+_DEFAULT_TAIL_HIST_RANGES: dict[str, tuple[float, float]] = {
+    "PRATEsfc": (0.0, 0.1),  # kg/m^2/s
+    "PRMSL": (900.0, 1080.0),  # hPa
+    "eastward_wind_at_ten_meters": (-70.0, 70.0),  # m/s
+    "northward_wind_at_ten_meters": (-70.0, 70.0),  # m/s
+}
+# Variables not listed default to "upper".
+_DEFAULT_TAIL_DIRECTIONS: dict[str, str] = {"PRMSL": "lower"}
+
+
+def _tail_quantile_level(percentile: float, direction: str) -> float:
+    """Map an extremeness ``percentile`` + tail ``direction`` to a CDF quantile.
+
+    ``"upper"`` → ``percentile / 100`` (e.g. 99.99 → 0.9999); ``"lower"`` →
+    its reflection ``1 - percentile / 100`` (e.g. 99.99 → 0.0001).
+    """
+    if direction == "upper":
+        return percentile / 100.0
+    if direction == "lower":
+        return 1.0 - percentile / 100.0
+    raise ValueError(f"tail direction must be 'upper' or 'lower', got {direction!r}")
+
+
+def _normalized_mean(
+    values_by_var: dict[str, float], scales: dict[str, float]
+) -> float:
+    """Mean over variables of ``value / scale`` (per-var ``scale``, default 1.0).
+
+    Used to reduce per-variable CRPS (in physical units, wildly different
+    magnitudes) into a single scale-free selection number, so e.g. precip
+    (~1e-5) is not drowned out by PRMSL (~1e3).
+    """
+    normed = [v / scales.get(k, 1.0) for k, v in values_by_var.items()]
+    return float(np.mean(normed)) if normed else float("inf")
+
+
+def _tail_deviation_score(ratios_by_var: dict[str, float]) -> float:
+    """Mean over variables of ``|ratio - 1|`` (0 = student tail matches teacher).
+
+    Each variable's discrepancy counts, so over-prediction in one variable
+    cannot cancel under-prediction in another (which a mean-of-ratios would
+    allow).
+    """
+    devs = [abs(r - 1.0) for r in ratios_by_var.values()]
+    return float(np.mean(devs)) if devs else float("inf")
+
+
 class BestStudentCheckpointCallback:
     """Save an ACE-format student checkpoint whenever validation CRPS improves.
 
@@ -136,26 +189,32 @@ class BestStudentCheckpointCallback:
             sampling for validation.  Should match the distillation
             ``student_sample_steps`` so validation reflects the trajectory
             the student was actually trained on.  Defaults to 4.
-        tail_percentiles: Upper-tail percentiles to track per variable
-            (default ``[99.99, 99.9999]``).  Each is logged as
+        tail_percentiles: Tail extremeness levels to track per variable
+            (default ``[99.99, 99.9999]``).  Applied per ``tail_directions``:
+            an ``"upper"`` variable uses quantile ``pct/100``, a ``"lower"``
+            variable its reflection ``1 - pct/100``.  Each is logged as
             ``val/tail_<pct>_<var>`` = student_pXX / target_pXX (values < 1
-            mean the student under-predicts the tail, > 1 means it over-
-            predicts).  CRPS remains the ``best_checkpoint_path`` selection
-            criterion; see ``best_tail_checkpoint_path`` for tail-driven
-            selection.
-        tail_hist_ranges: Per-variable ``(lo, hi)`` ranges used to bin values
-            for percentile estimation.  Variables not in this dict get the
-            tail metric skipped (CRPS is still computed).  Defaults to
-            ``{"PRATEsfc": (0.0, 0.1)}`` (kg/m²/s); extend for other targets.
+            mean the student under-predicts the tail extreme, > 1 over-
+            predicts).  The (std-normalized, var-averaged) CRPS remains the
+            ``best_checkpoint_path`` criterion; see
+            ``best_tail_checkpoint_path`` for tail-driven selection.
+        tail_hist_ranges: Per-variable ``(lo, hi)`` ranges (physical units)
+            used to bin values for percentile estimation; must bracket the
+            full distribution.  Variables not in this dict get the tail metric
+            skipped (CRPS is still computed).  Defaults to
+            ``_DEFAULT_TAIL_HIST_RANGES`` (precip/PRMSL/u10/v10).
+        tail_directions: Per-variable tail side, ``"upper"`` or ``"lower"``.
+            Defaults to ``_DEFAULT_TAIL_DIRECTIONS`` (PRMSL → ``"lower"`` for
+            deep-low extremes, everything else → ``"upper"``).
         tail_hist_bins: Number of equal-width bins inside each variable's
             range (default 10000).  Resolution is ``(hi - lo) / tail_hist_bins``
             — for PRATEsfc that's 1e-5 kg/m²/s.
         best_tail_checkpoint_path: Optional destination path for a checkpoint
             selected by the tail metric rather than CRPS.  When provided,
-            saves whenever the highest-percentile mean-across-variables tail
-            ratio is closest to 1.0 (minimises ``|ratio - 1|``).  Useful when
-            CRPS has plateaued but tail under/over-prediction is still
-            evolving.
+            saves whenever the highest-percentile tail score improves, where
+            the score is the mean over variables of ``|ratio - 1|`` (each
+            variable's discrepancy counts; no cross-variable cancellation).
+            Useful when CRPS has plateaued but tail fidelity is still evolving.
         validation_mode: How the student output ensemble is produced before
             comparing to the teacher zarr (see ``student_sampling``):
 
@@ -189,6 +248,7 @@ class BestStudentCheckpointCallback:
         student_sample_steps: int = 4,
         tail_percentiles: list[float] | None = None,
         tail_hist_ranges: dict[str, tuple[float, float]] | None = None,
+        tail_directions: dict[str, str] | None = None,
         tail_hist_bins: int = 10000,
         best_tail_checkpoint_path: str | None = None,
         validation_mode: str = "from_noise",
@@ -208,8 +268,24 @@ class BestStudentCheckpointCallback:
         self._tail_hist_ranges: dict[str, tuple[float, float]] = (
             dict(tail_hist_ranges)
             if tail_hist_ranges is not None
-            else {"PRATEsfc": (0.0, 0.1)}
+            else dict(_DEFAULT_TAIL_HIST_RANGES)
         )
+        self._tail_directions: dict[str, str] = (
+            dict(tail_directions)
+            if tail_directions is not None
+            else dict(_DEFAULT_TAIL_DIRECTIONS)
+        )
+        for var, direction in self._tail_directions.items():
+            if direction not in ("upper", "lower"):
+                raise ValueError(
+                    f"tail_directions[{var!r}] must be 'upper' or 'lower', "
+                    f"got {direction!r}."
+                )
+        # Per-variable CRPS scale (the variable's std) so CRPS in disparate
+        # physical units can be averaged across variables without the
+        # large-magnitude fields dominating.  Read from the teacher's fine
+        # normalizer; missing entries fall back to 1.0 (no normalization).
+        self._crps_scales: dict[str, float] = self._per_var_scales(teacher_model)
         self._tail_hist_bins = tail_hist_bins
         self._best_tail_checkpoint_path = best_tail_checkpoint_path
         if validation_mode not in ("from_noise", "lo_renoise"):
@@ -219,10 +295,30 @@ class BestStudentCheckpointCallback:
             )
         self._validation_mode = validation_mode
         self._best_crps = float("inf")
-        # Tracks min |ratio - 1.0| for best_tail_checkpoint_path selection,
-        # using the highest (most extreme) percentile in tail_percentiles.
+        # Tracks min mean-over-vars |ratio - 1.0| for best_tail_checkpoint_path
+        # selection, using the highest (most extreme) percentile.
         self._best_tail_score = float("inf")
         self._teacher_ds: xr.Dataset | None = None
+
+    @staticmethod
+    def _per_var_scales(teacher_model: DiffusionModel) -> dict[str, float]:
+        """Per-variable CRPS scale (the fine normalizer's std) for each output.
+
+        Returns ``{var: std}`` over ``teacher_model.out_packer.names``.  Std
+        tensors are reduced with ``mean()`` (they are per-variable scalars in
+        practice); a missing or non-positive std falls back to ``1.0`` so the
+        variable contributes its raw physical CRPS rather than dividing by zero.
+        """
+        stds = getattr(teacher_model.normalizer.fine, "stds", {}) or {}
+        scales: dict[str, float] = {}
+        for name in teacher_model.out_packer.names:
+            std = stds.get(name) if hasattr(stds, "get") else None
+            if std is None:
+                scales[name] = 1.0
+                continue
+            value = float(torch.as_tensor(std).float().mean().item())
+            scales[name] = value if value > 0 else 1.0
+        return scales
 
     # ------------------------------------------------------------------
     # FastGen callback interface — only on_save_checkpoint_success does work.
@@ -271,25 +367,27 @@ class BestStudentCheckpointCallback:
                 f"{tail_summary} (best={self._best_crps:.6f}, no improvement)"
             )
 
-        # Tail-best checkpoint (highest percentile, mean across vars, |ratio-1|).
+        # Tail-best checkpoint: highest percentile, mean-over-vars |ratio - 1|.
         if self._best_tail_checkpoint_path and self._tail_percentiles:
             top_pct = max(self._tail_percentiles)
-            top_by_var = tail_by_pct.get(top_pct, {})
-            top_mean = top_by_var.get("mean")
-            if top_mean is not None and np.isfinite(top_mean):
-                tail_score = abs(top_mean - 1.0)
-                if tail_score < self._best_tail_score:
-                    self._best_tail_score = tail_score
-                    save_student_checkpoint(
-                        student_module=student._ace_module,
-                        teacher=self._teacher_model,
-                        path=self._best_tail_checkpoint_path,
-                    )
-                    logger.info(
-                        f"[BestStudentCallback] iteration={iteration}"
-                        f" tail_{top_pct}={top_mean:.4f} |ratio-1|={tail_score:.4f}"
-                        f" (new tail best) → {self._best_tail_checkpoint_path}"
-                    )
+            ratios = {
+                var: ratio
+                for var, ratio in tail_by_pct.get(top_pct, {}).items()
+                if var != "mean"
+            }
+            tail_score = _tail_deviation_score(ratios)
+            if np.isfinite(tail_score) and tail_score < self._best_tail_score:
+                self._best_tail_score = tail_score
+                save_student_checkpoint(
+                    student_module=student._ace_module,
+                    teacher=self._teacher_model,
+                    path=self._best_tail_checkpoint_path,
+                )
+                logger.info(
+                    f"[BestStudentCallback] iteration={iteration}"
+                    f" tail_{top_pct} mean|ratio-1|={tail_score:.4f}"
+                    f" (new tail best) → {self._best_tail_checkpoint_path}"
+                )
 
         # Log after the best-checkpoint update so val/crps_best includes
         # this iteration's result.
@@ -697,7 +795,11 @@ class BestStudentCheckpointCallback:
             if c > 0:
                 crps_result[var] = float(sums[i].item()) / c
         if crps_result:
-            crps_result["mean"] = float(np.mean(list(crps_result.values())))
+            # Per-var values stay in physical units (logged as val/crps_<var>);
+            # "mean" is the std-normalized cross-variable mean used for
+            # checkpoint selection so disparate-magnitude fields contribute
+            # comparably (e.g. precip ~1e-5 is not drowned out by PRMSL ~1e3).
+            crps_result["mean"] = _normalized_mean(crps_result, self._crps_scales)
         else:
             crps_result = {"mean": float("inf")}
 
@@ -727,12 +829,9 @@ class BestStudentCheckpointCallback:
             by_var: dict[str, float] = {}
             for var in tail_keys:
                 lo, hi = self._tail_hist_ranges[var]
-                student_p = _quantile_from_histogram(
-                    hist_student[var], lo, hi, pct / 100.0
-                )
-                target_p = _quantile_from_histogram(
-                    hist_target[var], lo, hi, pct / 100.0
-                )
+                q = _tail_quantile_level(pct, self._tail_directions.get(var, "upper"))
+                student_p = _quantile_from_histogram(hist_student[var], lo, hi, q)
+                target_p = _quantile_from_histogram(hist_target[var], lo, hi, q)
                 if target_p is None or student_p is None or target_p <= 0:
                     continue
                 by_var[var] = student_p / target_p

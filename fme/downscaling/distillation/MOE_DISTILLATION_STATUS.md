@@ -349,6 +349,29 @@ disc-winning tip); (4) precip spectra stay healthy (they already were); (5) tail
 don't blow up. If R1-only holds the spectra, prefer it (simplest). If only allfix
 works, the LR-decay/weight cut were load-bearing. Compare both at matched steps.
 
+### Checkpoint-selection fix (2026-06-29, `best_student_callback.py`)
+
+The selection criteria were rebuilt so the saved checkpoints stop ignoring the
+fields that were collapsing:
+
+- **best-CRPS** (`best_student.ckpt`) now selects on a **std-normalized**
+  cross-variable mean (`val/crps_mean`): each var's physical CRPS ÷ its
+  normalizer std, then averaged. Previously the physical-units mean was
+  dominated by PRMSL/winds and ~blind to precip (~1e-5). Per-var `val/crps_<var>`
+  stay in physical units.
+- **best-tail** (`best_student_tail.ckpt`) now reduces across variables with
+  **per-variable tail direction**: PRMSL → **lower** tail (deep lows), precip +
+  winds → **upper**. Score = mean over vars of `|student_p/target_p − 1|` at the
+  top percentile (no cross-var cancellation). New per-var metrics
+  `val/tail_<pct>_{PRMSL,eastward_wind…,northward_wind…}` now log too.
+- Knobs: `tail_directions` arg + `_DEFAULT_TAIL_HIST_RANGES`/
+  `_DEFAULT_TAIL_DIRECTIONS`. **PRMSL range assumes hPa** (`(900,1080)`) — units
+  inferred from `plot_events.py` UNITS + the ~7 CRPS magnitude; revisit if the
+  zarr is actually Pa. Pure helpers (`_tail_quantile_level`, `_normalized_mean`,
+  `_tail_deviation_score`) are unit-tested in `test_best_student_callback.py`.
+- ⚠️ `val/crps_mean`, `val/crps_best`, `val/tail_best_score` **changed meaning** —
+  not comparable across this commit. The current GAN-fix runs predate it.
+
 ### (superseded) Active per-expert runs (submitted 2026-06-27)
 
 **Student-Lo distillation is submitted** (commit `fa6b49e9e`). Both step

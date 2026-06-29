@@ -16,14 +16,20 @@ import torch
 from fme.core.packer import Packer
 from fme.downscaling.distillation.best_student_callback import (
     BestStudentCheckpointCallback,
+    _normalized_mean,
+    _tail_deviation_score,
+    _tail_quantile_level,
 )
 
 
 class _ScaleNormalizer:
     """Normalizer that scales every variable by a known factor (identity-ish)."""
 
-    def __init__(self, factor: float) -> None:
+    def __init__(
+        self, factor: float, stds: dict[str, torch.Tensor] | None = None
+    ) -> None:
         self.factor = factor
+        self.stds = stds or {}
 
     def normalize(self, tensors: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         return {k: v * self.factor for k, v in tensors.items()}
@@ -33,16 +39,23 @@ class _ScaleNormalizer:
 
 
 class _FakeNormalizer:
-    def __init__(self, factor: float) -> None:
-        self.fine = _ScaleNormalizer(factor)
+    def __init__(
+        self, factor: float, stds: dict[str, torch.Tensor] | None = None
+    ) -> None:
+        self.fine = _ScaleNormalizer(factor, stds)
 
 
 class _FakeTeacherModel:
     """Minimal stand-in exposing only what the validation path reads."""
 
-    def __init__(self, names: list[str], factor: float = 0.5) -> None:
+    def __init__(
+        self,
+        names: list[str],
+        factor: float = 0.5,
+        stds: dict[str, torch.Tensor] | None = None,
+    ) -> None:
         self.out_packer = Packer(list(names))
-        self.normalizer = _FakeNormalizer(factor)
+        self.normalizer = _FakeNormalizer(factor, stds)
 
 
 class _TinyNet(torch.nn.Module):
@@ -176,3 +189,88 @@ def test_sample_student_output_from_noise_shape():
         C_out,
     )
     assert out.shape == (B, 3, C_out, H, W)
+
+
+# --------------------------------------------------------------------------
+# Reduction helpers: direction-aware tails + std-normalized cross-var CRPS.
+# --------------------------------------------------------------------------
+
+
+def test_tail_quantile_level_upper_and_lower():
+    assert _tail_quantile_level(99.99, "upper") == pytest.approx(0.9999)
+    assert _tail_quantile_level(99.99, "lower") == pytest.approx(0.0001)
+    assert _tail_quantile_level(99.9999, "lower") == pytest.approx(1e-6)
+    with pytest.raises(ValueError, match="upper.*lower"):
+        _tail_quantile_level(99.99, "sideways")
+
+
+def test_normalized_mean_equalizes_variable_magnitudes():
+    # PRMSL (~1e3) and precip (~1e-5) differ by ~8 orders of magnitude;
+    # dividing each by its own scale puts them on equal footing.
+    values = {"PRMSL": 7.0, "PRATEsfc": 5e-5}
+    scales = {"PRMSL": 7.0, "PRATEsfc": 5e-5}
+    assert _normalized_mean(values, scales) == pytest.approx(1.0)
+    # Missing scale falls back to 1.0 (raw value); empty -> inf.
+    assert _normalized_mean({"a": 4.0}, {}) == pytest.approx(4.0)
+    assert _normalized_mean({}, {}) == float("inf")
+
+
+def test_normalized_mean_not_dominated_by_large_magnitude_variable():
+    scales = {"PRMSL": 7.0, "PRATEsfc": 5e-5}
+    base = _normalized_mean({"PRMSL": 7.0, "PRATEsfc": 5e-5}, scales)
+    # A 2x worse precip CRPS and a 2x worse PRMSL CRPS move the mean equally —
+    # the whole point of normalizing (raw physical means would ignore precip).
+    worse_precip = _normalized_mean({"PRMSL": 7.0, "PRATEsfc": 1e-4}, scales)
+    worse_prmsl = _normalized_mean({"PRMSL": 14.0, "PRATEsfc": 5e-5}, scales)
+    assert worse_precip == pytest.approx(worse_prmsl)
+    assert worse_precip > base
+
+
+def test_tail_deviation_score_penalizes_each_variable_no_cancellation():
+    assert _tail_deviation_score({"a": 1.0, "b": 1.0}) == pytest.approx(0.0)
+    # Over- and under-prediction both count; a mean-of-ratios would cancel
+    # these to 1.0 (score 0), hiding that both variables are 20% off.
+    assert _tail_deviation_score({"a": 1.2, "b": 0.8}) == pytest.approx(0.2)
+    assert _tail_deviation_score({}) == float("inf")
+
+
+def test_per_var_scales_reads_normalizer_std():
+    tm = _FakeTeacherModel(
+        ["PRMSL", "PRATEsfc"],
+        stds={"PRMSL": torch.tensor(7.0), "PRATEsfc": torch.tensor(5e-5)},
+    )
+    scales = BestStudentCheckpointCallback._per_var_scales(tm)  # type: ignore[arg-type]
+    assert scales["PRMSL"] == pytest.approx(7.0)
+    assert scales["PRATEsfc"] == pytest.approx(5e-5)
+
+
+def test_per_var_scales_missing_or_nonpositive_std_falls_back_to_one():
+    tm = _FakeTeacherModel(["a", "b"], stds={"b": torch.tensor(0.0)})
+    scales = BestStudentCheckpointCallback._per_var_scales(tm)  # type: ignore[arg-type]
+    assert scales["a"] == 1.0  # no std entry
+    assert scales["b"] == 1.0  # non-positive std
+
+
+def test_default_tail_config_is_per_variable():
+    cb = _make_callback(_FakeTeacherModel(["a"]))
+    assert cb._tail_directions["PRMSL"] == "lower"
+    assert {
+        "PRMSL",
+        "PRATEsfc",
+        "eastward_wind_at_ten_meters",
+        "northward_wind_at_ten_meters",
+    } <= set(cb._tail_hist_ranges)
+    # Unlisted variables default to the upper tail at query time.
+    assert cb._tail_directions.get("PRATEsfc", "upper") == "upper"
+
+
+def test_invalid_tail_direction_rejected():
+    with pytest.raises(ValueError, match="upper.*lower"):
+        BestStudentCheckpointCallback(
+            val_dataset_path="x.zarr",
+            coarse_val_data=None,  # type: ignore[arg-type]
+            teacher_model=_FakeTeacherModel(["a"]),  # type: ignore[arg-type]
+            best_checkpoint_path="x.ckpt",
+            tail_directions={"a": "sideways"},
+            validation_mode="from_noise",
+        )
