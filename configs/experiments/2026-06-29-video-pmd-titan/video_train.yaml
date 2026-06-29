@@ -1,9 +1,11 @@
 # Full GPU training: endpoint-conditioned global video interpolation (PMD), 4x B200 DDP.
 experiment_dir: /results
-max_epochs: 100
+max_epochs: 200
 validate_using_ema: true
-validate_interval: 5
-test_interval: 10
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20   # bound the 50-step generation pass during validation
+max_test_batches: 50  # test eval runs every 10 epochs; 50 batches = stable metrics
 generate_n_samples: 1
 log_loss_vs_noise: true
 logging:

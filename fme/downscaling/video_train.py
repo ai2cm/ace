@@ -122,9 +122,10 @@ class VideoTrainerConfig:
     segment_epochs: int | None = None
     validate_interval: int = 1
     resume_results_dir: str | None = None
-    # Cap batches per train/val epoch (None iterates the full loader).
+    # Cap batches per train/val/test pass (None iterates the full loader).
     max_train_batches: int | None = None
     max_val_batches: int | None = None
+    max_test_batches: int | None = None
     log_loss_vs_noise: bool = False
 
     def __post_init__(self):
@@ -363,6 +364,11 @@ class VideoTrainer:
         viz = None
         with self._validation_context():
             for b, batch in enumerate(self.test_data.loader):
+                if (
+                    self.config.max_test_batches is not None
+                    and b >= self.config.max_test_batches
+                ):
+                    break
                 generated = self.model.generate(
                     batch, n_samples=self.config.generate_n_samples
                 )
