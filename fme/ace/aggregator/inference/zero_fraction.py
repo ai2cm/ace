@@ -81,14 +81,18 @@ class ZeroFractionAggregator:
 
     For each variable it reports the predicted fraction and, when a target is
     available, its difference from the target (gen - target), averaged over all
-    sample/time entries seen. The metric name is supplied by the caller as the
-    ``label`` prefix in :meth:`get_logs`.
+    sample/time entries seen. The initial-condition timestep of the first batch
+    (``i_time_start == 0``) is excluded, since it is prescribed rather than
+    predicted (as in :class:`TimeMeanAggregator`). The metric name is supplied
+    by the caller as the ``label`` prefix in :meth:`get_logs`.
 
     When ``include_maps`` is set it additionally accumulates the per-cell
     time-mean at-or-below-threshold fraction (the fraction of sample/time
     entries for which each cell is ``<= threshold``) and, in :meth:`get_logs`,
     plots a side-by-side generated/target comparison plus the
-    generated-minus-target error map.
+    generated-minus-target error map. The maps are plain per-cell fractions
+    (not area-weighted); the scalar fraction is the area-weighted mean of the
+    same indicator, so the two agree only when read back with area weighting.
     """
 
     def __init__(
@@ -129,8 +133,19 @@ class ZeroFractionAggregator:
         counts: dict[str, int],
         map_sums: dict[str, torch.Tensor],
         map_counts: dict[str, int],
+        ignore_initial: bool,
     ) -> None:
+        time_dim = 1
+        time_slice = slice(1, None) if ignore_initial else slice(None)
         for name, tensor in data.items():
+            # Drop the initial-condition timestep of the first batch: it is
+            # ground-truth-initialized, not predicted, so counting it would
+            # pull the generated fraction toward the target (mirrors
+            # TimeMeanAggregator's ignore_initial handling).
+            tensor = tensor[:, time_slice]
+            # NaN <= threshold is False, so NaN cells count as "not below"
+            # rather than propagating NaN; fine for fields like PRATEsfc that
+            # are never NaN, but note it for NaN-filled (missing) variables.
             below = (tensor <= self._threshold_for(name)).to(tensor.dtype)
             # area_weighted_mean reduces the horizontal dims, leaving the
             # (sample, time) leading dims; each entry is that snapshot's
@@ -142,7 +157,7 @@ class ZeroFractionAggregator:
                 # sum the indicator over the (sample, time) leading dims,
                 # leaving a [lat, lon] map; divided by the count later this is
                 # each cell's fraction of entries at or below the threshold.
-                sample_dim, time_dim = 0, 1
+                sample_dim = 0
                 cell_sum = below.sum(dim=time_dim).sum(dim=sample_dim)
                 if name in map_sums:
                     map_sums[name] = map_sums[name] + cell_sum
@@ -154,12 +169,14 @@ class ZeroFractionAggregator:
 
     @torch.no_grad()
     def record_batch(self, data: InferenceBatchData) -> None:
+        ignore_initial = data.i_time_start == 0
         self._accumulate(
             data.prediction,
             self._gen_sum,
             self._gen_count,
             self._gen_map_sum,
             self._gen_map_count,
+            ignore_initial,
         )
         if data.has_target:
             self._accumulate(
@@ -168,6 +185,7 @@ class ZeroFractionAggregator:
                 self._target_count,
                 self._target_map_sum,
                 self._target_map_count,
+                ignore_initial,
             )
 
     def _reduced_means(
@@ -204,7 +222,7 @@ class ZeroFractionAggregator:
             caption_name, units = self._caption_name_units(name)
             threshold = self._threshold_for(name)
             fraction_desc = (
-                f"{caption_name} fraction of time at or below " f"{threshold:g} {units}"
+                f"{caption_name} fraction of time at or below {threshold:g} {units}"
             )
             if name in target_maps:
                 target_map = target_maps[name]
