@@ -229,14 +229,35 @@ class VideoEDMPrecond(nn.Module):
         lon: torch.Tensor,
     ) -> torch.Tensor:
         x = x.to(torch.float32)
-        sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1, 1)
+        sigma = sigma.to(torch.float32)
+        if sigma.dim() == 0:
+            sigma = sigma.reshape(1, 1, 1, 1, 1)
+        elif sigma.dim() == 1:
+            if sigma.shape[0] == x.shape[0]:
+                sigma = sigma.reshape(-1, 1, 1, 1, 1)
+            elif sigma.shape[0] == x.shape[1]:
+                sigma = sigma.reshape(1, -1, 1, 1, 1)
+            else:
+                sigma = sigma.reshape(-1, 1, 1, 1, 1)
+        elif sigma.dim() == 2:
+            sigma = sigma.reshape(sigma.shape[0], sigma.shape[1], 1, 1, 1)
+        else:
+            sigma = sigma.reshape(*sigma.shape[:2], 1, 1, 1)
         c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
         c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
         c_in = 1 / (self.sigma_data**2 + sigma**2).sqrt()
-        c_noise = (sigma.log() / 4).flatten()
+        if sigma.shape[1] == 1:
+            c_noise = (sigma.log() / 4).flatten()
+        else:
+            c_noise = sigma.log().mean(dim=1).flatten() / 4
 
         arg = c_in * x
+        sigma_features = (sigma.log() / 4).expand(
+            x.shape[0], x.shape[1], x.shape[2], x.shape[3], x.shape[4]
+        )
         if condition is not None:
-            arg = torch.cat([arg, condition], dim=1)
+            arg = torch.cat([arg, condition, sigma_features], dim=1)
+        else:
+            arg = torch.cat([arg, sigma_features], dim=1)
         f_x = self.model(arg, c_noise, day_of_year, second_of_day, lon)
         return c_skip * x + c_out * f_x

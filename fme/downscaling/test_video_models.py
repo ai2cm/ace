@@ -13,6 +13,7 @@ from fme.downscaling.data.datasets import (
     VideoBatchItem,
 )
 from fme.downscaling.data.time_encoding import compute_calendar_features
+from fme.downscaling.noise import LogNormalNoiseDistribution, LogUniformNoiseDistribution
 from fme.downscaling.video_models import VideoDiffusionModelConfig
 
 OUT_NAMES = ["var0", "var1"]
@@ -75,6 +76,39 @@ def test_train_on_batch_runs_and_backprops():
     assert all(torch.isfinite(g).all() for g in grads)
     # prediction is a full clip per variable
     assert outputs.prediction["var0"].shape == (2, n_times, height, width)
+
+
+def test_train_on_batch_supports_per_channel_noise():
+    n_times, height, width = 5, 8, 8
+    config = VideoDiffusionModelConfig(
+        out_names=OUT_NAMES,
+        n_timesteps=n_times,
+        normalization=NormalizationConfig(
+            means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+        ),
+        num_diffusion_generation_steps=4,
+        model_channels=16,
+        n_heads=2,
+        num_freqs=3,
+        training_noise_distributions={
+            "var0": LogNormalNoiseDistribution(p_mean=-1.2, p_std=1.8),
+            "var1": LogUniformNoiseDistribution(p_min=0.005, p_max=2000.0),
+        },
+        sigma_min=0.002,
+        sigma_max=150.0,
+        sigma_min_by_channel={"var1": 0.005},
+        sigma_max_by_channel={"var1": 2000.0},
+    )
+    model = config.build()
+    batch = _paired_batch(batch_size=2, n_times=n_times, height=height, width=width)
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+
+    assert outputs.sigma is not None
+    assert outputs.sigma.shape == (2, 2)
+    sigma_min, sigma_max = config.generation_sigma_bounds(outputs.sigma.device)
+    assert torch.allclose(sigma_min, torch.tensor([0.002, 0.005]))
+    assert torch.allclose(sigma_max, torch.tensor([150.0, 2000.0]))
 
 
 def test_generate_pins_observed_endpoints():

@@ -28,21 +28,12 @@ from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.wandb import WandB
+from fme.downscaling.aggregators.main import LossVsNoiseAggregator
 from fme.downscaling.data import PairedDataLoaderConfig, PairedVideoBatchData
-from fme.downscaling.video_models import VideoDiffusionModelConfig
-
-
-def _linear_interp_endpoints(field: torch.Tensor) -> torch.Tensor:
-    """Per-frame temporal linear interpolation of the two endpoints along dim -3.
-
-    Works for ``(T, H, W)`` or ``(B, T, H, W)`` (time is the third-from-last dim).
-    """
-    n_times = field.shape[-3]
-    w = torch.linspace(0.0, 1.0, n_times, device=field.device)
-    w = w.reshape((n_times, 1, 1) if field.dim() == 3 else (1, n_times, 1, 1))
-    x0 = field[..., 0:1, :, :]
-    xT = field[..., n_times - 1 : n_times, :, :]
-    return (1 - w) * x0 + w * xT
+from fme.downscaling.video_models import (
+    VideoDiffusionModelConfig,
+    _linear_interp_endpoints,
+)
 
 
 def _video_comparison_figure(gt, pred, name: str, example_idx: int):
@@ -151,6 +142,7 @@ class VideoTrainerConfig:
     # None means iterate the full loader.
     max_train_batches: int | None = None
     max_val_batches: int | None = None
+    log_loss_vs_noise: bool = False
 
     def __post_init__(self):
         datasets = [
@@ -255,6 +247,9 @@ class VideoTrainer:
     def train_one_epoch(self) -> None:
         self.model.module.train()
         wandb = WandB.get_instance()
+        loss_vs_noise = (
+            LossVsNoiseAggregator() if self.config.log_loss_vs_noise else None
+        )
         batch: PairedVideoBatchData
         epoch_loss = 0.0
         n_batches = 0
@@ -267,6 +262,8 @@ class VideoTrainer:
             self.num_batches_seen += 1
             outputs = self.model.train_on_batch(batch, self.optimization)
             self.ema(self.model.modules)
+            if loss_vs_noise is not None:
+                loss_vs_noise.record_batch(outputs)
             batch_loss = outputs.loss.detach().cpu().item()
             epoch_loss += batch_loss
             n_batches += 1
@@ -276,15 +273,19 @@ class VideoTrainer:
         if n_batches == 0:
             raise RuntimeError("Empty training batch generator")
         self.optimization.step_scheduler(epoch_loss / n_batches)
-        wandb.log(
-            {"train/epoch_loss": epoch_loss / n_batches}, step=self.num_batches_seen
-        )
+        logs = {"train/epoch_loss": epoch_loss / n_batches}
+        if loss_vs_noise is not None:
+            logs.update(loss_vs_noise.get_wandb(prefix="train"))
+        wandb.log(logs, step=self.num_batches_seen)
 
     @torch.no_grad()
     def valid_one_epoch(self) -> dict[str, float]:
         self.model.module.eval()
         total_loss = 0.0
         total_gen_mae = 0.0
+        loss_vs_noise = (
+            LossVsNoiseAggregator() if self.config.log_loss_vs_noise else None
+        )
         n_batches = 0
         with self._validation_context():
             for j, batch in enumerate(self.validation_data.loader):
@@ -294,16 +295,31 @@ class VideoTrainer:
                 ):
                     break
                 outputs = self.model.train_on_batch(batch, self.null_optimization)
+                if loss_vs_noise is not None:
+                    loss_vs_noise.record_batch(outputs)
                 total_loss += outputs.loss.detach().cpu().item()
                 total_gen_mae += self._interior_generation_mae(batch)
                 n_batches += 1
-        if n_batches == 0:
+        # Reduce across ranks so the metric (and best-checkpoint selection)
+        # reflects the whole validation set, not just this rank's shard. All
+        # ranks must reach this collective, so the empty check uses the global
+        # count -- a single empty shard must not raise here while peers continue
+        # to the WandB.log barrier below (that would deadlock).
+        stats = torch.tensor(
+            [total_loss, total_gen_mae, float(n_batches)], device=get_device()
+        )
+        Distributed.get_instance().reduce_sum(stats)
+        total_loss, total_gen_mae, n_total = stats.tolist()
+        if n_total == 0:
             raise RuntimeError("Empty validation batch generator")
         summary = {
-            "validation/loss": total_loss / n_batches,
-            "validation/interior_mae": total_gen_mae / n_batches,
+            "validation/loss": total_loss / n_total,
+            "validation/interior_mae": total_gen_mae / n_total,
         }
-        WandB.get_instance().log(summary, step=self.num_batches_seen)
+        logs = dict(summary)
+        if loss_vs_noise is not None:
+            logs.update(loss_vs_noise.get_wandb(prefix="validation"))
+        WandB.get_instance().log(logs, step=self.num_batches_seen)
         return summary
 
     def _interior_generation_mae(self, batch: PairedVideoBatchData) -> float:

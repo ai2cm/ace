@@ -25,16 +25,15 @@ from fme.core.rand import randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import PairedVideoBatchData
 from fme.downscaling.models import ModelOutputs
-from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.modules.video_modules import VideoEDMPrecond, VideoUNet
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
     NoiseDistribution,
 )
+from fme.downscaling.requirements import DataRequirements
 
 CHANNEL_AXIS = 1  # (B, C, T, H, W)
-TIME_AXIS = 2
 
 
 def _interior_mask(n_times: int, device: torch.device) -> torch.Tensor:
@@ -45,12 +44,18 @@ def _interior_mask(n_times: int, device: torch.device) -> torch.Tensor:
     return mask.reshape(1, 1, n_times, 1, 1)
 
 
-def _linear_interp_baseline(clip: torch.Tensor) -> torch.Tensor:
-    """Per-frame temporal linear interpolation between the two endpoints."""
-    n_times = clip.shape[TIME_AXIS]
-    x0 = clip[:, :, 0:1]
-    xT = clip[:, :, n_times - 1 : n_times]
-    w = torch.linspace(0.0, 1.0, n_times, device=clip.device).reshape(1, 1, -1, 1, 1)
+def _linear_interp_endpoints(field: torch.Tensor) -> torch.Tensor:
+    """Per-frame temporal linear interpolation of the two endpoints along the
+    time axis (third-from-last dim).
+
+    Works for ``(T, H, W)``, ``(B, T, H, W)`` and ``(B, C, T, H, W)``.
+    """
+    n_times = field.shape[-3]
+    shape = [1] * field.dim()
+    shape[-3] = n_times
+    w = torch.linspace(0.0, 1.0, n_times, device=field.device).reshape(shape)
+    x0 = field[..., 0:1, :, :]
+    xT = field[..., n_times - 1 : n_times, :, :]
     return (1 - w) * x0 + w * xT
 
 
@@ -82,6 +87,11 @@ class VideoDiffusionModelConfig:
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
     ) = None
+    training_noise_distributions: (
+        dict[str, LogNormalNoiseDistribution | LogUniformNoiseDistribution] | None
+    ) = None
+    sigma_min_by_channel: dict[str, float] | None = None
+    sigma_max_by_channel: dict[str, float] | None = None
     loss_weight_exponent: float = 1.0
 
     def __post_init__(self):
@@ -90,12 +100,82 @@ class VideoDiffusionModelConfig:
                 "Video interpolation needs at least 3 frames (2 endpoints + 1 "
                 f"interior), got n_timesteps={self.n_timesteps}."
             )
+        for field_name in (
+            "training_noise_distributions",
+            "sigma_min_by_channel",
+            "sigma_max_by_channel",
+        ):
+            values = getattr(self, field_name)
+            if values is None:
+                continue
+            unknown = set(values) - set(self.out_names)
+            if unknown:
+                raise ValueError(
+                    f"{field_name} contains channels not in out_names: "
+                    f"{sorted(unknown)}"
+                )
+        if self.training_noise_distributions is not None:
+            missing = set(self.out_names) - set(self.training_noise_distributions)
+            if missing:
+                raise ValueError(
+                    "training_noise_distributions must specify every output "
+                    f"channel; missing {sorted(missing)}"
+                )
+        if (self.sigma_min_by_channel is None) != (self.sigma_max_by_channel is None):
+            raise ValueError(
+                "sigma_min_by_channel and sigma_max_by_channel must be specified "
+                "together."
+            )
+        if (
+            self.training_noise_distribution is not None
+            and self.training_noise_distributions is not None
+        ):
+            raise ValueError(
+                "Specify only one of training_noise_distribution or "
+                "training_noise_distributions."
+            )
 
     @property
     def noise_distribution(self) -> NoiseDistribution:
         if self.training_noise_distribution is not None:
             return self.training_noise_distribution
         return LogNormalNoiseDistribution(p_mean=-1.2, p_std=1.2)
+
+    def sample_training_noise(
+        self, batch_size: int, device: torch.device
+    ) -> torch.Tensor:
+        if self.training_noise_distributions is None:
+            return self.noise_distribution.sample(batch_size, device)
+        sigma_by_channel = [
+            self.training_noise_distributions[name].sample(batch_size, device)
+            for name in self.out_names
+        ]
+        return torch.cat(sigma_by_channel, dim=1)
+
+    def generation_sigma_bounds(
+        self, device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        sigma_min = torch.tensor(
+            [
+                self.sigma_min
+                if self.sigma_min_by_channel is None
+                else self.sigma_min_by_channel.get(name, self.sigma_min)
+                for name in self.out_names
+            ],
+            dtype=torch.float32,
+            device=device,
+        )
+        sigma_max = torch.tensor(
+            [
+                self.sigma_max
+                if self.sigma_max_by_channel is None
+                else self.sigma_max_by_channel.get(name, self.sigma_max)
+                for name in self.out_names
+            ],
+            dtype=torch.float32,
+            device=device,
+        )
+        return sigma_min, sigma_max
 
     @property
     def data_requirements(self) -> "DataRequirements":
@@ -122,8 +202,8 @@ class VideoDiffusionModelConfig:
 
         n_channels = len(self.out_names)
         # network input = preconditioned noisy residual (C) + conditioning
-        # (observed endpoint values C + observed-mask 1).
-        in_channels = 2 * n_channels + 1
+        # (observed endpoint values C + observed-mask 1 + log-sigma C).
+        in_channels = 3 * n_channels + 1
         net = VideoUNet(
             in_channels=in_channels,
             out_channels=n_channels,
@@ -184,15 +264,15 @@ class VideoDiffusionModel:
         fine = batch.fine
         clip = self._pack_normalized(fine.data)  # (B, C, T, H, W)
         batch_size, _, n_times, _, _ = clip.shape
-        baseline = _linear_interp_baseline(clip)
+        baseline = _linear_interp_endpoints(clip)
         residual = clip - baseline  # ~0 at endpoints by construction
 
         interior = _interior_mask(n_times, clip.device)
         condition = self._conditioning(clip, interior)
         day_of_year, second_of_day, lon = self._calendar_inputs(fine)
 
-        sigma = self.config.noise_distribution.sample(batch_size, clip.device)
-        sigma = sigma.reshape(batch_size, 1, 1, 1, 1)
+        sigma = self.config.sample_training_noise(batch_size, clip.device)
+        sigma = sigma.reshape(batch_size, -1, 1, 1, 1)
         # vanilla per-pixel Gaussian noise, applied to interior frames only
         noised = residual + randn_like(residual) * sigma * interior
 
@@ -211,12 +291,24 @@ class VideoDiffusionModel:
         optimizer.step_weights()
 
         with torch.no_grad():
-            full_norm = baseline + denoised
+            weighted_sq_err = sq_err * weight
+            per_sample_denominator = (
+                interior.expand(batch_size, 1, n_times, *clip.shape[-2:])
+                .sum(dim=(-3, -2, -1))
+                .clamp(min=1)
+            )
+            # pin observed endpoints (residual is 0 there, matching generate)
+            full_norm = baseline + denoised * interior
             prediction = self.normalizer.denormalize(
                 self.packer.unpack(full_norm, axis=CHANNEL_AXIS)
             )
             channel_losses = {
-                name: torch.mean((sq_err[:, i] * weight))
+                name: weighted_sq_err[:, i].sum() / per_sample_denominator.sum()
+                for i, name in enumerate(self.out_names)
+            }
+            per_sample_channel_loss = {
+                name: weighted_sq_err[:, i].sum(dim=(-3, -2, -1))
+                / per_sample_denominator.flatten()
                 for i, name in enumerate(self.out_names)
             }
         target = {k: fine.data[k] for k in self.out_names}
@@ -225,7 +317,12 @@ class VideoDiffusionModel:
             target=target,
             loss=loss,
             channel_losses=channel_losses,
-            sigma=sigma.flatten(),
+            sigma=(
+                sigma.flatten()
+                if sigma.shape[1] == 1
+                else sigma.squeeze(-1).squeeze(-1).squeeze(-1)
+            ),
+            per_sample_channel_loss=per_sample_channel_loss,
         )
 
     @torch.no_grad()
@@ -233,7 +330,7 @@ class VideoDiffusionModel:
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
         batch_size, n_channels, n_times, height, width = clip.shape
-        baseline = _linear_interp_baseline(clip)
+        baseline = _linear_interp_endpoints(clip)
         interior = _interior_mask(n_times, clip.device)
         condition = self._conditioning(clip, interior)
         day_of_year, second_of_day, lon = self._calendar_inputs(fine)
@@ -251,6 +348,7 @@ class VideoDiffusionModel:
             batch_size * n_samples, n_channels, n_times, height, width,
             device=clip.device,
         )
+        sigma_min, sigma_max = self.config.generation_sigma_bounds(clip.device)
         residual = _video_edm_sample(
             self.module,
             latents,
@@ -260,8 +358,8 @@ class VideoDiffusionModel:
             second_of_day,
             lon,
             num_steps=self.config.num_diffusion_generation_steps,
-            sigma_min=self.config.sigma_min,
-            sigma_max=self.config.sigma_max,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
             s_churn=self.config.churn,
         )
         full_norm = baseline + residual
@@ -290,8 +388,8 @@ def _video_edm_sample(
     second_of_day: torch.Tensor,
     lon: torch.Tensor,
     num_steps: int,
-    sigma_min: float,
-    sigma_max: float,
+    sigma_min: float | torch.Tensor,
+    sigma_max: float | torch.Tensor,
     rho: float = 7.0,
     s_churn: float = 0.0,
 ) -> torch.Tensor:
@@ -302,19 +400,33 @@ def _video_edm_sample(
     ``samplers.stochastic_sampler`` for the 5-D tensor + endpoint masking.
     """
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
-    step = torch.arange(num_steps, dtype=compute_dtype, device=latents.device)
+    sigma_min_t = torch.as_tensor(
+        sigma_min, dtype=compute_dtype, device=latents.device
+    ).reshape(1, -1, 1, 1, 1)
+    sigma_max_t = torch.as_tensor(
+        sigma_max, dtype=compute_dtype, device=latents.device
+    ).reshape(1, -1, 1, 1, 1)
+    step = torch.arange(
+        num_steps, dtype=compute_dtype, device=latents.device
+    ).reshape(-1, 1, 1, 1, 1)
     t = (
-        sigma_max ** (1 / rho)
-        + step / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))
+        sigma_max_t ** (1 / rho)
+        + step
+        / (num_steps - 1)
+        * (sigma_min_t ** (1 / rho) - sigma_max_t ** (1 / rho))
     ) ** rho
     t = torch.cat([t, torch.zeros_like(t[:1])])
     mask = interior_mask.to(compute_dtype)
 
     def denoise(x, sigma):
+        # ``sigma`` is the per-channel schedule slice of shape (C, 1, 1, 1); the
+        # precond expects a per-(sample, channel) tensor. Broadcast to (B, C) so
+        # c_skip/c_out/c_in are applied per channel and c_noise is per sample.
+        sigma_bc = sigma.reshape(1, -1).expand(x.shape[0], -1).to(torch.float32)
         out = net(
             x.to(torch.float32),
             condition,
-            sigma.to(torch.float32).reshape(1),
+            sigma_bc,
             day_of_year,
             second_of_day,
             lon,
@@ -323,7 +435,7 @@ def _video_edm_sample(
 
     x = latents.to(compute_dtype) * t[0] * mask
     for i, (t_cur, t_next) in enumerate(zip(t[:-1], t[1:])):
-        gamma = s_churn / num_steps if t_cur > 0 else 0.0
+        gamma = s_churn / num_steps
         t_hat = t_cur + gamma * t_cur
         x_hat = x + (t_hat**2 - t_cur**2).clamp(min=0).sqrt() * torch.randn_like(x)
         x_hat = x_hat * mask

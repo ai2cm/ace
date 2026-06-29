@@ -10,13 +10,14 @@ max_val_batches: 2
 validate_using_ema: true
 validate_interval: 1
 generate_n_samples: 1
+log_loss_vs_noise: true
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: downscaling-pmd
+  project: ace-temporal-interp
   name: regional-30-60-1degree-24to3-beaker-smoke
-  entity: jhhuang_chloe
+  entity: ai2cm
 optimization:
   lr: 0.0001
 ema:
@@ -77,9 +78,26 @@ model:
   n_heads: 2
   num_freqs: 3
   sigma_min: 0.002
-  sigma_max: 80.0
+  sigma_max: 150.0
   churn: 0.0
   num_diffusion_generation_steps: 4
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.2
+      p_std: 1.8
+    northward_wind_at_ten_meters:
+      p_mean: -1.2
+      p_std: 1.8
+    PRMSL:
+      p_mean: -1.2
+      p_std: 1.8
+    PRATEsfc:
+      p_min: 0.005
+      p_max: 2000.0
+  sigma_min_by_channel:
+    PRATEsfc: 0.005
+  sigma_max_by_channel:
+    PRATEsfc: 2000.0
   out_names:
     - eastward_wind_at_ten_meters
     - northward_wind_at_ten_meters

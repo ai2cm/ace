@@ -250,6 +250,27 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
         assert isinstance(value, wandb.Image)
 
 
+def test_loss_vs_noise_aggregator_accepts_channelwise_sigma():
+    aggregator = LossVsNoiseAggregator(n_bins=8)
+    outputs = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([[0.1, 1000.0], [1.0, 2000.0]], device=get_device()),
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 2.0], device=get_device()),
+            "prate": torch.tensor([3.0, 4.0], device=get_device()),
+        },
+    )
+
+    aggregator.record_batch(outputs)
+
+    assert int(aggregator._total_count.sum().item()) == 4
+    assert int(aggregator._channel_count["x"].sum().item()) == 2
+    assert int(aggregator._channel_count["prate"].sum().item()) == 2
+
+
 @pytest.mark.parametrize("n_latent_steps", [0, 2])
 def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
     downscale_factor = 2
