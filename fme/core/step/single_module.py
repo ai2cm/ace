@@ -25,7 +25,9 @@ from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
+    GlobalMeanRemovalState,
     NoGlobalMeanRemoval,
+    extra_channel_source_field,
 )
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
@@ -271,20 +273,24 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
-        n_in_channels = len(config.in_names)
-        if config.include_channel_mask_inputs:
-            n_in_channels *= 2
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
                 config.global_mean_removal.build(
                     normalizer=normalizer, in_names=config.in_names
                 )
             )
-            n_in_channels += self._global_mean_removal.n_extra_input_channels
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
+        # Synthetic GMR channels are packed alongside real inputs so they
+        # flow through the packer and channel-mask machinery uniformly.
+        packed_in_names = (
+            list(config.in_names) + self._global_mean_removal.extra_channel_names
+        )
+        n_in_channels = len(packed_in_names)
+        if config.include_channel_mask_inputs:
+            n_in_channels *= 2
         n_out_channels = len(config.out_names)
-        self.in_packer = Packer(config.in_names)
+        self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
@@ -377,17 +383,19 @@ class SingleModuleStep(StepABC):
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            # Fail loud if a NaN survives masking/normalization to the network
+            # input (cf. PR #1262). Gated on grad-enabled so the no_grad
+            # inference/eval rollout hot path pays no device-sync cost.
+            if torch.is_grad_enabled() and torch.isnan(input_tensor).any():
+                _raise_input_nan_error(input_norm)
             if self._config.include_channel_mask_inputs:
                 mask_dict = _build_channel_mask_dict(
-                    self.in_names, args.data_mask, input_tensor
+                    self.in_packer.names, args.data_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
-            extra = self._global_mean_removal.get_extra_channels()
-            if extra is not None:
-                input_tensor = torch.cat([input_tensor, extra], dim=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
@@ -417,15 +425,26 @@ class SingleModuleStep(StepABC):
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
             The state of the stepper.
         """
-        state = {
+        state: dict[str, Any] = {
             "module": self.module.get_state(),
             "secondary_decoder": self.secondary_decoder.get_module_state(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -442,6 +461,23 @@ class SingleModuleStep(StepABC):
         self.module.load_state(module)
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
+        self._corrector.load_state(state.get("corrector", {}))
+
+
+def _raise_input_nan_error(input_norm: TensorMapping) -> None:
+    """Raise a located error naming the input variable(s) that still hold NaN.
+
+    Called only once the cheap packed-tensor NaN check has fired, so the
+    per-variable scan here is off the hot path.
+    """
+    nan_names = sorted(k for k, v in input_norm.items() if torch.isnan(v).any())
+    raise ValueError(
+        "NaN found in network input for variable(s) "
+        f"{nan_names} after input masking and normalization. An input/forcing "
+        "variable likely contains NaN that is not covered by data_mask; ensure "
+        "the data_mask passed to the stepper includes every input variable that "
+        "may be masked (cf. PR #1262), or enable fill_nans_on_normalize."
+    )
 
 
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
@@ -482,8 +518,13 @@ def _build_channel_mask_dict(
     device = packed_input.device
     result: TensorDict = {}
     for name in in_names:
-        if data_mask is not None and name in data_mask:
-            mask_1d = data_mask[name].to(device=device, dtype=torch.float)
+        # GMR sentinel channels share their source field's mask: the extra
+        # value is already zeroed in forward_transform when the source is
+        # masked, so the mask channel must agree rather than default to 1.
+        source = extra_channel_source_field(name)
+        lookup_name = source if source is not None else name
+        if data_mask is not None and lookup_name in data_mask:
+            mask_1d = data_mask[lookup_name].to(device=device, dtype=torch.float)
             result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
         else:
             result[name] = torch.ones(batch, *spatial, device=device)
@@ -543,19 +584,25 @@ def step_with_adjustments(
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
+    gmr_state: GlobalMeanRemovalState | None = None
     if global_mean_removal is not None:
-        network_input: TensorMapping = global_mean_removal.forward_transform(
+        network_input, gmr_state = global_mean_removal.forward_transform(
             input, data_mask
         )
+        input_norm = normalizer.normalize(network_input)
+        # Synthetic GMR channels are produced in normalized space; merge
+        # them in after normalization so the network sees a single uniform
+        # input dict.
+        input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
     else:
-        network_input = input
-    input_norm = normalizer.normalize(network_input)
+        input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:
-        output = global_mean_removal.inverse_transform(output)
+        assert gmr_state is not None
+        output = global_mean_removal.inverse_transform(output, gmr_state)
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None

@@ -351,8 +351,14 @@ class TimeMeanEvaluatorAggregator:
         preds = self._get_target_gen_pairs()
         bias_map_key = "bias_map"
         rmse_all_channels = {}
+        # Variables whose target is entirely NaN have no valid data (e.g. filled
+        # by allow_missing_variables); their RMSE is NaN and they are excluded
+        # from the channel mean below.
+        all_nan_target_names: set[str] = set()
         for pred in preds:
             rmse_all_channels[pred.name] = pred.rmse()
+            if torch.isnan(pred.target).all():
+                all_nan_target_names.add(pred.name)
             should_log = self._log_variables is None or pred.name in self._log_variables
             if should_log:
                 bias_image = plot_paneled_data(
@@ -372,7 +378,7 @@ class TimeMeanEvaluatorAggregator:
         if self._target == "norm":
             metric_name = "rmse/channel_mean"
             if self._channel_mean_names is None:
-                values_to_average = list(rmse_all_channels.values())
+                channel_mean_names = list(rmse_all_channels)
             else:
                 missing = [
                     n for n in self._channel_mean_names if n not in rmse_all_channels
@@ -383,10 +389,21 @@ class TimeMeanEvaluatorAggregator:
                         f"recorded data: {missing}. Available: "
                         f"{sorted(rmse_all_channels)}."
                     )
+                channel_mean_names = list(self._channel_mean_names)
+            channel_mean_names = [
+                name for name in channel_mean_names if name not in all_nan_target_names
+            ]
+            if channel_mean_names:
                 values_to_average = [
-                    rmse_all_channels[name] for name in self._channel_mean_names
+                    rmse_all_channels[name] for name in channel_mean_names
                 ]
-            logs.update({metric_name: sum(values_to_average) / len(values_to_average)})
+                logs.update(
+                    {metric_name: sum(values_to_average) / len(values_to_average)}
+                )
+            else:
+                raise ValueError(
+                    "All target variables are NaN; cannot compute channel mean."
+                )
 
         logs.update(self._get_time_mean_spectrum_bias_logs(preds))
 

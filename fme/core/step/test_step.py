@@ -1,5 +1,4 @@
 import dataclasses
-import datetime
 import pathlib
 import tempfile
 import unittest
@@ -15,9 +14,7 @@ import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn3 import FCN3Config, FCN3Selector, FCN3StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
-from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
@@ -28,15 +25,17 @@ from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
 )
-from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
+from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
+    SingleModuleStep,
     SingleModuleStepConfig,
     _apply_input_mask,
     _build_channel_mask_dict,
 )
 from fme.core.step.step import StepABC, StepSelector
+from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
@@ -49,12 +48,7 @@ def get_network_and_loss_normalization_config(
     dir: pathlib.Path | None = None,
 ) -> NetworkAndLossNormalizationConfig:
     if dir is None:
-        return NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                means={name: 0.0 for name in names},
-                stds={name: 1.0 for name in names},
-            ),
-        )
+        return trivial_network_and_loss_normalization(names)
     else:
         return NetworkAndLossNormalizationConfig(
             network=NormalizationConfig(
@@ -479,7 +473,6 @@ HAS_NEXT_STEP_FORCING_NAME_CASES = [
         id="separate_radiation",
     ),
 ]
-TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_tensor_dict(
@@ -502,19 +495,10 @@ def get_step(
     init_weights: Callable[[list[nn.Module]], None] = lambda _: None,
     all_labels: set[str] | None = None,
 ) -> StepABC:
-    device = fme.get_device()
-    horizontal_coordinate = LatLonCoordinates(
-        lat=torch.zeros(img_shape[0], device=device),
-        lon=torch.zeros(img_shape[1], device=device),
-    )
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
-    )
-    dataset_info = DatasetInfo(
-        horizontal_coordinates=horizontal_coordinate,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
+    dataset_info = get_dataset_info(
+        img_shape=img_shape,
         all_labels=all_labels,
+        device=fme.get_device(),
     )
     return selector.get_step(dataset_info, init_weights)
 
@@ -1137,6 +1121,24 @@ def test_build_channel_mask_dict_partial_mask():
     assert (result["b"] == 1.0).all()
 
 
+def test_build_channel_mask_dict_gmr_extra_inherits_source_mask():
+    # The GMR sentinel channel `__gmr_extra__a` must inherit `a`'s mask
+    # because its value is zeroed in forward_transform when `a` is masked;
+    # otherwise the network sees a 0-valued extra with a 1-valued mask
+    # (i.e. contradictory "present" signal on a masked sample).
+    packed = torch.zeros(2, 4, 4, 8)
+    data_mask = {"a": torch.tensor([True, False])}
+    result = _build_channel_mask_dict(
+        ["a", "b", "__gmr_extra__a", "__gmr_extra__b"], data_mask, packed
+    )
+    assert result["a"][0, 0, 0] == 1.0
+    assert result["a"][1, 0, 0] == 0.0
+    assert result["__gmr_extra__a"][0, 0, 0] == 1.0
+    assert result["__gmr_extra__a"][1, 0, 0] == 0.0
+    assert (result["b"] == 1.0).all()
+    assert (result["__gmr_extra__b"] == 1.0).all()
+
+
 def test_step_with_include_channel_mask_inputs():
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
@@ -1442,6 +1444,53 @@ def test_step_shared_global_mean_removal_affects_output():
     )
 
 
+def test_step_per_channel_global_mean_removal_with_channel_masks():
+    """When both ``include_channel_mask_inputs`` and per-channel GMR extras
+    are enabled, the GMR extras should be packed as ordinary input
+    channels and receive their own mask channels.  Total network input
+    channels = ``2 * (n_in_names + n_extras)``.
+    """
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    all_names = list(set(in_names + out_names))
+    normalization = trivial_network_and_loss_normalization(all_names)
+    removal = PerChannelGlobalMeanRemovalConfig(
+        field_names=in_names, append_as_input=True
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                include_channel_mask_inputs=True,
+                global_mean_removal=removal,
+            ),
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    # 2 real inputs + 2 GMR extras → 4 packed input channels (doubled to 8
+    # by the channel-mask append in network_call).
+    assert len(step.in_packer.names) == 4
+
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    output, _ = step.step(
+        args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
+    )
+    for name in out_names:
+        assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+
+
 def test_step_shared_global_mean_removal_raises_on_masked_reference():
     in_names = ["surface_temperature", "air_temperature_0"]
     out_names = ["surface_temperature", "air_temperature_0"]
@@ -1471,3 +1520,73 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+def test_step_train_eval_toggle_propagates_to_modules():
+    step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+
+    assert all(module.training for module in step.modules)
+    assert step._training
+
+    step.eval()
+    assert all(not module.training for module in step.modules)
+    assert not step._training
+
+    step.train()
+    assert all(module.training for module in step.modules)
+    assert step._training
+
+    step.train(False)
+    assert all(not module.training for module in step.modules)
+    assert not step._training
+
+
+def test_corrector_state_not_in_state_by_default():
+    step = get_step(get_single_module_selector(), DEFAULT_IMG_SHAPE)
+    assert "corrector" not in step.get_state()
+
+
+def test_load_state_calls_corrector_with_empty_state_when_missing():
+    selector = get_single_module_selector()
+    config = dict(selector.config)
+    config["corrector"] = {
+        **config["corrector"],
+        "corrector_disabled_epochs": 1,
+    }
+    selector = StepSelector(type=selector.type, config=config)
+    step = get_step(selector, DEFAULT_IMG_SHAPE)
+    state = step.get_state()
+    del state["corrector"]
+
+    with pytest.raises(ValueError, match="corrector_disabled"):
+        step.load_state(state)
+
+
+def test_multi_call_step_forwards_set_epoch():
+    wrapped_step = unittest.mock.MagicMock(spec=StepABC)
+    config = MultiCallStepConfig(
+        wrapped_step=get_single_module_selector(),
+        config=None,
+        include_multi_call_in_loss=False,
+    )
+    step = MultiCallStep(wrapped_step=wrapped_step, config=config)
+    step.set_epoch(3)
+    wrapped_step.set_epoch.assert_called_once_with(3)
+
+
+def test_multi_call_step_forwards_train_eval():
+    wrapped_step = unittest.mock.MagicMock(spec=StepABC)
+    wrapped_step.modules = nn.ModuleList()
+    config = MultiCallStepConfig(
+        wrapped_step=get_single_module_selector(),
+        config=None,
+        include_multi_call_in_loss=False,
+    )
+    step = MultiCallStep(wrapped_step=wrapped_step, config=config)
+
+    step.eval()
+    wrapped_step.train.assert_called_once_with(False)
+
+    wrapped_step.train.reset_mock()
+    step.train()
+    wrapped_step.train.assert_called_once_with(True)

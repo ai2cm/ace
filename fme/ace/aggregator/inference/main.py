@@ -17,6 +17,7 @@ from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLog,
     InferenceLogs,
+    InferenceSummary,
 )
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.tensors import unfold_ensemble_dim
@@ -37,6 +38,7 @@ from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
+from .trend import TrendMetricConfig
 from .utils import LatLonRegion
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
@@ -62,6 +64,7 @@ MetricConfig = (
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
+    | TrendMetricConfig
 )
 
 
@@ -198,6 +201,8 @@ class InferenceEvaluatorAggregatorConfig:
         enso_index: ENSO index metrics.
         enso_coefficient: ENSO regression coefficient metrics.
         ipo_index: Interdecadal Pacific Oscillation index metrics.
+        trend: Per-grid-cell linear trend (slope vs. time) map metrics.
+            Disabled by default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -246,6 +251,7 @@ class InferenceEvaluatorAggregatorConfig:
     ipo_index: IpoIndexMetricConfig = dataclasses.field(
         default_factory=IpoIndexMetricConfig
     )
+    trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
@@ -286,6 +292,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_index,
             self.enso_coefficient,
             self.ipo_index,
+            self.trend,
         ]
         return [m for m in all_metrics if m.enabled]
 
@@ -610,12 +617,16 @@ class InferenceEvaluatorAggregator(
         self._n_timesteps_seen = n_times
         return logs
 
-    def get_summary_logs(self) -> InferenceLog:
+    def get_summary(self) -> InferenceSummary:
         logs: InferenceLog = {}
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
-        return logs
+        loss = logs.get("time_mean_norm/rmse/channel_mean")
+        return InferenceSummary(logs=logs, loss=loss)
+
+    def get_summary_logs(self) -> InferenceLog:
+        return self.get_summary().logs
 
     @torch.no_grad()
     def _get_logs(self):
@@ -870,12 +881,15 @@ class InferenceAggregator(
         self._n_timesteps_seen = n_times
         return logs
 
-    def get_summary_logs(self) -> InferenceLog:
+    def get_summary(self) -> InferenceSummary:
         logs = {}
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
-        return logs
+        return InferenceSummary(logs=logs, loss=None)
+
+    def get_summary_logs(self) -> InferenceLog:
+        return self.get_summary().logs
 
     @torch.no_grad()
     def _get_logs(self):
