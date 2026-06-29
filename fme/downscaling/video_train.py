@@ -87,6 +87,10 @@ class VideoTrainerConfig:
     segment_epochs: int | None = None
     validate_interval: int = 1
     resume_results_dir: str | None = None
+    # Cap batches per train/val epoch (e.g. for CPU smoke tests / debugging).
+    # None means iterate the full loader.
+    max_train_batches: int | None = None
+    max_val_batches: int | None = None
 
     def __post_init__(self):
         for name, data in (
@@ -182,6 +186,11 @@ class VideoTrainer:
         epoch_loss = 0.0
         n_batches = 0
         for i, batch in enumerate(self.train_data.loader):
+            if (
+                self.config.max_train_batches is not None
+                and i >= self.config.max_train_batches
+            ):
+                break
             self.num_batches_seen += 1
             outputs = self.model.train_on_batch(batch, self.optimization)
             self.ema(self.model.modules)
@@ -205,7 +214,12 @@ class VideoTrainer:
         total_gen_mae = 0.0
         n_batches = 0
         with self._validation_context():
-            for batch in self.validation_data.loader:
+            for j, batch in enumerate(self.validation_data.loader):
+                if (
+                    self.config.max_val_batches is not None
+                    and j >= self.config.max_val_batches
+                ):
+                    break
                 outputs = self.model.train_on_batch(batch, self.null_optimization)
                 total_loss += outputs.loss.detach().cpu().item()
                 total_gen_mae += self._interior_generation_mae(batch)

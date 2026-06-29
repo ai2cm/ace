@@ -1,39 +1,26 @@
-# Endpoint-conditioned video interpolation on X-SHiELD AMIP 3-hourly data.
-# Temporal-only: fine and coarse point at the SAME store (downscale factor 1);
-# coarse is loaded but ignored by the model. Each clip is a 24h window
-# (n_timesteps: 9 -> endpoints at 0h/24h + 7 interior frames at 3h spacing).
-#
-# Train/val/test split (chronological, whole-year, ~4019 daily clips total):
-#   train: 2013-01-02 .. 2021-12-31   (~3290 clips)
-#   val:   2022-01-01 .. 2022-12-31   (~365 clips)
-#   test:  2023-01-01 .. 2024-01-04   (~370 clips)   <- used by evaluation, not here
-# The split is encoded via each dataset's `subset` TimeSlice; the same zarr is
-# reused, date-limited. Clips never cross a split boundary (a 9-frame clip must
-# fit entirely within the subset), so there is no train/val/test leakage.
-#
-# First model uses 4 channels: u10, v10, PRMSL, PRATE (no 2m temperature).
-# Normalization means/stds are per-variable statistics computed from the TRAIN
-# split ONLY, over exactly the training region+period the model sees
-# (2013-01-02..2021-12-31, box lat 0-30 / lon 0-60), subsampled every ~5 days.
-# Recompute (toy/compute_norm_stats.py) if out_names, the box, or train range change.
-# NOTE: PRATEsfc is precipitation -- non-negative and heavy-tailed, so plain
-# mean/std standardization is crude; a log1p transform would help in a later pass.
-experiment_dir: /will/be/overwritten
-max_epochs: 20
+# CPU smoke config: same dataset/split/channels/normalization as
+# video_train_xshield.yaml, but tiny + capped so the full train loop
+# (train -> validate -> checkpoint) runs end-to-end in minutes on CPU.
+# Run with: FME_FORCE_CPU=1 python -m fme.downscaling.video_train \
+#   fme/downscaling/configs/video_train_xshield_smoke.yaml
+experiment_dir: /tmp/video_smoke
+max_epochs: 1
+max_train_batches: 3
+max_val_batches: 2
 validate_using_ema: true
 validate_interval: 1
 generate_n_samples: 1
 logging:
   log_to_screen: true
   log_to_wandb: true
-  log_to_file: true
+  log_to_file: false
   project: downscaling-pmd
-  name: regional-30-60-1degree-24to3
+  name: regional-30-60-1degree-24to3-smoke
   entity: jhhuang_chloe
 optimization:
   lr: 0.0001
 ema:
-  decay: 0.9999
+  decay: 0.99
 train_data:
   n_timesteps: 9
   fine:
@@ -50,7 +37,7 @@ train_data:
       subset:
         start_time: "2013-01-02"
         stop_time: "2021-12-31"
-  batch_size: 4
+  batch_size: 2
   num_data_workers: 0
   strict_ensemble: false
   lat_extent:
@@ -75,7 +62,7 @@ validation_data:
       subset:
         start_time: "2022-01-01"
         stop_time: "2022-12-31"
-  batch_size: 4
+  batch_size: 2
   num_data_workers: 0
   strict_ensemble: false
   lat_extent:
@@ -86,13 +73,13 @@ validation_data:
     stop: 60
 model:
   n_timesteps: 9
-  model_channels: 64
-  n_heads: 4
-  num_freqs: 4
+  model_channels: 16
+  n_heads: 2
+  num_freqs: 3
   sigma_min: 0.002
   sigma_max: 80.0
   churn: 0.0
-  num_diffusion_generation_steps: 18
+  num_diffusion_generation_steps: 4
   out_names:
     - eastward_wind_at_ten_meters
     - northward_wind_at_ten_meters

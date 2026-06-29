@@ -1,0 +1,98 @@
+# Beaker CPU smoke config for the video PMD trainer. Same dataset/split/channels/
+# normalization as fme/downscaling/configs/video_train_xshield.yaml, but tiny +
+# capped so the full train->validate->checkpoint loop runs quickly on CPU.
+# experiment_dir is /results so Beaker/gantry captures checkpoints + logs as the
+# run's result dataset. Launch with run.sh (gantry, --gpus 0).
+experiment_dir: /results
+max_epochs: 1
+max_train_batches: 3
+max_val_batches: 2
+validate_using_ema: true
+validate_interval: 1
+generate_n_samples: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: downscaling-pmd
+  name: regional-30-60-1degree-24to3-beaker-smoke
+  entity: jhhuang_chloe
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.99
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 2
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 30
+  lon_extent:
+    start: 0
+    stop: 60
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 2
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 30
+  lon_extent:
+    start: 0
+    stop: 60
+model:
+  n_timesteps: 9
+  model_channels: 16
+  n_heads: 2
+  num_freqs: 3
+  sigma_min: 0.002
+  sigma_max: 80.0
+  churn: 0.0
+  num_diffusion_generation_steps: 4
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+  normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.206107
+      northward_wind_at_ten_meters: 0.133348
+      PRMSL: 1009.104862
+      PRATEsfc: 0.000014
+    stds:
+      eastward_wind_at_ten_meters: 2.845158
+      northward_wind_at_ten_meters: 3.598240
+      PRMSL: 5.558873
+      PRATEsfc: 0.000098
