@@ -131,13 +131,12 @@ def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
 def test_separate_ic_writer_preserves_time_calendar(tmpdir, calendar):
     """A downstream reader must decode the written ``time`` to the source dates.
 
-    Regression test: previously ``SeparateICZarrWriterAdapter`` encoded the time
-    values with the source calendar but did not pass ``time_calendar`` to the
-    ``ZarrWriter``, so the coordinate was tagged with the default ``"julian"``
-    calendar. For non-julian data the values then no longer matched the label, so
-    decoding shifted every timestamp. The shift comes from leap days accumulated
-    between the 1970 encoding epoch and the data dates, so it appears even when the
-    coordinate itself does not span a leap day (here ~12 days for 2020).
+    ``SeparateICZarrWriterAdapter`` encodes the time values with the source
+    calendar, so the stored ``calendar`` attribute must name that same calendar.
+    A mismatched label (e.g. ``"julian"`` for non-julian data) leaves the values
+    inconsistent with the label, so decoding shifts every timestamp by the leap
+    days accumulated between the 1970 encoding epoch and the data dates -- a shift
+    present even when the coordinate does not span a leap day (~12 days for 2020).
     """
     n_timesteps = 2
     data = {"foo": torch.zeros((1, n_timesteps, 2, 2))}
@@ -174,9 +173,8 @@ def test_separate_ic_writer_preserves_time_calendar(tmpdir, calendar):
 
     output = str(tmpdir / "test_ic0000.zarr")
     # A downstream reader uses xarray's default decoding, which honors the stored
-    # ``calendar`` attribute. The decoded calendar dates must match the source;
-    # before the fix they were offset (compare day strings to ignore the cftime
-    # subclass and isolate the actual dates).
+    # ``calendar`` attribute. The decoded calendar dates must match the source
+    # (compare day strings to ignore the cftime subclass and isolate the dates).
     decoded = xr.open_zarr(output)
     np.testing.assert_array_equal(
         decoded.time.dt.strftime("%Y-%m-%d").values,
