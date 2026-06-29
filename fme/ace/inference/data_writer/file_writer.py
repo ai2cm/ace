@@ -176,6 +176,33 @@ def _select_time(
 
 
 @dataclasses.dataclass
+class FileWriterParams:
+    """Plain runtime parameters for `FileWriter`.
+
+    Built by `FileWriterConfig._build_writer_params` so that the runtime writer
+    depends only on the values it actually uses, rather than on the full
+    `FileWriterConfig`.
+
+    Parameters:
+        label: Label used in log messages for this output dataset.
+        names: Names of the variables to save, or None to save all available.
+        subselect_horizontal: Whether to subselect the horizontal domain using
+            `lat_slice` / `lon_slice`.
+        lat_slice: Latitude slice to apply when subselecting.
+        lon_slice: Longitude slice to apply when subselecting.
+        time_selection: Optional time selection criteria. Passed straight to
+            `_select_time`, which dispatches on each selector's own methods.
+    """
+
+    label: str
+    names: list[str] | None
+    subselect_horizontal: bool
+    lat_slice: slice
+    lon_slice: slice
+    time_selection: Slice | MonthSelector | TimeSlice | None
+
+
+@dataclasses.dataclass
 class FileWriterConfig:
     """
     Configuration for writing output data.
@@ -273,6 +300,16 @@ class FileWriterConfig:
         """Validate this writer's time coarsening against the inference schedule."""
         if self.time_coarsen is not None:
             self.time_coarsen.validate(forward_steps_in_memory, n_forward_steps)
+
+    def _build_writer_params(self) -> FileWriterParams:
+        return FileWriterParams(
+            label=self.label,
+            names=self.names,
+            subselect_horizontal=bool(self.lat_extent or self.lon_extent),
+            lat_slice=self.lat_slice,
+            lon_slice=self.lon_slice,
+            time_selection=self.time_selection,
+        )
 
     def build_paired(
         self,
@@ -434,7 +471,7 @@ class FileWriterConfig:
                     coords=subselect_coords_,
                     dataset_metadata=dataset_metadata,
                 )
-        writer = FileWriter(self, raw_writer, full_coords=coords)
+        writer = FileWriter(self._build_writer_params(), raw_writer, full_coords=coords)
         if isinstance(self.time_coarsen, TimeCoarsenConfig):
             return self.time_coarsen.build(writer)
         else:
@@ -448,14 +485,14 @@ class FileWriter:
 
     def __init__(
         self,
-        config: FileWriterConfig,
+        params: FileWriterParams,
         writer: RawDataWriter
         | MonthlyDataWriter
         | ZarrWriterAdapter
         | SeparateICZarrWriterAdapter,
         full_coords: Mapping[str, np.ndarray],
     ):
-        self.config = config
+        self._params = params
         self.writer = writer
         self.full_coords = full_coords
         self._no_write_count = 0
@@ -473,7 +510,7 @@ class FileWriter:
         sample_dim: str = "sample",
         time_dim: str = "time",
     ) -> tuple[dict[str, torch.Tensor], xr.DataArray]:
-        use_names = self.config.names or data.keys()
+        use_names = self._params.names or data.keys()
         data_xr = xr.Dataset(
             {
                 k: xr.DataArray(
@@ -490,18 +527,18 @@ class FileWriter:
             coords={time_dim: batch_time, **self.full_coords},
         )
 
-        if self.config.lat_extent or self.config.lon_extent:
+        if self._params.subselect_horizontal:
             # TODO: should eventually support selection straddling dateline
             data_xr = data_xr.sel(
                 {
-                    self._spatial_dims[0].name: self.config.lat_slice,
-                    self._spatial_dims[1].name: self.config.lon_slice,
+                    self._spatial_dims[0].name: self._params.lat_slice,
+                    self._spatial_dims[1].name: self._params.lon_slice,
                 }
             )
 
         data_xr = _select_time(
             data_xr,
-            self.config.time_selection,
+            self._params.time_selection,
             start_timestep=start_timestep,
             sample_dim=sample_dim,
             time_dim=time_dim,
@@ -533,7 +570,7 @@ class FileWriter:
             self._no_write_count += 1
             if self._no_write_count < 10:
                 logging.warning(
-                    f"No data to write for region {self.config.label} at "
+                    f"No data to write for region {self._params.label} at "
                     f"timestep {start_timestep}."
                 )
             elif self._no_write_count == 10:
