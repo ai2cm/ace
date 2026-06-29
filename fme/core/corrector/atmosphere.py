@@ -129,8 +129,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             (``total_frozen_precipitation_rate``) to be less than or equal to the
             total precipitation rate (``PRATEsfc``) in each grid cell, since frozen
             precipitation is a component of total precipitation. This is applied
-            after any other corrections, so the constraint holds with respect to the
-            final, corrected total precipitation rate.
+            after the moisture budget correction, so the constraint holds with
+            respect to the final, corrected total precipitation rate, but before
+            the total energy budget correction, since frozen precipitation
+            contributes to the surface energy flux via the latent heat of freezing.
     """
 
     conserve_dry_air: bool = False
@@ -230,6 +232,13 @@ class AtmosphereCorrector(CorrectorABC):
                 timestep_seconds=self._timestep_seconds,
                 terms_to_modify=self._config.moisture_budget_correction,
             )
+        if self._config.clip_frozen_precipitation:
+            # Clip after the moisture budget correction so the ceiling is the
+            # final precipitation rate, but before the energy budget correction:
+            # frozen precipitation contributes to the surface energy flux (via
+            # latent heat of freezing), so clipping it afterwards would break the
+            # energy conservation that correction enforces.
+            gen_data = _clip_frozen_precipitation(gen_data)
         if self._config.total_energy_budget_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
@@ -246,8 +255,6 @@ class AtmosphereCorrector(CorrectorABC):
                 method=self._config.total_energy_budget_correction.method,
                 unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
             )
-        if self._config.clip_frozen_precipitation:
-            gen_data = _clip_frozen_precipitation(gen_data)
         return gen_data, corrector_state
 
 

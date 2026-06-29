@@ -332,6 +332,52 @@ def test_clip_frozen_precipitation_corrector_integration():
     )
 
 
+def test_clip_frozen_precipitation_runs_before_energy_correction():
+    """Energy conservation must hold with respect to the clipped frozen
+    precipitation. Frozen precipitation contributes to the surface energy flux
+    via the latent heat of freezing, so the clip must run before the energy
+    budget correction; otherwise the enforced energy balance is broken by the
+    subsequent clip. This fails if the clip runs after the energy correction.
+    """
+    torch.manual_seed(0)
+    tensor_shape = (1, 5, 5)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    timestep = datetime.timedelta(seconds=3600)
+    # frozen precip greatly exceeds total precip (PRATEsfc ~ 1e-5) so clipping
+    # changes the surface energy flux by a detectable amount.
+    gen_data = {
+        **gen_data,
+        "total_frozen_precipitation_rate": 1e-4 + 1e-4 * torch.rand(size=tensor_shape),
+    }
+    config = AtmosphereCorrectorConfig(
+        clip_frozen_precipitation=True,
+        total_energy_budget_correction=EnergyBudgetConfig("constant_temperature"),
+    )
+    corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
+    corrected, _ = corrector(input_data, gen_data, forcing_data, None)
+
+    # the clip is applied
+    assert torch.all(
+        corrected["total_frozen_precipitation_rate"] <= corrected["PRATEsfc"]
+    )
+
+    # energy is conserved with respect to the final, clipped state
+    input = AtmosphereData(input_data, vertical_coord)
+    corrected_gen = AtmosphereData(corrected | forcing_data, vertical_coord)
+    input_gm_energy = ops.area_weighted_mean(input.total_energy_ace2_path)
+    corrected_gm_energy = ops.area_weighted_mean(corrected_gen.total_energy_ace2_path)
+    predicted_tendency = ops.area_weighted_mean(
+        corrected_gen.net_energy_flux_into_atmosphere
+    )
+    expected_gm_energy = input_gm_energy + predicted_tendency * timestep.total_seconds()
+    torch.testing.assert_close(corrected_gm_energy, expected_gm_energy)
+
+
 def _get_corrector_test_input(
     tensor_shape, requires_grad=False, air_temperature_prefix="air_temperature_"
 ):
