@@ -31,6 +31,41 @@ from fme.downscaling.data import PairedDataLoaderConfig, PairedVideoBatchData
 from fme.downscaling.video_models import VideoDiffusionModelConfig
 
 
+def _video_comparison_figure(gt, pred, name: str, example_idx: int):
+    """3-row (GT / Pred / Pred-GT) x T-frame grid for one variable + example."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n_times = gt.shape[0]
+    diff = pred - gt
+    vmin, vmax = float(gt.min()), float(gt.max())
+    if vmax <= vmin:
+        vmax = vmin + 1e-6
+    dmax = max(float(diff.abs().max()), 1e-6)
+    rows = [
+        ("GT", gt, dict(vmin=vmin, vmax=vmax, cmap="viridis")),
+        ("Pred", pred, dict(vmin=vmin, vmax=vmax, cmap="viridis")),
+        ("Pred-GT", diff, dict(vmin=-dmax, vmax=dmax, cmap="RdBu_r")),
+    ]
+    fig, axes = plt.subplots(3, n_times, figsize=(1.4 * n_times, 4.6), squeeze=False)
+    for r, (label, data, kw) in enumerate(rows):
+        for t in range(n_times):
+            ax = axes[r][t]
+            ax.imshow(data[t].numpy(), origin="lower", **kw)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if r == 0:
+                obs = "\n(obs)" if t in (0, n_times - 1) else ""
+                ax.set_title(f"{3 * t}h{obs}", fontsize=7)
+            if t == 0:
+                ax.set_ylabel(label, fontsize=9)
+    fig.suptitle(f"{name} - val example {example_idx}", fontsize=10)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    return fig
+
+
 def _save_checkpoint(trainer: "VideoTrainer", path: str) -> None:
     temporary_location = os.path.join(os.path.dirname(path), f".{uuid.uuid4()}.tmp")
     try:
@@ -84,6 +119,10 @@ class VideoTrainerConfig:
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
+    # Number of val examples to visualize (GT vs prediction frame grids) on W&B
+    # at each validation. 0 disables. The same first val examples are used each
+    # time so you can watch them improve across epochs.
+    num_visualization_examples: int = 3
     segment_epochs: int | None = None
     validate_interval: int = 1
     resume_results_dir: str | None = None
@@ -247,6 +286,35 @@ class VideoTrainer:
             )
         return sum(errors) / len(errors)
 
+    @torch.no_grad()
+    def log_validation_visualizations(self) -> None:
+        """Log GT-vs-prediction frame grids for a few val examples to W&B.
+
+        Called by ALL ranks so the collective barrier in ``WandB.log`` stays
+        matched; only root builds and logs the figures.
+        """
+        if self.config.num_visualization_examples <= 0:
+            return
+        dist = Distributed.get_instance()
+        wandb = WandB.get_instance()
+        self.model.module.eval()
+        with self._validation_context():
+            batch = next(iter(self.validation_data.loader))
+            generated = self.model.generate(batch, n_samples=1)
+        logs: dict = {}
+        if dist.is_root() and wandb.enabled:
+            import matplotlib.pyplot as plt
+
+            n = min(self.config.num_visualization_examples, len(batch.fine))
+            for i in range(n):
+                for name in self.model.out_names:
+                    gt = batch.fine.data[name][i].float().cpu()
+                    pred = generated[name][i, 0].float().cpu()
+                    fig = _video_comparison_figure(gt, pred, name, i)
+                    logs[f"val_viz/example_{i}/{name}"] = wandb.Image(fig)
+                    plt.close(fig)
+        wandb.log(logs, step=self.num_batches_seen)
+
     def save_best_checkpoint(self, summary: dict[str, float]) -> None:
         if self.best_checkpoint_path is None:
             return
@@ -284,6 +352,7 @@ class VideoTrainer:
                 summary = self.valid_one_epoch()
                 if dist.is_root() and self.config.save_checkpoints:
                     self.save_best_checkpoint(summary)
+                self.log_validation_visualizations()  # all ranks (barrier-safe)
             if dist.is_root() and self.config.save_checkpoints:
                 self.save_epoch_checkpoint()
             wandb.log(
