@@ -2692,3 +2692,61 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     output, _ = stepper.predict(input_data, forcing_data)
     ic_a = input_data.as_batch_data().data["a"][:, 0]
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
+
+
+def test_build_loss_spatial_mask_resolves_via_convention():
+    """Stepper.build_loss_spatial_mask resolves a per-loss-name mask from the
+    SpatialMaskProvider via the mask_ naming convention (field-specific wins,
+    falling back to the catch-all mask_2d)."""
+    img_shape = (5, 5)
+    mask_2d = torch.ones(img_shape, device=DEVICE)
+    mask_2d[3:, :] = 0.0
+    mask_a = torch.ones(img_shape, device=DEVICE)
+    mask_a[:, 4:] = 0.0
+    provider = SpatialMaskProvider({"mask_2d": mask_2d, "mask_a": mask_a})
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    stepper = config.get_stepper(
+        get_dataset_info(img_shape=img_shape, spatial_mask_provider=provider)
+    )
+    masks = stepper.build_loss_spatial_mask()
+    assert set(masks) == {"a", "b"}
+    torch.testing.assert_close(masks["a"], mask_a)  # field-specific wins
+    torch.testing.assert_close(masks["b"], mask_2d)  # falls back to mask_2d
+
+
+def test_build_loss_spatial_mask_empty_without_provider():
+    """No SpatialMaskProvider -> empty mapping (loss masking is a no-op)."""
+    config = _get_stepper_config(["a"], ["a"])
+    stepper = config.get_stepper(get_dataset_info())
+    assert stepper.build_loss_spatial_mask() == {}
+
+
+def test_train_stepper_mask_loss_gates_and_affects_loss():
+    """The mask_loss flag gates whether per-cell masks are sourced, and when on
+    they actually change the optimized loss."""
+    torch.manual_seed(0)
+    img_shape = (5, 5)
+    data = get_data(["a"], n_samples=3, n_time=2).data
+    mask = torch.ones(img_shape, device=DEVICE)
+    mask[3:, :] = 0.0  # mask out the bottom two rows
+    provider = SpatialMaskProvider({"mask_a": mask})
+    dataset_info = get_dataset_info(img_shape=img_shape, spatial_mask_provider=provider)
+    config = _get_stepper_config(["a"], ["a"])
+
+    masked = _get_train_stepper(
+        config, dataset_info, loss=StepLossConfig(type="MSE"), mask_loss=True
+    )
+    unmasked = _get_train_stepper(
+        config, dataset_info, loss=StepLossConfig(type="MSE"), mask_loss=False
+    )
+    assert masked._loss_spatial_mask is not None
+    assert set(masked._loss_spatial_mask) == {"a"}
+    assert unmasked._loss_spatial_mask is None
+
+    masked_loss = masked.train_on_batch(
+        data=data, optimization=NullOptimization()
+    ).metrics["loss"]
+    unmasked_loss = unmasked.train_on_batch(
+        data=data, optimization=NullOptimization()
+    ).metrics["loss"]
+    assert not torch.allclose(masked_loss, unmasked_loss)

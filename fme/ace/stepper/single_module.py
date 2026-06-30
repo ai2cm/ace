@@ -893,6 +893,28 @@ class Stepper:
             normalizer=loss_normalizer,
         )
 
+    def build_loss_spatial_mask(self) -> dict[str, torch.Tensor]:
+        """Per-output-variable spatial validity mask for the loss.
+
+        Returns a mapping from each loss variable name to its per-cell mask
+        (1 = valid, 0 = invalid), resolved from this stepper's
+        ``SpatialMaskProvider`` via the ``mask_`` naming convention
+        (``mask_<var>`` -> ``mask_<level>`` -> ``mask_2d``). Variables without a
+        matching mask are omitted (left unmasked). Returns an empty mapping when
+        no spatial masks are available, so loss masking is a no-op on datasets
+        that ship none.
+        """
+        try:
+            provider = self._dataset_info.spatial_mask_provider
+        except MissingDatasetInfo:
+            return {}
+        masks: dict[str, torch.Tensor] = {}
+        for name in self.loss_names:
+            mask = provider.get_mask_tensor_for(name)
+            if mask is not None:
+                masks[name] = mask
+        return masks
+
     @property
     def config(self) -> StepperConfig:
         return self._config
@@ -1447,6 +1469,11 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        mask_loss: When True, exclude per-cell invalid cells from the loss
+            spatial reduction (both numerator and denominator), using the
+            dataset's SpatialMaskProvider masks resolved per output variable via
+            the ``mask_`` naming convention. No-op when the dataset ships no
+            spatial masks. Default False, so existing configs are unaffected.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1456,6 +1483,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    mask_loss: bool = False
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1579,6 +1607,9 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+        self._loss_spatial_mask: dict[str, torch.Tensor] | None = (
+            self._stepper.build_loss_spatial_mask() if config.mask_loss else None
+        )
 
     def train_on_batch(
         self,
@@ -1735,6 +1766,7 @@ class TrainStepper(
             target_step,
             step=step,
             data_mask=data_mask,
+            spatial_mask=self._loss_spatial_mask,
         )
         step_total_loss = step_loss.total()
         metrics[f"loss_step_{step}"] = step_total_loss.detach()
