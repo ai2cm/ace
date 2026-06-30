@@ -395,14 +395,18 @@ check in scratch). Findings:
   Demo: a visually-invisible white residual at **1% of field std** (0.01% extra
   variance) on a steep-red-spectrum field drives `spec_mae_mid/hi` to ~9 while the
   absolute hi-band energy stays ~1e-5 of total. PRMSL is exactly this regime.
-- The real runs sit at ~0.9 (not ~9 — PRMSL has *some* hi-k energy), i.e. the
-  student's hi-k power is ~10^0.9 ≈ **8× the teacher's**, on a band holding little
-  absolute energy. Consistent with "the normalized image panels look fine."
+- The real runs sit at ~0.9 (not ~9). **Sign correction (see "Corrected diagnosis"
+  below): the raw PSD curves show the student is BELOW the teacher (a high-k power
+  *deficit* — too smooth), NOT 8× above it.** `spec_mae = |log ratio|` hides the
+  sign; the earlier "injects excess hi-k texture" reading was wrong. The smooth-field
+  relative-amplification still applies to PRMSL's near-zero hi-k bands, but the
+  direction is under-power.
 - **Trustworthy PRMSL signals are `spec_mae_lo_PRMSL` + `crps_PRMSL`** (and the new
   raw PSD curves). On those the damage is mild–moderate and coarse-band (lo
-  0.59→0.67 / 0.62→0.80), which is what the discriminator-tap lever targets.
-  → The headline "collapse" overstates the real harm; weight the coarse/lo signals
-  and the absolute PSD curves, not mid/hi `spec_mae`.
+  0.59→0.67 / 0.62→0.80).
+  → The headline mid/hi "collapse" number overstates the harm; read the **raw PSD
+  curves** (absolute power vs wavenumber) and the coarse/lo signals, not mid/hi
+  `spec_mae`.
 
 #### Tail-generation verified (2026-06-30) — tails are healthy, not failing
 
@@ -418,8 +422,9 @@ runs. **The model is generating the tails.**
 | PRATEsfc @30k (`3vk3or7v`) | **0.83** | **0.96** | recovers to near-target |
 
 - **PRMSL extremes are ~1.0 and stable** → the PRMSL spectral issue is NOT a tail
-  failure; spectral shape and distributional extremes are decoupled (reinforces the
-  artifact finding).
+  failure *for PRMSL* (its true hi-k energy ≈ 0, so nothing to miss). NB: for the
+  broadband fields (precip, winds) smoothness and tails share one root — the high-k
+  deficit — see "Corrected diagnosis" below; they are not decoupled there.
 - **Precip tails improve monotonically with maturity** (0.37→0.83 / 0.56→0.96 by
   30k). The under-prediction in the *young* GAN-fix runs (~0.6 @7k) is training
   immaturity, not collapse.
@@ -430,12 +435,52 @@ runs. **The model is generating the tails.**
   0.54→0.96 a "tails blow up" symptom. That was a misread — for a student/target
   ratio, 0.54→0.96 is the tail matched *better*. Precip tails improve, not degrade.
 
-**Implication for the planned spectral loss:** a PSD term is a 2nd-moment constraint
-and will **not** move the tails — precip already has good spectra
-(`spec_mae_lo/mid_PRATEsfc` ~0.03) yet still under-predicts extremes, because
-variance-per-wavenumber doesn't pin a heavy tail. Tails remain the job of the
-mass-covering forward-KL (already chosen) + maturity + tail-based selection. Add
-the spectral loss for spectral *shape* (coarse-PRMSL / texture), not for tails.
+**Implication for the planned spectral loss** (see also the corrected diagnosis
+below, which links spectra and tails): restoring high-k variance plausibly helps
+*both* spectra and tails (same root cause), but a *pure mean-PSD match* can be
+satisfied by incoherent high-k noise — so it won't reliably fix tails on its own; an
+adversarial fine-scale critic is better for coherent extremes, with the spectral
+term as a cheaper scaffold.
+
+#### Corrected diagnosis (2026-06-30): the student is too SMOOTH (high-k deficit), not over-textured
+
+Reading the raw `val/psd_<var>` curves directly (not `spec_mae`): **the student PSD
+sits BELOW the teacher across all variables, with a deficit that grows toward high
+wavenumber — the student is uniformly too smooth.** This **corrects the sign** of the
+earlier interpretation (`spec_mae = |log(student/teacher)|` carries no sign; the
+"GAN injects excess hi-k texture" reading was wrong — it's *under*-power).
+
+- **Root cause is the few-step distillation itself, not (primarily) the GAN.** A 1–2
+  step student's output ≈ the posterior mean `E[x0|x]` (Tweedie), which averages over
+  fine-scale realizations → blurry by construction; the mass-covering forward-KL
+  compounds it (hedges across modes instead of committing to a sharp one). "Too
+  smooth" is the *default* when nothing restores high-frequency variance.
+- **Why the GAN doesn't fix it — both prior hypotheses, reframed:**
+  - *Encoder tap = the primary structural culprit, and why the deficit is universal.*
+    The critic taps the **coarse bottleneck** → blind to high-k → gives **zero**
+    gradient to add fine-scale power for *any* variable. No GAN weight/stabilizer can
+    restore a band the critic can't see.
+  - *Collapse compounds it.* When the disc wins, the generator gradient saturates →
+    even the coarse bands it could shape stop improving.
+- **Unifies smoothness and tails** (supersedes the earlier "spectra and extremes are
+  decoupled"): too smooth = under-dispersed = high-k variance deficit = the
+  wind/precip **tail** under-prediction (extremes are local high-frequency features).
+  Same root cause. **PRMSL is the exception** — its tails read ~1.0 *despite* the
+  smoothness because its true hi-k energy is ~0 (nothing to miss there); the deficit
+  bites the broadband fields (precip, winds).
+
+**Relevance to experiments (updated):**
+- The **finer / decoder / output-space critic** (tap1/tap2, decoder-tap, per-variable
+  critics) is now the **primary lever**, not a side experiment: a critic that can
+  *see* high-k is the only thing that can push the generator to produce it. Success
+  signal = the student's `val/psd_*` high-k tail rising toward the teacher's.
+- A **spectral loss must penalize the DEFICIT** (student PSD below teacher), not the
+  excess assumed earlier. Caveat: a pure mean-PSD match can be met with *incoherent*
+  high-k noise → prefer the adversarial fine-scale critic for coherent structure; use
+  the spectral term as the cheap scaffold.
+- The tap "risk" is reframed: we're texture-*starved*, not over-textured — the worry
+  isn't unwanted texture but *incoherent* texture; the `val/psd_*` curves + tails are
+  the check.
 
 #### PSD curves now step-slidable (commit `dc7876eeb`)
 
@@ -589,9 +634,10 @@ purely by which conv level you tap, so tap-depth is a clean, near-monotone knob
   (late window + `val/psd_PRMSL` + `spec_mae_lo_PRMSL`) before re-architecting.
 - Targets the **coarse (lo/mid)** GAN-timed damage — NOT the mid/hi metric
   artifact (smooth-field noise floor).
-- Shallow-tap risk: a finer critic on a smooth field (PRMSL fine ≈ 0 energy)
-  could *inject* fine texture (the noise floor). GAN weight is only 1e-3, but
-  watch the hi band / PSD curves.
+- Shallow-tap risk (reframed per the 2026-06-30 corrected diagnosis): the student
+  is too *smooth* (high-k deficit), so a finer critic is *wanted* to ADD power — the
+  worry is not unwanted texture but *incoherent* texture (esp. on PRMSL where true
+  hi-k energy ≈ 0). Watch the `val/psd_*` curves and tails.
 - Separable lever from the backbone-expert choice and the GAN weight. Related to
   the older "which expert should the discriminator use?" design note below.
 
