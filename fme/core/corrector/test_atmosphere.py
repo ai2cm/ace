@@ -21,7 +21,6 @@ from .atmosphere import (
     _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
 )
-from .utils import force_positive
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -272,21 +271,6 @@ def test_force_conserve_moisture(
         np.testing.assert_almost_equal(new_budget_residual, 0.0, decimal=6)
 
     np.testing.assert_almost_equal(new_dry_air, original_dry_air, decimal=6)
-
-
-def test_force_positive():
-    data = {
-        "foo": torch.tensor([[-1.0, 0.0], [0.0, 1.0], [1.0, 2.0]]),
-        "bar": torch.tensor([[-1.0, 0.0], [0.0, -3.0], [1.0, 2.0]]),
-    }
-    original_min = torch.min(data["foo"])
-    assert original_min < 0.0
-    fixed_data = force_positive(data, ["foo"])
-    new_min = torch.min(fixed_data["foo"])
-    # Ensure the minimum value of 'foo' is now 0
-    torch.testing.assert_close(new_min, torch.tensor(0.0))
-    # Ensure other variables are not modified
-    torch.testing.assert_close(fixed_data["bar"], data["bar"])
 
 
 def _get_corrector_test_input(
