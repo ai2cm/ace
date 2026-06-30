@@ -37,12 +37,13 @@ from fme.ace.stepper.single_module import (
 )
 from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
 from fme.core.dataset_info import DatasetInfo
+from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.ocean import OceanConfig
-from fme.core.ocean_data import OceanData
+from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
@@ -85,11 +86,18 @@ class CoupledOceanFractionConfig:
     Configuration for computing ocean fraction from the ocean-predicted sea ice
     fraction.
 
+    The configured land fraction name is used to read the atmosphere forcing,
+    then passed to OceanData as its canonical land_fraction field. The configured
+    sea ice fraction name must be registered in OCEAN_FIELD_NAME_PREFIXES as
+    either sea_ice_fraction or ocean_sea_ice_fraction.
+
     Parameters:
         sea_ice_fraction_name: Name of the sea ice fraction field in the ocean
-            data. Must be an ocean prognostic variable. If the atmosphere uses
-            the same name as an ML forcing then the generated sea ice fraction
-            is also passed as an input to the atmosphere.
+            data. Must be an ocean prognostic variable and must be registered in
+            OCEAN_FIELD_NAME_PREFIXES as either sea_ice_fraction or
+            ocean_sea_ice_fraction. If the atmosphere uses the same name as an
+            ML forcing then the generated sea ice fraction is also passed as an
+            input to the atmosphere.
         land_fraction_name: Name of the land fraction field in the atmosphere
             data. If needed, will be passed to the ocean stepper as a forcing.
         sea_ice_fraction_name_in_atmosphere: Name of the sea ice fraction field in
@@ -100,6 +108,21 @@ class CoupledOceanFractionConfig:
     sea_ice_fraction_name: str
     land_fraction_name: str
     sea_ice_fraction_name_in_atmosphere: str | None = None
+
+    def __post_init__(self):
+        self._get_canonical_sea_ice_fraction_name()
+
+    def _get_canonical_sea_ice_fraction_name(self) -> str:
+        sea_ice_frac_name = self.sea_ice_fraction_name
+        if sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["sea_ice_fraction"]:
+            return "sea_ice_fraction"
+        elif sea_ice_frac_name in OCEAN_FIELD_NAME_PREFIXES["ocean_sea_ice_fraction"]:
+            return "ocean_sea_ice_fraction"
+        else:
+            raise ValueError(
+                f"CoupledOceanFractionConfig expected {sea_ice_frac_name} to be "
+                "registered in OCEAN_FIELD_NAME_PREFIXES as a sea ice fraction."
+            )
 
     def validate_ocean_prognostic_names(self, prognostic_names: Iterable[str]):
         if self.sea_ice_fraction_name not in prognostic_names:
@@ -152,7 +175,12 @@ class CoupledOceanFractionConfig:
         # fill nans with 0s
         sea_ice_frac = torch.nan_to_num(forcings_from_ocean[sea_ice_frac_name])
         land_frac = atmos_forcing_data[land_frac_name]
-        return OceanData({land_frac_name: land_frac, sea_ice_frac_name: sea_ice_frac})
+        return OceanData(
+            {
+                "land_fraction": land_frac,
+                self._get_canonical_sea_ice_fraction_name(): sea_ice_frac,
+            }
+        )
 
 
 def _load_stepper_weights_and_history_factory(
@@ -1415,6 +1443,13 @@ def _process_ensemble_output_list(
     return ocean_gen_data, atmos_gen_data
 
 
+# Offset added to the distributed/eval seed for the per-batch component-choice
+# RNG. Chosen as 685 -- one past TimeLengthProbabilities' reserved 684, and
+# distinct from the small per-schedule offsets (0, 1) used by seed_rng, so the
+# choice RNG never shares a seed with an n_steps sampler.
+_COMPONENT_CHOICE_RNG_OFFSET = 685
+
+
 class CoupledStepperTrainLoss:
     """Owns per-component loss computation *and* the rollout schedule
     (which steps are optimized, how many outer steps are required).
@@ -1426,6 +1461,7 @@ class CoupledStepperTrainLoss:
         atmosphere_loss: StepLoss,
         ocean_schedule: ComponentLossSchedule,
         atmosphere_schedule: ComponentLossSchedule,
+        optimize_single_component_per_batch: bool = False,
     ):
         self._loss_objs: dict[str, StepLoss] = {
             "ocean": ocean_loss,
@@ -1439,6 +1475,16 @@ class CoupledStepperTrainLoss:
             "ocean": ocean_schedule.loss_weight,
             "atmosphere": atmosphere_schedule.loss_weight,
         }
+        # Per-batch single-component selection state. Two RNGs mirror
+        # ComponentLossSchedule's _n_steps_sampler / _eval_n_steps_sampler split
+        # so the validation loss stays single-component (comparable in scale to
+        # the training batch loss) yet reproducible. ``_selected_realm is None``
+        # means both realms are eligible (the disabled / no-selection case).
+        self._optimize_single_component_per_batch = optimize_single_component_per_batch
+        self._component_choice_rng: np.random.RandomState | None = None
+        self._eval_component_choice_rng: np.random.RandomState | None = None
+        self._selected_realm: Literal["ocean", "atmosphere"] | None = None
+        self._is_training: bool = True
 
     @property
     def effective_loss_scaling(self) -> CoupledTensorMapping:
@@ -1447,19 +1493,99 @@ class CoupledStepperTrainLoss:
             atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
         )
 
-    def sample_n_steps(self) -> None:
+    def sample_from_rng(self) -> None:
+        """Draw this batch's per-component rollout window and the
+        single-component selection, in the required order.
+
+        The single public entry point for per-batch RNG draws so callers can't
+        transpose them: the selection's per-batch null check must see the
+        freshly sampled window, so ``_component_optimization_choice`` has to run
+        after ``_sample_n_steps``.
+        """
+        self._sample_n_steps()
+        self._component_optimization_choice()
+
+    def _sample_n_steps(self) -> None:
         for schedule in self._schedules.values():
             schedule.sample_n_steps()
 
-    def seed_step_sampler(self, seed: int) -> None:
+    def seed_rng(self, seed: int) -> None:
+        """Reseed the eval-only RNGs deterministically.
+
+        Reseeds both the per-schedule eval n_steps samplers and the eval
+        component-choice RNG, so each validation pass replays the same
+        single-component selections regardless of the training RNG position.
+        Training RNGs are distributed-seeded lazily and are left untouched.
+        """
         for i, schedule in enumerate(self._schedules.values()):
             schedule.seed_rng(seed + i)
+        self._eval_component_choice_rng = np.random.RandomState(
+            seed + _COMPONENT_CHOICE_RNG_OFFSET
+        )
+
+    def _init_component_choice_rng(self) -> None:
+        """Lazily seed the training component-choice RNG from the distributed
+        seed, mirroring ``TimeLengthProbabilities.initialize_rng``. Seeded
+        identically across ranks so every rank makes the same per-batch
+        selection. This does not make the per-batch training sequence
+        reproducible across preemption/resume -- the RNG advances batch-by-batch
+        and its position is not checkpointed, same as the random n_steps
+        sampler.
+        """
+        if self._component_choice_rng is None:
+            self._component_choice_rng = np.random.RandomState(
+                Distributed.get_instance().get_seed() + _COMPONENT_CHOICE_RNG_OFFSET
+            )
+
+    def _component_optimization_choice(self) -> None:
+        """Re-draw which single realm is optimized this batch (no-op when the
+        flag is disabled).
+
+        Invoked by ``sample_from_rng`` after ``_sample_n_steps`` so the
+        per-batch null check reflects the current batch's sampled window. The
+        train vs eval RNG is chosen by training/eval state (mirroring
+        ``ComponentLossSchedule.sample_n_steps``); the selection itself applies
+        in both modes via ``step_is_optimized``.
+        """
+        if not self._optimize_single_component_per_batch:
+            self._selected_realm = None
+            return
+        if self._is_training:
+            self._init_component_choice_rng()
+            rng = self._component_choice_rng
+        else:
+            if self._eval_component_choice_rng is None:
+                # Defensive: the validation loop drives seed_eval(0) before each
+                # pass, but fall back to a deterministic seed if it has not.
+                self._eval_component_choice_rng = np.random.RandomState(
+                    _COMPONENT_CHOICE_RNG_OFFSET
+                )
+            rng = self._eval_component_choice_rng
+        assert rng is not None
+        realms: list[Literal["ocean", "atmosphere"]] = ["ocean", "atmosphere"]
+        non_null = [
+            realm
+            for realm in realms
+            if self._schedules[realm].n_required_forward_steps() > 0
+        ]
+        if len(non_null) == 1:
+            self._selected_realm = non_null[0]
+        elif len(non_null) >= 2:
+            # Fair 50/50 among non-null realms; deterministic order keeps the
+            # draw reproducible across ranks for a fixed seed.
+            self._selected_realm = non_null[int(rng.randint(len(non_null)))]
+        else:
+            # Both realms null this batch (e.g. stochastic n_steps==0 for both);
+            # no realm contributes loss regardless, so leave both eligible.
+            self._selected_realm = None
 
     def set_train(self) -> None:
+        self._is_training = True
         for schedule in self._schedules.values():
             schedule.set_train()
 
     def set_eval(self) -> None:
+        self._is_training = False
         for schedule in self._schedules.values():
             schedule.set_eval()
 
@@ -1467,7 +1593,7 @@ class CoupledStepperTrainLoss:
         """Minimum number of outer (ocean) steps needed so that every
         component step contributing to the current batch's loss is computed.
 
-        Callers must invoke ``sample_n_steps()`` beforehand for stochastic
+        Callers must invoke ``sample_from_rng()`` beforehand for stochastic
         configs so the value reflects the current batch.
         """
         ocean_required = self._schedules["ocean"].n_required_forward_steps()
@@ -1480,6 +1606,16 @@ class CoupledStepperTrainLoss:
         realm: Literal["ocean", "atmosphere"],
         step: int,
     ) -> bool:
+        # Single-component selection gate. Applies in both train and eval (no
+        # _is_training gate here; the train/eval distinction lives in
+        # component_optimization_choice, which only picks the RNG), so the
+        # accumulated/validation loss stays single-component-per-batch.
+        if (
+            self._optimize_single_component_per_batch
+            and self._selected_realm is not None
+            and realm != self._selected_realm
+        ):
+            return False
         return self._schedules[realm].step_is_optimized(step)
 
     def compute_loss(
@@ -1504,7 +1640,11 @@ class CoupledStepperTrainLoss:
         target_data: TensorMapping,
     ) -> torch.Tensor | None:
         realm = prediction.realm
-        if not self._schedules[realm].step_is_optimized(prediction.step):
+        # Route through the (realm, step) wrapper so the single-component
+        # selection gates the normal training loss path too (the wrapper was
+        # previously bypassed here). compute_loss deliberately stays on the
+        # schedule directly to keep per-step diagnostic metrics for both realms.
+        if not self.step_is_optimized(realm, prediction.step):
             return None
         loss_output = self._loss_objs[realm](
             prediction.data, target_data, prediction.step
@@ -1575,6 +1715,14 @@ class CoupledTrainStepperConfig:
             batch member. Default is 2 if ocean or atmosphere loss type is
             EnsembleLoss, otherwise the default is 1. Must be 2 for EnsembleLoss
             to be valid.
+        optimize_single_component_per_batch: If True, each ``train_on_batch``
+            call optimizes exactly one of {ocean, atmosphere}, chosen per batch
+            (fair 50/50 among realms whose loss is non-null for that batch). The
+            selection stays active in validation too, drawn from a separate,
+            deterministically-seeded RNG, so the validation loss is
+            single-component-per-batch and comparable in scale to the training
+            batch loss. Default False reproduces the existing behavior exactly.
+            Requires both realms to be non-null (validated in __post_init__).
         parameter_init: The coupled parameter initialization configuration for
             fine-tuning a previously-trained coupled stepper.
     """
@@ -1583,6 +1731,7 @@ class CoupledTrainStepperConfig:
     ocean: ComponentTrainingConfig
     atmosphere: ComponentTrainingConfig
     n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
+    optimize_single_component_per_batch: bool = False
     parameter_init: CoupledParameterInitConfig = dataclasses.field(
         default_factory=lambda: CoupledParameterInitConfig()
     )
@@ -1607,6 +1756,18 @@ class CoupledTrainStepperConfig:
             raise ValueError(
                 "At least one of ocean or atmosphere loss must be "
                 "non-null (non-zero loss_weight and non-zero n_steps)."
+            )
+        if self.optimize_single_component_per_batch and (
+            self.ocean.loss_is_null or self.atmosphere.loss_is_null
+        ):
+            # With a statically-null realm the per-batch choice degrades to
+            # always selecting the sole non-null realm, so the flag has no
+            # observable effect; reject it rather than accept it silently.
+            raise ValueError(
+                "optimize_single_component_per_batch requires both ocean and "
+                "atmosphere losses to be non-null (non-zero loss_weight and "
+                "non-zero n_steps); a statically-null realm makes the per-batch "
+                "component choice a no-op."
             )
         if self.n_ensemble == -1:
             use_ensemble_loss = "EnsembleLoss" in (
@@ -1701,6 +1862,9 @@ class CoupledTrainStepperConfig:
             atmosphere_loss=atmos_step_loss,
             ocean_schedule=ocean_schedule,
             atmosphere_schedule=atmos_schedule,
+            optimize_single_component_per_batch=(
+                self.optimize_single_component_per_batch
+            ),
         )
 
     def get_train_stepper(
@@ -1819,7 +1983,7 @@ class CoupledTrainStepper(
         )
 
     def seed_eval(self, seed: int) -> None:
-        self._loss.seed_step_sampler(seed)
+        self._loss.seed_rng(seed)
 
     def set_train(self):
         self._stepper.set_train()
@@ -1993,7 +2157,10 @@ class CoupledTrainStepper(
         )
 
         metrics = ComponentStepMetrics()
-        self._loss.sample_n_steps()
+        # Draws this batch's rollout window and (when
+        # optimize_single_component_per_batch) the single-component selection,
+        # in the required order.
+        self._loss.sample_from_rng()
         optimization.set_mode(self.modules)
         with optimization.autocast():
             output_list = self._accumulate_loss(

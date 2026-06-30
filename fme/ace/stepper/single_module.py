@@ -358,6 +358,13 @@ class TrainOutput(TrainOutputABC):
                     f"target_data can only have one ensemble member, got {v.shape[1]}"
                 )
 
+    @property
+    def n_ensemble(self) -> int:
+        """The number of ensemble members in the generated data."""
+        for v in self.gen_data.values():
+            return v.shape[1]
+        raise ValueError("gen_data is empty, ensemble member count is not defined")
+
     def ensemble_derive_func(
         self, data: EnsembleTensorDict, forcing_data: TensorMapping
     ) -> EnsembleTensorDict:
@@ -1417,14 +1424,13 @@ class Stepper:
         return stepper
 
     def set_eval(self) -> None:
-        for module in self.modules:
-            module.eval()
+        self._step_obj.eval()
 
     def set_train(self) -> None:
-        for module in self.modules:
-            module.train()
+        self._step_obj.train()
 
     def set_epoch(self, epoch: int) -> None:
+        self._step_obj.set_epoch(epoch)
         for module in self.modules:
             for submodule in module.modules():
                 request_reset = getattr(
@@ -1684,7 +1690,7 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
-            data_mask=input_ensemble_data.data_mask,
+            data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
             n_ensemble=n_ensemble,
         )
@@ -1714,7 +1720,7 @@ class TrainStepper(
                     gen_step=gen_step,
                     target_step=target_step,
                     step=step,
-                    data_mask=input_batch_data.data_mask,
+                    data_mask=data.data_mask,
                     optimize=optimize_step,
                     metrics=metrics,
                     weighted_sums=weighted_sums,

@@ -86,6 +86,8 @@ aggregator:
     reference_data: null
     enabled: true
     strict: false
+    report_crps: true
+    report_rmse: true
   enso_index:
     name: enso_index
     enabled: true
@@ -97,6 +99,11 @@ aggregator:
   ipo_index:
     name: ipo_index
     enabled: true
+    strict: false
+  trend:
+    variables: null
+    name: trend
+    enabled: false
     strict: false
   monthly_reference_data: null
   time_mean_reference_data: null
