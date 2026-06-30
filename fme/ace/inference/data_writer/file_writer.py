@@ -269,6 +269,11 @@ class FileWriterConfig:
             for base_filename in base_filenames
         ]
 
+    def validate_time_coarsen(self, forward_steps_in_memory: int, n_forward_steps: int):
+        """Validate this writer's time coarsening against the inference schedule."""
+        if self.time_coarsen is not None:
+            self.time_coarsen.validate(forward_steps_in_memory, n_forward_steps)
+
     def build_paired(
         self,
         experiment_dir: str,
