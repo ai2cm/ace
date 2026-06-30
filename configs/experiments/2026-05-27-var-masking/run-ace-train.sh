@@ -52,7 +52,7 @@ run_training() {
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus $N_GPUS \
-    --shared-memory 400GiB \
+    --shared-memory 100GiB \
     --weka climate-default:/climate-default \
     --budget ai2/atec-climate \
     --system-python \

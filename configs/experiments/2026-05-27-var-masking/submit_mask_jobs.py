@@ -29,7 +29,9 @@ WANDB_GROUP = "ace2-var-masking-2026-06-15"
 CONFIGS = sorted(
     path.name
     for path in HERE.glob("*.yaml")
-    if path.name.startswith(CONFIG_PREFIX) and "-mask" in path.name
+    if path.name.startswith(CONFIG_PREFIX)
+    and "-mask" in path.name
+    and "--1940" in path.name
 )
 
 
@@ -58,9 +60,7 @@ def main() -> None:
         nargs="+",
         default=["ai2/titan"],
         metavar="CLUSTER",
-        help=(
-            "Beaker cluster(s) to target (ex: ai2/titan" "ai2/jupiter ai2/ceres)."
-        ),
+        help=("Beaker cluster(s) to target (ex: ai2/titan" "ai2/jupiter ai2/ceres)."),
     )
     parser.add_argument(
         "--beaker-priority",

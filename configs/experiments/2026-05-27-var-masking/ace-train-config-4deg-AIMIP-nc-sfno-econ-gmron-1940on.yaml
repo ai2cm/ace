@@ -296,7 +296,7 @@ train_loader:
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
       engine: zarr
       subset:
-        start_time: '1979-01-01'
+        start_time: '1940-01-03'
         stop_time: '1993-12-31'
     - data_path: /climate-default
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -429,6 +429,8 @@ stepper:
         - DSWRFsfc
         - USWRFsfc
         - USWRFtoa
+        total_energy_budget_correction:
+          method: constant_temperature
       next_step_forcing_names:
       - DSWRFtoa
       - global_mean_co2
@@ -531,9 +533,3 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
-      input_dropout:
-        kind: uniform
-        min_vars: 0
-        max_vars: 20
-      include_channel_mask_inputs: true
-pre_cooldown_checkpoint_epoch: 142

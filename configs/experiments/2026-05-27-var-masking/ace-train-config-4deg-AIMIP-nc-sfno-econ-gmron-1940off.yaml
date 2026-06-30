@@ -429,6 +429,8 @@ stepper:
         - DSWRFsfc
         - USWRFsfc
         - USWRFtoa
+        total_energy_budget_correction:
+          method: constant_temperature
       next_step_forcing_names:
       - DSWRFtoa
       - global_mean_co2
@@ -531,8 +533,3 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
-      input_dropout:
-        kind: per_variable
-        rate: 0.33
-      include_channel_mask_inputs: true
-pre_cooldown_checkpoint_epoch: 142
