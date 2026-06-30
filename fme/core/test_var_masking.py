@@ -13,6 +13,8 @@ def _names(n: int) -> list[str]:
 def test_max_masked_vars_validation():
     with pytest.raises(ValueError, match="max_masked_vars"):
         VariableMaskingConfig(max_masked_vars=-1)
+    with pytest.raises(ValueError, match="max_masked_vars"):
+        VariableMaskingConfig(max_masked_vars=True)
 
 
 def test_variable_masking_rates_validation():

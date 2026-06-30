@@ -10,10 +10,8 @@ class VariableMaskingConfig:
 
     Combines two masking mechanisms into a single mask that is broadcast across
     the whole batch (shape ``[1, n_channels]``), so every sample and every
-    ensemble member receives the same mask:
-
-    The two mechanisms govern disjoint sets of channels (Bernoulli takes
-    precedence over uniform):
+    ensemble member receives the same mask. The two mechanisms govern disjoint
+    sets of channels (Bernoulli takes precedence over uniform):
 
     1. Per-variable Bernoulli masking: for each variable named in
        ``variable_masking_rates`` a ``Bernoulli(rate)`` is drawn; the channel is
@@ -45,7 +43,11 @@ class VariableMaskingConfig:
     variable_masking_rates: dict[str, float] | None = None
 
     def __post_init__(self):
-        if not isinstance(self.max_masked_vars, int) or self.max_masked_vars < 0:
+        if (
+            not isinstance(self.max_masked_vars, int)
+            or isinstance(self.max_masked_vars, bool)
+            or self.max_masked_vars < 0
+        ):
             raise ValueError(
                 "max_masked_vars must be a non-negative int, got "
                 f"{self.max_masked_vars!r}"
