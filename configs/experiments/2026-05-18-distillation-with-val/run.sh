@@ -32,6 +32,11 @@
 #                Lower to let forward-KL carry more of the signal.
 #   --lr-decay-steps: linearly decay all three LRs to ~5% over N iters and cap
 #                max_iter at N (ACE_LR_DECAY_STEPS). 0/unset = constant LR.
+#   --disc-feature-depth: encoder level the GAN discriminator taps, as an offset
+#                toward finer resolution from the deepest/bottleneck level
+#                (ACE_DISC_FEATURE_DEPTH; default 0 = bottleneck/coarsest). Raise
+#                to move the policed spectral band finer (candidate fix for the
+#                coarse-PRMSL GAN damage). Resolved (res, channels) print at launch.
 
 set -e
 
@@ -45,6 +50,7 @@ STUDENT_STEPS=""
 GAN_R1=""
 GAN_WEIGHT=""
 LR_DECAY_STEPS=""
+DISC_FEATURE_DEPTH=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --suffix)
@@ -73,6 +79,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --lr-decay-steps)
             LR_DECAY_STEPS="${2:?--lr-decay-steps requires a value}"
+            shift 2
+            ;;
+        --disc-feature-depth)
+            DISC_FEATURE_DEPTH="${2:?--disc-feature-depth requires a value}"
             shift 2
             ;;
         *)
@@ -194,6 +204,12 @@ if [[ -n "$GAN_WEIGHT" ]]; then
 fi
 if [[ -n "$LR_DECAY_STEPS" ]]; then
     TEACHER_ENV_FLAGS+=(--env ACE_LR_DECAY_STEPS=$LR_DECAY_STEPS)
+fi
+
+# Optional discriminator tap depth (read by fastgen_train as
+# ACE_DISC_FEATURE_DEPTH): offset toward finer resolution from the bottleneck.
+if [[ -n "$DISC_FEATURE_DEPTH" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_DISC_FEATURE_DEPTH=$DISC_FEATURE_DEPTH)
 fi
 
 gantry run \

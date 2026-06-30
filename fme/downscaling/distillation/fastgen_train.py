@@ -287,6 +287,22 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--disc-feature-depth",
+        type=int,
+        default=int(os.environ.get("ACE_DISC_FEATURE_DEPTH", "0")),
+        dest="disc_feature_depth",
+        metavar="K",
+        help=(
+            "Offset (toward finer resolution) of the UNet encoder level the GAN "
+            "discriminator taps, measured from the deepest/bottleneck level. "
+            "0 (default) = bottleneck (coarsest, the historical pure-coarse "
+            "critic); 1 = one level up, etc. Shifts which spectral band the "
+            "adversarial gradient polices (deep=coarse, shallow=fine). The "
+            "tapped level's channel count sets the discriminator in_channels "
+            "automatically. Defaults to $ACE_DISC_FEATURE_DEPTH."
+        ),
+    )
+    parser.add_argument(
         "--data-yaml",
         required=True,
         metavar="YAML",
@@ -377,6 +393,8 @@ def main() -> None:
     # render every output channel (variable) as its own per-channel-normalized
     # panel — one row per sample, one column per variable.  Column labels come
     # from the teacher out_packer, populated below once the teacher loads.
+    from omegaconf import DictConfig
+
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -387,7 +405,6 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
-    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
     # Output-variable names for panel labels; filled once the teacher loads.
@@ -533,18 +550,23 @@ def main() -> None:
         from fastgen.networks.discriminators import Discriminator_EDM as _DiscEDM
 
         enc_info = teacher.encoder_feature_info()
-        # enc_info: [(block_key, out_channels, resolution), ...] finest→coarsest
+        # enc_info: [(block_key, out_channels, resolution), ...] finest→coarsest,
+        # so the last entry is the deepest/bottleneck (coarsest) level.
         deepest_idx = len(enc_info) - 1
-        _, disc_channels, _ = enc_info[deepest_idx]
+        # Tap level = deepest minus the requested offset (toward finer res).
+        # Clamp into range so an over-large offset just lands on the finest level.
+        feature_idx = max(0, deepest_idx - args.disc_feature_depth)
+        _, disc_channels, disc_res = enc_info[feature_idx]
         all_res = [res for _, _, res in enc_info]
         config.model.discriminator = L(_DiscEDM)(
-            feature_indices={deepest_idx},
+            feature_indices={feature_idx},
             all_res=all_res,
             in_channels=disc_channels,
         )
         logger.info(
-            f"DMD2 discriminator: feature_index={deepest_idx}, "
-            f"all_res={all_res}, in_channels={disc_channels}"
+            f"DMD2 discriminator: feature_index={feature_idx} "
+            f"(depth offset {args.disc_feature_depth} from deepest {deepest_idx}), "
+            f"resolution={disc_res}, all_res={all_res}, in_channels={disc_channels}"
         )
 
     # ------------------------------------------------------------------
