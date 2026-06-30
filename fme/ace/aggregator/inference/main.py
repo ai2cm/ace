@@ -11,6 +11,7 @@ import xarray as xr
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info_errors import MissingDatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.fill import SmoothFloodFill
 from fme.core.generics.aggregator import (
@@ -41,6 +42,7 @@ from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
 from .trend import TrendMetricConfig
 from .utils import LatLonRegion
 from .video import VideoMetricConfig
+from .wind_consistency import WindConsistencyMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
 
 wandb = WandB.get_instance()
@@ -65,6 +67,7 @@ MetricConfig = (
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
     | TrendMetricConfig
+    | WindConsistencyMetricConfig
 )
 
 
@@ -114,6 +117,10 @@ def build_inference_evaluator_aggregator(
         )
 
     n_timesteps = n_ic_steps + n_forward_steps
+    try:
+        vertical_coordinate = dataset_info.vertical_coordinate
+    except MissingDatasetInfo:
+        vertical_coordinate = None
     ctx = MetricBuildContext(
         ops=dataset_info.gridded_operations,
         horizontal_coordinates=dataset_info.horizontal_coordinates,
@@ -125,6 +132,7 @@ def build_inference_evaluator_aggregator(
         monthly_reference_data=monthly_ref,
         time_mean_reference_data=time_mean_ref,
         initial_time=initial_time,
+        vertical_coordinate=vertical_coordinate,
     )
 
     metrics = list(metrics)
@@ -203,6 +211,8 @@ class InferenceEvaluatorAggregatorConfig:
         ipo_index: Interdecadal Pacific Oscillation index metrics.
         trend: Per-grid-cell linear trend (slope vs. time) map metrics.
             Disabled by default.
+        wind_consistency: Log-pressure self-consistency of pressure-surface
+            winds. Disabled by default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -252,6 +262,9 @@ class InferenceEvaluatorAggregatorConfig:
         default_factory=IpoIndexMetricConfig
     )
     trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
+    wind_consistency: WindConsistencyMetricConfig = dataclasses.field(
+        default_factory=WindConsistencyMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
@@ -293,6 +306,7 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_coefficient,
             self.ipo_index,
             self.trend,
+            self.wind_consistency,
         ]
         return [m for m in all_metrics if m.enabled]
 

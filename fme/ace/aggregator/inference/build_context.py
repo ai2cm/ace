@@ -5,7 +5,7 @@ from typing import Any
 
 import xarray as xr
 
-from fme.core.coordinates import HorizontalCoordinates
+from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.gridded_ops import GriddedOperations
 
@@ -72,6 +72,7 @@ class MetricBuildContext:
     monthly_reference_data: xr.Dataset | None
     time_mean_reference_data: xr.Dataset | None
     initial_time: xr.DataArray
+    vertical_coordinate: VerticalCoordinate | None = None
 
     @property
     def n_forward_steps(self) -> int:
