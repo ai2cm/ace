@@ -56,6 +56,47 @@ class LogUniformNoiseDistribution(NoiseDistribution):
         ).to(device)
 
 
+def brownian_bridge_mixing_matrix(n_timesteps: int) -> torch.Tensor:
+    """Temporal mixing matrix for endpoint-pinned, time-correlated noise.
+
+    Returns a ``(T, T)`` matrix ``M`` such that, given white noise
+    ``Z ~ N(0, I)`` of shape ``(..., T, ...)`` mixed along the time axis as
+    ``E = M @ Z``, the noise ``E`` has a Brownian-bridge *correlation* structure
+    across the interior frames and is exactly zero on the two endpoint frames.
+
+    The Brownian-bridge covariance on normalized times ``tau_k = k / (T - 1)``
+    (with bridge length 1) is ``k_BB(s, t) = min(s, t) - s * t``. It vanishes at
+    both endpoints, matching the endpoint-pinned residual the video model
+    diffuses. We normalize it to a *correlation* matrix (unit diagonal on the
+    interior) so that, when scaled by the EDM noise level ``sigma``, each frame's
+    marginal noise std stays ``sigma`` -- only the cross-time correlation is
+    introduced. ``M`` is the Cholesky factor of that correlation matrix placed
+    into the interior block; the endpoint rows/cols are all zero.
+
+    Args:
+        n_timesteps: Number of frames ``T`` (>= 3: two endpoints + interior).
+
+    Returns:
+        A ``(T, T)`` float32 tensor on the CPU.
+    """
+    if n_timesteps < 3:
+        raise ValueError(
+            "Brownian-bridge noise needs at least 3 frames (2 endpoints + 1 "
+            f"interior), got n_timesteps={n_timesteps}."
+        )
+    n_interior = n_timesteps - 2
+    tau = torch.arange(1, n_timesteps - 1, dtype=torch.float64) / (n_timesteps - 1)
+    s = tau.reshape(-1, 1)
+    t = tau.reshape(1, -1)
+    cov = torch.minimum(s, t) - s * t  # interior Brownian-bridge covariance
+    std = cov.diagonal().sqrt()
+    corr = cov / torch.outer(std, std)  # normalize to unit diagonal
+    chol = torch.linalg.cholesky(corr)  # lower-triangular, corr == chol @ chol.T
+    mixing = torch.zeros(n_timesteps, n_timesteps, dtype=torch.float64)
+    mixing[1 : 1 + n_interior, 1 : 1 + n_interior] = chol
+    return mixing.to(torch.float32)
+
+
 def condition_with_noise_for_training(
     targets_norm: torch.Tensor,
     noise_distribution: NoiseDistribution,
