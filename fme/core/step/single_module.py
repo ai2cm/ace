@@ -440,7 +440,8 @@ class SingleModuleStep(StepABC):
             return None
         names = self.in_packer.names
         mask = self._config.input_dropout.sample_mask(names, device)
-        # Broadcast mask so all spatial ranks agree; data parallel gets distinct masks.
+        # Broadcast mask so all spatial-group tiles agree
+        # no-op for non-distributed/data-parallel
         mask = Distributed.get_instance().broadcast_spatial(mask)
         return {name: mask[:, i] for i, name in enumerate(names)}
 
