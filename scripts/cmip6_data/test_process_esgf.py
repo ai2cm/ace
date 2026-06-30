@@ -5,10 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import process_esgf
 import pytest
 import xarray as xr
 from config import ESGFProcessConfig
 from process_esgf import (
+    _download_files,
     _open_netcdf_files,
     _select_day_augmentables,
     select_esgf_datasets,
@@ -78,12 +80,12 @@ def test_open_netcdf_files_preserves_bounds():
         p = Path(tmpdir) / "pr_day_2010.nc"
         _write_netcdf(p, "pr", ntime=3, with_bounds=True)
         ds = _open_netcdf_files([p], "pr")
-        assert (
-            "lat_bnds" in ds.data_vars
-        ), "lat_bnds must survive for conservative regrid"
-        assert (
-            "lon_bnds" in ds.data_vars
-        ), "lon_bnds must survive for conservative regrid"
+        assert "lat_bnds" in ds.data_vars, (
+            "lat_bnds must survive for conservative regrid"
+        )
+        assert "lon_bnds" in ds.data_vars, (
+            "lon_bnds must survive for conservative regrid"
+        )
 
 
 def test_open_netcdf_files_no_bounds_no_error():
@@ -569,3 +571,58 @@ if __name__ == "__main__":
         print(f"\n{failed} test(s) failed")
         sys.exit(1)
     print("\nall tests passed")
+
+
+# ---------------------------------------------------------------------------
+# Parallel downloads
+# ---------------------------------------------------------------------------
+
+
+class _FakeFile:
+    def __init__(self, name):
+        self.filename = name
+
+
+def test_download_files_preserves_order_parallel(monkeypatch):
+    """Concurrent downloads must return paths in input (time) order even when
+    later files finish first, and call download_file once per file."""
+    import time as _time
+
+    calls = []
+
+    def fake_download(f, scratch):
+        # finish in reverse order so a naive as-completed gather would scramble
+        idx = int(f.filename.split("_")[1].split(".")[0])
+        _time.sleep(0.02 * (5 - idx))
+        calls.append(f.filename)
+        return Path(scratch) / f.filename
+
+    monkeypatch.setattr(process_esgf, "download_file", fake_download)
+    files = [_FakeFile(f"f_{i}.nc") for i in range(5)]
+    out = _download_files(files, Path("/scratch"), n_workers=4)
+    assert [p.name for p in out] == [f"f_{i}.nc" for i in range(5)]
+    assert sorted(calls) == sorted(f.filename for f in files)
+
+
+def test_download_files_serial_path(monkeypatch):
+    """n_workers=1 still downloads every file, in order."""
+    monkeypatch.setattr(
+        process_esgf, "download_file", lambda f, scratch: Path(scratch) / f.filename
+    )
+    files = [_FakeFile(f"f_{i}.nc") for i in range(3)]
+    out = _download_files(files, Path("/scratch"), n_workers=1)
+    assert [p.name for p in out] == ["f_0.nc", "f_1.nc", "f_2.nc"]
+
+
+def test_download_files_propagates_failure(monkeypatch):
+    """A download failure propagates (matching the old serial loop)."""
+
+    def fake_download(f, scratch):
+        if f.filename == "f_1.nc":
+            raise RuntimeError("data node down")
+        return Path(scratch) / f.filename
+
+    monkeypatch.setattr(process_esgf, "download_file", fake_download)
+    files = [_FakeFile(f"f_{i}.nc") for i in range(3)]
+    with pytest.raises(RuntimeError, match="data node down"):
+        _download_files(files, Path("/scratch"), n_workers=4)

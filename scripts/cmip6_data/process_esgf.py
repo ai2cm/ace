@@ -33,6 +33,7 @@ import logging
 import sys
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -387,6 +388,20 @@ def _open_netcdf_files(paths: list[Path], variable: str) -> xr.Dataset:
     return xr.concat(datasets, dim="time", data_vars="minimal")
 
 
+def _download_files(files, scratch: Path, n_workers: int) -> list[Path]:
+    """Download ESGF files to ``scratch``, returning local paths in input order.
+
+    ``download_file`` writes each file (and its ``.partial``) to a distinct
+    path, so concurrent calls do not collide. ``executor.map`` preserves input
+    order — keeping the returned paths time-ordered for concatenation — and
+    re-raises the first download failure exactly as a serial loop would.
+    """
+    if n_workers <= 1 or len(files) <= 1:
+        return [download_file(f, scratch) for f in files]
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        return list(executor.map(lambda f: download_file(f, scratch), files))
+
+
 def _download_and_regrid_variable(
     task: ESGFDatasetTask,
     variable: str,
@@ -422,16 +437,15 @@ def _download_and_regrid_variable(
         if not fileset.files:
             return None, {}
 
+    n_workers = max(1, min(config.esgf.download_workers, len(fileset.files)))
     logging.info(
-        "    downloading %d files (%.1f GB) for %s ...",
+        "    downloading %d files (%.1f GB) for %s with %d workers ...",
         len(fileset.files),
         fileset.total_size / 1e9,
         variable,
+        n_workers,
     )
-
-    local_paths: list[Path] = []
-    for f in fileset.files:
-        local_paths.append(download_file(f, scratch))
+    local_paths = _download_files(fileset.files, scratch, n_workers)
 
     logging.info("    opening and concatenating %s ...", variable)
     ds = _open_netcdf_files(local_paths, variable)

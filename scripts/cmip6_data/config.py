@@ -733,6 +733,12 @@ class ESGFConfig:
 
     search_node: str = ESGF_DEFAULT_NODE
     scratch_dir: str = "./scratch"
+    download_workers: int = 4
+    """Number of concurrent file downloads per variable. ESGF throughput is
+    typically per-connection-limited and replicas live on distinct data nodes,
+    so downloading a variable's time-chunk files in parallel multiplies
+    throughput. Downloads are pure I/O on worker threads and do not touch the
+    (thread-unsafe) xESMF regridder, which stays on the synchronous scheduler."""
 
 
 @dataclass
