@@ -27,6 +27,7 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
@@ -108,6 +109,180 @@ def save_stepper(
         dataset_info=dataset_info,
     )
     torch.save({"stepper": stepper.get_state()}, path)
+
+
+def save_noise_conditioned_stepper(
+    path: pathlib.Path,
+    in_names: list[str],
+    out_names: list[str],
+    horizontal_coords: dict[str, xr.DataArray],
+    nz_interface: int,
+    timestep: datetime.timedelta = TIMESTEP,
+):
+    """Save a minimal NoiseConditionedSFNO stepper whose noise actually affects
+    the output, for testing reproducible stochastic inference.
+
+    ConditionalLayerNorm zero-initializes its noise-conditioning weights, so an
+    untrained model would ignore the noise; we fill them with a fixed non-zero
+    value (mimicking a trained model) before saving the checkpoint.
+    """
+    all_names = list(set(in_names).union(out_names))
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="NoiseConditionedSFNO",
+                        config=dataclasses.asdict(
+                            NoiseConditionedSFNOBuilder(
+                                embed_dim=4,
+                                noise_embed_dim=4,
+                                noise_type="gaussian",
+                                num_layers=2,
+                                pos_embed=False,
+                                filter_type="linear",
+                                filter_num_groups=1,
+                            )
+                        ),
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={name: 0.0 for name in all_names},
+                            stds={name: 1.0 for name in all_names},
+                        ),
+                    ),
+                    ocean=OceanConfig(
+                        surface_temperature_name="sst",
+                        ocean_fraction_name="ocean_fraction",
+                    ),
+                ),
+            ),
+        ),
+    )
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.tensor(horizontal_coords["lat"].values, dtype=torch.float32),
+            lon=torch.tensor(horizontal_coords["lon"].values, dtype=torch.float32),
+        ),
+        vertical_coordinate=HybridSigmaPressureCoordinate(
+            ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
+        ),
+        timestep=timestep,
+    )
+    stepper = config.get_stepper(dataset_info=dataset_info)
+    with torch.no_grad():
+        for name, param in stepper._step_obj.modules.named_parameters():
+            if "W_scale_2d" in name or "W_bias_2d" in name:
+                param.fill_(0.1)
+    torch.save({"stepper": stepper.get_state()}, path)
+
+
+def _write_inference_inputs(
+    tmp_path: pathlib.Path,
+) -> tuple[pathlib.Path, FV3GFSData, pathlib.Path]:
+    """Shared data, checkpoint, and initial condition for the seed tests."""
+    in_names = ["prog", "sst", "forcing_var", "DSWRFtoa"]
+    out_names = ["prog", "sst", "ULWRFtoa", "USWRFtoa"]
+    stepper_path = tmp_path / "stepper"
+    nz_interface = 4
+    data = FV3GFSData(
+        path=tmp_path,
+        names=["forcing_var", "DSWRFtoa", "sst", "ocean_fraction"],
+        dim_sizes=DimSizes(
+            n_time=9,
+            horizontal=[DimSize("lat", 16), DimSize("lon", 32)],
+            nz_interface=4,
+        ),
+        timestep_days=0.25,
+        save_vertical_coordinate=False,
+    )
+    save_noise_conditioned_stepper(
+        stepper_path,
+        in_names=in_names,
+        out_names=out_names,
+        horizontal_coords=data.horizontal_coords,
+        nz_interface=nz_interface,
+    )
+    dims = ["sample", "lat", "lon"]
+    initial_condition = xr.Dataset(
+        {
+            name: xr.DataArray(np.random.rand(2, 16, 32).astype(np.float32), dims=dims)
+            for name in ["prog", "sst", "DSWRFtoa"]
+        }
+    )
+    ic_path = tmp_path / "init_data" / "ic.nc"
+    ic_path.parent.mkdir()
+    initial_condition["time"] = xr.DataArray(
+        [
+            cftime.DatetimeProlepticGregorian(2000, 1, 1, 6),
+            cftime.DatetimeProlepticGregorian(2000, 1, 1, 18),
+        ],
+        dims=["time"],
+    )
+    initial_condition.to_netcdf(ic_path, mode="w")
+    return stepper_path, data, ic_path
+
+
+def _run_seeded_inference(
+    run_dir: pathlib.Path,
+    stepper_path: pathlib.Path,
+    data: FV3GFSData,
+    ic_path: pathlib.Path,
+    seed: int | None,
+) -> np.ndarray:
+    run_dir.mkdir()
+    config = InferenceConfig(
+        experiment_dir=str(run_dir),
+        n_forward_steps=4,
+        forward_steps_in_memory=2,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_file=False, log_to_wandb=True
+        ),
+        initial_condition=InitialConditionConfig(path=str(ic_path)),
+        forcing_loader=ForcingDataLoaderConfig(
+            dataset=data.inference_data_loader_config.dataset,
+            num_data_workers=data.inference_data_loader_config.num_data_workers,
+        ),
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        seed=seed,
+    )
+    config_filename = run_dir / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+    ds = xr.open_dataset(
+        run_dir / "autoregressive_predictions.nc", decode_timedelta=False
+    )
+    return ds["prog"].values
+
+
+def test_inference_entrypoint_seed_reproducible(tmp_path: pathlib.Path):
+    """A seeded NoiseConditionedSFNO inference run is reproducible end-to-end,
+    while a different seed (and the unseeded default) gives a different result."""
+    stepper_path, data, ic_path = _write_inference_inputs(tmp_path)
+    seed0_a = _run_seeded_inference(tmp_path / "s0a", stepper_path, data, ic_path, 0)
+    seed0_b = _run_seeded_inference(tmp_path / "s0b", stepper_path, data, ic_path, 0)
+    seed1 = _run_seeded_inference(tmp_path / "s1", stepper_path, data, ic_path, 1)
+    unseeded_a = _run_seeded_inference(
+        tmp_path / "ua", stepper_path, data, ic_path, None
+    )
+    unseeded_b = _run_seeded_inference(
+        tmp_path / "ub", stepper_path, data, ic_path, None
+    )
+
+    np.testing.assert_array_equal(seed0_a, seed0_b)
+    assert not np.allclose(seed0_a, seed1)
+    assert not np.allclose(unseeded_a, unseeded_b)
 
 
 @pytest.mark.parametrize("n_ensemble_per_ic", [1, 2])
