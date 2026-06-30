@@ -477,6 +477,19 @@ rising above teacher; (4) precip stays healthy; (5) training not destabilized
 (`f_distill_loss`, GAN balance) — tap2's 256ch disc is the higher-risk one. Decide
 mid vs cheap tap on whether the coarse gain justifies any hi-k/stability cost.
 
+**Also check the tap runs for tails/variance, not just PRMSL spectra.** Wind tails
+plateau early (eastward/northward `tail_99.99` flat ~0.62 over r1-instr's 7k; no
+mature run logs per-var wind tails yet). Hypothesis: the current critic taps only
+the **coarse bottleneck**, so it's blind to the fine-scale local extremes that
+wind/precip tails are made of; a **finer tap could lift wind/precip tails** (and
+local variance), since adversarial training is the classical restorer of the
+variance/sharpness that the mass-covering forward-KL blurs. So watch
+`tail_99.99_{eastward,northward}_wind` and `tail_99.99_PRATEsfc` on tap1/tap2 vs
+the offset-0 baseline. Caveats: double-edged (finer GAN = texture/instability
+risk), GAN weight is only 1e-3 (stabilizer, not the dominant tail driver), and the
+primary tail levers remain the forward-KL + maturity (a direct quantile loss is
+more targeted than cranking the GAN). A PSD loss will not move tails (2nd moment).
+
 (deferred: offset 4 / 256² high-res tap, and combining the winning tap with R1.)
 
 ### Checkpoint-selection fix (2026-06-29, `best_student_callback.py`)
