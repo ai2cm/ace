@@ -1,11 +1,3 @@
-"""Value objects describing the per-step result of a corrector.
-
-These are pure additions in PR1 of the corrector-diagnostics work: they define
-the *shape* of a corrector's diagnostic payload without yet being returned by
-any corrector or carried on ``StepOutput`` (that wiring is issue 02). They live
-in the corrector package so ``fme.core`` does not import from ``fme.ace``.
-"""
-
 import dataclasses
 from collections.abc import Iterable
 
@@ -20,13 +12,8 @@ class CorrectorDiagnostics:
     Parameters:
         delta: ``corrected[name] - network_output[name]`` for each variable the
             corrector declares it touched. The network's raw pre-correction
-            value is recoverable as ``corrected[name] - delta[name]``. Defaults
-            to empty, which is the value carried when no corrector ran or none
-            modified anything.
-
-    This is a value object rather than a bare mapping so the follow-on PR can add
-    a per-field category label and metric fields without re-opening the corrector
-    return type or the ``StepOutput`` field type.
+            value is recoverable as ``corrected[name] - delta[name]``. Empty when
+            no corrector ran or none modified anything.
     """
 
     delta: TensorMapping = dataclasses.field(default_factory=dict)
@@ -36,17 +23,10 @@ class CorrectorDiagnostics:
 class CorrectorOutput:
     """The full result of applying a corrector to one step's generated data.
 
-    Replaces the corrector's historical ``(corrected, corrector_state)`` tuple
-    return with a named object so new per-step payloads can be added without
-    breaking every call site.
-
     Parameters:
-        corrected: The adjusted generated data, semantically unchanged from the
-            corrector's historical first tuple element.
-        diagnostics: The corrector's declared correction deltas. Defaults to
-            empty diagnostics.
-        corrector_state: Per-sample state carried across step calls, passed
-            through unchanged. Defaults to ``None``.
+        corrected: The adjusted generated data.
+        diagnostics: The corrector's declared correction deltas.
+        corrector_state: Per-sample state carried across step calls.
     """
 
     corrected: TensorDict
@@ -64,18 +44,14 @@ def build_corrector_diagnostics(
     """Build correction-delta diagnostics over an explicit set of touched names.
 
     Produces ``delta[name] = corrected[name] - input_snapshot[name]`` for each
-    ``name`` in ``touched_names`` and nothing else, so the delta is an explicit
-    declared diff over a known name set rather than something inferred by tensor
-    object identity.
+    ``name`` in ``touched_names``.
 
-    For a field touched by more than one enabled correction, ``corrected`` is the
-    corrector's exit value and ``input_snapshot`` is its entry value, so the
-    stored delta is the cumulative net effect of all of them and
-    ``input_snapshot == corrected - delta`` stays exact with no per-operation
-    bookkeeping.
+    When more than one correction touches a field, ``corrected`` is the
+    corrector's exit value and ``input_snapshot`` its entry value, so the stored
+    delta is their cumulative net effect and ``input_snapshot == corrected -
+    delta`` stays exact.
 
-    The returned tensors are *not* detached from the autograd graph here;
-    detaching is a step-boundary concern wired in issue 02.
+    The returned tensors are *not* detached from the autograd graph here.
 
     Args:
         input_snapshot: The corrector's input generated data, snapshotted at
