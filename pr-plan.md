@@ -13,64 +13,69 @@ The `CorrectorDiagnostics`, `CorrectorOutput`, and `build_corrector_diagnostics`
 value objects/helper already exist in `fme/core/corrector/output.py` (no consumer
 yet); this PR wires them in.
 
+Each `Correction` now returns **only the fields it modified** (today they return
+the full `gen_data`); `CorrectionSequence` dict-updates `gen_data` with that
+subset and accumulates the modified-name set from its keys. The correction's
+returned dict is the single source of truth for what it changed — it is exactly
+what gets applied — so the modified-name set is load-bearing and cannot silently
+drift from the write. The `delta` is built over that accumulated set.
+
 ---
+
+## `fme/core/corrector/output.py` (modified)
+
+Add a convenience property to the existing `CorrectorOutput` value object (the
+dataclasses are otherwise unchanged):
+
+```python
+@dataclasses.dataclass
+class CorrectorOutput:
+    corrected: TensorDict
+    diagnostics: CorrectorDiagnostics = ...
+    corrector_state: CorrectorState | None = None
+
+    @property
+    def modified_names(self) -> KeysView[str]:  # NEW — the corrector-modified variables
+        return self.diagnostics.delta.keys()
+```
 
 ## `fme/core/corrector/registry.py` (modified)
 
 ```python
 class Correction(Protocol):
-    def touched_names(self, gen_data: TensorMapping) -> set[str]:  # NEW
-        """Names in ``gen_data`` this correction writes when applied to it.
-
-        Resolved against ``gen_data`` because the written keys depend on the
-        data's variable naming (e.g. surface pressure is ``PRESsfc`` or ``PS``;
-        a per-level field expands to its present level names; ``sst``/``hfds``
-        may or may not be present). The result is static across a run's steps —
-        the variable naming does not change — but is not derivable from config
-        fields alone for corrections that write through ``AtmosphereData`` /
-        ``OceanData`` stackers. Config-only corrections ignore ``gen_data``.
-        """
-        ...
-
     def __call__(self, ...) -> tuple[TensorDict, CorrectorState | None]: ...
-        # unchanged — Correction sub-operations keep their tuple return
+        # CONTRACT CHANGE (not a signature change): the returned TensorDict must
+        # contain ONLY the fields this correction modified — not the full gen_data.
+        # The caller dict-updates gen_data with it and unions its keys into the
+        # modified-name set. (Today each correction returns the full gen_data.)
 
 
 class CorrectorABC(abc.ABC):
     @abc.abstractmethod
-    def touched_names(self, gen_data: TensorMapping) -> set[str]:  # NEW
-        ...
-
-    @abc.abstractmethod
     def __call__(self, ...) -> CorrectorOutput:  # CHANGED — was tuple[TensorDict, CorrectorState | None]
         ...
+    # no touched_names — the modified-name set is derived from what corrections return
 
 
 class CorrectionSequence(CorrectorABC):
-    def touched_names(self, gen_data: TensorMapping) -> set[str]:  # NEW — union over corrections
-        return set().union(*(c.touched_names(gen_data) for c in self._corrections))
-
     def __call__(self, input_data, gen_data, forcing_data, corrector_state) -> CorrectorOutput:  # CHANGED
-        # Snapshot ONLY the declared touched names from incoming gen_data (hold
-        # references; corrections apply out-of-place so entry tensors are not
-        # mutated). Apply corrections unchanged, then build populated diagnostics.
-        touched = self.touched_names(gen_data)
-        snapshot = {name: gen_data[name] for name in touched}
+        snapshot = dict(gen_data)        # references at entry; corrections apply out-of-place,
+                                         # so entry tensors are never mutated
         gen_data = dict(gen_data)
+        modified: set[str] = set()
         for correction in self._corrections:
-            gen_data, corrector_state = correction(input_data, gen_data, forcing_data, corrector_state)
+            changed, corrector_state = correction(input_data, gen_data, forcing_data, corrector_state)
+            gen_data.update(changed)     # `changed` holds ONLY the fields this correction modified
+            modified |= changed.keys()
         corrected = dict(gen_data)
         return CorrectorOutput(
             corrected=corrected,
-            diagnostics=build_corrector_diagnostics(snapshot, corrected, touched),  # not detached here
+            diagnostics=build_corrector_diagnostics(snapshot, corrected, modified),  # not detached here
             corrector_state=corrector_state,
         )
 
 
 class EpochScheduledCorrector(CorrectorABC):
-    def touched_names(self, gen_data: TensorMapping) -> set[str]:  # NEW — delegate to wrapped
-        return self._wrapped.touched_names(gen_data)
-
     def __call__(self, input_data, gen_data, forcing_data, corrector_state) -> CorrectorOutput:  # CHANGED
         if self._corrector_disabled and self._training:
             # applied nothing -> corrected passthrough, empty diagnostics
@@ -78,67 +83,55 @@ class EpochScheduledCorrector(CorrectorABC):
         return self._wrapped(input_data, gen_data, forcing_data, corrector_state)
 ```
 
+The individual `Correction.__call__`s keep their `tuple[TensorDict,
+CorrectorState | None]` return type — only their *content* contract changes
+(return the modified subset, not the full `gen_data`). Only `CorrectorABC.__call__`
+changes its return type, to `CorrectorOutput`.
+
 ## `fme/core/corrector/utils.py` (modified)
+
+`ForcePositive.__call__` returns only the clamped fields it writes:
 
 ```python
 class ForcePositive:
-    def touched_names(self, gen_data: TensorMapping) -> set[str]:  # NEW — config-only
-        return set(self.names)
+    def __call__(self, input_data, gen_data, forcing_data, corrector_state):  # modified-only return
+        return {name: torch.clamp(gen_data[name], min=0.0) for name in self.names}, corrector_state
 ```
 
 ## `fme/core/corrector/atmosphere.py` (modified)
 
-Each correction resolves its written keys against `gen_data` via the same
-`AtmosphereData` stacker its `__call__` writes through, so the declaration and
-the write cannot diverge (the drift test is the backstop).
+Each correction's helper still computes over the full `AtmosphereData` (it needs
+the surrounding fields), but `__call__` now returns **only the fields the helper
+wrote**, resolved against `gen_data` via the same `AtmosphereData` stacker the
+write goes through — so the returned set and the write cannot diverge. The
+modified fields per correction:
 
-```python
-class ConserveDryAir:
-    def touched_names(self, gen_data) -> set[str]:  # NEW — the surface-pressure key present in gen_data
-        ...  # AtmosphereData(gen_data) resolved "surface_pressure" key (PRESsfc | PS)
-
-class ZeroGlobalMeanMoistureAdvection:
-    def touched_names(self, gen_data) -> set[str]:  # NEW
-        return {"tendency_of_total_water_path_due_to_advection"}
-
-class MoistureBudgetCorrection:
-    def touched_names(self, gen_data) -> set[str]:  # NEW — by terms_to_modify
-        # precipitation -> {precip key};  evaporation -> {evap key}
-        # advection_and_* -> + {"tendency_of_total_water_path_due_to_advection"}
-        ...
-
-class TotalEnergyBudgetCorrection:
-    def touched_names(self, gen_data) -> set[str]:  # NEW — every air_temperature level key
-        ...  # AtmosphereData(gen_data).get_all_vertical_level_names("air_temperature")
-```
+- `ConserveDryAir` → the surface-pressure key present in `gen_data` (`PRESsfc` | `PS`).
+- `ZeroGlobalMeanMoistureAdvection` → `{"tendency_of_total_water_path_due_to_advection"}`.
+- `MoistureBudgetCorrection` → the keys implied by `terms_to_modify`
+  (precipitation → precip key; evaporation → evap key; `advection_and_*` →
+  + `"tendency_of_total_water_path_due_to_advection"`).
+- `TotalEnergyBudgetCorrection` → every `air_temperature` level key
+  (`AtmosphereData(gen_data).get_all_vertical_level_names("air_temperature")`).
 
 ## `fme/core/corrector/ocean.py` (modified)
 
-```python
-class SeaIceFractionCorrection:
-    def touched_names(self, gen_data) -> set[str]:  # NEW — config-only
-        return {self.config.sea_ice_fraction_name, *self.config.zero_where_ice_free_names}
+Same pattern — `__call__` returns only the modified subset:
 
-class SurfaceEnergyFluxCorrection:
-    def touched_names(self, gen_data) -> set[str]:  # NEW — the hfds key present in gen_data
-        return {"hfds"} if "hfds" in gen_data else {"hfds_total_area"}
-
-class OceanHeatContentCorrection:
-    def touched_names(self, gen_data) -> set[str]:  # NEW — thetao levels (+ sst if present)
-        ...  # {f"thetao_{k}" for k in levels} | ({"sst"} if "sst" in gen_data else set())
-```
+- `SeaIceFractionCorrection` → `{sea_ice_fraction_name, *zero_where_ice_free_names}` (config).
+- `SurfaceEnergyFluxCorrection` → the `hfds` key present in `gen_data`
+  (`"hfds"` or `"hfds_total_area"`).
+- `OceanHeatContentCorrection` → the `thetao` level keys it scales (+ `"sst"` if present).
 
 ## `fme/core/corrector/ice.py` (modified)
 
-`IceCorrector` is a bare `CorrectionSequence` subclass, so it gets
-`touched_names` / `CorrectorOutput` for free; only the leaf correction declares.
+`IceCorrector` is a bare `CorrectionSequence` subclass, so it gets the
+`CorrectorOutput` accumulation for free; only the leaf correction changes its
+return:
 
-```python
-class IceBudgetCorrection:
-    def touched_names(self, gen_data) -> set[str]:  # NEW — config-only, from corrected_variables
-        # union of each processed prognostic key and its three budget-term names
-        ...
-```
+- `IceBudgetCorrection` → returns only the processed prognostic keys and their
+  three budget-term names (config, from `corrected_variables`); empty subset when
+  `corrected_variables is None`.
 
 ## `fme/core/step/output.py` (new)
 
@@ -182,8 +175,7 @@ def step_with_adjustments(...) -> StepOutput:  # CHANGED — was tuple[TensorDic
         result = corrector(input, output, next_step_input_data, corrector_state)  # CHANGED — CorrectorOutput
         output = result.corrected
         # Detach diagnostic tensors here, once, unconditionally (step-boundary
-        # detach keeps the corrector autograd-agnostic; PR5's attach/detach
-        # control is a one-line change at this same seam).
+        # detach keeps the corrector autograd-agnostic).
         diagnostics = CorrectorDiagnostics(
             delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
         )
@@ -192,14 +184,14 @@ def step_with_adjustments(...) -> StepOutput:  # CHANGED — was tuple[TensorDic
 
     # Post-corrector adjustments still run AFTER and are excluded from diagnostics.
     # Case-2 disjointness guard: their written names must not overlap the
-    # corrector's touched names, or delta = output - snapshot stops being exact.
+    # corrector's modified names, or delta = output - snapshot stops being exact.
     post_corrector_names: set[str] = set(prescribed_prognostic_names)  # NEW
     if ocean is not None:
         post_corrector_names.add(ocean.surface_temperature_name)
-    overlap = post_corrector_names & set(diagnostics.delta)  # delta keys == corrector touched names
+    overlap = post_corrector_names & set(diagnostics.delta)  # delta keys == corrector modified names
     if overlap:
         raise ValueError(
-            f"post-corrector adjustment names overlap corrector touched names: {overlap}"
+            f"post-corrector adjustment names overlap corrector modified names: {overlap}"
         )
 
     if ocean is not None:
@@ -214,13 +206,13 @@ class SingleModuleStep(StepABC):
         ...
 ```
 
-### Critical detail — the disjointness guard uses the corrector's *resolved* touched names
+### Critical detail — the disjointness guard uses the corrector's modified-name set (the delta keys)
 
 The guard compares post-corrector adjustment names against the keys of the
-populated `delta` (which are exactly the corrector's resolved `touched_names` for
-this step) — no second `touched_names(gen_data)` call. A disabled
-`EpochScheduledCorrector` yields an empty `delta`, so the guard is trivially
-satisfied (it wrote nothing). This holds today (OHC corrects predicted `sst`;
+populated `delta` (which are exactly the corrector's modified names for this step,
+i.e. `result.modified_names`). A disabled `EpochScheduledCorrector` yields an
+empty `delta`, so the guard is trivially satisfied (it wrote nothing). This holds
+today (OHC corrects predicted `sst`;
 `Ocean` prescribes `sst` only in atmosphere-only configs that don't predict it —
 mutually exclusive) and fails loudly on any future overlapping config.
 
@@ -279,7 +271,7 @@ def process_prediction_generator_list(  # CHANGED — consumes StepOutput
 ) -> BatchData:
     output_dicts = [item.output for item in output_list]
     terminal_state = output_list[-1].stepper_state if output_list else None
-    # corrector_diagnostics intentionally NOT read here (PR3+)
+    # corrector_diagnostics intentionally NOT read here (a follow-up PR carries them)
     ...
 
 
@@ -354,26 +346,32 @@ Build on the existing per-option corrector fixtures. For each corrector
 ```python
 def test_corrector_output_behavior_preserving(...):
     # GOAL: CorrectorOutput.corrected equals current main output for identical inputs.
+    #       (This also guards the modified-set: a correction that fails to return a
+    #       field it changed would drop that change from `corrected` and fail here.)
     # PARAMETERIZE: over each enabled correction option.
 
-def test_corrector_delta_matches_declared_touched_names(...):
-    # GOAL: diagnostics.delta keys == declared touched_names(gen_data);
-    #       delta[name] == corrected[name] - input[name] exactly.
+def test_corrector_delta_matches_modified_returns(...):
+    # GOAL: diagnostics.delta keys == union of the corrections' returned keys
+    #       (== CorrectorOutput.modified_names); delta[name] == corrected[name] - input[name] exactly.
     # Prefer a deterministic constant-offset/scale scenario so delta is hand-computable.
 
 def test_corrector_delta_empty_when_nothing_modified(...):
     # GOAL: no enabled option that modifies a field -> empty delta.
 
-def test_touched_names_drift(...):  # THE BACKSTOP
-    # GOAL: declared touched_names(gen_data) == {name : not torch.equal(corrected[name], input[name])}
-    #       under a representative input, for both correctors across enabled options.
+def test_modified_returns_match_actual_changes(...):  # THE BACKSTOP
+    # GOAL: each corrector's modified-name set (the returned keys / delta keys) ==
+    #       {name : not torch.equal(corrected[name], input[name])} under a representative
+    #       input, for both correctors across enabled options. Behavior preservation already
+    #       enforces "every changed field is returned"; this catches the reverse — a returned
+    #       key that wasn't actually changed (a spurious zero delta).
 ```
 
 ## `fme/core/corrector/test_registry.py` (modified)
 
 ```python
-def test_correction_sequence_touched_names_is_union(...):
-    # GOAL: CorrectionSequence.touched_names == union of its corrections' touched_names.
+def test_correction_sequence_accumulates_modified_keys(...):
+    # GOAL: CorrectionSequence applies each correction's returned subset to gen_data and
+    #       the resulting delta keys == the union of the corrections' returned keys.
 
 def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics(...):
     # GOAL: disabled train-mode step -> CorrectorOutput(corrected passthrough, empty delta);
@@ -393,11 +391,11 @@ def test_step_diagnostics_detached(...):
     # GOAL: every delta tensor has requires_grad == False (detached at the step boundary).
 
 def test_boundary_disjointness_passes_when_disjoint(...):
-    # GOAL: corrector touched names disjoint from post-corrector adjustment names -> ok.
+    # GOAL: corrector modified names disjoint from post-corrector adjustment names -> ok.
 
 def test_boundary_disjointness_raises_on_overlap(...):
     # GOAL: a config where a prescribed_prognostic / Ocean SST name overlaps a corrector
-    #       touched name raises ValueError.
+    #       modified name raises ValueError.
 ```
 
 ## `fme/ace/stepper/test_single_module.py` (modified)
@@ -412,23 +410,25 @@ def test_predict_returns_corrected_only_batchdata(...):
 
 ---
 
-## Design note — why `touched_names` takes `gen_data`
+## Design note — why corrections return only their modified fields
 
-Physics corrections write through `AtmosphereData`/`OceanData` stackers, so the
-written gen_data keys (`PRESsfc` vs `PS`, present air-temperature/thetao level
-names, `sst`/`hfds` presence) are resolved from the data, not from config fields
-— and `_build` is not given the variable naming. `touched_names` therefore takes
-`gen_data` and resolves at sequence entry, where the data is in hand; the result
-is still static across a run's steps. Config-only corrections (`ForcePositive`,
-`SeaIceFractionCorrection`, `IceBudgetCorrection`) ignore the argument.
-Alternative considered: thread the resolved names into each correction at build
-time — rejected because `_build` has no variable list and `DatasetInfo` carries
-none.
+The diagnostics need the set of variables the corrector changed and the per-name
+`delta`. Rather than a separate declaration on each correction (a method living
+apart from the code that performs the write, which can silently drift from it),
+each `Correction.__call__` returns **only the fields it modified**.
+`CorrectionSequence` applies that subset to `gen_data` and unions its keys into
+the modified-name set, then builds `delta` over that set. Because the returned
+dict is exactly what gets applied, the modified-name set is load-bearing: a
+correction that fails to return a field it changed would drop that change from the
+output and fail the behavior-preservation test, so the declaration cannot diverge
+from the write.
 
-## Open Questions
+The written keys still depend on data naming (`PRESsfc` vs `PS`, present
+air-temperature/thetao level names, `sst`/`hfds` presence), but each correction
+resolves them against `gen_data` via the same stacker its write goes through, at
+the moment it returns — so no resolved-name list needs threading in at build time.
 
-- **Disjointness guard input.** The guard reads the populated `delta` keys
-  (equal to the corrector's resolved touched names for the step) rather than
-  calling `touched_names(gen_data)` a second time. Equivalent and avoids a
-  redundant stacker pass; flagging in case a reviewer prefers an explicit
-  `corrector.touched_names(...)` call at the seam.
+Alternative considered: a `touched_names` property per correction, resolved
+against `gen_data`. Rejected — it duplicates knowledge the write already has, sits
+apart from the application logic, and needs a drift test as a backstop. Returning
+the modified subset folds the declaration into the write itself.
