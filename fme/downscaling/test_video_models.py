@@ -114,6 +114,34 @@ def test_train_on_batch_supports_per_channel_noise():
     assert torch.allclose(sigma_max, torch.tensor([150.0, 2000.0]))
 
 
+def test_per_channel_sigma_data():
+    n_times, height, width = 5, 8, 8
+    config = VideoDiffusionModelConfig(
+        out_names=OUT_NAMES,
+        n_timesteps=n_times,
+        normalization=NormalizationConfig(
+            means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+        ),
+        num_diffusion_generation_steps=4,
+        model_channels=16,
+        n_heads=2,
+        sigma_min=0.002,
+        sigma_max=150.0,
+        sigma_data_by_channel={"var0": 0.2},  # var1 falls back to 1.0
+    )
+    model = config.build()
+    bare = getattr(model.module, "module", model.module)
+    assert torch.allclose(
+        bare.sigma_data.flatten(), torch.tensor([0.2, 1.0], device=bare.sigma_data.device)
+    )
+    assert model.sigma_data.shape == (1, 2, 1, 1, 1)
+    # train + generate still run end to end with per-channel sigma_data
+    batch = _paired_batch(batch_size=2, n_times=n_times, height=height, width=width)
+    model.train_on_batch(batch, NullOptimization())
+    generated = model.generate(batch, n_samples=2)
+    assert set(generated) == set(OUT_NAMES)
+
+
 @pytest.mark.parametrize(
     "temporal_noise_correlation", ["independent", "brownian_bridge"]
 )

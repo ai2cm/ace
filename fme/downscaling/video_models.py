@@ -83,6 +83,10 @@ class VideoDiffusionModelConfig:
     ) = None
     sigma_min_by_channel: dict[str, float] | None = None
     sigma_max_by_channel: dict[str, float] | None = None
+    # Per-channel EDM sigma_data (std of the diffused residual). Channels left
+    # unset default to 1.0. Setting it to the measured residual std per channel
+    # fixes the preconditioning/loss weighting for residual diffusion.
+    sigma_data_by_channel: dict[str, float] | None = None
     loss_weight_exponent: float = 1.0
     # Channels modeled in log space via log1p(x*scale); maps channel to scale.
     log_transform_channels: dict[str, float] | None = None
@@ -100,6 +104,7 @@ class VideoDiffusionModelConfig:
             "training_noise_distributions",
             "sigma_min_by_channel",
             "sigma_max_by_channel",
+            "sigma_data_by_channel",
         ):
             values = getattr(self, field_name)
             if values is None:
@@ -178,6 +183,19 @@ class VideoDiffusionModelConfig:
             for name in self.out_names
         ]
         return torch.cat(sigma_by_channel, dim=1)
+
+    def sigma_data_tensor(self, device: torch.device) -> torch.Tensor:
+        """Per-channel sigma_data (default 1.0), ordered by out_names."""
+        return torch.tensor(
+            [
+                1.0
+                if self.sigma_data_by_channel is None
+                else self.sigma_data_by_channel.get(name, 1.0)
+                for name in self.out_names
+            ],
+            dtype=torch.float32,
+            device=device,
+        )
 
     def generation_sigma_bounds(
         self, device: torch.device
@@ -262,7 +280,7 @@ class VideoDiffusionModelConfig:
                 num_freqs=self.num_freqs,
                 noise_embedding_type=self.noise_embedding_type,
             )
-        module = VideoEDMPrecond(net, sigma_data=1.0)
+        module = VideoEDMPrecond(net, sigma_data=self.sigma_data_tensor(get_device()))
         return VideoDiffusionModel(self, module, normalizer, self.out_names)
 
 
@@ -275,7 +293,8 @@ class VideoDiffusionModel:
         out_names: list[str],
     ):
         self.config = config
-        self.sigma_data = 1.0
+        # (1, C, 1, 1, 1) so it broadcasts against the per-channel sigma tensor.
+        self.sigma_data = config.sigma_data_tensor(get_device()).reshape(1, -1, 1, 1, 1)
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module.to(get_device()))
         self.normalizer = normalizer

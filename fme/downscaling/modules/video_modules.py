@@ -393,10 +393,14 @@ class VideoUNet(nn.Module):
 class VideoEDMPrecond(nn.Module):
     """EDM preconditioning (Karras 2022) for the 5-D video tensor."""
 
-    def __init__(self, model: VideoUNet, sigma_data: float = 1.0):
+    def __init__(self, model: VideoUNet, sigma_data: float | torch.Tensor = 1.0):
         super().__init__()
         self.model = model
-        self.sigma_data = sigma_data
+        # Scalar or per-channel; stored as a (1, C, 1, 1, 1) buffer (constant,
+        # so identical on every rank -> DDP-safe) that broadcasts against sigma.
+        if not torch.is_tensor(sigma_data):
+            sigma_data = torch.tensor([float(sigma_data)])
+        self.register_buffer("sigma_data", sigma_data.reshape(1, -1, 1, 1, 1))
 
     def forward(
         self,
