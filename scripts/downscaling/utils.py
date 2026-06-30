@@ -1,16 +1,19 @@
+import os
 import re
 import subprocess
 from pathlib import Path
 
 # Matching for <event_name>_YYYYMMDD*.nc
 _EVENT_FILE_RE = re.compile(r"(.+)_(\d{8}).*\.nc$")
+_FETCH_COMPLETE_MARKER = ".beaker_fetch_complete"
+_BEAKER_CACHE_ENV_VAR = "BEAKER_DATASET_CACHE_DIR"
 
 
 def fetch_beaker_dataset(
     dataset_id: str,
     target_dir: str,
     prefix: str | None = None,
-    cache_dir: str | None = "~/Downloads/beaker_cache",
+    cache_dir: str | None = None,
 ) -> str:
     """Fetch a beaker dataset to the specified directory.
 
@@ -20,16 +23,23 @@ def fetch_beaker_dataset(
         prefix: If provided, only fetch files matching this prefix.
         cache_dir: If provided, datasets are stored under
             ``<cache_dir>/<dataset_id>/`` and reused on subsequent calls.
-            When a cached copy exists the download is skipped and files
-            are served from the cache. *target_dir* is ignored when a
-            cache hit occurs.
+            A sentinel file is written after a successful fetch; partial
+            downloads from failed fetches are not treated as cache hits.
+            *target_dir* is ignored when a cache hit occurs. Caching is
+            opt-in: when *cache_dir* is ``None``, the environment variable
+            ``BEAKER_DATASET_CACHE_DIR`` is used if set; otherwise files are
+            fetched to *target_dir* with no caching.
 
     Returns:
         The directory containing the fetched dataset files.
     """
+    if cache_dir is None:
+        cache_dir = os.environ.get(_BEAKER_CACHE_ENV_VAR)
+    if not cache_dir:
+        cache_dir = None
     if cache_dir is not None:
         cached = Path(cache_dir).expanduser() / dataset_id
-        if cached.is_dir() and any(cached.iterdir()):
+        if (cached / _FETCH_COMPLETE_MARKER).is_file():
             print(f"Using cached dataset at {cached}")
             return str(cached)
         target_dir = str(cached)
@@ -42,6 +52,8 @@ def fetch_beaker_dataset(
     if prefix is not None:
         cmd += ["--prefix", prefix]
     subprocess.run(cmd, check=True)
+    if cache_dir is not None:
+        (Path(target_dir) / _FETCH_COMPLETE_MARKER).touch()
     return target_dir
 
 

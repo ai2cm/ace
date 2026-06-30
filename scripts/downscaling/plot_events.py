@@ -188,8 +188,7 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
     if len(samples) == 0:
         samples = [0]
 
-    else:
-        arr = ds_.to_array()
+    arr = ds_.to_array()
 
     vals = arr.values
     if hasattr(vals, "compute"):
