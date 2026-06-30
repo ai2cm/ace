@@ -2,17 +2,17 @@
 
 set -e
 
-JOB_NAME="test-ft-from-cm4-samudra-1pct-ocean-train-using-ufs-1day-dataset-20-step-mse"
+JOB_NAME="ufs-5d-samudra-fted-from-cm4-1pct-ocean"
 JOB_GROUP="ufs-replay-ocean"
-CONFIG_FILENAME="train-ft-from-cm4-to-ufs-test.yaml"
+CONFIG_FILENAME="train-ft-from-cm4-to-5day-mean-ufs-correctors.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
-STATS_DATA="troya/2026-06-01-ufs-replay-ocean-1deg-19level-1994-2023-stats"
+STATS_DATA="troya/2026-06-29-ufs-replay-ocean-1deg-19level-5day-stats"
 # STATS_DATA="troya/2026-06-04-ufs-replay-ocean-1deg-19level-5day-1994-2023-stats"
-CKPT_DATASET="01KT713REPKQJD8Z4T0G3B8H98"
+CKPT_DATASET="01KW2BQ83EGZ90WZ74CZ4TJATN"
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
