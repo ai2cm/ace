@@ -111,31 +111,80 @@ def ageostrophic_wind_speed(
     northward_wind: torch.Tensor,
     height: torch.Tensor,
     latitude_deg: torch.Tensor,
-    equatorial_mask_deg: float = 10.0,
+    equatorial_zero_deg: float = 10.0,
 ) -> torch.Tensor:
     """Magnitude of the ageostrophic wind on a pressure surface (m/s).
 
-    ``sqrt((u - u_g)^2 + (v - v_g)^2)``, set to NaN within
-    ``|latitude| < equatorial_mask_deg`` where geostrophy does not hold
-    (``f -> 0``). The NaN band is meant to be excluded by a NaN-aware area mean
-    downstream rather than zero-filled.
+    ``sqrt((u - u_g)^2 + (v - v_g)^2)``, set to zero within
+    ``|latitude| < equatorial_zero_deg`` where geostrophy does not hold
+    (``f -> 0``).
+
+    The equatorial band is zero-filled rather than NaN-masked deliberately: the
+    same function is applied to both generated and target data, so the band is
+    identically zero in each. It therefore contributes exactly zero to the
+    gen-vs-target bias and RMSE (the comparison is unaffected) and only dilutes
+    the absolute global-mean magnitude (equally for gen and target). Zero-filling
+    keeps this diagnostic from forcing a NaN-skipping path into the shared
+    area-mean aggregator, where it could silently mask genuine NaNs in other
+    variables.
 
     Args:
         eastward_wind: predicted eastward wind on the surface (m/s).
         northward_wind: predicted northward wind on the surface (m/s).
         height: predicted geopotential height on the surface (m).
         latitude_deg: latitudes in degrees, broadcastable to the field shape.
-        equatorial_mask_deg: half-width of the NaN-masked equatorial band.
+        equatorial_zero_deg: half-width of the zero-filled equatorial band.
 
     Returns:
-        Ageostrophic wind speed with the equatorial band set to NaN, same shape
+        Ageostrophic wind speed with the equatorial band set to zero, same shape
         as the input fields.
     """
     u_g, v_g = geostrophic_wind(height, latitude_deg)
     speed = torch.sqrt((eastward_wind - u_g) ** 2 + (northward_wind - v_g) ** 2)
-    equatorial = torch.abs(latitude_deg) < equatorial_mask_deg
+    equatorial = torch.abs(latitude_deg) < equatorial_zero_deg
     return torch.where(
         equatorial.broadcast_to(speed.shape),
-        torch.full_like(speed, float("nan")),
+        torch.zeros_like(speed),
         speed,
+    )
+
+
+def ageostrophic_speed_residual(
+    eastward_wind: torch.Tensor,
+    northward_wind: torch.Tensor,
+    height: torch.Tensor,
+    latitude_deg: torch.Tensor,
+    equatorial_zero_deg: float = 10.0,
+) -> torch.Tensor:
+    """Actual wind speed minus geostrophic wind speed on a surface (m/s).
+
+    ``sqrt(u^2 + v^2) - sqrt(u_g^2 + v_g^2)``, zero-filled within
+    ``|latitude| < equatorial_zero_deg``.
+
+    This is distinct from :func:`ageostrophic_wind_speed`, which is the magnitude
+    of the ageostrophic *vector* ``sqrt((u - u_g)^2 + (v - v_g)^2)``. The two are
+    equal only when the actual and geostrophic winds are parallel; in general
+    ``|V| - |V_g|`` can even be negative (geostrophic wind faster than actual),
+    so both are reported.
+
+    Args:
+        eastward_wind: predicted eastward wind on the surface (m/s).
+        northward_wind: predicted northward wind on the surface (m/s).
+        height: predicted geopotential height on the surface (m).
+        latitude_deg: latitudes in degrees, broadcastable to the field shape.
+        equatorial_zero_deg: half-width of the zero-filled equatorial band.
+
+    Returns:
+        The signed speed residual with the equatorial band set to zero, same
+        shape as the input fields.
+    """
+    u_g, v_g = geostrophic_wind(height, latitude_deg)
+    speed = torch.sqrt(eastward_wind**2 + northward_wind**2)
+    geostrophic_speed = torch.sqrt(u_g**2 + v_g**2)
+    residual = speed - geostrophic_speed
+    equatorial = torch.abs(latitude_deg) < equatorial_zero_deg
+    return torch.where(
+        equatorial.broadcast_to(residual.shape),
+        torch.zeros_like(residual),
+        residual,
     )

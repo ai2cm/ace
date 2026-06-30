@@ -53,22 +53,36 @@ class AtmosphericDeriveFn(DeriveFnABC):
         self,
         vertical_coordinate: "OptionalHybridSigmaPressureCoordinate",
         timestep: timedelta,
+        horizontal_coordinates: "HorizontalCoordinates | None" = None,
     ):
         self.vertical_coordinate = vertical_coordinate.to(
             "cpu"
         )  # must be on cpu for multiprocessing fork context
         self.timestep = timestep
+        # must be on cpu for multiprocessing fork context; needed by derived
+        # variables that depend on horizontal position (e.g. geostrophic winds).
+        self.horizontal_coordinates = (
+            horizontal_coordinates.to("cpu")
+            if horizontal_coordinates is not None
+            else None
+        )
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.vertical_coordinate, NullVerticalCoordinate):
             vertical_coord: HybridSigmaPressureCoordinate | None = None
         else:
             vertical_coord = self.vertical_coordinate.to(get_device())
+        horizontal_coords = (
+            self.horizontal_coordinates.to(get_device())
+            if self.horizontal_coordinates is not None
+            else None
+        )
         return compute_derived_quantities(
             dict(data),
             vertical_coordinate=vertical_coord,
             timestep=self.timestep,
             forcing_data=dict(forcing_data),
+            horizontal_coordinates=horizontal_coords,
         )
 
 
@@ -204,7 +218,7 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         timestep: timedelta,
         horizontal_coordinates: "HorizontalCoordinates | None" = None,
     ) -> DeriveFnABC:
-        return AtmosphericDeriveFn(self, timestep)
+        return AtmosphericDeriveFn(self, timestep, horizontal_coordinates)
 
     def get_ak(self) -> torch.Tensor:
         return self.ak

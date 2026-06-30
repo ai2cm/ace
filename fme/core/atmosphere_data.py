@@ -12,6 +12,7 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
 )
+from fme.core.dataset_info_errors import MissingDatasetInfo
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -59,6 +60,14 @@ class HasAtmosphereVerticalIntegral(Protocol):
         pass
 
 
+@runtime_checkable
+class HasLatitude(Protocol):
+    """Protocol for a horizontal coordinate that can provide 1D latitudes."""
+
+    @property
+    def lat_1d(self) -> torch.Tensor: ...
+
+
 class AtmosphereData:
     """Container for atmospheric data for accessing variables and providing
     torch.Tensor views on data with multiple vertical levels.
@@ -69,6 +78,7 @@ class AtmosphereData:
         atmosphere_data: TensorMapping,
         vertical_coordinate: HasAtmosphereVerticalIntegral | None = None,
         atmosphere_field_name_prefixes: Mapping[str, list[str]] | None = None,
+        horizontal_coordinates: "HasLatitude | None" = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -82,18 +92,39 @@ class AtmosphereData:
                 or "air_temperature") and lists of possible names or prefix variants
                 (e.g., ["PRESsfc", "PS"] or ["air_temperature_", "T_"]) found in the
                 data.
+            horizontal_coordinates: optional horizontal coordinate providing
+                latitude via ``lat_1d``, used by derived variables that depend on
+                horizontal position (e.g. geostrophic diagnostics).
         """
         if atmosphere_field_name_prefixes is None:
             atmosphere_field_name_prefixes = ATMOSPHERE_FIELD_NAME_PREFIXES.copy()
         self._data = dict(atmosphere_data)
         self._prefix_map = atmosphere_field_name_prefixes
         self._vertical_coordinate = vertical_coordinate
+        self._horizontal_coordinates = horizontal_coordinates
         self._stacker = Stacker(atmosphere_field_name_prefixes)
 
     @property
     def data(self) -> TensorDict:
         """Mapping from field names to tensors."""
         return self._data
+
+    @property
+    def latitude(self) -> torch.Tensor:
+        """Latitudes in degrees as a ``(n_lat, 1)`` tensor for derived variables
+        that depend on horizontal position (e.g. geostrophic diagnostics).
+
+        Raises ``KeyError`` when no horizontal coordinate with a clean 1D
+        latitude is available, so dependent derived variables are skipped rather
+        than erroring (consistent with how missing input fields are handled).
+        """
+        if self._horizontal_coordinates is None:
+            raise KeyError("latitude")
+        try:
+            lat = self._horizontal_coordinates.lat_1d
+        except MissingDatasetInfo as err:
+            raise KeyError("latitude") from err
+        return lat.reshape(-1, 1)
 
     def __getitem__(self, name: str):
         return getattr(self, name)

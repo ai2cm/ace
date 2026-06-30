@@ -4,8 +4,13 @@ from collections.abc import Callable, MutableMapping
 
 import torch
 
-from fme.core.atmosphere_data import AtmosphereData, HasAtmosphereVerticalIntegral
+from fme.core.atmosphere_data import (
+    AtmosphereData,
+    HasAtmosphereVerticalIntegral,
+    HasLatitude,
+)
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.geostrophic import ageostrophic_speed_residual, ageostrophic_wind_speed
 from fme.core.ocean_derived_variables import get_ocean_derived_variable_metadata
 from fme.core.typing_ import TensorDict
 
@@ -166,6 +171,60 @@ def windspeed_at_10m(data: AtmosphereData, timestep: datetime.timedelta):
     return data.windspeed_at_10m
 
 
+# Geostrophic-imbalance diagnostics on pressure surfaces. These are presence-
+# gated: each computes only when the model predicts the wind and height fields
+# for its surface (UGRD/VGRD/h at the given level) and a horizontal coordinate
+# is available, otherwise the KeyError is caught above and the variable skipped.
+def _surface_ageostrophic_wind_speed(data: AtmosphereData, level: int) -> torch.Tensor:
+    return ageostrophic_wind_speed(
+        data.data[f"UGRD{level}"],
+        data.data[f"VGRD{level}"],
+        data.data[f"h{level}"],
+        data.latitude,
+    )
+
+
+def _surface_ageostrophic_speed_residual(
+    data: AtmosphereData, level: int
+) -> torch.Tensor:
+    return ageostrophic_speed_residual(
+        data.data[f"UGRD{level}"],
+        data.data[f"VGRD{level}"],
+        data.data[f"h{level}"],
+        data.latitude,
+    )
+
+
+@register(VariableMetadata("m/s", "Ageostrophic wind speed at 200 hPa"))
+def ageostrophic_wind_speed_200(data: AtmosphereData, timestep: datetime.timedelta):
+    return _surface_ageostrophic_wind_speed(data, 200)
+
+
+@register(VariableMetadata("m/s", "Ageostrophic wind speed at 500 hPa"))
+def ageostrophic_wind_speed_500(data: AtmosphereData, timestep: datetime.timedelta):
+    return _surface_ageostrophic_wind_speed(data, 500)
+
+
+@register(VariableMetadata("m/s", "Ageostrophic wind speed at 850 hPa"))
+def ageostrophic_wind_speed_850(data: AtmosphereData, timestep: datetime.timedelta):
+    return _surface_ageostrophic_wind_speed(data, 850)
+
+
+@register(VariableMetadata("m/s", "Wind speed minus geostrophic wind speed at 200 hPa"))
+def ageostrophic_speed_residual_200(data: AtmosphereData, timestep: datetime.timedelta):
+    return _surface_ageostrophic_speed_residual(data, 200)
+
+
+@register(VariableMetadata("m/s", "Wind speed minus geostrophic wind speed at 500 hPa"))
+def ageostrophic_speed_residual_500(data: AtmosphereData, timestep: datetime.timedelta):
+    return _surface_ageostrophic_speed_residual(data, 500)
+
+
+@register(VariableMetadata("m/s", "Wind speed minus geostrophic wind speed at 850 hPa"))
+def ageostrophic_speed_residual_850(data: AtmosphereData, timestep: datetime.timedelta):
+    return _surface_ageostrophic_speed_residual(data, 850)
+
+
 def _compute_derived_variable(
     data: TensorDict,
     vertical_coordinate: HasAtmosphereVerticalIntegral | None,
@@ -173,6 +232,7 @@ def _compute_derived_variable(
     label: str,
     derived_variable_func: DerivedVariableFunc,
     forcing_data: TensorDict | None = None,
+    horizontal_coordinates: HasLatitude | None = None,
 ) -> TensorDict:
     """Computes a derived variable and adds it to the given data.
 
@@ -190,6 +250,9 @@ def _compute_derived_variable(
         forcing_data: optional dictionary of forcing data needed for some derived
             variables. If necessary forcing inputs are missing, the derived
             variable will not be computed.
+        horizontal_coordinates: optional horizontal coordinate providing latitude,
+            needed by derived variables that depend on horizontal position (e.g.
+            geostrophic diagnostics). If missing, such variables are skipped.
 
     Returns:
         A new data dictionary with the derived variable added.
@@ -205,7 +268,9 @@ def _compute_derived_variable(
             if key not in data:
                 data[key] = value
 
-    atmosphere_data = AtmosphereData(data, vertical_coordinate)
+    atmosphere_data = AtmosphereData(
+        data, vertical_coordinate, horizontal_coordinates=horizontal_coordinates
+    )
 
     try:
         output = derived_variable_func(atmosphere_data, timestep)
@@ -221,6 +286,7 @@ def compute_derived_quantities(
     vertical_coordinate: HasAtmosphereVerticalIntegral | None,
     timestep: datetime.timedelta,
     forcing_data: TensorDict | None = None,
+    horizontal_coordinates: HasLatitude | None = None,
 ) -> TensorDict:
     """Computes all derived quantities from the given data."""
     for label in _DERIVED_VARIABLE_REGISTRY:
@@ -232,5 +298,6 @@ def compute_derived_quantities(
             label,
             func,
             forcing_data=forcing_data,
+            horizontal_coordinates=horizontal_coordinates,
         )
     return data

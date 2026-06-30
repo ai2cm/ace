@@ -119,7 +119,7 @@ def test_geostrophic_wind_zonal_jet():
     )
 
 
-def test_ageostrophic_wind_speed_masks_equator_and_matches_residual():
+def test_ageostrophic_wind_speed_zeros_equator_and_matches_residual():
     nlat, nlon = 48, 96
     _, _, lat2d, _ = _make_grid(nlat, nlon)
     lat_rad = np.deg2rad(lat2d)
@@ -132,8 +132,11 @@ def test_ageostrophic_wind_speed_masks_equator_and_matches_residual():
     dv = torch.full_like(v_g, -4.0)
     speed = ageostrophic_wind_speed(u_g + du, v_g + dv, height, latitude)
 
+    # The equatorial band is zero-filled (not NaN) so the shared area-mean
+    # aggregator needs no NaN handling.
     equator = np.abs(lat2d) < 10.0
-    assert torch.isnan(speed[torch.tensor(equator)]).all()
+    assert (speed[torch.tensor(equator)] == 0.0).all()
+    assert not torch.isnan(speed).any()
     outside = (np.abs(lat2d) > 15.0) & (np.abs(lat2d) < 80.0)
     mask = torch.tensor(outside)
     torch.testing.assert_close(
@@ -148,3 +151,50 @@ def test_horizontal_gradient_batched_shapes(dtype):
     grad_east, grad_north = horizontal_gradient(field)
     assert grad_east.shape == field.shape
     assert grad_north.shape == field.shape
+
+
+def test_ageostrophic_derived_variables_presence_and_latitude_gating():
+    import datetime
+
+    from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+    from fme.core.derived_variables import compute_derived_quantities
+
+    nlat, nlon = 48, 96
+    lat = torch.tensor(_grid_latitudes_deg(nlat), dtype=torch.float32)
+    lon = torch.linspace(0.0, 360.0, nlon + 1)[:-1]
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    vertical = HybridSigmaPressureCoordinate(
+        ak=torch.tensor([0.0, 0.5, 0.0]), bk=torch.tensor([0.0, 0.5, 1.0])
+    )
+    shape = (2, 3, nlat, nlon)
+    # Only the 500 hPa surface fields are present.
+    data = {
+        "h500": 5000.0 + 100.0 * torch.randn(shape),
+        "UGRD500": torch.randn(shape),
+        "VGRD500": torch.randn(shape),
+    }
+    timestep = datetime.timedelta(hours=6)
+
+    out = compute_derived_quantities(
+        data,
+        vertical_coordinate=vertical,
+        timestep=timestep,
+        horizontal_coordinates=coords,
+    )
+    # 500 hPa diagnostics computed, with field shape and no NaNs.
+    for name in ("ageostrophic_wind_speed_500", "ageostrophic_speed_residual_500"):
+        assert name in out
+        assert out[name].shape == shape
+        assert not torch.isnan(out[name]).any()
+    # 200/850 absent because their input fields are not present (presence-gating).
+    assert "ageostrophic_wind_speed_200" not in out
+    assert "ageostrophic_wind_speed_850" not in out
+
+    # Without a horizontal coordinate, even a present surface is skipped.
+    out_no_coords = compute_derived_quantities(
+        data,
+        vertical_coordinate=vertical,
+        timestep=timestep,
+        horizontal_coordinates=None,
+    )
+    assert "ageostrophic_wind_speed_500" not in out_no_coords
