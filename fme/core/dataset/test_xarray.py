@@ -34,9 +34,11 @@ from fme.core.dataset.xarray import (
     _get_cumulative_timesteps,
     _get_file_local_index,
     _get_raw_times,
+    _get_spatial_mask_provider,
     _get_timestep,
     _get_vertical_coordinate,
     _repeat_and_increment_time,
+    get_loss_mask_variables,
     get_xarray_dataset,
 )
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -1273,3 +1275,44 @@ def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
             IntSchedule.from_constant(2),
             allow_missing_variables=False,
         )
+
+
+def _mask_test_dataset():
+    """A dataset with a per-cell loss mask (attribute-referenced, time-varying)
+    and an unrelated static provider mask."""
+    nt, ny, nx = 3, 2, 2
+    ds = xr.Dataset(
+        {
+            "a": (("time", "lat", "lon"), np.zeros((nt, ny, nx), dtype="float32")),
+            # time-varying per-cell loss mask referenced by "a"
+            "mask_a": (("time", "lat", "lon"), np.ones((nt, ny, nx), dtype="float32")),
+            # static provider mask (not referenced by any field's attribute)
+            "mask_2d": (("lat", "lon"), np.ones((ny, nx), dtype="float32")),
+        },
+        coords={"time": np.arange(nt), "lat": [0, 1], "lon": [0, 1]},
+    )
+    ds["a"].attrs["mask_variable"] = "mask_a"
+    return ds
+
+
+def test_get_loss_mask_variables_from_attribute():
+    ds = _mask_test_dataset()
+    assert get_loss_mask_variables(ds, ["a"]) == {"mask_a"}
+    # a requested var with no mask_variable attribute contributes nothing
+    assert get_loss_mask_variables(ds, ["mask_2d"]) == set()
+    # absent referenced mask is ignored
+    ds["a"].attrs["mask_variable"] = "mask_missing"
+    assert get_loss_mask_variables(ds, ["a"]) == set()
+
+
+def test_spatial_mask_provider_excludes_loss_masks():
+    """The time-varying loss mask is excluded from the static provider (so its
+    time dim doesn't trip the time-independence check); the unrelated static
+    mask still feeds the provider."""
+    ds = _mask_test_dataset()
+    referenced = get_loss_mask_variables(ds, ["a"])  # {"mask_a"}
+    provider = _get_spatial_mask_provider(ds, dtype=None, exclude=referenced)
+    assert set(provider.masks) == {"mask_2d"}
+    # without the exclusion the time-varying mask_a raises (existing behavior)
+    with pytest.raises(ValueError, match="time-independent"):
+        _get_spatial_mask_provider(ds, dtype=None)
