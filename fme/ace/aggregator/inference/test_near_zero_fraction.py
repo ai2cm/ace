@@ -4,7 +4,7 @@ import torch
 from fme.core.gridded_ops import LatLonOperations
 
 from .data import InferenceBatchData
-from .zero_fraction import ZeroFractionAggregator, ZeroFractionMetricConfig
+from .near_zero_fraction import NearZeroFractionAggregator, NearZeroFractionMetricConfig
 
 SHAPE = (2, 3, 4, 8)  # (sample, time, lat, lon)
 
@@ -13,7 +13,7 @@ def _ops() -> LatLonOperations:
     return LatLonOperations(area_weights=torch.ones(SHAPE[-2:]))
 
 
-def test_zero_fraction_counts_exactly_zero_cells():
+def test_near_zero_fraction_counts_exactly_zero_cells():
     # half the lon points are exactly zero -> fraction 0.5 with uniform area
     pred = torch.ones(SHAPE)
     pred[..., : SHAPE[-1] // 2] = 0.0
@@ -24,7 +24,7 @@ def test_zero_fraction_counts_exactly_zero_cells():
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    agg = ZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
+    agg = NearZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
     agg.record_batch(data)
     logs = agg.get_logs("val")
     assert logs["val/gen/PRATEsfc"] == 0.5
@@ -33,14 +33,14 @@ def test_zero_fraction_counts_exactly_zero_cells():
     assert "val/target/PRATEsfc" not in logs
 
 
-def test_zero_fraction_no_target():
+def test_near_zero_fraction_no_target():
     pred = torch.zeros(SHAPE)  # everything at/below zero
     data = InferenceBatchData(
         prediction={"PRATEsfc": pred},
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    agg = ZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
+    agg = NearZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
     agg.record_batch(data)
     logs = agg.get_logs("")
     assert logs["gen/PRATEsfc"] == 1.0
@@ -48,7 +48,7 @@ def test_zero_fraction_no_target():
     assert "gen_minus_target/PRATEsfc" not in logs
 
 
-def test_zero_fraction_threshold():
+def test_near_zero_fraction_threshold():
     pred = torch.full(SHAPE, 0.5)
     data = InferenceBatchData(
         prediction={"PRATEsfc": pred},
@@ -56,19 +56,19 @@ def test_zero_fraction_threshold():
         i_time_start=0,
     )
     # threshold 0.0: nothing at/below; threshold 1.0: everything at/below
-    agg_zero = ZeroFractionAggregator(
+    agg_zero = NearZeroFractionAggregator(
         area_weighted_mean=_ops().area_weighted_mean, threshold=0.0
     )
     agg_zero.record_batch(data)
     assert agg_zero.get_logs("")["gen/PRATEsfc"] == 0.0
-    agg_one = ZeroFractionAggregator(
+    agg_one = NearZeroFractionAggregator(
         area_weighted_mean=_ops().area_weighted_mean, threshold=1.0
     )
     agg_one.record_batch(data)
     assert agg_one.get_logs("")["gen/PRATEsfc"] == 1.0
 
 
-def test_zero_fraction_per_variable_threshold():
+def test_near_zero_fraction_per_variable_threshold():
     # "a" uses the per-variable threshold (1.0 -> all below), "b" falls back to
     # the global threshold (0.0 -> none below).
     pred = {"a": torch.full(SHAPE, 0.5), "b": torch.full(SHAPE, 0.5)}
@@ -77,7 +77,7 @@ def test_zero_fraction_per_variable_threshold():
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    agg = ZeroFractionAggregator(
+    agg = NearZeroFractionAggregator(
         area_weighted_mean=_ops().area_weighted_mean,
         threshold=0.0,
         per_variable_threshold={"a": 1.0},
@@ -88,7 +88,7 @@ def test_zero_fraction_per_variable_threshold():
     assert logs["gen/b"] == 0.0
 
 
-def test_zero_fraction_maps_disabled_by_default():
+def test_near_zero_fraction_maps_disabled_by_default():
     pred = torch.ones(SHAPE)
     pred[..., : SHAPE[-1] // 2] = 0.0
     data = InferenceBatchData(
@@ -97,14 +97,14 @@ def test_zero_fraction_maps_disabled_by_default():
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    agg = ZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
+    agg = NearZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
     agg.record_batch(data)
     logs = agg.get_logs("")
     assert not any("map" in key for key in logs)
     assert len(agg.get_dataset().data_vars) == 0
 
 
-def test_zero_fraction_maps_logged_with_target():
+def test_near_zero_fraction_maps_logged_with_target():
     # Construct a gen field with a distinct lat-row pattern, lon-col pattern,
     # a partial-in-time cell, and an initial-condition-only cell, so the test
     # pins the [lat, lon] orientation, the sample/time normalization, and the
@@ -121,7 +121,7 @@ def test_zero_fraction_maps_logged_with_target():
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    agg = ZeroFractionAggregator(
+    agg = NearZeroFractionAggregator(
         area_weighted_mean=_ops().area_weighted_mean, include_maps=True
     )
     agg.record_batch(data)
@@ -148,7 +148,7 @@ def test_zero_fraction_maps_logged_with_target():
     assert (error_map == gen_map).all()
 
 
-def test_zero_fraction_scalar_is_area_weighted():
+def test_near_zero_fraction_scalar_is_area_weighted():
     # Non-uniform (latitudinal) area weights: half the cells are dry but they
     # carry 3/(3+1) of the area, so the area-weighted fraction must be 0.75 --
     # a plain cell-count fraction would give 0.5.  (Weights must be
@@ -164,40 +164,40 @@ def test_zero_fraction_scalar_is_area_weighted():
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    agg = ZeroFractionAggregator(area_weighted_mean=ops.area_weighted_mean)
+    agg = NearZeroFractionAggregator(area_weighted_mean=ops.area_weighted_mean)
     agg.record_batch(data)
     assert agg.get_logs("")["gen/PRATEsfc"] == pytest.approx(0.75)
 
 
-def test_zero_fraction_drops_initial_condition_timestep():
+def test_near_zero_fraction_drops_initial_condition_timestep():
     # dry only at the first timestep (of 3).
     pred = torch.ones(SHAPE)
     pred[:, 0] = 0.0
     time = InferenceBatchData.new_test_data().time
     # i_time_start == 0: that timestep is the initial condition and is dropped,
     # so none of the 2 retained timesteps are dry -> fraction 0.
-    agg_ic = ZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
+    agg_ic = NearZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
     agg_ic.record_batch(
         InferenceBatchData(prediction={"PRATEsfc": pred}, time=time, i_time_start=0)
     )
     assert agg_ic.get_logs("")["gen/PRATEsfc"] == 0.0
     # i_time_start > 0: no initial condition to drop, all 3 timesteps retained,
     # dry at 1 of 3 -> fraction 1/3.
-    agg_mid = ZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
+    agg_mid = NearZeroFractionAggregator(area_weighted_mean=_ops().area_weighted_mean)
     agg_mid.record_batch(
         InferenceBatchData(prediction={"PRATEsfc": pred}, time=time, i_time_start=10)
     )
     assert agg_mid.get_logs("")["gen/PRATEsfc"] == pytest.approx(1.0 / 3.0)
 
 
-def test_zero_fraction_maps_no_target():
+def test_near_zero_fraction_maps_no_target():
     pred = torch.zeros(SHAPE)
     data = InferenceBatchData(
         prediction={"PRATEsfc": pred},
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    agg = ZeroFractionAggregator(
+    agg = NearZeroFractionAggregator(
         area_weighted_mean=_ops().area_weighted_mean, include_maps=True
     )
     agg.record_batch(data)
@@ -211,18 +211,38 @@ def test_zero_fraction_maps_no_target():
     assert "error_map-PRATEsfc" not in ds
 
 
-def test_zero_fraction_metric_config_include_maps_default_false():
-    assert ZeroFractionMetricConfig().include_maps is False
+def test_near_zero_fraction_metric_config_include_maps_default_false():
+    assert NearZeroFractionMetricConfig().include_maps is False
 
 
-def test_zero_fraction_metric_config_disabled_by_default():
-    config = ZeroFractionMetricConfig()
+def test_near_zero_fraction_metric_config_disabled_by_default():
+    config = NearZeroFractionMetricConfig()
     assert config.enabled is False
-    assert config.get_name() == "zero_threshold_fraction"
+    assert config.get_name() == "near_zero_fraction"
 
 
-def test_zero_fraction_metric_config_enabled_requires_variables():
+def test_near_zero_fraction_metric_config_enabled_requires_variables():
     with pytest.raises(ValueError, match="no variables"):
-        ZeroFractionMetricConfig(enabled=True)
-    # enabled with variables is fine
-    ZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"])
+        NearZeroFractionMetricConfig(enabled=True, threshold=1e-6)
+    # enabled with variables and a positive threshold is fine
+    NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"], threshold=1e-6)
+
+
+def test_near_zero_fraction_metric_config_enabled_requires_positive_threshold():
+    # the default threshold of 0.0 is rejected when enabled
+    with pytest.raises(ValueError, match="threshold must be > 0"):
+        NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"])
+    with pytest.raises(ValueError, match="threshold must be > 0"):
+        NearZeroFractionMetricConfig(
+            enabled=True, variables=["PRATEsfc"], threshold=-1.0
+        )
+    # per-variable thresholds must also be positive
+    with pytest.raises(ValueError, match="per_variable_threshold"):
+        NearZeroFractionMetricConfig(
+            enabled=True,
+            variables=["PRATEsfc"],
+            threshold=1e-6,
+            per_variable_threshold={"PRATEsfc": 0.0},
+        )
+    # a disabled config with a non-positive threshold is allowed (no validation)
+    NearZeroFractionMetricConfig(threshold=0.0)

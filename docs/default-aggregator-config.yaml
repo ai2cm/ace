@@ -105,11 +105,11 @@ aggregator:
     name: trend
     enabled: false
     strict: false
-  zero_fraction:
+  near_zero_fraction:
     variables: []
     threshold: 0.0
     per_variable_threshold: {}
-    name: zero_threshold_fraction
+    name: near_zero_fraction
     include_maps: false
     enabled: false
     strict: true

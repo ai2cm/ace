@@ -18,25 +18,29 @@ AreaWeightedMean = Callable[..., torch.Tensor]
 
 
 @dataclasses.dataclass
-class ZeroFractionMetricConfig:
-    """Area-weighted fraction of cells at or below a threshold.
+class NearZeroFractionMetricConfig:
+    """Area-weighted fraction of cells at or below a (small, positive) threshold.
 
     Reports, per variable, the area-weighted fraction of cells whose value is
     ``<= threshold`` for the prediction, and its difference from the target. For
-    precipitation (``PRATEsfc``) with the default threshold of 0 this is the
-    fraction of exactly-zero (dry) cells, which the existing
-    RMSE/bias/histogram metrics do not surface directly — useful for diagnosing
-    a model's dry-cell / drizzle behaviour against the target distribution.
-    Disabled by default.
+    precipitation (``PRATEsfc``) with a small threshold this is the fraction of
+    near-zero (dry / drizzle) cells, which the existing RMSE/bias/histogram
+    metrics do not surface directly — useful for diagnosing a model's dry-cell /
+    drizzle behaviour against the target distribution. Disabled by default.
+
+    The threshold is required to be strictly positive (when ``enabled``): the
+    metric is for *near*-zero cells, and an exact-zero indicator is a degenerate
+    edge case better served by a dedicated metric.
 
     Parameters:
         variables: variables to compute the metric for (e.g. ``["PRATEsfc"]``).
             Must be non-empty when ``enabled``.
         threshold: a cell counts toward the fraction when its value is
-            ``<= threshold``. Defaults to 0.0. Applied to any variable not
-            listed in ``per_variable_threshold``.
+            ``<= threshold``. Must be ``> 0`` when ``enabled``. Applied to any
+            variable not listed in ``per_variable_threshold``.
         per_variable_threshold: optional per-variable thresholds overriding
-            ``threshold`` for the named variables.
+            ``threshold`` for the named variables. Each must be ``> 0`` when
+            ``enabled``.
         name: log prefix and wandb key prefix.
         include_maps: if True, also log 2D maps of the per-cell time-mean
             at-or-below-threshold fraction: a side-by-side generated/target
@@ -49,23 +53,40 @@ class ZeroFractionMetricConfig:
     variables: list[str] = dataclasses.field(default_factory=list)
     threshold: float = 0.0
     per_variable_threshold: dict[str, float] = dataclasses.field(default_factory=dict)
-    name: str = "zero_threshold_fraction"
+    name: str = "near_zero_fraction"
     include_maps: bool = False
     enabled: bool = False
     strict: bool = True
 
     def __post_init__(self):
-        if self.enabled and not self.variables:
+        if not self.enabled:
+            return
+        if not self.variables:
             raise ValueError(
-                "ZeroFractionMetricConfig is enabled but no variables were given; "
-                "specify the variables to compute the metric for."
+                "NearZeroFractionMetricConfig is enabled but no variables were "
+                "given; specify the variables to compute the metric for."
+            )
+        if self.threshold <= 0:
+            raise ValueError(
+                "NearZeroFractionMetricConfig.threshold must be > 0, got "
+                f"{self.threshold}."
+            )
+        non_positive = {
+            var: value
+            for var, value in self.per_variable_threshold.items()
+            if value <= 0
+        }
+        if non_positive:
+            raise ValueError(
+                "NearZeroFractionMetricConfig.per_variable_threshold values must "
+                f"be > 0, got {non_positive}."
             )
 
     def get_name(self) -> str:
         return self.name
 
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
-        agg: SubAggregator = ZeroFractionAggregator(
+        agg: SubAggregator = NearZeroFractionAggregator(
             area_weighted_mean=ctx.ops.area_weighted_mean,
             threshold=self.threshold,
             per_variable_threshold=self.per_variable_threshold,
@@ -76,7 +97,7 @@ class ZeroFractionMetricConfig:
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))
 
 
-class ZeroFractionAggregator:
+class NearZeroFractionAggregator:
     """Accumulates the area-weighted fraction of cells with value ``<= threshold``.
 
     For each variable it reports the predicted fraction and, when a target is
