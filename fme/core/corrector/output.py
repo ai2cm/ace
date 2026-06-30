@@ -25,7 +25,7 @@ class CorrectorOutput:
 
     Parameters:
         corrected: The adjusted generated data.
-        diagnostics: The corrector's declared correction deltas.
+        diagnostics: The corrector's diagnostic outputs.
         corrector_state: Per-sample state carried across step calls.
     """
 
@@ -45,11 +45,6 @@ def build_corrector_diagnostics(
 
     Produces ``delta[name] = corrected[name] - input_snapshot[name]`` for each
     ``name`` in ``touched_names``.
-
-    When more than one correction touches a field, ``corrected`` is the
-    corrector's exit value and ``input_snapshot`` its entry value, so the stored
-    delta is their cumulative net effect and ``input_snapshot == corrected -
-    delta`` stays exact.
 
     The returned tensors are *not* detached from the autograd graph here.
 
