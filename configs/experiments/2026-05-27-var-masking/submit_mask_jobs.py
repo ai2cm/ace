@@ -31,7 +31,7 @@ CONFIGS = sorted(
     for path in HERE.glob("*.yaml")
     if path.name.startswith(CONFIG_PREFIX)
     and "-mask" in path.name
-    and "--1940" in path.name
+    and "-1940" in path.name
 )
 
 
