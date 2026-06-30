@@ -270,10 +270,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         total_energy_budget_correction: If not None, force the generated data to
             conserve an idealized version of total energy using the provided
             configuration.
-        keep_gradient_through_clamps: If True, apply the ``force_positive`` clamp
-            with a straight-through estimator: the forward value is still clamped
-            to be non-negative, but gradient flows as if the clamp had not
-            happened, so clamped-negative cells still get a learning signal.
+        keep_gradient_through_clamps: If True, apply the ``force_positive_names``
+            clamp with a straight-through estimator: the forward value is still
+            clamped to be non-negative, but gradient flows as if the clamp had
+            not happened, so clamped-negative cells still get a learning signal.
     """
 
     conserve_dry_air: bool = False

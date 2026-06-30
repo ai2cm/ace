@@ -217,15 +217,31 @@ class OceanHeatContentCorrection:
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigABC):
+    """Configuration for corrections applied to generated ocean data.
+
+    Parameters:
+        force_positive_names: Names of fields that should be forced to be greater
+            than or equal to zero.
+        sea_ice_fraction_correction: Optional configuration for a sea-ice-fraction
+            correction (bounds sea_ice_fraction to 0-1 and keeps the land, ocean,
+            and sea-ice fractions summing to one).
+        surface_energy_flux_correction: Optional configuration for a surface energy
+            flux correction to the generated hfds.
+        ocean_heat_content_correction: Optional configuration for an ocean heat
+            content correction.
+        keep_gradient_through_clamps: If True, apply the corrector's hard clamps
+            (the ``force_positive_names`` clamp and the
+            ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
+            estimator: the forward value is still clamped, but gradient flows as if
+            the clamp had not happened, so out-of-range cells still get a learning
+            signal.
+    """
+
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     surface_energy_flux_correction: SurfaceEnergyFluxCorrectionConfig | None = None
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
-    """If True, apply the corrector's hard clamps (``force_positive`` and the
-    ``sea_ice_fraction_correction`` bound/rebalance) with a straight-through
-    estimator: the forward value is still clamped, but gradient flows as if the
-    clamp had not happened, so out-of-range cells still get a learning signal."""
 
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:

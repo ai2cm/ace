@@ -23,7 +23,7 @@ def replace_value_keep_gradient(
     return x + (new_value - x).detach()
 
 
-def force_positive(
+def _force_positive(
     data: TensorMapping, names: list[str], keep_gradient: bool = False
 ) -> TensorDict:
     """Clamp all tensors defined by `names` to be greater than or equal to zero.
@@ -65,6 +65,6 @@ class ForcePositive:
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
         return (
-            force_positive(gen_data, self.names, keep_gradient=self.keep_gradient),
+            _force_positive(gen_data, self.names, keep_gradient=self.keep_gradient),
             corrector_state,
         )
