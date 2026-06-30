@@ -482,6 +482,21 @@ def stack_list_of_tensor_dicts(
     return stack_dict
 
 
+def _repeat_interleaved_tensor_mapping(
+    mask: TensorMapping | None, n_ensemble: int
+) -> TensorMapping | None:
+    """Expand a per-base-sample mask to the folded ensemble batch dimension.
+
+    Each row is repeated ``n_ensemble`` times (interleaved), matching
+    ``broadcast_ensemble``, so ensemble members of a base sample share the
+    same mask. Returns ``None`` unchanged so the no-dropout path stays a clean
+    pass-through.
+    """
+    if mask is None:
+        return None
+    return {k: v.repeat_interleave(n_ensemble, dim=0) for k, v in mask.items()}
+
+
 def process_ensemble_prediction_generator_list(
     output_list: list[EnsembleTensorDict],
 ) -> EnsembleTensorDict:
@@ -918,6 +933,14 @@ class Stepper:
         """
         return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
+    def make_input_dropout_mask(
+        self, batch_size: int, device: torch.device
+    ) -> TensorMapping | None:
+        return self._step_obj.make_input_dropout_mask(batch_size, device)
+
+    def has_input_dropout(self) -> bool:
+        return self._step_obj.has_input_dropout()
+
     @property
     def training_dataset_info(self) -> DatasetInfo:
         return self._dataset_info
@@ -1115,6 +1138,7 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        input_dropout_mask: TensorMapping | None = None,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1143,6 +1167,7 @@ class Stepper:
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
+                        input_dropout_mask=input_dropout_mask,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1664,6 +1689,15 @@ class TrainStepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
+        # Sample and broadcast the synthetic input-dropout mask for the ensemble batch.
+        sample_tensor = next(iter(input_batch_data.data.values()))
+        input_dropout_mask = _repeat_interleaved_tensor_mapping(
+            self._stepper.make_input_dropout_mask(
+                batch_size=sample_tensor.shape[0],
+                device=sample_tensor.device,
+            ),
+            n_ensemble,
+        )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
         output_generator = self._stepper.predict_generator(
@@ -1674,6 +1708,7 @@ class TrainStepper(
             labels=input_ensemble_data.labels,
             data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
+            input_dropout_mask=input_dropout_mask,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
