@@ -385,6 +385,55 @@ Trustworthy PRMSL signals: `spec_mae_lo_PRMSL` + `crps_PRMSL`. (Coarse PRMSL
 structure also lives at high σ — more the high-noise expert's job than Lo's,
 which standalone `lo_renoise` can't exercise.)
 
+### Design note (2026-06-29): discriminator tap location as a spectral-band lever (candidate experiment)
+
+Hypothesis to revisit once we know whether the GAN even tips in the current R1
+runs: the **coarse PRMSL damage may be caused by where the GAN taps the UNet.**
+
+**Grounding (traced in code):**
+- `fastgen_train.py:491-499` builds the discriminator with
+  `feature_indices={deepest_idx}`, `deepest_idx = len(enc_info)-1`.
+- `encoder_feature_info()` (`fastgen_teacher.py:306-334`) is ordered
+  **finest→coarsest**, so `deepest_idx` = the **coarsest/bottleneck** level
+  (16×16 for the 512² UNet). The critic today is a **pure coarse/global critic**.
+- `Discriminator_EDM` (`discriminators.py:62-118`) builds one strided-conv head
+  per tapped resolution down to 1×1, sharing a **single `in_channels`**.
+- The capture infra `_capture_encoder_features` already accepts a **set** of
+  indices, so a single shallower tap is plumbed; a multi-tap pyramid is not
+  (shared `in_channels`).
+
+**Why it could explain the damage.** Tap depth ≈ which spectral band the
+adversarial gradient acts on. PRMSL's realism *is* its coarse/global structure,
+so a bottleneck critic polices exactly the band that collapsed in dispatch-v2;
+precip (fine/mid structure) is barely touched by a coarse critic — matching the
+observed "precip healthy, coarse PRMSL collapses." **No attention in the UNet
+sharpens the lever:** attention (normally at 16/8 levels) is what would give the
+bottleneck a *global* receptive field; without it, scale sensitivity is set
+purely by which conv level you tap, so tap-depth is a clean, near-monotone knob
+(shallow = mid/fine, deep = coarse).
+
+**Two options:**
+1. **Single shallower tap — cheap (~3 lines):** `deepest_idx → deepest_idx - k`,
+   set `in_channels` from `enc_info[level]`. For expert 0 (`[1,2,2,2,1,1]`) the
+   two deepest levels are both 128ch, so one level up likely keeps
+   `in_channels=128`. Shifts the policed band up ~1 octave, freeing coarse PRMSL
+   for the score term (which is fully conditioned on the smooth coarse input).
+   Suggest exposing as `ACE_DISC_FEATURE_DEPTH` (offset from deepest, default 0).
+2. **Multi-resolution pyramid (coarse+mid+fine):** the principled projected-GAN /
+   LADD design, but needs `Discriminator_EDM` to take a per-level `in_channels`
+   list (or 1×1 projections) since heads currently share one channel count.
+
+**Caveats / sequencing:**
+- Pre-tip in the current runs — confirm the GAN actually damages coarse PRMSL
+  (late window + `val/psd_PRMSL` + `spec_mae_lo_PRMSL`) before re-architecting.
+- Targets the **coarse (lo/mid)** GAN-timed damage — NOT the mid/hi metric
+  artifact (smooth-field noise floor).
+- Shallow-tap risk: a finer critic on a smooth field (PRMSL fine ≈ 0 energy)
+  could *inject* fine texture (the noise floor). GAN weight is only 1e-3, but
+  watch the hi band / PSD curves.
+- Separable lever from the backbone-expert choice and the GAN weight. Related to
+  the older "which expert should the discriminator use?" design note below.
+
 ### (superseded) Active per-expert runs (submitted 2026-06-27)
 
 **Student-Lo distillation is submitted** (commit `fa6b49e9e`). Both step
