@@ -5,6 +5,7 @@ import torch
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.testing import mock_distributed
 
 
@@ -161,3 +162,44 @@ def test_loss():
     )
     logs = aggregator.get_logs(label="metrics")
     assert logs["metrics/loss"] == 2.0
+
+
+def test_mean_aggregator_masks_gen_vs_target_per_field():
+    """A per-field SpatialMaskProvider (bound to the gridded operations) makes
+    the gen-vs-target skill metrics score only the valid cells: error confined
+    to masked cells does not count. This is the eval-side mirror of the
+    per-cell loss masking, and it works through the existing area-weight path
+    (no aggregator changes needed)."""
+    area_weights = torch.ones([4, 4]).to(get_device())
+    mask = torch.ones([4, 4], device=get_device())
+    mask[2:, :] = 0.0  # invalidate the bottom half
+    provider = SpatialMaskProvider({"mask_a": mask}).to(get_device())
+
+    # target all zero; gen differs ONLY in the masked (bottom) region
+    target = {"a": torch.zeros([2, 2, 4, 4], device=get_device())}
+    gen_vals = torch.zeros([2, 2, 4, 4], device=get_device())
+    gen_vals[:, :, 2:, :] = 5.0
+    gen = {"a": gen_vals}
+
+    masked_agg = MeanAggregator(LatLonOperations(area_weights, provider))
+    masked_agg.record_batch(
+        loss=0.0,
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    masked_logs = masked_agg.get_logs(label="metrics")
+    np.testing.assert_allclose(masked_logs["metrics/weighted_rmse/a"], 0.0)
+    np.testing.assert_allclose(masked_logs["metrics/weighted_bias/a"], 0.0)
+
+    unmasked_agg = MeanAggregator(LatLonOperations(area_weights))
+    unmasked_agg.record_batch(
+        loss=0.0,
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    unmasked_logs = unmasked_agg.get_logs(label="metrics")
+    assert unmasked_logs["metrics/weighted_rmse/a"] > 0.0
