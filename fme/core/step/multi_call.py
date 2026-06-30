@@ -298,6 +298,12 @@ class MultiCallStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
 
+    def make_input_dropout_mask(self, device: torch.device) -> TensorMapping | None:
+        return self._wrapped_step.make_input_dropout_mask(device)
+
+    def has_input_dropout(self) -> bool:
+        return self._wrapped_step.has_input_dropout()
+
     def train(self, mode: bool = True) -> StepABC:
         super().train(mode)
         self._wrapped_step.train(mode)

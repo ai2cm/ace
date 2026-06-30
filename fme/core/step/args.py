@@ -26,6 +26,15 @@ class StepArgs:
             corrector references seeded from the IC). ``None`` if no state
             has been seeded yet. The step returns an updated stepper_state
             alongside its output dict.
+        input_dropout_mask: Synthetic training-only input presence mask. Keys
+            are the receiving Step's packed input channel names, values are
+            ``[1]``-shaped bool tensors (broadcast over the batch) where True
+            means present and False means synthetically dropped. Distinct from
+            ``data_mask`` (which marks genuinely-absent variables consumed by
+            preprocessing and loss masking): this mask only corrupts inputs to
+            the network. It is preserved through input processing but not
+            transformed by it, and is applied late inside the Step, just before
+            the module call.
     """
 
     def __init__(
@@ -35,12 +44,14 @@ class StepArgs:
         labels: BatchLabels | None = None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        input_dropout_mask: TensorMapping | None = None,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
         self.labels = labels
         self.data_mask = data_mask
         self.stepper_state = stepper_state
+        self.input_dropout_mask = input_dropout_mask
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -53,4 +64,5 @@ class StepArgs:
             labels=self.labels,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            input_dropout_mask=self.input_dropout_mask,
         )
