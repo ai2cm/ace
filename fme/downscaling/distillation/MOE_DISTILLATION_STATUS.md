@@ -338,7 +338,7 @@ wandb `ai2cm/fastgen`.
 
 | Run | GAN fixes | Beaker experiment | wandb name |
 |---|---|---|---|
-| **Lo-2step-r1** (highest-prob single fix) | R1 reg `0.1` only | `01KWAKEV8SS9RACQH8AA6CGY2Y` | `…-lo-2step-r1-moe-teacher-expert0` |
+| ~~**Lo-2step-r1**~~ (cancelled — superseded by `-instr` below) | R1 reg `0.1` only | `01KWAKEV8SS9RACQH8AA6CGY2Y` | `…-lo-2step-r1-moe-teacher-expert0` |
 | **Lo-2step-allfix** (everything) | R1 `0.1` + `gan_loss_weight_gen 3e-4` + LR decay→5% over 20k steps (max_iter capped 20k) | `01KWAKF2PV0G3E9V418207R7R0` | `…-lo-2step-allfix-moe-teacher-expert0` |
 | **Lo-2step-r1-instr** (R1-only, fully instrumented) | R1 reg `0.1` only, on commit `8ce57479d` | `01KWBDJ5CH98Q0HMWS05BHFA8Z` | `…-lo-2step-r1-instr-moe-teacher-expert0` |
 
