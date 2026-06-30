@@ -1,12 +1,14 @@
 import datetime
 
 import cftime
+import pytest
 import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import NullOptimization
+from fme.core.rand import set_seed
 from fme.downscaling.data.datasets import (
     PairedVideoBatchData,
     VideoBatchData,
@@ -44,7 +46,7 @@ def _paired_batch(batch_size, n_times, height, width):
     return PairedVideoBatchData(fine=clip, coarse=clip)
 
 
-def _model(n_times):
+def _model(n_times, temporal_noise_correlation="independent"):
     config = VideoDiffusionModelConfig(
         out_names=OUT_NAMES,
         n_timesteps=n_times,
@@ -55,6 +57,7 @@ def _model(n_times):
         model_channels=16,
         n_heads=2,
         num_freqs=3,
+        temporal_noise_correlation=temporal_noise_correlation,
     )
     return config.build()
 
@@ -111,9 +114,12 @@ def test_train_on_batch_supports_per_channel_noise():
     assert torch.allclose(sigma_max, torch.tensor([150.0, 2000.0]))
 
 
-def test_generate_pins_observed_endpoints():
+@pytest.mark.parametrize(
+    "temporal_noise_correlation", ["independent", "brownian_bridge"]
+)
+def test_generate_pins_observed_endpoints(temporal_noise_correlation):
     n_times, height, width = 5, 8, 8
-    model = _model(n_times)
+    model = _model(n_times, temporal_noise_correlation=temporal_noise_correlation)
     batch = _paired_batch(batch_size=2, n_times=n_times, height=height, width=width)
 
     generated = model.generate(batch, n_samples=3)
@@ -127,3 +133,58 @@ def test_generate_pins_observed_endpoints():
     for s in range(3):
         assert torch.allclose(out[:, s, 0], truth[:, 0], atol=1e-4)
         assert torch.allclose(out[:, s, -1], truth[:, -1], atol=1e-4)
+
+
+def test_train_on_batch_runs_with_brownian_bridge_noise():
+    n_times, height, width = 5, 8, 8
+    model = _model(n_times, temporal_noise_correlation="brownian_bridge")
+    batch = _paired_batch(batch_size=2, n_times=n_times, height=height, width=width)
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.loss.requires_grad
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
+
+
+def test_brownian_bridge_noise_has_expected_temporal_covariance():
+    n_times = 9
+    model = _model(n_times, temporal_noise_correlation="brownian_bridge")
+    set_seed(0)
+    # (samples, C=1, T, H=1, W=1): treat sample dim as the population.
+    like = torch.empty(20000, 1, n_times, 1, 1)
+    noise = model._sample_residual_noise(like)
+    flat = noise[:, 0, :, 0, 0]  # (samples, T)
+
+    emp_cov = (flat.T @ flat) / flat.shape[0]
+    expected = (model._noise_mixing @ model._noise_mixing.T).cpu()
+    assert torch.allclose(emp_cov, expected, atol=0.03)
+    # endpoints are noise-free; interior frames are correlated (off-diagonal != 0)
+    assert torch.allclose(emp_cov[0], torch.zeros(n_times))
+    assert torch.allclose(emp_cov[-1], torch.zeros(n_times))
+    assert emp_cov[1, 2].abs() > 0.1
+
+
+def test_independent_noise_is_uncorrelated_in_time():
+    n_times = 9
+    model = _model(n_times, temporal_noise_correlation="independent")
+    assert model._noise_mixing is None
+    set_seed(0)
+    like = torch.empty(20000, 1, n_times, 1, 1)
+    flat = model._sample_residual_noise(like)[:, 0, :, 0, 0]
+    emp_cov = (flat.T @ flat) / flat.shape[0]
+    assert torch.allclose(emp_cov, torch.eye(n_times), atol=0.05)
+
+
+def test_invalid_temporal_noise_correlation_rejected():
+    with pytest.raises(ValueError, match="temporal_noise_correlation"):
+        VideoDiffusionModelConfig(
+            out_names=OUT_NAMES,
+            n_timesteps=5,
+            normalization=NormalizationConfig(
+                means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+            ),
+            temporal_noise_correlation="bridge",
+        )

@@ -23,6 +23,7 @@ from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
     NoiseDistribution,
+    brownian_bridge_mixing_matrix,
 )
 from fme.downscaling.requirements import DataRequirements
 
@@ -85,6 +86,9 @@ class VideoDiffusionModelConfig:
     loss_weight_exponent: float = 1.0
     # Channels modeled in log space via log1p(x*scale); maps channel to scale.
     log_transform_channels: dict[str, float] | None = None
+    # Temporal correlation of the residual noise: "independent" (per-frame white
+    # noise, default) or "brownian_bridge" (endpoint-pinned time-correlated noise).
+    temporal_noise_correlation: str = "independent"
 
     def __post_init__(self):
         if self.n_timesteps < 3:
@@ -143,6 +147,11 @@ class VideoDiffusionModelConfig:
                     f"model_channels*{m}={self.model_channels * m} not divisible "
                     f"by n_heads={self.n_heads}."
                 )
+        if self.temporal_noise_correlation not in ("independent", "brownian_bridge"):
+            raise ValueError(
+                "temporal_noise_correlation must be 'independent' or "
+                f"'brownian_bridge', got {self.temporal_noise_correlation}."
+            )
         if self.backbone not in ("simple", "songunet"):
             raise ValueError(f"backbone must be 'simple' or 'songunet', got {self.backbone}.")
         if self.noise_embedding_type not in ("positional", "fourier"):
@@ -274,10 +283,25 @@ class VideoDiffusionModel:
         self.packer = Packer(out_names)
         self.n_timesteps = config.n_timesteps
         self.log_transform_channels = dict(config.log_transform_channels or {})
+        if config.temporal_noise_correlation == "brownian_bridge":
+            self._noise_mixing: torch.Tensor | None = brownian_bridge_mixing_matrix(
+                config.n_timesteps
+            ).to(get_device())
+        else:
+            self._noise_mixing = None
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
+
+    def _sample_residual_noise(self, like: torch.Tensor) -> torch.Tensor:
+        """White noise shaped like ``like`` (B, C, T, H, W), temporally correlated
+        with the Brownian-bridge kernel when configured, else independent."""
+        noise = randn_like(like)
+        if self._noise_mixing is None:
+            return noise
+        mixing = self._noise_mixing.to(device=noise.device, dtype=noise.dtype)
+        return torch.einsum("ti,bcihw->bcthw", mixing, noise)
 
     def _pack_normalized(self, data: TensorMapping) -> torch.Tensor:
         selected = {
@@ -334,7 +358,7 @@ class VideoDiffusionModel:
         sigma = self.config.sample_training_noise(batch_size, clip.device)
         sigma = sigma.reshape(batch_size, -1, 1, 1, 1)
         # Gaussian noise on interior frames only
-        noised = residual + randn_like(residual) * sigma * interior
+        noised = residual + self._sample_residual_noise(residual) * sigma * interior
 
         denoised = self.module(
             noised, condition, sigma, day_of_year, second_of_day, lon
@@ -402,9 +426,11 @@ class VideoDiffusionModel:
         second_of_day = repeat(second_of_day)
         interior_b = interior.expand(batch_size * n_samples, n_channels, n_times, 1, 1)
 
-        latents = torch.randn(
-            batch_size * n_samples, n_channels, n_times, height, width,
-            device=clip.device,
+        latents = self._sample_residual_noise(
+            torch.empty(
+                batch_size * n_samples, n_channels, n_times, height, width,
+                device=clip.device,
+            )
         )
         sigma_min, sigma_max = self.config.generation_sigma_bounds(clip.device)
         residual = _video_edm_sample(
@@ -419,6 +445,7 @@ class VideoDiffusionModel:
             sigma_min=sigma_min,
             sigma_max=sigma_max,
             s_churn=self.config.churn,
+            noise_mixing=self._noise_mixing,
         )
         full_norm = baseline + residual
         generated = self._denormalize_invert(full_norm)
@@ -448,9 +475,11 @@ def _video_edm_sample(
     sigma_max: float | torch.Tensor,
     rho: float = 7.0,
     s_churn: float = 0.0,
+    noise_mixing: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """EDM stochastic sampler that keeps the observed endpoints pinned (re-zeroed
-    after every update)."""
+    after every update). When ``noise_mixing`` is given, the stochastic churn noise
+    is temporally correlated with that mixing matrix (matching the training noise)."""
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
     sigma_min_t = torch.as_tensor(
         sigma_min, dtype=compute_dtype, device=latents.device
@@ -483,11 +512,18 @@ def _video_edm_sample(
         )
         return out.to(compute_dtype)
 
+    def churn_noise(x):
+        noise = torch.randn_like(x)
+        if noise_mixing is None:
+            return noise
+        mixing = noise_mixing.to(device=noise.device, dtype=noise.dtype)
+        return torch.einsum("ti,bcihw->bcthw", mixing, noise)
+
     x = latents.to(compute_dtype) * t[0] * mask
     for i, (t_cur, t_next) in enumerate(zip(t[:-1], t[1:])):
         gamma = s_churn / num_steps
         t_hat = t_cur + gamma * t_cur
-        x_hat = x + (t_hat**2 - t_cur**2).clamp(min=0).sqrt() * torch.randn_like(x)
+        x_hat = x + (t_hat**2 - t_cur**2).clamp(min=0).sqrt() * churn_noise(x)
         x_hat = x_hat * mask
         d_cur = (x_hat - denoise(x_hat, t_hat)) / t_hat
         x = (x_hat + (t_next - t_hat) * d_cur) * mask
