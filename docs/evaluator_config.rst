@@ -157,6 +157,9 @@ in the default aggregator configuration above.
 .. autoclass:: fme.ace.EnsembleMetricConfig
    :noindex:
 
+.. autoclass:: fme.ace.NearZeroFractionMetricConfig
+   :noindex:
+
 .. autoclass:: fme.ace.StepperOverrideConfig
    :show-inheritance:
    :noindex:
