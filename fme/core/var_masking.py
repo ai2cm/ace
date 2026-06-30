@@ -85,11 +85,19 @@ class VariableMaskingConfig:
         perm = torch.randperm(n_uniform, device=device)
         present[0, uniform_pool[perm[:k]]] = False
 
-        # Per-variable Bernoulli masking over the named channels.
-        for i, name in enumerate(names):
-            rate = rates.get(name)
-            if rate is None:
-                continue
-            if bool(torch.rand((), device=device) < rate):
-                present[0, i] = False
+        # Per-variable Bernoulli masking over the named channels, vectorized
+        # so the whole draw is a single kernel with no per-channel host sync.
+        named_idx = torch.tensor(
+            [i for i, name in enumerate(names) if name in rates],
+            device=device,
+            dtype=torch.long,
+        )
+        if named_idx.numel() > 0:
+            named_rates = torch.tensor(
+                [rates[names[int(i)]] for i in named_idx],
+                device=device,
+                dtype=torch.float,
+            )
+            fired = torch.rand(named_idx.numel(), device=device) < named_rates
+            present[0, named_idx[fired]] = False
         return present
