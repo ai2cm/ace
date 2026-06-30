@@ -595,6 +595,74 @@ purely by which conv level you tap, so tap-depth is a clean, near-monotone knob
 - Separable lever from the backbone-expert choice and the GAN weight. Related to
   the older "which expert should the discriminator use?" design note below.
 
+### Design note (2026-06-30): per-variable / multi-critic discriminator (self-calibrating per-channel emphasis)
+
+Motivated by the precip-good / winds-under asymmetry: precip tails recover to ~0.83
+by 30k, wind tails plateau ~0.62 (at 7k) — a single shared objective can't push one
+channel without touching the others. Traced the loss to pin down what's actually
+adjustable.
+
+**Key mechanic — `ratio_upper` is per-sample, not per-channel.**
+`_get_f_div_weighting_h` (`f_distill.py:59-69`) does `fake_logits.mean(dim=1)` →
+**one scalar per sample**, then `ratio = exp(·)`, then `clamp(·, ratio_lower,
+ratio_upper)`; assert `ratio.shape == t.shape` (i.e. `[B]`). So `ratio_upper` caps
+how much a rare/hard *sample* up-weights the VSD loss — the channels are already
+collapsed into one critic logit before the clip. **You cannot make `ratio_upper`
+per-channel with one critic**, and a *global* bump is doubly blunt here: (1)
+per-sample → up-weighting a wind-extreme sample also re-weights its (already-good)
+precip; (2) with today's coarse bottleneck critic the ratio tracks *coarse*
+mismatch, not wind extremes, so it isn't even aimed at the problem.
+
+**Two orthogonal axes** (don't conflate):
+- **Tap depth / scale** = what the critic can *see* (coarse bottleneck → blind to
+  fine-scale local extremes; finer tap → sees them). This is the queued tap1/tap2
+  A/B. But those are still *single* critics mixing all 4 vars into one logit, so
+  they buy visibility, **not** per-channel emphasis.
+- **Per-channel** = whether a channel's signal is *weighted* enough vs the others.
+
+**Favored direction (per the 2026-06-30 discussion): per-variable / multiple
+critics — self-calibrating.** Each variable getting its own critic → its own
+density ratio → its own `h` (and a per-channel `ratio_upper` falls out naturally),
+so per-channel emphasis *emerges* from how distinguishable each field currently is
+— no subjective static weights. This could also help **tails**: a critic that sees
+a variable's local extremes gives that variable tail-relevant gradient (the
+under-dispersed channels get pushed harder automatically).
+
+**Architectural reality to solve first.** The critic is a *projected* GAN on the
+**teacher's entangled encoder features**, not on separable per-variable output
+channels — so "one critic per output variable" isn't clean at the feature level
+(the bottleneck feature doesn't decompose per-variable). Realistic routes:
+- **Per-variable critics in output (pixel/spectral) space** — abandon the
+  projected/feature design for a per-variable patch or *spectral* discriminator.
+  Cleanest per-variable signal; also the natural home for a spectral-shape critic.
+- **Multi-resolution pyramid (per-scale, not per-variable)** — the LADD-style
+  coarse+mid+fine projected critic. `_capture_encoder_features` already accepts a
+  **set** of indices (multi-tap capture is plumbed), but `Discriminator_EDM` shares
+  a single `in_channels` across tapped resolutions, so a true pyramid needs
+  per-level `in_channels` (or 1×1 projections) — the blocker.
+- **Per-variable × per-level grid** (the fullest version raised 2026-06-30):
+  combine both axes. Most expressive, most parameters/critics to balance.
+
+**Self-calibrating critics vs manual per-channel weights (the tradeoff raised):**
+- *Per-variable critics (self-cal):* no subjective weights, adapts as a channel is
+  solved. Cost: more params and **C× the GAN-balance problem** — each critic can
+  win/collapse, multiplying the instability we're already fighting; harder to tune,
+  more compute.
+- *Manual per-channel loss weights (option b):* one `w_c` vector, decoupled from the
+  GAN, simple and likely **easier training dynamics**. Cost: subjective and *static*
+  (a solved channel keeps its weight; needs retuning).
+- *Cheap middle ground:* adaptive per-channel weights without C critics —
+  uncertainty-weighting (Kendall multi-task) or GradNorm / running-magnitude
+  normalization. Self-calibrating-ish, single critic, far simpler dynamics.
+
+**Sequencing.** (1) Let tap1/tap2 mature and report whether finer *visibility* alone
+lifts wind/precip tails (and whether winds climb on their own past 7k, as precip
+did). (2) If a channel is visible but still under because the shared objective
+favors precip → add per-channel *emphasis*: start with the cheap adaptive weights
+or a static `w_c`, escalate to per-variable critics if self-calibration is worth the
+C× dynamics cost. Do **not** use global `ratio_upper` for this (per-sample,
+channel-collapsed, and coarse-critic-filtered).
+
 ### (superseded) Active per-expert runs (submitted 2026-06-27)
 
 **Student-Lo distillation is submitted** (commit `fa6b49e9e`). Both step
