@@ -385,6 +385,24 @@ Trustworthy PRMSL signals: `spec_mae_lo_PRMSL` + `crps_PRMSL`. (Coarse PRMSL
 structure also lives at high σ — more the high-noise expert's job than Lo's,
 which standalone `lo_renoise` can't exercise.)
 
+### Train-media fix (2026-06-29, `fastgen_train.py`)
+
+`train_media/student/generation` and `train_media/data/real` previously showed
+**only output channel 0** (the first variable, ~u10): FastGen's `to_wandb`
+asserts C==3, and the ACE patch had been replicating channel 0 to grayscale and
+dropping channels 1-3. The "4 panels" were just the 4 per-GPU batch samples
+(global batch 16 / 4 GPUs) of that one variable — *not* the 4 variables.
+
+Now `_ace_to_wandb` renders **every output variable as its own panel** via
+`_channels_to_grid`: one row per sample, one column per variable, each channel
+**independently min-max normalized** so PRMSL and precip are each visible (they
+live on very different scales in normalized space). Columns are labeled from
+`out_packer.names` (caption `cols: u10 | v10 | PRMSL | PRATEsfc`). Guarded so a
+viz failure falls back to the old renderer and never crashes training. Helper
+logic (per-channel norm + sample-major ordering) verified; the `torchvision`
+`make_grid` path only runs in the distillation Docker image (not the local
+`fme` env).
+
 ### Design note (2026-06-29): discriminator tap location as a spectral-band lever (candidate experiment)
 
 Hypothesis to revisit once we know whether the GAN even tips in the current R1

@@ -73,6 +73,38 @@ def _copy_ace_teacher(teacher: AceDiffusionTeacher) -> AceDiffusionTeacher:
     return copy.deepcopy(teacher)
 
 
+def _channels_to_grid(
+    tensor: torch.Tensor, channel_names: list[str], max_samples: int = 8
+) -> tuple[torch.Tensor, str]:
+    """Tile a ``[B, C, H, W]`` batch as a per-channel panel grid for logging.
+
+    One row per sample, one column per output channel (variable), each channel
+    independently min-max normalized to ``[0, 1]`` so disparate fields (e.g.
+    PRMSL vs precip) are each visible.  Returns the ``[3, Hg, Wg]`` grid tensor
+    (grayscale replicated to RGB) and a caption naming the columns.
+
+    Replaces the previous behavior of showing only channel 0 — ACE has 4 output
+    variables, so dropping channels 1-3 hid most of the state (see
+    MOE_DISTILLATION_STATUS.md train-media note).
+    """
+    import torchvision
+
+    b, c, h, w = tensor.shape
+    n = min(b, max_samples)
+    panels = tensor[:n].detach().float().cpu()
+    # Per-channel min-max over the displayed samples → [0, 1].
+    flat = panels.permute(1, 0, 2, 3).reshape(c, -1)
+    lo = flat.min(dim=1).values.view(1, c, 1, 1)
+    hi = flat.max(dim=1).values.view(1, c, 1, 1)
+    panels = ((panels - lo) / (hi - lo).clamp(min=1e-8)).clamp(0.0, 1.0)
+    # Sample-major flatten so make_grid lays out each sample's channels in a row.
+    grid_in = panels.reshape(n * c, 1, h, w).expand(n * c, 3, h, w)
+    grid = torchvision.utils.make_grid(grid_in, nrow=c, pad_value=1.0)
+    names = list(channel_names) or [f"ch{i}" for i in range(c)]
+    caption = "cols: " + " | ".join(names) + "  (rows: samples)"
+    return grid, caption
+
+
 class _CheckpointPruner:
     """Deletes old checkpoints after each save, keeping only the most recent N.
 
@@ -341,10 +373,10 @@ def main() -> None:
     # Defer all FastGen imports until after arg parsing so `--help` works
     # in environments without the full FastGen dependency chain installed.
     # Patch FastGen's to_wandb to handle non-RGB tensors (ACE outputs C != 3).
-    # WandbCallback.to_wandb asserts C == 3; we replicate the first channel to
-    # RGB so sample logging works regardless of the number of output channels.
-    from omegaconf import DictConfig
-
+    # WandbCallback.to_wandb asserts C == 3 and would otherwise fail; instead we
+    # render every output channel (variable) as its own per-channel-normalized
+    # panel — one row per sample, one column per variable.  Column labels come
+    # from the teacher out_packer, populated below once the teacher loads.
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -355,16 +387,25 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
+    # Output-variable names for panel labels; filled once the teacher loads.
+    _ace_channel_names: list[str] = []
 
     def _ace_to_wandb(tensor: torch.Tensor, *args, **kwargs):
-        if tensor.ndim >= 3 and tensor.shape[-3] != 3:
-            first_chan = tensor.narrow(tensor.ndim - 3, 0, 1)
-            expand_shape = list(tensor.shape)
-            expand_shape[-3] = 3
-            tensor = first_chan.expand(expand_shape)
-        return _orig_to_wandb(tensor, *args, **kwargs)
+        # Only the 4D image case (ACE) gets the per-channel panel treatment;
+        # already-RGB or video tensors fall back to FastGen's renderer.  Guarded
+        # so a viz failure can never crash training.
+        if tensor.ndim != 4 or tensor.shape[-3] == 3:
+            return _orig_to_wandb(tensor, *args, **kwargs)
+        try:
+            import torchvision.transforms.functional as tv_F
+
+            grid, caption = _channels_to_grid(tensor, _ace_channel_names)
+            return _wandb_mod.wandb.Image(tv_F.to_pil_image(grid), caption=caption)
+        except Exception:  # noqa: BLE001 - sample viz is best-effort
+            return _orig_to_wandb(tensor, *args, **kwargs)
 
     _wandb_mod.to_wandb = _ace_to_wandb
 
@@ -464,6 +505,9 @@ def main() -> None:
         else teacher_model
     )
     c_out_teacher = len(_ref_model.out_packer.names)
+    # Label the sample-media panels with the output-variable names (see the
+    # to_wandb patch above).
+    _ace_channel_names[:] = list(_ref_model.out_packer.names)
     c_out_config = config.model.input_shape[0]
     if c_out_config != c_out_teacher:
         logger.warning(
