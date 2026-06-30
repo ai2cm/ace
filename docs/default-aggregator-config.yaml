@@ -107,8 +107,8 @@ aggregator:
     strict: false
   near_zero_fraction:
     variables: []
-    threshold: 0.0
-    per_variable_threshold: {}
+    eps: 0.0
+    per_variable_eps: {}
     name: near_zero_fraction
     include_maps: false
     enabled: false

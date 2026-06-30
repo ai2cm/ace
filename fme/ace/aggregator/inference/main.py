@@ -206,10 +206,10 @@ class InferenceEvaluatorAggregatorConfig:
         trend: Per-grid-cell linear trend (slope vs. time) map metrics.
             Disabled by default.
         near_zero_fraction: Area-weighted fraction of cells at or below a
-            small positive threshold per variable, reported for prediction and
+            small non-negative ``eps`` per variable, reported for prediction and
             its difference from the target. Optionally (``include_maps``) also
             logs side-by-side generated/target maps of the per-cell
-            at-or-below-threshold fraction and the error map. Disabled by
+            at-or-below-``eps`` fraction and the error map. Disabled by
             default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.

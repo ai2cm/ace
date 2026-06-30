@@ -19,31 +19,31 @@ AreaWeightedMean = Callable[..., torch.Tensor]
 
 @dataclasses.dataclass
 class NearZeroFractionMetricConfig:
-    """Area-weighted fraction of cells at or below a (small, positive) threshold.
+    """Area-weighted fraction of cells at or below a (small, non-negative) ``eps``.
 
     Reports, per variable, the area-weighted fraction of cells whose value is
-    ``<= threshold`` for the prediction, and its difference from the target. For
-    precipitation (``PRATEsfc``) with a small threshold this is the fraction of
+    ``<= eps`` for the prediction, and its difference from the target. For
+    precipitation (``PRATEsfc``) with a small ``eps`` this is the fraction of
     near-zero (dry / drizzle) cells, which the existing RMSE/bias/histogram
     metrics do not surface directly — useful for diagnosing a model's dry-cell /
     drizzle behaviour against the target distribution. Disabled by default.
 
-    The threshold is required to be strictly positive (when ``enabled``): the
-    metric is for *near*-zero cells, and an exact-zero indicator is a degenerate
-    edge case better served by a dedicated metric.
+    ``eps`` is required to be non-negative (when ``enabled``). A value of exactly
+    ``0`` is permitted: when a corrector clamps a variable to a physical floor
+    (e.g. precipitation at zero) the at-or-below-zero fraction is a meaningful
+    exact-dry-cell count, not a degenerate edge case.
 
     Parameters:
         variables: variables to compute the metric for (e.g. ``["PRATEsfc"]``).
             Must be non-empty when ``enabled``.
-        threshold: a cell counts toward the fraction when its value is
-            ``<= threshold``. Must be ``> 0`` when ``enabled``. Applied to any
-            variable not listed in ``per_variable_threshold``.
-        per_variable_threshold: optional per-variable thresholds overriding
-            ``threshold`` for the named variables. Each must be ``> 0`` when
-            ``enabled``.
+        eps: a cell counts toward the fraction when its value is ``<= eps``.
+            Must be ``>= 0`` when ``enabled``. Applied to any variable not listed
+            in ``per_variable_eps``.
+        per_variable_eps: optional per-variable ``eps`` overriding ``eps`` for the
+            named variables. Each must be ``>= 0`` when ``enabled``.
         name: log prefix and wandb key prefix.
         include_maps: if True, also log 2D maps of the per-cell time-mean
-            at-or-below-threshold fraction: a side-by-side generated/target
+            at-or-below-``eps`` fraction: a side-by-side generated/target
             comparison and the generated-minus-target error map. Defaults to
             False.
         enabled: master toggle for the metric.
@@ -51,8 +51,8 @@ class NearZeroFractionMetricConfig:
     """
 
     variables: list[str] = dataclasses.field(default_factory=list)
-    threshold: float = 0.0
-    per_variable_threshold: dict[str, float] = dataclasses.field(default_factory=dict)
+    eps: float = 0.0
+    per_variable_eps: dict[str, float] = dataclasses.field(default_factory=dict)
     name: str = "near_zero_fraction"
     include_maps: bool = False
     enabled: bool = False
@@ -66,20 +66,17 @@ class NearZeroFractionMetricConfig:
                 "NearZeroFractionMetricConfig is enabled but no variables were "
                 "given; specify the variables to compute the metric for."
             )
-        if self.threshold <= 0:
+        if self.eps < 0:
             raise ValueError(
-                "NearZeroFractionMetricConfig.threshold must be > 0, got "
-                f"{self.threshold}."
+                f"NearZeroFractionMetricConfig.eps must be >= 0, got {self.eps}."
             )
-        non_positive = {
-            var: value
-            for var, value in self.per_variable_threshold.items()
-            if value <= 0
+        negative = {
+            var: value for var, value in self.per_variable_eps.items() if value < 0
         }
-        if non_positive:
+        if negative:
             raise ValueError(
-                "NearZeroFractionMetricConfig.per_variable_threshold values must "
-                f"be > 0, got {non_positive}."
+                "NearZeroFractionMetricConfig.per_variable_eps values must "
+                f"be >= 0, got {negative}."
             )
 
     def get_name(self) -> str:
@@ -88,8 +85,8 @@ class NearZeroFractionMetricConfig:
     def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
         agg: SubAggregator = NearZeroFractionAggregator(
             area_weighted_mean=ctx.ops.area_weighted_mean,
-            threshold=self.threshold,
-            per_variable_threshold=self.per_variable_threshold,
+            eps=self.eps,
+            per_variable_eps=self.per_variable_eps,
             include_maps=self.include_maps,
             variable_metadata=ctx.variable_metadata,
             horizontal_dims=ctx.horizontal_coordinates.dims,
@@ -98,18 +95,18 @@ class NearZeroFractionMetricConfig:
 
 
 class NearZeroFractionAggregator:
-    """Accumulates the area-weighted fraction of cells with value ``<= threshold``.
+    """Accumulates the area-weighted fraction of cells with value ``<= eps``.
 
     For each variable it reports the predicted fraction and, when a target is
-    available, its difference from the target (gen - target), averaged over all
-    sample/time entries seen. The initial-condition timestep of the first batch
-    (``i_time_start == 0``) is excluded, since it is prescribed rather than
-    predicted (as in :class:`TimeMeanAggregator`). The metric name is supplied
-    by the caller as the ``label`` prefix in :meth:`get_logs`.
+    available, its difference from the target fraction (gen - target), averaged
+    over all sample/time entries seen. The initial-condition timestep of the
+    first batch (``i_time_start == 0``) is excluded, since it is prescribed
+    rather than predicted (as in :class:`TimeMeanAggregator`). The metric name is
+    supplied by the caller as the ``label`` prefix in :meth:`get_logs`.
 
     When ``include_maps`` is set it additionally accumulates the per-cell
-    time-mean at-or-below-threshold fraction (the fraction of sample/time
-    entries for which each cell is ``<= threshold``) and, in :meth:`get_logs`,
+    time-mean at-or-below-``eps`` fraction (the fraction of sample/time
+    entries for which each cell is ``<= eps``) and, in :meth:`get_logs`,
     plots a side-by-side generated/target comparison plus the
     generated-minus-target error map. The maps are plain per-cell fractions
     (not area-weighted); the scalar fraction is the area-weighted mean of the
@@ -119,15 +116,15 @@ class NearZeroFractionAggregator:
     def __init__(
         self,
         area_weighted_mean: AreaWeightedMean,
-        threshold: float = 0.0,
-        per_variable_threshold: dict[str, float] | None = None,
+        eps: float = 0.0,
+        per_variable_eps: dict[str, float] | None = None,
         include_maps: bool = False,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         horizontal_dims: Sequence[str] | None = None,
     ):
         self._area_weighted_mean = area_weighted_mean
-        self._threshold = threshold
-        self._per_variable_threshold = per_variable_threshold or {}
+        self._eps = eps
+        self._per_variable_eps = per_variable_eps or {}
         self._include_maps = include_maps
         self._variable_metadata = variable_metadata or {}
         self._horizontal_dims = (
@@ -138,14 +135,14 @@ class NearZeroFractionAggregator:
         self._gen_count: dict[str, int] = {}
         self._target_sum: dict[str, torch.Tensor] = {}
         self._target_count: dict[str, int] = {}
-        # per-cell [lat, lon] sums of the at-or-below-threshold indicator
+        # per-cell [lat, lon] sums of the at-or-below-eps indicator
         self._gen_map_sum: dict[str, torch.Tensor] = {}
         self._gen_map_count: dict[str, int] = {}
         self._target_map_sum: dict[str, torch.Tensor] = {}
         self._target_map_count: dict[str, int] = {}
 
-    def _threshold_for(self, name: str) -> float:
-        return self._per_variable_threshold.get(name, self._threshold)
+    def _eps_for(self, name: str) -> float:
+        return self._per_variable_eps.get(name, self._eps)
 
     def _accumulate(
         self,
@@ -164,20 +161,20 @@ class NearZeroFractionAggregator:
             # pull the generated fraction toward the target (mirrors
             # TimeMeanAggregator's ignore_initial handling).
             tensor = tensor[:, time_slice]
-            # NaN <= threshold is False, so NaN cells count as "not below"
-            # rather than propagating NaN; fine for fields like PRATEsfc that
-            # are never NaN, but note it for NaN-filled (missing) variables.
-            below = (tensor <= self._threshold_for(name)).to(tensor.dtype)
+            # NaN <= eps is False, so NaN cells count as "not below" rather than
+            # propagating NaN; this metric targets never-NaN fields like
+            # PRATEsfc.
+            below = (tensor <= self._eps_for(name)).to(tensor.dtype)
             # area_weighted_mean reduces the horizontal dims, leaving the
             # (sample, time) leading dims; each entry is that snapshot's
-            # area-weighted fraction at or below the threshold.
+            # area-weighted fraction at or below eps.
             frac = self._area_weighted_mean(below, name=name)
             sums[name] = sums.get(name, frac.new_zeros(())) + frac.sum()
             counts[name] = counts.get(name, 0) + frac.numel()
             if self._include_maps:
                 # sum the indicator over the (sample, time) leading dims,
                 # leaving a [lat, lon] map; divided by the count later this is
-                # each cell's fraction of entries at or below the threshold.
+                # each cell's fraction of entries at or below eps.
                 sample_dim = 0
                 cell_sum = below.sum(dim=time_dim).sum(dim=sample_dim)
                 if name in map_sums:
@@ -213,8 +210,8 @@ class NearZeroFractionAggregator:
         self, sums: dict[str, torch.Tensor], counts: dict[str, int]
     ) -> dict[str, float]:
         means: dict[str, float] = {}
-        for name, total in sums.items():
-            local_mean = total / counts[name]
+        for name in sorted(sums):
+            local_mean = sums[name] / counts[name]
             means[name] = self._dist.reduce_mean(local_mean).item()
         return means
 
@@ -222,8 +219,8 @@ class NearZeroFractionAggregator:
         self, sums: dict[str, torch.Tensor], counts: dict[str, int]
     ) -> dict[str, torch.Tensor]:
         maps: dict[str, torch.Tensor] = {}
-        for name, total in sums.items():
-            local_map = total / counts[name]
+        for name in sorted(sums):
+            local_map = sums[name] / counts[name]
             maps[name] = self._dist.reduce_mean(local_map)
         return maps
 
@@ -241,9 +238,9 @@ class NearZeroFractionAggregator:
         logs: dict[str, Image] = {}
         for name, gen_map in gen_maps.items():
             caption_name, units = self._caption_name_units(name)
-            threshold = self._threshold_for(name)
+            eps = self._eps_for(name)
             fraction_desc = (
-                f"{caption_name} fraction of time at or below {threshold:g} {units}"
+                f"{caption_name} fraction of time at or below {eps:g} {units}"
             )
             if name in target_maps:
                 target_map = target_maps[name]

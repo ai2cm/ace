@@ -48,29 +48,29 @@ def test_near_zero_fraction_no_target():
     assert "gen_minus_target/PRATEsfc" not in logs
 
 
-def test_near_zero_fraction_threshold():
+def test_near_zero_fraction_eps():
     pred = torch.full(SHAPE, 0.5)
     data = InferenceBatchData(
         prediction={"PRATEsfc": pred},
         time=InferenceBatchData.new_test_data().time,
         i_time_start=0,
     )
-    # threshold 0.0: nothing at/below; threshold 1.0: everything at/below
+    # eps 0.0: nothing at/below; eps 1.0: everything at/below
     agg_zero = NearZeroFractionAggregator(
-        area_weighted_mean=_ops().area_weighted_mean, threshold=0.0
+        area_weighted_mean=_ops().area_weighted_mean, eps=0.0
     )
     agg_zero.record_batch(data)
     assert agg_zero.get_logs("")["gen/PRATEsfc"] == 0.0
     agg_one = NearZeroFractionAggregator(
-        area_weighted_mean=_ops().area_weighted_mean, threshold=1.0
+        area_weighted_mean=_ops().area_weighted_mean, eps=1.0
     )
     agg_one.record_batch(data)
     assert agg_one.get_logs("")["gen/PRATEsfc"] == 1.0
 
 
-def test_near_zero_fraction_per_variable_threshold():
-    # "a" uses the per-variable threshold (1.0 -> all below), "b" falls back to
-    # the global threshold (0.0 -> none below).
+def test_near_zero_fraction_per_variable_eps():
+    # "a" uses the per-variable eps (1.0 -> all below), "b" falls back to
+    # the global eps (0.0 -> none below).
     pred = {"a": torch.full(SHAPE, 0.5), "b": torch.full(SHAPE, 0.5)}
     data = InferenceBatchData(
         prediction=pred,
@@ -79,8 +79,8 @@ def test_near_zero_fraction_per_variable_threshold():
     )
     agg = NearZeroFractionAggregator(
         area_weighted_mean=_ops().area_weighted_mean,
-        threshold=0.0,
-        per_variable_threshold={"a": 1.0},
+        eps=0.0,
+        per_variable_eps={"a": 1.0},
     )
     agg.record_batch(data)
     logs = agg.get_logs("")
@@ -223,26 +223,32 @@ def test_near_zero_fraction_metric_config_disabled_by_default():
 
 def test_near_zero_fraction_metric_config_enabled_requires_variables():
     with pytest.raises(ValueError, match="no variables"):
-        NearZeroFractionMetricConfig(enabled=True, threshold=1e-6)
-    # enabled with variables and a positive threshold is fine
-    NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"], threshold=1e-6)
+        NearZeroFractionMetricConfig(enabled=True, eps=1e-6)
+    # enabled with variables and a positive eps is fine
+    NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"], eps=1e-6)
 
 
-def test_near_zero_fraction_metric_config_enabled_requires_positive_threshold():
-    # the default threshold of 0.0 is rejected when enabled
-    with pytest.raises(ValueError, match="threshold must be > 0"):
-        NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"])
-    with pytest.raises(ValueError, match="threshold must be > 0"):
-        NearZeroFractionMetricConfig(
-            enabled=True, variables=["PRATEsfc"], threshold=-1.0
-        )
-    # per-variable thresholds must also be positive
-    with pytest.raises(ValueError, match="per_variable_threshold"):
+def test_near_zero_fraction_metric_config_enabled_requires_nonnegative_eps():
+    # a negative eps is rejected when enabled
+    with pytest.raises(ValueError, match="eps must be >= 0"):
+        NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"], eps=-1.0)
+    # an eps of exactly 0.0 (the default) is allowed when enabled: with a
+    # corrector clamping to a physical floor, the at-or-below-zero fraction
+    # is a meaningful exact-dry-cell count.
+    NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"])
+    NearZeroFractionMetricConfig(enabled=True, variables=["PRATEsfc"], eps=0.0)
+    # per-variable eps must also be non-negative
+    with pytest.raises(ValueError, match="per_variable_eps"):
         NearZeroFractionMetricConfig(
             enabled=True,
             variables=["PRATEsfc"],
-            threshold=1e-6,
-            per_variable_threshold={"PRATEsfc": 0.0},
+            eps=1e-6,
+            per_variable_eps={"PRATEsfc": -1.0},
         )
-    # a disabled config with a non-positive threshold is allowed (no validation)
-    NearZeroFractionMetricConfig(threshold=0.0)
+    # a per-variable eps of exactly 0.0 is allowed
+    NearZeroFractionMetricConfig(
+        enabled=True,
+        variables=["PRATEsfc"],
+        eps=1e-6,
+        per_variable_eps={"PRATEsfc": 0.0},
+    )
