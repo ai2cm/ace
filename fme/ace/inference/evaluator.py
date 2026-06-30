@@ -50,6 +50,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
+from fme.core.random_state import RandomState
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -219,6 +220,11 @@ class InferenceEvaluatorConfig:
         n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
             stochastic model weather inference. n_ensemble_per_ic = 1 is default
             inference behavior.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a reproducible
+            noise sequence, independent of forward_steps_in_memory. Leave unset
+            (None) for the default non-reproducible behavior. Only affects the
+            stepper rollout (not the prediction_loader comparison path).
     """
 
     experiment_dir: str
@@ -239,6 +245,7 @@ class InferenceEvaluatorConfig:
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
     n_ensemble_per_ic: int = 1
+    seed: int | None = None
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -361,6 +368,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             ic = data.initial_condition.as_batch_data()
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
+        if config.seed is not None:
+            data._initial_condition = data.initial_condition.with_random_state(
+                RandomState.from_seed(config.seed)
             )
         stepper = config.load_stepper()
         stepper.set_eval()
