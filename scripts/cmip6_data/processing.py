@@ -438,6 +438,69 @@ def compute_below_surface_mask(
     return mask, "orog_static"
 
 
+def below_surface_indicator(zg: xr.DataArray, orog: xr.DataArray) -> xr.DataArray:
+    """Boolean (True = below surface) per cell from ``zg < orog``.
+
+    Grid-agnostic: the source-grid masking computes this on the NATIVE grid
+    (before regrid), where ``zg`` is the published geopotential height per plev
+    level and ``orog`` the surface geopotential height. ``zg`` may be
+    ``(time, plev, lat, lon)``; ``orog`` broadcasts over ``(time, plev)``.
+    """
+    return zg < orog
+
+
+def coverage_to_valid_mask(
+    valid_fraction: xr.DataArray, threshold: float = 0.5
+) -> xr.DataArray:
+    """Boolean valid mask (True = valid) from a regridded fractional
+    valid-coverage field (the conservatively-regridded above-surface
+    indicator). A target cell is valid where at least ``threshold`` of its
+    source footprint was above surface.
+    """
+    return valid_fraction >= threshold
+
+
+def _plev_hpa(plev_pa: "np.ndarray") -> list[int]:
+    """Round a plev coordinate (Pa) to integer hPa for variable naming."""
+    return [int(round(float(p) / 100.0)) for p in plev_pa]
+
+
+def derive_layer_thickness(
+    zg: xr.DataArray, hgtsfc: xr.DataArray
+) -> dict[str, xr.DataArray]:
+    """Surface-anchored geopotential layer thicknesses (metres) from ``zg``.
+
+    ``zg`` is ``(..., plev, lat, lon)`` with plev normalised to DESCENDING
+    pressure (index 0 = highest pressure = nearest the surface, e.g. 1000 hPa),
+    so geopotential height increases with plev index. ``hgtsfc`` is the surface
+    geopotential height (``orog``), broadcasting over the horizontal dims.
+
+    Returns a mapping of uniquely-named thicknesses:
+      * ``thickness_surface_<p0>`` = ``zg[p0] - hgtsfc`` (the surface→lowest-level
+        layer; <= 0 where that pressure level is below ground — masked in the
+        loss),
+      * ``thickness_<p_lower>_<p_upper>`` = ``zg[upper] - zg[lower]`` for each
+        adjacent plev pair, with ``p_lower`` the higher-pressure (lower) bound.
+
+    Names encode the hPa bounds so they are unique per pressure-bound pair —
+    two models with different available levels never collide (e.g. a model
+    lacking 500 hPa yields ``thickness_700_250`` where a complete model yields
+    ``thickness_700_500`` + ``thickness_500_250``). The model predicts these
+    (more stationary, surface-height-independent than absolute ``zg``);
+    ``zg`` is reconstructed by integrating up from ``hgtsfc``.
+    """
+    plev_hpa = _plev_hpa(zg["plev"].values)
+    out: dict[str, xr.DataArray] = {}
+    p0 = plev_hpa[0]
+    out[f"thickness_surface_{p0}"] = zg.isel(plev=0, drop=True) - hgtsfc
+    for k in range(len(plev_hpa) - 1):
+        lower, upper = plev_hpa[k], plev_hpa[k + 1]
+        out[f"thickness_{lower}_{upper}"] = zg.isel(plev=k + 1, drop=True) - zg.isel(
+            plev=k, drop=True
+        )
+    return out
+
+
 def nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:
     """Legacy below-surface fill: each column's masked cells inherit the
     lowest above-surface level's value.
@@ -712,8 +775,7 @@ def harmonize_temperature_to_kelvin(
         converted.attrs = attrs
         converted.attrs["units"] = "K"
         return converted, (
-            f"{var_id or da.name}: converted °C → K"
-            f" (source attr units={raw_units!r})"
+            f"{var_id or da.name}: converted °C → K (source attr units={raw_units!r})"
         )
     if units_token in _KELVIN_UNIT_TOKENS or not units_token:
         # Already K (or missing both attr and a spec default).
@@ -775,7 +837,7 @@ def compute_total_water_path(
     out = total.rename("total_water_path")
     out.attrs["original_name"] = "derived"
     out.attrs["long_name"] = (
-        "total water path (vapor + cloud condensate) " "= water_vapor_path + clwvi"
+        "total water path (vapor + cloud condensate) = water_vapor_path + clwvi"
     )
     out.attrs["units"] = "kg m-2"
     return out
@@ -1171,7 +1233,7 @@ def write_zarr(ds: xr.Dataset, path: str, cfg: ResolvedDatasetConfig) -> None:
             )
         rss_after = rss_mib()
         logging.info(
-            "  write_zarr: batch %d/%d (%d vars: %s) in %.1fs " "(rss %.0f → %.0f MiB)",
+            "  write_zarr: batch %d/%d (%d vars: %s) in %.1fs (rss %.0f → %.0f MiB)",
             i + 1,
             len(batches),
             len(batch_vars),
@@ -1387,8 +1449,7 @@ def clamp_static_fractions(ds: xr.Dataset) -> tuple[xr.Dataset, list[str]]:
     else:
         if vmax > 100.0 + _EPS or vmin < -_EPS:
             warnings.append(
-                f"sftlf clipped to [0, 100]: pre-clip range "
-                f"[{vmin:.3g}, {vmax:.3g}]"
+                f"sftlf clipped to [0, 100]: pre-clip range [{vmin:.3g}, {vmax:.3g}]"
             )
         land_fraction = (arr.clip(0.0, 100.0) / 100.0).rename("land_fraction")
     land_fraction.attrs = dict(arr.attrs)

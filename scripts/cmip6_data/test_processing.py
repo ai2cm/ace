@@ -407,9 +407,9 @@ def test_decode_default_fills_threshold_well_above_physical_values():
     """
     from processing import _FILL_VALUE_THRESHOLD, decode_default_fills
 
-    assert (
-        _FILL_VALUE_THRESHOLD >= 1.0e9
-    ), "Threshold must stay well above physical-variable extremes."
+    assert _FILL_VALUE_THRESHOLD >= 1.0e9, (
+        "Threshold must stay well above physical-variable extremes."
+    )
     ds = xr.Dataset(
         {
             "ua": (
@@ -1277,9 +1277,9 @@ def test_harmonize_temperature_silent_for_non_temperature_units():
         da = xr.DataArray(np.full((2, 3), 1.0), dims=("lat", "lon"))
         da.attrs["units"] = units
         out, msg = harmonize_temperature_to_kelvin(da, var_id="some_flux")
-        assert (
-            msg == ""
-        ), f"unexpected warning for non-temperature units {units!r}: {msg}"
+        assert msg == "", (
+            f"unexpected warning for non-temperature units {units!r}: {msg}"
+        )
 
 
 def test_harmonize_temperature_warns_on_prefixed_temperature_var():
@@ -1366,9 +1366,9 @@ def test_stats_for_time_field_uses_dask_without_materialising():
         "finite_fraction",
         "autocorr_lag1",
     ):
-        assert (
-            abs(out_dask[key] - out_np[key]) < 1e-4
-        ), f"{key}: dask={out_dask[key]} vs numpy={out_np[key]}"
+        assert abs(out_dask[key] - out_np[key]) < 1e-4, (
+            f"{key}: dask={out_dask[key]} vs numpy={out_np[key]}"
+        )
 
 
 def test_compute_dataset_stats_handles_360_day_calendar():
@@ -1599,9 +1599,9 @@ def test_write_zarr_multi_batch_smoke(tmp_path, caplog):
     rss_re = re.compile(r"batch (\d+)/\d+.*?rss \d+ → \d+ MiB")
     n_with_rss = sum(1 for r in caplog.records if rss_re.search(r.getMessage()))
     n_batches = (n_vars + batch_size - 1) // batch_size
-    assert (
-        n_with_rss == n_batches
-    ), f"expected {n_batches} per-batch RSS log lines, got {n_with_rss}"
+    assert n_with_rss == n_batches, (
+        f"expected {n_batches} per-batch RSS log lines, got {n_with_rss}"
+    )
 
 
 def test_write_zarr_bounds_memory_with_variable_batching(tmp_path):
@@ -1717,3 +1717,78 @@ if __name__ == "__main__":
         print(f"\n{failed} test(s) failed")
         sys.exit(1)
     print("\nall tests passed")
+
+
+# ---------------------------------------------------------------------------
+# Source-grid masking + layer-thickness derivation (schema 1.0.0 / ESGF line)
+# ---------------------------------------------------------------------------
+
+
+def test_below_surface_indicator():
+    from processing import below_surface_indicator
+
+    # zg increasing with altitude (plev index); orog at 500 m
+    zg = xr.DataArray(
+        np.array([[[100.0]], [[600.0]], [[1500.0]]]),  # (plev, lat, lon)
+        dims=("plev", "lat", "lon"),
+    )
+    orog = xr.DataArray(np.array([[500.0]]), dims=("lat", "lon"))
+    bs = below_surface_indicator(zg, orog)
+    # level 0 (100 m) below 500 m surface -> True; levels 1,2 above -> False
+    assert bs.values.ravel().tolist() == [True, False, False]
+
+
+def test_coverage_to_valid_mask_threshold():
+    from processing import coverage_to_valid_mask
+
+    frac = xr.DataArray(np.array([0.0, 0.49, 0.5, 0.8, 1.0]), dims=("x",))
+    mask = coverage_to_valid_mask(frac, threshold=0.5)
+    assert mask.values.tolist() == [False, False, True, True, True]
+    strict = coverage_to_valid_mask(frac, threshold=1.0)
+    assert strict.values.tolist() == [False, False, False, False, True]
+
+
+def test_derive_layer_thickness_names_and_values():
+    from processing import derive_layer_thickness
+
+    # plev descending pressure (Pa): 1000, 850, 700, 250 hPa (MPI-style gap)
+    plev = np.array([100000.0, 85000.0, 70000.0, 25000.0])
+    # zg increasing with altitude; choose round numbers
+    zg = xr.DataArray(
+        np.array([200.0, 1500.0, 3000.0, 10000.0]).reshape(4, 1, 1),
+        dims=("plev", "lat", "lon"),
+        coords={"plev": plev},
+    )
+    hgtsfc = xr.DataArray(np.array([[50.0]]), dims=("lat", "lon"))
+    out = derive_layer_thickness(zg, hgtsfc)
+    assert set(out) == {
+        "thickness_surface_1000",
+        "thickness_1000_850",
+        "thickness_850_700",
+        "thickness_700_250",
+    }
+    assert out["thickness_surface_1000"].values.item() == 200.0 - 50.0
+    assert out["thickness_1000_850"].values.item() == 1500.0 - 200.0
+    assert out["thickness_850_700"].values.item() == 3000.0 - 1500.0
+    assert (
+        out["thickness_700_250"].values.item() == 10000.0 - 3000.0
+    )  # spans missing 500
+    # thicknesses carry no plev dim
+    assert "plev" not in out["thickness_1000_850"].dims
+
+
+def test_derive_layer_thickness_negative_below_ground_surface_layer():
+    from processing import derive_layer_thickness
+
+    # 1000 hPa below ground (zg1000 < hgtsfc) -> negative surface-layer thickness
+    plev = np.array([100000.0, 85000.0])
+    zg = xr.DataArray(
+        np.array([300.0, 1500.0]).reshape(2, 1, 1),
+        dims=("plev", "lat", "lon"),
+        coords={"plev": plev},
+    )
+    hgtsfc = xr.DataArray(np.array([[800.0]]), dims=("lat", "lon"))
+    out = derive_layer_thickness(zg, hgtsfc)
+    assert (
+        out["thickness_surface_1000"].values.item() == 300.0 - 800.0
+    )  # negative; masked
