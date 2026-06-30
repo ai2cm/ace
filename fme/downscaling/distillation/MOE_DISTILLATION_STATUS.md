@@ -404,6 +404,39 @@ check in scratch). Findings:
   → The headline "collapse" overstates the real harm; weight the coarse/lo signals
   and the absolute PSD curves, not mid/hi `spec_mae`.
 
+#### Tail-generation verified (2026-06-30) — tails are healthy, not failing
+
+Checked per-variable tail ratios (student pXX ÷ target pXX, ideal 1.0) across
+runs. **The model is generating the tails.**
+
+| var | 99.99 | 99.9999 | read |
+|---|---|---|---|
+| PRMSL | 1.01 | 1.02 | **exact, flat all training** |
+| eastward_wind | 0.64 | 1.24 | 99.99 mod. under; 99.9999 noisy |
+| northward_wind | 0.65 | 1.18 | same |
+| PRATEsfc @7k (r1-instr) | 0.59 | 0.69 | under but climbing |
+| PRATEsfc @30k (`3vk3or7v`) | **0.83** | **0.96** | recovers to near-target |
+
+- **PRMSL extremes are ~1.0 and stable** → the PRMSL spectral issue is NOT a tail
+  failure; spectral shape and distributional extremes are decoupled (reinforces the
+  artifact finding).
+- **Precip tails improve monotonically with maturity** (0.37→0.83 / 0.56→0.96 by
+  30k). The under-prediction in the *young* GAN-fix runs (~0.6 @7k) is training
+  immaturity, not collapse.
+- **Winds ~0.64 under at the reliable 99.99**; the 99.99-under / 99.9999-over split
+  shows **99.9999 is unreliable** (1-in-1e6 on a finite val set + histogram bins) —
+  trust 99.99.
+- **Correction:** the 2026-06-29 RESULT note called `tail_99.9999_PRATEsfc`
+  0.54→0.96 a "tails blow up" symptom. That was a misread — for a student/target
+  ratio, 0.54→0.96 is the tail matched *better*. Precip tails improve, not degrade.
+
+**Implication for the planned spectral loss:** a PSD term is a 2nd-moment constraint
+and will **not** move the tails — precip already has good spectra
+(`spec_mae_lo/mid_PRATEsfc` ~0.03) yet still under-predicts extremes, because
+variance-per-wavenumber doesn't pin a heavy tail. Tails remain the job of the
+mass-covering forward-KL (already chosen) + maturity + tail-based selection. Add
+the spectral loss for spectral *shape* (coarse-PRMSL / texture), not for tails.
+
 #### PSD curves now step-slidable (commit `dc7876eeb`)
 
 `val/psd_<var>` was a `wandb.plot.line_series` (Vega chart, latest-step only).
