@@ -64,38 +64,37 @@ def test_bernoulli_rate_zero_keeps_all():
         assert config.sample_mask(_names(4), DEVICE).all()
 
 
-def test_rate_one_var_not_dropped_when_no_slots():
-    """With max_masked_vars=0 there are no slots, so a rate-1 var is not dropped."""
+def test_rate_one_var_dropped_with_no_uniform_slots():
+    """With max_masked_vars=0 a rate-1 var is still dropped via the OR."""
     config = VariableMaskingConfig(
         max_masked_vars=0, variable_masking_rates={"var_0": 1.0}
     )
     names = _names(4)
     for _ in range(32):
         mask = config.sample_mask(names, DEVICE)
-        assert mask.all(), "no uniform slots means nothing can be dropped"
+        assert not bool(mask[0, 0].item()), "rate-1 var must always be dropped"
+        # only var_0 fires and max_masked_vars=0, so nothing else is dropped
+        assert int((~mask).sum().item()) == 1
 
 
-def test_rate_one_var_always_dropped_with_slots():
-    """With at least one slot, a rate-1 var is always dropped, count stays k."""
+def test_rate_one_var_always_dropped():
+    """A rate-1 var is always dropped regardless of the uniform count k."""
     config = VariableMaskingConfig(
         max_masked_vars=2, variable_masking_rates={"var_0": 1.0}
     )
     names = _names(5)
     for _ in range(128):
         mask = config.sample_mask(names, DEVICE)
-        n_masked = int((~mask).sum().item())
-        # The fired bernoulli var must be dropped whenever k >= 1; k may be 0.
-        if n_masked == 0:
-            continue
-        assert not bool(mask[0, 0].item()), "rate-1 var must be dropped when k>=1"
-        assert 1 <= n_masked <= 2
+        assert not bool(mask[0, 0].item()), "rate-1 var must always be dropped"
+        # k in [0, 2] plus the guaranteed var_0 (which may overlap the uniform set)
+        assert 1 <= int((~mask).sum().item()) <= 3
 
 
-def test_fired_var_already_in_uniform_set_leaves_count_unchanged():
-    """A fired bernoulli var that the uniform draw already dropped is a no-op.
+def test_fired_var_in_uniform_set_does_not_double_count():
+    """A fired var the uniform draw already dropped stays dropped (idempotent OR).
 
     With max_masked_vars == n_channels and a single rate-1 var, the dropped
-    count must always equal the uniform count k (never exceed it).
+    count never exceeds n_channels.
     """
     n = 4
     config = VariableMaskingConfig(
@@ -105,13 +104,12 @@ def test_fired_var_already_in_uniform_set_leaves_count_unchanged():
     for _ in range(256):
         mask = config.sample_mask(names, DEVICE)
         n_masked = int((~mask).sum().item())
-        assert 0 <= n_masked <= n
-        if n_masked >= 1:
-            assert not bool(mask[0, 0].item())
+        assert 1 <= n_masked <= n
+        assert not bool(mask[0, 0].item())
 
 
-def test_multiple_fired_vars_capped_by_slots():
-    """More fired vars than evictable slots: only k-worth dropped."""
+def test_multiple_fired_vars_all_dropped():
+    """OR-combining: all fired vars are dropped, count >= number fired."""
     n = 5
     config = VariableMaskingConfig(
         max_masked_vars=1,
@@ -120,5 +118,5 @@ def test_multiple_fired_vars_capped_by_slots():
     names = _names(n)
     for _ in range(128):
         mask = config.sample_mask(names, DEVICE)
-        # k is drawn from [0, 1]; all vars fire but only k can be dropped.
-        assert int((~mask).sum().item()) <= 1
+        # all n vars fire, so all are dropped regardless of k
+        assert int((~mask).sum().item()) == n

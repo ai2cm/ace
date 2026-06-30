@@ -18,20 +18,11 @@ class VariableMaskingConfig:
        drop nothing.
     2. Per-variable Bernoulli masking: for each variable named in
        ``variable_masking_rates`` a ``Bernoulli(rate)`` is drawn; channels that
-       fire are guaranteed to be dropped (subject to the edge cases below).
+       fire are dropped.
 
-    The two mechanisms do not OR/AND. Instead each fired Bernoulli channel that
-    is not already in the uniform drop set evicts a randomly-chosen channel that
-    is in the drop set and is not itself a fired Bernoulli channel, then takes
-    its place. The total dropped count therefore stays equal to the uniform
-    count ``k``.
-
-    Edge cases:
-        - If ``k == 0`` there are no slots to evict, so no Bernoulli var can be
-          dropped (replacement is a no-op).
-        - If more Bernoulli vars fire than there are evictable (non-fired)
-          uniform slots, only ``k``-worth are dropped; which fired vars win is
-          random.
+    The two mechanisms combine by logical OR: a channel is dropped if the
+    uniform draw selected it or its Bernoulli fired. The total dropped count is
+    therefore at least ``k`` and may exceed it (up to ``n_channels``).
 
     Parameters:
         max_masked_vars: Maximum number of uniformly-masked variables. The
@@ -71,34 +62,17 @@ class VariableMaskingConfig:
         max_n = min(self.max_masked_vars, n)
         # Uniform count of dropped channels in [0, max_n].
         k = int(torch.randint(0, max_n + 1, (1,), device=device).item())
+        present = torch.ones(1, n, dtype=torch.bool, device=device)
         # Uniform drop set: the first k of a random permutation.
         perm = torch.randperm(n, device=device)
-        drop = set(perm[:k].tolist())
+        present[0, perm[:k]] = False
 
-        # Bernoulli-fired channels.
-        fired: set[int] = set()
+        # Per-variable Bernoulli masking, OR-combined with the uniform drop set.
         rates = self.variable_masking_rates or {}
         for i, name in enumerate(names):
             rate = rates.get(name)
             if rate is None:
                 continue
             if bool(torch.rand((), device=device) < rate):
-                fired.add(i)
-
-        # Combine by replacement: each fired channel not already dropped evicts
-        # a non-fired channel from the drop set and takes its place.
-        fired_to_add = sorted(f for f in fired if f not in drop)
-        evictable = sorted(d for d in drop if d not in fired)
-        if fired_to_add and evictable:
-            n_replace = min(len(fired_to_add), len(evictable))
-            add_idx = torch.randperm(len(fired_to_add), device=device)[:n_replace]
-            evict_idx = torch.randperm(len(evictable), device=device)[:n_replace]
-            for a, e in zip(add_idx.tolist(), evict_idx.tolist()):
-                drop.discard(evictable[e])
-                drop.add(fired_to_add[a])
-
-        present = torch.ones(1, n, dtype=torch.bool, device=device)
-        if drop:
-            idx = torch.tensor(sorted(drop), device=device, dtype=torch.long)
-            present[0, idx] = False
+                present[0, i] = False
         return present
