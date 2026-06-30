@@ -95,15 +95,8 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
-        builder_wants_channel_mask = getattr(
-            self.builder.module_config, "condition_on_channel_mask", False
-        )
-        if self.include_channel_mask_inputs and builder_wants_channel_mask:
-            raise ValueError(
-                "include_channel_mask_inputs (concat path) and the SFNO builder's "
-                "condition_on_channel_mask (FiLM path) are mutually exclusive; "
-                "enable at most one."
-            )
+        if self.input_dropout is not None:
+            self.input_dropout.validate_names(self.in_names)
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -428,6 +421,14 @@ class SingleModuleStep(StepABC):
                     input_tensor.device,
                     input_tensor.dtype,
                 )
+                if self._config.include_channel_mask_inputs:
+                    # Concat doubled n_in_channels, so the FiLM mask embedding
+                    # was sized for 2 * len(in_names). The appended indicator
+                    # channels are always-present model inputs, so pad the
+                    # [batch, n_channels] presence vector with ones to match.
+                    channel_mask = torch.cat(
+                        [channel_mask, torch.ones_like(channel_mask)], dim=1
+                    )
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,

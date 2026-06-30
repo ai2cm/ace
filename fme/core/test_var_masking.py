@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from fme.core.var_masking import (
+    CO2_NAME,
     PerVariableMaskingConfig,
     UniformMaskingConfig,
     VariableMaskingConfig,
@@ -121,3 +122,21 @@ def test_co2_rate_requires_co2_channel():
             device=torch.device("cpu"),
             channel_names=["a", "b", "c"],
         )
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        UniformMaskingConfig(co2_rate=0.3),
+        UniformMaskingConfig(co2_rate=None),
+        PerVariableMaskingConfig(co2_rate=0.3),
+        PerVariableMaskingConfig(co2_rate=None),
+    ],
+)
+def test_validate_names(config):
+    if config.co2_rate is None:
+        config.validate_names(["a", "b"])  # no-op
+    else:
+        with pytest.raises(ValueError, match="global_mean_co2"):
+            config.validate_names(["a", "b"])
+        config.validate_names(["a", CO2_NAME])

@@ -36,6 +36,9 @@ class UniformMaskingConfig:
             )
         _validate_co2_rate(self.co2_rate)
 
+    def validate_names(self, channel_names: list[str]) -> None:
+        _validate_co2_in_names(self.co2_rate, channel_names)
+
     def sample_mask(
         self,
         n_channels: int,
@@ -97,6 +100,9 @@ class PerVariableMaskingConfig:
         mask = _sample_per_variable(self, n_channels, batch_size, device)
         return _apply_co2_override(mask, self.co2_rate, channel_names, device)
 
+    def validate_names(self, channel_names: list[str]) -> None:
+        _validate_co2_in_names(self.co2_rate, channel_names)
+
 
 VariableMaskingConfig = UniformMaskingConfig | PerVariableMaskingConfig
 
@@ -104,6 +110,14 @@ VariableMaskingConfig = UniformMaskingConfig | PerVariableMaskingConfig
 def _validate_co2_rate(co2_rate: float | None) -> None:
     if co2_rate is not None and not 0.0 <= co2_rate <= 1.0:
         raise ValueError(f"co2_rate must be in [0, 1], got {co2_rate}")
+
+
+def _validate_co2_in_names(co2_rate: float | None, channel_names: list[str]) -> None:
+    if co2_rate is not None and CO2_NAME not in channel_names:
+        raise ValueError(
+            f"co2_rate is set but {CO2_NAME!r} is not an input channel: "
+            f"{channel_names}"
+        )
 
 
 def _apply_co2_override(

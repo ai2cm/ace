@@ -1337,6 +1337,20 @@ class _DummyParamModule(torch.nn.Module):
         return x[:, :1] + 0.0 * self.dummy
 
 
+def test_input_dropout_co2_rate_requires_co2_channel():
+    """co2_rate set but global_mean_co2 absent fails at config time."""
+    with pytest.raises(ValueError, match="global_mean_co2"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(
+                type="prebuilt", config={"module": _DummyParamModule()}
+            ),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=trivial_network_and_loss_normalization(["a"]),
+            input_dropout=PerVariableMaskingConfig(rate=0.5, co2_rate=0.5),
+        )
+
+
 def test_input_dropout_ensemble_members_share_mask():
     """Training layer samples one mask per base sample, shared across ensemble.
 

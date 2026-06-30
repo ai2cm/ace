@@ -1290,29 +1290,82 @@ def test_step_condition_on_channel_mask_not_doubled_and_passes_mask():
     assert (mask[:, 1] == 1.0).all()
 
 
-def test_step_condition_on_channel_mask_conflicts_with_include():
+def test_step_condition_on_channel_mask_with_include_composes():
+    """FiLM (condition_on_channel_mask) and concat (include_channel_mask_inputs)
+    can be enabled together.
+
+    Concat doubles the input channel count, so the FiLM mask embedding is sized
+    for 2 * len(in_names). The runtime presence vector must therefore be padded
+    to that width: the first half carries the real channel presence, and the
+    second half (the always-present indicator channels) is all ones.
+    """
     normalization = get_network_and_loss_normalization_config(
         names=["forcing_shared", "forcing_rad", "diagnostic_main"],
     )
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        SingleModuleStepConfig(
-            builder=ModuleSelector(
-                type="NoiseConditionedSFNO",
-                config=dataclasses.asdict(
-                    NoiseConditionedSFNOBuilder(
-                        embed_dim=4,
-                        noise_embed_dim=4,
-                        num_layers=2,
-                        local_blocks=[0],
-                        condition_on_channel_mask=True,
-                    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="gaussian",
+                            num_layers=2,
+                            local_blocks=[0],
+                            condition_on_channel_mask=True,
+                        )
+                    ),
                 ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
+                normalization=normalization,
+                include_channel_mask_inputs=True,
             ),
-            in_names=["forcing_shared", "forcing_rad"],
-            out_names=["diagnostic_main"],
-            normalization=normalization,
-            include_channel_mask_inputs=True,
-        )
+        ),
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    n_samples = 3
+    step = get_step(config, img_shape)
+    assert isinstance(step, SingleModuleStep)
+    assert step.module.wants_channel_mask
+    n_in = len(step.in_packer.names)
+
+    captured: dict[str, torch.Tensor | None] = {}
+    sfno_wrapper = step.module.torch_module.module
+
+    def hook(module, args):
+        captured["channel_mask"] = args[1].channel_mask
+
+    sfno_wrapper.conditional_model.register_forward_pre_hook(hook)
+
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    data_mask = {
+        "forcing_shared": torch.tensor([True, True, False], device=fme.get_device()),
+    }
+    step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+            data_mask=data_mask,
+        ),
+    )
+    mask = captured["channel_mask"]
+    assert mask is not None
+    # Padded to the doubled channel count the FiLM embedding was sized for.
+    assert mask.shape == (n_samples, 2 * n_in)
+    # First half: real presence. forcing_shared (col 0) masked on sample 2.
+    assert mask[0, 0] == 1.0
+    assert mask[2, 0] == 0.0
+    assert (mask[:, 1] == 1.0).all()
+    # Second half: always-present indicator channels.
+    assert (mask[:, n_in:] == 1.0).all()
 
 
 def test_step_condition_on_channel_mask_allows_input_dropout():
