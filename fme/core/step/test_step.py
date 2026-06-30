@@ -37,7 +37,7 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.var_masking import VariableMaskingConfig
 
 from .radiation import SeparateRadiationStepConfig
@@ -1596,6 +1596,19 @@ def _presence_mask(step: SingleModuleStep, present: bool) -> TensorDict:
     return {name: value.clone() for name in step.in_packer.names}
 
 
+def _inject_input_dropout_mask(
+    step: SingleModuleStep, mask: TensorMapping | None
+) -> None:
+    """Force the per-rollout cached input-dropout mask.
+
+    The Step samples its own mask internally; tests inject a deterministic mask
+    (or None for no dropout) so the application path is exercised without
+    relying on the random sampler.
+    """
+    step._input_dropout_pending = False
+    step._input_dropout_mask = mask
+
+
 def test_input_dropout_mask_zeros_inputs():
     """A supplied input_dropout_mask deterministically zeros masked inputs.
 
@@ -1611,12 +1624,12 @@ def test_input_dropout_mask_zeros_inputs():
     )
 
     def _run(mask):
+        _inject_input_dropout_mask(step, mask)
         out, _ = step.step(
             args=StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
                 labels=None,
-                input_dropout_mask=mask,
             )
         )
         return out
@@ -1663,12 +1676,12 @@ def test_input_dropout_mask_indicator_reflects_combined_presence():
 
     handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
     try:
+        _inject_input_dropout_mask(step, dropout_mask)
         step.step(
             args=StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
                 labels=None,
-                input_dropout_mask=dropout_mask,
             )
         )
     finally:
@@ -1711,13 +1724,13 @@ def test_input_dropout_mask_and_combine_with_data_mask():
 
     handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
     try:
+        _inject_input_dropout_mask(step, dropout_mask)
         step.step(
             args=StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
                 labels=None,
                 data_mask=data_mask,
-                input_dropout_mask=dropout_mask,
             )
         )
     finally:
@@ -1762,12 +1775,12 @@ def test_input_dropout_mask_gmr_extras_independently_maskable():
 
     handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
     try:
+        _inject_input_dropout_mask(step, dropout_mask)
         step.step(
             args=StepArgs(
                 input=input_data,
                 next_step_input_data=next_step,
                 labels=None,
-                input_dropout_mask=dropout_mask,
             )
         )
     finally:
@@ -1782,10 +1795,10 @@ def test_input_dropout_mask_gmr_extras_independently_maskable():
     assert (indicator_half[:, other] == 1.0).all()
 
 
-def test_make_input_dropout_mask_shape_and_dtype():
+def test_draw_input_dropout_mask_shape_and_dtype():
     step = _make_single_module_step(VariableMaskingConfig(max_masked_vars=1))
     step.module.torch_module.train()
-    mask = step.make_input_dropout_mask(fme.get_device())
+    mask = step._draw_input_dropout_mask()
     assert mask is not None
     # keyed by packed input channel names, one [1] bool tensor each (broadcast)
     assert set(mask.keys()) == set(step.in_packer.names)
@@ -1794,28 +1807,28 @@ def test_make_input_dropout_mask_shape_and_dtype():
         assert mask[name].dtype == torch.bool
 
 
-def test_make_input_dropout_mask_none_when_unset():
+def test_draw_input_dropout_mask_none_when_unset():
     step = _make_single_module_step(None)
     step.module.torch_module.train()
-    assert step.make_input_dropout_mask(fme.get_device()) is None
+    assert step._draw_input_dropout_mask() is None
     assert step.has_input_dropout() is False
 
 
-def test_make_input_dropout_mask_none_in_eval_mode():
+def test_draw_input_dropout_mask_none_in_eval_mode():
     step = _make_single_module_step(VariableMaskingConfig(max_masked_vars=1))
     step.module.torch_module.eval()
     # configured, but eval mode disables dropout sampling
-    assert step.make_input_dropout_mask(fme.get_device()) is None
+    assert step._draw_input_dropout_mask() is None
     # has_input_dropout is mode-independent
     assert step.has_input_dropout() is True
 
 
-def test_make_input_dropout_mask_includes_gmr_extras():
+def test_draw_input_dropout_mask_includes_gmr_extras():
     step = _make_gmr_input_dropout_step(
         VariableMaskingConfig(max_masked_vars=1), include_channel_mask_inputs=False
     )
     step.module.torch_module.train()
-    mask = step.make_input_dropout_mask(fme.get_device())
+    mask = step._draw_input_dropout_mask()
     assert mask is not None
     # GMR extra sentinel channels are independently maskable
     assert set(mask.keys()) == set(step.in_packer.names)
@@ -1834,14 +1847,15 @@ def test_input_dropout_mask_not_passed_to_global_mean_removal():
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
     dropout_mask = _presence_mask(step, present=False)
+    _inject_input_dropout_mask(step, dropout_mask)
     out_with_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
             labels=None,
-            input_dropout_mask=dropout_mask,
         )
     )
+    _inject_input_dropout_mask(step, None)
     out_without_mask, _ = step.step(
         args=StepArgs(
             input=input_data,
@@ -1849,8 +1863,7 @@ def test_input_dropout_mask_not_passed_to_global_mean_removal():
             labels=None,
         )
     )
-    # The step runs without GMR raising on a "missing" reference field, because
-    # GMR never receives the synthetic mask.
+    # Step runs without GMR raising on a "missing" reference field; GMR never sees mask.
     assert set(out_with_mask) == set(out_without_mask)
 
 

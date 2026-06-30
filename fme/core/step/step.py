@@ -356,28 +356,12 @@ class StepABC(abc.ABC):
         """
         pass
 
-    def make_input_dropout_mask(self, device: torch.device) -> TensorMapping | None:
-        """
-        Sample a synthetic input-dropout presence mask, if configured.
-
-        The returned mapping is keyed by this Step's packed input channel
-        names, with ``[1]``-shaped bool values (True = present, False =
-        synthetically dropped) that broadcast over the batch. This is a
-        sampling hook, not application: the sampled mask is passed back to the
-        Step via ``StepArgs.input_dropout_mask``.
-
-        Returns ``None`` when input dropout is not configured, or when the
-        Step's module is in eval mode (dropout is training-only). Because the
-        result is mode-dependent and random, use ``has_input_dropout`` to
-        detect configuration instead of this method.
-        """
-        return None
-
     def has_input_dropout(self) -> bool:
         """
         Whether this Step has input dropout configured.
 
-        Non-random and mode-independent, unlike ``make_input_dropout_mask``.
+        Non-random and mode-independent. Used to reject input dropout in
+        contexts where it is unsupported (e.g. coupled training).
         """
         return False
 
@@ -406,6 +390,16 @@ class StepABC(abc.ABC):
 
         Default implementation is a no-op. Steps which wrap another step must
         forward the call to the wrapped step.
+        """
+        pass
+
+    def new_rollout(self) -> None:
+        """Called by the stepper at the start of each training rollout.
+
+        Lets a Step refresh per-rollout state (e.g. resample input dropout)
+        so it stays constant across the rollout's forward steps. Default
+        implementation is a no-op. Steps which wrap another step must forward
+        the call to the wrapped step.
         """
         pass
 

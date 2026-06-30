@@ -336,6 +336,9 @@ class SingleModuleStep(StepABC):
         self._corrector = corrector
         self.in_names = config.in_names
         self.out_names = config.out_names
+        # Synthetic input-dropout mask, drawn once per rollout; see new_rollout.
+        self._input_dropout_pending = False
+        self._input_dropout_mask: TensorMapping | None = None
 
     @property
     def config(self) -> SingleModuleStepConfig:
@@ -385,11 +388,13 @@ class SingleModuleStep(StepABC):
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> tuple[TensorDict, StepperState | None]:
+        input_dropout_mask = self._sample_input_dropout_mask()
+
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
-            if args.input_dropout_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.input_dropout_mask)
+            if input_dropout_mask is not None:
+                input_norm = _apply_input_mask(input_norm, input_dropout_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             # Fail loud if a NaN survives masking/normalization to the network
             # input (cf. PR #1262). Gated on grad-enabled so the no_grad
@@ -401,7 +406,7 @@ class SingleModuleStep(StepABC):
                     self.in_packer.names,
                     args.data_mask,
                     input_tensor,
-                    args.input_dropout_mask,
+                    input_dropout_mask,
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
@@ -433,17 +438,35 @@ class SingleModuleStep(StepABC):
             stepper_state=args.stepper_state,
         )
 
-    def make_input_dropout_mask(self, device: torch.device) -> TensorMapping | None:
+    def _sample_input_dropout_mask(self) -> TensorMapping | None:
+        """Return this rollout's synthetic input-dropout mask, sampling if armed.
+
+        ``new_rollout`` arms a fresh draw at the start of each training rollout;
+        the mask is then sampled lazily on the first ``step`` and reused for
+        every subsequent forward step and multi_call sub-call, so the dropped
+        set is constant across the rollout. When not armed (e.g. inference,
+        which never calls ``new_rollout``) the cached ``None`` is returned and
+        no dropout is applied.
+        """
+        if self._input_dropout_pending:
+            self._input_dropout_mask = self._draw_input_dropout_mask()
+            self._input_dropout_pending = False
+        return self._input_dropout_mask
+
+    def _draw_input_dropout_mask(self) -> TensorMapping | None:
         if self._config.input_dropout is None:
             return None
         if not self.module.torch_module.training:
             return None
         names = self.in_packer.names
-        mask = self._config.input_dropout.sample_mask(names, device)
-        # Broadcast mask so all spatial-group tiles agree
-        # no-op for non-distributed/data-parallel
+        mask = self._config.input_dropout.sample_mask(names, get_device())
+        # Broadcast so spatial-group tiles agree; no-op for non-distributed
         mask = Distributed.get_instance().broadcast_spatial(mask)
         return {name: mask[:, i] for i, name in enumerate(names)}
+
+    def new_rollout(self) -> None:
+        self._input_dropout_pending = True
+        self._input_dropout_mask = None
 
     def has_input_dropout(self) -> bool:
         return self._config.input_dropout is not None

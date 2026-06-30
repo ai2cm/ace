@@ -34,7 +34,7 @@ from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
@@ -500,11 +500,12 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
         ),
     )
     step = get_step(selector, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
     for module in step.modules:
         module.train()
     # Force per-rank RNG divergence to mimic real spatial-parallel training.
     torch.manual_seed(dist.rank)
-    mask = step.make_input_dropout_mask(fme.get_device())
+    mask = step._draw_input_dropout_mask()
     assert mask is not None
     stacked = torch.stack([mask[name].float() for name in in_names])  # [C, 1]
     gathered = dist.gather(stacked)

@@ -1155,7 +1155,12 @@ def test_input_dropout_same_mask_across_batch_and_ensemble():
 
 
 def test_input_dropout_mask_constant_across_rollout_steps():
-    """Training layer samples one dropout mask per rollout, not per step."""
+    """The Step samples one dropout mask per rollout, not per step.
+
+    new_rollout arms a single draw; the Step caches it and reuses it across all
+    forward steps, so the underlying _draw_input_dropout_mask fires exactly once
+    per rollout and every step sees the same dropped channel.
+    """
     n_base, n_ensemble, n_steps = 3, 1, 3
     config = _input_dropout_stepper_config(
         ["a"], ["a"], VariableMaskingConfig(max_masked_vars=1)
@@ -1166,8 +1171,8 @@ def test_input_dropout_mask_constant_across_rollout_steps():
     data = get_data(["a"], n_samples=n_base, n_time=n_steps + 1).data
     base_mask = torch.tensor([False], dtype=torch.bool, device=DEVICE)  # [1], broadcast
 
-    def _fixed_input_dropout_mask(device):
-        return {"a": base_mask.to(device)}
+    def _fixed_input_dropout_mask():
+        return {"a": base_mask}
 
     captured: list[torch.Tensor] = []
 
@@ -1180,15 +1185,15 @@ def test_input_dropout_mask_constant_across_rollout_steps():
     )
     try:
         with patch.object(
-            stepper._stepper,
-            "make_input_dropout_mask",
+            stepper._stepper._step_obj,
+            "_draw_input_dropout_mask",
             side_effect=_fixed_input_dropout_mask,
-        ) as make_mask:
+        ) as draw_mask:
             stepper.train_on_batch(data, optimization=optimization)
     finally:
         handle.remove()
 
-    assert make_mask.call_count == 1
+    assert draw_mask.call_count == 1
     assert len(captured) == n_steps
     for packed in captured:
         indicators = packed[:, 1:, 0, 0]  # [batch, 1]
@@ -1198,8 +1203,8 @@ def test_input_dropout_mask_constant_across_rollout_steps():
 def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
     """A NullOptimization train_on_batch (eval mode) applies no input dropout.
 
-    The make_input_dropout_mask hook returns None in eval mode, so the result
-    must match a stepper with no input_dropout configured.
+    _draw_input_dropout_mask returns None in eval mode, so the result must
+    match a stepper with no input_dropout configured.
     """
     n_steps = 2
 
@@ -1223,8 +1228,8 @@ def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
 def test_input_dropout_inactive_in_inference():
     """Serialized input_dropout does not affect the inference predict path.
 
-    predict never fires make_input_dropout_mask, so output matches a stepper
-    with no input_dropout configured (same weights).
+    predict never arms input dropout (no new_rollout), so output matches a
+    stepper with no input_dropout configured (same weights).
     """
     n_steps = 3
 

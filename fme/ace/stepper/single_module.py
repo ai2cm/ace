@@ -35,7 +35,6 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -919,11 +918,11 @@ class Stepper:
         """
         return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
-    def make_input_dropout_mask(self, device: torch.device) -> TensorMapping | None:
-        return self._step_obj.make_input_dropout_mask(device)
-
     def has_input_dropout(self) -> bool:
         return self._step_obj.has_input_dropout()
+
+    def new_rollout(self) -> None:
+        self._step_obj.new_rollout()
 
     @property
     def training_dataset_info(self) -> DatasetInfo:
@@ -1122,7 +1121,6 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
-        input_dropout_mask: TensorMapping | None = None,
     ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1151,7 +1149,6 @@ class Stepper:
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
-                        input_dropout_mask=input_dropout_mask,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1673,9 +1670,8 @@ class TrainStepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
-        input_dropout_mask = self._stepper.make_input_dropout_mask(
-            device=get_device(),
-        )
+        # Sample a fresh input-dropout mask per rollout (Step caches it internally).
+        self._stepper.new_rollout()
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
         output_generator = self._stepper.predict_generator(
@@ -1686,7 +1682,6 @@ class TrainStepper(
             labels=input_ensemble_data.labels,
             data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
-            input_dropout_mask=input_dropout_mask,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

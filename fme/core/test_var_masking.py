@@ -88,8 +88,7 @@ def test_rate_one_var_always_dropped():
     for _ in range(128):
         mask = config.sample_mask(names, DEVICE)
         assert not bool(mask[0, 0].item()), "rate-1 var must always be dropped"
-        # var_0 (named) is excluded from the uniform pool of 4, so the dropped
-        # count is exactly 1 (guaranteed var_0) plus k in [0, 2].
+        # var_0 excluded from uniform pool of 4; dropped count is 1 plus k in [0, 2].
         assert 1 <= int((~mask).sum().item()) <= 3
 
 

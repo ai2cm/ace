@@ -1369,8 +1369,8 @@ def get_train_stepper_and_batch(
 def test_coupled_training_with_input_dropout_raises():
     """input_dropout is unsupported for coupled training and must fail loud.
 
-    The coupled training route never calls make_input_dropout_mask, so a
-    configured input_dropout would silently do nothing; constructing the
+    The coupled training route never arms input dropout, so a configured
+    input_dropout would silently do nothing; constructing the
     CoupledTrainStepper must raise instead.
     """
     _, _, config, dataset_info = get_stepper_and_batch(
