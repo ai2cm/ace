@@ -43,18 +43,33 @@ class CorrectorOutput:
 
 ```python
 class Correction(Protocol):
+    """A correction applied to generated data.
+
+    `__call__` implementations must return only the fields this correction
+    modified (see the Returns annotation below) — the dict is exactly what the
+    caller applies.
+    """
+
     def __call__(self, ...) -> tuple[TensorDict, CorrectorState | None]: ...
         # CONTRACT CHANGE (not a signature change): the returned TensorDict must
         # contain ONLY the fields this correction modified — not the full gen_data.
         # The caller dict-updates gen_data with it and unions its keys into the
         # modified-name set. (Today each correction returns the full gen_data.)
+        #
+        # This contract is load-bearing, so it is documented in two places that
+        # travel with the code: this `Correction` class docstring and an explicit
+        # `Returns:` annotation on each concrete `__call__` ("the TensorDict
+        # contains only the fields modified by this correction"). Inline docs are
+        # the primary guard against drift (the backstop test is deliberately not
+        # comprehensive — see Tests).
 
 
 class CorrectorABC(abc.ABC):
     @abc.abstractmethod
     def __call__(self, ...) -> CorrectorOutput:  # CHANGED — was tuple[TensorDict, CorrectorState | None]
         ...
-    # no touched_names — the modified-name set is derived from what corrections return
+    # the modified-name set is derived from what corrections return (no separate
+    # per-correction declaration method)
 
 
 class CorrectionSequence(CorrectorABC):
@@ -90,12 +105,22 @@ changes its return type, to `CorrectorOutput`.
 
 ## `fme/core/corrector/utils.py` (modified)
 
-`ForcePositive.__call__` returns only the clamped fields it writes:
+`ForcePositive.__call__` returns only the clamped fields it writes. It keeps its
+existing `keep_gradient` flag: `_force_positive` applies the clamp through the
+straight-through estimator (`replace_value_keep_gradient`) when set, so the
+modified-only return must **subset `_force_positive`'s output** (preserving the
+STE-applied tensors) rather than recompute a plain `torch.clamp` — otherwise the
+gradient-through-clamp behavior would silently regress:
 
 ```python
+@dataclasses.dataclass
 class ForcePositive:
+    names: list[str]
+    keep_gradient: bool = False  # unchanged
+
     def __call__(self, input_data, gen_data, forcing_data, corrector_state):  # modified-only return
-        return {name: torch.clamp(gen_data[name], min=0.0) for name in self.names}, corrector_state
+        clamped = _force_positive(gen_data, self.names, keep_gradient=self.keep_gradient)
+        return {name: clamped[name] for name in self.names}, corrector_state
 ```
 
 ## `fme/core/corrector/atmosphere.py` (modified)
@@ -116,7 +141,12 @@ modified fields per correction:
 
 ## `fme/core/corrector/ocean.py` (modified)
 
-Same pattern — `__call__` returns only the modified subset:
+Same pattern — `__call__` returns only the modified subset. As in `utils.py`,
+where a correction applies clamps through the `keep_gradient` straight-through
+estimator (`SeaIceFractionCorrection` carries the same flag, and
+`SeaIceFractionConfig.__call__` STE-clamps the 0–1 bound and the negative-ocean
+rebalance), the subset must come from that helper's STE-applied output, not a
+re-clamp, so the gradient path is preserved.
 
 - `SeaIceFractionCorrection` → `{sea_ice_fraction_name, *zero_where_ice_free_names}` (config).
 - `SurfaceEnergyFluxCorrection` → the `hfds` key present in `gen_data`
@@ -175,7 +205,10 @@ def step_with_adjustments(...) -> StepOutput:  # CHANGED — was tuple[TensorDic
         result = corrector(input, output, next_step_input_data, corrector_state)  # CHANGED — CorrectorOutput
         output = result.corrected
         # Detach diagnostic tensors here, once, unconditionally (step-boundary
-        # detach keeps the corrector autograd-agnostic).
+        # detach keeps the corrector autograd-agnostic). Kept inline for this PR;
+        # a `CorrectorDiagnostics.detach()` convenience helper is deferred to the
+        # later PR that makes the attach/detach choice conditional on the
+        # optimization (where some deltas must stay attached).
         diagnostics = CorrectorDiagnostics(
             delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
         )
@@ -358,12 +391,39 @@ def test_corrector_delta_matches_modified_returns(...):
 def test_corrector_delta_empty_when_nothing_modified(...):
     # GOAL: no enabled option that modifies a field -> empty delta.
 
-def test_modified_returns_match_actual_changes(...):  # THE BACKSTOP
-    # GOAL: each corrector's modified-name set (the returned keys / delta keys) ==
-    #       {name : not torch.equal(corrected[name], input[name])} under a representative
-    #       input, for both correctors across enabled options. Behavior preservation already
-    #       enforces "every changed field is returned"; this catches the reverse — a returned
-    #       key that wasn't actually changed (a spurious zero delta).
+def test_modified_returns_no_uncorrected_fields(...):  # THE BACKSTOP (deliberately narrow)
+    # GOAL: guard the most-likely regression — a correction blindly returning the full
+    #       gen_data (or any field outside its responsibility). Assert that under a
+    #       representative input, the corrector's modified-name set (returned keys / delta
+    #       keys) contains NO field the corrector is not responsible for correcting; i.e.
+    #       at least one un-corrected gen_data field is present and is NOT in the set.
+    # NOT exhaustive reverse-equality: a correction legitimately returns the fields it is
+    #       responsible for even when a given field's delta is zero this step (e.g.
+    #       ForcePositive on already-non-negative data), so modified-set == {numerically
+    #       changed} is too strong. The contract is held primarily by the inline
+    #       Correction docs (above), not by this test.
+```
+
+The modified-name set is "the fields each correction is responsible for writing"
+(the returned keys), which under a representative input normally coincides with
+the numerically-changed fields but may legitimately include a corrected field
+whose `delta` is exactly zero this step. `delta[name] == corrected[name] −
+input[name]` still holds exactly (zero for such a field).
+
+## `fme/core/corrector/test_ice.py` (new)
+
+`IceCorrector` is a bare `CorrectionSequence` subclass whose only leaf is
+`IceBudgetCorrection`, so it needs its own coverage of the modified-subset
+contract:
+
+```python
+def test_ice_corrector_output_behavior_preserving(...):
+    # GOAL: IceCorrector's CorrectorOutput.corrected equals current main output.
+
+def test_ice_budget_correction_returns_only_modified(...):
+    # GOAL: IceBudgetCorrection returns only the processed prognostic keys + its three
+    #       budget-term names (from corrected_variables); empty subset when
+    #       corrected_variables is None. delta keys == those names; no uncorrected field.
 ```
 
 ## `fme/core/corrector/test_registry.py` (modified)
@@ -421,7 +481,11 @@ the modified-name set, then builds `delta` over that set. Because the returned
 dict is exactly what gets applied, the modified-name set is load-bearing: a
 correction that fails to return a field it changed would drop that change from the
 output and fail the behavior-preservation test, so the declaration cannot diverge
-from the write.
+from the write. The reverse direction — a correction returning a field outside its
+responsibility — is held primarily by the inline `Correction` docs and a narrow
+backstop test (no un-corrected field is propagated), not by an exhaustive
+returned-keys-equal-numerically-changed assertion: a correction legitimately
+returns the fields it is responsible for even when one has zero `delta` this step.
 
 The written keys still depend on data naming (`PRESsfc` vs `PS`, present
 air-temperature/thetao level names, `sst`/`hfds` presence), but each correction
