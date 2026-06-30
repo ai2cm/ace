@@ -3,7 +3,7 @@
 Living notes for the multivariate MoE FastGen distillation effort on branch
 `experiment/fastgen-distill`. Pick up here from any clone.
 
-_Last updated: 2026-06-29._
+_Last updated: 2026-06-30._
 
 ---
 
@@ -358,6 +358,67 @@ stay flat/declining late** instead of climbing to ~0.8 (the whole point); (3)
 disc-winning tip); (4) precip spectra stay healthy (they already were); (5) tails
 don't blow up. If R1-only holds the spectra, prefer it (simplest). If only allfix
 works, the LR-decay/weight cut were load-bearing. Compare both at matched steps.
+
+#### Check-in (2026-06-30): both GAN fixes FAILED to stop the collapse
+
+Read both live runs (`rzisfp5c` r1-instr @6.4k, `3lrjuahv` allfix @13k/20k). The
+canceled non-instr r1 (`p1jxfj9x`) is superseded. **Neither fix prevented the
+PRMSL collapse**; both reproduce the disc-winning signature.
+
+| metric | allfix (13k) | r1-instr (6.4k) | read |
+|---|---|---|---|
+| `spec_mae_mid_PRMSL` | 0.13→**0.87** | 0.18→**0.94** | collapsed (largely artifact, see below) |
+| `spec_mae_hi_PRMSL` | 0.075→**0.93** | 0.14→**0.88** | collapsed (mostly artifact) |
+| `spec_mae_lo_PRMSL` (trustworthy) | 0.59→0.67 | 0.62→**0.80** | mild–moderate REAL degradation |
+| `crps_PRMSL` | 6.91→7.10 | 7.03→7.12 | ~flat |
+| `gan_loss_gen`↑ / `gan_loss_disc`↓ | 0.74→1.01 / 1.34→1.17 | 0.73→0.78 / 1.37→1.33 | gen losing |
+| `fake_score_loss` (late spike) | 0.016→0.031 | 0.016→0.022 | regime change |
+| `gan_loss_ar1` | 0.02→**0.165** (8×) | 0.015→0.078 (5×) | R1 active but overpowered |
+| precip `spec_mae_lo/mid_PRATEsfc` best | 0.05 / 0.025 | 0.06 / 0.056 | **healthy** |
+
+- **R1@0.1 is active but losing** — `gan_loss_ar1` grows 5–8×, i.e. the disc's
+  real-data gradient keeps rising; R1 at this weight is overpowered, not taming it.
+- **allfix ≈ r1-instr** despite R1 + 3× lower gen weight + LR decay → the
+  weight-cut and LR-decay are **not** load-bearing; none of the three toolkit
+  levers fixed it.
+- Precip (the low-noise expert's real job) stays strong throughout.
+
+#### PSD calc verified — the mid/hi PRMSL "collapse" is largely a metric artifact
+
+Audited `compute_zonal_power_spectrum` + the `spec_mae` band reduction (numerical
+check in scratch). Findings:
+
+- **The PSD function is correct.** Parseval holds to 0.19% (the residual is the
+  known Nyquist double-count seam — `ones_and_twos` multiplies *all* k>0 by 2
+  including Nyquist; negligible, not the cause of anything).
+- **`spec_mae` is a relative (log-PSD-ratio) error and explodes on a smooth field.**
+  Demo: a visually-invisible white residual at **1% of field std** (0.01% extra
+  variance) on a steep-red-spectrum field drives `spec_mae_mid/hi` to ~9 while the
+  absolute hi-band energy stays ~1e-5 of total. PRMSL is exactly this regime.
+- The real runs sit at ~0.9 (not ~9 — PRMSL has *some* hi-k energy), i.e. the
+  student's hi-k power is ~10^0.9 ≈ **8× the teacher's**, on a band holding little
+  absolute energy. Consistent with "the normalized image panels look fine."
+- **Trustworthy PRMSL signals are `spec_mae_lo_PRMSL` + `crps_PRMSL`** (and the new
+  raw PSD curves). On those the damage is mild–moderate and coarse-band (lo
+  0.59→0.67 / 0.62→0.80), which is what the discriminator-tap lever targets.
+  → The headline "collapse" overstates the real harm; weight the coarse/lo signals
+  and the absolute PSD curves, not mid/hi `spec_mae`.
+
+#### PSD curves now step-slidable (commit `dc7876eeb`)
+
+`val/psd_<var>` was a `wandb.plot.line_series` (Vega chart, latest-step only).
+Converted to a matplotlib `loglog` figure logged as `wandb.Image` per validation
+(`step=iteration`) — now a **step-slidable media panel** like the other
+downscaling power-spectrum aggregators, with lo/mid/hi band boundaries marked.
+Scrub the training axis to watch the high-k tail drift (the decisive real-vs-
+artifact check). Takes effect on runs launched from `dc7876eeb`+.
+
+**Next (per the discriminator-tap design note below): shift the critic's tap up.**
+Two tests — a **mid-resolution** tap and a **shallower/high-resolution** tap — via
+a new `ACE_DISC_FEATURE_DEPTH` offset. Open question the runs must answer: does a
+shallower tap relieve the coarse-PRMSL GAN damage **without** making training
+harder or injecting fine-scale (hi-k) texture. Will be launched from `dc7876eeb`+
+so the step-slidable PSD curves are available to judge it.
 
 ### Checkpoint-selection fix (2026-06-29, `best_student_callback.py`)
 
