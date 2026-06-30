@@ -340,6 +340,16 @@ wandb `ai2cm/fastgen`.
 |---|---|---|---|
 | **Lo-2step-r1** (highest-prob single fix) | R1 reg `0.1` only | `01KWAKEV8SS9RACQH8AA6CGY2Y` | `…-lo-2step-r1-moe-teacher-expert0` |
 | **Lo-2step-allfix** (everything) | R1 `0.1` + `gan_loss_weight_gen 3e-4` + LR decay→5% over 20k steps (max_iter capped 20k) | `01KWAKF2PV0G3E9V418207R7R0` | `…-lo-2step-allfix-moe-teacher-expert0` |
+| **Lo-2step-r1-instr** (R1-only, fully instrumented) | R1 reg `0.1` only, on commit `8ce57479d` | `01KWBDJ5CH98Q0HMWS05BHFA8Z` | `…-lo-2step-r1-instr-moe-teacher-expert0` |
+
+**`Lo-2step-r1-instr` (submitted 2026-06-29) is the one to read going forward** —
+it's the only run with the full new instrumentation: normalized cross-var CRPS
+selection, direction-aware multi-var tail selection, per-var `val/psd_<var>` raw
+PSD curves, and all-4-variable train-media panels. The two runs above predate
+those commits (old channel-0-only media, old selection, no PSD curves). Caveats:
+`val/crps_mean`/`crps_best`/`tail_best_score` are **not comparable** to the
+earlier runs (selection meaning changed); compare on per-var spectra, the PSD
+curves, and the GAN-stability signals instead.
 
 **What to check:** (1) jobs healthy + R1 active — expect a `gan_loss_ar1` metric
 in wandb (logs only when both GAN weights >0); (2) **does `spec_mae_mid/hi_PRMSL`
