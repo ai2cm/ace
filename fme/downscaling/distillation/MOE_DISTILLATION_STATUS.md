@@ -413,12 +413,38 @@ downscaling power-spectrum aggregators, with lo/mid/hi band boundaries marked.
 Scrub the training axis to watch the high-k tail drift (the decisive real-vs-
 artifact check). Takes effect on runs launched from `dc7876eeb`+.
 
-**Next (per the discriminator-tap design note below): shift the critic's tap up.**
-Two tests — a **mid-resolution** tap and a **shallower/high-resolution** tap — via
-a new `ACE_DISC_FEATURE_DEPTH` offset. Open question the runs must answer: does a
-shallower tap relieve the coarse-PRMSL GAN damage **without** making training
-harder or injecting fine-scale (hi-k) texture. Will be launched from `dc7876eeb`+
-so the step-slidable PSD curves are available to judge it.
+#### Discriminator-tap A/B (submitted 2026-06-30, commit `9aca3c418`) — CHECK THESE
+
+Shift the critic's tap up the encoder (finer band) to relieve the coarse-PRMSL
+GAN damage. New knob `ACE_DISC_FEATURE_DEPTH` = offset toward finer resolution
+from the bottleneck (`run.sh --disc-feature-depth`); the tapped level's channel
+count sets the discriminator `in_channels` automatically, printed at launch.
+Expert 0 levels finest→coarsest `[512,256,128,64,32,16]`, channels
+`[128,256,256,256,128,128]`; offset 0 = bottleneck (16², 128ch, the historical
+critic).
+
+**Clean tap-only A/B (no R1, default gan_weight, 2-step expert 0)** so the tap
+level is the *only* variable; the offset-0 reference is the original Lo-2step run
+(`3vk3or7v`). Both launched from `9aca3c418`, so they carry the step-slidable PSD
+curves + new selection/media.
+
+| Run | tap offset | resolution / in_ch | Beaker | wandb name |
+|---|---|---|---|---|
+| **tap1** | 1 | 32² / 128ch (cheapest; disc size unchanged) | `01KWCXMJG2STT6VA6G078ZB86K` | `…-tap1-2step-moe-teacher-expert0` |
+| **tap2** | 2 | 64² / 256ch (mid; disc doubles to 256ch) | `01KWCXMVRH7G0X4F3XW22XH33Q` | `…-tap2-2step-moe-teacher-expert0` |
+
+**What to check:** (1) jobs healthy + the `DMD2 discriminator: feature_index=… depth
+offset … resolution=… in_channels=…` log line confirms the tap moved (tap1→32²/128,
+tap2→64²/256); (2) **does the coarse-band damage ease** — `spec_mae_lo_PRMSL` and
+`crps_PRMSL` (the trustworthy signals) stay flat/declining vs the offset-0 baseline
+(lo 0.62→0.80); (3) **side effect to watch (the open risk):** a finer critic on a
+smooth field could *inject* hi-k texture — watch `spec_mae_hi_PRMSL` and especially
+the raw `val/psd_PRMSL` curves (now step-slidable) for the student's high-k tail
+rising above teacher; (4) precip stays healthy; (5) training not destabilized
+(`f_distill_loss`, GAN balance) — tap2's 256ch disc is the higher-risk one. Decide
+mid vs cheap tap on whether the coarse gain justifies any hi-k/stability cost.
+
+(deferred: offset 4 / 256² high-res tap, and combining the winning tap with R1.)
 
 ### Checkpoint-selection fix (2026-06-29, `best_student_callback.py`)
 
