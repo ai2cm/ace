@@ -21,9 +21,10 @@ import yaml
 
 CORE_VARIABLES: list[str] = [
     # 3D state on plev8 (required).
-    # ``ta`` is excluded because Pangeo daily coverage is essentially nil
-    # (3 models); layer-mean T is derived from zg + hus in the processing
-    # step instead and stored as ta_derived_layer_{0..6}.
+    # ``ta`` is excluded from the *core* set because Pangeo daily coverage is
+    # essentially nil (3 models). It IS published daily on plev8 by many models
+    # on ESGF (the schema-1.0.0 / ESGF line ingests it via OPTIONAL_VARIABLES),
+    # where it supersedes the zg+hus-derived layer-mean temperature.
     "ua",
     "va",
     "hus",
@@ -38,6 +39,11 @@ CORE_VARIABLES: list[str] = [
 ]
 
 OPTIONAL_VARIABLES: list[str] = [
+    # Air temperature on plev8 (``day`` table). Published daily by many models
+    # on ESGF (not on Pangeo); ingested as a 3D plev field (flattened +
+    # below-surface masked) when present. The real energy-relevant temperature
+    # state for the schema-1.0.0 / ESGF line.
+    "ta",
     # TOA radiation. ``rsdt``/``rsut`` (and their clear-sky pair
     # ``rsutcs``, plus ``rlutcs``) aren't published on the standard
     # ``day`` table by *any* CMIP6 model — they live on ``CFday`` (see
