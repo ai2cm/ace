@@ -338,7 +338,9 @@ class BestStudentCheckpointCallback:
 
         student: AceDiffusionTeacher = model.net
         # Validation runs on ALL ranks (sharded) — see class docstring.
-        crps_by_var, tail_by_pct, spec_by_var = self._compute_validation_crps(student)
+        crps_by_var, tail_by_pct, spec_by_var, spec_curves = (
+            self._compute_validation_crps(student)
+        )
         crps = crps_by_var["mean"]
 
         if not is_rank0():
@@ -391,7 +393,9 @@ class BestStudentCheckpointCallback:
 
         # Log after the best-checkpoint update so val/crps_best includes
         # this iteration's result.
-        self._log_to_wandb(crps_by_var, tail_by_pct, spec_by_var, iteration)
+        self._log_to_wandb(
+            crps_by_var, tail_by_pct, spec_by_var, spec_curves, iteration
+        )
 
     def _tail_summary_str(self, tail_by_pct: dict[float, dict[str, float]]) -> str:
         parts = []
@@ -406,9 +410,10 @@ class BestStudentCheckpointCallback:
         crps_by_var: dict[str, float],
         tail_by_pct: dict[float, dict[str, float]],
         spec_by_var: dict[str, dict[str, float]],
+        spec_curves: dict[str, dict[str, list[float]]],
         iteration: int,
     ) -> None:
-        """Log CRPS, tail-fraction, and spectral scalars to wandb."""
+        """Log CRPS, tail-fraction, and spectral scalars + PSD curves to wandb."""
         if not np.isfinite(crps_by_var.get("mean", float("inf"))):
             return
         try:
@@ -417,7 +422,10 @@ class BestStudentCheckpointCallback:
             return
         if wandb.run is None:
             return
-        payload: dict[str, float] = {f"val/crps_{k}": v for k, v in crps_by_var.items()}
+        # Holds scalars plus wandb custom-chart objects (PSD curves).
+        payload: dict[str, object] = {
+            f"val/crps_{k}": v for k, v in crps_by_var.items()
+        }
         if np.isfinite(self._best_crps):
             payload["val/crps_best"] = self._best_crps
         for pct, by_var in tail_by_pct.items():
@@ -432,6 +440,27 @@ class BestStudentCheckpointCallback:
             payload["val/spec_mae_mean"] = float(
                 np.mean([m["mae"] for m in spec_by_var.values()])
             )
+        # Raw mean-PSD curves (student vs teacher) as log10 line charts, one per
+        # variable.  Lets a large band MAE be judged against the absolute energy
+        # at each wavenumber — a big log-ratio where the teacher PSD is tiny
+        # (smooth field) is a metric artifact, not a real spectral failure.
+        # Guarded so a viz hiccup can never drop the scalar metrics.
+        for var, curves in spec_curves.items():
+            student = curves.get("student")
+            teacher = curves.get("teacher")
+            if not student or not teacher:
+                continue
+            try:
+                wavenumber = list(range(len(student)))
+                payload[f"val/psd_{var}"] = wandb.plot.line_series(
+                    xs=wavenumber,
+                    ys=[np.log10(student).tolist(), np.log10(teacher).tolist()],
+                    keys=["student", "teacher"],
+                    title=f"log10 mean PSD: {var}",
+                    xname="zonal wavenumber",
+                )
+            except Exception:  # noqa: BLE001 - viz is best-effort, never fatal
+                continue
         wandb.log(payload, step=iteration)
 
     def __getattr__(self, name: str):
@@ -523,8 +552,9 @@ class BestStudentCheckpointCallback:
         dict[str, float],
         dict[float, dict[str, float]],
         dict[str, dict[str, float]],
+        dict[str, dict[str, list[float]]],
     ]:
-        """Return ``(crps_by_var, tail_by_pct, spec_by_var)``.
+        """Return ``(crps_by_var, tail_by_pct, spec_by_var, spec_curves)``.
 
         ``crps_by_var``: ``{"<var>": crps, "mean": <var-averaged>}``.
         ``tail_by_pct``: ``{percentile: {"<var>": student_pXX / target_pXX,
@@ -535,6 +565,9 @@ class BestStudentCheckpointCallback:
         "mae_hi": ...}}`` where each value is the mean absolute log10-ratio of
         the zonal power spectra (student / teacher), split into lo/mid/hi thirds
         of the wavenumber axis.
+        ``spec_curves``: ``{"<var>": {"student": [...], "teacher": [...]}}`` —
+        the raw mean PSD per zonal wavenumber for each, so the band MAEs above
+        can be read against the absolute energy at each scale.
 
         Sampling uses the FastGen "predict x0 → renoise" loop (via
         ``fastgen_sampler``) instead of ACE's Heun sampler so validation
@@ -850,6 +883,11 @@ class BestStudentCheckpointCallback:
         psd_nw = int(nw_tensor.item())
 
         spec_by_var: dict[str, dict[str, float]] = {}
+        # Per-variable mean PSD curves (student + teacher) for raw-spectrum
+        # logging, so a large |log-ratio| can be judged against the absolute
+        # energy at that wavenumber (a huge ratio where the teacher PSD is
+        # ~0 is a metric artifact of a smooth field, not a real failure).
+        spec_curves: dict[str, dict[str, list[float]]] = {}
         if psd_nw > 0:
             ns_counts = torch.tensor(
                 [psd_ns.get(k, 0) for k in global_keys],
@@ -892,5 +930,9 @@ class BestStudentCheckpointCallback:
                     "mae_mid": float(log_ratio[lo_end:hi_start].abs().mean().item()),
                     "mae_hi": float(log_ratio[hi_start:].abs().mean().item()),
                 }
+                spec_curves[var] = {
+                    "student": mean_s.clamp(min=1e-30).cpu().tolist(),
+                    "teacher": mean_t.clamp(min=1e-30).cpu().tolist(),
+                }
 
-        return crps_result, tail_by_pct, spec_by_var
+        return crps_result, tail_by_pct, spec_by_var, spec_curves

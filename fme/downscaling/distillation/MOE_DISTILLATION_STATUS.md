@@ -372,6 +372,19 @@ fields that were collapsing:
 - ⚠️ `val/crps_mean`, `val/crps_best`, `val/tail_best_score` **changed meaning** —
   not comparable across this commit. The current GAN-fix runs predate it.
 
+**Raw PSD curves now logged** (`val/psd_<var>`, log10 mean PSD line charts,
+student vs teacher, per variable, each validation). Motivation: PRMSL's
+mid/hi-band `spec_mae` "collapse" is largely a **metric artifact of a smooth
+field** — `spec_mae` is a *relative* (log-PSD-ratio) error, and PRMSL has
+near-zero true energy at mid/high wavenumbers, so a tiny absolute residual
+(few-step incomplete-denoising noise floor + any GAN texture) divided by a
+~0 teacher PSD explodes the ratio. Band ordering confirms it: PRMSL error is
+worst at hi/mid (~0.9), least bad at lo (~0.68). The raw curves let you see
+*where the teacher actually has energy* before reacting to a big band MAE.
+Trustworthy PRMSL signals: `spec_mae_lo_PRMSL` + `crps_PRMSL`. (Coarse PRMSL
+structure also lives at high σ — more the high-noise expert's job than Lo's,
+which standalone `lo_renoise` can't exercise.)
+
 ### (superseded) Active per-expert runs (submitted 2026-06-27)
 
 **Student-Lo distillation is submitted** (commit `fa6b49e9e`). Both step
