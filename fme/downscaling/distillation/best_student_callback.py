@@ -440,27 +440,39 @@ class BestStudentCheckpointCallback:
             payload["val/spec_mae_mean"] = float(
                 np.mean([m["mae"] for m in spec_by_var.values()])
             )
-        # Raw mean-PSD curves (student vs teacher) as log10 line charts, one per
-        # variable.  Lets a large band MAE be judged against the absolute energy
-        # at each wavenumber — a big log-ratio where the teacher PSD is tiny
-        # (smooth field) is a metric artifact, not a real spectral failure.
-        # Guarded so a viz hiccup can never drop the scalar metrics.
-        for var, curves in spec_curves.items():
-            student = curves.get("student")
-            teacher = curves.get("teacher")
-            if not student or not teacher:
-                continue
-            try:
-                wavenumber = list(range(len(student)))
-                payload[f"val/psd_{var}"] = wandb.plot.line_series(
-                    xs=wavenumber,
-                    ys=[np.log10(student).tolist(), np.log10(teacher).tolist()],
-                    keys=["student", "teacher"],
-                    title=f"log10 mean PSD: {var}",
-                    xname="zonal wavenumber",
-                )
-            except Exception:  # noqa: BLE001 - viz is best-effort, never fatal
-                continue
+        # Raw mean-PSD curves (student vs teacher) as loglog figures, one per
+        # variable, logged as wandb media so they are STEP-SLIDABLE — scrub the
+        # training axis to watch the PSD (esp. the high-k tail) evolve, the
+        # decisive way to tell a real spectral drift from the smooth-field
+        # spec_mae artifact (a large log-ratio where the teacher PSD is ~0
+        # carries negligible absolute energy).  Matches the loglog style of the
+        # downscaling power-spectrum aggregator (aggregators/main.py) and is
+        # step-sliderable like the other aggregators' charts.  Guarded so a viz
+        # hiccup never drops the scalar metrics.
+        try:
+            import matplotlib.pyplot as plt
+
+            for var, curves in spec_curves.items():
+                student = curves.get("student")
+                teacher = curves.get("teacher")
+                if not student or not teacher:
+                    continue
+                nw = len(student)
+                fig = plt.figure()
+                plt.loglog(teacher, label="teacher")
+                plt.loglog(student, linestyle="--", label="student")
+                # lo/mid/hi band boundaries used by spec_mae_{lo,mid,hi}.
+                plt.axvline(nw // 3, color="gray", linestyle=":", linewidth=0.8)
+                plt.axvline(2 * nw // 3, color="gray", linestyle=":", linewidth=0.8)
+                plt.xlabel("zonal wavenumber")
+                plt.ylabel("mean power")
+                plt.title(f"{var} mean PSD (iter {iteration})")
+                plt.legend()
+                plt.grid(True, which="both", alpha=0.3)
+                payload[f"val/psd_{var}"] = wandb.Image(fig)
+                plt.close(fig)
+        except Exception:  # noqa: BLE001 - viz is best-effort, never fatal
+            pass
         wandb.log(payload, step=iteration)
 
     def __getattr__(self, name: str):
