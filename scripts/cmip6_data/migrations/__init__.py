@@ -60,6 +60,13 @@ def chain_for(current_version: str, target_version: str) -> list[Migration]:
     while version_lt(cur, target_version):
         next_step = next((m for m in MIGRATIONS if m.from_version == cur), None)
         if next_step is None:
+            if cur.split(".")[0] != target_version.split(".")[0]:
+                raise RuntimeError(
+                    f"no migration path from {cur!r} to {target_version!r}: these "
+                    "are different schema lines separated by a clean break (a major "
+                    "version bump). Reprocess from source onto the target line "
+                    "instead of migrating. See schema_version.py."
+                )
             raise RuntimeError(
                 f"no migration registered from {cur!r}; expected to reach "
                 f"{target_version!r} but the chain stopped here. Check "

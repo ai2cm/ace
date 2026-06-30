@@ -81,25 +81,55 @@ def test_chain_for_empty_when_at_target():
     assert chain_for(SCHEMA_VERSION, SCHEMA_VERSION) == []
 
 
-def test_chain_for_returns_registered_steps():
+def test_chain_for_composes_the_0x_line():
+    """The 0.x line chains contiguously from 0.0.0 up to the last registered
+    migration. (1.0.0 is a clean break with no migration into it, so the chain
+    intentionally tops out at the last 0.x migration, not at SCHEMA_VERSION.)"""
     from migrations import MIGRATIONS, chain_for
-    from schema_version import SCHEMA_VERSION
 
     if not MIGRATIONS:
         pytest.skip("no migrations registered yet")
-    chain = chain_for("0.0.0", SCHEMA_VERSION)
+    last_registered = MIGRATIONS[-1].to_version
+    chain = chain_for("0.0.0", last_registered)
     # Chain composes: each step starts where the previous ended.
     assert chain[0].from_version == "0.0.0"
     for prev, curr in zip(chain, chain[1:]):
         assert prev.to_version == curr.from_version
-    assert chain[-1].to_version == SCHEMA_VERSION
+    assert chain[-1].to_version == last_registered
+
+
+def test_chain_for_1x_line_reaches_current_schema():
+    """The post-clean-break 1.x line stays consistent: the chain from the 1.x
+    base composes contiguously and reaches the current SCHEMA_VERSION. With no
+    1.x migrations yet this is the trivial empty chain (base == SCHEMA_VERSION);
+    as 1.x migrations are added it verifies they chain to current."""
+    from migrations import chain_for
+    from schema_version import CLEAN_BREAK_BASE_VERSION, SCHEMA_VERSION
+
+    chain = chain_for(CLEAN_BREAK_BASE_VERSION, SCHEMA_VERSION)
+    if chain:
+        assert chain[0].from_version == CLEAN_BREAK_BASE_VERSION
+        for prev, curr in zip(chain, chain[1:]):
+            assert prev.to_version == curr.from_version
+        assert chain[-1].to_version == SCHEMA_VERSION
+    else:
+        # no 1.x migrations registered yet: base is already current
+        assert CLEAN_BREAK_BASE_VERSION == SCHEMA_VERSION
 
 
 def test_chain_for_raises_on_unreachable_target():
     from migrations import chain_for
 
     with pytest.raises(RuntimeError, match="no migration registered"):
-        chain_for("0.0.0", "99.99.99")
+        chain_for("0.0.0", "0.99.99")
+
+
+def test_chain_for_raises_clean_break_across_major():
+    """Crossing the 0.x→1.x clean break has no migration path and says so."""
+    from migrations import chain_for
+
+    with pytest.raises(RuntimeError, match="clean break"):
+        chain_for("0.0.0", "1.0.0")
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +178,11 @@ def test_migrate_one_missing_sidecar(tmp_path: Path):
 
 def test_migrate_one_dry_run_describes_chain(tmp_path: Path):
     from migrate import migrate_one
-    from schema_version import SCHEMA_VERSION
+    from migrations import MIGRATIONS
 
+    # Target the last 0.x migration: a 0.0.0 dataset migrates within the 0.x
+    # line (it cannot cross the clean break to the 1.x SCHEMA_VERSION).
+    target = MIGRATIONS[-1].to_version
     zarr = _make_sidecar_only_dataset(
         tmp_path,
         {
@@ -160,10 +193,10 @@ def test_migrate_one_dry_run_describes_chain(tmp_path: Path):
             # No schema_version → treated as 0.0.0.
         },
     )
-    status, detail = migrate_one(zarr, target_version=SCHEMA_VERSION, dry_run=True)
+    status, detail = migrate_one(zarr, target_version=target, dry_run=True)
     assert status == "would-migrate"
     assert "0.0.0" in detail
-    assert SCHEMA_VERSION in detail
+    assert target in detail
     # Dry-run must NOT mutate the sidecar.
     after = json.loads((Path(zarr) / "metadata.json").read_text())
     assert after.get("schema_version", "") == ""
@@ -384,9 +417,9 @@ def test_migration_0_1_0_to_0_2_0_adds_log_co2(tmp_path: Path):
     stats = xr.open_dataset(str(stats_path))
     try:
         keys = set(stats.data_vars)
-        assert any(
-            k.startswith("log_input4mips_co2__") for k in keys
-        ), f"expected log_input4mips_co2__* keys in stats.nc, got: {sorted(keys)}"
+        assert any(k.startswith("log_input4mips_co2__") for k in keys), (
+            f"expected log_input4mips_co2__* keys in stats.nc, got: {sorted(keys)}"
+        )
         # Spot-check the values against a manual computation.
         co2_series = np.linspace(390.0, 395.0, 6).astype(np.float32)
         log_series = np.log(co2_series)
@@ -1913,12 +1946,12 @@ def test_integration_pipeline_then_migration(tmp_path: Path):
     stats = xr.open_dataset(str(stats_path))
     try:
         keys = set(stats.data_vars)
-        assert any(
-            k.startswith("HGTsfc__") for k in keys
-        ), f"expected HGTsfc__* keys in stats.nc, got: {sorted(keys)}"
-        assert any(
-            k.startswith("log_input4mips_co2__") for k in keys
-        ), f"expected log_input4mips_co2__* keys, got: {sorted(keys)}"
+        assert any(k.startswith("HGTsfc__") for k in keys), (
+            f"expected HGTsfc__* keys in stats.nc, got: {sorted(keys)}"
+        )
+        assert any(k.startswith("log_input4mips_co2__") for k in keys), (
+            f"expected log_input4mips_co2__* keys, got: {sorted(keys)}"
+        )
         # Spatially-uniform co2 → mean collapses to mean of the
         # log time series.
         log_series = np.log(co2_series)

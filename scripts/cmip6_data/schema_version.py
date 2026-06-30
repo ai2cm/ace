@@ -12,12 +12,26 @@ The version is a hand-maintained semver string. Bump it (and add a
 matching migration to ``migrations/``) whenever the on-disk schema
 changes — variable renames, unit rescales, new derived channels, mask
 convention changes, etc.
+
+**Clean break at 1.0.0.** The ``0.x`` line (the Pangeo-sourced multi-model
+cohort, migrations up to ``0.9.0``) and the ``1.0.0`` line are intentionally
+NOT connected by a migration: ``1.0.0`` is the ESGF-sourced, per-field
+time-varying-mask + real-``ta`` + layer-thickness schema, which cannot be
+derived from ``0.9.0`` data (the new fields require re-ingesting from ESGF).
+There is deliberately no ``0.9.0``→``1.0.0`` migration; ``0.x`` datasets stay
+on the ``0.x`` line and ``1.x`` datasets are written fresh. Future ``1.x``
+migrations chain from ``1.0.0`` onward.
 """
 
 from dataclasses import dataclass
 from typing import Callable
 
-SCHEMA_VERSION: str = "0.9.0"
+SCHEMA_VERSION: str = "1.0.0"
+
+# Base of the post-clean-break ``1.x`` migration line. Datasets at or above this
+# version migrate among themselves toward ``SCHEMA_VERSION``; there is no
+# migration path from the ``0.x`` line across this boundary (see module docstring).
+CLEAN_BREAK_BASE_VERSION: str = "1.0.0"
 
 
 @dataclass(frozen=True)
