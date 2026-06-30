@@ -551,7 +551,9 @@ def _build_channel_mask_dict(
     device = packed_input.device
     result: TensorDict = {}
     for name in in_names:
-        # Use the source field mask for GMR sentinel channels
+        # GMR sentinel channels share their source field's mask: the extra
+        # value is already zeroed in forward_transform when the source is
+        # masked, so the mask channel must agree rather than default to 1.
         source = extra_channel_source_field(name)
         lookup_name = source if source is not None else name
         if data_mask is not None and lookup_name in data_mask:

@@ -1902,10 +1902,6 @@ class CoupledTrainStepper(
         self._stepper = stepper
         self._config = config
         self._loss = self._config._build_loss(stepper, config.n_coupled_steps)
-        # Input dropout is sampled in the uncoupled training layer's
-        # _accumulate_loss; the coupled training route never calls the
-        # make_input_dropout_mask hook, so a configured input_dropout would
-        # silently do nothing. Fail loud rather than no-op.
         for realm, component in (
             ("atmosphere", stepper.atmosphere),
             ("ocean", stepper.ocean),
