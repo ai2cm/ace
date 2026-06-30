@@ -17,6 +17,7 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Callable
 from typing import Hashable, Optional
 
 import numpy as np
@@ -499,6 +500,44 @@ def derive_layer_thickness(
             plev=k, drop=True
         )
     return out
+
+
+def regrid_with_coverage_mask(
+    da_native: xr.DataArray,
+    valid_native: xr.DataArray,
+    regrid_data: Callable[[xr.DataArray], xr.DataArray],
+    regrid_indicator: Callable[[xr.DataArray], xr.DataArray],
+    threshold: float = 0.5,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Source-grid-masked regrid of one field, returning the regridded field
+    and its per-cell target-grid validity mask.
+
+    The invalid native cells (``valid_native`` False — e.g. below surface by the
+    native ``zg < orog`` test) are set to NaN *before* regridding so a valid-only
+    (``skipna``) regrid averages real data only, never the source fill value. The
+    same 0/1 validity indicator is regridded to give each target cell's fractional
+    valid coverage, thresholded into the stored boolean mask.
+
+    Args:
+        da_native: native-grid field, dims include ``(lat, lon)`` (plus optional
+            leading ``time``/``plev``).
+        valid_native: boolean native validity (True = valid), broadcastable to
+            ``da_native``.
+        regrid_data: valid-only (``skipna``) regrid of the (NaN-masked) data field.
+        regrid_indicator: regrid of the 0/1 validity indicator; for a conservative
+            scheme this yields the area-fraction of valid source cells per target
+            cell.
+        threshold: minimum valid coverage for a target cell to be marked valid.
+
+    Returns:
+        ``(regridded_data, valid_mask)`` on the target grid. ``valid_mask`` is a
+        boolean DataArray (True = valid).
+    """
+    masked_native = da_native.where(valid_native)
+    regridded = regrid_data(masked_native)
+    coverage = regrid_indicator(valid_native.astype("float32"))
+    valid_mask = coverage_to_valid_mask(coverage, threshold)
+    return regridded, valid_mask
 
 
 def nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:

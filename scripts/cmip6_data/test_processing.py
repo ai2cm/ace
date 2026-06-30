@@ -1792,3 +1792,44 @@ def test_derive_layer_thickness_negative_below_ground_surface_layer():
     assert (
         out["thickness_surface_1000"].values.item() == 300.0 - 800.0
     )  # negative; masked
+
+
+def test_regrid_with_coverage_mask_block_mean_fake_regridder():
+    """The masking glue (NaN invalid -> valid-only regrid; indicator regrid ->
+    coverage -> threshold mask) is verified with a fake 2x2 block-mean
+    regridder, no ESMF needed."""
+    from processing import regrid_with_coverage_mask
+
+    def block_mean(da, skipna):
+        # coarsen each 2x2 lat/lon block by mean (the fake "regrid")
+        return da.coarsen(lat=2, lon=2).mean(skipna=skipna)
+
+    regrid_data = lambda da: block_mean(da, skipna=True)  # noqa: E731
+    regrid_indicator = lambda da: block_mean(da, skipna=False)  # noqa: E731
+
+    # 4x4 native field; mark the top-left 2x2 block as 3/4 valid, others all valid
+    data = xr.DataArray(
+        np.arange(16, dtype="float64").reshape(4, 4),
+        dims=("lat", "lon"),
+        coords={"lat": np.arange(4), "lon": np.arange(4)},
+    )
+    valid = xr.DataArray(
+        np.ones((4, 4), dtype=bool),
+        dims=("lat", "lon"),
+        coords={"lat": np.arange(4), "lon": np.arange(4)},
+    )
+    valid[0, 0] = False  # one invalid cell in the top-left block -> coverage 0.75
+
+    regridded, mask = regrid_with_coverage_mask(
+        data, valid, regrid_data, regrid_indicator, threshold=0.5
+    )
+    # coverage of the top-left target cell = 3/4 valid; others = 1.0
+    assert mask.values.tolist() == [[True, True], [True, True]]  # 0.75 >= 0.5
+    # top-left target value = mean of the 3 VALID native cells (1,4,5), not 0
+    np.testing.assert_allclose(regridded.values[0, 0], (1 + 4 + 5) / 3)
+
+    # with strict threshold the partially-covered cell becomes invalid
+    _, strict = regrid_with_coverage_mask(
+        data, valid, regrid_data, regrid_indicator, threshold=1.0
+    )
+    assert strict.values.tolist() == [[False, True], [True, True]]
