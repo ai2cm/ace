@@ -18,3 +18,6 @@ DENSITY_OF_SEA_WATER_CM4 = 1035.0  # kg/m^3
 FREEZING_TEMPERATURE_KELVIN = 273.15  # K
 
 EARTH_RADIUS = 6371000.0  # m
+# Earth's mean angular rotation rate, used for the Coriolis parameter
+# f = 2 * OMEGA * sin(latitude).
+OMEGA = 7.292115e-5  # rad/s
