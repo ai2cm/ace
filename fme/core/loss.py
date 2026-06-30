@@ -325,10 +325,16 @@ class WeightedMappingLoss:
             dims = tuple(i for i in range(t.ndim) if i not in (0, cdim))
             if not dims:
                 return StandardLoss(t)
-            # The packed mask has channel at dim 1; only apply it when the
-            # loss tensor shares that layout (the standard (B, C, lat, lon)
-            # case). Ensemble-layout element-wise tensors are not wrapped here.
-            use_mask = spatial_mask_packed if cdim == 1 else None
+            # The packed mask is (batch, channel, lat, lon) with channel at dim
+            # 1. Insert singleton axes so the channel lands at ``cdim``, letting
+            # the mask broadcast over any intervening dims (e.g. an ensemble
+            # dim at dim 1, which puts the channel at dim 2). The mask is 1 over
+            # those dims, so they are averaged normally while spatial cells are
+            # masked.
+            use_mask = spatial_mask_packed
+            if use_mask is not None:
+                for _ in range(cdim - 1):
+                    use_mask = use_mask.unsqueeze(1)
             return StandardLoss(_masked_spatial_mean(t, use_mask, dims))
 
         if isinstance(result, list):

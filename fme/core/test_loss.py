@@ -1007,3 +1007,35 @@ def test_step_loss_forwards_spatial_mask():
     mask = {"var_0": torch.tensor([[1.0, 1.0], [0.0, 0.0]], device=device)}
     out = loss(x, y, step=0, spatial_mask=mask)
     torch.testing.assert_close(out.total(), torch.tensor(0.0, device=device))
+
+
+def test_weighted_mapping_loss_spatial_mask_with_ensemble_dim():
+    """The per-cell spatial mask is applied even when the loss tensor carries an
+    ensemble dim (channel not at dim 1) — the stepper always adds one, so this
+    is the real training layout. Regression test for the cdim>1 alignment."""
+    device = get_device()
+    out_names = ["a"]
+    normalizer = StandardNormalizer(
+        means={"a": torch.as_tensor(0.0)}, stds={"a": torch.as_tensor(1.0)}
+    )
+    mapping_loss = WeightedMappingLoss(
+        torch.nn.MSELoss(reduction="none"),
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    # per-var (batch=1, ensemble=2, lat=2, lon=2); packer inserts channel at -3
+    x = {"a": torch.zeros(1, 2, 2, 2, device=device)}
+    yv = torch.zeros(1, 2, 2, 2, device=device)
+    yv[..., 1, :] = 10.0  # (x-y)^2 = 100 in the bottom row, both members
+    y = {"a": yv}
+    # unmasked: mean over all spatial cells (and ensemble) = 50
+    torch.testing.assert_close(
+        mapping_loss(x, y).total(), torch.tensor(50.0, device=device)
+    )
+    # mask out the high-error bottom row -> 0 despite the ensemble dim
+    mask_top = {"a": torch.tensor([[1.0, 1.0], [0.0, 0.0]], device=device)}
+    torch.testing.assert_close(
+        mapping_loss(x, y, spatial_mask=mask_top).total(),
+        torch.tensor(0.0, device=device),
+    )

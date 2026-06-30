@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
+import re
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -893,28 +894,6 @@ class Stepper:
             normalizer=loss_normalizer,
         )
 
-    def build_loss_spatial_mask(self) -> dict[str, torch.Tensor]:
-        """Per-output-variable spatial validity mask for the loss.
-
-        Returns a mapping from each loss variable name to its per-cell mask
-        (1 = valid, 0 = invalid), resolved from this stepper's
-        ``SpatialMaskProvider`` via the ``mask_`` naming convention
-        (``mask_<var>`` -> ``mask_<level>`` -> ``mask_2d``). Variables without a
-        matching mask are omitted (left unmasked). Returns an empty mapping when
-        no spatial masks are available, so loss masking is a no-op on datasets
-        that ship none.
-        """
-        try:
-            provider = self._dataset_info.spatial_mask_provider
-        except MissingDatasetInfo:
-            return {}
-        masks: dict[str, torch.Tensor] = {}
-        for name in self.loss_names:
-            mask = provider.get_mask_tensor_for(name)
-            if mask is not None:
-                masks[name] = mask
-        return masks
-
     @property
     def config(self) -> StepperConfig:
         return self._config
@@ -1554,6 +1533,42 @@ class TrainStepperConfig:
         )
 
 
+_MASK_LEVEL_RE = re.compile(r"_?(\d+)$")
+
+
+def resolve_mask_var_name(
+    out_name: str,
+    available: set[str],
+    explicit_mapping: Mapping[str, str] | None = None,
+) -> str | None:
+    """Resolve the mask data-variable masking output variable ``out_name``.
+
+    Masks ride in the batch as ordinary (time-varying or broadcast
+    time-invariant) data variables. Resolution order:
+
+    1. an explicit ``out_name -> mask_var`` mapping (the dataset's
+       self-describing per-field ``mask_variable`` attribute, authoritative);
+    2. a variable-specific ``mask_<out_name>``;
+    3. a level-shared ``mask_<level>`` for a flattened plev field whose name
+       ends in the level (e.g. ``ta1000`` -> ``mask_1000``);
+    4. a catch-all ``mask_2d``.
+
+    Returns the chosen mask variable name if present in ``available``, else
+    ``None`` (the variable is left unmasked).
+    """
+    if explicit_mapping is not None and out_name in explicit_mapping:
+        candidate = explicit_mapping[out_name]
+        return candidate if candidate in available else None
+    if f"mask_{out_name}" in available:
+        return f"mask_{out_name}"
+    match = _MASK_LEVEL_RE.search(out_name)
+    if match and f"mask_{match.group(1)}" in available:
+        return f"mask_{match.group(1)}"
+    if "mask_2d" in available:
+        return "mask_2d"
+    return None
+
+
 def _finalize_per_channel_losses(
     weighted_sums: dict[str, torch.Tensor],
     total_counts: dict[str, int],
@@ -1607,9 +1622,36 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
-        self._loss_spatial_mask: dict[str, torch.Tensor] | None = (
-            self._stepper.build_loss_spatial_mask() if config.mask_loss else None
+        self._mask_loss = config.mask_loss
+        # Optional authoritative out_var -> mask_var mapping from the dataset's
+        # self-describing per-field "mask_variable" attributes; None falls back
+        # to the mask_ naming convention (see resolve_mask_var_name).
+        self._mask_var_mapping: Mapping[str, str] | None = (
+            getattr(self._stepper.training_dataset_info, "mask_variable_mapping", None)
+            if self._mask_loss
+            else None
         )
+
+    def _build_step_spatial_mask(
+        self, target_data: BatchData, step: int
+    ) -> dict[str, torch.Tensor] | None:
+        """Per-output-variable validity masks for the loss at one forward step.
+
+        Masks are time-varying (or broadcast time-invariant) data variables
+        riding in the batch; each loss variable's mask is resolved by
+        :func:`resolve_mask_var_name` and sliced at ``step`` to ``[batch, lat,
+        lon]``. Variables without a mask are omitted (left unmasked). Returns
+        ``None`` when masking is disabled.
+        """
+        if not self._mask_loss:
+            return None
+        available = set(target_data.data.keys())
+        out: dict[str, torch.Tensor] = {}
+        for name in self.loss_names:
+            mask_var = resolve_mask_var_name(name, available, self._mask_var_mapping)
+            if mask_var is not None:
+                out[name] = target_data.data[mask_var].select(self.TIME_DIM, step)
+        return out or None
 
     def train_on_batch(
         self,
@@ -1741,6 +1783,7 @@ class TrainStepper(
                     target_step=target_step,
                     step=step,
                     data_mask=data.data_mask,
+                    spatial_mask=self._build_step_spatial_mask(target_data, step),
                     optimize=optimize_step,
                     metrics=metrics,
                     weighted_sums=weighted_sums,
@@ -1756,6 +1799,7 @@ class TrainStepper(
         target_step: TensorMapping,
         step: int,
         data_mask: TensorMapping | None,
+        spatial_mask: TensorMapping | None,
         optimize: bool,
         metrics: dict[str, float],
         weighted_sums: dict[str, torch.Tensor],
@@ -1766,7 +1810,7 @@ class TrainStepper(
             target_step,
             step=step,
             data_mask=data_mask,
-            spatial_mask=self._loss_spatial_mask,
+            spatial_mask=spatial_mask,
         )
         step_total_loss = step_loss.total()
         metrics[f"loss_step_{step}"] = step_total_loss.detach()
