@@ -1,0 +1,33 @@
+# Standalone inference reproducibility probe for the seedable-random-state PR.
+# Runs the v2 4deg-daily ERA5-only NoiseConditionedSFNO (noise_embed_dim=32,
+# isotropic) forward 20 steps from a single IC with a fixed seed, writing the
+# full predicted state to netCDF. Launched 2x on GPU and 2x on CPU: same-device
+# runs should match bitwise; CPU vs GPU may differ.
+#   checkpoint: --dataset 01KVYC47QN4PM0MXD4FYPFVWV6:training_checkpoints/best_ckpt.tar:/ckpt.tar
+experiment_dir: /results
+n_forward_steps: 20
+forward_steps_in_memory: 5
+checkpoint_path: /ckpt.tar
+seed: 0
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+forcing_loader:
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 4
+initial_condition:
+  path: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2015-01-01T00:00:00'
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+n_ensemble_per_ic: 1
