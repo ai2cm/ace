@@ -105,5 +105,13 @@ aggregator:
     name: trend
     enabled: false
     strict: false
+  near_zero_fraction:
+    variables: []
+    eps: 0.0
+    per_variable_eps: {}
+    name: near_zero_fraction
+    include_maps: false
+    enabled: false
+    strict: true
   monthly_reference_data: null
   time_mean_reference_data: null
