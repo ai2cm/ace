@@ -2,7 +2,7 @@
 
 Full factorial (2x2x2 = 8) over three binary factors, applied to the base
 nc-sfno config
-(configs/experiments/2026-05-27-var-masking/ace-train-config-4deg-AIMIP-nc-sfno.yaml).
+(configs/experiments/2026-06-30-at0/ace-train-config-4deg-AIMIP-nc-sfno.yaml).
 
 Factors and their base-config state:
   - energy corrector (total_energy_budget_correction):  OFF
@@ -32,7 +32,10 @@ import pathlib
 
 import yaml
 
-WANDB_PROJECT = "VarMasking4"
+WANDB_PROJECT = "AirTemp0"
+WANDB_PREFIX = "ace2-at0-"  # prepended to wandb run names
+WANDB_SUFFIX = "-v1"  # appended to wandb run names
+CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"  # stripped from config stems
 
 # Earliest ERA5 timestamp in the dataset (1940-01-01/02 are absent).
 EARLIEST_ERA5_TIME = "1940-01-03"

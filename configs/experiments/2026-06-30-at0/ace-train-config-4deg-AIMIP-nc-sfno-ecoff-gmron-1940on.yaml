@@ -281,7 +281,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: VarMasking4
+  project: AirTemp0
   entity: ai2cm
 train_loader:
   batch_size: 8
@@ -528,3 +528,6 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
+      global_mean_removal:
+        kind: shared
+        append_as_input: true

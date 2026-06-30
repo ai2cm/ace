@@ -281,7 +281,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: VarMasking4
+  project: AirTemp0
   entity: ai2cm
 train_loader:
   batch_size: 8
@@ -296,7 +296,7 @@ train_loader:
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
       engine: zarr
       subset:
-        start_time: '1979-01-01'
+        start_time: '1940-01-03'
         stop_time: '1993-12-31'
     - data_path: /climate-default
       file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
@@ -530,6 +530,3 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
-      global_mean_removal:
-        kind: shared
-        append_as_input: true
