@@ -629,9 +629,22 @@ a variable's local extremes gives that variable tail-relevant gradient (the
 under-dispersed channels get pushed harder automatically).
 
 **Architectural reality to solve first.** The critic is a *projected* GAN on the
-**teacher's entangled encoder features**, not on separable per-variable output
-channels — so "one critic per output variable" isn't clean at the feature level
-(the bottleneck feature doesn't decompose per-variable). Realistic routes:
+**teacher's entangled ENCODER features** (`_capture_encoder_features` hooks
+`unet.enc[block_key]` only — `fastgen_teacher.py:347`), not on the decoder or the
+reconstructed output, and not on separable per-variable channels — so "one critic
+per output variable" isn't clean at the feature level (the bottleneck feature
+doesn't decompose per-variable, and the encoder mixes channels from layer 1).
+
+**New axis (2026-06-30): encoder vs decoder tap.** The teacher forward runs the
+full U (encoder→bottleneck→decoder→x0) in one call, so we can hook `unet.dec`
+instead of/in addition to `unet.enc`. Decoder features are **output-aligned** (the
+decoder reconstructs toward x0, fusing skips), so a decoder-side critic polices
+fine-scale, output-relevant structure rather than compressed input semantics — the
+right end for the per-variable / tail goals. Per-variable separability still only
+appears at the **final output projection**, so clean per-variable critics still
+mean output-space (pixel/spectral) critics; the decoder is the richer *intermediate*
+between encoder-projected and raw-pixel. So the lever generalizes from "encoder tap
+depth" to **where in the U (encoder vs decoder, how deep)**. Realistic routes:
 - **Per-variable critics in output (pixel/spectral) space** — abandon the
   projected/feature design for a per-variable patch or *spectral* discriminator.
   Cleanest per-variable signal; also the natural home for a spectral-shape critic.
