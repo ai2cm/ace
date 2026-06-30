@@ -65,7 +65,7 @@ def test_bernoulli_rate_zero_keeps_all():
 
 
 def test_rate_one_var_dropped_with_no_uniform_slots():
-    """With max_masked_vars=0 a rate-1 var is still dropped via the OR."""
+    """A rate-1 var is dropped solely by its Bernoulli, even with no uniform."""
     config = VariableMaskingConfig(
         max_masked_vars=0, variable_masking_rates={"var_0": 1.0}
     )
@@ -86,30 +86,64 @@ def test_rate_one_var_always_dropped():
     for _ in range(128):
         mask = config.sample_mask(names, DEVICE)
         assert not bool(mask[0, 0].item()), "rate-1 var must always be dropped"
-        # k in [0, 2] plus the guaranteed var_0 (which may overlap the uniform set)
+        # var_0 (named) is excluded from the uniform pool of 4, so the dropped
+        # count is exactly 1 (guaranteed var_0) plus k in [0, 2].
         assert 1 <= int((~mask).sum().item()) <= 3
 
 
-def test_fired_var_in_uniform_set_does_not_double_count():
-    """A fired var the uniform draw already dropped stays dropped (idempotent OR).
+def test_named_vars_excluded_from_uniform_pool():
+    """Named channels are never dropped by the uniform mechanism.
 
-    With max_masked_vars == n_channels and a single rate-1 var, the dropped
-    count never exceeds n_channels.
+    A rate-0 named var must stay present no matter how large max_masked_vars
+    is, because it is excluded from the uniform pool entirely.
     """
     n = 4
     config = VariableMaskingConfig(
-        max_masked_vars=n, variable_masking_rates={"var_0": 1.0}
+        max_masked_vars=n, variable_masking_rates={"var_0": 0.0}
     )
     names = _names(n)
     for _ in range(256):
         mask = config.sample_mask(names, DEVICE)
-        n_masked = int((~mask).sum().item())
-        assert 1 <= n_masked <= n
-        assert not bool(mask[0, 0].item())
+        assert bool(mask[0, 0].item()), "rate-0 named var must never be dropped"
+        # uniform pool is var_1..var_3 (3 channels), so at most 3 are dropped
+        assert 0 <= int((~mask).sum().item()) <= n - 1
+
+
+def test_uniform_count_capped_at_pool_size():
+    """The uniform count is capped at the number of unnamed channels."""
+    n = 5
+    config = VariableMaskingConfig(
+        max_masked_vars=100,
+        variable_masking_rates={"var_0": 0.0, "var_1": 0.0},
+    )
+    names = _names(n)
+    for _ in range(64):
+        mask = config.sample_mask(names, DEVICE)
+        # var_0, var_1 are rate-0 and excluded; pool is the other 3 channels
+        assert bool(mask[0, 0].item()) and bool(mask[0, 1].item())
+        assert 0 <= int((~mask).sum().item()) <= 3
+
+
+def test_marginal_rate_independent_of_uniform():
+    """A named var's drop frequency matches its rate, independent of uniform."""
+    n = 6
+    rate = 0.5
+    config = VariableMaskingConfig(
+        max_masked_vars=n, variable_masking_rates={"var_0": rate}
+    )
+    names = _names(n)
+    torch.manual_seed(0)
+    trials = 4000
+    dropped = sum(
+        int(not bool(config.sample_mask(names, DEVICE)[0, 0].item()))
+        for _ in range(trials)
+    )
+    freq = dropped / trials
+    assert abs(freq - rate) < 0.05, f"expected ~{rate}, got {freq}"
 
 
 def test_multiple_fired_vars_all_dropped():
-    """OR-combining: all fired vars are dropped, count >= number fired."""
+    """All fired vars are dropped; with all channels named, count == n."""
     n = 5
     config = VariableMaskingConfig(
         max_masked_vars=1,
@@ -118,5 +152,5 @@ def test_multiple_fired_vars_all_dropped():
     names = _names(n)
     for _ in range(128):
         mask = config.sample_mask(names, DEVICE)
-        # all n vars fire, so all are dropped regardless of k
+        # all n vars fire (and the uniform pool is empty), so all are dropped
         assert int((~mask).sum().item()) == n

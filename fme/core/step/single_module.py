@@ -440,11 +440,7 @@ class SingleModuleStep(StepABC):
             return None
         names = self.in_packer.names
         mask = self._config.input_dropout.sample_mask(names, device)
-        # The mask has no spatial dim, so it cannot be sliced per-tile. Under
-        # spatial/model parallelism every co-rank holds the same samples but
-        # advances torch.rand independently; broadcast the spatial root's mask
-        # so all tiles agree. Data-parallel ranks keep distinct masks (the
-        # backend broadcasts over the spatial group only).
+        # Broadcast mask so all spatial ranks agree; data parallel gets distinct masks.
         mask = Distributed.get_instance().broadcast_spatial(mask)
         return {name: mask[:, i] for i, name in enumerate(names)}
 
@@ -555,17 +551,14 @@ def _build_channel_mask_dict(
     device = packed_input.device
     result: TensorDict = {}
     for name in in_names:
-        # GMR sentinel channels share their source field's mask: the extra
-        # value is already zeroed in forward_transform when the source is
-        # masked, so the mask channel must agree rather than default to 1.
+        # Use the source field mask for GMR sentinel channels
         source = extra_channel_source_field(name)
         lookup_name = source if source is not None else name
         if data_mask is not None and lookup_name in data_mask:
             real = data_mask[lookup_name].to(device=device).bool()
         else:
             real = torch.ones(batch, device=device, dtype=torch.bool)
-        # Synthetic dropout is keyed by packed channel name directly (GMR
-        # extras are independently maskable), not by the source field.
+        # Synthetic dropout is keyed by the packed channel name itself
         if input_dropout_mask is not None and name in input_dropout_mask:
             synthetic = input_dropout_mask[name].to(device=device).bool()
             combined = real & synthetic

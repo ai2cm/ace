@@ -1672,9 +1672,6 @@ class TrainStepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
-        # Sample the synthetic input-dropout mask once per rollout. The mask is
-        # broadcast over the whole batch (shape [1]), so it is shared across all
-        # samples and ensemble members with no ensemble threading.
         sample_tensor = next(iter(input_batch_data.data.values()))
         input_dropout_mask = self._stepper.make_input_dropout_mask(
             device=sample_tensor.device,
