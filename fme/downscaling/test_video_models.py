@@ -15,7 +15,10 @@ from fme.downscaling.data.datasets import (
     VideoBatchItem,
 )
 from fme.downscaling.data.time_encoding import compute_calendar_features
-from fme.downscaling.noise import LogNormalNoiseDistribution, LogUniformNoiseDistribution
+from fme.downscaling.noise import (
+    LogNormalNoiseDistribution,
+    LogUniformNoiseDistribution,
+)
 from fme.downscaling.video_models import VideoDiffusionModelConfig
 
 OUT_NAMES = ["var0", "var1"]
@@ -46,7 +49,7 @@ def _paired_batch(batch_size, n_times, height, width):
     return PairedVideoBatchData(fine=clip, coarse=clip)
 
 
-def _model(n_times, temporal_noise_correlation="independent"):
+def _model(n_times, temporal_noise_correlation="independent", **config_kwargs):
     config = VideoDiffusionModelConfig(
         out_names=OUT_NAMES,
         n_timesteps=n_times,
@@ -58,6 +61,7 @@ def _model(n_times, temporal_noise_correlation="independent"):
         n_heads=2,
         num_freqs=3,
         temporal_noise_correlation=temporal_noise_correlation,
+        **config_kwargs,
     )
     return config.build()
 
@@ -72,9 +76,7 @@ def test_train_on_batch_runs_and_backprops():
     assert outputs.loss.requires_grad
     # gradients flow into the network
     outputs.loss.backward()
-    grads = [
-        p.grad for p in model.module.parameters() if p.grad is not None
-    ]
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
     assert len(grads) > 0
     assert all(torch.isfinite(g).all() for g in grads)
     # prediction is a full clip per variable
@@ -132,7 +134,8 @@ def test_per_channel_sigma_data():
     model = config.build()
     bare = getattr(model.module, "module", model.module)
     assert torch.allclose(
-        bare.sigma_data.flatten(), torch.tensor([0.2, 1.0], device=bare.sigma_data.device)
+        bare.sigma_data.flatten(),
+        torch.tensor([0.2, 1.0], device=bare.sigma_data.device),
     )
     assert model.sigma_data.shape == (1, 2, 1, 1, 1)
     # train + generate still run end to end with per-channel sigma_data
@@ -216,3 +219,79 @@ def test_invalid_temporal_noise_correlation_rejected():
             ),
             temporal_noise_correlation="bridge",
         )
+
+
+@pytest.mark.parametrize(
+    "temporal_noise_correlation", ["independent", "brownian_bridge"]
+)
+def test_generate_subset_frames(temporal_noise_correlation):
+    # full grid is 9 frames (00..24 at 3h); request a non-uniform subset
+    n_times, height, width = 9, 8, 8
+    model = _model(n_times, temporal_noise_correlation=temporal_noise_correlation)
+    batch = _paired_batch(batch_size=2, n_times=n_times, height=height, width=width)
+
+    frames = [0, 3, 7, 8]  # endpoints + two non-uniformly spaced interior frames
+    generated = model.generate(batch, n_samples=3, frames=frames)
+    out = generated["var0"]
+    assert out.shape == (2, 3, len(frames), height, width)
+    assert torch.isfinite(out).all()
+
+    # observed endpoints (first/last of the subset) reproduced exactly
+    truth = batch.fine.data["var0"]
+    for s in range(3):
+        assert torch.allclose(out[:, s, 0], truth[:, 0], atol=1e-4)
+        assert torch.allclose(out[:, s, -1], truth[:, -1], atol=1e-4)
+
+
+def test_generate_rejects_invalid_frames():
+    n_times = 9
+    model = _model(n_times)
+    batch = _paired_batch(batch_size=1, n_times=n_times, height=8, width=8)
+    # must include both endpoints
+    with pytest.raises(ValueError, match="start at 0 and end at"):
+        model.generate(batch, frames=[0, 3, 6])
+    # must be strictly increasing
+    with pytest.raises(ValueError, match="strictly increasing"):
+        model.generate(batch, frames=[0, 3, 3, 8])
+    # needs at least one interior frame
+    with pytest.raises(ValueError, match="at least 3 frame indices"):
+        model.generate(batch, frames=[0, 8])
+
+
+@pytest.mark.parametrize(
+    "temporal_noise_correlation", ["independent", "brownian_bridge"]
+)
+def test_subset_augmented_training_runs(temporal_noise_correlation):
+    n_times, height, width = 9, 8, 8
+    model = _model(
+        n_times,
+        temporal_noise_correlation=temporal_noise_correlation,
+        subset_augmentation_prob=1.0,  # always subset, to exercise the path
+        subset_min_interior=1,
+    )
+    batch = _paired_batch(batch_size=2, n_times=n_times, height=height, width=width)
+    set_seed(0)
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0 and all(torch.isfinite(g).all() for g in grads)
+    # prediction and target stay aligned on the (subset) frame axis
+    assert outputs.prediction["var0"].shape == outputs.target["var0"].shape
+    assert outputs.prediction["var0"].shape[1] < n_times
+
+
+def test_subset_augmentation_prob_zero_is_full_grid():
+    n_times = 9
+    model = _model(n_times, subset_augmentation_prob=0.0)
+    batch = _paired_batch(batch_size=2, n_times=n_times, height=8, width=8)
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert outputs.prediction["var0"].shape[1] == n_times
+
+
+def test_invalid_subset_config_rejected():
+    with pytest.raises(ValueError, match="subset_augmentation_prob"):
+        _model(5, subset_augmentation_prob=1.5)
+    with pytest.raises(ValueError, match="subset_min_interior"):
+        _model(5, subset_min_interior=4)  # n_timesteps - 2 == 3

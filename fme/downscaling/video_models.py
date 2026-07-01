@@ -24,6 +24,7 @@ from fme.downscaling.noise import (
     LogUniformNoiseDistribution,
     NoiseDistribution,
     brownian_bridge_mixing_matrix,
+    uniform_frame_times,
 )
 from fme.downscaling.requirements import DataRequirements
 
@@ -38,12 +39,24 @@ def _interior_mask(n_times: int, device: torch.device) -> torch.Tensor:
     return mask.reshape(1, 1, n_times, 1, 1)
 
 
-def _linear_interp_endpoints(field: torch.Tensor) -> torch.Tensor:
-    """Temporal linear interpolation of the two endpoints along the time axis."""
+def _linear_interp_endpoints(
+    field: torch.Tensor, tau: torch.Tensor | None = None
+) -> torch.Tensor:
+    """Temporal linear interpolation of the two endpoints along the time axis.
+
+    ``tau`` gives the normalized time of each frame in ``[0, 1]`` (endpoints at 0
+    and 1). When omitted the frames are assumed uniformly spaced, reproducing the
+    ``linspace`` weights; passing the true ``tau`` lets the baseline stay correct
+    for a non-uniform subset of frames.
+    """
     n_times = field.shape[-3]
     shape = [1] * field.dim()
     shape[-3] = n_times
-    w = torch.linspace(0.0, 1.0, n_times, device=field.device).reshape(shape)
+    if tau is None:
+        w = torch.linspace(0.0, 1.0, n_times, device=field.device)
+    else:
+        w = tau.to(device=field.device, dtype=field.dtype)
+    w = w.reshape(shape)
     x0 = field[..., 0:1, :, :]
     xT = field[..., n_times - 1 : n_times, :, :]
     return (1 - w) * x0 + w * xT
@@ -93,6 +106,13 @@ class VideoDiffusionModelConfig:
     # Temporal correlation of the residual noise: "independent" (per-frame white
     # noise, default) or "brownian_bridge" (endpoint-pinned time-correlated noise).
     temporal_noise_correlation: str = "independent"
+    # Fraction of training batches trained on a random subset of interior frames
+    # (the two endpoints are always kept) instead of the full uniform grid, so the
+    # model learns to answer variable query sets and stays consistent across them.
+    # 0.0 (default) trains only on the full grid -- exact prior behavior.
+    subset_augmentation_prob: float = 0.0
+    # Minimum number of interior frames to keep when a batch is subsetted.
+    subset_min_interior: int = 1
 
     def __post_init__(self):
         if self.n_timesteps < 3:
@@ -141,7 +161,9 @@ class VideoDiffusionModelConfig:
                 "log_transform_channels contains channels not in out_names: "
                 f"{sorted(unknown_log)}"
             )
-        if any(lvl not in range(len(self.channel_mult)) for lvl in self.attention_levels):
+        if any(
+            lvl not in range(len(self.channel_mult)) for lvl in self.attention_levels
+        ):
             raise ValueError(
                 f"attention_levels {self.attention_levels} must index into "
                 f"channel_mult (0..{len(self.channel_mult) - 1})."
@@ -157,8 +179,21 @@ class VideoDiffusionModelConfig:
                 "temporal_noise_correlation must be 'independent' or "
                 f"'brownian_bridge', got {self.temporal_noise_correlation}."
             )
+        if not 0.0 <= self.subset_augmentation_prob <= 1.0:
+            raise ValueError(
+                "subset_augmentation_prob must be in [0, 1], got "
+                f"{self.subset_augmentation_prob}."
+            )
+        max_interior = self.n_timesteps - 2
+        if not 1 <= self.subset_min_interior <= max_interior:
+            raise ValueError(
+                f"subset_min_interior must be in [1, {max_interior}] "
+                f"(n_timesteps - 2), got {self.subset_min_interior}."
+            )
         if self.backbone not in ("simple", "songunet"):
-            raise ValueError(f"backbone must be 'simple' or 'songunet', got {self.backbone}.")
+            raise ValueError(
+                f"backbone must be 'simple' or 'songunet', got {self.backbone}."
+            )
         if self.noise_embedding_type not in ("positional", "fourier"):
             raise ValueError(
                 "noise_embedding_type must be 'positional' or 'fourier', got "
@@ -302,9 +337,13 @@ class VideoDiffusionModel:
         self.packer = Packer(out_names)
         self.n_timesteps = config.n_timesteps
         self.log_transform_channels = dict(config.log_transform_channels or {})
-        if config.temporal_noise_correlation == "brownian_bridge":
+        # normalized full-grid frame times (endpoints at 0/1) used to derive the
+        # baseline weights and bridge kernel for whatever frame subset is in play.
+        self._full_tau = uniform_frame_times(config.n_timesteps)
+        self._bridge_noise = config.temporal_noise_correlation == "brownian_bridge"
+        if self._bridge_noise:
             self._noise_mixing: torch.Tensor | None = brownian_bridge_mixing_matrix(
-                config.n_timesteps
+                self._full_tau
             ).to(get_device())
         else:
             self._noise_mixing = None
@@ -313,14 +352,104 @@ class VideoDiffusionModel:
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
 
-    def _sample_residual_noise(self, like: torch.Tensor) -> torch.Tensor:
+    def _sample_residual_noise(
+        self, like: torch.Tensor, mixing: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """White noise shaped like ``like`` (B, C, T, H, W), temporally correlated
-        with the Brownian-bridge kernel when configured, else independent."""
+        with ``mixing`` when given (Brownian-bridge kernel), else independent.
+
+        ``mixing`` defaults to the full-grid bridge matrix; pass a subset matrix
+        for a subset of frames, or ``None`` stays independent (mixing is ``None``
+        in independent mode regardless).
+        """
         noise = randn_like(like)
-        if self._noise_mixing is None:
+        if mixing is None:
+            mixing = self._noise_mixing
+        if mixing is None:
             return noise
-        mixing = self._noise_mixing.to(device=noise.device, dtype=noise.dtype)
+        mixing = mixing.to(device=noise.device, dtype=noise.dtype)
         return torch.einsum("ti,bcihw->bcthw", mixing, noise)
+
+    def _tau_for_indices(self, idx: torch.Tensor | None) -> torch.Tensor | None:
+        """Normalized frame times for a subset of the full grid (``None`` = full
+        grid, where the ``linspace`` default in the baseline already applies).
+        """
+        if idx is None:
+            return None
+        return self._full_tau.to(idx.device).index_select(0, idx)
+
+    def _mixing_for_indices(self, idx: torch.Tensor | None) -> torch.Tensor | None:
+        """Bridge mixing matrix for a subset of frames -- the full-window bridge
+        restricted to ``idx``. ``None`` for independent noise or the full grid.
+        """
+        if not self._bridge_noise:
+            return None
+        if idx is None:
+            return self._noise_mixing
+        tau = self._full_tau.index_select(0, idx.cpu())
+        return brownian_bridge_mixing_matrix(tau).to(get_device())
+
+    def _sample_training_subset_indices(
+        self, n_times: int, device: torch.device
+    ) -> torch.Tensor | None:
+        """Randomly pick frame indices (always keeping the two endpoints) for
+        subset-augmented training, or ``None`` to train on the full grid.
+
+        The choice is drawn on rank 0 and broadcast so every rank -- data- or
+        model-parallel -- trains on the identical temporal shape.
+        """
+        if self.config.subset_augmentation_prob <= 0.0:
+            return None
+        dist = Distributed.get_instance()
+        seed = torch.randint(0, 2**31 - 1, (1,), device=device)
+        if dist.rank != 0:
+            seed.zero_()
+        seed = int(dist.reduce_sum(seed).item())
+        gen = torch.Generator().manual_seed(seed)
+        if float(torch.rand((), generator=gen)) >= self.config.subset_augmentation_prob:
+            return None
+        n_interior = n_times - 2
+        n_keep = int(
+            torch.randint(
+                self.config.subset_min_interior, n_interior + 1, (1,), generator=gen
+            )
+        )
+        if n_keep >= n_interior:
+            return None  # kept everything -> full grid
+        interior = torch.randperm(n_interior, generator=gen)[:n_keep] + 1
+        interior = torch.sort(interior).values
+        idx = torch.cat(
+            [
+                torch.zeros(1, dtype=torch.long),
+                interior,
+                torch.full((1,), n_times - 1, dtype=torch.long),
+            ]
+        )
+        return idx.to(device)
+
+    @staticmethod
+    def _validate_frames(
+        frames: "list[int] | None", n_times: int, device: torch.device
+    ) -> torch.Tensor | None:
+        """Validate a requested frame subset for ``generate`` and return it as a
+        LongTensor of indices into the full grid, or ``None`` for the full grid.
+        """
+        if frames is None:
+            return None
+        idx = torch.as_tensor(list(frames), dtype=torch.long)
+        if idx.ndim != 1 or idx.numel() < 3:
+            raise ValueError(
+                "frames must list at least 3 frame indices (2 endpoints + "
+                f"interior), got {list(frames)}."
+            )
+        if int(idx[0]) != 0 or int(idx[-1]) != n_times - 1:
+            raise ValueError(
+                f"frames must start at 0 and end at {n_times - 1} (the observed "
+                f"endpoints), got {list(frames)}."
+            )
+        if not bool(torch.all(idx[1:] > idx[:-1])):
+            raise ValueError(f"frames must be strictly increasing, got {list(frames)}.")
+        return idx.to(device)
 
     def _pack_normalized(self, data: TensorMapping) -> torch.Tensor:
         selected = {
@@ -350,7 +479,9 @@ class VideoDiffusionModel:
         """Observed-endpoint values + a binary observed mask channel."""
         observed = 1.0 - interior_mask
         observed_values = clip * observed
-        mask_channel = observed.expand(clip.shape[0], 1, -1, clip.shape[-2], clip.shape[-1])
+        mask_channel = observed.expand(
+            clip.shape[0], 1, -1, clip.shape[-2], clip.shape[-1]
+        )
         return torch.cat([observed_values, mask_channel], dim=CHANNEL_AXIS)
 
     def _calendar_inputs(self, batch_fine):
@@ -366,18 +497,31 @@ class VideoDiffusionModel:
     def train_on_batch(self, batch: PairedVideoBatchData, optimizer) -> ModelOutputs:
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
+        day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+
+        # Optionally train on a random subset of interior frames (endpoints kept)
+        # so the model learns to answer variable query sets; the bridge noise and
+        # baseline follow the subset's true times, i.e. the full-window marginal.
+        idx = self._sample_training_subset_indices(clip.shape[2], clip.device)
+        if idx is not None:
+            clip = clip.index_select(2, idx)
+            day_of_year = day_of_year.index_select(1, idx)
+            second_of_day = second_of_day.index_select(1, idx)
         batch_size, _, n_times, _, _ = clip.shape
-        baseline = _linear_interp_endpoints(clip)
+        tau = self._tau_for_indices(idx)
+
+        baseline = _linear_interp_endpoints(clip, tau)
         residual = clip - baseline  # ~0 at endpoints by construction
 
         interior = _interior_mask(n_times, clip.device)
         condition = self._conditioning(clip, interior)
-        day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+        mixing = self._mixing_for_indices(idx)
 
         sigma = self.config.sample_training_noise(batch_size, clip.device)
         sigma = sigma.reshape(batch_size, -1, 1, 1, 1)
         # Gaussian noise on interior frames only
-        noised = residual + self._sample_residual_noise(residual) * sigma * interior
+        noise = self._sample_residual_noise(residual, mixing)
+        noised = residual + noise * sigma * interior
 
         denoised = self.module(
             noised, condition, sigma, day_of_year, second_of_day, lon
@@ -412,7 +556,11 @@ class VideoDiffusionModel:
                 / per_sample_denominator.flatten()
                 for i, name in enumerate(self.out_names)
             }
-        target = {k: fine.data[k] for k in self.out_names}
+        # keep target aligned with the (possibly subset) prediction frames
+        target = {
+            k: fine.data[k] if idx is None else fine.data[k].index_select(1, idx)
+            for k in self.out_names
+        }
         return ModelOutputs(
             prediction=prediction,
             target=target,
@@ -427,14 +575,35 @@ class VideoDiffusionModel:
         )
 
     @torch.no_grad()
-    def generate(self, batch: PairedVideoBatchData, n_samples: int = 1) -> TensorDict:
+    def generate(
+        self,
+        batch: PairedVideoBatchData,
+        n_samples: int = 1,
+        frames: list[int] | None = None,
+    ) -> TensorDict:
+        """Generate the interior frames conditioned on the observed endpoints.
+
+        ``frames`` optionally restricts generation to a subset of frame indices
+        into the full ``n_timesteps`` grid; it must start at 0 and end at
+        ``n_timesteps - 1`` (the observed endpoints) and be strictly increasing.
+        The returned clips then contain only those frames. The baseline and the
+        bridge noise use the subset's true times, so a subset draws from the
+        exact marginal of the full-window process. Defaults to the full grid.
+        """
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
+        day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+        idx = self._validate_frames(frames, clip.shape[2], clip.device)
+        if idx is not None:
+            clip = clip.index_select(2, idx)
+            day_of_year = day_of_year.index_select(1, idx)
+            second_of_day = second_of_day.index_select(1, idx)
         batch_size, n_channels, n_times, height, width = clip.shape
-        baseline = _linear_interp_endpoints(clip)
+        tau = self._tau_for_indices(idx)
+        baseline = _linear_interp_endpoints(clip, tau)
         interior = _interior_mask(n_times, clip.device)
         condition = self._conditioning(clip, interior)
-        day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+        mixing = self._mixing_for_indices(idx)
 
         def repeat(t):
             return t.repeat_interleave(n_samples, dim=0)
@@ -447,9 +616,14 @@ class VideoDiffusionModel:
 
         latents = self._sample_residual_noise(
             torch.empty(
-                batch_size * n_samples, n_channels, n_times, height, width,
+                batch_size * n_samples,
+                n_channels,
+                n_times,
+                height,
+                width,
                 device=clip.device,
-            )
+            ),
+            mixing,
         )
         sigma_min, sigma_max = self.config.generation_sigma_bounds(clip.device)
         residual = _video_edm_sample(
@@ -464,7 +638,7 @@ class VideoDiffusionModel:
             sigma_min=sigma_min,
             sigma_max=sigma_max,
             s_churn=self.config.churn,
-            noise_mixing=self._noise_mixing,
+            noise_mixing=mixing,
         )
         full_norm = baseline + residual
         generated = self._denormalize_invert(full_norm)
@@ -498,7 +672,8 @@ def _video_edm_sample(
 ) -> torch.Tensor:
     """EDM stochastic sampler that keeps the observed endpoints pinned (re-zeroed
     after every update). When ``noise_mixing`` is given, the stochastic churn noise
-    is temporally correlated with that mixing matrix (matching the training noise)."""
+    is temporally correlated with that mixing matrix (matching the training noise).
+    """
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
     sigma_min_t = torch.as_tensor(
         sigma_min, dtype=compute_dtype, device=latents.device
@@ -506,14 +681,12 @@ def _video_edm_sample(
     sigma_max_t = torch.as_tensor(
         sigma_max, dtype=compute_dtype, device=latents.device
     ).reshape(1, -1, 1, 1, 1)
-    step = torch.arange(
-        num_steps, dtype=compute_dtype, device=latents.device
-    ).reshape(-1, 1, 1, 1, 1)
+    step = torch.arange(num_steps, dtype=compute_dtype, device=latents.device).reshape(
+        -1, 1, 1, 1, 1
+    )
     t = (
         sigma_max_t ** (1 / rho)
-        + step
-        / (num_steps - 1)
-        * (sigma_min_t ** (1 / rho) - sigma_max_t ** (1 / rho))
+        + step / (num_steps - 1) * (sigma_min_t ** (1 / rho) - sigma_max_t ** (1 / rho))
     ) ** rho
     t = torch.cat([t, torch.zeros_like(t[:1])])
     mask = interior_mask.to(compute_dtype)

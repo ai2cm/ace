@@ -56,43 +56,63 @@ class LogUniformNoiseDistribution(NoiseDistribution):
         ).to(device)
 
 
-def brownian_bridge_mixing_matrix(n_timesteps: int) -> torch.Tensor:
+def uniform_frame_times(n_timesteps: int) -> torch.Tensor:
+    """Normalized times of ``n_timesteps`` uniformly spaced frames on ``[0, 1]``.
+
+    Endpoints land exactly on 0 and 1; interior frames on ``k / (T - 1)``.
+    """
+    return torch.linspace(0.0, 1.0, n_timesteps, dtype=torch.float64)
+
+
+def brownian_bridge_mixing_matrix(tau: torch.Tensor) -> torch.Tensor:
     """Temporal mixing matrix for endpoint-pinned, time-correlated noise.
 
-    Returns a ``(T, T)`` matrix ``M`` such that, given white noise
-    ``Z ~ N(0, I)`` of shape ``(..., T, ...)`` mixed along the time axis as
-    ``E = M @ Z``, the noise ``E`` has a Brownian-bridge *correlation* structure
-    across the interior frames and is exactly zero on the two endpoint frames.
+    Given the normalized frame times ``tau`` (1-D, length ``T``, with
+    ``tau[0] == 0`` and ``tau[-1] == 1`` marking the pinned endpoints and the
+    interior strictly inside ``(0, 1)``), returns a ``(T, T)`` matrix ``M`` such
+    that white noise ``Z ~ N(0, I)`` mixed along the time axis as ``E = M @ Z``
+    has a Brownian-bridge *correlation* structure across the interior frames and
+    is exactly zero on the two endpoint frames.
 
-    The Brownian-bridge covariance on normalized times ``tau_k = k / (T - 1)``
-    (with bridge length 1) is ``k_BB(s, t) = min(s, t) - s * t``. It vanishes at
-    both endpoints, matching the endpoint-pinned residual the video model
-    diffuses. We normalize it to a *correlation* matrix (unit diagonal on the
-    interior) so that, when scaled by the EDM noise level ``sigma``, each frame's
-    marginal noise std stays ``sigma`` -- only the cross-time correlation is
-    introduced. ``M`` is the Cholesky factor of that correlation matrix placed
-    into the interior block; the endpoint rows/cols are all zero.
+    The Brownian-bridge covariance ``k_BB(s, t) = min(s, t) - s * t`` (bridge
+    length 1) vanishes at both endpoints, matching the endpoint-pinned residual
+    the video model diffuses. We normalize it to a *correlation* matrix (unit
+    diagonal on the interior) so that, when scaled by the EDM noise level
+    ``sigma``, each frame's marginal noise std stays ``sigma`` -- only the
+    cross-time correlation is introduced. ``M`` is the Cholesky factor of that
+    correlation matrix placed into the interior block; the endpoint rows/cols are
+    all zero.
+
+    Because every entry depends only on its own pair ``(tau_i, tau_j)``, the
+    matrix built for any *subset* of frame times equals the full-grid matrix
+    restricted to those frames. Generating a subset of frames therefore draws
+    from the exact *marginal* of the full-window bridge -- the noise obeys the
+    same process whether or not the other frames are requested.
 
     Args:
-        n_timesteps: Number of frames ``T`` (>= 3: two endpoints + interior).
+        tau: Normalized frame times, shape ``(T,)`` with ``T >= 3``, sorted with
+            endpoints at 0 and 1 and interior values in ``(0, 1)``.
 
     Returns:
-        A ``(T, T)`` float32 tensor on the CPU.
+        A ``(T, T)`` float32 tensor on ``tau``'s device.
     """
-    if n_timesteps < 3:
+    if tau.ndim != 1 or tau.shape[0] < 3:
         raise ValueError(
             "Brownian-bridge noise needs at least 3 frames (2 endpoints + 1 "
-            f"interior), got n_timesteps={n_timesteps}."
+            f"interior); got tau with shape {tuple(tau.shape)}."
         )
+    n_timesteps = tau.shape[0]
     n_interior = n_timesteps - 2
-    tau = torch.arange(1, n_timesteps - 1, dtype=torch.float64) / (n_timesteps - 1)
-    s = tau.reshape(-1, 1)
-    t = tau.reshape(1, -1)
+    tau_i = tau[1:-1].to(torch.float64)
+    s = tau_i.reshape(-1, 1)
+    t = tau_i.reshape(1, -1)
     cov = torch.minimum(s, t) - s * t  # interior Brownian-bridge covariance
     std = cov.diagonal().sqrt()
     corr = cov / torch.outer(std, std)  # normalize to unit diagonal
     chol = torch.linalg.cholesky(corr)  # lower-triangular, corr == chol @ chol.T
-    mixing = torch.zeros(n_timesteps, n_timesteps, dtype=torch.float64)
+    mixing = torch.zeros(
+        n_timesteps, n_timesteps, dtype=torch.float64, device=tau.device
+    )
     mixing[1 : 1 + n_interior, 1 : 1 + n_interior] = chol
     return mixing.to(torch.float32)
 
