@@ -111,6 +111,15 @@ _DEFAULT_TAIL_HIST_RANGES: dict[str, tuple[float, float]] = {
 # Variables not listed default to "upper".
 _DEFAULT_TAIL_DIRECTIONS: dict[str, str] = {"PRMSL": "lower"}
 
+# Per-variable reference value from which tail *extremity* is measured, so the
+# metric is a ratio of ANOMALIES rather than raw values.  Critical for PRMSL: a
+# ratio of raw pressures (~1000 hPa offset) is ~1.0 even for a several-hPa
+# deep-low error, so it's blind to the extreme that matters.  Measuring depth
+# below a standard 1000 hPa (``1000 - p_0.01``) makes the ratio sensitive.
+# Zero-referenced variables (winds ~0-centered, precip ≥0) keep the raw-value
+# ratio (reference 0.0), i.e. unchanged behavior.
+_DEFAULT_TAIL_REFERENCES: dict[str, float] = {"PRMSL": 1000.0}  # hPa
+
 
 def _tail_quantile_level(percentile: float, direction: str) -> float:
     """Map an extremeness ``percentile`` + tail ``direction`` to a CDF quantile.
@@ -122,6 +131,23 @@ def _tail_quantile_level(percentile: float, direction: str) -> float:
         return percentile / 100.0
     if direction == "lower":
         return 1.0 - percentile / 100.0
+    raise ValueError(f"tail direction must be 'upper' or 'lower', got {direction!r}")
+
+
+def _tail_magnitude(quantile_value: float, reference: float, direction: str) -> float:
+    """Extremity magnitude of a tail quantile, measured from ``reference``.
+
+    ``"upper"`` → ``quantile_value - reference`` (how far above); ``"lower"`` →
+    ``reference - quantile_value`` (how far below).  With ``reference=0`` this is
+    the raw value (unchanged for zero-referenced variables); for PRMSL
+    (``reference=1000``, ``"lower"``) it is the depth below 1000 hPa, so the
+    student/target ratio reflects deep-low anomalies rather than absolute
+    pressures (a ratio of ~1000 hPa values would be ~1.0 regardless of error).
+    """
+    if direction == "upper":
+        return quantile_value - reference
+    if direction == "lower":
+        return reference - quantile_value
     raise ValueError(f"tail direction must be 'upper' or 'lower', got {direction!r}")
 
 
@@ -193,10 +219,11 @@ class BestStudentCheckpointCallback:
             (default ``[99.99, 99.9999]``).  Applied per ``tail_directions``:
             an ``"upper"`` variable uses quantile ``pct/100``, a ``"lower"``
             variable its reflection ``1 - pct/100``.  Each is logged as
-            ``val/tail_<pct>_<var>`` = student_pXX / target_pXX (values < 1
-            mean the student under-predicts the tail extreme, > 1 over-
-            predicts).  The (std-normalized, var-averaged) CRPS remains the
-            ``best_checkpoint_path`` criterion; see
+            ``val/tail_<pct>_<var>`` = ratio of the student vs target tail
+            *anomaly* (distance from ``tail_references[var]`` in the tail
+            direction; values < 1 mean the student under-predicts the extreme,
+            > 1 over-predicts).  The (std-normalized, var-averaged) CRPS remains
+            the ``best_checkpoint_path`` criterion; see
             ``best_tail_checkpoint_path`` for tail-driven selection.
         tail_hist_ranges: Per-variable ``(lo, hi)`` ranges (physical units)
             used to bin values for percentile estimation; must bracket the
@@ -206,6 +233,12 @@ class BestStudentCheckpointCallback:
         tail_directions: Per-variable tail side, ``"upper"`` or ``"lower"``.
             Defaults to ``_DEFAULT_TAIL_DIRECTIONS`` (PRMSL → ``"lower"`` for
             deep-low extremes, everything else → ``"upper"``).
+        tail_references: Per-variable reference from which the tail *anomaly* is
+            measured, so the ratio is of anomalies not raw values.  Defaults to
+            ``_DEFAULT_TAIL_REFERENCES`` (PRMSL → 1000 hPa, so the metric is the
+            depth-below-1000 ratio; a raw-pressure ratio is ~1.0 regardless of
+            deep-low error).  Unlisted variables use 0.0 (raw-value ratio,
+            unchanged) — appropriate for the ~0-centered winds and ≥0 precip.
         tail_hist_bins: Number of equal-width bins inside each variable's
             range (default 10000).  Resolution is ``(hi - lo) / tail_hist_bins``
             — for PRATEsfc that's 1e-5 kg/m²/s.
@@ -249,6 +282,7 @@ class BestStudentCheckpointCallback:
         tail_percentiles: list[float] | None = None,
         tail_hist_ranges: dict[str, tuple[float, float]] | None = None,
         tail_directions: dict[str, str] | None = None,
+        tail_references: dict[str, float] | None = None,
         tail_hist_bins: int = 10000,
         best_tail_checkpoint_path: str | None = None,
         validation_mode: str = "from_noise",
@@ -281,6 +315,11 @@ class BestStudentCheckpointCallback:
                     f"tail_directions[{var!r}] must be 'upper' or 'lower', "
                     f"got {direction!r}."
                 )
+        self._tail_references: dict[str, float] = (
+            dict(tail_references)
+            if tail_references is not None
+            else dict(_DEFAULT_TAIL_REFERENCES)
+        )
         # Per-variable CRPS scale (the variable's std) so CRPS in disparate
         # physical units can be averaged across variables without the
         # large-magnitude fields dominating.  Read from the teacher's fine
@@ -874,12 +913,21 @@ class BestStudentCheckpointCallback:
             by_var: dict[str, float] = {}
             for var in tail_keys:
                 lo, hi = self._tail_hist_ranges[var]
-                q = _tail_quantile_level(pct, self._tail_directions.get(var, "upper"))
+                direction = self._tail_directions.get(var, "upper")
+                reference = self._tail_references.get(var, 0.0)
+                q = _tail_quantile_level(pct, direction)
                 student_p = _quantile_from_histogram(hist_student[var], lo, hi, q)
                 target_p = _quantile_from_histogram(hist_target[var], lo, hi, q)
-                if target_p is None or student_p is None or target_p <= 0:
+                if target_p is None or student_p is None:
                     continue
-                by_var[var] = student_p / target_p
+                # Ratio of anomalies (distance from ``reference`` in the tail
+                # direction) so PRMSL's ~1000 hPa offset can't wash out deep-low
+                # errors; reference 0 recovers the raw-value ratio.
+                student_mag = _tail_magnitude(student_p, reference, direction)
+                target_mag = _tail_magnitude(target_p, reference, direction)
+                if target_mag <= 0:
+                    continue
+                by_var[var] = student_mag / target_mag
             if by_var:
                 by_var["mean"] = float(np.mean(list(by_var.values())))
                 tail_by_pct[pct] = by_var

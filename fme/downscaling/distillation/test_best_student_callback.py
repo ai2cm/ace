@@ -18,6 +18,7 @@ from fme.downscaling.distillation.best_student_callback import (
     BestStudentCheckpointCallback,
     _normalized_mean,
     _tail_deviation_score,
+    _tail_magnitude,
     _tail_quantile_level,
 )
 
@@ -251,9 +252,32 @@ def test_per_var_scales_missing_or_nonpositive_std_falls_back_to_one():
     assert scales["b"] == 1.0  # non-positive std
 
 
+def test_tail_magnitude_reference_and_direction():
+    # Zero reference recovers the raw value (winds/precip behavior).
+    assert _tail_magnitude(40.0, 0.0, "upper") == pytest.approx(40.0)
+    # PRMSL lower tail: depth below 1000 hPa.
+    assert _tail_magnitude(955.0, 1000.0, "lower") == pytest.approx(45.0)
+    with pytest.raises(ValueError, match="upper.*lower"):
+        _tail_magnitude(1.0, 0.0, "sideways")
+
+
+def test_tail_magnitude_makes_prmsl_ratio_sensitive_to_deep_lows():
+    """A raw-pressure ratio is ~1.0 for a several-hPa deep-low error; the
+    depth-below-1000 ratio exposes it."""
+    student_p, target_p = 958.0, 953.0  # student low is 5 hPa too shallow
+    raw_ratio = student_p / target_p  # ~1.005 — looks "perfect"
+    depth_ratio = _tail_magnitude(student_p, 1000.0, "lower") / _tail_magnitude(
+        target_p, 1000.0, "lower"
+    )  # 42/47
+    assert raw_ratio == pytest.approx(1.0052, abs=1e-3)
+    assert depth_ratio == pytest.approx(0.894, abs=1e-3)
+    assert abs(depth_ratio - 1.0) > 10 * abs(raw_ratio - 1.0)
+
+
 def test_default_tail_config_is_per_variable():
     cb = _make_callback(_FakeTeacherModel(["a"]))
     assert cb._tail_directions["PRMSL"] == "lower"
+    assert cb._tail_references["PRMSL"] == pytest.approx(1000.0)
     assert {
         "PRMSL",
         "PRATEsfc",
