@@ -42,7 +42,10 @@ _REPLICA_PREFERENCE = {
     "esgf-data.ucar.edu": 1,
     "esgf.ceda.ac.uk": 1,
 }
-_REPLICA_DEPRIORITISE = ("diasjp",)
+# ``diasjp`` (DIAS Japan) is slow; ``ornl`` (the ESGF 1.5 bridge node) has been
+# returning gateway timeouts / truncated bodies — push both to last resort so
+# the fast LLNL/DKRZ data nodes are tried first.
+_REPLICA_DEPRIORITISE = ("diasjp", "ornl")
 
 
 def _replica_priority(url: str) -> int:
@@ -273,6 +276,18 @@ def download_file(
                             if not chunk:
                                 break
                             out.write(chunk)
+                # Guard against truncated downloads: a flaky data node or gateway
+                # timeout can close the stream early (or return a short error
+                # body) WITHOUT raising, leaving a corrupt file that only fails
+                # later at open time (NetCDF HDF error). Treat a size mismatch as
+                # a failure so we retry / fall through to the next replica rather
+                # than accept it.
+                actual_size = partial.stat().st_size
+                if esgf_file.size and actual_size != esgf_file.size:
+                    raise OSError(
+                        f"incomplete download: got {actual_size} of "
+                        f"{esgf_file.size} bytes"
+                    )
                 last_err = None
                 break
             except Exception as e:

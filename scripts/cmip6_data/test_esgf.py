@@ -263,6 +263,58 @@ def test_replica_priority_orders_known_hosts():
     assert "some-other-host.example.org" in middle[-1]
 
 
+def test_replica_priority_ornl_deprioritised():
+    """The ORNL bridge node (flaky 504s) is pushed to last resort, below
+    unknown hosts and alongside DIAS Japan."""
+    from esgf import _replica_priority
+
+    ornl = "https://esgf-node.ornl.gov/esgf-1-5-bridge/.../file.nc"
+    unknown = "https://random-mirror.invalid/.../file.nc"
+    llnl = "https://esgf-node.llnl.gov/thredds/.../file.nc"
+    assert _replica_priority(ornl) > _replica_priority(unknown)
+    assert _replica_priority(ornl) > _replica_priority(llnl)
+
+
+def test_download_file_rejects_truncated_and_falls_through(tmp_path, monkeypatch):
+    """A replica that returns a short/truncated body without raising must be
+    rejected (size mismatch) and download_file must fall through to a good
+    replica rather than accept the corrupt file."""
+    import esgf
+    from esgf import ESGFFile, download_file
+
+    full = b"NETCDF-FULL-CONTENT-1234567890"  # 30 bytes
+
+    class _Resp:
+        def __init__(self, body):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n):
+            chunk, self._body = self._body[:n], self._body[n:]
+            return chunk
+
+    def fake_urlopen(req, timeout=0):
+        url = req.full_url
+        if "truncating-node" in url:
+            return _Resp(full[:10])  # short body, no exception
+        return _Resp(full)
+
+    monkeypatch.setattr(esgf.urllib.request, "urlopen", fake_urlopen)
+    f = ESGFFile(
+        url="https://truncating-node.example/file.nc",
+        filename="file.nc",
+        size=len(full),
+        replica_urls=["https://good-node.example/file.nc"],
+    )
+    dest = download_file(f, tmp_path, verify_checksum=False)
+    assert dest.read_bytes() == full  # got the complete file from the replica
+
+
 def test_replica_priority_unknown_host_outranks_diasjp():
     """An unknown host (priority 5) still beats DIAS Japan (priority
     10) — better to gamble on an unknown replica than to wait through
