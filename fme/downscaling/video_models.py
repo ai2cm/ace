@@ -114,11 +114,13 @@ class VideoDiffusionModelConfig:
     # Minimum number of interior frames to keep when a batch is subsetted.
     subset_min_interior: int = 1
     # Weight of the marginal-consistency loss (video PMD L_marg). When > 0, each
-    # training step runs a second pass on a random strict subset of interior
-    # frames -- sharing the full pass's noised inputs on the shared frames -- and
-    # penalizes disagreement between the full-pass prediction restricted to the
-    # subset and the subset-native prediction. 0.0 (default) disables it (single
-    # pass, exact prior behavior).
+    # training step runs a second pass on a random strict subset of the (possibly
+    # augmentation-subset) interior frames -- sharing the first pass's noised
+    # inputs on the shared frames -- and penalizes disagreement between the first
+    # pass's prediction restricted to the subset and the subset-native prediction.
+    # May be combined with subset_augmentation_prob (holds subset exposure fixed
+    # while toggling the loss). 0.0 (default) disables it (single pass, exact
+    # prior behavior).
     marginal_consistency_weight: float = 0.0
 
     def __post_init__(self):
@@ -203,14 +205,11 @@ class VideoDiffusionModelConfig:
                 f"{self.marginal_consistency_weight}."
             )
         if self.marginal_consistency_weight > 0.0:
-            if self.subset_augmentation_prob > 0.0:
-                raise ValueError(
-                    "marginal_consistency_weight and subset_augmentation_prob "
-                    "cannot both be enabled; the consistency loss already trains "
-                    "on subsets via its second pass."
-                )
-            # need a strict interior subset: keep in [subset_min_interior,
-            # n_interior - 1], so n_interior >= subset_min_interior + 1.
+            # The full grid must admit a strict interior subset (keep in
+            # [subset_min_interior, n_interior - 1]), so n_interior >=
+            # subset_min_interior + 1. May be combined with subset_augmentation:
+            # when an augmented batch is too small to form a strict subset the
+            # consistency pass is skipped for that batch (see train_on_batch).
             if self.n_timesteps - 2 < self.subset_min_interior + 1:
                 raise ValueError(
                     "marginal_consistency_weight > 0 needs n_timesteps >= "
@@ -600,7 +599,11 @@ class VideoDiffusionModel:
         # subset, to the subset-native prediction on the shared interior frames.
         marginal_loss: torch.Tensor | None = None
         total_loss = loss
-        if self._marginal_consistency_weight > 0.0:
+        # A strict interior subset needs at least subset_min_interior + 1 interior
+        # frames; an augmentation-shrunk batch may fall below that, so skip the
+        # consistency pass for it rather than fail.
+        can_subset = n_times - 2 >= self.config.subset_min_interior + 1
+        if self._marginal_consistency_weight > 0.0 and can_subset:
             sub = self._sample_consistency_subset_indices(n_times, clip.device)
             interior_s = _interior_mask(int(sub.numel()), clip.device)
             denoised_s = self.module(

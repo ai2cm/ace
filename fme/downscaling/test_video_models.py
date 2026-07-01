@@ -353,10 +353,25 @@ def test_marginal_consistency_is_reproducible():
     assert a.item() == b.item()
 
 
+def test_marginal_consistency_with_subset_augmentation_compose():
+    # subset augmentation and the consistency loss may be combined: same subset
+    # exposure in the first pass, plus the consistency tie via the second pass.
+    model = _model(
+        9,
+        marginal_consistency_weight=1.0,
+        subset_augmentation_prob=1.0,  # always augment, to exercise the combo
+    )
+    batch = _paired_batch(batch_size=2, n_times=9, height=8, width=8)
+    set_seed(0)
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss) and outputs.loss.requires_grad
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0 and all(torch.isfinite(g).all() for g in grads)
+
+
 def test_marginal_consistency_config_validation():
     with pytest.raises(ValueError, match="marginal_consistency_weight must be >= 0"):
         _model(9, marginal_consistency_weight=-0.1)
-    with pytest.raises(ValueError, match="cannot both be enabled"):
-        _model(9, marginal_consistency_weight=1.0, subset_augmentation_prob=0.5)
     with pytest.raises(ValueError, match="n_timesteps >="):
         _model(3, marginal_consistency_weight=1.0)  # only 1 interior frame
