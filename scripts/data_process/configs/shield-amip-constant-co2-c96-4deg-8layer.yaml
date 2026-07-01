@@ -1,9 +1,9 @@
 runs:
   AMIP-constant-CO2: gs://vcm-ml-raw-flexible-retention/2025-12-16-C96-SHiELD-AMIP-constant-CO2/regridded-zarrs/gaussian_grid_45_by_90/AMIP-constant-CO2
-data_output_directory: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset
+data_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset
 stats:
-  output_directory: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats
-  beaker_dataset: 2026-06-30-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats
+  output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2021
+  beaker_dataset: 2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2021
   start_date: "1979-01-01T06:00:00"
   end_date: "2021-01-01T00:00:00"  # Only use whole years for computing the stats
   data_type: FV3GFS
@@ -90,8 +90,8 @@ dataset_computation:
     total_frozen_precip_rate: None
 time_coarsen:
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-  stats_output_directory: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset-stats
+  data_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+  stats_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset-stats-1979-2021
   snapshot_names:
     - PRESsfc
     - PRMSL
@@ -129,7 +129,6 @@ time_coarsen:
     - eastward_wind_5
     - eastward_wind_6
     - eastward_wind_7
-    - global_mean_co2
     - h1000
     - h50
     - h500
@@ -171,6 +170,7 @@ time_coarsen:
     - ULWRFtoa
     - USWRFsfc
     - USWRFtoa
+    - global_mean_co2
     - tendency_of_total_water_path
     - tendency_of_total_water_path_due_to_advection
     - total_frozen_precipitation_rate
