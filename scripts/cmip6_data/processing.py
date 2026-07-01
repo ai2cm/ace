@@ -723,13 +723,18 @@ def assemble_masked_3d_state(
     Returns:
         ``(ds_plev, field_to_mask)``.
     """
-    invalid = (~valid_target.astype(bool)).astype("uint8")
     dims = ("time", "plev", "lat", "lon")
+    invalid = (~valid_target.astype(bool)).astype("uint8").transpose(*dims)
+    # Capture names up front, then POP each field out of ``regridded_3d`` as it
+    # is filled so the (large, eager) input and the filled output are not both
+    # fully resident — holding both OOM-killed the 32Gi pod at prod scale. NB
+    # this consumes ``regridded_3d``; the caller must not reuse it afterward.
+    field_names = list(regridded_3d)
     fields: dict[str, xr.DataArray] = {}
-    for name, da in regridded_3d.items():
-        da = da.transpose(*dims)
+    for name in field_names:
+        da = regridded_3d.pop(name).transpose(*dims)
         if fill:
-            da = fill_below_surface_smooth(da, invalid.transpose(*dims))
+            da = fill_below_surface_smooth(da, invalid)
         fields[name] = da
 
     ds = xr.Dataset(fields)
@@ -749,7 +754,7 @@ def assemble_masked_3d_state(
 
     plev_hpa = _plev_hpa(valid_target["plev"].values)
     field_to_mask: dict[str, str] = {}
-    for name in regridded_3d:
+    for name in field_names:
         for hpa in plev_hpa:
             field_to_mask[f"{name}{hpa}"] = f"mask_{hpa}"
     if has_zg:

@@ -806,6 +806,11 @@ def process_one_esgf(
                 masked_state_ds, mask_field_map = assemble_masked_3d_state(
                     masked_3d, valid_target_3d, hgtsfc_3d
                 )
+                # Re-chunk the (eager, numpy-backed) masked state to dask so the
+                # downstream merge / flatten_plev / write_zarr operate lazily and
+                # stream chunk-by-chunk, rather than copying the full ~10GB state
+                # at each step (which would OOM the 32Gi pod after assembly).
+                masked_state_ds = masked_state_ds.chunk({"time": 730})
                 logging.info("  masked 3D state assembled")
                 used_source_grid_masking = True
                 row.mask_source = "source_grid"
