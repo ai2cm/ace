@@ -43,10 +43,12 @@ def test_extract_spatial_masks():
     }
     masks = extract_spatial_masks(data, ["ta1000", "ua1000", "pr"])
     # ta1000 + ua1000 share mask_1000 (level convention); pr has no mask
+    assert masks is not None
     assert set(masks) == {"ta1000", "ua1000"}
     assert masks["ta1000"] is m1000 and masks["ua1000"] is m1000
     # explicit mapping honored
     masks2 = extract_spatial_masks(data, ["ta1000"], {"ta1000": "mask_1000"})
+    assert masks2 is not None
     assert masks2["ta1000"] is m1000
     # no masks present -> None (clean no-op for callers)
     assert extract_spatial_masks({"pr": torch.randn(1)}, ["pr"]) is None

@@ -723,8 +723,8 @@ def assemble_masked_3d_state(
     if has_zg:
         p0 = plev_hpa[0]
         field_to_mask[f"thickness_surface_{p0}"] = f"mask_thickness_surface_{p0}"
-        for k in range(len(plev_hpa) - 1):
-            lower, upper = plev_hpa[k], plev_hpa[k + 1]
+        for i in range(len(plev_hpa) - 1):
+            lower, upper = plev_hpa[i], plev_hpa[i + 1]
             field_to_mask[f"thickness_{lower}_{upper}"] = (
                 f"mask_thickness_{lower}_{upper}"
             )

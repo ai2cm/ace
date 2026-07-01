@@ -80,12 +80,12 @@ def test_open_netcdf_files_preserves_bounds():
         p = Path(tmpdir) / "pr_day_2010.nc"
         _write_netcdf(p, "pr", ntime=3, with_bounds=True)
         ds = _open_netcdf_files([p], "pr")
-        assert "lat_bnds" in ds.data_vars, (
-            "lat_bnds must survive for conservative regrid"
-        )
-        assert "lon_bnds" in ds.data_vars, (
-            "lon_bnds must survive for conservative regrid"
-        )
+        assert (
+            "lat_bnds" in ds.data_vars
+        ), "lat_bnds must survive for conservative regrid"
+        assert (
+            "lon_bnds" in ds.data_vars
+        ), "lon_bnds must survive for conservative regrid"
 
 
 def test_open_netcdf_files_no_bounds_no_error():
@@ -731,6 +731,7 @@ def test_masked_regrid_3d_state_shared_mask_and_cleanup(monkeypatch):
         make_regridder_fn=_fake_make_regridder,
         threshold=0.5,
     )
+    assert regridded is not None and valid is not None and hgtsfc is not None
 
     # Shared target-grid per-level validity: top-left 1000 hPa cell had 3/4
     # coverage (>=0.5 -> valid); everything else valid.
@@ -810,6 +811,7 @@ def test_masked_regrid_3d_state_full_network_mock(monkeypatch, tmp_path):
         make_regridder_fn=_fake_make_regridder,
         threshold=0.5,
     )
+    assert regridded is not None and valid is not None
     assert set(regridded) == {"zg", "ua"}
     assert valid.sel(plev=100000.0).values[0].tolist() == [[True, True], [True, True]]
     np.testing.assert_allclose(

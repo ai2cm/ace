@@ -407,9 +407,9 @@ def test_decode_default_fills_threshold_well_above_physical_values():
     """
     from processing import _FILL_VALUE_THRESHOLD, decode_default_fills
 
-    assert _FILL_VALUE_THRESHOLD >= 1.0e9, (
-        "Threshold must stay well above physical-variable extremes."
-    )
+    assert (
+        _FILL_VALUE_THRESHOLD >= 1.0e9
+    ), "Threshold must stay well above physical-variable extremes."
     ds = xr.Dataset(
         {
             "ua": (
@@ -1277,9 +1277,9 @@ def test_harmonize_temperature_silent_for_non_temperature_units():
         da = xr.DataArray(np.full((2, 3), 1.0), dims=("lat", "lon"))
         da.attrs["units"] = units
         out, msg = harmonize_temperature_to_kelvin(da, var_id="some_flux")
-        assert msg == "", (
-            f"unexpected warning for non-temperature units {units!r}: {msg}"
-        )
+        assert (
+            msg == ""
+        ), f"unexpected warning for non-temperature units {units!r}: {msg}"
 
 
 def test_harmonize_temperature_warns_on_prefixed_temperature_var():
@@ -1366,9 +1366,9 @@ def test_stats_for_time_field_uses_dask_without_materialising():
         "finite_fraction",
         "autocorr_lag1",
     ):
-        assert abs(out_dask[key] - out_np[key]) < 1e-4, (
-            f"{key}: dask={out_dask[key]} vs numpy={out_np[key]}"
-        )
+        assert (
+            abs(out_dask[key] - out_np[key]) < 1e-4
+        ), f"{key}: dask={out_dask[key]} vs numpy={out_np[key]}"
 
 
 def test_compute_dataset_stats_handles_360_day_calendar():
@@ -1599,9 +1599,9 @@ def test_write_zarr_multi_batch_smoke(tmp_path, caplog):
     rss_re = re.compile(r"batch (\d+)/\d+.*?rss \d+ → \d+ MiB")
     n_with_rss = sum(1 for r in caplog.records if rss_re.search(r.getMessage()))
     n_batches = (n_vars + batch_size - 1) // batch_size
-    assert n_with_rss == n_batches, (
-        f"expected {n_batches} per-batch RSS log lines, got {n_with_rss}"
-    )
+    assert (
+        n_with_rss == n_batches
+    ), f"expected {n_batches} per-batch RSS log lines, got {n_with_rss}"
 
 
 def test_write_zarr_bounds_memory_with_variable_batching(tmp_path):
