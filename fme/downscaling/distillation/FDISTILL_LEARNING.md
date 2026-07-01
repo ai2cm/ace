@@ -257,12 +257,16 @@ critics, spectral loss — live in `MOE_DISTILLATION_STATUS.md`.)
 ## 12. Project implications (pointers)
 
 These mechanics drive the findings in `MOE_DISTILLATION_STATUS.md`:
-- A **PSD/spectral loss** would attach at the `gen_data` node (clean output, every
-  step) — but is a 2nd-moment constraint and **won't move tails** (those are the
-  forward-KL's + maturity's job).
-- **Tails** are healthy/recovering; the **spectral** issue (coarse PRMSL) is separate.
-- The **discriminator tap location** (coarse encoder bottleneck) is why it's blind to
-  fine-scale/per-variable structure — motivating the tap-depth A/B and the
-  per-variable / decoder-tap critic ideas.
+- **The student is uniformly too smooth — a real high-k power deficit across all
+  broadband fields** (confirmed on the raw `val/psd_*` curves; not a metric
+  artifact). This one deficit drives *both* the under-powered high-k spectra and the
+  tail under-prediction — they share a root, they are not separate.
+- A **spectral loss** attaches at the `gen_data` node (clean output, every step) and
+  should penalize the *deficit* (student PSD below teacher). Caveat: a pure mean-PSD
+  match can be met with *incoherent* high-k noise → an adversarial fine-scale critic
+  is better for coherent extremes; the spectral term is the cheaper scaffold.
+- The **discriminator tap location** (coarse encoder bottleneck) is why the GAN can't
+  add fine-scale power — blind to high-k for every variable — motivating the tap-depth
+  A/B and the per-variable / decoder-tap critic ideas (now the *primary* lever).
 - `ratio_upper` is **per-sample** (channels collapsed) — so it can't give per-channel
   tail emphasis; that needs per-variable critics or direct per-channel weights.

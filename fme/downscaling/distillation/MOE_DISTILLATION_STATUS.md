@@ -369,9 +369,9 @@ PRMSL collapse**; both reproduce the disc-winning signature.
 
 | metric | allfix (13k) | r1-instr (6.4k) | read |
 |---|---|---|---|
-| `spec_mae_mid_PRMSL` | 0.13→**0.87** | 0.18→**0.94** | collapsed (largely artifact, see below) |
-| `spec_mae_hi_PRMSL` | 0.075→**0.93** | 0.14→**0.88** | collapsed (mostly artifact) |
-| `spec_mae_lo_PRMSL` (trustworthy) | 0.59→0.67 | 0.62→**0.80** | mild–moderate REAL degradation |
+| `spec_mae_mid_PRMSL` | 0.13→**0.87** | 0.18→**0.94** | REAL deficit (student too smooth; not an artifact — no teacher floor) |
+| `spec_mae_hi_PRMSL` | 0.075→**0.93** | 0.14→**0.88** | REAL deficit (too smooth) |
+| `spec_mae_lo_PRMSL` | 0.59→0.67 | 0.62→**0.80** | real degradation |
 | `crps_PRMSL` | 6.91→7.10 | 7.03→7.12 | ~flat |
 | `gan_loss_gen`↑ / `gan_loss_disc`↓ | 0.74→1.01 / 1.34→1.17 | 0.73→0.78 / 1.37→1.33 | gen losing |
 | `fake_score_loss` (late spike) | 0.016→0.031 | 0.016→0.022 | regime change |
@@ -385,24 +385,27 @@ PRMSL collapse**; both reproduce the disc-winning signature.
   levers fixed it.
 - Precip (the low-noise expert's real job) stays strong throughout.
 
-#### PSD calc verified — the mid/hi PRMSL "collapse" is largely a metric artifact
+#### PSD calc verified; the "artifact" caveat was WRONG (retracted 2026-06-30)
 
-Audited `compute_zonal_power_spectrum` + the `spec_mae` band reduction (numerical
-check in scratch). Findings:
+Audited `compute_zonal_power_spectrum` + the `spec_mae` band reduction. Findings:
 
 - **The PSD function is correct.** Parseval holds to 0.19% (the residual is the
   known Nyquist double-count seam — `ones_and_twos` multiplies *all* k>0 by 2
   including Nyquist; negligible, not the cause of anything).
-- **`spec_mae` is a relative (log-PSD-ratio) error and explodes on a smooth field.**
-  Demo: a visually-invisible white residual at **1% of field std** (0.01% extra
-  variance) on a steep-red-spectrum field drives `spec_mae_mid/hi` to ~9 while the
-  absolute hi-band energy stays ~1e-5 of total. PRMSL is exactly this regime.
-- The real runs sit at ~0.9 (not ~9). **Sign correction (see "Corrected diagnosis"
-  below): the raw PSD curves show the student is BELOW the teacher (a high-k power
-  *deficit* — too smooth), NOT 8× above it.** `spec_mae = |log ratio|` hides the
-  sign; the earlier "injects excess hi-k texture" reading was wrong. The smooth-field
-  relative-amplification still applies to PRMSL's near-zero hi-k bands, but the
-  direction is under-power.
+- **`spec_mae` is a relative (log-PSD-ratio) error** — so the *raw* `val/psd_*`
+  curves (absolute power + sign) are the ground truth, not the scalar.
+- **⚠️ RETRACTION: the "mid/hi PRMSL is largely a metric artifact" claim was wrong.**
+  It was inferred from the `spec_mae` scalars + a synthetic smooth-field demo, and
+  *assumed* the teacher PRMSL/wind PSD craters to ~0 (a floor) at high k. **Reading
+  the actual log10 mean PSD curves refutes this: there is NO floor for PRMSL or
+  winds — the teacher retains real, finite energy across wavenumber.** So the
+  deficits are **genuine, not division-by-near-zero.** Example (PRMSL, real curve):
+  student `log10 PSD ≈ 1.0` vs teacher `≈ 1.5` → ratio ≈ 0.32 → **~3× too little
+  power (real, ~0.5 dex)**. The artifact only *could* apply in a true teacher-floor
+  region, which these fields don't have — so treat mid/hi `spec_mae` here as real.
+- **Sign: it's a DEFICIT (student below teacher, too smooth), not excess texture** —
+  `spec_mae = |log ratio|` hid the sign; the earlier "injects excess hi-k texture"
+  reading was also wrong.
 - **Trustworthy PRMSL signals are `spec_mae_lo_PRMSL` + `crps_PRMSL`** (and the new
   raw PSD curves). On those the damage is mild–moderate and coarse-band (lo
   0.59→0.67 / 0.62→0.80).
@@ -423,10 +426,12 @@ runs. **The model is generating the tails.**
 | PRATEsfc @7k (r1-instr) | 0.59 | 0.69 | under but climbing |
 | PRATEsfc @30k (`3vk3or7v`) | **0.83** | **0.96** | recovers to near-target |
 
-- **PRMSL extremes are ~1.0 and stable** → the PRMSL spectral issue is NOT a tail
-  failure *for PRMSL* (its true hi-k energy ≈ 0, so nothing to miss). NB: for the
-  broadband fields (precip, winds) smoothness and tails share one root — the high-k
-  deficit — see "Corrected diagnosis" below; they are not decoupled there.
+- **PRMSL extremes read ~1.0 — but that's the offset-blind metric bug, not real**
+  (see "Metric bug found" below: a raw-pressure ratio is ~1.0 regardless of deep-low
+  error). PRMSL is genuinely too smooth at high-k too (real deficit, no teacher
+  floor), so its extremes are likely under-deepened — we just weren't measuring it.
+  Smoothness and tails share one root (the high-k deficit) across all broadband
+  fields; see "Corrected diagnosis" below.
 - **Precip tails improve monotonically with maturity** (0.37→0.83 / 0.56→0.96 by
   30k). The under-prediction in the *young* GAN-fix runs (~0.6 @7k) is training
   immaturity, not collapse.
@@ -484,11 +489,11 @@ earlier interpretation (`spec_mae = |log(student/teacher)|` carries no sign; the
   local high-frequency features). Same root cause. **This includes precip** — an
   earlier overstatement that "precip spectra are healthy" was only true at lo/mid;
   precip is **under-powered at high-k** (`spec_mae_hi_PRATEsfc` ~0.15–0.3 → ~0.4–0.5×
-  teacher), which is *more* consequential than for PRMSL because precip is broadband
-  (real fine energy to miss) and it directly drives the precip tail deficit. **PRMSL
-  is the exception** — its tails/hi-k read ~fine only because its true hi-k energy ≈ 0
-  (nothing to miss); its real damage is coarse-band + the now-fixed unmeasured deep
-  lows. The deficit itself is universal (all broadband fields too smooth at fine scale).
+  teacher), and it directly drives the precip tail deficit. **PRMSL is NOT an
+  exception** (earlier claim retracted): the raw curves show it too has real hi-k
+  energy (no floor) and the student is genuinely too smooth there. PRMSL only *looked*
+  fine on the tail metric because that metric was offset-blind (now fixed). The high-k
+  deficit is **universal** — every broadband field is too smooth at fine scale.
 
 **Relevance to experiments (updated):**
 - The **finer / decoder / output-space critic** (tap1/tap2, decoder-tap, per-variable
@@ -582,17 +587,15 @@ fields that were collapsing:
   not comparable across this commit. The current GAN-fix runs predate it.
 
 **Raw PSD curves now logged** (`val/psd_<var>`, log10 mean PSD line charts,
-student vs teacher, per variable, each validation). Motivation: PRMSL's
-mid/hi-band `spec_mae` "collapse" is largely a **metric artifact of a smooth
-field** — `spec_mae` is a *relative* (log-PSD-ratio) error, and PRMSL has
-near-zero true energy at mid/high wavenumbers, so a tiny absolute residual
-(few-step incomplete-denoising noise floor + any GAN texture) divided by a
-~0 teacher PSD explodes the ratio. Band ordering confirms it: PRMSL error is
-worst at hi/mid (~0.9), least bad at lo (~0.68). The raw curves let you see
-*where the teacher actually has energy* before reacting to a big band MAE.
-Trustworthy PRMSL signals: `spec_mae_lo_PRMSL` + `crps_PRMSL`. (Coarse PRMSL
-structure also lives at high σ — more the high-noise expert's job than Lo's,
-which standalone `lo_renoise` can't exercise.)
+student vs teacher, per variable, each validation). Motivation was originally the
+suspected smooth-field artifact — **but reading the curves refuted that
+(retracted; see the PSD-verified retraction above): PRMSL/winds have NO teacher
+floor, so the mid/hi `spec_mae` reflects a REAL high-k deficit (student too
+smooth), not a division-by-~0 artifact.** The curves remain the right thing to
+read because `spec_mae` is *relative* and unsigned — but here they *confirm* the
+deficit rather than explain it away. (Coarse PRMSL structure also lives at high σ —
+more the high-noise expert's job than Lo's, which standalone `lo_renoise` can't
+exercise.)
 
 ### Train-media fix (2026-06-29, `fastgen_train.py`)
 
@@ -653,12 +656,13 @@ purely by which conv level you tap, so tap-depth is a clean, near-monotone knob
 **Caveats / sequencing:**
 - Pre-tip in the current runs — confirm the GAN actually damages coarse PRMSL
   (late window + `val/psd_PRMSL` + `spec_mae_lo_PRMSL`) before re-architecting.
-- Targets the **coarse (lo/mid)** GAN-timed damage — NOT the mid/hi metric
-  artifact (smooth-field noise floor).
+- The mid/hi `spec_mae` is a **real high-k deficit** (retraction above — no teacher
+  floor), so a finer tap targeting fine scales is addressing a real problem, not a
+  metric artifact.
 - Shallow-tap risk (reframed per the 2026-06-30 corrected diagnosis): the student
-  is too *smooth* (high-k deficit), so a finer critic is *wanted* to ADD power — the
-  worry is not unwanted texture but *incoherent* texture (esp. on PRMSL where true
-  hi-k energy ≈ 0). Watch the `val/psd_*` curves and tails.
+  is too *smooth* (high-k deficit) across all broadband fields, so a finer critic is
+  *wanted* to ADD power — the worry is not unwanted texture but *incoherent* texture.
+  Watch the `val/psd_*` curves and tails.
 - Separable lever from the backbone-expert choice and the GAN weight. Related to
   the older "which expert should the discriminator use?" design note below.
 
