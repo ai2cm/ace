@@ -3,7 +3,6 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-import re
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -49,7 +48,11 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
+from fme.core.spatial_masking import (
+    NullSpatialMasking,
+    StaticSpatialMaskingConfig,
+    resolve_mask_var_name,
+)
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
@@ -1531,42 +1534,6 @@ class TrainStepperConfig:
             stepper=stepper,
             config=self,
         )
-
-
-_MASK_LEVEL_RE = re.compile(r"_?(\d+)$")
-
-
-def resolve_mask_var_name(
-    out_name: str,
-    available: set[str],
-    explicit_mapping: Mapping[str, str] | None = None,
-) -> str | None:
-    """Resolve the mask data-variable masking output variable ``out_name``.
-
-    Masks ride in the batch as ordinary (time-varying or broadcast
-    time-invariant) data variables. Resolution order:
-
-    1. an explicit ``out_name -> mask_var`` mapping (the dataset's
-       self-describing per-field ``mask_variable`` attribute, authoritative);
-    2. a variable-specific ``mask_<out_name>``;
-    3. a level-shared ``mask_<level>`` for a flattened plev field whose name
-       ends in the level (e.g. ``ta1000`` -> ``mask_1000``);
-    4. a catch-all ``mask_2d``.
-
-    Returns the chosen mask variable name if present in ``available``, else
-    ``None`` (the variable is left unmasked).
-    """
-    if explicit_mapping is not None and out_name in explicit_mapping:
-        candidate = explicit_mapping[out_name]
-        return candidate if candidate in available else None
-    if f"mask_{out_name}" in available:
-        return f"mask_{out_name}"
-    match = _MASK_LEVEL_RE.search(out_name)
-    if match and f"mask_{match.group(1)}" in available:
-        return f"mask_{match.group(1)}"
-    if "mask_2d" in available:
-        return "mask_2d"
-    return None
 
 
 def _finalize_per_channel_losses(
