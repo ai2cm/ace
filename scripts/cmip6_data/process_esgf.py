@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Optional
 
 import fsspec
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -630,14 +631,21 @@ def _masked_regrid_3d_state(
     n_time = int(zg_native.sizes["time"])
     n_seg = (n_time + time_chunk - 1) // time_chunk
     logging.info(
-        "    masked 3D regrid: %d timesteps in %d segments of %d (rss %.0f MiB)",
+        "    masked 3D regrid: %d timesteps in %d segments of %d",
         n_time,
         n_seg,
         time_chunk,
-        rss_mib(),
     )
-    regridded_parts: dict[str, list[xr.DataArray]] = {v: [] for v in native_aligned}
-    valid_parts: list[xr.DataArray] = []
+    # Fill each segment's regridded result into a PRE-ALLOCATED full-length
+    # numpy buffer rather than accumulating a list and ``xr.concat``-ing at the
+    # end. concat holds both the parts and the concatenated copy at once — with
+    # five ~1.7GB target-grid fields that ~doubled peak memory and OOM-killed the
+    # 32Gi pod right after the last segment. Pre-allocating means peak is one
+    # full field set (+ one segment's transient), not two.
+    full_arrays: dict[str, np.ndarray] = {}
+    template: dict[str, xr.DataArray] = {}
+    valid_full: np.ndarray | None = None
+    valid_template: xr.DataArray | None = None
     for seg_i, start in enumerate(range(0, n_time, time_chunk)):
         sl = slice(start, start + time_chunk)
         seg_fields = {v: native_aligned[v].isel(time=sl) for v in native_aligned}
@@ -650,21 +658,29 @@ def _masked_regrid_3d_state(
             threshold=threshold,
         )
         for v, da in seg_regridded.items():
-            regridded_parts[v].append(da.load())
-        valid_parts.append(seg_valid.load())
-        logging.info(
-            "    masked 3D segment %d/%d done (rss %.0f MiB)",
-            seg_i + 1,
-            n_seg,
-            rss_mib(),
-        )
+            da = da.load()
+            if v not in full_arrays:
+                full_arrays[v] = np.empty((n_time, *da.shape[1:]), dtype=da.dtype)
+                template[v] = da  # for non-time coords/dims/attrs
+            full_arrays[v][sl] = da.values
+        seg_valid = seg_valid.load()
+        if valid_full is None:
+            valid_full = np.empty((n_time, *seg_valid.shape[1:]), dtype=seg_valid.dtype)
+            valid_template = seg_valid
+        valid_full[sl] = seg_valid.values
+        logging.info("    masked 3D segment %d/%d done", seg_i + 1, n_seg)
 
-    regridded_3d = {
-        v: xr.concat(parts, dim="time") for v, parts in regridded_parts.items()
-    }
-    valid_target = xr.concat(valid_parts, dim="time")
+    time_coord = zg_native["time"]
+
+    def _rewrap(buf: np.ndarray, ref: xr.DataArray) -> xr.DataArray:
+        coords = {c: ref.coords[c] for c in ref.coords if "time" not in ref[c].dims}
+        coords["time"] = time_coord
+        return xr.DataArray(buf, dims=ref.dims, coords=coords, attrs=ref.attrs)
+
+    regridded_3d = {v: _rewrap(full_arrays[v], template[v]) for v in full_arrays}
+    valid_target = _rewrap(valid_full, valid_template)
     hgtsfc_target = regrid_data(orog_native).load()  # static, no time dim
-    logging.info("    masked 3D regrid complete (rss %.0f MiB)", rss_mib())
+    logging.info("    masked 3D regrid complete")
 
     for v in downloaded:
         cleanup_variable_files(scratch, v)
@@ -787,14 +803,10 @@ def process_one_esgf(
             if masked_3d is not None:
                 row.regrid_methods.update(m3d_methods)
                 masked_field_names = set(masked_3d)
-                logging.info(
-                    "  masked 3D regrid returned; assembling (rss %.0f MiB)",
-                    rss_mib(),
-                )
                 masked_state_ds, mask_field_map = assemble_masked_3d_state(
                     masked_3d, valid_target_3d, hgtsfc_3d
                 )
-                logging.info("  masked 3D state assembled (rss %.0f MiB)", rss_mib())
+                logging.info("  masked 3D state assembled")
                 used_source_grid_masking = True
                 row.mask_source = "source_grid"
             else:
