@@ -459,7 +459,9 @@ class SingleModuleStep(StepABC):
         mask = self._input_masking.sample_mask(get_device())
         # Broadcast so spatial-group tiles agree; no-op for non-distributed
         mask = Distributed.get_instance().broadcast_spatial(mask)
-        return {name: mask[:, i] for i, name in enumerate(names)}
+        # Emit only dropped channels; absent key means present, skips a no-op where.
+        present = mask[0].tolist()
+        return {name: mask[:, i] for i, name in enumerate(names) if not present[i]}
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)

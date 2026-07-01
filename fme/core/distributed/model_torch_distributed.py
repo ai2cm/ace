@@ -406,7 +406,11 @@ class ModelTorchDistributed(DistributedBackend):
                 buffer = tensor.to(torch.uint8)
                 torch.distributed.broadcast(buffer, src, group=self._spatial_group)
                 return buffer.to(torch.bool)
-            torch.distributed.broadcast(tensor, src, group=self._spatial_group)
+            # Clone first: broadcast writes in place and would overwrite the
+            # caller's tensor on non-root ranks.
+            buffer = tensor.clone()
+            torch.distributed.broadcast(buffer, src, group=self._spatial_group)
+            return buffer
         return tensor
 
     def weighted_mean(

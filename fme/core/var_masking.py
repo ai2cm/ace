@@ -3,6 +3,8 @@ import dataclasses
 
 import torch
 
+from fme.core.distributed import Distributed
+
 
 class MaskingGenerator(abc.ABC):
     """Owns a disjoint slice of channels and answers which it drops per step.
@@ -13,8 +15,13 @@ class MaskingGenerator(abc.ABC):
     """
 
     @abc.abstractmethod
-    def sample(self, device: torch.device) -> list[str]:
-        """Return the names this generator drops on this step."""
+    def sample(self, generator: torch.Generator) -> list[str]:
+        """Return the names this generator drops on this step.
+
+        Draws are taken from ``generator`` (a CPU RNG owned by
+        :class:`VariableMasking`) rather than the global torch RNG, so masking
+        is decoupled from the global stream and never forces a device sync.
+        """
 
 
 class BernoulliMaskingGenerator(MaskingGenerator):
@@ -29,8 +36,8 @@ class BernoulliMaskingGenerator(MaskingGenerator):
         self._names = list(names)
         self._rate = rate
 
-    def sample(self, device: torch.device) -> list[str]:
-        fired = bool((torch.rand(1, device=device) < self._rate).item())
+    def sample(self, generator: torch.Generator) -> list[str]:
+        fired = bool((torch.rand(1, generator=generator) < self._rate).item())
         return list(self._names) if fired else []
 
 
@@ -45,13 +52,13 @@ class UniformMaskingGenerator(MaskingGenerator):
         self._names = list(names)
         self._max_masked_vars = max_masked_vars
 
-    def sample(self, device: torch.device) -> list[str]:
+    def sample(self, generator: torch.Generator) -> list[str]:
         n = len(self._names)
         max_n = min(self._max_masked_vars, n)
-        k = int(torch.randint(0, max_n + 1, (1,), device=device).item())
+        k = int(torch.randint(0, max_n + 1, (1,), generator=generator).item())
         if k == 0:
             return []
-        perm = torch.randperm(n, device=device)[:k]
+        perm = torch.randperm(n, generator=generator)[:k]
         return [self._names[i] for i in perm.tolist()]
 
 
@@ -200,6 +207,23 @@ class VariableMasking:
     def __init__(self, names: list[str], generators: list[MaskingGenerator]):
         self._names = list(names)
         self._generators = list(generators)
+        self._generator: torch.Generator | None = None
+
+    def _get_generator(self) -> torch.Generator:
+        """Lazily build the per-rank CPU RNG used for all draws.
+
+        Seeded with ``distributed_seed + global_rank`` so data-parallel ranks
+        draw independent masks (distinct local batches drop distinct channels);
+        the Step re-syncs spatial co-ranks afterwards via ``broadcast_spatial``.
+        Seeded lazily because the distributed seed is set after the Step is
+        built. The RNG is a private CPU generator, so draws neither perturb the
+        global torch stream nor force a device sync.
+        """
+        if self._generator is None:
+            dist = Distributed.get_instance()
+            self._generator = torch.Generator()
+            self._generator.manual_seed(dist.get_seed() + dist.rank)
+        return self._generator
 
     def sample_mask(self, device: torch.device) -> torch.Tensor:
         """Sample a boolean presence mask of shape ``[1, n_channels]``.
@@ -208,12 +232,12 @@ class VariableMasking:
         The leading dimension is 1 so the mask broadcasts over the batch (and
         hence over ensemble members) when applied.
         """
+        generator = self._get_generator()
         dropped: set[str] = set()
-        for generator in self._generators:
-            dropped.update(generator.sample(device))
+        for masking_generator in self._generators:
+            dropped.update(masking_generator.sample(generator))
         present = torch.tensor(
             [[name not in dropped for name in self._names]],
             dtype=torch.bool,
-            device=device,
         )
-        return present
+        return present.to(device)

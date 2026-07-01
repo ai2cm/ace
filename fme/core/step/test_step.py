@@ -1834,17 +1834,29 @@ def test_input_dropout_mask_gmr_extras_independently_maskable():
 
 
 def test_draw_input_dropout_mask_shape_and_dtype():
+    # rate-1 drops every channel, so emitted keys are exactly the packed input channels.
     step = _make_single_module_step(
-        VariableMaskingConfig(default=UniformMaskingConfig(1))
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0))
     )
     step.module.torch_module.train()
     mask = step._draw_input_dropout_mask()
     assert mask is not None
-    # keyed by packed input channel names, one [1] bool tensor each (broadcast)
+    # keyed by dropped channels, one [1] bool tensor each; present channels omitted.
     assert set(mask.keys()) == set(step.in_packer.names)
     for name in step.in_packer.names:
         assert mask[name].shape == (1,)
         assert mask[name].dtype == torch.bool
+        assert not bool(mask[name].item())  # emitted channels are dropped
+
+
+def test_draw_input_dropout_mask_omits_present_channels():
+    # rate-0 default drops nothing, so no channels are emitted.
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=0.0))
+    )
+    step.module.torch_module.train()
+    mask = step._draw_input_dropout_mask()
+    assert mask == {}
 
 
 def test_draw_input_dropout_mask_none_when_unset():
@@ -1863,8 +1875,9 @@ def test_draw_input_dropout_mask_none_in_eval_mode():
 
 
 def test_draw_input_dropout_mask_includes_gmr_extras():
+    # rate-1 default drops every channel so GMR extra sentinels appear too.
     step = _make_gmr_input_dropout_step(
-        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0)),
         include_channel_mask_inputs=False,
     )
     step.module.torch_module.train()
