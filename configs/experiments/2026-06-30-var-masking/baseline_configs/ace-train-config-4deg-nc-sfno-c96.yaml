@@ -61,8 +61,8 @@ inference:
             - SHTFLsfc
             - tendency_of_total_water_path_due_to_advection
             - air_temperature_0
-            - air_temperature_2
             - air_temperature_1
+            - air_temperature_2
             - air_temperature_3
             - air_temperature_4
             - air_temperature_5

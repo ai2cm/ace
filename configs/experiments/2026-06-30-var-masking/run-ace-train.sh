@@ -15,11 +15,13 @@ N_GPUS=2
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
+RUN_CONFIGS_SUBDIR=run_configs  # generated configs live here
+
 run_training() {
   local config_filename="$1"
   local job_name="$2"
   local job_group="$3"
-  local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
+  local CONFIG_PATH="$SCRIPT_PATH/$RUN_CONFIGS_SUBDIR/$config_filename"
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
 
@@ -62,4 +64,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "${1:-ace-train-config-4deg-AIMIP.yaml}" "${2:-ace2-era5-train-4deg-daily-AIMIP-bs16}" "${3:-ace2-era5}"
+run_training "${1:-ace-train-config-4deg-nc-sfno-c96-mask10-co2default-vgdefault.yaml}" "${2:-ace2-var-mask-nc-sfno-c96-mask10-co2default-vgdefault-v4}" "${3:-ace2-var-masking-2026-06-30}"
