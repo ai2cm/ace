@@ -1995,3 +1995,83 @@ def test_attach_mask_attributes_sets_only_present_pairs():
     )
     assert ds["ta1000"].attrs["mask_variable"] == "mask_1000"
     assert ds["thickness_1000_850"].attrs["mask_variable"] == "mask_thickness_1000_850"
+
+
+def _target_3d(values_by_plev, plev):
+    """(time=1, plev, lat, lon) target-grid field from per-plev 2D arrays."""
+    arr = np.stack([np.asarray(v, dtype="float64") for v in values_by_plev])[None]
+    lat = np.arange(arr.shape[2])
+    lon = np.arange(arr.shape[3])
+    return xr.DataArray(
+        arr,
+        dims=("time", "plev", "lat", "lon"),
+        coords={"time": [0], "plev": plev, "lat": lat, "lon": lon},
+    )
+
+
+def test_assemble_masked_3d_state_structure_and_mapping():
+    from processing import assemble_masked_3d_state
+
+    plev = np.array([100000.0, 85000.0])  # 1000, 850 hPa
+    zg = _target_3d([np.full((2, 2), 200.0), np.full((2, 2), 1500.0)], plev)
+    ua = _target_3d([np.full((2, 2), 5.0), np.full((2, 2), 9.0)], plev)
+    valid = xr.DataArray(
+        np.ones((1, 2, 2, 2), dtype=bool),
+        dims=("time", "plev", "lat", "lon"),
+        coords={"time": [0], "plev": plev},
+    )
+    valid[0, 0, 0, 0] = False  # 1000 hPa invalid at (0,0)
+    hgtsfc = xr.DataArray(
+        np.full((2, 2), 50.0),
+        dims=("lat", "lon"),
+        coords={"lat": [0, 1], "lon": [0, 1]},
+    )
+
+    ds, mapping = assemble_masked_3d_state(
+        {"zg": zg, "ua": ua}, valid, hgtsfc, fill=False
+    )
+
+    # 3D fields keep plev; thickness/masks/HGTsfc are 2D
+    assert "plev" in ds["zg"].dims and "plev" in ds["ua"].dims
+    assert set(ds["thickness_surface_1000"].dims) == {"time", "lat", "lon"}
+    assert "orog" in ds  # renamed to HGTsfc downstream
+    assert {"mask_1000", "mask_850"} <= set(ds.data_vars)
+    assert {"mask_thickness_surface_1000", "mask_thickness_1000_850"} <= set(
+        ds.data_vars
+    )
+    # thickness value (from zg) = 1500 - 200 everywhere
+    np.testing.assert_allclose(ds["thickness_1000_850"].values, 1300.0)
+    # mapping is keyed by FLATTENED names
+    assert mapping["ua1000"] == "mask_1000"
+    assert mapping["zg850"] == "mask_850"
+    assert mapping["thickness_surface_1000"] == "mask_thickness_surface_1000"
+    assert mapping["thickness_1000_850"] == "mask_thickness_1000_850"
+    # per-level mask polarity: 1 = valid
+    assert ds["mask_1000"].values[0].tolist() == [[0, 1], [1, 1]]
+
+
+def test_assemble_masked_3d_state_fill_makes_invalid_cells_finite():
+    """With fill=True the below-surface cells hold finite (smooth-filled) data
+    even though the mask flags them invalid."""
+    from processing import assemble_masked_3d_state
+
+    plev = np.array([100000.0])  # single level to keep the fill cheap
+    field = _target_3d([np.arange(16, dtype="float64").reshape(4, 4)], plev)
+    zg = _target_3d([np.full((4, 4), 200.0)], plev)
+    valid = xr.DataArray(
+        np.ones((1, 1, 4, 4), dtype=bool),
+        dims=("time", "plev", "lat", "lon"),
+        coords={"time": [0], "plev": plev},
+    )
+    valid[0, 0, 0, 0] = False  # one invalid cell
+    hgtsfc = xr.DataArray(
+        np.zeros((4, 4)),
+        dims=("lat", "lon"),
+        coords={"lat": np.arange(4), "lon": np.arange(4)},
+    )
+
+    ds, _ = assemble_masked_3d_state({"zg": zg, "ua": field}, valid, hgtsfc, fill=True)
+    # every cell finite after fill (input finiteness) ...
+    assert bool(np.isfinite(ds["ua"].values).all())
+    # ... while the mask still marks the below-surface cell invalid
+    assert ds["mask_1000"].values[0, 0, 0] == 0

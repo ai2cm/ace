@@ -653,6 +653,84 @@ def attach_mask_attributes(ds: xr.Dataset, field_to_mask: dict[str, str]) -> xr.
     return ds
 
 
+def assemble_masked_3d_state(
+    regridded_3d: dict[str, xr.DataArray],
+    valid_target: xr.DataArray,
+    hgtsfc: xr.DataArray,
+    surface_height_name: str = "orog",
+    fill: bool = True,
+) -> tuple[xr.Dataset, dict[str, str]]:
+    """Assemble the source-grid-masked 3D state into a plev-dimensioned dataset.
+
+    Consumes the output of :func:`source_grid_masked_regrid` (already on the
+    target grid) and produces everything the write path needs *before* plev
+    flattening:
+
+      * each 3D field smooth-filled in its invalid (below-surface) cells so the
+        stored data is finite (the loss/eval still exclude them via the mask),
+      * layer thicknesses from the (filled) ``zg`` anchored on ``hgtsfc``,
+      * the surface height stored under ``surface_height_name`` (renamed to
+        ``HGTsfc`` downstream),
+      * per-level validity masks ``mask_<hPa>`` and thickness masks
+        ``mask_thickness_<...>`` (uint8, 1 = valid).
+
+    The returned ``field_to_mask`` maps each **flattened** field name (e.g.
+    ``ta1000``, ``thickness_1000_850``) to its mask variable, for stamping the
+    self-describing ``mask_variable`` attribute *after* the caller runs
+    :func:`flatten_plev_variables`.
+
+    Args:
+        regridded_3d: ``{name: (time, plev, lat, lon)}`` masked-regridded fields
+            (must include ``zg`` to derive thicknesses).
+        valid_target: shared ``(time, plev, lat, lon)`` boolean validity.
+        hgtsfc: target-grid surface geopotential height ``(lat, lon)``.
+        surface_height_name: variable name to store ``hgtsfc`` under.
+        fill: when True, smooth-fill invalid cells (needs the scipy-backed
+            ``fill`` module); set False in tests that only check structure.
+
+    Returns:
+        ``(ds_plev, field_to_mask)``.
+    """
+    invalid = (~valid_target.astype(bool)).astype("uint8")
+    dims = ("time", "plev", "lat", "lon")
+    fields: dict[str, xr.DataArray] = {}
+    for name, da in regridded_3d.items():
+        da = da.transpose(*dims)
+        if fill:
+            da = fill_below_surface_smooth(da, invalid.transpose(*dims))
+        fields[name] = da
+
+    ds = xr.Dataset(fields)
+
+    has_zg = "zg" in fields
+    if has_zg:
+        for k, v in derive_layer_thickness(fields["zg"], hgtsfc).items():
+            ds[k] = v
+
+    ds[surface_height_name] = hgtsfc
+
+    for k, v in build_level_masks(valid_target).items():
+        ds[k] = v
+    if has_zg:
+        for k, v in build_thickness_masks(valid_target).items():
+            ds[k] = v
+
+    plev_hpa = _plev_hpa(valid_target["plev"].values)
+    field_to_mask: dict[str, str] = {}
+    for name in regridded_3d:
+        for hpa in plev_hpa:
+            field_to_mask[f"{name}{hpa}"] = f"mask_{hpa}"
+    if has_zg:
+        p0 = plev_hpa[0]
+        field_to_mask[f"thickness_surface_{p0}"] = f"mask_thickness_surface_{p0}"
+        for k in range(len(plev_hpa) - 1):
+            lower, upper = plev_hpa[k], plev_hpa[k + 1]
+            field_to_mask[f"thickness_{lower}_{upper}"] = (
+                f"mask_thickness_{lower}_{upper}"
+            )
+    return ds, field_to_mask
+
+
 def nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:
     """Legacy below-surface fill: each column's masked cells inherit the
     lowest above-surface level's value.
@@ -1806,6 +1884,7 @@ __all__ = [
     "build_level_masks",
     "build_thickness_masks",
     "attach_mask_attributes",
+    "assemble_masked_3d_state",
     "nearest_above_fill",
     "fill_below_surface_smooth",
     "fill_horizontal_diffuse",
