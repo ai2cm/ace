@@ -435,6 +435,20 @@ runs. **The model is generating the tails.**
   0.54→0.96 a "tails blow up" symptom. That was a misread — for a student/target
   ratio, 0.54→0.96 is the tail matched *better*. Precip tails improve, not degrade.
 
+**Metric bug found (2026-06-30, fixed `80db7e7b1`): the PRMSL tail ratio was
+offset-blind.** The tail metric was `student_pXX / target_pXX` on *raw* values.
+For PRMSL, direction is correctly the **lower** tail (deep lows), but the ratio of
+raw pressures sits on a ~1000 hPa DC offset → a several-hPa deep-low error reads
+`958/953 ≈ 1.005 ≈ 1.0`. **So the "PRMSL tails ~1.0, exact" readings above are an
+offset artifact, not evidence deep lows are captured** — and given the
+smoothness/high-k-deficit finding the student almost certainly *under-deepens*
+lows, which this metric couldn't see. It also made PRMSL's `|ratio−1|` term ~0, so
+it contributed ~nothing to `best_student_tail` selection. Winds (~0-centered) and
+precip (≥0) ratios were fine. **Fix:** per-variable `tail_references`
+(PRMSL=1000 hPa) + `_tail_magnitude` → PRMSL tail is now the **depth-below-1000
+ratio** `(1000 − p_0.01)`; zero-referenced vars unchanged. `val/tail_*_PRMSL`
+changes meaning (depth ratio) — not comparable to pre-fix PRMSL tail values.
+
 **Implication for the planned spectral loss** (see also the corrected diagnosis
 below, which links spectra and tails): restoring high-k variance plausibly helps
 *both* spectra and tails (same root cause), but a *pure mean-PSD match* can be
