@@ -13,33 +13,37 @@ standard recipe under hydrostatic balance.
 
 The pipeline is:
   1. Open the ACE zarr and assemble the four fields TempestExtremes needs
-     (sea-level pressure, T3, 10m u/v wind) into per-chunk NetCDF files.
-  2. Run ``DetectNodes`` to find candidate TC centers at each timestep.
-  3. Run ``StitchNodes`` to link candidates into tracks.
+     (sea-level pressure, T3, 10m u/v wind), lazily.
+  2. For each time chunk, convert it to a temporary NetCDF file, run
+     ``DetectNodes`` on it to find candidate TC centers, then delete the temp
+     file. Candidate nodes from all chunks are concatenated. TempestExtremes
+     reads NetCDF (not zarr), and DetectNodes scores each timestep
+     independently, so chunked scanning is equivalent to scanning the whole
+     record at once while keeping only one chunk on disk at a time.
+  3. Run ``StitchNodes`` over the concatenated candidates to link them into
+     tracks.
   4. Parse the StitchNodes output into a tidy CSV (one row per track point).
 
 TempestExtremes must be installed and on ``PATH`` (e.g.
 ``conda install -c conda-forge tempest-extremes``).
 
 Usage examples:
-    # Basic run on a local zarr, writing intermediates + tracks to out/
+    # Basic run on a local zarr, writing candidates + tracks to out/
     python detect_tc_tracks.py /path/to/ace_output.zarr out/
 
     # Select a specific ensemble member and time range
     python detect_tc_tracks.py gs://bucket/ace_output.zarr out/ \
         --sample 2 --time-start 2020-01-01 --time-end 2020-12-31
 
-    # Reuse already-written NetCDF intermediates (skip step 1)
-    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --skip-convert
-
-    # Only build the NetCDF inputs, don't run TempestExtremes
-    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --convert-only
+    # Put the transient per-chunk NetCDF on a scratch filesystem
+    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --tmp-dir /scratch
 """
 
 import argparse
 import logging
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -119,31 +123,6 @@ def build_te_dataset(
     return out
 
 
-def write_netcdf_chunks(ds: xr.Dataset, out_dir: Path, chunk_size: int) -> Path:
-    """Write the dataset to per-chunk NetCDF files and a DetectNodes file list.
-
-    TempestExtremes reads NetCDF (not zarr), and splitting the record dimension
-    into multiple files keeps memory bounded and lets DetectNodes stream via
-    ``--in_data_list``. Returns the path to the written file list.
-    """
-    n_time = ds.sizes["time"]
-    nc_dir = out_dir / "netcdf"
-    nc_dir.mkdir(parents=True, exist_ok=True)
-
-    paths = []
-    for start in range(0, n_time, chunk_size):
-        sub = ds.isel(time=slice(start, start + chunk_size))
-        path = nc_dir / f"te_input_{start:06d}.nc"
-        logger.info("Writing %s (%d timesteps)", path.name, sub.sizes["time"])
-        sub.to_netcdf(path)
-        paths.append(path)
-
-    list_path = out_dir / "input_files.txt"
-    list_path.write_text("\n".join(str(p) for p in paths) + "\n")
-    logger.info("Wrote file list %s (%d files)", list_path, len(paths))
-    return list_path
-
-
 def _check_exe(exe: str) -> None:
     """Raise a helpful error if a TempestExtremes binary is not on PATH.
 
@@ -163,14 +142,13 @@ def _check_exe(exe: str) -> None:
 
 
 def run_detect_nodes(
-    in_list: Path, out_path: Path, exe: str, lat_name: str, lon_name: str
+    in_data: Path, out_path: Path, exe: str, lat_name: str, lon_name: str
 ) -> None:
-    """Run DetectNodes to find candidate TC centers at each timestep."""
-    _check_exe(exe)
+    """Run DetectNodes on a single NetCDF file to find candidate TC centers."""
     cmd = [
         exe,
-        "--in_data_list",
-        str(in_list),
+        "--in_data",
+        str(in_data),
         "--out",
         str(out_path),
         "--timefilter",
@@ -192,9 +170,46 @@ def run_detect_nodes(
     subprocess.run(cmd, check=True)
 
 
+def detect_nodes_streaming(
+    ds: xr.Dataset,
+    nodes_path: Path,
+    chunk_size: int,
+    exe: str,
+    lat_name: str,
+    lon_name: str,
+    tmp_dir: str | None,
+) -> Path:
+    """Scan the dataset chunk-by-chunk, converting each chunk to a temp NetCDF.
+
+    Each chunk is written to a temporary NetCDF, scanned with DetectNodes, and
+    the temp file deleted before moving on, so only one chunk exists on disk at
+    a time. Candidate nodes from all chunks are concatenated (in chronological
+    order) into ``nodes_path``, which is valid input for StitchNodes because
+    DetectNodes emits an independent block per timestep.
+    """
+    n_time = ds.sizes["time"]
+    n_chunks = (n_time + chunk_size - 1) // chunk_size
+    with open(nodes_path, "w") as combined:
+        for i, start in enumerate(range(0, n_time, chunk_size)):
+            sub = ds.isel(time=slice(start, start + chunk_size))
+            with tempfile.TemporaryDirectory(dir=tmp_dir) as td:
+                nc_path = Path(td) / "chunk.nc"
+                chunk_nodes = Path(td) / "nodes.dat"
+                logger.info(
+                    "Chunk %d/%d: converting %d timesteps -> temp NetCDF",
+                    i + 1,
+                    n_chunks,
+                    sub.sizes["time"],
+                )
+                sub.to_netcdf(nc_path)
+                run_detect_nodes(nc_path, chunk_nodes, exe, lat_name, lon_name)
+                combined.write(chunk_nodes.read_text())
+    logger.info("Wrote concatenated candidate nodes to %s", nodes_path)
+    return nodes_path
+
+
 def run_stitch_nodes(in_path: Path, out_path: Path, exe: str) -> None:
     """Run StitchNodes to link candidate centers into tracks."""
-    _check_exe(exe)
     cmd = [
         exe,
         "--in",
@@ -302,51 +317,46 @@ def main() -> None:
     parser.add_argument("--detect-exe", default="DetectNodes")
     parser.add_argument("--stitch-exe", default="StitchNodes")
     parser.add_argument(
-        "--skip-convert",
-        action="store_true",
-        help="Reuse existing NetCDF inputs in out_dir (skip zarr conversion).",
-    )
-    parser.add_argument(
-        "--convert-only",
-        action="store_true",
-        help="Only build the NetCDF inputs; do not run TempestExtremes.",
+        "--tmp-dir",
+        default=None,
+        help="Directory for the transient per-chunk NetCDF (default: system "
+        "temp). Point at a scratch filesystem for large chunks.",
     )
     args = parser.parse_args()
 
+    # Fail fast (before any conversion) if the binaries are missing.
+    _check_exe(args.detect_exe)
+    _check_exe(args.stitch_exe)
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    list_path = out_dir / "input_files.txt"
 
-    if not args.skip_convert:
-        logger.info("Opening zarr %s", args.zarr)
-        ds = xr.open_zarr(args.zarr)
-        if args.time_start is not None or args.time_end is not None:
-            ds = ds.sel(time=slice(args.time_start, args.time_end))
-        te_ds = build_te_dataset(
-            ds,
-            psl_var=args.psl_var,
-            psfc_var=args.psfc_var,
-            t3_var=args.t3_var,
-            u_var=args.u_var,
-            v_var=args.v_var,
-            sample=args.sample,
-        )
-        list_path = write_netcdf_chunks(te_ds, out_dir, args.chunk_size)
-    elif not list_path.exists():
-        raise FileNotFoundError(
-            f"--skip-convert set but {list_path} not found; run conversion first."
-        )
-
-    if args.convert_only:
-        logger.info("--convert-only set; stopping after NetCDF conversion.")
-        return
+    logger.info("Opening zarr %s", args.zarr)
+    ds = xr.open_zarr(args.zarr)
+    if args.time_start is not None or args.time_end is not None:
+        ds = ds.sel(time=slice(args.time_start, args.time_end))
+    te_ds = build_te_dataset(
+        ds,
+        psl_var=args.psl_var,
+        psfc_var=args.psfc_var,
+        t3_var=args.t3_var,
+        u_var=args.u_var,
+        v_var=args.v_var,
+        sample=args.sample,
+    )
 
     nodes_path = out_dir / "candidate_nodes.dat"
     tracks_path = out_dir / "tracks.dat"
     csv_path = out_dir / "tracks.csv"
 
-    run_detect_nodes(
-        list_path, nodes_path, args.detect_exe, args.lat_name, args.lon_name
+    detect_nodes_streaming(
+        te_ds,
+        nodes_path,
+        args.chunk_size,
+        args.detect_exe,
+        args.lat_name,
+        args.lon_name,
+        args.tmp_dir,
     )
     run_stitch_nodes(nodes_path, tracks_path, args.stitch_exe)
 
