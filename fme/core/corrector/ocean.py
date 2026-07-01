@@ -473,9 +473,7 @@ def _force_conserve_ocean_heat_content(
     heat_content_correction_ratio = (
         global_input_ocean_heat_content + expected_change_ocean_heat_content
     ) / global_gen_ocean_heat_content
-    # apply same temperature correction to all vertical layers; each written
-    # level (and the SST) is placed in the output as it is corrected, so the
-    # return contains only the modified fields.
+    # apply same temperature correction to all vertical layers
     out: TensorDict = {}
     n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):

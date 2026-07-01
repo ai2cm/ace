@@ -133,21 +133,6 @@ class IceBudgetCorrectionConfig:
 
         return s / timestep, k / timestep, t / timestep
 
-    def _processing_order(self) -> list[str]:
-        """Prognostic variables this correction reconstructs, in write order."""
-        if self.corrected_variables is None:
-            return []
-        sic_vars = {"siconc", "sea_ice_fraction", "ocean_sea_ice_fraction"}
-        processing_order: list[str] = []
-        if "simass" in self.corrected_variables:
-            processing_order.append("simass")
-        for var in sic_vars:
-            if var in self.corrected_variables:
-                processing_order.append(var)
-        if "sisnmass" in self.corrected_variables:
-            processing_order.append("sisnmass")
-        return processing_order
-
     def __call__(
         self, gen_data: TensorMapping, input_data: TensorMapping, timestep: float
     ) -> TensorDict:
@@ -176,7 +161,14 @@ class IceBudgetCorrectionConfig:
             if sic_in_corrected:
                 mask_var = next(iter(sic_in_corrected))
 
-        processing_order = self._processing_order()
+        processing_order = []
+        if "simass" in self.corrected_variables:
+            processing_order.append("simass")
+        for var in sic_vars:
+            if var in self.corrected_variables:
+                processing_order.append(var)
+        if "sisnmass" in self.corrected_variables:
+            processing_order.append("sisnmass")
 
         for key in processing_order:
             area_mode = key in sic_vars

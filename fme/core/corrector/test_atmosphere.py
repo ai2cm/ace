@@ -571,6 +571,28 @@ def _build_full_atmosphere_corrector(tensor_shape):
     return corrector, input_data, gen_data, forcing_data
 
 
+def test_atmosphere_corrector_config_fields_are_exercised():
+    # Staleness guard: the full-corrector builder above enables every
+    # field-modifying option. If a new corrector option is added to
+    # AtmosphereCorrectorConfig this fails, flagging that the builder and the
+    # delta/modified-return tests need to exercise it.
+    expected = {
+        "conserve_dry_air",
+        "zero_global_mean_moisture_advection",
+        "moisture_budget_correction",
+        "force_positive_names",
+        "total_energy_budget_correction",
+        "keep_gradient_through_clamps",
+        "corrector_disabled_epochs",  # inherited epoch-scheduling field
+    }
+    actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}
+    assert actual == expected, (
+        "AtmosphereCorrectorConfig fields changed; update "
+        "_build_full_atmosphere_corrector and the corrector delta tests to "
+        f"cover the new option(s): {actual ^ expected}"
+    )
+
+
 def test_atmosphere_corrector_delta_matches_modified_returns():
     torch.manual_seed(0)
     tensor_shape = (2, 5, 5)

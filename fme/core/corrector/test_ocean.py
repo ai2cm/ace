@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 
 import pytest
@@ -473,6 +474,25 @@ def test_ocean_heat_content_correction(hfds_type):
         expected_gen_data.ocean_heat_content,
         gen_data_corrected.ocean_heat_content,
         equal_nan=True,
+    )
+
+
+def test_ocean_corrector_config_fields_are_known():
+    # Staleness guard: if a new corrector option is added to
+    # OceanCorrectorConfig this fails, flagging that the corrector delta/
+    # modified-return tests need to exercise it.
+    expected = {
+        "force_positive_names",
+        "sea_ice_fraction_correction",
+        "surface_energy_flux_correction",
+        "ocean_heat_content_correction",
+        "keep_gradient_through_clamps",
+        "corrector_disabled_epochs",  # inherited epoch-scheduling field
+    }
+    actual = {f.name for f in dataclasses.fields(OceanCorrectorConfig)}
+    assert actual == expected, (
+        "OceanCorrectorConfig fields changed; update the corrector delta tests "
+        f"to cover the new option(s): {actual ^ expected}"
     )
 
 

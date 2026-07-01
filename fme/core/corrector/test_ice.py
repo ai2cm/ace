@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 
 import torch
@@ -32,6 +33,21 @@ def _ice_test_data():
         "other": torch.randn(IMG_SHAPE, device=DEVICE),  # uncorrected field
     }
     return input_data, gen_data
+
+
+def test_ice_corrector_config_fields_are_known():
+    # Staleness guard: if a new corrector option is added to IceCorrectorConfig
+    # this fails, flagging that the corrector delta/modified-return tests need to
+    # exercise it.
+    expected = {
+        "budget_correction",
+        "corrector_disabled_epochs",  # inherited epoch-scheduling field
+    }
+    actual = {f.name for f in dataclasses.fields(IceCorrectorConfig)}
+    assert actual == expected, (
+        "IceCorrectorConfig fields changed; update the corrector delta tests to "
+        f"cover the new option(s): {actual ^ expected}"
+    )
 
 
 def test_ice_corrector_output_behavior_preserving():

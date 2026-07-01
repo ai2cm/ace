@@ -83,9 +83,7 @@ class Correction(Protocol):
     ``gen_data`` with the returned subset and takes its keys as the set of
     variables the correction is responsible for writing. Because the returned
     dict is exactly what gets applied, the returned keys are the single source of
-    truth for what changed and cannot drift from the write. This contract is
-    documented here and reiterated in a ``Returns`` annotation on each concrete
-    ``__call__``; that inline documentation is the primary guard against drift.
+    truth for what changed and cannot drift from the write.
     """
 
     def __call__(

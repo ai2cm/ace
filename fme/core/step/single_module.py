@@ -613,8 +613,7 @@ def step_with_adjustments(
         )
         result = corrector(input, output, next_step_input_data, corrector_state)
         output = result.corrected
-        # Detach the diagnostic tensors once, at the step boundary, so the
-        # corrector itself stays autograd-agnostic.
+        # Detach the corrector diagnostic tensors.
         diagnostics = CorrectorDiagnostics(
             delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
         )

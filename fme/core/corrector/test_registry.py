@@ -133,7 +133,7 @@ def test_scheduled_corrector_forwards_lifecycle_and_state():
     assert wrapped.loaded_state == {"wrapped_value": 3}
 
 
-class _ConstantOffsetCorrection:
+class ConstantOffsetCorrection:
     """Adds a constant offset to one named field, returning only that field."""
 
     def __init__(self, name: str, offset: float):
@@ -158,8 +158,8 @@ def test_correction_sequence_accumulates_modified_keys():
     }
     sequence = CorrectionSequence(
         [
-            _ConstantOffsetCorrection("a", 1.0),
-            _ConstantOffsetCorrection("b", 2.0),
+            ConstantOffsetCorrection("a", 1.0),
+            ConstantOffsetCorrection("b", 2.0),
         ]
     )
     result = sequence({}, gen_data, {}, None)
@@ -178,8 +178,8 @@ def test_correction_sequence_unions_repeated_modified_key():
     gen_data = {"a": torch.zeros(2, 2)}
     sequence = CorrectionSequence(
         [
-            _ConstantOffsetCorrection("a", 1.0),
-            _ConstantOffsetCorrection("a", 3.0),
+            ConstantOffsetCorrection("a", 1.0),
+            ConstantOffsetCorrection("a", 3.0),
         ]
     )
     result = sequence({}, gen_data, {}, None)
@@ -188,7 +188,7 @@ def test_correction_sequence_unions_repeated_modified_key():
 
 
 def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics():
-    wrapped = CorrectionSequence([_ConstantOffsetCorrection("a", 1.0)])
+    wrapped = CorrectionSequence([ConstantOffsetCorrection("a", 1.0)])
     corrector = EpochScheduledCorrector(wrapped=wrapped, disabled_epochs=1)
     corrector.train(True)  # disabled for train-mode steps in the first epoch
     gen_data = {"a": torch.zeros(2, 2)}

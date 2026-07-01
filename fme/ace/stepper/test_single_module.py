@@ -65,6 +65,7 @@ from fme.core.coordinates import (
 from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import CorrectionSequence, CorrectorABC
 from fme.core.corrector.state import CorrectorState
+from fme.core.corrector.test_registry import ConstantOffsetCorrection
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -1301,27 +1302,10 @@ def test_predict_threads_stepper_state_across_calls():
     torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
 
 
-class _OffsetCorrection:
-    """Adds a constant offset to one field, returning only that field."""
-
-    def __init__(self, name: str, offset: float):
-        self._name = name
-        self._offset = offset
-
-    def __call__(
-        self,
-        input_data: TensorMapping,
-        gen_data: TensorMapping,
-        forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[dict, CorrectorState | None]:
-        return {self._name: gen_data[self._name] + self._offset}, corrector_state
-
-
 def test_predict_seam_yields_stepoutput_and_discards_diagnostics():
     stepper = _get_stepper(["a"], ["a"])
     stepper._step_obj._corrector = CorrectionSequence(  # type: ignore[attr-defined]
-        [_OffsetCorrection("a", 1.0)]
+        [ConstantOffsetCorrection("a", 1.0)]
     )
     n_steps = 2
     input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])

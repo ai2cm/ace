@@ -505,8 +505,7 @@ def process_prediction_generator_list(
 
     Attaches the terminal stepper_state (from the last entry in
     ``output_list``) to the returned BatchData so it can propagate to the
-    next ``Stepper.predict`` call. The per-step corrector diagnostics carried by
-    each ``StepOutput`` are not consumed here.
+    next ``Stepper.predict`` call.
     """
     output_dicts = [item.output for item in output_list]
     terminal_state = output_list[-1].stepper_state if output_list else None
