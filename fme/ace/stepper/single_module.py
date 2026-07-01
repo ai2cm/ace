@@ -918,12 +918,6 @@ class Stepper:
         """
         return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
-    def has_input_dropout(self) -> bool:
-        return self._step_obj.has_input_dropout()
-
-    def new_rollout(self) -> None:
-        self._step_obj.new_rollout()
-
     @property
     def training_dataset_info(self) -> DatasetInfo:
         return self._dataset_info
@@ -1670,8 +1664,6 @@ class TrainStepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
-        # Sample a fresh input-dropout mask per rollout (Step caches it internally).
-        self._stepper.new_rollout()
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
         output_generator = self._stepper.predict_generator(

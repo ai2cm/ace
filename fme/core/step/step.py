@@ -356,15 +356,6 @@ class StepABC(abc.ABC):
         """
         pass
 
-    def has_input_dropout(self) -> bool:
-        """
-        Whether this Step has input dropout configured.
-
-        Non-random and mode-independent. Used to reject input dropout in
-        contexts where it is unsupported (e.g. coupled training).
-        """
-        return False
-
     @abc.abstractmethod
     def step(
         self: SelfType,
@@ -390,16 +381,6 @@ class StepABC(abc.ABC):
 
         Default implementation is a no-op. Steps which wrap another step must
         forward the call to the wrapped step.
-        """
-        pass
-
-    def new_rollout(self) -> None:
-        """Called by the stepper at the start of each training rollout.
-
-        Lets a Step refresh per-rollout state (e.g. resample input dropout)
-        so it stays constant across the rollout's forward steps. Default
-        implementation is a no-op. Steps which wrap another step must forward
-        the call to the wrapped step.
         """
         pass
 

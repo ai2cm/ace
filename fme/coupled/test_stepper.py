@@ -1366,14 +1366,13 @@ def get_train_stepper_and_batch(
     return train_stepper, coupled_data, config, dataset_info
 
 
-def test_coupled_training_with_input_dropout_raises():
-    """input_dropout is unsupported for coupled training and must fail loud.
+def test_coupled_training_with_input_dropout_runs():
+    """input_dropout on a coupled component trains without error.
 
-    The coupled training route never arms input dropout, so a configured
-    input_dropout would silently do nothing; constructing the
-    CoupledTrainStepper must raise instead.
+    Each forward step samples its own mask in train mode, so coupled training
+    needs no special coordination; the batch must step through successfully.
     """
-    _, _, config, dataset_info = get_stepper_and_batch(
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
         ocean_in_names=["sst"],
         ocean_out_names=["sst"],
         atmosphere_in_names=["surface_temperature", "ocean_fraction"],
@@ -1383,13 +1382,11 @@ def test_coupled_training_with_input_dropout_raises():
         n_samples=2,
         atmosphere_input_dropout=VariableMaskingConfig(max_masked_vars=1),
     )
-    train_stepper_config = CoupledTrainStepperConfig(
-        n_coupled_steps=1,
-        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
-        atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+    output = train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=NullOptimization(),
     )
-    with pytest.raises(ValueError, match="input_dropout is not supported"):
-        train_stepper_config.get_train_stepper(config, dataset_info)
+    assert "surface_temperature" in output.atmosphere.gen_data
 
 
 @pytest.mark.parametrize(

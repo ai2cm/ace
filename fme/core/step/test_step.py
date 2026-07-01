@@ -1599,14 +1599,14 @@ def _presence_mask(step: SingleModuleStep, present: bool) -> TensorDict:
 def _inject_input_dropout_mask(
     step: SingleModuleStep, mask: TensorMapping | None
 ) -> None:
-    """Force the per-rollout cached input-dropout mask.
+    """Force the mask drawn by the next ``step`` call.
 
-    The Step samples its own mask internally; tests inject a deterministic mask
-    (or None for no dropout) so the application path is exercised without
-    relying on the random sampler.
+    The Step samples its own mask internally on every forward step; tests
+    override ``_draw_input_dropout_mask`` with a deterministic mask (or None
+    for no dropout) so the application path is exercised without relying on
+    the random sampler.
     """
-    step._input_dropout_pending = False
-    step._input_dropout_mask = mask
+    step._draw_input_dropout_mask = lambda: mask  # type: ignore[method-assign]
 
 
 def test_input_dropout_mask_zeros_inputs():
@@ -1811,7 +1811,6 @@ def test_draw_input_dropout_mask_none_when_unset():
     step = _make_single_module_step(None)
     step.module.torch_module.train()
     assert step._draw_input_dropout_mask() is None
-    assert step.has_input_dropout() is False
 
 
 def test_draw_input_dropout_mask_none_in_eval_mode():
@@ -1819,8 +1818,6 @@ def test_draw_input_dropout_mask_none_in_eval_mode():
     step.module.torch_module.eval()
     # configured, but eval mode disables dropout sampling
     assert step._draw_input_dropout_mask() is None
-    # has_input_dropout is mode-independent
-    assert step.has_input_dropout() is True
 
 
 def test_draw_input_dropout_mask_includes_gmr_extras():

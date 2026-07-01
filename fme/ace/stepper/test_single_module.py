@@ -1154,12 +1154,12 @@ def test_input_dropout_same_mask_across_batch_and_ensemble():
     ).all(), "every batch and ensemble member must share the dropout mask"
 
 
-def test_input_dropout_mask_constant_across_rollout_steps():
-    """The Step samples one dropout mask per rollout, not per step.
+def test_input_dropout_mask_sampled_per_forward_step():
+    """The Step samples an independent dropout mask on every forward step.
 
-    new_rollout arms a single draw; the Step caches it and reuses it across all
-    forward steps, so the underlying _draw_input_dropout_mask fires exactly once
-    per rollout and every step sees the same dropped channel.
+    Each step() draws its own mask (no per-rollout caching), so the underlying
+    _draw_input_dropout_mask fires once per forward step. A fixed side_effect
+    keeps the assertion deterministic while still exercising every draw.
     """
     n_base, n_ensemble, n_steps = 3, 1, 3
     config = _input_dropout_stepper_config(
@@ -1193,7 +1193,7 @@ def test_input_dropout_mask_constant_across_rollout_steps():
     finally:
         handle.remove()
 
-    assert draw_mask.call_count == 1
+    assert draw_mask.call_count == n_steps
     assert len(captured) == n_steps
     for packed in captured:
         indicators = packed[:, 1:, 0, 0]  # [batch, 1]
@@ -1228,15 +1228,15 @@ def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
 def test_input_dropout_inactive_in_inference():
     """Serialized input_dropout does not affect the inference predict path.
 
-    predict never arms input dropout (no new_rollout), so output matches a
-    stepper with no input_dropout configured (same weights).
+    Inference runs in eval mode, so _draw_input_dropout_mask returns None and
+    output matches a stepper with no input_dropout configured (same weights).
     """
     n_steps = 3
 
     def _run(input_dropout):
         torch.manual_seed(0)
         stepper = _get_stepper(["a"], ["a"], input_dropout=input_dropout)
-        stepper.set_train()  # even in train mode, predict applies no dropout
+        stepper.set_eval()  # inference runs in eval mode: no dropout
         input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
         forcing_data.data = {}
         output, _ = stepper.predict(input_data, forcing_data)

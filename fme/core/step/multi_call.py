@@ -298,9 +298,6 @@ class MultiCallStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
 
-    def has_input_dropout(self) -> bool:
-        return self._wrapped_step.has_input_dropout()
-
     def train(self, mode: bool = True) -> StepABC:
         super().train(mode)
         self._wrapped_step.train(mode)
@@ -308,9 +305,6 @@ class MultiCallStep(StepABC):
 
     def set_epoch(self, epoch: int) -> None:
         self._wrapped_step.set_epoch(epoch)
-
-    def new_rollout(self) -> None:
-        self._wrapped_step.new_rollout()
 
     def step(
         self,
