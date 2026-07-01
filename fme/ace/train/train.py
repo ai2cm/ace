@@ -58,7 +58,7 @@ import dacite
 import torch
 
 import fme
-from fme.ace.train.train_config import TrainBuilders, TrainConfig
+from fme.ace.train.train_config import TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import Trainer
@@ -68,15 +68,10 @@ __all__ = [
     "main",
     "prepare_directory",
     "run_train",
-    "run_train_from_config",
 ]
 
 
-def run_train_from_config(config: TrainConfig):
-    run_train(TrainBuilders(config), config)
-
-
-def run_train(builders: TrainBuilders, config: TrainConfig):
+def run_train(config: TrainConfig):
     dist = Distributed.get_instance()
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
@@ -93,7 +88,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         logging.info(
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
-    trainer = config.build_trainer(builders)
+    trainer = config.build_trainer()
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
 
@@ -110,4 +105,4 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
             config.experiment_dir, config_data, config.resume_results
         ),
     )
-    run_train_from_config(config)
+    run_train(config)

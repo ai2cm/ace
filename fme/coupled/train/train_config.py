@@ -505,7 +505,8 @@ class TrainConfig:
             stepper=stepper,
         )
 
-    def build_trainer(self, builders: "TrainBuilders") -> Trainer:
+    def build_trainer(self) -> Trainer:
+        builders = TrainBuilders(self)
         logging.info("Initializing training data loader")
         train_data = builders.get_train_data()
 

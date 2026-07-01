@@ -590,10 +590,11 @@ class TrainConfig:
             stepper=stepper,
         )
 
-    def build_trainer(self, builders: "TrainBuilders") -> Trainer:
+    def build_trainer(self) -> Trainer:
         # note for devs: you don't have to use this method to build a custom
         # trainer, you can build it however you like. This is here for
         # convenience.
+        builders = TrainBuilders(self)
         logging.info("Initializing training data loader")
         train_data = builders.get_train_data()
 

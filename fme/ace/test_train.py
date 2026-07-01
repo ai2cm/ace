@@ -62,7 +62,6 @@ from fme.ace.train.train import prepare_directory
 from fme.ace.train.train_config import (
     InlineInferenceConfig,
     InlineValidationConfig,
-    TrainBuilders,
     TrainConfig,
 )
 from fme.core.coordinates import (
@@ -850,8 +849,7 @@ def _get_reproducible_trainer(config_dict, seed):
         data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
     )
     prepare_directory(config.experiment_dir, config_dict)
-    builders = TrainBuilders(config)
-    return config.build_trainer(builders)
+    return config.build_trainer()
 
 
 @pytest.mark.medium_duration
@@ -903,11 +901,10 @@ def test_restore_checkpoint(
         data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
     )
     prepare_directory(config.experiment_dir, config_dict)
-    builders = TrainBuilders(config)
 
-    base_trainer = config.build_trainer(builders)
-    restored_trainer1 = config.build_trainer(builders)
-    restored_trainer2 = config.build_trainer(builders)
+    base_trainer = config.build_trainer()
+    restored_trainer1 = config.build_trainer()
+    restored_trainer2 = config.build_trainer()
 
     # run one epoch
     base_trainer.train_one_epoch()

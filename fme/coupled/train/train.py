@@ -9,10 +9,10 @@ import torch
 import fme
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.distributed import Distributed
-from fme.coupled.train.train_config import TrainBuilders, TrainConfig
+from fme.coupled.train.train_config import TrainConfig
 
 
-def run_train(builders: TrainBuilders, config: TrainConfig):
+def run_train(config: TrainConfig):
     dist = Distributed.get_instance()
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
@@ -30,13 +30,9 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
         config.resume_results.verify_wandb_resumption(config.experiment_dir)
-    trainer = config.build_trainer(builders)
+    trainer = config.build_trainer()
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
-
-
-def run_train_from_config(config: TrainConfig):
-    run_train(TrainBuilders(config), config)
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
@@ -53,4 +49,4 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
             train_config.experiment_dir, data, train_config.resume_results
         ),
     )
-    run_train_from_config(train_config)
+    run_train(train_config)
