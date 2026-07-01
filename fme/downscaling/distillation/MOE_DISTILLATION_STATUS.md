@@ -612,6 +612,29 @@ tap-location (fine-scale visibility) was the binding constraint.** PRMSL
 PRMSL tail is measured. Confirm tap2's high-k gain is *coherent* (not incoherent
 noise) via the raw `val/psd_*` curves + a post-fix PRMSL depth tail.
 
+##### Follow-up runs (submitted 2026-07-01, commit `f00d554bd`) — CHECK THESE
+
+Crank the tap finer + test GAN weight. All from HEAD, so they carry the
+depth-based PRMSL tail (`80db7e7b1`) + step-slidable PSD (unlike tap1/tap2).
+Expert 0 has 6 levels (finest→coarsest `[512,256,128,64,32,16]`); `level =
+5 − offset`; offset ≥5 clamps to the finest 512².
+
+| Run | tap | resolution / in_ch | Beaker |
+|---|---|---|---|
+| **tap4-2step** | offset 4 | 256² / 256ch | `01KWF8W37GNK20SX8PYXH8ECAA` |
+| **tap6-2step** | offset 6→5 | 512² / 128ch (finest, clamped) | `01KWF8WCQ0TAE8TGZ8337PMM0W` |
+| **tap2-gan3e3** | offset 2 (64²) + `gan_weight 3e-3` | 256ch, 3× GAN | `01KWF8WQ6CJ016D3FMPTW3TFP8` |
+
+What to check: (1) confirm the resolved tap in logs (`DMD2 discriminator:
+feature_index=… resolution=… in_channels=…`); (2) does finer-than-64² help PRMSL
+*more* or start injecting *incoherent* hi-k (watch raw `val/psd_*`, esp. whether
+the student tail overshoots teacher); (3) **do winds high-k finally improve** at
+256²/512² (the gap tap2 left); (4) does 3× GAN weight (with the 64² critic) push
+high-k up further or destabilize (`fake_score_loss`, `gan_loss_*`); (5) the
+**depth-based PRMSL tail** (`tail_99.99_PRMSL`) is now real here — watch whether it
+drops below 1.0 (student under-deepening lows) rather than the old offset-blind
+~1.0. NB: 512² is a near-pixel critic (expensive; big head) — watch throughput.
+
 ### Checkpoint-selection fix (2026-06-29, `best_student_callback.py`)
 
 The selection criteria were rebuilt so the saved checkpoints stop ignoring the
