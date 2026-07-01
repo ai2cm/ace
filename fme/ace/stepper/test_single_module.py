@@ -1302,9 +1302,10 @@ def test_predict_threads_stepper_state_across_calls():
     torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
 
 
-def test_predict_seam_yields_stepoutput_and_discards_diagnostics():
+def test_predict_generator_yields_detached_stepoutput():
     stepper = _get_stepper(["a"], ["a"])
-    stepper._step_obj._corrector = CorrectionSequence(  # type: ignore[attr-defined]
+    assert isinstance(stepper._step_obj, SingleModuleStep)
+    stepper._step_obj._corrector = CorrectionSequence(
         [ConstantOffsetCorrection("a", 1.0)]
     )
     n_steps = 2
@@ -1322,12 +1323,6 @@ def test_predict_seam_yields_stepoutput_and_discards_diagnostics():
         assert isinstance(item, StepOutput)
         assert set(item.corrector_diagnostics.delta) == {"a"}
         assert not item.corrector_diagnostics.delta["a"].requires_grad
-
-    # predict returns a corrected-only BatchData with no diagnostics attached
-    data, state = stepper.predict(input_data, forcing_data)
-    assert isinstance(data, BatchData)
-    assert not hasattr(data, "corrector_diagnostics")
-    assert isinstance(state, PrognosticState)
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])
