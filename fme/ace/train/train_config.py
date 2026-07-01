@@ -1,16 +1,19 @@
 import dataclasses
 import functools
+import logging
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import torch
 
+import fme
 from fme.ace.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     LegacyFlagOneStepAggregatorConfig,
     OneStepAggregatorConfig,
+    TrainAggregator,
 )
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.batch_data import PrognosticState
@@ -19,7 +22,7 @@ from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.ace.stepper import TrainStepper
+from fme.ace.stepper import TrainOutput, TrainStepper
 from fme.ace.stepper.single_module import (
     CheckpointStepperConfig,
     StepperConfig,
@@ -30,10 +33,25 @@ from fme.core.cloud import is_local
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset_info import DatasetInfo
+from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
-from fme.core.generics.lr_tuning import LRTuningConfig
-from fme.core.generics.trainer import EndOfBatchCallback, TrainerParams
+from fme.core.generics.data import GriddedDataABC
+from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
+from fme.core.generics.train_stepper import TrainStepperABC
+from fme.core.generics.trainer import (
+    AggregatorBuilderABC,
+    EndOfBatchCallback,
+    InferenceCallback,
+    InferenceTask,
+    Trainer,
+    TrainerParams,
+    ValidationCallback,
+    ValidationTask,
+    build_inference_callback,
+    build_validation_callback,
+)
+from fme.core.generics.validation import run_validation_loop
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
@@ -530,3 +548,273 @@ class TrainBuilders:
 
             return copy_after_batch
         return lambda: None
+
+
+def get_validation_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedDataABC, str]],
+    stepper: TrainStepperABC,
+    dataset_info: DatasetInfo,
+    loss_scaling: dict[str, torch.Tensor] | None,
+    loss_names: Sequence[str] | None,
+    save_per_epoch_diagnostics: bool,
+    output_dir: str,
+) -> ValidationCallback:
+    tasks: list[ValidationTask] = [
+        ValidationTask(
+            name=name,
+            data=data,
+            aggregator_factory=_make_ace_validation_aggregator_factory(
+                entry_config=entry_config,
+                name=name,
+                dataset_info=dataset_info,
+                loss_scaling=loss_scaling,
+                loss_names=loss_names,
+                save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                output_dir=output_dir,
+            ),
+            weight=entry_config.weight,
+        )
+        for entry_config, data, name in validation_entries
+    ]
+    return build_validation_callback(tasks=tasks, stepper=stepper)
+
+
+def _make_ace_validation_aggregator_factory(
+    entry_config: InlineValidationConfig,
+    name: str,
+    dataset_info: DatasetInfo,
+    loss_scaling: dict[str, torch.Tensor] | None,
+    loss_names: Sequence[str] | None,
+    save_per_epoch_diagnostics: bool,
+    output_dir: str,
+):
+    def factory():
+        return entry_config.aggregator.build(
+            dataset_info=dataset_info,
+            loss_scaling=loss_scaling,
+            save_diagnostics=save_per_epoch_diagnostics,
+            output_dir=os.path.join(output_dir, name),
+            channel_mean_names=loss_names,
+        )
+
+    return factory
+
+
+def get_validate_stepper_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedDataABC, str]],
+    dataset_info: DatasetInfo,
+    loss_scaling: dict[str, torch.Tensor] | None,
+    loss_names: Sequence[str] | None,
+    validate_using_ema: bool,
+) -> ValidateStepper:
+    # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
+    # own stepper, so this callback manages its own EMA via run_validation_loop
+    # rather than relying on the Trainer's validation_context().
+    def validate_stepper(
+        stepper: TrainStepperABC, ema: EMATracker, epoch: int
+    ) -> float:
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            data.set_epoch(epoch)
+            aggregator = entry_config.aggregator.build(
+                dataset_info=dataset_info,
+                loss_scaling=loss_scaling,
+                save_diagnostics=False,
+                output_dir="",
+                channel_mean_names=loss_names,
+            )
+            run_validation_loop(
+                stepper=stepper,
+                valid_data=data,
+                aggregator=aggregator,
+                ema=ema,
+                validate_using_ema=validate_using_ema,
+            )
+            if entry_config.weight > 0:
+                summary = aggregator.get_summary(label=name)
+                if summary.loss is not None:
+                    weighted_loss += entry_config.weight * summary.loss
+        return weighted_loss
+
+    return validate_stepper
+
+
+def get_inference_callback(
+    inference_entries: Sequence[
+        tuple[InlineInferenceConfig, InferenceGriddedData, DatasetInfo, str]
+    ],
+    inference_epochs: Sequence[int],
+    inference_epoch_sets: Sequence[set[int]],
+    stepper: TrainStepper,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+) -> InferenceCallback:
+    tasks: list[InferenceTask] = []
+    for i, (entry_config, data, entry_dataset_info, name) in enumerate(
+        inference_entries
+    ):
+        tasks.append(
+            InferenceTask(
+                name=name,
+                data=data,
+                aggregator_factory=_make_ace_aggregator_factory(
+                    entry_config=entry_config,
+                    data=data,
+                    entry_dataset_info=entry_dataset_info,
+                    name=name,
+                    stepper=stepper,
+                    output_dir=output_dir,
+                    save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                ),
+                epoch_set=frozenset(inference_epoch_sets[i]),
+                weight=entry_config.weight,
+            )
+        )
+
+    return build_inference_callback(
+        tasks=tasks,
+        inference_epochs=inference_epochs,
+        stepper=stepper,
+    )
+
+
+def _make_ace_aggregator_factory(
+    entry_config: InlineInferenceConfig,
+    data: InferenceGriddedData,
+    entry_dataset_info: DatasetInfo,
+    name: str,
+    stepper: TrainStepper,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+):
+    def factory():
+        return entry_config.aggregator.build(
+            dataset_info=entry_dataset_info,
+            n_ic_steps=stepper.n_ic_timesteps,
+            n_forward_steps=entry_config.n_forward_steps,
+            initial_time=data.initial_time,
+            normalize=stepper.normalizer.normalize,
+            output_dir=os.path.join(output_dir, name),
+            channel_mean_names=stepper.loss_names,
+            save_diagnostics=save_per_epoch_diagnostics,
+            n_ensemble_per_ic=entry_config.n_ensemble_per_ic,
+            enable_time_series=False,
+        )
+
+    return factory
+
+
+def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
+    # note for devs: you don't have to use this function to build a custom
+    # trainer, you can build it however you like. This is here for convenience.
+    logging.info("Initializing training data loader")
+    train_data = builder.get_train_data()
+
+    variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
+
+    logging.info("Initializing validation data loaders")
+    validation_entries = builder.get_validation_data()
+
+    for data, name in zip(
+        [train_data] + [data for _, data, _ in validation_entries],
+        ["train"] + [name for _, _, name in validation_entries],
+    ):
+        data.log_info(name)
+
+    if config.inference_list:
+        logging.info("Initializing inline inference data loaders")
+    else:
+        logging.info("Skipping inline inference")
+    inference_entries = builder.get_inference_data(variable_metadata)
+    inference_epochs = config.get_inference_epochs()
+    inference_epoch_sets = config.get_inference_epoch_sets()
+
+    dataset_info = train_data.dataset_info
+    logging.info("Starting model initialization")
+    stepper = builder.get_stepper(
+        dataset_info=dataset_info,
+    )
+    end_of_batch_ops = builder.get_end_of_batch_ops(
+        modules=stepper.modules, base_weights=stepper.get_base_weights()
+    )
+
+    loss_scaling = stepper.effective_loss_scaling
+    loss_names = stepper.loss_names
+    aggregator_builder = AggregatorBuilder(
+        train_config=config.train_aggregator,
+        dataset_info=dataset_info.update_variable_metadata(variable_metadata),
+        output_dir=config.output_dir,
+        loss_scaling=loss_scaling,
+        channel_mean_names=loss_names,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+    )
+
+    validation_callback = get_validation_callback(
+        validation_entries=validation_entries,
+        stepper=stepper,
+        dataset_info=dataset_info.update_variable_metadata(variable_metadata),
+        loss_scaling=loss_scaling,
+        loss_names=loss_names,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        output_dir=config.output_dir,
+    )
+
+    validate_stepper: ValidateStepper | None = None
+    if config.lr_tuning is not None:
+        validate_stepper = get_validate_stepper_callback(
+            validation_entries=validation_entries,
+            dataset_info=dataset_info.update_variable_metadata(variable_metadata),
+            loss_scaling=loss_scaling,
+            loss_names=loss_names,
+            validate_using_ema=config.validate_using_ema,
+        )
+
+    inference_callback = get_inference_callback(
+        inference_entries=inference_entries,
+        inference_epochs=inference_epochs,
+        inference_epoch_sets=inference_epoch_sets,
+        stepper=stepper,
+        output_dir=config.output_dir,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+    )
+
+    do_gc_collect = fme.get_device() != torch.device("cpu")
+    return Trainer(
+        train_data=train_data,
+        stepper=stepper,
+        build_optimization=builder.get_optimization,
+        build_ema=builder.get_ema,
+        params=config.get_trainer_params(),
+        aggregator_builder=aggregator_builder,
+        validation_callback=validation_callback,
+        end_of_batch_callback=end_of_batch_ops,
+        inference_callback=inference_callback,
+        validate_stepper=validate_stepper,
+        do_gc_collect=do_gc_collect,
+    )
+
+
+class AggregatorBuilder(
+    AggregatorBuilderABC[TrainOutput],
+):
+    def __init__(
+        self,
+        train_config: TrainAggregatorConfig,
+        dataset_info: DatasetInfo,
+        output_dir: str,
+        loss_scaling: dict[str, torch.Tensor] | None = None,
+        channel_mean_names: Sequence[str] | None = None,
+        save_per_epoch_diagnostics: bool = False,
+    ):
+        self.train_config = train_config
+        self.dataset_info = dataset_info
+        self.loss_scaling = loss_scaling
+        self.channel_mean_names = channel_mean_names
+        self.output_dir = output_dir
+        self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
+
+    def get_train_aggregator(self) -> TrainAggregator:
+        return TrainAggregator(
+            config=self.train_config,
+            operations=self.dataset_info.gridded_operations,
+        )
