@@ -709,10 +709,17 @@ def _default_inventory_queries() -> list[CatalogQuery]:
             CatalogQuery(table_id=tab, variables=variables)
             for tab, variables in surface_and_ocean_by_table.items()
         ],
+        # fx (static orog/sftlf) filtered by experiment. Querying fx with no
+        # experiment_id returns ~58k datasets cohort-wide, and paginating that
+        # far trips LLNL's Solr-bridge deep-offset limit (HTTP 422), which
+        # silently dropped ALL orog/sftlf from the inventory. Filtering by the
+        # configured experiments (historical etc.) cuts it to ~1.6k datasets
+        # that paginate cleanly; models publish orog under historical, so
+        # coverage for the experiments we ingest is unaffected.
         CatalogQuery(
             table_id="fx",
             variables=list(STATIC_VARIABLES),
-            filter_by_experiment=False,
+            filter_by_experiment=True,
         ),
     ]
 

@@ -53,3 +53,7 @@ defaults:
 selection:
   source_ids: [MPI-ESM1-2-LR]
   experiments: [historical]
+  # r1i1p1f1 (train) + r2i1p1f1 (held-out). submit.sh enumerates from the
+  # config selection (no --variant-labels), so keep the two lowest-r members
+  # per (p,f) group — for MPI-ESM1-2-LR historical that is exactly r1 + r2.
+  max_members_per_f: 2
