@@ -3,7 +3,6 @@ import datetime
 import logging
 import os
 from collections.abc import Callable, Sequence
-from typing import Any
 
 import torch
 
@@ -32,6 +31,7 @@ from fme.core.rand import set_seed
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import (
+    InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregator,
     TrainAggregator,
@@ -181,7 +181,7 @@ class InlineInferenceConfig:
         dataset_info: CoupledDatasetInfo,
         output_dir: str,
         save_per_epoch_diagnostics: bool,
-    ) -> Callable[[], Any]:
+    ) -> Callable[[], InferenceEvaluatorAggregator]:
         def factory():
             batch = next(iter(data.loader))
             initial_times = batch.ocean_data.time.isel(time=0)
@@ -409,7 +409,7 @@ class TrainConfig:
         dataset_info: CoupledDatasetInfo,
         loss_scaling: CoupledTensorMapping,
     ) -> ValidationCallback:
-        def make_factory(name: str) -> Callable[[], Any]:
+        def make_factory(name: str) -> Callable[[], OneStepAggregator]:
             def factory():
                 return OneStepAggregator(
                     dataset_info=dataset_info,

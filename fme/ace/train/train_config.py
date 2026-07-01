@@ -9,9 +9,11 @@ import torch
 
 import fme
 from fme.ace.aggregator import (
+    InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregator,
     OneStepAggregatorConfig,
     TrainAggregator,
 )
@@ -98,7 +100,7 @@ class InlineValidationConfig:
         loss_names: Sequence[str] | None,
         save_per_epoch_diagnostics: bool,
         output_dir: str,
-    ) -> Callable[[], Any]:
+    ) -> Callable[[], OneStepAggregator]:
         def factory():
             return self.aggregator.build(
                 dataset_info=dataset_info,
@@ -197,7 +199,7 @@ class InlineInferenceConfig:
         stepper: TrainStepper,
         output_dir: str,
         save_per_epoch_diagnostics: bool,
-    ) -> Callable[[], Any]:
+    ) -> Callable[[], InferenceEvaluatorAggregator]:
         def factory():
             return self.aggregator.build(
                 dataset_info=entry_dataset_info,
