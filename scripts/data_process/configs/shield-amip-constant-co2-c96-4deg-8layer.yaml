@@ -2,8 +2,8 @@ runs:
   AMIP-constant-CO2: gs://vcm-ml-raw-flexible-retention/2025-12-16-C96-SHiELD-AMIP-constant-CO2/regridded-zarrs/gaussian_grid_45_by_90/AMIP-constant-CO2
 data_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset
 stats:
-  output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2021
-  beaker_dataset: 2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2021
+  output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2020
+  beaker_dataset: 2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2020
   start_date: "1979-01-01T06:00:00"
   end_date: "2021-01-01T00:00:00"  # Only use whole years for computing the stats
   data_type: FV3GFS
@@ -91,7 +91,7 @@ dataset_computation:
 time_coarsen:
   factor: 4
   data_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
-  stats_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset-stats-1979-2021
+  stats_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset-stats-1979-2020
   snapshot_names:
     - PRESsfc
     - PRMSL
