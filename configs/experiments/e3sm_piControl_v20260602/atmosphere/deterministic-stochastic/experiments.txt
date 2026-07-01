@@ -10,3 +10,7 @@ PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic|rs1|
 PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic-from-BK|rs0|54179300|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-22:00:00|stepper.step.config.builder.config.embed_dim=384||best_inference_ckpt
 
 PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic-from-BK-multi-step-FT-energy-corrector|rs0|54194693|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-19:00:00|stepper.step.config.builder.config.embed_dim=384||best_inference_ckpt
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic-multi-step-FT-early-ckpt|rs1|54314774|submitted|e3sm|regular|gpu&hbm80g|2|4|128|3-22:00:00|stepper.step.config.builder.config.embed_dim=384||best_inference_ckpt
+
+PM-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic-from-BK-multi-step-FT-energy-corrector|rs0|54521298|submitted|e3sm|regular|gpu&hbm80g|2|4|128|18:00:00|stepper.step.config.builder.config.embed_dim=384||best_inference_ckpt

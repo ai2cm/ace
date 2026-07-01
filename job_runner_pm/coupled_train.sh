@@ -10,24 +10,28 @@ usage() {
   cat <<EOF
 Usage: $0 <experiment_dir> --stats <path> [options]
 
-Launch Perlmutter training jobs from an experiment directory containing
-config-train.yaml and training.txt.
+Launch Perlmutter coupled training jobs from an experiment directory containing
+a coupled config template and a pretraining table.
 
 Required:
-  <experiment_dir>          Directory containing the experiment config and inputs.
-  --stats <path>            Stats directory to expose as FME_STATS_DIR.
+  <experiment_dir>             Directory containing the experiment config and inputs.
+  --stats <path>               Stats directory to expose as FME_STATS_DIR.
 
 Options:
-  --train-dir <path>        Training dataset root. Defaults to /pscratch/sd/e/elynnwu/fme-dataset.
-  --valid-dir <path>        Validation dataset root. Defaults to empty.
-  --config-file <name>      Config file inside experiment_dir. Defaults to config-train.yaml.
-  --training-file <name>    Training table inside experiment_dir. Defaults to training.txt.
-  --experiments-file <name> Experiments log inside experiment_dir. Defaults to experiments.txt.
-  --sbatch-script <path>    Override sbatch script. Defaults to job_runner_pm/sbatch-scripts/sbatch-train.sh.
-  --reservation <name>      Slurm reservation. Defaults to aigs_picontrol.
-  --no-reservation          Submit without a Slurm reservation.
-  --dry-run                 Print jobs without creating envs or submitting to Slurm.
-  -h, --help                Show this help.
+  --train-dir <path>           Training dataset root. Defaults to /pscratch/sd/e/elynnwu/fme-dataset.
+  --valid-dir <path>           Validation dataset root. Defaults to empty.
+  --template-file <name>       Coupled template inside experiment_dir. Defaults to config-train-template.yaml.
+  --config-file <name>         Generated config inside experiment_dir. Defaults to config-train.yaml.
+  --pretraining-file <name>    Pretraining table inside experiment_dir. Defaults to pretraining.txt.
+  --experiments-file <name>    Experiments log inside experiment_dir. Defaults to experiments.txt.
+  --sbatch-script <path>       Override sbatch script. Defaults to job_runner_pm/sbatch-scripts/sbatch-train.sh.
+  --reservation <name>         Slurm reservation. Defaults to aigs_picontrol.
+  --no-reservation             Submit without a Slurm reservation.
+  --dry-run                    Print jobs without creating envs or submitting to Slurm.
+  -h, --help                   Show this help.
+
+Pretraining table format:
+  group|tag|status|ocean_config|ocean_ckpt|atmos_config|atmos_ckpt|account|queue|constraint|nodes|gpus_per_node|cpus_per_task|time_limit|override_args|resume_job_id
 EOF
 }
 
@@ -40,8 +44,9 @@ EXPERIMENT_DIR=""
 FME_STATS_DIR=""
 FME_TRAIN_DIR="/pscratch/sd/e/elynnwu/fme-dataset"
 FME_VALID_DIR=""
-TRAINING_FILE="training.txt"
+PRETRAINING_FILE="pretraining.txt"
 CONFIG_FILE="config-train.yaml"
+TEMPLATE_FILE="config-train-template.yaml"
 EXPERIMENTS_FILE="experiments.txt"
 SBATCH_SCRIPT="$SCRIPT_DIR/sbatch-scripts/sbatch-train.sh"
 RESERVATION="aigs_picontrol"
@@ -51,67 +56,39 @@ DRY_RUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --stats)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --stats"
-        exit 1
-      fi
-      FME_STATS_DIR="$2"
+      FME_STATS_DIR="${2:?Missing value for --stats}"
       shift 2
       ;;
     --train-dir)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --train-dir"
-        exit 1
-      fi
-      FME_TRAIN_DIR="$2"
+      FME_TRAIN_DIR="${2:?Missing value for --train-dir}"
       shift 2
       ;;
     --valid-dir)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --valid-dir"
-        exit 1
-      fi
-      FME_VALID_DIR="$2"
+      FME_VALID_DIR="${2:?Missing value for --valid-dir}"
+      shift 2
+      ;;
+    --template-file)
+      TEMPLATE_FILE="${2:?Missing value for --template-file}"
       shift 2
       ;;
     --config-file)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --config-file"
-        exit 1
-      fi
-      CONFIG_FILE="$2"
+      CONFIG_FILE="${2:?Missing value for --config-file}"
       shift 2
       ;;
-    --training-file)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --training-file"
-        exit 1
-      fi
-      TRAINING_FILE="$2"
+    --pretraining-file)
+      PRETRAINING_FILE="${2:?Missing value for --pretraining-file}"
       shift 2
       ;;
     --experiments-file)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --experiments-file"
-        exit 1
-      fi
-      EXPERIMENTS_FILE="$2"
+      EXPERIMENTS_FILE="${2:?Missing value for --experiments-file}"
       shift 2
       ;;
     --sbatch-script)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --sbatch-script"
-        exit 1
-      fi
-      SBATCH_SCRIPT="$2"
+      SBATCH_SCRIPT="${2:?Missing value for --sbatch-script}"
       shift 2
       ;;
     --reservation)
-      if [[ $# -lt 2 ]]; then
-        echo "Missing value for --reservation"
-        exit 1
-      fi
-      RESERVATION="$2"
+      RESERVATION="${2:?Missing value for --reservation}"
       USE_RESERVATION=true
       shift 2
       ;;
@@ -164,8 +141,9 @@ if [[ "$SBATCH_SCRIPT" != /* ]]; then
   SBATCH_SCRIPT="$REPO_ROOT/$SBATCH_SCRIPT"
 fi
 
-TRAINING_PATH="$EXPERIMENT_DIR/$TRAINING_FILE"
+PRETRAINING_PATH="$EXPERIMENT_DIR/$PRETRAINING_FILE"
 CONFIG_PATH="$EXPERIMENT_DIR/$CONFIG_FILE"
+TEMPLATE_PATH="$EXPERIMENT_DIR/$TEMPLATE_FILE"
 EXPERIMENTS_PATH="$EXPERIMENT_DIR/$EXPERIMENTS_FILE"
 
 if [[ ! -d "$EXPERIMENT_DIR" ]]; then
@@ -173,13 +151,13 @@ if [[ ! -d "$EXPERIMENT_DIR" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$TRAINING_PATH" ]]; then
-  echo "Missing training file: $TRAINING_PATH"
+if [[ ! -f "$PRETRAINING_PATH" ]]; then
+  echo "Missing pretraining file: $PRETRAINING_PATH"
   exit 1
 fi
 
-if [[ ! -f "$CONFIG_PATH" ]]; then
-  echo "Missing config file: $CONFIG_PATH"
+if [[ ! -f "$TEMPLATE_PATH" ]]; then
+  echo "Missing template file: $TEMPLATE_PATH"
   exit 1
 fi
 
@@ -193,6 +171,7 @@ export COMMIT
 export FME_TRAIN_DIR
 export FME_VALID_DIR
 export FME_STATS_DIR
+export FME_TRAIN_MODULE="fme.coupled.train"
 
 build_job_name() {
   local group="$1"
@@ -214,6 +193,15 @@ ensure_venv() {
   conda activate "$FME_VENV"
 }
 
+resolve_path() {
+  local path="$1"
+  if [[ "$path" == /* ]]; then
+    echo "$path"
+  else
+    echo "$EXPERIMENT_DIR/$path"
+  fi
+}
+
 validate_config() {
   local config_path="$1"
   local override_args="$2"
@@ -224,19 +212,21 @@ validate_config() {
     validate_args+=("--override" "${override_array[@]}")
   fi
 
-  python -m fme.ace.validate_config "${validate_args[@]}"
+  python -m fme.coupled.validate_config "${validate_args[@]}"
 }
 
 print_job() {
   echo
-  echo "Perlmutter training job:"
+  echo "Perlmutter coupled training job:"
   echo " - Experiment dir: $EXPERIMENT_DIR"
   echo " - Job name: $JOB_NAME"
   echo " - WandB group: $WANDB_RUN_GROUP"
-  echo " - Config: $CONFIG_PATH"
-  echo " - Training file: $TRAINING_PATH"
-  echo " - Train dir: $FME_TRAIN_DIR"
-  echo " - Valid dir: ${FME_VALID_DIR:-(empty)}"
+  echo " - Template: $TEMPLATE_PATH"
+  echo " - Generated config: $CONFIG_PATH"
+  echo " - Ocean config: $OCEAN_CONFIG"
+  echo " - Ocean checkpoint: $OCEAN_CKPT"
+  echo " - Atmosphere config: $ATMOS_CONFIG"
+  echo " - Atmosphere checkpoint: $ATMOS_CKPT"
   echo " - Stats dir: $FME_STATS_DIR"
   echo " - Account/queue: ${ACCOUNT}/${QUEUE}"
   echo " - Constraint: $CONSTRAINT"
@@ -261,10 +251,10 @@ fi
 
 cd "$EXPERIMENT_DIR"
 
-while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
-  [[ -z "$TRAINING" ]] && continue
-  [[ "$TRAINING" =~ ^[[:space:]]*# ]] && continue
-  [[ "$TRAINING" == group\|tag\|* ]] && continue
+while IFS= read -r PRETRAINING || [[ -n "$PRETRAINING" ]]; do
+  [[ -z "$PRETRAINING" ]] && continue
+  [[ "$PRETRAINING" =~ ^[[:space:]]*# ]] && continue
+  [[ "$PRETRAINING" == group\|tag\|* ]] && continue
 
   TOTAL_JOBS=$((TOTAL_JOBS + 1))
 
@@ -272,6 +262,10 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
     GROUP \
     TAG \
     STATUS \
+    OCEAN_CONFIG \
+    OCEAN_CKPT \
+    ATMOS_CONFIG \
+    ATMOS_CKPT \
     ACCOUNT \
     QUEUE \
     CONSTRAINT \
@@ -281,7 +275,7 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
     TIME_LIMIT \
     OVERRIDE_ARGS \
     RESUME_JOB_ID \
-    <<< "$TRAINING"
+    <<< "$PRETRAINING"
 
   if [[ "$STATUS" != "train" ]]; then
     SKIPPED_JOBS=$((SKIPPED_JOBS + 1))
@@ -300,10 +294,24 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
   OVERRIDE_ARGS=${OVERRIDE_ARGS:-}
   RESUME_JOB_ID=${RESUME_JOB_ID:-}
 
+  OCEAN_CONFIG=$(resolve_path "$OCEAN_CONFIG")
+  ATMOS_CONFIG=$(resolve_path "$ATMOS_CONFIG")
+  OCEAN_CKPT=$(resolve_path "$OCEAN_CKPT")
+  ATMOS_CKPT=$(resolve_path "$ATMOS_CKPT")
+
+  for REQUIRED_PATH in "$OCEAN_CONFIG" "$ATMOS_CONFIG" "$OCEAN_CKPT" "$ATMOS_CKPT"; do
+    if [[ ! -e "$REQUIRED_PATH" ]]; then
+      echo "Missing required path for job ${GROUP}: $REQUIRED_PATH"
+      exit 1
+    fi
+  done
+
   JOB_NAME=$(build_job_name "$GROUP" "$TAG")
   export WANDB_NAME="$JOB_NAME"
   export WANDB_RUN_GROUP="$GROUP"
   export FME_OVERRIDE_ARGS="$OVERRIDE_ARGS"
+  export OCEAN_CKPT
+  export ATMOS_CKPT
 
   if [[ -n "$RESUME_JOB_ID" ]]; then
     export RESUME_JOB_ID
@@ -319,6 +327,12 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
 
   ensure_venv
 
+  "$SCRIPT_DIR/create_coupled_train_config.py" \
+    --atmos-config "$ATMOS_CONFIG" \
+    --ocean-config "$OCEAN_CONFIG" \
+    --template-config "$TEMPLATE_PATH" \
+    --output-config "$CONFIG_PATH"
+
   UUID=$(uuidgen)
   export CONFIG_DIR=${PSCRATCH}/fme-config/${UUID}
   mkdir -p "$CONFIG_DIR" joblogs
@@ -329,12 +343,14 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
     cp "${PSCRATCH}/fme-output/${RESUME_JOB_ID}/job_config/train-config.yaml" "$CONFIG_DIR/train-config.yaml"
   fi
 
-  cp "$SCRIPT_PATH" "$CONFIG_DIR/train.sh"
-  cp "$TRAINING_PATH" "$CONFIG_DIR/training.txt"
+  cp "$SCRIPT_PATH" "$CONFIG_DIR/coupled_train.sh"
+  cp "$PRETRAINING_PATH" "$CONFIG_DIR/pretraining.txt"
+  cp "$TEMPLATE_PATH" "$CONFIG_DIR/$TEMPLATE_FILE"
   cp "$SBATCH_SCRIPT" "$CONFIG_DIR/sbatch-train.sh"
   cp "$SCRIPT_DIR/sbatch-scripts/requeueable-train.sh" "$CONFIG_DIR/requeueable-train.sh"
   cp "$SCRIPT_DIR/make-venv.sh" "$CONFIG_DIR/make-venv.sh"
   cp "$SCRIPT_DIR/upload-to-beaker.sh" "$CONFIG_DIR/upload-to-beaker.sh"
+  cp "$SCRIPT_DIR/create_coupled_train_config.py" "$CONFIG_DIR/create_coupled_train_config.py"
   printf "%s\n" "$OVERRIDE_ARGS" > "$CONFIG_DIR/override_args.txt"
 
   validate_config "$CONFIG_DIR/train-config.yaml" "$OVERRIDE_ARGS"
@@ -364,7 +380,7 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
     echo
     echo "${GROUP}|${TAG}|${SLURM_JOB_ID}|submitted|${ACCOUNT}|${QUEUE}|${CONSTRAINT}|${NODES}|${GPUS_PER_NODE}|${CPUS_PER_TASK}|${TIME_LIMIT}|${OVERRIDE_ARGS}"
   } >> "$EXPERIMENTS_PATH"
-done < "$TRAINING_PATH"
+done < "$PRETRAINING_PATH"
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo

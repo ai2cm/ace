@@ -170,7 +170,6 @@ while IFS= read -r TRAINING || [[ -n "$TRAINING" ]]; do
 
   SBATCH_OUTPUT=$(
     sbatch \
-      --reservation=aigs_picontrol \
       -A "$ACCOUNT" \
       -q "$QUEUE" \
       -C "$CONSTRAINT" \

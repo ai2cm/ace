@@ -38,6 +38,12 @@ sed -i "s|FME_OUTPUT_DIR|${FME_OUTPUT_DIR}|" "$TRAIN_CONFIG"
 sed -i "s|FME_TRAIN_DIR|${FME_TRAIN_DIR}|" "$TRAIN_CONFIG"
 sed -i "s|FME_VALID_DIR|${FME_VALID_DIR}|" "$TRAIN_CONFIG"
 sed -i "s|FME_STATS_DIR|${FME_STATS_DIR}|" "$TRAIN_CONFIG"
+if [[ -n "${OCEAN_CKPT:-}" ]]; then
+  sed -i "s|OCEAN_CKPT|${OCEAN_CKPT}|" "$TRAIN_CONFIG"
+fi
+if [[ -n "${ATMOS_CKPT:-}" ]]; then
+  sed -i "s|ATMOS_CKPT|${ATMOS_CKPT}|" "$TRAIN_CONFIG"
+fi
 
 cp -r "$CONFIG_DIR" "$FME_OUTPUT_DIR/job_config"
 
