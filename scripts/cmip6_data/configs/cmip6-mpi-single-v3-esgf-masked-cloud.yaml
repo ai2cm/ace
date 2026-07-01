@@ -1,0 +1,49 @@
+# MPI-ESM1-2-LR single-model reprocess — schema 1.0.0 / v3 line.
+#
+# Task 2026-06-25-reprocess-mpi-esm1-2-lr-...-residual-off. Reprocesses
+# MPI-ESM1-2-LR historical 1979-2014 from ESGF with:
+#   * source-grid below-surface masking (native zg<orog, NaN-aware masked
+#     regrid) -> per-cell validity masks ``mask_<hPa>`` / ``mask_thickness_*``
+#     with self-describing ``mask_variable`` attributes,
+#   * real daily-mean ``ta`` on plev8 (ESGF ``day`` table; via
+#     OPTIONAL_VARIABLES),
+#   * geopotential layer thicknesses ``thickness_surface_1000`` /
+#     ``thickness_<lo>_<hi>`` (offset-free, surface-anchored on HGTsfc) stored
+#     alongside ``zg`` for the thickness-predicting / residual-off training run.
+#
+# Schema 1.0.0 is a CLEAN BREAK from the v2 0.x cohort (no migration), so this
+# writes a fresh ``/v3`` version dir that coexists with ``/v2``.
+#
+# Members: run with
+#   --source-ids MPI-ESM1-2-LR --variant-labels r1i1p1f1 r2i1p1f1
+# (r1 = train, r2 = held-out). Both are i1p1f1; the selection below scopes to
+# the model + historical and the launcher pins the two members.
+#
+# NOTE (confirm at launch): the ``/v3`` bucket path and the ``esgf-data.dkrz.de``
+# search node (MPI's home data node, where the daily ``ta`` + complete ``zg500``
+# were live-confirmed; LLNL's index mirrored the Pangeo zg500 gap).
+
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v3
+# Shared across versions so external forcings are staged once (version-
+# independent until external_forcings.py changes).
+external_forcings_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/external_forcings
+
+esgf:
+  # MPI-ESM1-2-LR's home node. Daily ``ta`` on plev8 and complete ``zg``
+  # (incl. 500 hPa) were live-confirmed here; the "MPI lacks zg500" shakedown
+  # was a Pangeo-mirror artifact.
+  search_node: https://esgf-data.dkrz.de/esg-search/search
+  scratch_dir: /scratch
+  download_workers: 4
+
+defaults:
+  time_subset:
+    historical: {start: "1979-01-01", end: "2014-12-31"}
+  chunking:
+    chunk_time: 360
+    shard_time: 7200
+    variable_batch_size: 8
+
+selection:
+  source_ids: [MPI-ESM1-2-LR]
+  experiments: [historical]
