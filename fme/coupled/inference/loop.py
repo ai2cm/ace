@@ -54,6 +54,8 @@ def run_coupled_dataset_comparison(
     def _remove_overlapping_names(batch: CoupledBatchData) -> CoupledBatchData:
         if not overlapping_names:
             return batch
+        assert batch.ocean_data is not None
+        assert batch.atmosphere_data is not None
         ocean_keep = [n for n in batch.ocean_data.data if n not in overlapping_names]
         return CoupledBatchData(
             ocean_data=batch.ocean_data.subset_names(ocean_keep),
@@ -81,6 +83,7 @@ def run_coupled_dataset_comparison(
             with timer.context("wandb_logging"):
                 record_logs(logs)
 
+        assert pred.ocean_data is not None
         forward_steps_in_memory = list(pred.ocean_data.data.values())[0].size(1) - 1
         logging.info(
             f"Inference: Processing window {i + 1} of {n_windows}"

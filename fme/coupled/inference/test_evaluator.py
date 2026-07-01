@@ -158,6 +158,8 @@ def inference_helper(
             n_levels_ocean=1,
             n_levels_atmosphere=1,
         )
+    assert mock_data.ocean is not None
+    assert mock_data.atmosphere is not None
     inference_data_config = InferenceDataLoaderConfig(
         dataset=CoupledDatasetWithOptionalOceanConfig(
             ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
@@ -285,6 +287,8 @@ def _create_dataset_info_for_stepper(
         n_levels_ocean=1,
         n_levels_atmosphere=1,
     )
+    assert mock_data.ocean is not None
+    assert mock_data.atmosphere is not None
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=mock_data.vcoord,
         hcoord=mock_data.hcoord,
@@ -408,6 +412,8 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
             data_dir=stepper_data_dir,
         )
         assert mock_data is not None
+        assert mock_data.ocean is not None
+        assert mock_data.atmosphere is not None
         checkpoint_path = save_coupled_stepper(
             tmp_path,
             ocean_in_names=ocean_in_names,
