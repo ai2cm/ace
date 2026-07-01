@@ -507,6 +507,7 @@ def _masked_regrid_3d_state(
     *,
     make_regridder_fn=make_regridder,
     threshold: float = 0.5,
+    time_chunk: int = 730,
 ) -> tuple[
     Optional[dict[str, xr.DataArray]],
     Optional[xr.DataArray],
@@ -613,34 +614,42 @@ def _masked_regrid_3d_state(
     def regrid_indicator(da: xr.DataArray) -> xr.DataArray:
         return regridder(da, skipna=False)
 
-    # Compute under the synchronous scheduler. xesmf is not thread-safe, and the
-    # default threaded scheduler computes many native chunks in parallel — with
-    # five native 3D fields (96x192 x 8 plev x ~13k days ≈ 38 GB together)
-    # feeding the regrid, that OOM-killed the 32Gi pod. Synchronous streams each
-    # field's regrid one chunk at a time, so peak memory is ~the accumulated
-    # target-grid fields (small at 4deg) plus per-chunk transients. The eager
-    # ``.load()`` is retained: ``fill_below_surface_smooth`` (in
-    # ``assemble_masked_3d_state``) writes into ``.values`` and so needs
-    # numpy-backed fields, and it lets the native files be released here.
+    # Time-chunk the masked regrid. ``apply_time_subset`` fancy-indexes each
+    # native field fully into RAM (~7.7 GB each at 96x192 x 8 plev x ~13k days),
+    # so masking all five at once (plus orog/validity) OOM-killed the 32Gi pod.
+    # Regridding one ``time_chunk``-day segment at a time and concatenating the
+    # small target-grid results (45x90 at 4deg) bounds peak memory to a single
+    # segment's natives regardless of record length or model. xesmf is not
+    # thread-safe, so compute each segment under the synchronous scheduler; the
+    # eager per-segment ``.load()`` also gives ``fill_below_surface_smooth``
+    # (which writes into ``.values``) the numpy-backed fields it needs.
     import dask
 
     dask.config.set(scheduler="synchronous")
 
-    regridded_3d, valid_target = source_grid_masked_regrid(
-        native_aligned,
-        zg_native,
-        orog_native,
-        regrid_data,
-        regrid_indicator,
-        threshold=threshold,
-    )
-    hgtsfc_target = regrid_data(orog_native)
+    n_time = int(zg_native.sizes["time"])
+    regridded_parts: dict[str, list[xr.DataArray]] = {v: [] for v in native_aligned}
+    valid_parts: list[xr.DataArray] = []
+    for start in range(0, n_time, time_chunk):
+        sl = slice(start, start + time_chunk)
+        seg_fields = {v: native_aligned[v].isel(time=sl) for v in native_aligned}
+        seg_regridded, seg_valid = source_grid_masked_regrid(
+            seg_fields,
+            seg_fields["zg"],
+            orog_native,
+            regrid_data,
+            regrid_indicator,
+            threshold=threshold,
+        )
+        for v, da in seg_regridded.items():
+            regridded_parts[v].append(da.load())
+        valid_parts.append(seg_valid.load())
 
-    # Materialize one field at a time (synchronous), so peak memory is bounded
-    # by the target-grid result, not the full native stack.
-    regridded_3d = {k: v.load() for k, v in regridded_3d.items()}
-    valid_target = valid_target.load()
-    hgtsfc_target = hgtsfc_target.load()
+    regridded_3d = {
+        v: xr.concat(parts, dim="time") for v, parts in regridded_parts.items()
+    }
+    valid_target = xr.concat(valid_parts, dim="time")
+    hgtsfc_target = regrid_data(orog_native).load()  # static, no time dim
 
     for v in downloaded:
         cleanup_variable_files(scratch, v)

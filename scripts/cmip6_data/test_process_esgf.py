@@ -948,3 +948,47 @@ def test_process_one_esgf_wires_masks_thickness_and_attrs(monkeypatch):
     # source-grid masking recorded, no legacy below_surface_mask emitted
     assert row.mask_source == "source_grid"
     assert "below_surface_mask" not in ds.data_vars
+
+
+def test_masked_regrid_3d_state_time_chunking_matches_single(monkeypatch):
+    """Time-chunking the masked regrid (bounds peak memory) must produce the
+    same result as processing the whole record at once."""
+    plev = np.array([100000.0, 85000.0])
+    zg1000 = np.full((4, 4), 1000.0)
+    zg1000[0, 0] = 100.0  # below the 500 m surface at 1000 hPa
+    # ntime=4 so time_chunk=2 forces two segments
+    natives = {
+        "zg": _native_3d_ds("zg", plev, [zg1000, np.full((4, 4), 3000.0)], ntime=4),
+        "ua": _native_3d_ds(
+            "ua", plev, [np.arange(16.0).reshape(4, 4), np.full((4, 4), 7.0)], ntime=4
+        ),
+        "orog": _orog_ds(np.full((4, 4), 500.0)),
+    }
+
+    def fake_download_native(task, variable, table_id, config, scratch):
+        return natives.get(variable)
+
+    monkeypatch.setattr(process_esgf, "_download_native_variable", fake_download_native)
+    monkeypatch.setattr(process_esgf, "cleanup_variable_files", lambda scratch, v: None)
+
+    def run(time_chunk):
+        return process_esgf._masked_regrid_3d_state(
+            _masking_task(),
+            _minimal_config(),
+            target_grid=xr.Dataset(),
+            scratch=Path("/scratch"),
+            present_3d=["zg", "ua"],
+            make_regridder_fn=_fake_make_regridder,
+            threshold=0.5,
+            time_chunk=time_chunk,
+        )
+
+    reg_single, valid_single, hg_single, _ = run(4)  # one segment
+    reg_chunked, valid_chunked, hg_chunked, _ = run(2)  # two segments
+
+    assert reg_single is not None and reg_chunked is not None
+    assert reg_single["ua"].sizes["time"] == 4  # full record reassembled
+    for v in ("zg", "ua"):
+        xr.testing.assert_allclose(reg_single[v], reg_chunked[v])
+    xr.testing.assert_equal(valid_single, valid_chunked)
+    xr.testing.assert_allclose(hg_single, hg_chunked)
