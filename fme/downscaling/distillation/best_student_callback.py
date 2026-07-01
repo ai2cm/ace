@@ -479,15 +479,14 @@ class BestStudentCheckpointCallback:
             payload["val/spec_mae_mean"] = float(
                 np.mean([m["mae"] for m in spec_by_var.values()])
             )
-        # Raw mean-PSD curves (student vs teacher) as loglog figures, one per
-        # variable, logged as wandb media so they are STEP-SLIDABLE — scrub the
-        # training axis to watch the PSD (esp. the high-k tail) evolve, the
-        # decisive way to tell a real spectral drift from the smooth-field
-        # spec_mae artifact (a large log-ratio where the teacher PSD is ~0
-        # carries negligible absolute energy).  Matches the loglog style of the
-        # downscaling power-spectrum aggregator (aggregators/main.py) and is
-        # step-sliderable like the other aggregators' charts.  Guarded so a viz
-        # hiccup never drops the scalar metrics.
+        # Raw mean-PSD curves (student vs teacher), one loglog figure per
+        # variable, logged as the **raw matplotlib figure** (NOT wandb.Image) so
+        # wandb auto-converts it to an interactive chart — matching the evaluator's
+        # ``power_spectrum/<var>`` panels (aggregators/main.py logs the bare fig
+        # too).  Keyed ``val/power_spectrum/<var>``.  The figures are closed only
+        # *after* wandb.log has consumed them.  Guarded so a viz hiccup never drops
+        # the scalar metrics.
+        figs_to_close: list = []
         try:
             import matplotlib.pyplot as plt
 
@@ -508,11 +507,21 @@ class BestStudentCheckpointCallback:
                 plt.title(f"{var} mean PSD (iter {iteration})")
                 plt.legend()
                 plt.grid(True, which="both", alpha=0.3)
-                payload[f"val/psd_{var}"] = wandb.Image(fig)
-                plt.close(fig)
+                payload[f"val/power_spectrum/{var}"] = fig
+                figs_to_close.append(fig)
         except Exception:  # noqa: BLE001 - viz is best-effort, never fatal
             pass
         wandb.log(payload, step=iteration)
+        # Close figures only after wandb has serialized them (raw figs are
+        # consumed at log time), to avoid leaking a figure per validation.
+        if figs_to_close:
+            try:
+                import matplotlib.pyplot as plt
+
+                for fig in figs_to_close:
+                    plt.close(fig)
+            except Exception:  # noqa: BLE001 - cleanup is best-effort
+                pass
 
     def __getattr__(self, name: str):
         return lambda *args, **kwargs: None
