@@ -1601,7 +1601,9 @@ def _presence_mask(step: SingleModuleStep, present: bool) -> TensorDict:
     return {name: value.clone() for name in step.in_packer.names}
 
 
-def _inject_input_dropout_mask(step: SingleModuleStep, mask: TensorMapping | None) -> None:
+def _inject_input_dropout_mask(
+    step: SingleModuleStep, mask: TensorMapping | None
+) -> None:
     """Force the mask drawn by the next ``step`` call.
 
     The Step samples its own mask internally on every forward step; tests

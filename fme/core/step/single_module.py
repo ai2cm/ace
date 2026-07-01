@@ -459,7 +459,7 @@ class SingleModuleStep(StepABC):
         mask = self._input_masking.sample_mask(get_device())
         # Broadcast so spatial-group tiles agree; no-op for non-distributed
         mask = Distributed.get_instance().broadcast_spatial(mask)
-        # Emit only dropped channels; absent key means present, skipping a no-op torch.where.
+        # Emit only dropped channels; absent key means present, skips a no-op where.
         present = mask[0].tolist()
         return {name: mask[:, i] for i, name in enumerate(names) if not present[i]}
 
