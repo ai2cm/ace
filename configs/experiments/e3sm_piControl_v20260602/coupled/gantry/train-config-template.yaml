@@ -184,19 +184,18 @@ stepper_training:
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
-    loss_contributions:
-      weight: 1.0
-      n_steps:
-        outcomes:
-          - steps: 0
-            probability: 0.1
-          - steps: 1
-            probability: 0.3
-          - steps: 2
-            probability: 0.3
-          - steps: 4
-            probability: 0.3
-      optimize_last_step_only: false
+    loss_weight: 1.0
+    n_steps:
+      outcomes:
+        - steps: 0
+          probability: 0.1
+        - steps: 1
+          probability: 0.3
+        - steps: 2
+          probability: 0.3
+        - steps: 4
+          probability: 0.3
+    optimize_last_step_only: false
     loss:
       type: EnsembleLoss
       kwargs:
@@ -205,23 +204,22 @@ stepper_training:
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
-    loss_contributions:
-      weight: 1.0
-      n_steps:
-        outcomes:
-          - steps: 0
-            probability: 0.025
-          - steps: 1
-            probability: 0.29
-          - steps: 2
-            probability: 0.29
-          - steps: 4
-            probability: 0.29
-          - steps: 21
-            probability: 0.1
-          - steps: 41
-            probability: 0.05
-      optimize_last_step_only: true
+    loss_weight: 1.0
+    n_steps:
+      outcomes:
+        - steps: 0
+          probability: 0.025
+        - steps: 1
+          probability: 0.29
+        - steps: 2
+          probability: 0.29
+        - steps: 4
+          probability: 0.29
+        - steps: 21
+          probability: 0.1
+        - steps: 41
+          probability: 0.05
+    optimize_last_step_only: true
     loss:
       type: EnsembleLoss
       kwargs:
@@ -234,6 +232,37 @@ stepper:
   sst_name: sst
   ocean:
     timedelta: 5D
+    stepper:
+      input_masking:
+        mask_value: 0
+        fill_value: 0
+        exclude_names_and_prefixes:
+          - LANDFRAC
+      step:
+        type: single_module
+        config:
+          builder:
+            type: Samudra
+            config:
+              ch_width:
+                - 280
+                - 380
+                - 480
+                - 520
+              dilation:
+                - 1
+                - 2
+                - 4
+                - 8
+              n_layers:
+                - 1
+                - 1
+                - 1
+                - 1
+              norm: instance
+              upscale_factor: 2
+              checkpoint_strategy: all
+              zonally_periodic_upsample: true
     # stepper added by job_runner/create_coupled_train_config.sh
   atmosphere:
     timedelta: 6h
