@@ -17,6 +17,11 @@ from ..inference.build_context import MetricBuildContext, MetricNotSupportedErro
 from ..inference.data import MetricBuildResult
 from .build_context import OneStepBuildContext, OneStepMetricBuildResult
 
+# A zero-spread cell with unbiased MSE below this fraction of the field's
+# largest is treated as prescribed (a 0/0): the rounding residue from
+# averaging identical members sits far below this, genuine skill far above.
+_PRESCRIBED_MSE_RTOL = 1e-6
+
 
 def get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
@@ -146,14 +151,26 @@ class SSRBiasMetric(ReducedMetric):
         if self._total_unbiased_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
         spread = self._total_variance.sqrt()
-        # Clamp to avoid NaN from sqrt of negative values. The unbiased MSE
-        # correction (mse - variance/n_ensemble) can overshoot with small
-        # ensembles or few batches, producing negative values at some grid
-        # cells that do not indicate spread truly exceeding skill.
+        # Clamp before sqrt: the unbiased-MSE correction (mse - variance/n)
+        # can go slightly negative with small ensembles without meaning spread
+        # truly exceeds skill.
         skill = torch.clamp(self._total_unbiased_mse, min=0.0).sqrt()
-        # When skill is zero (clamped or genuinely perfect), SSR is undefined.
-        # Use -1 as the convention (equivalent to zero spread).
-        return torch.where(skill > 0, spread / skill - 1, torch.tensor(-1.0))
+        # Zero skill with nonzero spread is undefined; use -1 by convention
+        # (also the limit of spread / skill - 1 as spread -> 0 at nonzero skill).
+        ssr_bias = torch.where(
+            skill > 0, spread / skill - 1, torch.full_like(spread, -1.0)
+        )
+        # Prescribed cells (every member equals the target, e.g. SST over ocean)
+        # are a genuine 0/0: zero spread and zero error. Report 0 (perfectly
+        # calibrated) rather than the -1 floor, which would otherwise dominate
+        # the global mean of a mostly-prescribed field. Variance is exactly 0
+        # there, but the unbiased MSE carries a tiny rounding residue, so test
+        # it against a small fraction of the field's largest MSE, not against 0.
+        mse_floor = _PRESCRIBED_MSE_RTOL * skill.square().max()
+        prescribed = (self._total_variance == 0) & (
+            self._total_unbiased_mse <= mse_floor
+        )
+        return torch.where(prescribed, torch.zeros_like(spread), ssr_bias)
 
 
 class _EnsembleAggregator:
@@ -202,6 +219,10 @@ class _EnsembleAggregator:
         self._report_variables = (
             frozenset(report_variables) if report_variables is not None else None
         )
+        # Variables whose target is entirely NaN (e.g. filled by
+        # allow_missing_variables); detected once on the first batch since
+        # missingness is constant, then excluded from the channel mean.
+        self._all_nan_target_names: set[str] | None = None
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
@@ -252,6 +273,10 @@ class _EnsembleAggregator:
                     target=target_data[name],
                     gen=gen_data[name],
                 )
+        if self._all_nan_target_names is None:
+            self._all_nan_target_names = {
+                name for name in gen_data if torch.isnan(target_data[name]).all()
+            }
         self._n_batches += 1
 
     def _get_caption(self, name: str) -> str:
@@ -298,15 +323,19 @@ class _EnsembleAggregator:
                             f"{sorted(all_keys)}."
                         )
                     names = list(self._channel_mean_names)
+                # Exclude variables whose target was entirely NaN (e.g. filled
+                # by allow_missing_variables) from the channel mean.
+                nan_targets = self._all_nan_target_names or set()
+                names = [name for name in names if name not in nan_targets]
                 if names:
                     scalars = [data[f"{metric}/{key}"] for key in names]
                     data[f"{metric}/channel_mean"] = sum(scalars) / len(scalars)
         if self._report_variables is not None:
-            excluded = all_variable_names - self._report_variables
+            nan_targets = all_variable_names - self._report_variables
             data = {
                 k: v
                 for k, v in data.items()
-                if not any(seg in excluded for seg in k.split("/"))
+                if not any(seg in nan_targets for seg in k.split("/"))
             }
         return data
 
