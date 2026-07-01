@@ -175,7 +175,7 @@ def _select_time(
     return combined_data
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class FileWriterParams:
     """Plain runtime parameters for `FileWriter`.
 
