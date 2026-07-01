@@ -613,6 +613,19 @@ def _masked_regrid_3d_state(
     def regrid_indicator(da: xr.DataArray) -> xr.DataArray:
         return regridder(da, skipna=False)
 
+    # Compute under the synchronous scheduler. xesmf is not thread-safe, and the
+    # default threaded scheduler computes many native chunks in parallel — with
+    # five native 3D fields (96x192 x 8 plev x ~13k days ≈ 38 GB together)
+    # feeding the regrid, that OOM-killed the 32Gi pod. Synchronous streams each
+    # field's regrid one chunk at a time, so peak memory is ~the accumulated
+    # target-grid fields (small at 4deg) plus per-chunk transients. The eager
+    # ``.load()`` is retained: ``fill_below_surface_smooth`` (in
+    # ``assemble_masked_3d_state``) writes into ``.values`` and so needs
+    # numpy-backed fields, and it lets the native files be released here.
+    import dask
+
+    dask.config.set(scheduler="synchronous")
+
     regridded_3d, valid_target = source_grid_masked_regrid(
         native_aligned,
         zg_native,
@@ -623,7 +636,8 @@ def _masked_regrid_3d_state(
     )
     hgtsfc_target = regrid_data(orog_native)
 
-    # Force compute so the native files can be released before we return.
+    # Materialize one field at a time (synchronous), so peak memory is bounded
+    # by the target-grid result, not the full native stack.
     regridded_3d = {k: v.load() for k, v in regridded_3d.items()}
     valid_target = valid_target.load()
     hgtsfc_target = hgtsfc_target.load()
