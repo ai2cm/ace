@@ -508,6 +508,21 @@ earlier interpretation (`spec_mae = |log(student/teacher)|` carries no sign; the
   isn't unwanted texture but *incoherent* texture; the `val/psd_*` curves + tails are
   the check.
 
+**Misconfiguration assessment of the GAN-fix line.** `r1-instr` and especially
+`allfix` were rational under the *old* (wrong) diagnosis (GAN injecting texture /
+collapsing) but **misconfigured for the real deficit**: R1 stabilizes, and `allfix`
+*lowers*, the one force that could add high-k power — `allfix` (GAN weight 3e-4 + LR
+decay) pushed toward **more** smoothness, the wrong direction. The *opposite* move
+(higher GAN weight / less stabilization) is the sensible direction, **but it's
+second-order to the tap blindness**: through the coarse bottleneck critic, more
+weight just pushes harder on coarse structure (most likely worsening the coarse-PRMSL
+degradation) and still can't manufacture high-k the critic can't see. So **tap
+location is the gate; GAN weight is a multiplier only useful downstream of a
+fine-seeing critic** — fix the tap first, then tune weight up. The tap runs
+disentangle it: high-k PSD rising at the same ~1e-3 weight ⇒ blindness was binding
+(weight then becomes a real knob); no lift ⇒ weight/coherence or a spectral term is
+also needed.
+
 #### PSD curves now step-slidable (commit `dc7876eeb`)
 
 `val/psd_<var>` was a `wandb.plot.line_series` (Vega chart, latest-step only).
