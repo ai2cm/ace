@@ -408,7 +408,7 @@ def _get_test_yaml_files(
                             ),
                         ),
                         ocean=OceanConfig(
-                            surface_temperature_name=in_variable_names[0],
+                            surface_temperature_name="surface_temperature",
                             ocean_fraction_name=mask_name,
                         ),
                         corrector=corrector_config,
