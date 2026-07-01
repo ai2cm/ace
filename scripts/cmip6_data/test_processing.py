@@ -2075,3 +2075,47 @@ def test_assemble_masked_3d_state_fill_makes_invalid_cells_finite():
     assert bool(np.isfinite(ds["ua"].values).all())
     # ... while the mask still marks the below-surface cell invalid
     assert ds["mask_1000"].values[0, 0, 0] == 0
+
+
+def test_align_to_reference_grid_harmonizes_float_diff():
+    from processing import align_to_reference_grid
+
+    ref_lat = xr.DataArray(np.array([-45.0, 0.0, 45.0]), dims=("lat",))
+    ref_lon = xr.DataArray(np.array([0.0, 120.0, 240.0]), dims=("lon",))
+    # same physical grid, but lat/lon stored with tiny float-rep differences
+    da = xr.DataArray(
+        np.zeros((3, 3)),
+        dims=("lat", "lon"),
+        coords={
+            "lat": ref_lat.values + 1e-6,
+            "lon": ref_lon.values + 1e-6,
+        },
+    )
+    out = align_to_reference_grid(da, ref_lat, ref_lon)
+    assert out is not None
+    # coords snapped to the reference exactly -> no spurious intersection on merge
+    np.testing.assert_array_equal(out["lat"].values, ref_lat.values)
+    np.testing.assert_array_equal(out["lon"].values, ref_lon.values)
+    # a direct comparison no longer intersects away rows
+    assert (da.assign_coords(lat=ref_lat, lon=ref_lon) + out).shape == (3, 3)
+
+
+def test_align_to_reference_grid_rejects_genuine_mismatch():
+    from processing import align_to_reference_grid
+
+    ref_lat = xr.DataArray(np.array([-45.0, 0.0, 45.0]), dims=("lat",))
+    ref_lon = xr.DataArray(np.array([0.0, 120.0, 240.0]), dims=("lon",))
+    # different lat count -> genuinely different grid -> unusable
+    da_shape = xr.DataArray(
+        np.zeros((2, 3)),
+        dims=("lat", "lon"),
+        coords={"lat": [-30.0, 30.0], "lon": ref_lon.values},
+    )
+    assert align_to_reference_grid(da_shape, ref_lat, ref_lon) is None
+    # same shape but coords far from the reference -> different grid -> unusable
+    da_coords = xr.DataArray(
+        np.zeros((3, 3)),
+        dims=("lat", "lon"),
+        coords={"lat": [-60.0, 0.0, 60.0], "lon": ref_lon.values},
+    )
+    assert align_to_reference_grid(da_coords, ref_lat, ref_lon) is None

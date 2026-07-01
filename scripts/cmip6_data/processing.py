@@ -547,6 +547,38 @@ def regrid_with_coverage_mask(
 MASKED_3D_STATE_FIELDS: tuple[str, ...] = ("ua", "va", "hus", "zg", "ta")
 
 
+def align_to_reference_grid(
+    da: xr.DataArray,
+    ref_lat: xr.DataArray,
+    ref_lon: xr.DataArray,
+    atol: float = 1e-3,
+) -> Optional[xr.DataArray]:
+    """Snap ``da`` onto a reference horizontal grid, or reject a genuine mismatch.
+
+    The same physical native grid (one model + grid_label) is stored with tiny
+    float-representation differences in its lat/lon coordinates across CMIP6
+    tables (e.g. the ``day`` ``zg`` file vs the ``fx`` ``orog`` file). If those
+    coordinates are compared/merged directly, xarray's implicit alignment
+    silently INTERSECTS them and drops the non-exactly-matching rows (e.g. 96 ->
+    56 latitudes), corrupting the below-surface mask and breaking the shared
+    regridder. When ``da``'s horizontal shape matches the reference and its
+    coordinates are within ``atol``, its lat/lon are replaced by the reference's
+    so downstream alignment is exact.
+
+    Returns ``None`` when ``da`` is on a genuinely different horizontal grid
+    (shape mismatch, or coordinates not within ``atol``) — such data can't be
+    source-grid masked against the reference and the caller should drop it.
+    """
+    if da.sizes.get("lat") != ref_lat.size or da.sizes.get("lon") != ref_lon.size:
+        return None
+    if not (
+        np.allclose(da["lat"].values, ref_lat.values, atol=atol)
+        and np.allclose(da["lon"].values, ref_lon.values, atol=atol)
+    ):
+        return None
+    return da.assign_coords(lat=ref_lat, lon=ref_lon)
+
+
 def source_grid_masked_regrid(
     native_fields: dict[str, xr.DataArray],
     zg_native: xr.DataArray,
@@ -1880,6 +1912,7 @@ __all__ = [
     "regrid_with_coverage_mask",
     "derive_layer_thickness",
     "MASKED_3D_STATE_FIELDS",
+    "align_to_reference_grid",
     "source_grid_masked_regrid",
     "build_level_masks",
     "build_thickness_masks",

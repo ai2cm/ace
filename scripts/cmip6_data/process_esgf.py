@@ -75,6 +75,7 @@ from processing import (  # noqa: E402
     DuplicateTimestampsError,
     RssSampler,
     SimulationBoundaryError,
+    align_to_reference_grid,
     apply_output_renames,
     apply_target_land_mask,
     apply_time_subset,
@@ -559,10 +560,41 @@ def _masked_regrid_3d_state(
             cleanup_variable_files(scratch, v)
         return None, None, None, {}
 
-    # Align all native fields on their common time axis so the shared native
-    # validity (from zg) lines up cell-for-cell with every field before the
-    # ``.where`` mask (xarray would otherwise broadcast-align and inject NaNs
-    # for any non-overlapping timestamps).
+    # Snap every field + orog onto zg's native horizontal grid. Across CMIP6
+    # tables the same physical grid is stored with tiny float-rep differences in
+    # its lat/lon coords (day ``zg`` vs fx ``orog``, and sometimes between day
+    # fields); left as-is, xarray's implicit alignment silently INTERSECTS them
+    # (e.g. 96 -> 56 lats), corrupting the mask and crashing the shared
+    # regridder. A field on a genuinely different grid (shape/coords mismatch) is
+    # data we can't source-grid mask -> drop it (and bail to the unmasked
+    # fallback if it's orog or zg itself).
+    ref_lat = native["zg"]["lat"]
+    ref_lon = native["zg"]["lon"]
+    orog_native = align_to_reference_grid(orog_native, ref_lat, ref_lon)
+    if orog_native is None:
+        logging.warning(
+            "  orog is on a different horizontal grid than zg; cannot source-grid "
+            "mask — falling back to the unmasked path"
+        )
+        for v in downloaded:
+            cleanup_variable_files(scratch, v)
+        return None, None, None, {}
+    harmonized: dict[str, xr.DataArray] = {}
+    for v, da in native.items():
+        aligned = align_to_reference_grid(da, ref_lat, ref_lon)
+        if aligned is None:
+            logging.warning(
+                "  %s is on a different horizontal grid than zg; dropping it from "
+                "the source-grid masked 3D state (unusable data)",
+                v,
+            )
+            continue
+        harmonized[v] = aligned
+    native = harmonized
+
+    # Merge on the common TIME axis (lat/lon are now identical, so the inner
+    # join only intersects timestamps — the shared native validity from zg then
+    # lines up cell-for-cell with every field before the ``.where`` mask).
     merged_native = xr.merge(
         [native[v].rename(v) for v in native], compat="override", join="inner"
     )
