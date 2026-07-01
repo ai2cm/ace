@@ -540,6 +540,119 @@ def regrid_with_coverage_mask(
     return regridded, valid_mask
 
 
+# 3D-state fields whose regrid is source-grid below-surface masked. All share
+# the same plev axis, so a single native ``zg < orog`` test defines the
+# validity for every one of them (the mask is a function of zg vs orog only,
+# not of the field being masked).
+MASKED_3D_STATE_FIELDS: tuple[str, ...] = ("ua", "va", "hus", "zg", "ta")
+
+
+def source_grid_masked_regrid(
+    native_fields: dict[str, xr.DataArray],
+    zg_native: xr.DataArray,
+    orog_native: xr.DataArray,
+    regrid_data: Callable[[xr.DataArray], xr.DataArray],
+    regrid_indicator: Callable[[xr.DataArray], xr.DataArray],
+    threshold: float = 0.5,
+) -> tuple[dict[str, xr.DataArray], xr.DataArray]:
+    """Source-grid below-surface-masked regrid of the 3D plev state.
+
+    All 3D fields share one plev axis, so the native below-surface validity
+    (``zg >= orog``, True = above surface) is computed once from ``zg_native``
+    and ``orog_native`` and applied to every field before a valid-only
+    (``skipna``) regrid. The 0/1 validity indicator is regridded **once** (it
+    is identical for every field), thresholded into the shared target-grid
+    per-level validity mask.
+
+    Args:
+        native_fields: ``{name: (time, plev, lat, lon)}`` native fields to
+            regrid (must include ``zg`` so its regridded form is returned for
+            thickness derivation). Every field must share ``zg_native``'s
+            ``(time, plev, lat, lon)`` coordinates.
+        zg_native: native geopotential height on the field plev axis.
+        orog_native: native surface geopotential height, broadcastable over
+            ``(time, plev)``.
+        regrid_data: valid-only (``skipna``) regrid callable for a data field.
+        regrid_indicator: regrid callable for the 0/1 validity indicator.
+        threshold: minimum valid coverage for a target cell to count as valid.
+
+    Returns:
+        ``(regridded_fields, valid_target)`` where ``valid_target`` is the
+        shared ``(time, plev, lat, lon)`` boolean validity (True = valid) on
+        the target grid, and ``regridded_fields`` maps each input name to its
+        masked-regridded field.
+    """
+    valid_native = ~below_surface_indicator(zg_native, orog_native)
+    coverage = regrid_indicator(valid_native.astype("float32"))
+    valid_target = coverage_to_valid_mask(coverage, threshold)
+    regridded = {
+        name: regrid_data(da.where(valid_native)) for name, da in native_fields.items()
+    }
+    return regridded, valid_target
+
+
+def build_level_masks(valid_target: xr.DataArray) -> dict[str, xr.DataArray]:
+    """Per-plev-level validity masks (uint8, 1 = valid) named ``mask_<hPa>``.
+
+    Each mask is ``(time, lat, lon)`` — the validity of that pressure level,
+    shared across all same-level 3D fields (``ua``/``va``/``hus``/``zg``/``ta``
+    at that level). The sharing is provably exact, not merely approximate: the
+    validity is a function of ``zg`` vs ``orog`` only, so the regridded +
+    thresholded mask is byte-identical for every field at a given level.
+    """
+    plev_hpa = _plev_hpa(valid_target["plev"].values)
+    out: dict[str, xr.DataArray] = {}
+    for i, hpa in enumerate(plev_hpa):
+        name = f"mask_{hpa}"
+        out[name] = valid_target.isel(plev=i, drop=True).astype("uint8").rename(name)
+    return out
+
+
+def build_thickness_masks(valid_target: xr.DataArray) -> dict[str, xr.DataArray]:
+    """Validity masks (uint8, 1 = valid) for the derived layer thicknesses.
+
+    Naming mirrors :func:`derive_layer_thickness` so each thickness field
+    ``thickness_<...>`` resolves to ``mask_thickness_<...>`` by the
+    ``mask_<field>`` convention:
+
+      * ``mask_thickness_surface_<p0>`` = validity of level ``p0`` (the
+        surface→lowest-level thickness is invalid where ``p0`` is below ground),
+      * ``mask_thickness_<lower>_<upper>`` = intersection of the two bounding
+        levels' validity (the layer is meaningful only where both endpoints are
+        above surface). Stored explicitly rather than aliased to the lower
+        level's mask so the stored mask stays exact even at coverage-threshold
+        boundaries.
+    """
+    plev_hpa = _plev_hpa(valid_target["plev"].values)
+    out: dict[str, xr.DataArray] = {}
+    p0 = plev_hpa[0]
+    name0 = f"mask_thickness_surface_{p0}"
+    out[name0] = valid_target.isel(plev=0, drop=True).astype("uint8").rename(name0)
+    for k in range(len(plev_hpa) - 1):
+        lower, upper = plev_hpa[k], plev_hpa[k + 1]
+        name = f"mask_thickness_{lower}_{upper}"
+        both = valid_target.isel(plev=k, drop=True) & valid_target.isel(
+            plev=k + 1, drop=True
+        )
+        out[name] = both.astype("uint8").rename(name)
+    return out
+
+
+def attach_mask_attributes(ds: xr.Dataset, field_to_mask: dict[str, str]) -> xr.Dataset:
+    """Set each field's self-describing ``mask_variable`` attribute.
+
+    ``field_to_mask`` maps an output field name to the mask data-variable that
+    flags its invalid cells. Only pairs where both the field and the mask are
+    present in ``ds`` are stamped; the attribute is authoritative for loading
+    (see ``get_loss_mask_variables``) and consistent with the stepper's
+    ``mask_<...>`` naming-convention resolution.
+    """
+    for field, mask in field_to_mask.items():
+        if field in ds.data_vars and mask in ds.data_vars:
+            ds[field].attrs["mask_variable"] = mask
+    return ds
+
+
 def nearest_above_fill(da: xr.DataArray, mask: xr.DataArray) -> xr.DataArray:
     """Legacy below-surface fill: each column's masked cells inherit the
     lowest above-surface level's value.
@@ -1684,6 +1797,15 @@ __all__ = [
     "PLEV8_DEFAULT_HPA",
     "normalize_plev",
     "compute_below_surface_mask",
+    "below_surface_indicator",
+    "coverage_to_valid_mask",
+    "regrid_with_coverage_mask",
+    "derive_layer_thickness",
+    "MASKED_3D_STATE_FIELDS",
+    "source_grid_masked_regrid",
+    "build_level_masks",
+    "build_thickness_masks",
+    "attach_mask_attributes",
     "nearest_above_fill",
     "fill_below_surface_smooth",
     "fill_horizontal_diffuse",

@@ -1833,3 +1833,165 @@ def test_regrid_with_coverage_mask_block_mean_fake_regridder():
         data, valid, regrid_data, regrid_indicator, threshold=1.0
     )
     assert strict.values.tolist() == [[False, True], [True, True]]
+
+
+def _block_mean_regridders():
+    """2x2 lat/lon block-mean fake regridders (data=skipna, indicator=plain)."""
+
+    def block_mean(da, skipna):
+        return da.coarsen(lat=2, lon=2).mean(skipna=skipna)
+
+    regrid_data = lambda da: block_mean(da, skipna=True)  # noqa: E731
+    regrid_indicator = lambda da: block_mean(da, skipna=False)  # noqa: E731
+    return regrid_data, regrid_indicator
+
+
+def _native_3d(values_by_plev, coords):
+    """(time=1, plev, lat, lon) DataArray from a list of 2D per-plev arrays."""
+    arr = np.stack([np.asarray(v, dtype="float64") for v in values_by_plev])[None]
+    return xr.DataArray(arr, dims=("time", "plev", "lat", "lon"), coords=coords)
+
+
+def test_source_grid_masked_regrid_shared_mask_and_valid_only_average():
+    from processing import source_grid_masked_regrid
+
+    regrid_data, regrid_indicator = _block_mean_regridders()
+    lat = np.arange(4)
+    lon = np.arange(4)
+    plev = np.array([100000.0, 85000.0])  # 1000, 850 hPa (descending pressure)
+    coords = {"time": [0], "plev": plev, "lat": lat, "lon": lon}
+
+    # zg increases with altitude; orog = 500 m everywhere. At 1000 hPa the
+    # top-left native cell sits at 100 m (below surface); every other cell and
+    # the whole 850 hPa level are above surface.
+    zg1000 = np.full((4, 4), 1000.0)
+    zg1000[0, 0] = 100.0
+    zg850 = np.full((4, 4), 3000.0)
+    zg = _native_3d([zg1000, zg850], coords)
+    orog = xr.DataArray(
+        np.full((4, 4), 500.0), dims=("lat", "lon"), coords={"lat": lat, "lon": lon}
+    )
+    # A distinct field (e.g. ua) sharing zg's grid.
+    ua = _native_3d(
+        [np.arange(16, dtype="float64").reshape(4, 4), np.full((4, 4), 7.0)], coords
+    )
+
+    regridded, valid_target = source_grid_masked_regrid(
+        {"zg": zg, "ua": ua}, zg, orog, regrid_data, regrid_indicator, threshold=0.5
+    )
+
+    # valid_target is (time, plev, lat, lon) on the 2x2 target grid. The
+    # top-left 1000 hPa cell had 3/4 coverage (>=0.5 -> valid); everything else
+    # fully valid.
+    assert valid_target.dims == ("time", "plev", "lat", "lon")
+    assert valid_target.sel(plev=100000.0).values[0].tolist() == [
+        [True, True],
+        [True, True],
+    ]
+    assert bool(valid_target.sel(plev=85000.0).all())
+
+    # ua's top-left 1000 hPa target cell averages only the 3 valid native cells
+    # (1, 4, 5), never the below-surface 0.
+    np.testing.assert_allclose(
+        regridded["ua"].sel(plev=100000.0).values[0, 0, 0], (1 + 4 + 5) / 3
+    )
+
+
+def test_source_grid_masked_regrid_indicator_regridded_once():
+    """The indicator regrid must be invoked once total (mask is field-
+    independent), not once per field."""
+    from processing import source_grid_masked_regrid
+
+    regrid_data, regrid_indicator = _block_mean_regridders()
+    calls = {"indicator": 0, "data": 0}
+
+    def counting_data(da):
+        calls["data"] += 1
+        return regrid_data(da)
+
+    def counting_indicator(da):
+        calls["indicator"] += 1
+        return regrid_indicator(da)
+
+    lat, lon = np.arange(2), np.arange(2)
+    plev = np.array([100000.0])
+    coords = {"time": [0], "plev": plev, "lat": lat, "lon": lon}
+    zg = _native_3d([np.full((2, 2), 1000.0)], coords)
+    orog = xr.DataArray(
+        np.zeros((2, 2)), dims=("lat", "lon"), coords={"lat": lat, "lon": lon}
+    )
+    fields = {n: _native_3d([np.full((2, 2), 1.0)], coords) for n in ("ua", "va", "zg")}
+    fields["zg"] = zg
+
+    source_grid_masked_regrid(
+        fields, zg, orog, counting_data, counting_indicator, threshold=0.5
+    )
+    assert calls["indicator"] == 1  # shared across the 3 fields
+    assert calls["data"] == 3
+
+
+def test_build_level_masks_names_dims_and_polarity():
+    from processing import build_level_masks
+
+    plev = np.array([100000.0, 85000.0, 10000.0])  # 1000, 850, 100 hPa
+    valid = xr.DataArray(
+        np.ones((1, 3, 2, 2), dtype=bool),
+        dims=("time", "plev", "lat", "lon"),
+        coords={"time": [0], "plev": plev},
+    )
+    valid[0, 0, 0, 0] = False  # one invalid cell at 1000 hPa
+    masks = build_level_masks(valid)
+    assert set(masks) == {"mask_1000", "mask_850", "mask_100"}
+    # (time, lat, lon), uint8, 1 = valid
+    assert masks["mask_1000"].dims == ("time", "lat", "lon")
+    assert masks["mask_1000"].dtype == np.uint8
+    assert masks["mask_1000"].values[0].tolist() == [[0, 1], [1, 1]]
+    assert masks["mask_850"].values.min() == 1  # fully valid level
+
+
+def test_build_thickness_masks_surface_and_intersection():
+    from processing import build_thickness_masks
+
+    plev = np.array([100000.0, 85000.0, 70000.0])  # 1000, 850, 700 hPa
+    valid = xr.DataArray(
+        np.ones((1, 3, 2, 2), dtype=bool),
+        dims=("time", "plev", "lat", "lon"),
+        coords={"time": [0], "plev": plev},
+    )
+    valid[0, 0, 0, 0] = False  # 1000 hPa invalid at (0,0)
+    valid[0, 1, 0, 1] = False  # 850 hPa invalid at (0,1)
+    masks = build_thickness_masks(valid)
+    assert set(masks) == {
+        "mask_thickness_surface_1000",
+        "mask_thickness_1000_850",
+        "mask_thickness_850_700",
+    }
+    # surface layer tracks the 1000 hPa level's validity
+    assert masks["mask_thickness_surface_1000"].values[0].tolist() == [[0, 1], [1, 1]]
+    # 1000-850 layer valid only where BOTH endpoints valid (intersection)
+    assert masks["mask_thickness_1000_850"].values[0].tolist() == [[0, 0], [1, 1]]
+    assert masks["mask_thickness_1000_850"].dtype == np.uint8
+
+
+def test_attach_mask_attributes_sets_only_present_pairs():
+    from processing import attach_mask_attributes
+
+    ds = xr.Dataset(
+        {
+            "ta1000": ("x", [1.0]),
+            "mask_1000": ("x", np.array([1], dtype="uint8")),
+            "thickness_1000_850": ("x", [2.0]),
+            "mask_thickness_1000_850": ("x", np.array([1], dtype="uint8")),
+        }
+    )
+    attach_mask_attributes(
+        ds,
+        {
+            "ta1000": "mask_1000",
+            "thickness_1000_850": "mask_thickness_1000_850",
+            "absent_field": "mask_1000",  # field missing -> skipped
+            "ta1000_dupe": "mask_missing",  # mask missing -> skipped
+        },
+    )
+    assert ds["ta1000"].attrs["mask_variable"] == "mask_1000"
+    assert ds["thickness_1000_850"].attrs["mask_variable"] == "mask_thickness_1000_850"
