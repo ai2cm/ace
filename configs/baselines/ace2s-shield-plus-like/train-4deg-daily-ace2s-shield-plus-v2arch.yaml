@@ -1,0 +1,664 @@
+# CANDIDATE variant of the 4-degree daily ACE2S-SHiELD+ analog
+# (train-4deg-daily-ace2s-shield-plus.yaml), launched alongside it. Two changes
+# bring it closer to our latest 4-degree (ERA5 v2) configs:
+#   1. builder: the v2 NoiseConditionedSFNO settings (noise_embed_dim 32,
+#      filter_num_groups 16, spectral_ratio 0.125, normalize_big_skip,
+#      clip_latent_global_means) instead of the paper's builder.
+#   2. loss: no per-variable weights (the paper's weightings are dropped, as in
+#      the ERA5 v2 baseline).
+# Everything below this header otherwise matches the original config, whose
+# provenance notes follow. If this candidate pans out it forks a successor
+# baseline.
+#
+# 4-degree daily-timestep analog of the ACE2S-SHiELD+ training recipe from
+# github.com/ai2cm/ace2s-shield-plus-paper (ACE-experiments/training @ b271da1,
+# "full" data recipe + energy-conserving fine-tune — the model the manuscript
+# calls ACE2S-SHiELD+). Differences from that two-stage 1-degree/6-hourly
+# recipe, beyond swapping in the 4deg-daily datasets:
+#   - Single stage: stepper_training.n_forward_steps is an epoch schedule
+#     (1-step for epochs 1-120, then the paper's stochastic multi-step
+#     distribution for epochs 121-240) instead of separate pre-train and
+#     fine-tune runs. Step counts are kept from the paper, so the multi-step
+#     horizons are 1-20 days here rather than 6h-5d.
+#   - Epochs x4 (30+30 -> 120+120): daily data has 4x fewer samples per year,
+#     so this holds total optimizer steps roughly constant.
+#   - NO total_energy_budget_correction (the paper's "+" fine-tune has it): in
+#     a single-stage run it would be active from the start of training, which
+#     complicates fine-tuning these checkpoints on other datasets. A full
+#     with-optimizer-state checkpoint is saved at epoch 120 (end of the 1-step
+#     phase) for exactly that kind of fine-tuning.
+#   - Inline inference uses the current list form: 5-year SOM ic_0003 rollouts
+#     at 1x/2x/4xCO2 (checkpoint-selection weight, analogous to the paper's
+#     inline inference), a 10-year AMIP rollout, and 43-year AMIP rollouts with
+#     historical and constant CO2 (the paper's SST/CO2 disentangling axis).
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_every_n_batches: 5000
+validate_using_ema: true
+# Full checkpoints (with optimizer state) at epoch 120 — the end of the 1-step
+# phase, a clean pre-trained init for fine-tuning on other datasets — and at
+# the final epoch.
+checkpoint_save_epochs:
+  start: 120
+  step: 120
+ema_checkpoint_save_epochs:
+  start: 10
+  step: 10
+max_epochs: 240
+ema:
+  decay: 0.999
+train_aggregator:
+  ensemble_metrics: true
+inference:
+  # Short-case cadence: every other epoch. The epochs field is a slice over
+  # [1..max_epochs], so start 1 / step 2 fires on epochs 2,4,...,240 — which
+  # includes every EMA-checkpoint-save epoch (10,20,...,240) and the final
+  # epoch.
+  - name: som_1xco2_5year
+    weight: 1.0
+    epochs:
+      start: 1
+      step: 2
+    n_forward_steps: 1825
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '2032-07-01T00:00:00'
+          - '2033-01-01T00:00:00'
+          - '2033-07-01T00:00:00'
+          - '2034-01-01T00:00:00'
+          - '2034-07-01T00:00:00'
+          - '2035-01-01T00:00:00'
+          - '2035-07-01T00:00:00'
+          - '2036-01-01T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 1xCO2-ic_0003.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+          name: day_5
+          variables: &inference_variables
+            - PRATEsfc
+            - TMP2m
+            - Q2m
+            - UGRD10m
+            - VGRD10m
+            - h500
+            - TMP850
+            - PRESsfc
+            - surface_temperature
+            - ULWRFsfc
+            - DLWRFsfc
+            - USWRFsfc
+            - DSWRFsfc
+            - ULWRFtoa
+            - USWRFtoa
+            - LHTFLsfc
+            - SHTFLsfc
+            - tendency_of_total_water_path_due_to_advection
+            - total_frozen_precipitation_rate
+            - air_temperature_0
+            - air_temperature_1
+            - air_temperature_3
+            - air_temperature_7
+            - specific_total_water_0
+            - specific_total_water_1
+            - specific_total_water_3
+            - specific_total_water_7
+            - eastward_wind_0
+            - eastward_wind_1
+            - eastward_wind_3
+            - eastward_wind_7
+            - northward_wind_0
+            - northward_wind_1
+            - northward_wind_3
+            - northward_wind_7
+            - total_water_path
+        - step: 5
+          target: norm
+          name: day_5_norm
+          variables: *inference_variables
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      histogram:
+        enabled: true
+  - name: som_2xco2_5year
+    weight: 1.0
+    epochs:
+      start: 1
+      step: 2
+    n_forward_steps: 1825
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '2032-07-01T00:00:00'
+          - '2033-01-01T00:00:00'
+          - '2033-07-01T00:00:00'
+          - '2034-01-01T00:00:00'
+          - '2034-07-01T00:00:00'
+          - '2035-01-01T00:00:00'
+          - '2035-07-01T00:00:00'
+          - '2036-01-01T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 2xCO2-ic_0003.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+          name: day_5
+          variables: *inference_variables
+        - step: 5
+          target: norm
+          name: day_5_norm
+          variables: *inference_variables
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      histogram:
+        enabled: true
+  - name: som_4xco2_5year
+    weight: 1.0
+    epochs:
+      start: 1
+      step: 2
+    n_forward_steps: 1825
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '2032-07-01T00:00:00'
+          - '2033-01-01T00:00:00'
+          - '2033-07-01T00:00:00'
+          - '2034-01-01T00:00:00'
+          - '2034-07-01T00:00:00'
+          - '2035-01-01T00:00:00'
+          - '2035-07-01T00:00:00'
+          - '2036-01-01T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 4xCO2-ic_0003.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+          name: day_5
+          variables: *inference_variables
+        - step: 5
+          target: norm
+          name: day_5_norm
+          variables: *inference_variables
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      histogram:
+        enabled: true
+  - name: amip_10year
+    weight: 0.0
+    epochs:
+      start: 1
+      step: 2
+    n_forward_steps: 3652
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '2009-01-01T00:00:00'
+          - '2009-01-02T00:00:00'
+          - '2009-01-03T00:00:00'
+          - '2009-01-04T00:00:00'
+          - '2009-01-05T00:00:00'
+          - '2009-01-06T00:00:00'
+          - '2009-01-07T00:00:00'
+          - '2009-01-08T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+          name: day_5
+          variables: *inference_variables
+        - step: 5
+          target: norm
+          name: day_5_norm
+          variables: *inference_variables
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      histogram:
+        enabled: true
+  # Long-case cadence: every 10 epochs. start 9 is a slice index over
+  # [1..max_epochs], so these fire on epochs 10,20,...,240 — exactly the
+  # EMA-checkpoint-save epochs, including the final epoch.
+  - name: amip_long_43year
+    weight: 0.0
+    epochs:
+      start: 9
+      step: 10
+    n_forward_steps: 15622
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '1979-01-01T00:00:00'
+          - '1979-01-02T00:00:00'
+          - '1979-01-03T00:00:00'
+          - '1979-01-04T00:00:00'
+          - '1979-01-05T00:00:00'
+          - '1979-01-06T00:00:00'
+          - '1979-01-07T00:00:00'
+          - '1979-01-08T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means: []
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      zonal_mean:
+        enabled: false
+      time_mean_denorm:
+        target: denorm
+        variables: *inference_variables
+      time_mean_norm:
+        target: norm
+        variables: *inference_variables
+      annual:
+        variables: *inference_variables
+      power_spectrum:
+        variables: *inference_variables
+      histogram:
+        enabled: true
+  # The SST/CO2 disentangling case: observed AMIP SSTs with CO2 held constant,
+  # verified against the SHiELD AMIP-constant-CO2 simulation itself (so the
+  # target is a real simulation, not a persistence-CO2 counterfactual). Same
+  # cadence as amip_long_43year: epochs 10,20,...,240, coinciding with EMA
+  # checkpoint saves and the final epoch.
+  - name: amip_constant_co2_43year
+    weight: 0.0
+    epochs:
+      start: 9
+      step: 10
+    n_forward_steps: 15622
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '1979-01-01T00:00:00'
+          - '1979-01-02T00:00:00'
+          - '1979-01-03T00:00:00'
+          - '1979-01-04T00:00:00'
+          - '1979-01-05T00:00:00'
+          - '1979-01-06T00:00:00'
+          - '1979-01-07T00:00:00'
+          - '1979-01-08T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-06-30-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+        file_pattern: AMIP-constant-CO2.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means: []
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      zonal_mean:
+        enabled: false
+      time_mean_denorm:
+        target: denorm
+        variables: *inference_variables
+      time_mean_norm:
+        target: norm
+        variables: *inference_variables
+      annual:
+        variables: *inference_variables
+      power_spectrum:
+        variables: *inference_variables
+      histogram:
+        enabled: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 8
+  time_buffer_pool_size: 32
+  dataset:
+    strict: false
+    concat:
+      # Ramped-climSST random-CO2 ensemble; the first member of each CO2 level
+      # has no -ic_0001 suffix in this dataset. Subsets start 2020-01-02: the
+      # first daily point whose averaging window is entirely within the
+      # post-spinup years (2020-2024), matching the paper's 2020-01-01T06
+      # 6-hourly cut.
+      - &random_co2_training_data
+        data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
+        file_pattern: ramped-sst-1xCO2-random-perturbation.zarr
+        engine: zarr
+        subset:
+          start_time: '2020-01-02'
+      - <<: *random_co2_training_data
+        file_pattern: ramped-sst-1xCO2-random-perturbation-ic_0002.zarr
+      - <<: *random_co2_training_data
+        file_pattern: ramped-sst-2xCO2-random-perturbation.zarr
+      - <<: *random_co2_training_data
+        file_pattern: ramped-sst-2xCO2-random-perturbation-ic_0002.zarr
+      - <<: *random_co2_training_data
+        file_pattern: ramped-sst-4xCO2-random-perturbation.zarr
+      - <<: *random_co2_training_data
+        file_pattern: ramped-sst-4xCO2-random-perturbation-ic_0002.zarr
+      # Historical AMIP, 30 years in-sample (2009+ held out for validation and
+      # inference).
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+        subset:
+          start_time: '1979-01-01'
+          stop_time: '2008-12-31'
+      # SOM equilibrium climates.
+      - &equilibrium_climate_training_data
+        data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+        file_pattern: 1xCO2-ic_0001.zarr
+        engine: zarr
+      - <<: *equilibrium_climate_training_data
+        file_pattern: 2xCO2-ic_0001.zarr
+      - <<: *equilibrium_climate_training_data
+        file_pattern: 4xCO2-ic_0001.zarr
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 8
+    prefetch_factor: 2
+    time_buffer: 16
+    dataset:
+      strict: false
+      concat:
+        - &random_co2_validation_data
+          data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
+          file_pattern: ramped-sst-1xCO2-random-perturbation-ic_0003.zarr
+          engine: zarr
+          subset:
+            start_time: '2022-01-01'
+            stop_time: '2022-12-31'
+        - <<: *random_co2_validation_data
+          file_pattern: ramped-sst-2xCO2-random-perturbation-ic_0003.zarr
+        - <<: *random_co2_validation_data
+          file_pattern: ramped-sst-4xCO2-random-perturbation-ic_0003.zarr
+        - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+          file_pattern: ic_0001.zarr
+          engine: zarr
+          subset:
+            start_time: '2009-01-01'
+            stop_time: '2011-12-31'
+        - &equilibrium_climate_validation_data
+          data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+          file_pattern: 1xCO2-ic_0002.zarr
+          engine: zarr
+          subset:
+            start_time: '2038-01-01'
+            stop_time: '2038-12-31'
+        - <<: *equilibrium_climate_validation_data
+          file_pattern: 2xCO2-ic_0002.zarr
+        - <<: *equilibrium_climate_validation_data
+          file_pattern: 4xCO2-ic_0002.zarr
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  # Single-stage replacement for the paper's separate pre-train and fine-tune
+  # runs: 1-step training for epochs 1-120, then the paper's stochastic
+  # multi-step distribution (step counts unchanged) for epochs 121-240.
+  n_forward_steps:
+    start_value: 1
+    milestones:
+      - epoch: 121
+        value:
+          outcomes:
+            - steps: 1
+              probability: 0.6
+            - steps: 2
+              probability: 0.2
+            - steps: 4
+              probability: 0.1
+            - steps: 12
+              probability: 0.05
+            - steps: 20
+              probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      residual_prediction: false
+      # The ERA5 v2 baseline's builder settings (the candidate's change #1).
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 512
+          noise_embed_dim: 32
+          noise_type: isotropic
+          filter_type: linear
+          affine_norms: true
+          normalize_big_skip: true
+          filter_num_groups: 16
+          spectral_ratio: 0.125
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          clip_latent_global_means: true
+      normalization:
+        network:
+          global_means_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily-stats/combined/centering.nc
+          global_stds_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily-stats/combined/scaling-full-field.nc
+        residual:
+          global_means_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily-stats/combined/centering.nc
+          global_stds_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily-stats/combined/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+        interpolate: true
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        # No total_energy_budget_correction, unlike the paper's "+" fine-tune:
+        # a single-stage run would carry it from the start of training, which
+        # complicates fine-tuning these checkpoints on other datasets. It can
+        # be added in a later fine-tune (the paper's SHiELD value: 1.13 W/m**2).
+        force_positive_names:
+          - specific_total_water_0
+          - specific_total_water_1
+          - specific_total_water_2
+          - specific_total_water_3
+          - specific_total_water_4
+          - specific_total_water_5
+          - specific_total_water_6
+          - specific_total_water_7
+          - Q2m
+          - PRATEsfc
+          - ULWRFsfc
+          - ULWRFtoa
+          - DLWRFsfc
+          - DSWRFsfc
+          - USWRFsfc
+          - USWRFtoa
+          - total_frozen_precipitation_rate
+      next_step_forcing_names:
+        - DSWRFtoa
+        - global_mean_co2
+      in_names:
+        - land_fraction
+        - ocean_fraction
+        - sea_ice_fraction
+        - DSWRFtoa
+        - HGTsfc
+        - PRESsfc
+        - surface_temperature
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+        - global_mean_co2
+      out_names:
+        - PRESsfc
+        - surface_temperature
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+        - tendency_of_total_water_path_due_to_advection
+        - TMP850
+        - h500
+        - total_frozen_precipitation_rate
