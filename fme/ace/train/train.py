@@ -79,7 +79,6 @@ from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     InferenceCallback,
     InferenceTask,
-    TrainConfigProtocol,
     Trainer,
     ValidationCallback,
     ValidationTask,
@@ -318,13 +317,12 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     )
 
     do_gc_collect = fme.get_device() != torch.device("cpu")
-    trainer_config: TrainConfigProtocol = config  # documenting trainer input type
     return Trainer(
         train_data=train_data,
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
-        config=trainer_config,
+        params=config.get_trainer_params(),
         aggregator_builder=aggregator_builder,
         validation_callback=validation_callback,
         end_of_batch_callback=end_of_batch_ops,

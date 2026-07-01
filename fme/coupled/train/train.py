@@ -256,7 +256,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         stepper=stepper,
         build_optimization=builder.get_optimization,
         build_ema=builder.get_ema,
-        config=config,
+        params=config.get_trainer_params(),
         aggregator_builder=aggregator_builder,
         validation_callback=validation_callback,
         end_of_batch_callback=end_of_batch_ops,

@@ -8,7 +8,7 @@ from fme.core.cli import ResumeResultsConfig
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.lr_tuning import LRTuningConfig
-from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.generics.trainer import EndOfBatchCallback, TrainerParams
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.rand import set_seed
@@ -349,6 +349,27 @@ class TrainConfig:
         if not epoch_sets:
             return []
         return sorted(set().union(*epoch_sets))
+
+    def get_trainer_params(self) -> TrainerParams:
+        """Package the scalar training parameters read by the Trainer."""
+        return TrainerParams(
+            experiment_dir=self.experiment_dir,
+            checkpoint_dir=self.checkpoint_dir,
+            max_epochs=self.max_epochs,
+            save_checkpoint=self.save_checkpoint,
+            validate_using_ema=self.validate_using_ema,
+            log_train_every_n_batches=self.log_train_every_n_batches,
+            train_evaluation_batches=self.train_evaluation_batches,
+            checkpoint_every_n_batches=self.checkpoint_every_n_batches,
+            segment_epochs=self.segment_epochs,
+            checkpoint_save_epochs=self.checkpoint_save_epochs,
+            ema_checkpoint_save_epochs=self.ema_checkpoint_save_epochs,
+            evaluate_before_training=self.evaluate_before_training,
+            save_best_inference_epoch_checkpoints=(
+                self.save_best_inference_epoch_checkpoints
+            ),
+            lr_tuning=self.lr_tuning,
+        )
 
 
 class TrainBuilders:
