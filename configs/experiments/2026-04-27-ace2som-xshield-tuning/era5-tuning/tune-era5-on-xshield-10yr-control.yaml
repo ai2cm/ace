@@ -93,7 +93,7 @@ stepper_training:
   loss:
     type: EnsembleLoss
     weights:
-      PRATEsfc: 10
+      PRATEsfc: 1
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
