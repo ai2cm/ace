@@ -55,7 +55,7 @@ class UniformMaskingGenerator(MaskingGenerator):
         return [self._names[i] for i in perm.tolist()]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class BernoulliMaskingConfig:
     """All-or-nothing Bernoulli masking of a channel pool.
 
@@ -74,7 +74,7 @@ class BernoulliMaskingConfig:
         return BernoulliMaskingGenerator(names, self.rate)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class UniformMaskingConfig:
     """Uniform masking of a random count of channels from a pool.
 
@@ -108,7 +108,7 @@ class UniformMaskingConfig:
 MaskingConfig = BernoulliMaskingConfig | UniformMaskingConfig
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class MaskingGroupConfig:
     """A named group of variables masked together by one generator.
 
@@ -128,7 +128,7 @@ class MaskingGroupConfig:
             raise ValueError("masking group variables must be non-empty")
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VariableMaskingConfig:
     """Synthetic training-time input variable masking.
 
