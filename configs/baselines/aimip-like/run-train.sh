@@ -36,6 +36,7 @@ run_training() {
   done < "$CONFIG_PATH"
 
   gantry run \
+    --yes \
     --name "$job_name" \
     --description 'Run ACE training (AIMIP-like baseline)' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
