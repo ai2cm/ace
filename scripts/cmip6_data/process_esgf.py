@@ -70,6 +70,7 @@ from index import (  # noqa: E402
 )
 from processing import (  # noqa: E402
     BOUNDS_NAMES,
+    MASKED_3D_STATE_FIELDS,
     UNSTRUCTURED_METHOD,
     DuplicateTimestampsError,
     RssSampler,
@@ -77,6 +78,8 @@ from processing import (  # noqa: E402
     apply_output_renames,
     apply_target_land_mask,
     apply_time_subset,
+    assemble_masked_3d_state,
+    attach_mask_attributes,
     clamp_static_fractions,
     compute_below_surface_mask,
     compute_total_water_path,
@@ -86,11 +89,13 @@ from processing import (  # noqa: E402
     finalize_surface_and_ocean_variable,
     flatten_plev_variables,
     harmonize_temperature_to_kelvin,
+    make_regridder,
     normalize_plev,
     regrid_variables,
     resolve_time_duplicates,
     rss_mib,
     run_sanity_checks,
+    source_grid_masked_regrid,
     validate_cell_methods,
     write_zarr,
 )
@@ -402,17 +407,21 @@ def _download_files(files, scratch: Path, n_workers: int) -> list[Path]:
         return list(executor.map(lambda f: download_file(f, scratch), files))
 
 
-def _download_and_regrid_variable(
+def _download_native_variable(
     task: ESGFDatasetTask,
     variable: str,
     table_id: str,
-    target_grid: xr.Dataset,
     config: ESGFProcessConfig,
     scratch: Path,
-) -> tuple[Optional[xr.Dataset], dict[str, str]]:
-    """Download, regrid, and return one variable. Cleans up native files.
+) -> Optional[xr.Dataset]:
+    """Download + open one variable on its NATIVE grid (no regrid, no cleanup).
 
-    Returns ``(regridded_ds, {variable: method})``."""
+    Returns the native dataset (plev-normalised, time-subset, dedup'd) or
+    ``None`` when ESGF has no files or the time filter empties the set. The
+    caller owns regridding and native-file cleanup (via
+    ``cleanup_variable_files``) — the source-grid masking path needs several
+    native fields resident at once, so cleanup can't happen per variable here.
+    """
     cfg = config.resolve(task.source_id, task.experiment, task.variant_label)
     node = config.esgf.search_node
 
@@ -421,7 +430,7 @@ def _download_and_regrid_variable(
         node, task.source_id, task.experiment, task.variant_label, table_id, variable
     )
     if not fileset.files:
-        return None, {}
+        return None
 
     tw = cfg.time_subset.get(task.experiment)
     if tw is not None:
@@ -435,7 +444,7 @@ def _download_and_regrid_variable(
                 n_before,
             )
         if not fileset.files:
-            return None, {}
+            return None
 
     n_workers = max(1, min(config.esgf.download_workers, len(fileset.files)))
     logging.info(
@@ -456,11 +465,29 @@ def _download_and_regrid_variable(
     else:
         ds = apply_time_subset(ds, cfg)
         if ds.sizes.get("time", 0) == 0:
-            cleanup_variable_files(scratch, variable)
-            return None, {}
+            return None
         ds, msg = resolve_time_duplicates(ds, variable, allow_dedupe=cfg.allow_dedupe)
         if msg:
             logging.warning("    %s", msg)
+    return ds
+
+
+def _download_and_regrid_variable(
+    task: ESGFDatasetTask,
+    variable: str,
+    table_id: str,
+    target_grid: xr.Dataset,
+    config: ESGFProcessConfig,
+    scratch: Path,
+) -> tuple[Optional[xr.Dataset], dict[str, str]]:
+    """Download, regrid, and return one variable. Cleans up native files.
+
+    Returns ``(regridded_ds, {variable: method})``."""
+    cfg = config.resolve(task.source_id, task.experiment, task.variant_label)
+    ds = _download_native_variable(task, variable, table_id, config, scratch)
+    if ds is None:
+        cleanup_variable_files(scratch, variable)
+        return None, {}
 
     logging.info("    regridding %s ...", variable)
     regridded, methods = regrid_variables(ds, target_grid, cfg)
@@ -468,6 +495,112 @@ def _download_and_regrid_variable(
 
     cleanup_variable_files(scratch, variable)
     return regridded, methods
+
+
+def _masked_regrid_3d_state(
+    task: ESGFDatasetTask,
+    config: ESGFProcessConfig,
+    target_grid: xr.Dataset,
+    scratch: Path,
+    present_3d: list[str],
+    *,
+    make_regridder_fn=make_regridder,
+    threshold: float = 0.5,
+) -> tuple[
+    Optional[dict[str, xr.DataArray]],
+    Optional[xr.DataArray],
+    Optional[xr.DataArray],
+    dict[str, str],
+]:
+    """Source-grid below-surface-masked regrid of the 3D plev state.
+
+    Downloads the native 3D fields the model publishes (a subset of
+    ``MASKED_3D_STATE_FIELDS`` — must include ``zg``) plus native ``orog``,
+    computes the native ``zg < orog`` validity once, and returns the
+    masked-regridded fields (plev-dimensioned, on the target grid), the shared
+    target-grid per-level validity, the regridded surface height, and the
+    per-field regrid methods.
+
+    A single regridder built on the native grid serves both the valid-only
+    (``skipna``) data regrid and the 0/1 indicator regrid — the native 3D
+    fields and ``orog`` share one grid. ``make_regridder_fn`` is injectable so
+    tests can supply a fake (block-mean) regridder without ESMF.
+
+    Returns ``(None, None, None, {})`` when the state can't be masked (no
+    ``zg``, no ``orog``, or nothing downloaded) — the caller then falls back to
+    the unmasked per-variable path.
+    """
+    cfg = config.resolve(task.source_id, task.experiment, task.variant_label)
+    if "zg" not in present_3d or not task.has_orog:
+        return None, None, None, {}
+
+    downloaded: list[str] = []
+    orog_ds = _download_native_variable(task, "orog", "fx", config, scratch)
+    if orog_ds is None or "orog" not in orog_ds:
+        cleanup_variable_files(scratch, "orog")
+        return None, None, None, {}
+    downloaded.append("orog")
+    orog_native = orog_ds["orog"]
+
+    native: dict[str, xr.DataArray] = {}
+    zg_native_ds: Optional[xr.Dataset] = None
+    for v in present_3d:
+        ds_v = _download_native_variable(
+            task, v, cmip6_source_table(v), config, scratch
+        )
+        downloaded.append(v)
+        if ds_v is not None and v in ds_v:
+            native[v] = ds_v[v]
+            if v == "zg":
+                zg_native_ds = ds_v
+
+    if "zg" not in native or zg_native_ds is None:
+        for v in downloaded:
+            cleanup_variable_files(scratch, v)
+        return None, None, None, {}
+
+    # Align all native fields on their common time axis so the shared native
+    # validity (from zg) lines up cell-for-cell with every field before the
+    # ``.where`` mask (xarray would otherwise broadcast-align and inject NaNs
+    # for any non-overlapping timestamps).
+    merged_native = xr.merge(
+        [native[v].rename(v) for v in native], compat="override", join="inner"
+    )
+    native_aligned = {v: merged_native[v] for v in native}
+    zg_native = native_aligned["zg"]
+
+    # Build the regridder from the native ``zg`` *dataset* (not the merged
+    # DataArrays) so its lat/lon bounds survive — conservative regridding needs
+    # them, and every 3D field + orog share this one native grid.
+    method = cfg.regrid.method_for("zg")
+    regridder, actual_method = make_regridder_fn(zg_native_ds, target_grid, method)
+
+    def regrid_data(da: xr.DataArray) -> xr.DataArray:
+        return regridder(da, keep_attrs=True, skipna=True)
+
+    def regrid_indicator(da: xr.DataArray) -> xr.DataArray:
+        return regridder(da, skipna=False)
+
+    regridded_3d, valid_target = source_grid_masked_regrid(
+        native_aligned,
+        zg_native,
+        orog_native,
+        regrid_data,
+        regrid_indicator,
+        threshold=threshold,
+    )
+    hgtsfc_target = regrid_data(orog_native)
+
+    # Force compute so the native files can be released before we return.
+    regridded_3d = {k: v.load() for k, v in regridded_3d.items()}
+    valid_target = valid_target.load()
+    hgtsfc_target = hgtsfc_target.load()
+
+    for v in downloaded:
+        cleanup_variable_files(scratch, v)
+
+    methods = {v: actual_method for v in native_aligned}
+    return regridded_3d, valid_target, hgtsfc_target, methods
 
 
 def process_one_esgf(
@@ -532,8 +665,14 @@ def process_one_esgf(
             v for v in cfg.core_variables if v in task.available_day_variables
         ] + [v for v in cfg.optional_variables if v in task.available_day_variables]
 
+        # The 3D plev state ({ua,va,hus,zg,ta} the model publishes) goes
+        # through source-grid below-surface masking (native zg<orog before
+        # regrid); everything else is regridded per-variable, unmasked.
+        masked_3d_present = [v for v in MASKED_3D_STATE_FIELDS if v in all_day_vars]
+        generic_day_vars = [v for v in all_day_vars if v not in masked_3d_present]
+
         regridded_vars: dict[str, xr.Dataset] = {}
-        for v in all_day_vars:
+        for v in generic_day_vars:
             try:
                 source_table = cmip6_source_table(v)
                 logging.info(
@@ -551,7 +690,59 @@ def process_one_esgf(
                 cleanup_scratch_dir(scratch)
                 return row
 
-        missing_core = [v for v in cfg.core_variables if v not in regridded_vars]
+        # Source-grid masked 3D state. Falls back to the legacy unmasked
+        # per-variable path (+ the NaN-union below-surface mask at step 5/6)
+        # when the model lacks orog or zg.
+        masked_state_ds: Optional[xr.Dataset] = None
+        mask_field_map: dict[str, str] = {}
+        masked_field_names: set[str] = set()
+        used_source_grid_masking = False
+        if masked_3d_present:
+            logging.info(
+                "  [%s] source-grid masked 3D state: %s",
+                task.source_id,
+                masked_3d_present,
+            )
+            try:
+                masked_3d, valid_target_3d, hgtsfc_3d, m3d_methods = (
+                    _masked_regrid_3d_state(
+                        task, config, target, scratch, masked_3d_present
+                    )
+                )
+            except (SimulationBoundaryError, DuplicateTimestampsError) as e:
+                row.status = "skipped"
+                row.skip_reason = str(e)
+                cleanup_scratch_dir(scratch)
+                return row
+            if masked_3d is not None:
+                row.regrid_methods.update(m3d_methods)
+                masked_field_names = set(masked_3d)
+                masked_state_ds, mask_field_map = assemble_masked_3d_state(
+                    masked_3d, valid_target_3d, hgtsfc_3d
+                )
+                used_source_grid_masking = True
+                row.mask_source = "source_grid"
+            else:
+                row.warnings.append(
+                    "source-grid masking unavailable (no orog/zg); "
+                    "3D state regridded unmasked"
+                )
+                for v in masked_3d_present:
+                    try:
+                        result, methods = _download_and_regrid_variable(
+                            task, v, cmip6_source_table(v), target, config, scratch
+                        )
+                        row.regrid_methods.update(methods)
+                        if result is not None:
+                            regridded_vars[v] = result
+                    except (SimulationBoundaryError, DuplicateTimestampsError) as e:
+                        row.status = "skipped"
+                        row.skip_reason = str(e)
+                        cleanup_scratch_dir(scratch)
+                        return row
+
+        present_core = set(regridded_vars) | masked_field_names
+        missing_core = [v for v in cfg.core_variables if v not in present_core]
         if len(missing_core) > cfg.max_core_missing:
             row.status = "skipped"
             row.skip_reason = (
@@ -563,10 +754,13 @@ def process_one_esgf(
         if missing_core:
             row.warnings.append(f"core variables absent (tolerated): {missing_core}")
 
-        # 2. Merge all regridded daily variables.
-        day_regridded = xr.merge(
-            list(regridded_vars.values()), compat="override", join="inner"
-        )
+        # 2. Merge all regridded daily variables (+ the masked 3D state, which
+        # already carries its filled fields, thicknesses, per-cell masks and
+        # surface height).
+        merge_inputs = list(regridded_vars.values())
+        if masked_state_ds is not None:
+            merge_inputs.append(masked_state_ds)
+        day_regridded = xr.merge(merge_inputs, compat="override", join="inner")
 
         if "time" in day_regridded.dims and day_regridded.sizes["time"] == 0:
             row.status = "skipped"
@@ -589,9 +783,14 @@ def process_one_esgf(
             row.cell_methods_mismatch = mm
             row.warnings.append(f"cell_methods != 'time: mean' for {mm}")
 
-        # 4. Static fields.
+        # 4. Static fields. When source-grid masking ran, the target-grid
+        # surface height ``orog`` is already in ``day_regridded`` (regridded
+        # with the same regridder as ``zg`` for a self-consistent thickness
+        # anchor), so skip re-downloading it here.
         static_ds: Optional[xr.Dataset] = None
         for static_var in cfg.static_variables:
+            if static_var == "orog" and used_source_grid_masking:
+                continue
             has_it = (static_var == "orog" and task.has_orog) or (
                 static_var == "sftlf" and task.has_sftlf
             )
@@ -625,21 +824,25 @@ def process_one_esgf(
 
         dask.config.set(scheduler="synchronous")
 
-        # 5. Below-surface mask.
+        # 5-6. Below-surface mask + smooth-flood fill of the level-valued 3D
+        # state. Skipped when source-grid masking ran — those fields are
+        # already masked-regridded, smooth-filled and carry per-cell masks;
+        # this is the legacy fallback path (target-grid NaN-union mask) for
+        # models processed without native zg/orog masking.
         stage_t0 = time.monotonic()
-        orog: Optional[xr.DataArray] = None
-        if static_ds is not None and "orog" in static_ds:
-            orog = static_ds["orog"]
-        mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
+        if not used_source_grid_masking:
+            orog: Optional[xr.DataArray] = None
+            if static_ds is not None and "orog" in static_ds:
+                orog = static_ds["orog"]
+            mask, row.mask_source = compute_below_surface_mask(day_regridded, orog)
+            if mask is not None:
+                for v in ("ua", "va", "hus", "zg"):
+                    if v in day_regridded:
+                        day_regridded[v] = fill_below_surface_smooth(
+                            day_regridded[v], mask
+                        )
+                day_regridded = day_regridded.assign(below_surface_mask=mask)
         _stage("below_surface_mask", stage_t0)
-
-        # 6. Smooth-flood fill for the level-valued 3D state (see
-        # process.py for the algorithm rationale).
-        if mask is not None:
-            for v in ("ua", "va", "hus", "zg"):
-                if v in day_regridded:
-                    day_regridded[v] = fill_below_surface_smooth(day_regridded[v], mask)
-            day_regridded = day_regridded.assign(below_surface_mask=mask)
 
         # 7. Surface-and-ocean variables (surface T, sea-ice, ocean) — see
         # the matching block in process.py for the design. ESGF picks
@@ -763,15 +966,20 @@ def process_one_esgf(
             row.time_start = str(day_regridded["time"].values[0])
             row.time_end = str(day_regridded["time"].values[-1])
 
-        # 12. Flatten plev.
+        # 12. Flatten plev, then stamp the per-cell ``mask_variable`` attrs on
+        # the now-flattened 3D + thickness fields (the mapping is keyed by the
+        # flattened names, e.g. ``ta1000`` -> ``mask_1000``).
         day_regridded = flatten_plev_variables(day_regridded)
+        if used_source_grid_masking:
+            attach_mask_attributes(day_regridded, mask_field_map)
 
         # 13. Harmonize temperatures to K (some CMIP6 publishers
         # emit ``tos``/``tob``/``sitemptop`` in °C). See process.py.
-        # Skip ``_mask`` channels — they're 0/1 indicators that
-        # used to inherit ``units`` from their parent variable.
+        # Skip mask channels — the ``_mask``-suffixed surface/ocean indicators
+        # and the ``mask_``-prefixed per-cell loss/eval masks are 0/1 fields,
+        # not temperatures.
         for v in list(day_regridded.data_vars):
-            if v.endswith("_mask"):
+            if v.endswith("_mask") or v.startswith("mask_"):
                 continue
             da, msg = harmonize_temperature_to_kelvin(day_regridded[v], var_id=v)
             if msg:

@@ -626,3 +626,192 @@ def test_download_files_propagates_failure(monkeypatch):
     files = [_FakeFile(f"f_{i}.nc") for i in range(3)]
     with pytest.raises(RuntimeError, match="data node down"):
         _download_files(files, Path("/scratch"), n_workers=4)
+
+
+# ---------------------------------------------------------------------------
+# _masked_regrid_3d_state — source-grid below-surface masking orchestration.
+# Verified with a fake block-mean regridder + mocked ESGF, no ESMF/network.
+# ---------------------------------------------------------------------------
+
+
+class _BlockMeanRegridder:
+    """Fake xESMF regridder: coarsen each 2x2 lat/lon block by mean.
+
+    Accepts the same call kwargs the real regridder is invoked with
+    (``keep_attrs``, ``skipna``) so the injected seam is signature-compatible.
+    """
+
+    def __call__(self, da, keep_attrs=False, skipna=True):
+        return da.coarsen(lat=2, lon=2).mean(skipna=skipna)
+
+
+def _fake_make_regridder(source_ds, target, method):
+    return _BlockMeanRegridder(), method
+
+
+def _native_3d_ds(name, plev, blocks_by_plev, ntime=2):
+    """Native (time, plev, lat, lon) single-variable dataset from per-plev 2D
+    arrays, broadcast across ``ntime`` timesteps."""
+    per_plev = [np.asarray(b, dtype="float64") for b in blocks_by_plev]
+    nlat, nlon = per_plev[0].shape
+    arr = np.broadcast_to(
+        np.stack(per_plev)[None], (ntime, len(plev), nlat, nlon)
+    ).copy()
+    time = xr.date_range(
+        "2010-01-01", periods=ntime, freq="D", calendar="noleap", use_cftime=True
+    )
+    return xr.Dataset(
+        {name: (("time", "plev", "lat", "lon"), arr)},
+        coords={
+            "time": time,
+            "plev": plev,
+            "lat": np.arange(nlat),
+            "lon": np.arange(nlon),
+        },
+    )
+
+
+def _orog_ds(values):
+    arr = np.asarray(values, dtype="float64")
+    nlat, nlon = arr.shape
+    return xr.Dataset(
+        {"orog": (("lat", "lon"), arr)},
+        coords={"lat": np.arange(nlat), "lon": np.arange(nlon)},
+    )
+
+
+def _masking_task():
+    return process_esgf.ESGFDatasetTask(
+        source_id="MPI-ESM1-2-LR",
+        experiment="historical",
+        variant_label="r1i1p1f1",
+        variant_r=1,
+        variant_i=1,
+        variant_p=1,
+        variant_f=1,
+        grid_label="gn",
+        available_day_variables=["zg", "ua"],
+        has_orog=True,
+    )
+
+
+def test_masked_regrid_3d_state_shared_mask_and_cleanup(monkeypatch):
+    """Native download seam mocked; a single native zg<orog test drives the
+    shared per-level mask for every field, and native files are cleaned up."""
+    plev = np.array([100000.0, 85000.0])  # 1000, 850 hPa (descending pressure)
+    # 1000 hPa: top-left native cell at 100 m (below the 500 m surface); rest
+    # above. 850 hPa: fully above surface.
+    zg1000 = np.full((4, 4), 1000.0)
+    zg1000[0, 0] = 100.0
+    natives = {
+        "zg": _native_3d_ds("zg", plev, [zg1000, np.full((4, 4), 3000.0)]),
+        "ua": _native_3d_ds(
+            "ua", plev, [np.arange(16.0).reshape(4, 4), np.full((4, 4), 7.0)]
+        ),
+        "orog": _orog_ds(np.full((4, 4), 500.0)),
+    }
+
+    def fake_download_native(task, variable, table_id, config, scratch):
+        return natives.get(variable)
+
+    cleaned: list[str] = []
+    monkeypatch.setattr(process_esgf, "_download_native_variable", fake_download_native)
+    monkeypatch.setattr(
+        process_esgf,
+        "cleanup_variable_files",
+        lambda scratch, v: cleaned.append(v),
+    )
+
+    regridded, valid, hgtsfc, methods = process_esgf._masked_regrid_3d_state(
+        _masking_task(),
+        _minimal_config(),
+        target_grid=xr.Dataset(),  # ignored by the fake regridder
+        scratch=Path("/scratch"),
+        present_3d=["zg", "ua"],
+        make_regridder_fn=_fake_make_regridder,
+        threshold=0.5,
+    )
+
+    # Shared target-grid per-level validity: top-left 1000 hPa cell had 3/4
+    # coverage (>=0.5 -> valid); everything else valid.
+    assert valid.dims == ("time", "plev", "lat", "lon")
+    assert valid.sel(plev=100000.0).values[0].tolist() == [[True, True], [True, True]]
+    assert bool(valid.sel(plev=85000.0).all())
+    # ua's masked-regridded top-left 1000 hPa cell averages only the 3 valid
+    # native cells (1, 4, 5), never the below-surface 0.
+    np.testing.assert_allclose(
+        regridded["ua"].sel(plev=100000.0).values[0, 0, 0], (1 + 4 + 5) / 3
+    )
+    assert set(regridded) == {"zg", "ua"}
+    assert methods == {"zg": "bilinear", "ua": "bilinear"}
+    assert hgtsfc.dims == ("lat", "lon")  # regridded surface height
+    # every downloaded native (orog + zg + ua) is cleaned up
+    assert set(cleaned) == {"orog", "zg", "ua"}
+
+
+def test_masked_regrid_3d_state_bails_without_orog(monkeypatch):
+    """No orography -> can't build the source-grid mask -> signal fallback."""
+    monkeypatch.setattr(process_esgf, "_download_native_variable", lambda *a, **k: None)
+    task = _masking_task()
+    task.has_orog = False
+    out = process_esgf._masked_regrid_3d_state(
+        task,
+        _minimal_config(),
+        target_grid=xr.Dataset(),
+        scratch=Path("/scratch"),
+        present_3d=["zg", "ua"],
+        make_regridder_fn=_fake_make_regridder,
+    )
+    assert out == (None, None, None, {})
+
+
+def test_masked_regrid_3d_state_full_network_mock(monkeypatch, tmp_path):
+    """End-to-end through the true network seam (query_files/download_file):
+    idealized native netCDFs on disk, fake regridder, no ESMF."""
+    plev = np.array([100000.0, 85000.0], dtype="float64")
+    zg1000 = np.full((4, 4), 1000.0)
+    zg1000[0, 0] = 100.0  # below the 500 m surface
+    written = {
+        "zg": _native_3d_ds("zg", plev, [zg1000, np.full((4, 4), 3000.0)]),
+        "ua": _native_3d_ds(
+            "ua", plev, [np.arange(16.0).reshape(4, 4), np.full((4, 4), 7.0)]
+        ),
+        "orog": _orog_ds(np.full((4, 4), 500.0)),
+    }
+    paths = {}
+    for var, ds in written.items():
+        p = tmp_path / f"{var}.nc"
+        ds.to_netcdf(p)
+        paths[var] = p
+
+    class _Fileset:
+        def __init__(self, var):
+            self.files = [_FakeFile(var)]  # .filename carries the variable
+
+        @property
+        def total_size(self):
+            return 1
+
+    def fake_query(node, source, exp, member, table, variable):
+        return _Fileset(variable)
+
+    monkeypatch.setattr(process_esgf, "query_files", fake_query)
+    monkeypatch.setattr(process_esgf, "filter_files_by_time", lambda fs, s, e: fs)
+    monkeypatch.setattr(
+        process_esgf, "download_file", lambda f, scratch: paths[f.filename]
+    )
+
+    regridded, valid, hgtsfc, methods = process_esgf._masked_regrid_3d_state(
+        _masking_task(),
+        _minimal_config(),
+        target_grid=xr.Dataset(),
+        scratch=tmp_path,
+        present_3d=["zg", "ua"],
+        make_regridder_fn=_fake_make_regridder,
+        threshold=0.5,
+    )
+    assert set(regridded) == {"zg", "ua"}
+    assert valid.sel(plev=100000.0).values[0].tolist() == [[True, True], [True, True]]
+    np.testing.assert_allclose(
+        regridded["ua"].sel(plev=100000.0).values[0, 0, 0], (1 + 4 + 5) / 3
+    )
