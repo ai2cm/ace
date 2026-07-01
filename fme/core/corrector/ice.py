@@ -133,17 +133,39 @@ class IceBudgetCorrectionConfig:
 
         return s / timestep, k / timestep, t / timestep
 
+    def _processing_order(self) -> list[str]:
+        """Prognostic variables this correction reconstructs, in write order."""
+        if self.corrected_variables is None:
+            return []
+        sic_vars = {"siconc", "sea_ice_fraction", "ocean_sea_ice_fraction"}
+        processing_order: list[str] = []
+        if "simass" in self.corrected_variables:
+            processing_order.append("simass")
+        for var in sic_vars:
+            if var in self.corrected_variables:
+                processing_order.append(var)
+        if "sisnmass" in self.corrected_variables:
+            processing_order.append("sisnmass")
+        return processing_order
+
     def __call__(
         self, gen_data: TensorMapping, input_data: TensorMapping, timestep: float
     ) -> TensorDict:
-        x_in = {**input_data}
-        out = {**gen_data}
-
+        """
+        Returns:
+            A ``TensorDict`` containing only the fields modified by this
+            correction (each reconstructed prognostic variable and its three
+            budget terms); empty when ``corrected_variables`` is None.
+        """
         if self.corrected_variables is None:
-            return {key: value.float() for key, value in gen_data.items()}
+            return {}
 
         x_in = {key: value.double() for key, value in input_data.items()}
-        out = {key: value.double() for key, value in gen_data.items()}
+        # A full-precision working copy is needed for the read-after-write
+        # dependencies below (the ice mask reads a prognostic written in an
+        # earlier iteration); only the fields actually written are returned.
+        work = {key: value.double() for key, value in gen_data.items()}
+        modified: TensorDict = {}
 
         sic_vars = {"siconc", "sea_ice_fraction", "ocean_sea_ice_fraction"}
         mask_var = None
@@ -154,36 +176,34 @@ class IceBudgetCorrectionConfig:
             if sic_in_corrected:
                 mask_var = next(iter(sic_in_corrected))
 
-        processing_order = []
-        if "simass" in self.corrected_variables:
-            processing_order.append("simass")
-        for var in sic_vars:
-            if var in self.corrected_variables:
-                processing_order.append(var)
-        if "sisnmass" in self.corrected_variables:
-            processing_order.append("sisnmass")
+        processing_order = self._processing_order()
 
         for key in processing_order:
             area_mode = key in sic_vars
             ice_mask = None
             if key != processing_order[0] and mask_var is not None:
-                ice_mask = out[mask_var]
+                ice_mask = work[mask_var]
 
+            terms = self.corrected_variables[key]
             budgets = self.constrain_budgets(
                 x_in[key],
-                out[self.corrected_variables[key][0]],
-                out[self.corrected_variables[key][1]],
-                out[self.corrected_variables[key][2]],
+                work[terms[0]],
+                work[terms[1]],
+                work[terms[2]],
                 area_mode=area_mode,
                 timestep=timestep,
                 ice_mask=ice_mask,
             )
-            out[self.corrected_variables[key][0]] = budgets[0]
-            out[self.corrected_variables[key][1]] = budgets[1]
-            out[self.corrected_variables[key][2]] = budgets[2]
-            out[key] = x_in[key] + timestep * (budgets[0] + budgets[1] + budgets[2])
+            work[terms[0]] = budgets[0]
+            work[terms[1]] = budgets[1]
+            work[terms[2]] = budgets[2]
+            work[key] = x_in[key] + timestep * (budgets[0] + budgets[1] + budgets[2])
+            # record each field as it is written -- the writes determine the
+            # modified set.
+            for name in (terms[0], terms[1], terms[2], key):
+                modified[name] = work[name]
 
-        return {key: value.float() for key, value in out.items()}
+        return {key: value.float() for key, value in modified.items()}
 
 
 @dataclasses.dataclass
@@ -205,7 +225,16 @@ class IceBudgetCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        return self.config(gen_data, input_data, self.timestep_seconds), corrector_state
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (each reconstructed prognostic variable and its
+            budget terms); empty when no variables are corrected.
+            ``IceBudgetCorrectionConfig.__call__`` already returns only those
+            fields.
+        """
+        corrected = self.config(gen_data, input_data, self.timestep_seconds)
+        return corrected, corrector_state
 
 
 @CorrectorSelector.register("ice_corrector")

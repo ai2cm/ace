@@ -452,12 +452,12 @@ def test_step_regression(
     input_data = dist.scatter_spatial(input_data, img_shape)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
 
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     # Gather local outputs back to global for comparison
     output = dist.gather_spatial(output, img_shape)

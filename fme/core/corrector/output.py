@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Iterable
+from collections.abc import Iterable, KeysView
 
 from fme.core.corrector.state import CorrectorState
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -34,6 +34,15 @@ class CorrectorOutput:
         default_factory=CorrectorDiagnostics
     )
     corrector_state: CorrectorState | None = None
+
+    @property
+    def modified_names(self) -> KeysView[str]:
+        """Names of the variables the corrector modified this step.
+
+        These are exactly the keys of the diagnostics ``delta``, i.e. the union
+        of the fields returned by each applied correction.
+        """
+        return self.diagnostics.delta.keys()
 
 
 def build_corrector_diagnostics(
