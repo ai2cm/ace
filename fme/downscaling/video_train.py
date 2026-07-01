@@ -253,7 +253,12 @@ class VideoTrainer:
             n_batches += 1
             if i % 10 == 0:
                 logging.info(f"Training batch {i + 1}, loss {batch_loss:.4f}")
-            wandb.log({"train/batch_loss": batch_loss}, step=self.num_batches_seen)
+            batch_logs = {"train/batch_loss": batch_loss}
+            if outputs.marginal_consistency_loss is not None:
+                batch_logs["train/marginal_consistency_loss"] = (
+                    outputs.marginal_consistency_loss.cpu().item()
+                )
+            wandb.log(batch_logs, step=self.num_batches_seen)
         if n_batches == 0:
             raise RuntimeError("Empty training batch generator")
         self.optimization.step_scheduler(epoch_loss / n_batches)
@@ -420,7 +425,9 @@ class VideoTrainer:
     def save_best_checkpoint(self, summary: dict[str, float]) -> None:
         if self.best_checkpoint_path is None:
             return
-        context = self._ema_context if self.validate_using_ema else contextlib.nullcontext
+        context = (
+            self._ema_context if self.validate_using_ema else contextlib.nullcontext
+        )
         if summary["validation/loss"] < self.best_valid_loss:
             logging.info("Saving best checkpoint")
             self.best_valid_loss = summary["validation/loss"]

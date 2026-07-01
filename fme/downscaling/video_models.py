@@ -113,6 +113,13 @@ class VideoDiffusionModelConfig:
     subset_augmentation_prob: float = 0.0
     # Minimum number of interior frames to keep when a batch is subsetted.
     subset_min_interior: int = 1
+    # Weight of the marginal-consistency loss (video PMD L_marg). When > 0, each
+    # training step runs a second pass on a random strict subset of interior
+    # frames -- sharing the full pass's noised inputs on the shared frames -- and
+    # penalizes disagreement between the full-pass prediction restricted to the
+    # subset and the subset-native prediction. 0.0 (default) disables it (single
+    # pass, exact prior behavior).
+    marginal_consistency_weight: float = 0.0
 
     def __post_init__(self):
         if self.n_timesteps < 3:
@@ -190,6 +197,26 @@ class VideoDiffusionModelConfig:
                 f"subset_min_interior must be in [1, {max_interior}] "
                 f"(n_timesteps - 2), got {self.subset_min_interior}."
             )
+        if self.marginal_consistency_weight < 0.0:
+            raise ValueError(
+                "marginal_consistency_weight must be >= 0, got "
+                f"{self.marginal_consistency_weight}."
+            )
+        if self.marginal_consistency_weight > 0.0:
+            if self.subset_augmentation_prob > 0.0:
+                raise ValueError(
+                    "marginal_consistency_weight and subset_augmentation_prob "
+                    "cannot both be enabled; the consistency loss already trains "
+                    "on subsets via its second pass."
+                )
+            # need a strict interior subset: keep in [subset_min_interior,
+            # n_interior - 1], so n_interior >= subset_min_interior + 1.
+            if self.n_timesteps - 2 < self.subset_min_interior + 1:
+                raise ValueError(
+                    "marginal_consistency_weight > 0 needs n_timesteps >= "
+                    f"subset_min_interior + 3 (got n_timesteps={self.n_timesteps}, "
+                    f"subset_min_interior={self.subset_min_interior})."
+                )
         if self.backbone not in ("simple", "songunet"):
             raise ValueError(
                 f"backbone must be 'simple' or 'songunet', got {self.backbone}."
@@ -340,6 +367,7 @@ class VideoDiffusionModel:
         # normalized full-grid frame times (endpoints at 0/1) used to derive the
         # baseline weights and bridge kernel for whatever frame subset is in play.
         self._full_tau = uniform_frame_times(config.n_timesteps)
+        self._marginal_consistency_weight = config.marginal_consistency_weight
         self._bridge_noise = config.temporal_noise_correlation == "brownian_bridge"
         if self._bridge_noise:
             self._noise_mixing: torch.Tensor | None = brownian_bridge_mixing_matrix(
@@ -389,23 +417,45 @@ class VideoDiffusionModel:
         tau = self._full_tau.index_select(0, idx.cpu())
         return brownian_bridge_mixing_matrix(tau).to(get_device())
 
-    def _sample_training_subset_indices(
-        self, n_times: int, device: torch.device
-    ) -> torch.Tensor | None:
-        """Randomly pick frame indices (always keeping the two endpoints) for
-        subset-augmented training, or ``None`` to train on the full grid.
-
-        The choice is drawn on rank 0 and broadcast so every rank -- data- or
-        model-parallel -- trains on the identical temporal shape.
+    def _synced_generator(self, device: torch.device) -> torch.Generator:
+        """A CPU RNG seeded identically on every rank (drawn on rank 0 and
+        broadcast) so all data-/model-parallel ranks pick the same frame subset
+        and therefore agree on the temporal shape of the batch.
         """
-        if self.config.subset_augmentation_prob <= 0.0:
-            return None
         dist = Distributed.get_instance()
         seed = torch.randint(0, 2**31 - 1, (1,), device=device)
         if dist.rank != 0:
             seed.zero_()
         seed = int(dist.reduce_sum(seed).item())
-        gen = torch.Generator().manual_seed(seed)
+        return torch.Generator().manual_seed(seed)
+
+    @staticmethod
+    def _interior_subset_indices(
+        n_keep: int, n_times: int, gen: torch.Generator, device: torch.device
+    ) -> torch.Tensor:
+        """Sorted frame indices keeping both endpoints plus ``n_keep`` random
+        interior frames.
+        """
+        n_interior = n_times - 2
+        interior = torch.sort(torch.randperm(n_interior, generator=gen)[:n_keep]).values
+        idx = torch.cat(
+            [
+                torch.zeros(1, dtype=torch.long),
+                interior + 1,
+                torch.full((1,), n_times - 1, dtype=torch.long),
+            ]
+        )
+        return idx.to(device)
+
+    def _sample_training_subset_indices(
+        self, n_times: int, device: torch.device
+    ) -> torch.Tensor | None:
+        """Randomly pick frame indices (always keeping the two endpoints) for
+        subset-augmented training, or ``None`` to train on the full grid.
+        """
+        if self.config.subset_augmentation_prob <= 0.0:
+            return None
+        gen = self._synced_generator(device)
         if float(torch.rand((), generator=gen)) >= self.config.subset_augmentation_prob:
             return None
         n_interior = n_times - 2
@@ -416,16 +466,24 @@ class VideoDiffusionModel:
         )
         if n_keep >= n_interior:
             return None  # kept everything -> full grid
-        interior = torch.randperm(n_interior, generator=gen)[:n_keep] + 1
-        interior = torch.sort(interior).values
-        idx = torch.cat(
-            [
-                torch.zeros(1, dtype=torch.long),
-                interior,
-                torch.full((1,), n_times - 1, dtype=torch.long),
-            ]
+        return self._interior_subset_indices(n_keep, n_times, gen, device)
+
+    def _sample_consistency_subset_indices(
+        self, n_times: int, device: torch.device
+    ) -> torch.Tensor:
+        """A random *strict* interior subset (endpoints kept, at least one interior
+        frame dropped) for the marginal-consistency second pass.
+        """
+        gen = self._synced_generator(device)
+        n_interior = n_times - 2
+        # keep in [subset_min_interior, n_interior - 1]: never the full interior,
+        # so the two passes always differ in their query set.
+        n_keep = int(
+            torch.randint(
+                self.config.subset_min_interior, n_interior, (1,), generator=gen
+            )
         )
-        return idx.to(device)
+        return self._interior_subset_indices(n_keep, n_times, gen, device)
 
     @staticmethod
     def _validate_frames(
@@ -534,7 +592,37 @@ class VideoDiffusionModel:
         n_interior_elems = interior.expand_as(sq_err).sum()
         loss = (weight * sq_err).sum() / n_interior_elems
 
-        optimizer.accumulate_loss(loss)
+        # Marginal-consistency loss: a second pass on a random strict subset of
+        # the (full) interior frames, sharing the SAME noised inputs, sigma, and
+        # conditioning on the shared frames (obtained by slicing the full pass, so
+        # the only difference is the query set). We add the subset's own diffusion
+        # loss plus a penalty tying the full-pass prediction, restricted to the
+        # subset, to the subset-native prediction on the shared interior frames.
+        marginal_loss: torch.Tensor | None = None
+        total_loss = loss
+        if self._marginal_consistency_weight > 0.0:
+            sub = self._sample_consistency_subset_indices(n_times, clip.device)
+            interior_s = _interior_mask(int(sub.numel()), clip.device)
+            denoised_s = self.module(
+                noised.index_select(2, sub),
+                condition.index_select(2, sub),
+                sigma,
+                day_of_year.index_select(1, sub),
+                second_of_day.index_select(1, sub),
+                lon,
+            )
+            residual_s = residual.index_select(2, sub)
+            n_interior_s = interior_s.expand_as(residual_s).sum()
+            sq_err_s = (denoised_s - residual_s) ** 2 * interior_s
+            dsm_sub = (weight * sq_err_s).sum() / n_interior_s
+            # full-pass prediction restricted to the subset vs subset-native one
+            diff = (denoised.index_select(2, sub) - denoised_s) ** 2 * interior_s
+            marginal_loss = diff.sum() / n_interior_s
+            total_loss = (
+                loss + dsm_sub + self._marginal_consistency_weight * marginal_loss
+            )
+
+        optimizer.accumulate_loss(total_loss)
         optimizer.step_weights()
 
         with torch.no_grad():
@@ -564,7 +652,10 @@ class VideoDiffusionModel:
         return ModelOutputs(
             prediction=prediction,
             target=target,
-            loss=loss,
+            loss=total_loss,
+            marginal_consistency_loss=(
+                None if marginal_loss is None else marginal_loss.detach()
+            ),
             channel_losses=channel_losses,
             sigma=(
                 sigma.flatten()

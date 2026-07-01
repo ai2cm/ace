@@ -47,6 +47,8 @@ class ModelOutputs:
     channel_losses: TensorDict = dataclasses.field(default_factory=dict)
     sigma: torch.Tensor | None = None
     per_sample_channel_loss: TensorDict = dataclasses.field(default_factory=dict)
+    # Optional marginal-consistency term (video PMD), for logging only.
+    marginal_consistency_loss: torch.Tensor | None = None
 
 
 def _rename_normalizer(
