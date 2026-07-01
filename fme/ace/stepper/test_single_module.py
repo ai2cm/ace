@@ -52,7 +52,7 @@ from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbability,
     TimeLengthSchedule,
 )
-from fme.ace.testing import DimSizes, save_stepper_checkpoint
+from fme.ace.testing import DimSizes, get_batch_data, save_stepper_checkpoint
 from fme.core import AtmosphereData
 from fme.core.benchmark.memory import benchmark_memory
 from fme.core.coordinates import (
@@ -84,6 +84,11 @@ from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
+from fme.core.testing import (
+    get_dataset_info,
+    trivial_network_and_loss_normalization,
+    trivial_normalization,
+)
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -91,7 +96,6 @@ from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 DIR = os.path.abspath(os.path.dirname(__file__))
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_coord"])
-TIMESTEP = datetime.timedelta(hours=6)
 DEVICE = fme.get_device()
 OCEAN_CONFIG = OceanConfig(surface_temperature_name="a", ocean_fraction_name="b")
 MULTI_CALL_CONFIG = MultiCallConfig(
@@ -108,52 +112,14 @@ EMPTY_DERIVED_FORCINGS_CONFIG = DerivedForcingsConfig()
 
 
 def get_data(names: Iterable[str], n_samples, n_time, epoch: int = 0) -> SphericalData:
-    data_dict = {}
     n_lat, n_lon, nz = 5, 5, 7
-
+    data = get_batch_data(
+        names, n_samples, n_time, img_shape=(n_lat, n_lon), epoch=epoch
+    )
     lats = torch.linspace(-89.5, 89.5, n_lat)  # arbitary choice
-    for name in names:
-        data_dict[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
     area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
-    ak, bk = torch.arange(nz), torch.arange(nz)
-    vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
-    data = BatchData.new_on_device(
-        data=data_dict,
-        time=xr.DataArray(
-            np.zeros((n_samples, n_time)),
-            dims=["sample", "time"],
-        ),
-        labels=None,
-        epoch=epoch,
-    )
+    vertical_coord = HybridSigmaPressureCoordinate(torch.arange(nz), torch.arange(nz))
     return SphericalData(data, area_weights, vertical_coord)
-
-
-def get_dataset_info(
-    img_shape=(5, 5),
-    spatial_mask_provider=None,
-    vertical_coordinate=None,
-    horizontal_coordinate=None,
-) -> DatasetInfo:
-    if horizontal_coordinate is None:
-        horizontal_coordinate = LatLonCoordinates(
-            lat=torch.zeros(img_shape[-2]),
-            lon=torch.zeros(img_shape[-1]),
-        )
-    if vertical_coordinate is None:
-        vertical_coordinate = HybridSigmaPressureCoordinate(
-            ak=torch.arange(7), bk=torch.arange(7)
-        )
-    return DatasetInfo(
-        horizontal_coordinates=horizontal_coordinate,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-        spatial_mask_provider=spatial_mask_provider,
-    )
-
-
-def get_scalar_data(names, value):
-    return {n: float(value) for n in names}
 
 
 def test_stepper_no_train_step_specified():
@@ -239,10 +205,7 @@ def test_seed_eval_does_not_corrupt_training_sampler():
 def test_train_on_batch_normalizer_changes_only_norm_data():
     torch.manual_seed(0)
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
-    normalization_config = NormalizationConfig(
-        means=get_scalar_data(["a", "b"], 0.0),
-        stds=get_scalar_data(["a", "b"], 1.0),
-    )
+    normalization_config = trivial_normalization(["a", "b"])
 
     def get_stepper_config(normalization_config: NetworkAndLossNormalizationConfig):
         return StepperConfig(
@@ -272,14 +235,8 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     )  # as std=1, mean=0, no change
     config = get_stepper_config(
         NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                means=get_scalar_data(["a", "b"], 0.0),
-                stds=get_scalar_data(["a", "b"], 2.0),
-            ),
-            loss=NormalizationConfig(
-                means=get_scalar_data(["a", "b"], 0.0),
-                stds=get_scalar_data(["a", "b"], 3.0),
-            ),
+            network=trivial_normalization(["a", "b"], std=2.0),
+            loss=trivial_normalization(["a", "b"], std=3.0),
         )
     )
     stepper = _get_train_stepper(config, dataset_info, loss=StepLossConfig(type="MSE"))
@@ -396,12 +353,7 @@ def test_train_on_batch_crps_loss():
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -446,12 +398,7 @@ def test_train_on_batch_optimize_last_step_only(optimize_last_step_only: bool):
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -496,12 +443,7 @@ def test_per_channel_losses_bounded_by_accumulated_loss():
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -564,12 +506,7 @@ def test_reloaded_stepper_gives_same_prediction():
                     ),
                     in_names=["a", "b"],
                     out_names=["a", "b"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(["a", "b"], 0.0),
-                            stds=get_scalar_data(["a", "b"], 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                 )
             ),
         ),
@@ -683,11 +620,8 @@ def _setup_and_train_on_batch(
                     builder=ModuleSelector(type="prebuilt", config={"module": module}),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(set(in_names + out_names), 0.0),
-                            stds=get_scalar_data(set(in_names + out_names), 1.0),
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names)
                     ),
                     ocean=ocean_config,
                     **stepper_config_kwargs,
@@ -730,11 +664,8 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
                     builder=ModuleSelector(type="prebuilt", config={"module": module}),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(set(in_names + out_names), 0.0),
-                            stds=get_scalar_data(set(in_names + out_names), 1.0),
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names)
                     ),
                 )
             ),
@@ -762,9 +693,9 @@ def test_train_on_batch_requires_epoch(has_epoch: bool, uses_scheduling: bool):
     ],
 )
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3], ids=lambda p: f"k={p}")
-@pytest.mark.parametrize("is_train", [True, False], ids=["is_train", ""])
+@pytest.mark.parametrize("is_train", [True, False], ids=["train", "eval"])
 @pytest.mark.parametrize(
-    "with_activation_checkpointing", [True, False], ids=["act_ckpt", ""]
+    "with_activation_checkpointing", [True, False], ids=["act_ckpt", "no_act_ckpt"]
 )
 def test_train_on_batch(
     n_forward_steps,
@@ -875,26 +806,15 @@ class Multiply(torch.nn.Module):
         return x * self.factor
 
 
-@pytest.mark.parametrize(
-    "global_only, terms_to_modify, force_positive",
-    [
-        (True, None, False),
-        (True, "precipitation", False),
-        (True, "evaporation", False),
-        (False, "advection_and_precipitation", False),
-        (False, "advection_and_evaporation", False),
-        (False, "advection_and_precipitation", True),
-    ],
-)
-@pytest.mark.parametrize("compute_derived_in_train_on_batch", [False, True])
-def test_stepper_corrector(
-    global_only: bool,
+def _get_corrector_stepper_and_data(
     terms_to_modify,
-    force_positive: bool,
-    compute_derived_in_train_on_batch: bool,
-):
+    force_positive_names: list[str],
+    n_forward_steps: int,
+) -> tuple[TrainStepper, BatchData, DatasetInfo, HybridSigmaPressureCoordinate]:
+    """Build a stepper with an atmosphere corrector and a batch of data
+    with a nonzero global-mean moisture advection for the corrector to remove.
+    """
     torch.random.manual_seed(0)
-    n_forward_steps = 5
     device = get_device()
     data = {
         "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
@@ -918,12 +838,6 @@ def test_stepper_corrector(
         vertical_coordinate=vertical_coordinate,
         horizontal_coordinate=horizontal_coordinate,
     )
-    gridded_ops = dataset_info.gridded_operations
-
-    if force_positive:
-        force_positive_names = ["specific_total_water_0"]
-    else:
-        force_positive_names = []
 
     corrector_config = AtmosphereCorrectorConfig(
         conserve_dry_air=True,
@@ -932,7 +846,7 @@ def test_stepper_corrector(
         force_positive_names=force_positive_names,
     )
 
-    mean_advection = gridded_ops.area_weighted_mean(
+    mean_advection = dataset_info.gridded_operations.area_weighted_mean(
         data["tendency_of_total_water_path_due_to_advection"].to(device)
     )
     assert (mean_advection.abs() > 0.0).all()
@@ -950,12 +864,7 @@ def test_stepper_corrector(
                     ),
                     in_names=list(data.keys()),
                     out_names=list(data.keys()),
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={key: 0.0 for key in data.keys()},
-                            stds={key: 1.0 for key in data.keys()},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(data.keys()),
                     corrector=corrector_config,
                 )
             ),
@@ -980,6 +889,37 @@ def test_stepper_corrector(
         labels=None,
         epoch=0,
     ).to_device()
+    return stepper, batch_data, dataset_info, vertical_coordinate
+
+
+@pytest.mark.parametrize(
+    "global_only, terms_to_modify, force_positive",
+    [
+        (True, None, False),
+        (True, "precipitation", False),
+        (True, "evaporation", False),
+        (False, "advection_and_precipitation", False),
+        (False, "advection_and_evaporation", False),
+        (False, "advection_and_precipitation", True),
+    ],
+)
+@pytest.mark.parametrize("compute_derived_in_train_on_batch", [False, True])
+def test_stepper_corrector(
+    global_only: bool,
+    terms_to_modify,
+    force_positive: bool,
+    compute_derived_in_train_on_batch: bool,
+):
+    if force_positive:
+        force_positive_names = ["specific_total_water_0"]
+    else:
+        force_positive_names = []
+    stepper, batch_data, dataset_info, vertical_coordinate = (
+        _get_corrector_stepper_and_data(
+            terms_to_modify, force_positive_names, n_forward_steps=5
+        )
+    )
+    gridded_ops = dataset_info.gridded_operations
     # run the stepper on the data
     with torch.no_grad():
         stepped = stepper.train_on_batch(
@@ -1092,11 +1032,8 @@ def _get_stepper_config(
                     builder=ModuleSelector(type="prebuilt", config=module_config),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(set(in_names + out_names), norm_mean),
-                            stds=get_scalar_data(set(in_names + out_names), 1.0),
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names), mean=norm_mean
                     ),
                     ocean=ocean_config,
                     **kwargs,
@@ -1430,7 +1367,7 @@ def test_prescribed_prognostic_config_validation_raises():
             ),
             in_names=["a"],
             out_names=["a"],
-            normalization=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+            normalization=trivial_normalization(["a"]),
             prescribed_prognostic_names=["b"],
         )
     assert "prescribed_prognostic_name" in str(err.value)
@@ -1448,12 +1385,7 @@ def test_get_forcing_window_data_requirements_includes_prescribed_names():
                     ),
                     in_names=["a", "b"],
                     out_names=["a"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={"a": 0.0, "b": 0.0},
-                            stds={"a": 1.0, "b": 1.0},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
                     prescribed_prognostic_names=["a"],
                 )
             ),
@@ -1688,6 +1620,7 @@ LOAD_STEPPER_TESTS = {
     list(LOAD_STEPPER_TESTS.values()),
     ids=list(LOAD_STEPPER_TESTS.keys()),
 )
+@pytest.mark.medium_duration
 def test_load_stepper_and_load_stepper_config(
     tmp_path: pathlib.Path,
     serialized_ocean_config: OceanConfig | None,
@@ -1699,10 +1632,7 @@ def test_load_stepper_and_load_stepper_config(
     expected_ocean_config: OceanConfig | None,
     expected_multi_call_config: MultiCallConfig | None,
     expected_derived_forcings_config: DerivedForcingsConfig,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     in_names = ["co2", "var", "a", "b"]
     fluxes = ["ULWRFtoa"]
     out_names = ["var", "a"] + fluxes
@@ -1788,13 +1718,10 @@ def validate_stepper_prescribed_prognostic_names(
     assert config.prescribed_prognostic_names == expected
 
 
-def test_load_stepper_with_prescribed_prognostic_override(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
+@pytest.mark.medium_duration
+def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path):
     """Loading with StepperOverrideConfig(prescribed_prognostic_names=...) applies the
     override."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     in_names = ["co2", "var", "a", "b"]
     out_names = ["var", "a"]
     stepper_path = tmp_path / "stepper"
@@ -1900,11 +1827,8 @@ def test_load_stepper_does_not_double_buffer_on_gpu(tmp_path: pathlib.Path):
                         ),
                         in_names=in_names,
                         out_names=out_names,
-                        normalization=NetworkAndLossNormalizationConfig(
-                            network=NormalizationConfig(
-                                means={n: 0.0 for n in in_names + out_names},
-                                stds={n: 1.0 for n in in_names + out_names},
-                            ),
+                        normalization=trivial_network_and_loss_normalization(
+                            in_names + out_names
                         ),
                     ),
                 ),
@@ -1984,11 +1908,8 @@ def get_regression_stepper_and_data(
                     ),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={n: 0.1 for n in all_names},
-                            stds={n: 1.1 for n in all_names},
-                        ),
+                    normalization=trivial_network_and_loss_normalization(
+                        all_names, mean=0.1, std=1.1
                     ),
                     ocean=None,
                 )
@@ -2204,6 +2125,79 @@ class TestBackfillDeptho:
         assert stepper.training_dataset_info.vertical_coordinate == original_vc
 
 
+def _get_scheduled_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
+    return _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["a"],
+            corrector_disabled_epochs=corrector_disabled_epochs,
+        ),
+    )
+
+
+def _step_negative_input(stepper: Stepper) -> tuple[torch.Tensor, torch.Tensor]:
+    """Step on all-negative input and return (output, raw prediction).
+
+    The stepper adds one to its input, so the raw prediction is negative
+    everywhere and the force-positive corrector clamps it to zero.
+    """
+    input_data = {"a": torch.full((3, 5, 5), -5.0, device=DEVICE)}
+    output, _ = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    )
+    return output["a"], input_data["a"] + 1
+
+
+def test_scheduled_corrector_disabled_during_first_epoch():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+
+    stepper.set_train()
+    stepper.set_epoch(1)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, raw_prediction)
+
+    # the corrector is still applied in eval mode (validation/inference)
+    stepper.set_eval()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+    stepper.set_train()
+    stepper.set_epoch(2)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_unwrapped_corrector_applied_in_train_mode():
+    stepper = _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["a"]),
+    )
+    stepper.set_train()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_scheduled_corrector_disabled_state_restored_on_resume():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+    stepper.set_train()
+    stepper.set_epoch(2)
+    state = stepper.get_state()
+
+    # a freshly-built stepper assumes the first epoch, so the corrector is
+    # disabled for train-mode steps until load_state restores the state of
+    # the interrupted epoch (mid-epoch resume does not call set_epoch)
+    resumed = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+    resumed.set_train()
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, raw_prediction)
+
+    resumed.load_state(state)
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
 def _get_stepper_with_input_masking(
     dataset_info_has_spatial_mask_provider: bool = True,
 ):
@@ -2218,12 +2212,7 @@ def _get_stepper_with_input_masking(
                     ),
                     in_names=["a"],
                     out_names=["a"],
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={"a": 0.0},
-                            stds={"a": 1.0},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(["a"]),
                 )
             ),
         ),
@@ -2386,12 +2375,7 @@ def _get_ocean_stepper(
                     ),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={name: 0.0 for name in all_names},
-                            stds={name: 1.0 for name in all_names},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(all_names),
                     corrector=CorrectorSelector("ocean_corrector", {}),
                     next_step_forcing_names=next_step_forcing_names,
                 )
@@ -2658,6 +2642,106 @@ def test_train_on_batch_masked_variable_has_zero_loss_count():
     assert stepped.per_channel_losses is not None
     assert stepped.per_channel_losses["b"].count == 0
     assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_unmasked_nan_forcing_raises():
+    """A NaN forcing not covered by data_mask raises a located error.
+
+    Without the guard this silently propagates to a NaN loss with no
+    indication that an unmasked forcing variable was the cause (cf. PR #1262).
+    """
+    n_samples = 2
+    data: BatchData = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan  # NaN forcing, no data_mask to cover it
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.train_on_batch(data=data, optimization=NullOptimization())
+
+
+def test_step_unmasked_nan_input_raises():
+    """A NaN input not covered by data_mask raises a located error in step()."""
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    n_samples = 2
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data["b"][1] = torch.nan
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.step(StepArgs(input=input_data, next_step_input_data={}, labels=None))
+
+
+def test_step_masked_nan_input_does_not_raise():
+    """A NaN input covered by data_mask is zeroed, so the guard does not fire."""
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    n_samples = 2
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data["b"][1] = torch.nan
+    data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    output, _ = stepper.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data={},
+            labels=None,
+            data_mask=data_mask,
+        )
+    )
+    assert not torch.isnan(output["a"]).any()
+
+
+def test_train_on_batch_masked_output_only_variable_has_zero_loss_count():
+    """Masked output-only variable contributes 0 samples to loss."""
+    n_samples = 4
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a"], ["a", "b"], module_name="RepeatChannel")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_masked_forcing_repeats_mask_across_ensemble():
+    """NaN forcing for a masked sample does not produce NaN loss in ensemble."""
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    data.data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert not torch.isnan(stepped.metrics["loss"])
+
+
+def test_train_on_batch_unmasked_nan_forcing_raises_in_ensemble():
+    """NaN forcing without a mask raises a located error in ensemble training.
+
+    Before the network-input guard (PR #1297) this silently propagated to a
+    NaN loss; the guard now raises a located error instead.
+    """
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.train_on_batch(data=data, optimization=NullOptimization())
 
 
 def test_predict_with_data_mask_zeros_masked_forcing():

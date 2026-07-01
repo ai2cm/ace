@@ -374,12 +374,14 @@ class Trainer:
         """Create a new EMATracker initialized from the current EMA state."""
         return EMATracker.from_state(self._ema.get_state(), modules)
 
-    def _validate_stepper(self, stepper: TrainStepperABC, ema: EMATracker) -> float:
+    def _validate_stepper(
+        self, stepper: TrainStepperABC, ema: EMATracker, epoch: int
+    ) -> float:
         if self._validate_stepper_callback is None:
             raise RuntimeError(
                 "validate_stepper callback is required when lr_tuning is configured"
             )
-        return self._validate_stepper_callback(stepper, ema)
+        return self._validate_stepper_callback(stepper, ema, epoch)
 
     def _maybe_tune_lr(self):
         cfg = self.config.lr_tuning
@@ -400,6 +402,7 @@ class Trainer:
             copy_ema=self._copy_ema,
             config=cfg,
             current_lr=self.optimization.learning_rate,
+            epoch=self._epochs_trained + 1,
             validate_stepper=self._validate_stepper,
         )
         if new_lr is not None:
@@ -535,6 +538,12 @@ class Trainer:
             "complete epochs"
         )
         self.train_data.set_epoch(self._epochs_trained + 1)
+        # Only signal a fresh-epoch boundary to the stepper if we are
+        # actually starting one; on mid-epoch resume the in-module
+        # per-epoch state should reflect the partial epoch up to the
+        # crash and then continue accumulating.
+        if self._current_epoch_num_batches_seen == 0:
+            self.stepper.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
         names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
         n_samples_seen_since_logging = 0
