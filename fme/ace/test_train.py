@@ -57,8 +57,8 @@ from fme.ace.testing import (
     save_stats_netcdfs,
     save_stepper_checkpoint,
 )
-from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
+from fme.ace.train.train import prepare_directory
 from fme.ace.train.train_config import (
     InlineInferenceConfig,
     InlineValidationConfig,
@@ -851,7 +851,7 @@ def _get_reproducible_trainer(config_dict, seed):
     )
     prepare_directory(config.experiment_dir, config_dict)
     builders = TrainBuilders(config)
-    return build_trainer(builders, config)
+    return config.build_trainer(builders)
 
 
 @pytest.mark.medium_duration
@@ -905,9 +905,9 @@ def test_restore_checkpoint(
     prepare_directory(config.experiment_dir, config_dict)
     builders = TrainBuilders(config)
 
-    base_trainer = build_trainer(builders, config)
-    restored_trainer1 = build_trainer(builders, config)
-    restored_trainer2 = build_trainer(builders, config)
+    base_trainer = config.build_trainer(builders)
+    restored_trainer1 = config.build_trainer(builders)
+    restored_trainer2 = config.build_trainer(builders)
 
     # run one epoch
     base_trainer.train_one_epoch()

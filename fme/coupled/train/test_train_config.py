@@ -380,9 +380,8 @@ class TestGetValidationCallback:
     and weight flow correctly from config through to the shared helper.
     """
 
-    def test_entries_wired_to_tasks(self):
-        from fme.coupled.train.train import get_validation_callback
-
+    def test_entries_wired_to_tasks(self, tmp_path):
+        config = _make_train_config_for_validation(tmp_path, _make_validation_config())
         entries = [
             (_make_validation_config(name="a", weight=2.0), MagicMock(), "a"),
             (_make_validation_config(name="b", weight=3.0), MagicMock(), "b"),
@@ -395,13 +394,11 @@ class TestGetValidationCallback:
                 AggregatorSummary(logs={}, loss=0.2),
             ],
         ):
-            callback = get_validation_callback(
+            callback = config.get_validation_callback(
                 validation_entries=entries,
                 stepper=stepper,
                 dataset_info=MagicMock(),
                 loss_scaling=MagicMock(),
-                save_per_epoch_diagnostics=False,
-                output_dir="/tmp/out",
             )
             _, loss = callback(epoch=1)
         assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
@@ -420,14 +417,14 @@ class TestGetInferenceCallback:
 
     @staticmethod
     def _call(
+        tmp_path,
         entries,
         inference_one_epoch_side_effect,
         epoch=1,
         inference_epochs=(1,),
         inference_epoch_sets=None,
     ):
-        from fme.coupled.train.train import get_inference_callback
-
+        config = _make_train_config_for_inference(tmp_path, inference=[])
         if inference_epoch_sets is None:
             inference_epoch_sets = [{1} for _ in entries]
         stepper = MagicMock()
@@ -435,20 +432,19 @@ class TestGetInferenceCallback:
             "fme.core.generics.trainer.inference_one_epoch",
             side_effect=inference_one_epoch_side_effect,
         ):
-            callback = get_inference_callback(
+            callback = config.get_inference_callback(
                 inference_entries=entries,
                 inference_epochs=list(inference_epochs),
                 inference_epoch_sets=list(inference_epoch_sets),
                 stepper=stepper,
                 dataset_info=MagicMock(),
-                output_dir="/tmp/out",
-                save_per_epoch_diagnostics=False,
             )
             return callback(epoch=epoch)
 
-    def test_epoch_not_in_inference_epochs_returns_empty(self):
+    def test_epoch_not_in_inference_epochs_returns_empty(self, tmp_path):
         entries = [self._make_entry("inference")]
         logs, error = self._call(
+            tmp_path,
             entries,
             inference_one_epoch_side_effect=[],
             epoch=2,
@@ -457,9 +453,10 @@ class TestGetInferenceCallback:
         assert logs == {}
         assert error is None
 
-    def test_single_entry_weighted_error(self):
+    def test_single_entry_weighted_error(self, tmp_path):
         entries = [self._make_entry("inference", weight=2.0)]
         logs, error = self._call(
+            tmp_path,
             entries,
             [
                 InferenceSummary(
@@ -470,17 +467,19 @@ class TestGetInferenceCallback:
         assert error == pytest.approx(2.0 * 0.4)
         assert "inference/time_mean_norm/rmse/channel_mean" in logs
 
-    def test_weighted_entry_missing_metric_raises(self):
+    def test_weighted_entry_missing_metric_raises(self, tmp_path):
         entries = [self._make_entry("a", weight=1.0)]
         with pytest.raises(RuntimeError, match="did not produce a loss"):
             self._call(
+                tmp_path,
                 entries,
                 [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
             )
 
-    def test_all_zero_weight_returns_none_error(self):
+    def test_all_zero_weight_returns_none_error(self, tmp_path):
         entries = [self._make_entry("a", weight=0.0)]
         logs, error = self._call(
+            tmp_path,
             entries,
             [
                 InferenceSummary(
@@ -491,12 +490,13 @@ class TestGetInferenceCallback:
         assert error is None
         assert "a/time_mean_norm/rmse/channel_mean" in logs
 
-    def test_multiple_weighted_entries(self):
+    def test_multiple_weighted_entries(self, tmp_path):
         entries = [
             self._make_entry("a", weight=2.0),
             self._make_entry("b", weight=3.0),
         ]
         logs, error = self._call(
+            tmp_path,
             entries,
             [
                 InferenceSummary(
@@ -509,12 +509,13 @@ class TestGetInferenceCallback:
         )
         assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
 
-    def test_entry_skipped_when_not_in_epoch_set(self):
+    def test_entry_skipped_when_not_in_epoch_set(self, tmp_path):
         entries = [
             self._make_entry("a", weight=1.0),
             self._make_entry("b", weight=1.0),
         ]
         logs, error = self._call(
+            tmp_path,
             entries,
             [
                 InferenceSummary(

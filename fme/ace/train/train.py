@@ -48,6 +48,7 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
+
 import dataclasses
 import logging
 import os
@@ -57,26 +58,13 @@ import dacite
 import torch
 
 import fme
-from fme.ace.train.train_config import (
-    AggregatorBuilder,
-    TrainBuilders,
-    TrainConfig,
-    build_trainer,
-    get_inference_callback,
-    get_validate_stepper_callback,
-    get_validation_callback,
-)
+from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import Trainer
 
 __all__ = [
-    "AggregatorBuilder",
     "Trainer",
-    "build_trainer",
-    "get_inference_callback",
-    "get_validate_stepper_callback",
-    "get_validation_callback",
     "main",
     "prepare_directory",
     "run_train",
@@ -105,7 +93,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
         logging.info(
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
-    trainer = build_trainer(builders, config)
+    trainer = config.build_trainer(builders)
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
 
@@ -116,7 +104,10 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
     )
     config.set_random_seed()
-    config.resume_results = prepare_directory(
-        config.experiment_dir, config_data, config.resume_results
+    config = dataclasses.replace(
+        config,
+        resume_results=prepare_directory(
+            config.experiment_dir, config_data, config.resume_results
+        ),
     )
     run_train_from_config(config)

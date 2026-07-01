@@ -9,28 +9,7 @@ import torch
 import fme
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.distributed import Distributed
-from fme.core.generics.trainer import Trainer
-from fme.coupled.train.train_config import (
-    CoupledAggregatorBuilder,
-    TrainBuilders,
-    TrainConfig,
-    build_trainer,
-    get_inference_callback,
-    get_validate_stepper_callback,
-    get_validation_callback,
-)
-
-__all__ = [
-    "CoupledAggregatorBuilder",
-    "Trainer",
-    "build_trainer",
-    "get_inference_callback",
-    "get_validate_stepper_callback",
-    "get_validation_callback",
-    "main",
-    "run_train",
-    "run_train_from_config",
-]
+from fme.coupled.train.train_config import TrainBuilders, TrainConfig
 
 
 def run_train(builders: TrainBuilders, config: TrainConfig):
@@ -51,7 +30,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
             f"Resuming training from results in {config.resume_results.existing_dir}"
         )
         config.resume_results.verify_wandb_resumption(config.experiment_dir)
-    trainer = build_trainer(builders, config)
+    trainer = config.build_trainer(builders)
     trainer.train()
     logging.info(f"DONE ---- rank {dist.rank}")
 
@@ -68,7 +47,10 @@ def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
         config=dacite.Config(strict=True),
     )
     train_config.set_random_seed()
-    train_config.resume_results = prepare_directory(
-        train_config.experiment_dir, data, train_config.resume_results
+    train_config = dataclasses.replace(
+        train_config,
+        resume_results=prepare_directory(
+            train_config.experiment_dir, data, train_config.resume_results
+        ),
     )
     run_train_from_config(train_config)
