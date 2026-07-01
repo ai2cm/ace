@@ -31,6 +31,7 @@ OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200, 100, 
 # Gaussian grid specs: name -> N (grid number; nlat=2N, nlon=4N)
 GAUSSIAN_GRID_N = {
     "F22.5": 22.5,
+    "F45": 45,
     "F90": 90,
     "F360": 360,
 }
@@ -1087,7 +1088,10 @@ def _get_parser():
         "--output_grid",
         type=str,
         default="F90",
-        help="Output grid specification: 'F90' for 1 degree, 'F360' for 0.25 degree.",
+        help=(
+            "Output grid specification: 'F22.5' for 4 degree, 'F45' for 2 degree, "
+            "'F90' for 1 degree, 'F360' for 0.25 degree."
+        ),
     )
     parser.add_argument(
         "--output_time_chunksize",

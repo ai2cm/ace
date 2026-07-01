@@ -13,13 +13,13 @@ from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
+from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.timing import GlobalTimer
 
 from ._multi_call import MultiCallConfig, get_multi_call_name
@@ -79,10 +79,6 @@ def test_multi_call():
     torch.testing.assert_close(co2_data["CO2"], torch.full(shape, co2_value))
 
 
-def get_scalar_data(names, value):
-    return {n: value for n in names}
-
-
 def _get_stepper_config(
     in_names, out_names, all_names, multi_call_config, include_loss
 ):
@@ -112,11 +108,8 @@ def _get_stepper_config(
                                 ),
                                 in_names=in_names,
                                 out_names=out_names,
-                                normalization=NetworkAndLossNormalizationConfig(
-                                    network=NormalizationConfig(
-                                        means=get_scalar_data(all_names, 0.0),
-                                        stds=get_scalar_data(all_names, 1.0),
-                                    ),
+                                normalization=trivial_network_and_loss_normalization(
+                                    all_names
                                 ),
                             ),
                         ),

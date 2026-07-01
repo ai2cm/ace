@@ -14,7 +14,6 @@ from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOpe
 from fme.core.typing_ import TensorMapping
 
 from .atmosphere import (
-    AtmosphereCorrector,
     AtmosphereCorrectorConfig,
     EnergyBudgetConfig,
     _adjust_gen_dry_air_to_target,
@@ -22,7 +21,6 @@ from .atmosphere import (
     _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
 )
-from .utils import force_positive
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -275,21 +273,6 @@ def test_force_conserve_moisture(
     np.testing.assert_almost_equal(new_dry_air, original_dry_air, decimal=6)
 
 
-def test_force_positive():
-    data = {
-        "foo": torch.tensor([[-1.0, 0.0], [0.0, 1.0], [1.0, 2.0]]),
-        "bar": torch.tensor([[-1.0, 0.0], [0.0, -3.0], [1.0, 2.0]]),
-    }
-    original_min = torch.min(data["foo"])
-    assert original_min < 0.0
-    fixed_data = force_positive(data, ["foo"])
-    new_min = torch.min(fixed_data["foo"])
-    # Ensure the minimum value of 'foo' is now 0
-    torch.testing.assert_close(new_min, torch.tensor(0.0))
-    # Ensure other variables are not modified
-    torch.testing.assert_close(fixed_data["bar"], data["bar"])
-
-
 def _get_corrector_test_input(
     tensor_shape, requires_grad=False, air_temperature_prefix="air_temperature_"
 ):
@@ -460,7 +443,7 @@ def test_corrector_integration(air_temperature_prefix):
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
+    corrector = config._build(ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data, None)
 
 
@@ -472,7 +455,7 @@ def _build_conserve_dry_air_corrector(tensor_shape):
         torch.ones(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    return AtmosphereCorrector(config, ops, vertical_coord, timestep), vertical_coord
+    return config._build(ops, vertical_coord, timestep), vertical_coord
 
 
 def _global_dry_air_mass(
@@ -551,6 +534,6 @@ def test_conserve_dry_air_requires_vertical_coordinate():
     config = AtmosphereCorrectorConfig(conserve_dry_air=True)
     ops = LatLonOperations(torch.ones(size=(5, 1)).broadcast_to(size=(5, 5)))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = AtmosphereCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
     with pytest.raises(ValueError, match="vertical coordinate"):
         corrector({}, {}, {}, None)

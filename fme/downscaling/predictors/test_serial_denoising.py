@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from fme.core.coordinates import LatLonCoordinates
-from fme.downscaling.data import StaticInput, StaticInputs
+from fme.downscaling.data import StaticInputs
 from fme.downscaling.models import CheckpointModelConfig
 from fme.downscaling.predictors.serial_denoising import (
     DenoisingExpertCheckpointConfig,
@@ -18,7 +18,7 @@ from fme.downscaling.predictors.serial_denoising import (
 )
 from fme.downscaling.test_models import (
     _get_diffusion_model,
-    _get_monotonic_coordinate,
+    _make_global_fine_coords_and_static,
     make_fine_coords,
     make_paired_batch_data,
 )
@@ -323,19 +323,54 @@ def test_save_preserves_rename_applied_by_checkpoint_model_config(tmp_path):
     assert set(reqs.coarse_names) == {"renamed_x"}
 
 
-def _make_global_fine_coords_and_static(fine_shape: tuple[int, int]):
-    """Return a global-covering LatLonCoordinates and matching StaticInputs."""
-    step = 360 / fine_shape[1]
-    global_fine_lon = torch.arange(fine_shape[1]) * step + step / 2
-    global_fine_lat = _get_monotonic_coordinate(fine_shape[0], stop=fine_shape[0])
-    full_fine_coords = LatLonCoordinates(lat=global_fine_lat, lon=global_fine_lon)
-    static_field = torch.arange(
-        fine_shape[0] * fine_shape[1], dtype=torch.float32
-    ).reshape(*fine_shape)
-    static_inputs = StaticInputs(
-        fields=[StaticInput(static_field)], coords=full_fine_coords
+def test_denoising_moe_predictor_with_rolled_lon_rolls_all_experts():
+    """with_rolled_lon rolls every expert (keeping the shared-grid invariant)."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+
+    expert0 = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
     )
-    return full_fine_coords, static_inputs
+    expert1 = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+    predictor = DenoisingMoEPredictor(
+        experts=[expert0, expert1],
+        sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
+        num_diffusion_generation_steps=2,
+        churn=0.0,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = predictor.with_rolled_lon(coarse_lon)
+
+    # Every expert is a new (rolled) object; _primary stays _experts[0].
+    assert rolled._primary is rolled._experts[0]
+    for rolled_expert, original, source in zip(
+        rolled._experts, predictor._experts, [expert0, expert1]
+    ):
+        assert rolled_expert is not original
+        # Coords are rolled...
+        assert rolled_expert.full_fine_coords.lon[0].item() < 0
+        # ...but the raw network weights are still shared (fresh wrapper).
+        assert next(rolled_expert.module.parameters()) is next(
+            source.module.parameters()
+        )
+    # The sigma dispatcher is rebuilt from the rolled experts, consistent with
+    # _experts (not left pointing at any pre-roll module).
+    for entry, rolled_expert in zip(rolled._dispatch_module._entries, rolled._experts):
+        assert entry[2] is rolled_expert.module
+
+    # No-roll case returns self
+    non_neg_lon = torch.tensor([0.0, 5.0, 10.0, 15.0], dtype=torch.float32)
+    assert predictor.with_rolled_lon(non_neg_lon) is predictor
 
 
 def test_denoising_moe_predictor_rejects_mismatched_expert_grids():
