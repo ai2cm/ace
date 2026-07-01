@@ -24,6 +24,8 @@ PRE_TRAINED_WEIGHTS_DATASETS=("01KHJ5F1M6YKVZESPZAAVVD6G8" "01KHCEF1SBYCZCGDM78N
 PARTIAL_TUNED=("01KTWDTVRWZJ4V64VAZJMFZJ4Y")
 POSEMB_TUNED=("01KVRAQRJRPARFT7CRC5R87WVS")
 
+PRMSL_SHIELDPLUS_TUNED=("01KV5ZF269W3T9WPVENGEWZZYW")
+
 # tuned on XSHiELD, 1-1, seed 0
 #TUNED_DATASET=01KQD8NF9HQD1QY2X0S132YH72
 
@@ -57,7 +59,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${PRE_TRAINED_WEIGHTS_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
+        --dataset ${PRMSL_SHIELDPLUS_TUNED[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
         --dataset $STATS_DATASET:/statsdata \
         --gpus $N_GPUS \
         --shared-memory 400GiB \
