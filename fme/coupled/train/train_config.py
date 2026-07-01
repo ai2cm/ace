@@ -1,5 +1,4 @@
 import dataclasses
-import datetime
 import logging
 import os
 from collections.abc import Callable, Sequence
@@ -204,6 +203,111 @@ class InlineInferenceConfig:
         return factory
 
 
+def _get_validation_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
+    stepper: TrainStepperABC,
+    dataset_info: CoupledDatasetInfo,
+    loss_scaling: CoupledTensorMapping,
+    save_per_epoch_diagnostics: bool,
+    output_dir: str,
+) -> ValidationCallback:
+    def make_factory(name: str) -> Callable[[], OneStepAggregator]:
+        def factory():
+            return OneStepAggregator(
+                dataset_info=dataset_info,
+                save_diagnostics=save_per_epoch_diagnostics,
+                output_dir=os.path.join(output_dir, name),
+                loss_scaling=loss_scaling,
+            )
+
+        return factory
+
+    tasks: list[ValidationTask] = [
+        ValidationTask(
+            name=name,
+            data=data,
+            aggregator_factory=make_factory(name),
+            weight=entry_config.weight,
+        )
+        for entry_config, data, name in validation_entries
+    ]
+    return build_validation_callback(tasks=tasks, stepper=stepper)
+
+
+def _get_validate_stepper_callback(
+    validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
+    dataset_info: CoupledDatasetInfo,
+    loss_scaling: CoupledTensorMapping,
+    validate_using_ema: bool,
+) -> ValidateStepper:
+    # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
+    # own stepper, so this callback manages its own EMA via run_validation_loop
+    # rather than relying on the Trainer's validation_context().
+    def validate_stepper(
+        stepper: TrainStepperABC, ema: EMATracker, epoch: int
+    ) -> float:
+        weighted_loss = 0.0
+        for entry_config, data, name in validation_entries:
+            data.set_epoch(epoch)
+            aggregator = OneStepAggregator(
+                dataset_info=dataset_info,
+                save_diagnostics=False,
+                output_dir="",
+                loss_scaling=loss_scaling,
+            )
+            run_validation_loop(
+                stepper=stepper,
+                valid_data=data,
+                aggregator=aggregator,
+                ema=ema,
+                validate_using_ema=validate_using_ema,
+            )
+            if entry_config.weight > 0:
+                summary = aggregator.get_summary(label=name)
+                if summary.loss is not None:
+                    weighted_loss += entry_config.weight * summary.loss
+        return weighted_loss
+
+    return validate_stepper
+
+
+def _get_inference_callback(
+    inference_entries: Sequence[
+        tuple[InlineInferenceConfig, InferenceGriddedData, str]
+    ],
+    inference_epochs: Sequence[int],
+    inference_epoch_sets: Sequence[set[int]],
+    stepper: CoupledTrainStepper,
+    dataset_info: CoupledDatasetInfo,
+    output_dir: str,
+    save_per_epoch_diagnostics: bool,
+) -> InferenceCallback:
+    tasks: list[InferenceTask] = []
+    for i, (entry_config, data, name) in enumerate(inference_entries):
+        tasks.append(
+            InferenceTask(
+                name=name,
+                data=data,
+                aggregator_factory=entry_config.build_aggregator_factory(
+                    data=data,
+                    name=name,
+                    stepper=stepper,
+                    dataset_info=dataset_info,
+                    output_dir=output_dir,
+                    save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                ),
+                epoch_set=frozenset(inference_epoch_sets[i]),
+                weight=entry_config.weight,
+            )
+        )
+
+    return build_inference_callback(
+        tasks=tasks,
+        inference_epochs=inference_epochs,
+        stepper=stepper,
+    )
+
+
 @dataclasses.dataclass
 class TrainConfig:
     """
@@ -402,113 +506,75 @@ class TrainConfig:
             return []
         return sorted(set().union(*epoch_sets))
 
-    def get_validation_callback(
-        self,
-        validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
-        stepper: TrainStepperABC,
-        dataset_info: CoupledDatasetInfo,
-        loss_scaling: CoupledTensorMapping,
-    ) -> ValidationCallback:
-        def make_factory(name: str) -> Callable[[], OneStepAggregator]:
-            def factory():
-                return OneStepAggregator(
-                    dataset_info=dataset_info,
-                    save_diagnostics=self.save_per_epoch_diagnostics,
-                    output_dir=os.path.join(self.output_dir, name),
-                    loss_scaling=loss_scaling,
-                )
+    def _get_train_window_data_requirements(self) -> CoupledTrainDataRequirements:
+        return self.stepper_training.get_train_window_data_requirements(self.stepper)
 
-            return factory
-
-        tasks: list[ValidationTask] = [
-            ValidationTask(
-                name=name,
-                data=data,
-                aggregator_factory=make_factory(name),
-                weight=entry_config.weight,
-            )
-            for entry_config, data, name in validation_entries
-        ]
-        return build_validation_callback(tasks=tasks, stepper=stepper)
-
-    def get_validate_stepper_callback(
-        self,
-        validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
-        dataset_info: CoupledDatasetInfo,
-        loss_scaling: CoupledTensorMapping,
-    ) -> ValidateStepper:
-        # LR tuning passes trial stepper/EMA instances distinct from the
-        # Trainer's own stepper, so this callback manages its own EMA via
-        # run_validation_loop rather than relying on the Trainer's
-        # validation_context().
-        validate_using_ema = self.validate_using_ema
-
-        def validate_stepper(
-            stepper: TrainStepperABC, ema: EMATracker, epoch: int
-        ) -> float:
-            weighted_loss = 0.0
-            for entry_config, data, name in validation_entries:
-                data.set_epoch(epoch)
-                aggregator = OneStepAggregator(
-                    dataset_info=dataset_info,
-                    save_diagnostics=False,
-                    output_dir="",
-                    loss_scaling=loss_scaling,
-                )
-                run_validation_loop(
-                    stepper=stepper,
-                    valid_data=data,
-                    aggregator=aggregator,
-                    ema=ema,
-                    validate_using_ema=validate_using_ema,
-                )
-                if entry_config.weight > 0:
-                    summary = aggregator.get_summary(label=name)
-                    if summary.loss is not None:
-                        weighted_loss += entry_config.weight * summary.loss
-            return weighted_loss
-
-        return validate_stepper
-
-    def get_inference_callback(
-        self,
-        inference_entries: Sequence[
-            tuple[InlineInferenceConfig, InferenceGriddedData, str]
-        ],
-        inference_epochs: Sequence[int],
-        inference_epoch_sets: Sequence[set[int]],
-        stepper: CoupledTrainStepper,
-        dataset_info: CoupledDatasetInfo,
-    ) -> InferenceCallback:
-        tasks: list[InferenceTask] = []
-        for i, (entry_config, data, name) in enumerate(inference_entries):
-            tasks.append(
-                InferenceTask(
-                    name=name,
-                    data=data,
-                    aggregator_factory=entry_config.build_aggregator_factory(
-                        data=data,
-                        name=name,
-                        stepper=stepper,
-                        dataset_info=dataset_info,
-                        output_dir=self.output_dir,
-                        save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
-                    ),
-                    epoch_set=frozenset(inference_epoch_sets[i]),
-                    weight=entry_config.weight,
-                )
-            )
-
-        return build_inference_callback(
-            tasks=tasks,
-            inference_epochs=inference_epochs,
-            stepper=stepper,
+    def _get_valid_window_data_requirements(self) -> CoupledDataRequirements:
+        return self.stepper.get_evaluation_window_data_requirements(
+            self.n_coupled_steps
         )
 
+    def _get_train_data(self) -> GriddedData:
+        data_requirements = self._get_train_window_data_requirements()
+        return get_gridded_train_data(
+            self.train_loader,
+            requirements=data_requirements,
+        )
+
+    def _get_validation_data(
+        self,
+    ) -> list[tuple[InlineValidationConfig, GriddedData, str]]:
+        data_requirements = self._get_valid_window_data_requirements()
+        names = self.validation_names
+        entries: list[tuple[InlineValidationConfig, GriddedData, str]] = []
+        for entry, name in zip(self.validation_list, names):
+            data = get_gridded_data(
+                entry.loader,
+                requirements=data_requirements,
+                train=False,
+            )
+            entries.append((entry, data, name))
+        return entries
+
+    def _get_inference_data(
+        self,
+    ) -> list[tuple[InlineInferenceConfig, InferenceGriddedData, str]]:
+        names = self.inference_names
+        initial_condition = self.stepper.get_prognostic_state_data_requirements()
+        entries: list[tuple[InlineInferenceConfig, InferenceGriddedData, str]] = []
+        for entry, name in zip(self.inference_list, names):
+            window_requirements = self.stepper.get_evaluation_window_data_requirements(
+                entry.coupled_steps_in_memory
+            )
+            data = get_inference_data(
+                config=entry.loader,
+                total_coupled_steps=entry.n_coupled_steps,
+                window_requirements=window_requirements,
+                initial_condition=initial_condition,
+            )
+            entries.append((entry, data, name))
+        return entries
+
+    def _get_optimization(self, parameters) -> Optimization:
+        return self.optimization.build(parameters, self.max_epochs)
+
+    def _get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledTrainStepper:
+        return self.stepper_training.get_train_stepper(
+            stepper_config=self.stepper,
+            dataset_info=dataset_info,
+        )
+
+    def _get_ema(self, modules) -> EMATracker:
+        return self.ema.build(modules)
+
+    def _get_end_of_batch_ops(
+        self, modules: list[torch.nn.Module]
+    ) -> EndOfBatchCallback:
+        return lambda: None
+
     def build_trainer(self) -> Trainer:
-        builders = TrainBuilders(self)
         logging.info("Initializing training data loader")
-        train_data = builders.get_train_data()
+        train_data = self._get_train_data()
 
         variable_metadata = (
             get_derived_variable_metadata() | train_data.variable_metadata
@@ -518,7 +584,7 @@ class TrainConfig:
         )
 
         logging.info("Initializing validation data loaders")
-        validation_entries = builders.get_validation_data()
+        validation_entries = self._get_validation_data()
 
         for data, name in zip(
             [train_data] + [data for _, data, _ in validation_entries],
@@ -530,13 +596,13 @@ class TrainConfig:
             logging.info("Initializing inline inference data loaders")
         else:
             logging.info("Skipping inline inference")
-        inference_entries = builders.get_inference_data()
+        inference_entries = self._get_inference_data()
         inference_epochs = self.get_inference_epochs()
         inference_epoch_sets = self.get_inference_epoch_sets()
 
         logging.info("Starting model initialization")
-        stepper = builders.get_stepper(train_data.dataset_info)
-        end_of_batch_ops = builders.get_end_of_batch_ops(stepper.modules)
+        stepper = self._get_stepper(train_data.dataset_info)
+        end_of_batch_ops = self._get_end_of_batch_ops(stepper.modules)
 
         loss_scaling = stepper.effective_loss_scaling
         aggregator_builder = CoupledAggregatorBuilder(
@@ -546,34 +612,39 @@ class TrainConfig:
             output_dir=self.output_dir,
         )
 
-        validation_callback = self.get_validation_callback(
+        validation_callback = _get_validation_callback(
             validation_entries=validation_entries,
             stepper=stepper,
             dataset_info=dataset_info,
             loss_scaling=loss_scaling,
+            save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
+            output_dir=self.output_dir,
         )
 
         validate_stepper: ValidateStepper | None = None
         if self.lr_tuning is not None:
-            validate_stepper = self.get_validate_stepper_callback(
+            validate_stepper = _get_validate_stepper_callback(
                 validation_entries=validation_entries,
                 dataset_info=dataset_info,
                 loss_scaling=loss_scaling,
+                validate_using_ema=self.validate_using_ema,
             )
 
-        inference_callback = self.get_inference_callback(
+        inference_callback = _get_inference_callback(
             inference_entries=inference_entries,
             inference_epochs=inference_epochs,
             inference_epoch_sets=inference_epoch_sets,
             stepper=stepper,
             dataset_info=dataset_info,
+            output_dir=self.output_dir,
+            save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
         )
 
         return Trainer(
             train_data=train_data,
             stepper=stepper,
-            build_optimization=builders.get_optimization,
-            build_ema=builders.get_ema,
+            build_optimization=self._get_optimization,
+            build_ema=self._get_ema,
             params=self.get_trainer_params(),
             aggregator_builder=aggregator_builder,
             validation_callback=validation_callback,
@@ -619,86 +690,3 @@ class CoupledAggregatorBuilder(AggregatorBuilderABC[CoupledTrainOutput]):
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
-
-
-class TrainBuilders:
-    def __init__(self, config: TrainConfig):
-        self.config = config
-
-    def _get_train_window_data_requirements(self) -> CoupledTrainDataRequirements:
-        return self.config.stepper_training.get_train_window_data_requirements(
-            self.config.stepper
-        )
-
-    def _get_valid_window_data_requirements(self) -> CoupledDataRequirements:
-        return self.config.stepper.get_evaluation_window_data_requirements(
-            self.config.n_coupled_steps
-        )
-
-    def get_train_data(self) -> GriddedData:
-        data_requirements = self._get_train_window_data_requirements()
-        return get_gridded_train_data(
-            self.config.train_loader,
-            requirements=data_requirements,
-        )
-
-    def get_validation_data(
-        self,
-    ) -> list[tuple[InlineValidationConfig, GriddedData, str]]:
-        data_requirements = self._get_valid_window_data_requirements()
-        names = self.config.validation_names
-        entries: list[tuple[InlineValidationConfig, GriddedData, str]] = []
-        for entry, name in zip(self.config.validation_list, names):
-            data = get_gridded_data(
-                entry.loader,
-                requirements=data_requirements,
-                train=False,
-            )
-            entries.append((entry, data, name))
-        return entries
-
-    def get_inference_data(
-        self,
-    ) -> list[tuple[InlineInferenceConfig, InferenceGriddedData, str]]:
-        names = self.config.inference_names
-        initial_condition = self.config.stepper.get_prognostic_state_data_requirements()
-        entries: list[tuple[InlineInferenceConfig, InferenceGriddedData, str]] = []
-        for entry, name in zip(self.config.inference_list, names):
-            window_requirements = (
-                self.config.stepper.get_evaluation_window_data_requirements(
-                    entry.coupled_steps_in_memory
-                )
-            )
-            data = get_inference_data(
-                config=entry.loader,
-                total_coupled_steps=entry.n_coupled_steps,
-                window_requirements=window_requirements,
-                initial_condition=initial_condition,
-            )
-            entries.append((entry, data, name))
-        return entries
-
-    def get_optimization(self, parameters) -> Optimization:
-        return self.config.optimization.build(parameters, self.config.max_epochs)
-
-    @property
-    def atmosphere_timestep(self) -> datetime.timedelta:
-        return self.config.stepper.atmosphere_timestep
-
-    @property
-    def ocean_timestep(self) -> datetime.timedelta:
-        return self.config.stepper.ocean_timestep
-
-    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledTrainStepper:
-        return self.config.stepper_training.get_train_stepper(
-            stepper_config=self.config.stepper,
-            dataset_info=dataset_info,
-        )
-
-    def get_ema(self, modules) -> EMATracker:
-        return self.config.ema.build(modules)
-
-    def get_end_of_batch_ops(
-        self, modules: list[torch.nn.Module]
-    ) -> EndOfBatchCallback:
-        return lambda: None
