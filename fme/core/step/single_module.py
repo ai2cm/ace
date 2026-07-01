@@ -292,6 +292,10 @@ class SingleModuleStep(StepABC):
         packed_in_names = (
             list(config.in_names) + self._global_mean_removal.extra_channel_names
         )
+        if config.input_dropout is not None:
+            # Fail loud on a typo'd group variable name; packed_in_names is the
+            # full maskable set (inputs plus GMR extra sentinels).
+            config.input_dropout.validate_names(packed_in_names)
         n_in_channels = len(packed_in_names)
         if config.include_channel_mask_inputs:
             n_in_channels *= 2

@@ -13,8 +13,10 @@ class MaskingGroupConfig:
     reproduces per-variable masking.
 
     Parameters:
-        variables: Names of the input channels in this group. Names not present
-            among the input channels are ignored.
+        variables: Names of the input channels in this group. Every name must
+            match a packed input channel (validated by
+            ``VariableMaskingConfig.validate_names``); a typo raises rather than
+            silently masking nothing.
         rate: Bernoulli masking rate in ``[0, 1]`` shared by the whole group.
     """
 
@@ -49,9 +51,9 @@ class VariableMaskingConfig:
 
     Parameters:
         max_masked_vars: Maximum number of uniformly-masked variables. The
-            count is sampled uniformly from ``[0, max_masked_vars]`` (capped at
-            the number of uniformly-maskable channels), so a draw may mask no
-            variables.
+            count is sampled uniformly from
+            ``[0, min(max_masked_vars, n_uniform)]`` where ``n_uniform`` is the
+            number of ungrouped channels, so a draw may mask no variables.
         variable_masking_groups: Optional list of variable groups, each with a
             shared Bernoulli masking rate. Grouped channels are excluded from
             the uniform pool. A variable may appear in at most one group.
@@ -61,6 +63,8 @@ class VariableMaskingConfig:
     variable_masking_groups: list[MaskingGroupConfig] | None = None
 
     def __post_init__(self):
+        # bool is a subclass of int, so reject it explicitly to avoid a
+        # silently-coerced True/False being treated as a masked-var count.
         if (
             not isinstance(self.max_masked_vars, int)
             or isinstance(self.max_masked_vars, bool)
@@ -86,6 +90,27 @@ class VariableMaskingConfig:
                         )
                     seen.add(name)
 
+    def validate_names(self, names: list[str]) -> None:
+        """Check every grouped variable matches a packed input channel.
+
+        Raises ``ValueError`` naming any grouped variable absent from
+        ``names`` so a typo fails loudly at build time rather than silently
+        masking nothing. ``names`` is the authoritative packed channel set
+        (input channels plus any GMR extra sentinels).
+        """
+        valid = set(names)
+        unknown = [
+            name
+            for group in (self.variable_masking_groups or [])
+            for name in group.variables
+            if name not in valid
+        ]
+        if unknown:
+            raise ValueError(
+                f"masking group variable(s) {unknown} not in packed input "
+                f"channels {names}"
+            )
+
     def sample_mask(self, names: list[str], device: torch.device) -> torch.Tensor:
         """
         Sample a boolean presence mask of shape ``[1, n_channels]``.
@@ -102,9 +127,11 @@ class VariableMaskingConfig:
         name_to_idx = {name: i for i, name in enumerate(names)}
         group_id = torch.full((n,), -1, dtype=torch.long, device=device)
         for g, group in enumerate(groups):
-            for name in group.variables:
-                if name in name_to_idx:
-                    group_id[name_to_idx[name]] = g
+            idxs = [
+                name_to_idx[name] for name in group.variables if name in name_to_idx
+            ]
+            if idxs:
+                group_id[torch.tensor(idxs, dtype=torch.long, device=device)] = g
 
         # Grouped channels are excluded from uniform masking; pool is ungrouped.
         uniform_pool = (group_id == -1).nonzero(as_tuple=True)[0]

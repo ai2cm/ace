@@ -1609,6 +1609,29 @@ def _inject_input_dropout_mask(
     step._draw_input_dropout_mask = lambda: mask  # type: ignore[method-assign]
 
 
+def test_input_dropout_unknown_group_variable_raises_at_build():
+    """A typo'd group variable fails loudly when the Step is built."""
+    from fme.core.var_masking import MaskingGroupConfig
+
+    bad = VariableMaskingConfig(
+        variable_masking_groups=[MaskingGroupConfig(variables=["typo"], rate=0.5)]
+    )
+    with pytest.raises(ValueError, match="not in packed input channels"):
+        _make_single_module_step(bad)
+
+
+def test_input_dropout_group_variable_accepts_gmr_extra_sentinel():
+    """A group may target a GMR extra sentinel; build must not reject it."""
+    from fme.core.step.global_mean_removal import _extra_channel_name
+    from fme.core.var_masking import MaskingGroupConfig
+
+    sentinel = _extra_channel_name("forcing_shared")
+    config = VariableMaskingConfig(
+        variable_masking_groups=[MaskingGroupConfig(variables=[sentinel], rate=0.5)]
+    )
+    _make_gmr_input_dropout_step(config, include_channel_mask_inputs=False)
+
+
 def test_input_dropout_mask_zeros_inputs():
     """A supplied input_dropout_mask deterministically zeros masked inputs.
 

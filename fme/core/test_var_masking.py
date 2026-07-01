@@ -40,6 +40,25 @@ def test_duplicate_variable_across_groups_validation():
         )
 
 
+def test_validate_names_rejects_unknown_group_variable():
+    config = VariableMaskingConfig(
+        variable_masking_groups=[_group(["var_0", "typo"], 0.5)]
+    )
+    with pytest.raises(ValueError, match="not in packed input channels"):
+        config.validate_names(_names(3))
+
+
+def test_validate_names_accepts_known_group_variables():
+    config = VariableMaskingConfig(
+        variable_masking_groups=[_group(["var_0", "var_2"], 0.5)]
+    )
+    config.validate_names(_names(3))
+
+
+def test_validate_names_noop_without_groups():
+    VariableMaskingConfig(max_masked_vars=2).validate_names(_names(3))
+
+
 def test_sample_mask_shape_and_dtype():
     config = VariableMaskingConfig(max_masked_vars=3)
     mask = config.sample_mask(_names(10), DEVICE)
