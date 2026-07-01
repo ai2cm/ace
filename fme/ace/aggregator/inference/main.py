@@ -34,10 +34,12 @@ from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
+from .near_zero_fraction import NearZeroFractionMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
+from .trend import TrendMetricConfig
 from .utils import LatLonRegion
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
@@ -63,6 +65,8 @@ MetricConfig = (
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
+    | TrendMetricConfig
+    | NearZeroFractionMetricConfig
 )
 
 
@@ -199,6 +203,14 @@ class InferenceEvaluatorAggregatorConfig:
         enso_index: ENSO index metrics.
         enso_coefficient: ENSO regression coefficient metrics.
         ipo_index: Interdecadal Pacific Oscillation index metrics.
+        trend: Per-grid-cell linear trend (slope vs. time) map metrics.
+            Disabled by default.
+        near_zero_fraction: Area-weighted fraction of cells at or below a
+            small non-negative ``eps`` per variable, reported for prediction and
+            its difference from the target. Optionally (``include_maps``) also
+            logs side-by-side generated/target maps of the per-cell
+            at-or-below-``eps`` fraction and the error map. Disabled by
+            default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -247,6 +259,10 @@ class InferenceEvaluatorAggregatorConfig:
     ipo_index: IpoIndexMetricConfig = dataclasses.field(
         default_factory=IpoIndexMetricConfig
     )
+    trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
+    near_zero_fraction: NearZeroFractionMetricConfig = dataclasses.field(
+        default_factory=NearZeroFractionMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
@@ -287,6 +303,8 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_index,
             self.enso_coefficient,
             self.ipo_index,
+            self.trend,
+            self.near_zero_fraction,
         ]
         return [m for m in all_metrics if m.enabled]
 

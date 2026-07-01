@@ -285,6 +285,43 @@ def test_aggregator_norm_logs_channel_mean_all_variables():
         )
 
 
+def test_aggregator_norm_channel_mean_excludes_all_nan_target():
+    """A variable whose target is entirely NaN (e.g. filled by
+    allow_missing_variables) is excluded from the channel mean."""
+    torch.manual_seed(0)
+    area_weights = torch.ones([4, 4], device=get_device())
+    agg = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=False,
+        target="norm",
+    )
+    names = ["a", "b", "c"]
+    target = _make_ensemble_batch(names)
+    gen = _make_ensemble_batch(names)
+    # "c" is missing from the data: entirely-NaN target.
+    target = EnsembleTensorDict(
+        {**target, "c": torch.full_like(target["c"], torch.nan)}
+    )
+    agg.record_batch(
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    logs = agg.get_logs(label="metrics")
+    for metric in ("crps", "ensemble_mean_rmse"):
+        channel_mean = float(logs[f"metrics/{metric}/channel_mean"])
+        assert not math.isnan(channel_mean)
+        # equals the mean of the two valid-target channels (a, b); "c" excluded.
+        expected = (logs[f"metrics/{metric}/a"] + logs[f"metrics/{metric}/b"]) / 2
+        torch.testing.assert_close(
+            torch.tensor(channel_mean),
+            torch.tensor(float(expected)),
+            atol=1e-6,
+            rtol=1e-6,
+        )
+
+
 def test_aggregator_norm_logs_channel_mean_subset():
     """channel_mean_names restricts the channel mean to the listed variables."""
     torch.manual_seed(0)
