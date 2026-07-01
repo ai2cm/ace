@@ -23,6 +23,10 @@ class _TargetGenPair:
     target: torch.Tensor
     gen: torch.Tensor
     ops: GriddedOperations
+    # Per-cell validity weights (1 = valid, 0 = never-valid) for the masked
+    # time-mean: never-valid cells drop from the area-weighted metrics. None
+    # for unmasked variables (identical to the pre-masking behavior).
+    cell_weights: torch.Tensor | None = None
 
     def bias(self):
         return self.gen - self.target
@@ -33,6 +37,7 @@ class _TargetGenPair:
                 predicted=self.gen,
                 truth=self.target,
                 name=self.name,
+                cell_weights=self.cell_weights,
             )
             .cpu()
             .numpy()
@@ -45,6 +50,7 @@ class _TargetGenPair:
                 predicted=self.gen,
                 truth=self.target,
                 name=self.name,
+                cell_weights=self.cell_weights,
             )
             .cpu()
             .numpy()
@@ -92,36 +98,46 @@ class TimeMeanAggregator:
             self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._variable_metadata = variable_metadata
-        # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
+        # Running per-cell sums of shape [n_lat, n_lon]. ``_data`` holds the
+        # (masked) sum over (sample, time); ``_counts`` holds the per-cell valid
+        # (sample, time) count for variables that carry a per-cell mask (else
+        # the global n_timesteps * n_samples applies). See the masking design in
+        # the CMIP6 per-cell-loss-masking work.
         self._data: TensorDict | None = None
+        self._counts: TensorDict = {}
         self._n_timesteps = 0
         self._n_samples: int | None = None
         self._reference_means = reference_means
         self._reference_validated = False
         self._log_variables = log_variables
 
-    @staticmethod
-    def _add_or_initialize_time_mean(
-        maybe_dict: TensorDict | None,
+    def _accumulate(
+        self,
         new_data: TensorMapping,
-        ignore_initial: bool = False,
-    ) -> TensorDict:
+        mask_dict: Mapping[str, torch.Tensor] | None,
+        ignore_initial: bool,
+    ) -> None:
+        """Accumulate per-cell (masked) sums and, for masked variables, per-cell
+        valid counts. Unmasked variables keep the plain sum (divided by the
+        global count in :meth:`get_data`).
+        """
         sample_dim = 0
         time_dim = 1
-        if ignore_initial:
-            time_slice = slice(1, None)
-        else:
-            time_slice = slice(0, None)
-        if maybe_dict is None:
-            d: TensorDict = {
-                name: tensor[:, time_slice].sum(dim=time_dim).sum(dim=sample_dim)
-                for name, tensor in new_data.items()
-            }
-        else:
-            d = dict(maybe_dict)
-            for name, tensor in new_data.items():
-                d[name] += tensor[:, time_slice].sum(dim=time_dim).sum(dim=sample_dim)
-        return d
+        time_slice = slice(1, None) if ignore_initial else slice(0, None)
+        if self._data is None:
+            self._data = {}
+        for name, tensor in new_data.items():
+            t = tensor[:, time_slice]
+            mask = None if mask_dict is None else mask_dict.get(name)
+            if mask is not None:
+                m = mask[:, time_slice].to(t.dtype)
+                masked_sum = (t * m).sum(dim=time_dim).sum(dim=sample_dim)
+                count = m.sum(dim=time_dim).sum(dim=sample_dim)
+                self._data[name] = self._data.get(name, 0.0) + masked_sum
+                self._counts[name] = self._counts.get(name, 0.0) + count
+            else:
+                s = t.sum(dim=time_dim).sum(dim=sample_dim)
+                self._data[name] = self._data.get(name, 0.0) + s
 
     @torch.no_grad()
     def record_batch(
@@ -134,9 +150,7 @@ class TimeMeanAggregator:
             tensor_data = data.prediction_norm
         i_time_start = data.i_time_start
         ignore_initial = i_time_start == 0
-        self._data = self._add_or_initialize_time_mean(
-            self._data, tensor_data, ignore_initial
-        )
+        self._accumulate(tensor_data, data.target_mask, ignore_initial)
         if self._n_samples is None:
             self._n_samples = tensor_data[list(tensor_data)[0]].size(0)
         if ignore_initial:
@@ -148,6 +162,14 @@ class TimeMeanAggregator:
                 self.get_logs(label="")
             self._reference_validated = True
 
+    def get_valid_counts(self) -> TensorDict:
+        """Per-cell valid (sample, time) counts for masked variables.
+
+        Empty when no variable carries a per-cell mask. A cell with count 0 is
+        never valid over the run and should be dropped from spatial metrics.
+        """
+        return dict(self._counts)
+
     def get_data(self) -> TensorDict:
         if self._n_timesteps == 0 or self._data is None:
             raise ValueError("No data recorded.")
@@ -157,7 +179,16 @@ class TimeMeanAggregator:
         names = sorted(list(self._data.keys()))  # sort for rank-consistent order
         for name in names:
             value = self._data[name]
-            gen = dist.reduce_mean(value / self._n_timesteps / self._n_samples)
+            if name in self._counts:
+                # Per-cell valid-only time-mean: divide by the per-cell valid
+                # count. Never-valid cells (count 0) are set to 0 here and
+                # dropped from area-weighted metrics via the validity weights.
+                count = self._counts[name]
+                mean = value / count.clamp(min=1.0)
+                mean = torch.where(count > 0, mean, torch.zeros_like(mean))
+                gen = dist.reduce_mean(mean)
+            else:
+                gen = dist.reduce_mean(value / self._n_timesteps / self._n_samples)
             ret[name] = gen
         return ret
 
@@ -323,15 +354,23 @@ class TimeMeanEvaluatorAggregator:
     def _get_target_gen_pairs(self) -> list[_TargetGenPair]:
         target_data = self._target_agg.get_data()
         gen_data = self._gen_agg.get_data()
+        # Per-cell validity from the TARGET mask (applied identically to gen and
+        # target time-means): a cell valid on >=1 (sample, time) counts; a
+        # never-valid cell is dropped from the spatial metrics.
+        valid_counts = self._target_agg.get_valid_counts()
 
         ret = []
         for name in gen_data.keys():
+            cell_weights = None
+            if name in valid_counts:
+                cell_weights = (valid_counts[name] > 0).to(gen_data[name].dtype)
             ret.append(
                 _TargetGenPair(
                     gen=gen_data[name],
                     target=target_data[name],
                     name=name,
                     ops=self._ops,
+                    cell_weights=cell_weights,
                 )
             )
         return ret

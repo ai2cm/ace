@@ -303,3 +303,47 @@ def test_aggregator_mean_values():
         ds["gen_map-a"].values,
         (data["a"].cpu().numpy().mean(axis=(0, 1))),
     )
+
+
+def test_time_mean_evaluator_per_cell_masking():
+    """Per-cell valid-only time-mean + never-valid cell dropping (A-eval).
+
+    target_mask marks cell (0,0) never-valid, (0,1) valid only at t=0, and the
+    bottom row valid at both steps. The masked time-mean must use only valid
+    (sample, time) entries per cell, and the never-valid cell must drop from the
+    area-weighted rmse/bias.
+    """
+    area_weights = torch.ones(2, 2).to(get_device())
+    agg = TimeMeanEvaluatorAggregator(
+        LatLonOperations(area_weights), horizontal_dims=["lat", "lon"]
+    )
+    # (sample=1, time=2, lat=2, lon=2)
+    target = torch.tensor(
+        [[[[10.0, 20.0], [30.0, 40.0]], [[11.0, 777.0], [31.0, 41.0]]]]
+    ).to(get_device())  # 777 sits under an invalid mask, must not leak
+    gen = target + 2.0
+    mask = torch.tensor([[[[0.0, 1.0], [1.0, 1.0]], [[0.0, 0.0], [1.0, 1.0]]]]).to(
+        get_device()
+    )
+    agg.record_batch(
+        InferenceBatchData(
+            prediction={"ta1000": gen},
+            prediction_norm={"ta1000": gen},
+            target={"ta1000": target},
+            target_norm={"ta1000": target},
+            target_mask={"ta1000": mask},
+            time=make_dummy_time(1, 2),
+            i_time_start=1,  # count both timesteps (no initial-condition drop)
+        )
+    )
+    pair = agg._get_target_gen_pairs()[0]
+    tmean = pair.target.cpu().numpy()
+    # (0,1) uses only t=0 (20, not blended with the masked 777); bottom row avgs
+    np.testing.assert_allclose(tmean[0, 1], 20.0)
+    np.testing.assert_allclose(tmean[1, 0], 30.5)
+    np.testing.assert_allclose(tmean[1, 1], 40.5)
+    # gen is target+2 at every valid cell -> masked rmse over the 3 valid cells
+    # is exactly 2.0; the never-valid (0,0) is dropped (else it would be
+    # sqrt(3) by inflating the denominator).
+    np.testing.assert_allclose(pair.rmse(), 2.0, rtol=1e-6)
+    np.testing.assert_allclose(pair.weighted_mean_bias(), 2.0, rtol=1e-6)
