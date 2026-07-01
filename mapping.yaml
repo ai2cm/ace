@@ -9,3 +9,7 @@ dataset_pairs:
     stats: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset-stats/
   - dataset: gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-1940-2025/
     stats: gs://vcm-ml-intermediate/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/
+  - dataset: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset
+    stats: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats
+  - dataset: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+    stats: gs://vcm-ml-intermediate/2026-06-30-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset-stats
