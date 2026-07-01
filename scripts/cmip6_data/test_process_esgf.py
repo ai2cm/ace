@@ -815,3 +815,134 @@ def test_masked_regrid_3d_state_full_network_mock(monkeypatch, tmp_path):
     np.testing.assert_allclose(
         regridded["ua"].sel(plev=100000.0).values[0, 0, 0], (1 + 4 + 5) / 3
     )
+
+
+def _target_2d(var, ntime=2):
+    """A regridded 2D (time, lat, lon) single-variable dataset on the 2x2
+    target grid (matches the masked-state target grid in the wiring test)."""
+    time = xr.date_range(
+        "2010-01-01", periods=ntime, freq="D", calendar="noleap", use_cftime=True
+    )
+    arr = np.ones((ntime, 2, 2), dtype="float32")
+    return xr.Dataset(
+        {var: (("time", "lat", "lon"), arr)},
+        coords={"time": time, "lat": [0, 1], "lon": [0, 1]},
+    )
+
+
+def test_process_one_esgf_wires_masks_thickness_and_attrs(monkeypatch):
+    """End-to-end wiring of process_one_esgf with source-grid masking mocked:
+    the written dataset carries flattened 3D fields, per-level + thickness
+    masks, HGTsfc, and self-describing ``mask_variable`` attrs."""
+    plev = np.array([100000.0, 85000.0], dtype="float64")
+    ntime = 2
+    lat = [0, 1]
+    lon = [0, 1]
+    time = xr.date_range(
+        "2010-01-01", periods=ntime, freq="D", calendar="noleap", use_cftime=True
+    )
+
+    def _masked_field(fill):
+        arr = np.full((ntime, 2, 2, 2), fill, dtype="float64")
+        return xr.DataArray(
+            arr,
+            dims=("time", "plev", "lat", "lon"),
+            coords={"time": time, "plev": plev, "lat": lat, "lon": lon},
+        )
+
+    # zg increasing with altitude so thicknesses are positive.
+    masked_3d = {
+        "ua": _masked_field(3.0),
+        "va": _masked_field(-2.0),
+        "hus": _masked_field(0.01),
+        "ta": _masked_field(260.0),
+        "zg": xr.concat(
+            [_masked_field(200.0).isel(plev=0), _masked_field(1500.0).isel(plev=1)],
+            dim="plev",
+        ).transpose("time", "plev", "lat", "lon"),
+    }
+    valid = xr.DataArray(
+        np.ones((ntime, 2, 2, 2), dtype=bool),
+        dims=("time", "plev", "lat", "lon"),
+        coords={"time": time, "plev": plev, "lat": lat, "lon": lon},
+    )
+    valid[0, 0, 0, 0] = False  # one below-surface cell at 1000 hPa
+    hgtsfc = xr.DataArray(
+        np.full((2, 2), 50.0), dims=("lat", "lon"), coords={"lat": lat, "lon": lon}
+    )
+
+    monkeypatch.setattr(process_esgf, "make_target_grid", lambda name: xr.Dataset())
+    monkeypatch.setattr(
+        process_esgf,
+        "_masked_regrid_3d_state",
+        lambda *a, **k: (masked_3d, valid, hgtsfc, {v: "bilinear" for v in masked_3d}),
+    )
+
+    generic = {v: _target_2d(v) for v in ("tas", "huss", "psl", "pr")}
+
+    def fake_generic(task, variable, table_id, target_grid, config, scratch):
+        if variable in generic:
+            return generic[variable], {variable: "bilinear"}
+        return None, {}
+
+    monkeypatch.setattr(process_esgf, "_download_and_regrid_variable", fake_generic)
+    monkeypatch.setattr(process_esgf, "attach_external_forcings", lambda *a, **k: None)
+    monkeypatch.setattr(process_esgf, "cleanup_scratch_dir", lambda s: None)
+    monkeypatch.setattr(
+        process_esgf,
+        "scratch_dir_for_dataset",
+        lambda *a, **k: Path("/scratch"),
+    )
+
+    captured = {}
+
+    def fake_write_zarr(ds, path, cfg):
+        captured["ds"] = ds
+
+    monkeypatch.setattr(process_esgf, "write_zarr", fake_write_zarr)
+
+    task = process_esgf.ESGFDatasetTask(
+        source_id="MPI-ESM1-2-LR",
+        experiment="historical",
+        variant_label="r1i1p1f1",
+        variant_r=1,
+        variant_i=1,
+        variant_p=1,
+        variant_f=1,
+        grid_label="gn",
+        available_day_variables=[
+            "ua",
+            "va",
+            "hus",
+            "zg",
+            "ta",
+            "tas",
+            "huss",
+            "psl",
+            "pr",
+        ],
+        has_orog=True,
+        has_sftlf=False,
+    )
+    row = process_esgf.process_one_esgf(task, _minimal_config())
+
+    assert row.status == "ok", row.skip_reason
+    ds = captured["ds"]
+    # flattened 3D state present (ta from ESGF; both plev levels)
+    for name in ("ta1000", "ta850", "ua1000", "zg850"):
+        assert name in ds.data_vars
+    # thickness fields + their masks
+    assert "thickness_surface_1000" in ds.data_vars
+    assert "thickness_1000_850" in ds.data_vars
+    assert "mask_1000" in ds.data_vars and "mask_850" in ds.data_vars
+    assert "mask_thickness_1000_850" in ds.data_vars
+    # surface height (renamed orog -> HGTsfc)
+    assert "HGTsfc" in ds.data_vars
+    # self-describing mask attrs, keyed to the flattened names
+    assert ds["ta1000"].attrs["mask_variable"] == "mask_1000"
+    assert ds["thickness_1000_850"].attrs["mask_variable"] == "mask_thickness_1000_850"
+    # mask polarity 1 = valid: the below-surface cell is 0 at 1000 hPa
+    assert ds["mask_1000"].values[0, 0, 0] == 0
+    # source-grid masking recorded, no legacy below_surface_mask emitted
+    assert row.mask_source == "source_grid"
+    assert "below_surface_mask" not in ds.data_vars
