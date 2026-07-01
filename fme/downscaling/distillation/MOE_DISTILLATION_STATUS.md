@@ -3,7 +3,7 @@
 Living notes for the multivariate MoE FastGen distillation effort on branch
 `experiment/fastgen-distill`. Pick up here from any clone.
 
-_Last updated: 2026-06-30._
+_Last updated: 2026-07-01._
 
 ---
 
@@ -577,6 +577,40 @@ primary tail levers remain the forward-KL + maturity (a direct quantile loss is
 more targeted than cranking the GAN). A PSD loss will not move tails (2nd moment).
 
 (deferred: offset 4 / 256² high-res tap, and combining the winning tap with R1.)
+
+##### Check-in (2026-07-01, tap1 @9.6k / tap2 @11.2k) — ★ finer tap WORKS on PRMSL
+
+**The finer critic largely prevents the PRMSL spectral collapse — confirming
+tap-location (fine-scale visibility) was the binding constraint.** PRMSL
+`spec_mae` last values (real deficits, no floor):
+
+| band | tap1 (32², 128ch) | **tap2 (64², 256ch)** | rzisfp5c (bottleneck+R1) |
+|---|---|---|---|
+| lo_PRMSL | 0.66 | **0.51** (improving) | 0.75 |
+| mid_PRMSL | 0.83 | **0.35** | 0.86 |
+| hi_PRMSL | 0.84 (collapsed) | **0.05** (held to 11k) | 0.72 (collapsed) |
+
+- **tap2 (64²) holds hi_PRMSL at ~0.05 from step ~500 to 11k** (no collapse),
+  mid degrades only mildly, lo *improves* — the finer critic adds the missing
+  high-k power and keeps it. Every prior run collapsed here.
+- **tap1 (32²) collapses like the baseline** → the shallower tap isn't enough; the
+  win needs the 64² tap. (Confound: tap2 is also the larger 256ch critic — finer
+  *and* higher-capacity; can't fully separate the two yet.)
+- **Open gaps:** winds high-k still degrades in *both* (`spec_mae_hi_eastward_wind`
+  → 0.60 tap2 / 0.73 tap1) — the finer tap fixed PRMSL, not winds (needs even finer
+  or per-variable). Precip slightly traded in tap2 (lo/mid 0.11/0.13 vs tap1's
+  0.05/0.03). `fake_score_loss` still drifts up (0.017→0.031) but tap2's PRMSL is
+  robust to it.
+- **Tails largely unchanged** (precip ~0.63–0.71 @10k, young; winds ~0.6 plateau).
+  ⚠️ **PRMSL tail reads 1.014 but these runs predate the depth-based fix
+  (`80db7e7b1`) — still the offset-blind metric; ignore it.**
+
+**Takeaway / next:** tap location is confirmed as the primary lever. Candidates:
+(a) go finer still (offset 3/4 = 128²/256²) and/or per-variable to fix winds;
+(b) now that the critic sees fine scales, GAN weight becomes a real knob (push
+*up*); (c) relaunch the winner from a post-`80db7e7b1` commit so the depth-based
+PRMSL tail is measured. Confirm tap2's high-k gain is *coherent* (not incoherent
+noise) via the raw `val/psd_*` curves + a post-fix PRMSL depth tail.
 
 ### Checkpoint-selection fix (2026-06-29, `best_student_callback.py`)
 
