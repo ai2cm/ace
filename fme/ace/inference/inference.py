@@ -34,7 +34,12 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import makedirs
+from fme.core.cloud import (
+    exists,
+    is_local,
+    makedirs,
+    open_dataset_via_inter_filesystem_copy,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -72,12 +77,17 @@ class InitialConditionConfig:
     start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
-        ds = xr.open_dataset(
-            self.path,
+        open_kwargs = dict(
             engine=self.engine,
             decode_times=CFDatetimeCoder(use_cftime=True),
             decode_timedelta=False,
         )
+        if self.engine == "zarr" or is_local(self.path):
+            ds = xr.open_dataset(self.path, **open_kwargs)
+        else:
+            # netCDF can't be read directly from remote stores (e.g. gs://);
+            # copy to a local temp first (covers cross-segment restart.nc ICs).
+            ds = open_dataset_via_inter_filesystem_copy(self.path, **open_kwargs)
         return self._subselect_initial_conditions(ds)
 
     def _subselect_initial_conditions(self, ds: xr.Dataset) -> xr.Dataset:
@@ -227,18 +237,10 @@ class InferenceConfig:
     seed: int | None = None
 
     def __post_init__(self):
-        if self.data_writer.time_coarsen is not None:
-            self.data_writer.time_coarsen.validate(
-                self.forward_steps_in_memory,
-                self.n_forward_steps,
-            )
-        if self.data_writer.files is not None:
-            for file_config in self.data_writer.files:
-                if file_config.time_coarsen is not None:
-                    file_config.time_coarsen.validate(
-                        self.forward_steps_in_memory,
-                        self.n_forward_steps,
-                    )
+        self.data_writer.validate_time_coarsen(
+            self.forward_steps_in_memory,
+            self.n_forward_steps,
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -440,7 +442,7 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         segment_label = f"segment_{segment:04d}"
         segment_dir = os.path.join(config.experiment_dir, segment_label)
         restart_path = os.path.join(segment_dir, "restart.nc")
-        if os.path.exists(restart_path):
+        if exists(restart_path):
             logging.info(f"Skipping segment {segment} because it has already been run.")
         else:
             logging.info(f"Running segment {segment}.")

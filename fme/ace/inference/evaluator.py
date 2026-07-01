@@ -248,18 +248,10 @@ class InferenceEvaluatorConfig:
     seed: int | None = None
 
     def __post_init__(self):
-        if self.data_writer.time_coarsen is not None:
-            self.data_writer.time_coarsen.validate(
-                self.forward_steps_in_memory,
-                self.n_forward_steps,
-            )
-        if self.data_writer.files is not None:
-            for file_config in self.data_writer.files:
-                if file_config.time_coarsen is not None:
-                    file_config.time_coarsen.validate(
-                        self.forward_steps_in_memory,
-                        self.n_forward_steps,
-                    )
+        self.data_writer.validate_time_coarsen(
+            self.forward_steps_in_memory,
+            self.n_forward_steps,
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)

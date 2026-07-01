@@ -3,7 +3,11 @@ import datetime
 
 import torch
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    Correction,
+    CorrectionSequence,
+    CorrectorConfigABC,
+)
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
@@ -182,6 +186,28 @@ class IceBudgetCorrectionConfig:
         return {key: value.float() for key, value in out.items()}
 
 
+@dataclasses.dataclass
+class IceBudgetCorrection:
+    """Correction that reconstructs ice/snow state from budget terms.
+
+    Wraps ``IceBudgetCorrectionConfig`` so the corrector applies the operation
+    without reading config fields. ``forcing_data`` and ``corrector_state`` are
+    unused and passed through.
+    """
+
+    config: IceBudgetCorrectionConfig
+    timestep_seconds: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        return self.config(gen_data, input_data, self.timestep_seconds), corrector_state
+
+
 @CorrectorSelector.register("ice_corrector")
 @dataclasses.dataclass
 class IceCorrectorConfig(CorrectorConfigABC):
@@ -191,37 +217,25 @@ class IceCorrectorConfig(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> "IceCorrector":
-        return IceCorrector(
-            self,
+        return self._build(
             dataset_info.gridded_operations,
             dataset_info.timestep,
         )
 
+    def _build(
+        self,
+        gridded_operations: GriddedOperations,
+        timestep: datetime.timedelta,
+    ) -> "IceCorrector":
+        corrections: list[Correction] = []
+        if self.budget_correction is not None:
+            corrections.append(
+                IceBudgetCorrection(self.budget_correction, timestep.total_seconds())
+            )
+        return IceCorrector(corrections)
 
-class IceCorrector(CorrectorABC):
+
+class IceCorrector(CorrectionSequence):
     """
     Implement choice of sea ice corrector.
     """
-
-    def __init__(
-        self,
-        config: IceCorrectorConfig,
-        gridded_operations: GriddedOperations,
-        timestep: datetime.timedelta,
-    ):
-        self._config = config
-        self._gridded_operations = gridded_operations
-        self._timestep = timestep
-
-    def __call__(
-        self,
-        input_data: TensorMapping,
-        gen_data: TensorMapping,
-        forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        timestep = self._timestep.total_seconds()
-        if self._config.budget_correction is not None:
-            gen_data = self._config.budget_correction(gen_data, input_data, timestep)
-
-        return dict(gen_data), corrector_state
