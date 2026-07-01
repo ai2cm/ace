@@ -660,9 +660,13 @@ def _masked_regrid_3d_state(
         for v, da in seg_regridded.items():
             da = da.load()
             if v not in full_arrays:
-                full_arrays[v] = np.empty((n_time, *da.shape[1:]), dtype=da.dtype)
+                # float32: xesmf upcasts to float64, which would double the
+                # resident 3D state (5 fields x ~3.4GB) and OOM the pod during
+                # assembly. CMIP6 data is float32 and the pipeline stores
+                # float32, so cast here for both memory and storage fidelity.
+                full_arrays[v] = np.empty((n_time, *da.shape[1:]), dtype=np.float32)
                 template[v] = da  # for non-time coords/dims/attrs
-            full_arrays[v][sl] = da.values
+            full_arrays[v][sl] = da.values  # assignment casts to float32
         seg_valid = seg_valid.load()
         if valid_full is None:
             valid_full = np.empty((n_time, *seg_valid.shape[1:]), dtype=seg_valid.dtype)
