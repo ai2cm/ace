@@ -621,9 +621,14 @@ Expert 0 has 6 levels (finest→coarsest `[512,256,128,64,32,16]`); `level =
 
 | Run | tap | resolution / in_ch | Beaker |
 |---|---|---|---|
-| **tap4-2step** | offset 4 | 256² / 256ch | `01KWF8W37GNK20SX8PYXH8ECAA` |
-| **tap6-2step** | offset 6→5 | 512² / 128ch (finest, clamped) | `01KWF8WCQ0TAE8TGZ8337PMM0W` |
-| **tap2-gan3e3** | offset 2 (64²) + `gan_weight 3e-3` | 256ch, 3× GAN | `01KWF8WQ6CJ016D3FMPTW3TFP8` |
+| **tap4-2step** | offset 4 | 256² / 256ch | `01KWF8W37GNK20SX8PYXH8ECAA` (running; static-image PSD) |
+| **tap6-2step** | offset 6→5 | 512² / 128ch (finest, clamped) | `01KWFCEHZQ25E2TXQ8QJMFVEFN` (relaunched from `9dda320d6`) |
+| **tap2-gan3e3** | offset 2 (64²) + `gan_weight 3e-3` | 256ch, 3× GAN | `01KWFCEN0DNASSXG0J5DF6FVB8` (relaunched from `9dda320d6`) |
+
+tap6 & tap2-gan3e3 were relaunched from `9dda320d6` so they log the interactive
+`val/power_spectrum/<var>` chart (raw fig, like the evaluator) instead of a static
+Media image; their original submissions (`01KWF8WCQ…`, `01KWF8WQ6…`) were canceled
+before starting. tap4 kept running (static-image PSD; data present).
 
 What to check: (1) confirm the resolved tap in logs (`DMD2 discriminator:
 feature_index=… resolution=… in_channels=…`); (2) does finer-than-64² help PRMSL
