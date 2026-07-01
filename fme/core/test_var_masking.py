@@ -224,6 +224,50 @@ def test_group_members_dropped_together():
     assert saw_dropped and saw_present
 
 
+def test_masks_are_rank_independent(monkeypatch):
+    """Two ranks with the same distributed seed draw distinct mask sequences.
+
+    The per-rank RNG is seeded ``distributed_seed + rank``, so data-parallel
+    ranks drop distinct channels from their distinct local batches. Guards the
+    PR's data-parallel independence claim.
+    """
+    from fme.core.distributed import Distributed
+
+    dist = Distributed.get_instance()
+
+    def _sample_sequence(rank: int, trials: int) -> list[tuple[bool, ...]]:
+        monkeypatch.setattr(type(dist), "rank", property(lambda self: rank))
+        monkeypatch.setattr(dist, "get_seed", lambda: 0)
+        masking = _build(VariableMaskingConfig(default=UniformMaskingConfig(4)), 8)
+        return [
+            tuple(bool(x) for x in masking.sample_mask(DEVICE)[0].tolist())
+            for _ in range(trials)
+        ]
+
+    trials = 64
+    seq0 = _sample_sequence(rank=0, trials=trials)
+    seq1 = _sample_sequence(rank=1, trials=trials)
+    assert seq0 != seq1
+
+
+def test_masks_are_reproducible_for_fixed_seed_and_rank(monkeypatch):
+    """Same seed + rank replays the same mask sequence (distributed-seeded)."""
+    from fme.core.distributed import Distributed
+
+    dist = Distributed.get_instance()
+    monkeypatch.setattr(type(dist), "rank", property(lambda self: 3))
+    monkeypatch.setattr(dist, "get_seed", lambda: 7)
+
+    def _sample_sequence() -> list[tuple[bool, ...]]:
+        masking = _build(VariableMaskingConfig(default=UniformMaskingConfig(4)), 8)
+        return [
+            tuple(bool(x) for x in masking.sample_mask(DEVICE)[0].tolist())
+            for _ in range(32)
+        ]
+
+    assert _sample_sequence() == _sample_sequence()
+
+
 def test_multiple_groups_fire_independently():
     """Distinct groups drop on their own draws; a fired group drops all members."""
     n = 5
