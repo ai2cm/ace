@@ -38,7 +38,7 @@ from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
-from fme.core.var_masking import VariableMaskingConfig
+from fme.core.var_masking import MaskingGroupConfig, VariableMaskingConfig
 
 DEFAULT_IMG_SHAPE = (45, 90)
 
@@ -494,7 +494,10 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
                 normalization=get_network_and_loss_normalization_config(in_names),
                 input_dropout=VariableMaskingConfig(
                     max_masked_vars=2,
-                    variable_masking_rates={"a": 0.5, "b": 0.5},
+                    variable_masking_groups=[
+                        MaskingGroupConfig(variables=["a"], rate=0.5),
+                        MaskingGroupConfig(variables=["b"], rate=0.5),
+                    ],
                 ),
             )
         ),

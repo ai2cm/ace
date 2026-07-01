@@ -92,7 +92,7 @@ from fme.core.testing import (
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
-from fme.core.var_masking import VariableMaskingConfig
+from fme.core.var_masking import MaskingGroupConfig, VariableMaskingConfig
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -1122,7 +1122,11 @@ def test_input_dropout_same_mask_across_batch_and_ensemble():
         ["a", "b"],
         ["a"],
         VariableMaskingConfig(
-            max_masked_vars=1, variable_masking_rates={"a": 0.5, "b": 0.5}
+            max_masked_vars=1,
+            variable_masking_groups=[
+                MaskingGroupConfig(variables=["a"], rate=0.5),
+                MaskingGroupConfig(variables=["b"], rate=0.5),
+            ],
         ),
     )
     stepper = _get_train_stepper(
