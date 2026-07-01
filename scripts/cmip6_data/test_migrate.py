@@ -417,9 +417,9 @@ def test_migration_0_1_0_to_0_2_0_adds_log_co2(tmp_path: Path):
     stats = xr.open_dataset(str(stats_path))
     try:
         keys = set(stats.data_vars)
-        assert any(k.startswith("log_input4mips_co2__") for k in keys), (
-            f"expected log_input4mips_co2__* keys in stats.nc, got: {sorted(keys)}"
-        )
+        assert any(
+            k.startswith("log_input4mips_co2__") for k in keys
+        ), f"expected log_input4mips_co2__* keys in stats.nc, got: {sorted(keys)}"
         # Spot-check the values against a manual computation.
         co2_series = np.linspace(390.0, 395.0, 6).astype(np.float32)
         log_series = np.log(co2_series)
@@ -1946,12 +1946,12 @@ def test_integration_pipeline_then_migration(tmp_path: Path):
     stats = xr.open_dataset(str(stats_path))
     try:
         keys = set(stats.data_vars)
-        assert any(k.startswith("HGTsfc__") for k in keys), (
-            f"expected HGTsfc__* keys in stats.nc, got: {sorted(keys)}"
-        )
-        assert any(k.startswith("log_input4mips_co2__") for k in keys), (
-            f"expected log_input4mips_co2__* keys, got: {sorted(keys)}"
-        )
+        assert any(
+            k.startswith("HGTsfc__") for k in keys
+        ), f"expected HGTsfc__* keys in stats.nc, got: {sorted(keys)}"
+        assert any(
+            k.startswith("log_input4mips_co2__") for k in keys
+        ), f"expected log_input4mips_co2__* keys, got: {sorted(keys)}"
         # Spatially-uniform co2 → mean collapses to mean of the
         # log time series.
         log_series = np.log(co2_series)
