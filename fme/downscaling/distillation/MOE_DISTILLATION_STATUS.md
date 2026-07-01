@@ -319,9 +319,11 @@ findings:
    tails blow up (`tail_99.9999_PRATEsfc` 0.54@1%→**0.96**). Same disc-winning
    signature as dispatch-v2: `fake_score_loss` spikes late (0.017→0.032),
    `gan_loss_disc`↓ / `gan_loss_gen`↑.
-   - **Fine-scale precip IS healthy** (`spec_mae_lo/mid_PRATEsfc` → 0.02–0.04) —
-     the pivot fixed the *domain* problem; the collapse is a separate, untouched
-     **GAN-instability** problem.
+   - **Precip is good at lo/mid** (`spec_mae_lo/mid_PRATEsfc` → 0.02–0.04) — the
+     pivot fixed the *domain* problem. **[Corrected 2026-06-30: precip is NOT fully
+     healthy — it is under-powered at high-k (`spec_mae_hi_PRATEsfc` ~0.15–0.3 →
+     ~0.4–0.5× teacher), i.e. too smooth at fine scales too; see "Corrected
+     diagnosis".]**
    - **Checkpoint-selection trap (again):** the good model is mid-training
      (~78–88% for 2-step); `best_student.ckpt` (CRPS-selected) and the last
      checkpoint are spectrally collapsed. Pull a mid-training ckpt before judging.
@@ -477,11 +479,16 @@ earlier interpretation (`spec_mae = |log(student/teacher)|` carries no sign; the
   - *Collapse compounds it.* When the disc wins, the generator gradient saturates →
     even the coarse bands it could shape stop improving.
 - **Unifies smoothness and tails** (supersedes the earlier "spectra and extremes are
-  decoupled"): too smooth = under-dispersed = high-k variance deficit = the
-  wind/precip **tail** under-prediction (extremes are local high-frequency features).
-  Same root cause. **PRMSL is the exception** — its tails read ~1.0 *despite* the
-  smoothness because its true hi-k energy is ~0 (nothing to miss there); the deficit
-  bites the broadband fields (precip, winds).
+  decoupled"): too smooth = under-dispersed = high-k variance deficit → both
+  **under-powered high-k spectra** AND the **tail** under-prediction (extremes are
+  local high-frequency features). Same root cause. **This includes precip** — an
+  earlier overstatement that "precip spectra are healthy" was only true at lo/mid;
+  precip is **under-powered at high-k** (`spec_mae_hi_PRATEsfc` ~0.15–0.3 → ~0.4–0.5×
+  teacher), which is *more* consequential than for PRMSL because precip is broadband
+  (real fine energy to miss) and it directly drives the precip tail deficit. **PRMSL
+  is the exception** — its tails/hi-k read ~fine only because its true hi-k energy ≈ 0
+  (nothing to miss); its real damage is coarse-band + the now-fixed unmeasured deep
+  lows. The deficit itself is universal (all broadband fields too smooth at fine scale).
 
 **Relevance to experiments (updated):**
 - The **finer / decoder / output-space critic** (tap1/tap2, decoder-tap, per-variable
