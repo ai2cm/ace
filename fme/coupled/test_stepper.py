@@ -30,7 +30,7 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
-from fme.core.var_masking import VariableMaskingConfig
+from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
@@ -1380,7 +1380,7 @@ def test_coupled_training_with_input_dropout_runs():
         n_forward_times_ocean=1,
         n_forward_times_atmosphere=2,
         n_samples=2,
-        atmosphere_input_dropout=VariableMaskingConfig(max_masked_vars=1),
+        atmosphere_input_dropout=VariableMaskingConfig(default=UniformMaskingConfig(1)),
     )
     output = train_stepper.train_on_batch(
         data=coupled_data.data,

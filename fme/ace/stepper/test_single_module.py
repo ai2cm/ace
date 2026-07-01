@@ -92,7 +92,12 @@ from fme.core.testing import (
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
-from fme.core.var_masking import MaskingGroupConfig, VariableMaskingConfig
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -1122,10 +1127,14 @@ def test_input_dropout_same_mask_across_batch_and_ensemble():
         ["a", "b"],
         ["a"],
         VariableMaskingConfig(
-            max_masked_vars=1,
-            variable_masking_groups=[
-                MaskingGroupConfig(variables=["a"], rate=0.5),
-                MaskingGroupConfig(variables=["b"], rate=0.5),
+            default=UniformMaskingConfig(1),
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["a"], masking=BernoulliMaskingConfig(rate=0.5)
+                ),
+                MaskingGroupConfig(
+                    variables=["b"], masking=BernoulliMaskingConfig(rate=0.5)
+                ),
             ],
         ),
     )
@@ -1167,7 +1176,7 @@ def test_input_dropout_mask_sampled_per_forward_step():
     """
     n_base, n_ensemble, n_steps = 3, 1, 3
     config = _input_dropout_stepper_config(
-        ["a"], ["a"], VariableMaskingConfig(max_masked_vars=1)
+        ["a"], ["a"], VariableMaskingConfig(default=UniformMaskingConfig(1))
     )
     stepper = _get_train_stepper(
         config, n_ensemble=n_ensemble, loss=StepLossConfig(type="MSE")
@@ -1223,7 +1232,7 @@ def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
             data, optimization=NullOptimization()
         ).gen_data
 
-    out_dropout = _run(VariableMaskingConfig(max_masked_vars=1))
+    out_dropout = _run(VariableMaskingConfig(default=UniformMaskingConfig(1)))
     out_none = _run(None)
     for name in out_none:
         torch.testing.assert_close(out_dropout[name], out_none[name])
@@ -1246,7 +1255,7 @@ def test_input_dropout_inactive_in_inference():
         output, _ = stepper.predict(input_data, forcing_data)
         return output.data
 
-    out_dropout = _run(VariableMaskingConfig(max_masked_vars=1))
+    out_dropout = _run(VariableMaskingConfig(default=UniformMaskingConfig(1)))
     out_none = _run(None)
     for name in out_none:
         torch.testing.assert_close(out_dropout[name], out_none[name])

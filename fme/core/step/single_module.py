@@ -37,7 +37,7 @@ from fme.core.step.secondary_decoder import (
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.var_masking import VariableMaskingConfig
+from fme.core.var_masking import VariableMasking, VariableMaskingConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -292,10 +292,14 @@ class SingleModuleStep(StepABC):
         packed_in_names = (
             list(config.in_names) + self._global_mean_removal.extra_channel_names
         )
-        if config.input_dropout is not None:
-            # Fail loud on a typo'd group variable name; packed_in_names is the
-            # full maskable set (inputs plus GMR extra sentinels).
-            config.input_dropout.validate_names(packed_in_names)
+        # Build the runtime masking object once; build raises loud on a typo'd
+        # group variable name (packed_in_names is the full maskable set: inputs
+        # plus GMR extra sentinels).
+        self._input_masking: VariableMasking | None = (
+            config.input_dropout.build(packed_in_names)
+            if config.input_dropout is not None
+            else None
+        )
         n_in_channels = len(packed_in_names)
         if config.include_channel_mask_inputs:
             n_in_channels *= 2
@@ -447,12 +451,12 @@ class SingleModuleStep(StepABC):
         unconfigured or the module is in eval mode, so inference and
         validation batches stay inert.
         """
-        if self._config.input_dropout is None:
+        if self._input_masking is None:
             return None
         if not self.module.torch_module.training:
             return None
         names = self.in_packer.names
-        mask = self._config.input_dropout.sample_mask(names, get_device())
+        mask = self._input_masking.sample_mask(get_device())
         # Broadcast so spatial-group tiles agree; no-op for non-distributed
         mask = Distributed.get_instance().broadcast_spatial(mask)
         return {name: mask[:, i] for i, name in enumerate(names)}

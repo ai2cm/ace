@@ -38,7 +38,12 @@ from fme.core.step.single_module import (
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.var_masking import VariableMaskingConfig
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -1611,10 +1616,12 @@ def _inject_input_dropout_mask(
 
 def test_input_dropout_unknown_group_variable_raises_at_build():
     """A typo'd group variable fails loudly when the Step is built."""
-    from fme.core.var_masking import MaskingGroupConfig
-
     bad = VariableMaskingConfig(
-        variable_masking_groups=[MaskingGroupConfig(variables=["typo"], rate=0.5)]
+        override_groups=[
+            MaskingGroupConfig(
+                variables=["typo"], masking=BernoulliMaskingConfig(rate=0.5)
+            )
+        ]
     )
     with pytest.raises(ValueError, match="not in packed input channels"):
         _make_single_module_step(bad)
@@ -1623,11 +1630,14 @@ def test_input_dropout_unknown_group_variable_raises_at_build():
 def test_input_dropout_group_variable_accepts_gmr_extra_sentinel():
     """A group may target a GMR extra sentinel; build must not reject it."""
     from fme.core.step.global_mean_removal import _extra_channel_name
-    from fme.core.var_masking import MaskingGroupConfig
 
     sentinel = _extra_channel_name("forcing_shared")
     config = VariableMaskingConfig(
-        variable_masking_groups=[MaskingGroupConfig(variables=[sentinel], rate=0.5)]
+        override_groups=[
+            MaskingGroupConfig(
+                variables=[sentinel], masking=BernoulliMaskingConfig(rate=0.5)
+            )
+        ]
     )
     _make_gmr_input_dropout_step(config, include_channel_mask_inputs=False)
 
@@ -1638,7 +1648,9 @@ def test_input_dropout_mask_zeros_inputs():
     A full-drop mask must change outputs versus no mask; an all-present mask
     must reproduce the no-mask output exactly.
     """
-    step = _make_single_module_step(VariableMaskingConfig(max_masked_vars=1))
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1))
+    )
     step.module.torch_module.eval()  # module determinism; late dropout still applies
     n_samples = 4
     input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
@@ -1676,7 +1688,8 @@ def test_input_dropout_mask_indicator_reflects_combined_presence():
     undropped channel must have indicator 1.
     """
     step = _make_single_module_step(
-        VariableMaskingConfig(max_masked_vars=1), include_channel_mask_inputs=True
+        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        include_channel_mask_inputs=True,
     )
     step.module.torch_module.eval()
     n_samples = 2
@@ -1724,7 +1737,8 @@ def test_input_dropout_mask_and_combine_with_data_mask():
     Guards against fallback-priority resurrecting a genuinely-missing variable.
     """
     step = _make_single_module_step(
-        VariableMaskingConfig(max_masked_vars=1), include_channel_mask_inputs=True
+        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        include_channel_mask_inputs=True,
     )
     step.module.torch_module.eval()
     n_samples = 2
@@ -1768,7 +1782,8 @@ def test_input_dropout_mask_and_combine_with_data_mask():
 def test_input_dropout_mask_gmr_extras_independently_maskable():
     """GMR extra channels are dropped independently; the indicator agrees."""
     step = _make_gmr_input_dropout_step(
-        VariableMaskingConfig(max_masked_vars=1), include_channel_mask_inputs=True
+        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        include_channel_mask_inputs=True,
     )
     step.module.torch_module.eval()
     names = step.in_packer.names
@@ -1819,7 +1834,9 @@ def test_input_dropout_mask_gmr_extras_independently_maskable():
 
 
 def test_draw_input_dropout_mask_shape_and_dtype():
-    step = _make_single_module_step(VariableMaskingConfig(max_masked_vars=1))
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1))
+    )
     step.module.torch_module.train()
     mask = step._draw_input_dropout_mask()
     assert mask is not None
@@ -1837,7 +1854,9 @@ def test_draw_input_dropout_mask_none_when_unset():
 
 
 def test_draw_input_dropout_mask_none_in_eval_mode():
-    step = _make_single_module_step(VariableMaskingConfig(max_masked_vars=1))
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1))
+    )
     step.module.torch_module.eval()
     # configured, but eval mode disables dropout sampling
     assert step._draw_input_dropout_mask() is None
@@ -1845,7 +1864,8 @@ def test_draw_input_dropout_mask_none_in_eval_mode():
 
 def test_draw_input_dropout_mask_includes_gmr_extras():
     step = _make_gmr_input_dropout_step(
-        VariableMaskingConfig(max_masked_vars=1), include_channel_mask_inputs=False
+        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        include_channel_mask_inputs=False,
     )
     step.module.torch_module.train()
     mask = step._draw_input_dropout_mask()
@@ -1858,7 +1878,8 @@ def test_draw_input_dropout_mask_includes_gmr_extras():
 def test_input_dropout_mask_not_passed_to_global_mean_removal():
     """Synthetic dropout is applied late (after GMR); GMR sees only data_mask."""
     step = _make_gmr_input_dropout_step(
-        VariableMaskingConfig(max_masked_vars=2), include_channel_mask_inputs=False
+        VariableMaskingConfig(default=UniformMaskingConfig(2)),
+        include_channel_mask_inputs=False,
     )
     step.module.torch_module.eval()  # disable any in-step sampling
     n_samples = 2
