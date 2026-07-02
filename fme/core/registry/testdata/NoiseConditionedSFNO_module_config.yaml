@@ -33,6 +33,8 @@ separable: false
 spectral_layers: 1
 spectral_lora_alpha: null
 spectral_lora_rank: 0
+spectral_noise_shaping: true
+spectral_noise_shaping_init_amplitude: 0.001
 spectral_ratio: 1.0
 spectral_transform: sht
 use_mlp: true
