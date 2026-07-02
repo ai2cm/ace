@@ -17,6 +17,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallStepConfig
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
@@ -33,7 +34,7 @@ TEST_CONFIG = MultiCallConfig(
 
 def _step(args: StepArgs, wrapper: Callable[[nn.Module], nn.Module] = lambda x: x):
     output = {k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names}
-    return output, args.stepper_state
+    return StepOutput(output=output, stepper_state=args.stepper_state)
 
 
 def test_multi_call_names():
@@ -57,14 +58,14 @@ def test_multi_call():
     initial_condition = {"temperature": torch.ones(shape)}
     co2_data = {"CO2": torch.full(shape, co2_value)}
 
-    output, _ = multi_call.step(
+    output = multi_call.step(
         args=StepArgs(
             input=initial_condition | co2_data,
             next_step_input_data={},
             labels=None,
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     assert set(output) == set(config.names)
     for name in config.output_names:
