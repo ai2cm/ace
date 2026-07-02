@@ -35,7 +35,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: &id002
     step_means:
     - step: 5
@@ -133,7 +133,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id002
 - name: 10year_insample_ensemble_varying_co2
   weight: 1.0
@@ -158,7 +158,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id002
 - name: 10year_insample_ensemble_constant_co2
   weight: 1.0
@@ -183,7 +183,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id002
 - name: weather_1994_ensemble_varying_co2
   weight: 0.0
@@ -208,7 +208,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: &id003
     step_means:
     - step: 5
@@ -269,7 +269,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id003
 - name: long_43year_ensemble_varying_co2
   weight: 0.0
@@ -294,7 +294,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: &id004
     step_means: []
     ensembles: []
@@ -341,7 +341,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id004
 logging:
   log_to_screen: true
@@ -373,7 +373,7 @@ train_loader:
 validation:
   loader:
     batch_size: 32
-    num_data_workers: 8
+    num_data_workers: 4
     prefetch_factor: 2
     time_buffer: 16
     dataset:
@@ -561,50 +561,11 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 0
+          max_masked_vars: 44
+          probability: 0.2
         override_groups:
         - variables:
-          - air_temperature_0
-          - air_temperature_1
-          - air_temperature_2
-          - air_temperature_3
-          - air_temperature_4
-          - air_temperature_5
-          - air_temperature_6
-          - air_temperature_7
+          - global_mean_co2
           masking:
-            rate: 0.2
-        - variables:
-          - specific_total_water_0
-          - specific_total_water_1
-          - specific_total_water_2
-          - specific_total_water_3
-          - specific_total_water_4
-          - specific_total_water_5
-          - specific_total_water_6
-          - specific_total_water_7
-          masking:
-            rate: 0.2
-        - variables:
-          - eastward_wind_0
-          - eastward_wind_1
-          - eastward_wind_2
-          - eastward_wind_3
-          - eastward_wind_4
-          - eastward_wind_5
-          - eastward_wind_6
-          - eastward_wind_7
-          masking:
-            rate: 0.2
-        - variables:
-          - northward_wind_0
-          - northward_wind_1
-          - northward_wind_2
-          - northward_wind_3
-          - northward_wind_4
-          - northward_wind_5
-          - northward_wind_6
-          - northward_wind_7
-          masking:
-            rate: 0.2
+            rate: 0.9
       include_channel_mask_inputs: true

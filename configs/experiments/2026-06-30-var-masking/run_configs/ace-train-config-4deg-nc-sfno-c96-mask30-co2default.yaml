@@ -35,7 +35,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: &id002
     step_means:
     - step: 5
@@ -133,7 +133,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id002
 - name: 10year_insample_ensemble_varying_co2
   weight: 1.0
@@ -158,7 +158,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id002
 - name: 10year_insample_ensemble_constant_co2
   weight: 1.0
@@ -183,7 +183,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id002
 - name: weather_1994_ensemble_varying_co2
   weight: 0.0
@@ -208,7 +208,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: &id003
     step_means:
     - step: 5
@@ -269,7 +269,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id003
 - name: long_43year_ensemble_varying_co2
   weight: 0.0
@@ -294,7 +294,7 @@ inference:
       data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
       file_pattern: ic_0001.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: &id004
     step_means: []
     ensembles: []
@@ -341,7 +341,7 @@ inference:
       data_path: /climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
       file_pattern: AMIP-constant-CO2.zarr
       engine: zarr
-    num_data_workers: 8
+    num_data_workers: 4
   aggregator: *id004
 logging:
   log_to_screen: true
@@ -373,7 +373,7 @@ train_loader:
 validation:
   loader:
     batch_size: 32
-    num_data_workers: 8
+    num_data_workers: 4
     prefetch_factor: 2
     time_buffer: 16
     dataset:
@@ -561,5 +561,5 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 5
+          max_masked_vars: 30
       include_channel_mask_inputs: true
