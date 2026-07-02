@@ -542,6 +542,7 @@ class BestStudentCheckpointCallback:
         student: AceDiffusionTeacher,
         condition: torch.Tensor,
         teacher_phys: dict[str, torch.Tensor],
+        base_norm: torch.Tensor | None,
         B: int,
         H: int,
         W: int,
@@ -552,6 +553,16 @@ class BestStudentCheckpointCallback:
         Dispatches on ``self._validation_mode``.  ``student._ace_module`` is a
         ``UNetDiffusionModule`` wrapping ``EDMPrecond`` whose forward signature
         is ``(x, condition, sigma)`` — the denoiser the sampling helpers expect.
+
+        For a **residual** teacher (``predict_residual=True``) the student net
+        predicts ``fine − interpolate(coarse)`` in normalized space, so
+        ``base_norm`` (the interpolated-coarse base, ``(B, C_out, H, W)``) must
+        be **added back** to recover the full field before comparison — mirroring
+        ``DiffusionModel.postprocess_generated``. It is ``None`` for
+        non-residual teachers. For ``lo_renoise`` the base is also **subtracted**
+        from the target before re-noising, since the student operates on
+        ``residual + noise`` (its training-input distribution), not ``full +
+        noise``.
         """
         from fme.downscaling.distillation.student_sampling import (
             sample_student_from_noise,
@@ -560,7 +571,9 @@ class BestStudentCheckpointCallback:
 
         if self._validation_mode == "lo_renoise":
             target_norm = self._packed_target_norm(teacher_phys)
-            return sample_student_lo_renoise(
+            if base_norm is not None:
+                target_norm = target_norm - base_norm.unsqueeze(1)  # → residual
+            out = sample_student_lo_renoise(
                 student._ace_module,
                 condition,
                 target_norm,
@@ -568,15 +581,52 @@ class BestStudentCheckpointCallback:
                 sigma_min=student._sigma_min,
                 sigma_max=student._sigma_max,
             )
-        return sample_student_from_noise(
-            student._ace_module,
-            condition,
-            c_out=C_out,
-            n_samples=self._n_student_samples,
-            num_steps=self._student_sample_steps,
-            sigma_min=student._sigma_min,
-            sigma_max=student._sigma_max,
+        else:
+            out = sample_student_from_noise(
+                student._ace_module,
+                condition,
+                c_out=C_out,
+                n_samples=self._n_student_samples,
+                num_steps=self._student_sample_steps,
+                sigma_min=student._sigma_min,
+                sigma_max=student._sigma_max,
+            )
+        if base_norm is not None:
+            out = out + base_norm.unsqueeze(1)  # residual → full field
+        return out
+
+    def _base_prediction_norm(
+        self, batch, keep_mask: np.ndarray
+    ) -> torch.Tensor | None:
+        """Interpolated-coarse base for a residual teacher, in normalized space.
+
+        Returns ``(B_kept, C_out, H_fine, W_fine)`` = ``interpolate(pack(
+        coarse_normalizer.normalize(coarse_out_vars)), downscale_factor)`` —
+        exactly the base ``DiffusionModel`` adds back at generation. Returns
+        ``None`` when the teacher is not a residual model (nothing to add).
+        ``keep_mask`` subsets the batch to times present in the teacher zarr,
+        matching the condition/output subsetting.
+        """
+        model = self._teacher_model
+        cfg = getattr(model, "config", None)
+        if cfg is None or not getattr(cfg, "predict_residual", False):
+            return None
+        from fme.downscaling.metrics_and_maths import interpolate
+
+        names = model.out_packer.names
+        coarse = batch.data
+        keep_idx = (
+            None if keep_mask.all() else torch.from_numpy(np.flatnonzero(keep_mask))
         )
+        phys: dict[str, torch.Tensor] = {}
+        for k in names:
+            v = coarse[k]
+            if keep_idx is not None:
+                v = v.index_select(0, keep_idx.to(v.device))
+            phys[k] = v
+        norm = model.normalizer.coarse.normalize(phys)
+        packed = model.out_packer.pack(norm, axis=-3)  # (B, C_out, H_c, W_c)
+        return interpolate(packed, model.downscale_factor)  # (B, C_out, H, W)
 
     def _packed_target_norm(
         self, teacher_phys: dict[str, torch.Tensor]
@@ -759,10 +809,15 @@ class BestStudentCheckpointCallback:
                     condition.device, dtype=torch.float32
                 )
 
+            # Interpolated-coarse base to add back for a residual teacher
+            # (None otherwise); computed before sampling so lo_renoise can also
+            # subtract it from the re-noise target.
+            base_norm = self._base_prediction_norm(batch, keep_mask)
+
             # Produce the student output ensemble (B, n, C_out, H, W) per the
             # configured validation mode (see student_sampling).
             output_norm = self._sample_student_output(
-                student, condition, teacher_phys, B, H, W, C_out
+                student, condition, teacher_phys, base_norm, B, H, W, C_out
             )
 
             # Unpack channel dim (axis=-3) then denormalize → physical units.

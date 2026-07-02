@@ -10,6 +10,7 @@ normalizer and for the student denoiser.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 
@@ -161,12 +162,60 @@ def test_sample_student_output_lo_renoise_shape():
         student,  # type: ignore[arg-type]  # fake exposes the attrs used
         condition,
         teacher_phys,
+        None,  # base_norm (non-residual)
         B,
         H,
         W,
         C_out,
     )
     assert out.shape == (B, 2, C_out, H, W)
+
+
+def test_sample_student_output_adds_residual_base():
+    """For a residual teacher the interpolated-coarse base is added back to the
+    student's (residual) output; passing base=0 vs base=const shifts the output
+    by exactly that constant."""
+    tm = _FakeTeacherModel(["a", "b"])
+    cb = _make_callback(tm, validation_mode="from_noise", n_student_samples=2)
+    C_out, C_cond = 2, 3
+    net = _TinyNet(C_out, C_cond).eval()
+    student = _FakeStudent(net, 0.002, 80.0)
+    B, H, W = 1, 4, 4
+    torch.manual_seed(0)
+    condition = torch.randn(B, C_cond, H, W)
+
+    torch.manual_seed(1)
+    out_zero = cb._sample_student_output(
+        student,  # type: ignore[arg-type]
+        condition,
+        {},
+        torch.zeros(B, C_out, H, W),
+        B,
+        H,
+        W,
+        C_out,
+    )
+    base = torch.full((B, C_out, H, W), 5.0)
+    torch.manual_seed(1)
+    out_base = cb._sample_student_output(
+        student,  # type: ignore[arg-type]
+        condition,
+        {},
+        base,
+        B,
+        H,
+        W,
+        C_out,
+    )
+    # Residual output identical; base add-back shifts every sample by +5.
+    torch.testing.assert_close(out_base - out_zero, torch.full_like(out_base, 5.0))
+
+
+def test_base_prediction_norm_none_for_nonresidual():
+    """No base add-back when the teacher isn't a residual model."""
+    tm = _FakeTeacherModel(["a"])  # _FakeTeacherModel has no .config
+    cb = _make_callback(tm)
+    assert cb._base_prediction_norm(object(), np.array([True])) is None
 
 
 def test_sample_student_output_from_noise_shape():
@@ -184,6 +233,7 @@ def test_sample_student_output_from_noise_shape():
         student,  # type: ignore[arg-type]  # fake exposes the attrs used
         condition,
         {},
+        None,  # base_norm (non-residual)
         B,
         H,
         W,
