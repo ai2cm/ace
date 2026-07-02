@@ -324,6 +324,14 @@ interpolated-coarse base back** (`models.py::postprocess_generated`). The audit 
   with tap/GAN (the real fine-scale residual). `lo_renoise` had a second bug: it built
   the re-noise state from the **full** target, but the student expects `residual+noise`.
 
+**Why it went undetected:** the `train_media` panels show the student's *normalized
+residual* output (not the full field), per-channel min-max-stretched — and the paired
+`data/real` is *also* the residual (the `teacher.sample()` target is residual). So
+student-vs-real media were apples-to-apples (both residuals) and looked fine; the only
+place a residual meets a *full field* is the callback vs the val zarr — the one buggy
+comparison. The media looking fine actually *confirms* the student produces a correct
+residual; the bug is purely validation-side.
+
 **Training and deployment were already correct** — training is residual-consistent
 (teacher targets, VSD, GAN all residual), and `save_student_checkpoint` preserves
 `predict_residual=True`, so `DiffusionModel.generate` adds the base at inference. **The
