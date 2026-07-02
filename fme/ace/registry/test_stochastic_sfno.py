@@ -4,7 +4,11 @@ import pytest
 import torch
 from torch_harmonics import InverseRealSHT
 
-from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO, isotropic_noise
+from fme.ace.registry.stochastic_sfno import (
+    NoiseConditionedSFNO,
+    SpectralNoiseShaping,
+    isotropic_noise,
+)
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context
 
@@ -88,3 +92,69 @@ def test_noise_conditioned_sfno_onehot_labels():
     args, _ = mock_sfno.call_args
     context = args[1]
     assert context.labels.shape == (batch_size, n_labels)
+
+
+def test_spectral_noise_shaping_module():
+    """Shape, stochasticity, amplitude scaling, and gradient flow."""
+    torch.manual_seed(0)
+    nlat, nlon = 16, 32
+    n_channels = 3
+    init_amplitude = 1e-3
+    isht = InverseRealSHT(nlat, nlon, grid="legendre-gauss").to(get_device())
+    shaping = SpectralNoiseShaping(
+        n_channels=n_channels,
+        lmax=isht.lmax,
+        mmax=isht.mmax,
+        isht=isht,
+        init_amplitude=init_amplitude,
+    ).to(get_device())
+    n_batch = 200
+    out1 = shaping(n_batch, get_device())
+    out2 = shaping(n_batch, get_device())
+    assert out1.shape == (n_batch, n_channels, nlat, nlon)
+    assert not torch.allclose(out1, out2)  # stochastic
+    # flat amplitude a -> grid std ~ a (isotropic_noise normalization)
+    torch.testing.assert_close(
+        out1.std(),
+        torch.tensor(init_amplitude, device=out1.device),
+        rtol=0.1,
+        atol=0.0,
+    )
+    loss = out1.pow(2).mean()
+    loss.backward()
+    assert shaping.amplitude.grad is not None
+    assert torch.any(shaping.amplitude.grad != 0)
+
+
+def test_noise_conditioned_model_applies_spectral_noise_shaping():
+    """With shaping enabled the wrapped model's output gains the perturbation."""
+    torch.manual_seed(0)
+    nlat, nlon = 16, 32
+    n_channels = 3
+    isht = InverseRealSHT(nlat, nlon, grid="legendre-gauss").to(get_device())
+    shaping = SpectralNoiseShaping(
+        n_channels=n_channels,
+        lmax=isht.lmax,
+        mmax=isht.mmax,
+        isht=isht,
+        init_amplitude=1e-2,
+    ).to(get_device())
+    batch_size = 2
+    zero_output = torch.zeros(batch_size, n_channels, nlat, nlon, device=get_device())
+    mock_sfno = unittest.mock.MagicMock(return_value=zero_output)
+    model = NoiseConditionedSFNO(
+        conditional_model=mock_sfno,
+        img_shape=(nlat, nlon),
+        embed_dim_noise=4,
+        spectral_noise_shaping=shaping,
+    )
+    x = torch.randn(batch_size, n_channels, nlat, nlon, device=get_device())
+    out = model(x)
+    assert out.shape == zero_output.shape
+    assert torch.any(out != 0)  # the perturbation was added
+    without = NoiseConditionedSFNO(
+        conditional_model=mock_sfno,
+        img_shape=(nlat, nlon),
+        embed_dim_noise=4,
+    )(x)
+    assert torch.all(without == 0)

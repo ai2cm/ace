@@ -47,6 +47,56 @@ def isotropic_noise(
     return isht(alm)
 
 
+class SpectralNoiseShaping(torch.nn.Module):
+    """Stochastic spectral output perturbation with learnable per-degree amplitude.
+
+    Draws white spherical-harmonic noise (the ``isotropic_noise`` normalization,
+    so unit amplitude would give a unit-variance grid field), scales each
+    degree l's coefficients by a learnable per-(channel, degree) amplitude, and
+    inverse-transforms to grid space. Added to the network output so ensemble
+    members carry stochastic structure with directly-parameterized per-scale
+    amplitude even where the deterministic pathway is smooth; the amplitudes
+    are trained end-to-end by the ensemble loss's dispersion term, a far more
+    direct gradient pathway to calibrated per-scale variance than the noise
+    embedding -> filter co-adaptation.
+    """
+
+    def __init__(
+        self,
+        n_channels: int,
+        lmax: int,
+        mmax: int,
+        isht: Callable[[torch.Tensor], torch.Tensor],
+        init_amplitude: float = 1e-3,
+    ):
+        super().__init__()
+        self.n_channels = n_channels
+        self._lmax = lmax
+        self._mmax = mmax
+        self._isht = isht
+        self.amplitude = torch.nn.Parameter(
+            torch.full((n_channels, lmax), float(init_amplitude))
+        )
+
+    def forward(self, n_batch: int, device: torch.device) -> torch.Tensor:
+        coeff_shape = (n_batch, self.n_channels, self._lmax, self._mmax)
+        real = randn(coeff_shape, dtype=torch.float32, device=device)
+        imag = randn(coeff_shape, dtype=torch.float32, device=device)
+        imag[..., :, 0] = 0.0  # m = 0 => purely real
+        sqrt2 = math.sqrt(2.0)
+        real[..., :, 1:] /= sqrt2
+        imag[..., :, 1:] /= sqrt2
+        scale = math.sqrt(4.0 * math.pi) / self._lmax
+        alm = (real + 1j * imag) * scale
+        # learnable per-(channel, degree) amplitude, broadcast over order m
+        alm = alm * self.amplitude[None, :, :, None]
+        l_slice, m_slice = Distributed.get_instance().get_local_slices(
+            (self._lmax, self._mmax)
+        )
+        alm = alm[..., l_slice, m_slice]
+        return self._isht(alm)
+
+
 class NoiseConditionedModel(torch.nn.Module):
     """Wraps a context-based module with noise and optional label conditioning.
 
@@ -82,6 +132,7 @@ class NoiseConditionedModel(torch.nn.Module):
         inverse_sht: Callable[[torch.Tensor], torch.Tensor] | None = None,
         lmax: int = 0,
         mmax: int = 0,
+        spectral_noise_shaping: SpectralNoiseShaping | None = None,
     ):
         super().__init__()
         self.conditional_model = conditional_model
@@ -90,6 +141,7 @@ class NoiseConditionedModel(torch.nn.Module):
         self._inverse_sht = inverse_sht
         self._lmax = lmax
         self._mmax = mmax
+        self.spectral_noise_shaping = spectral_noise_shaping
 
         if label_embed_dim > 0 and n_labels == 0:
             raise ValueError("label_embed_dim > 0 requires n_labels > 0")
@@ -161,7 +213,7 @@ class NoiseConditionedModel(torch.nn.Module):
         else:
             embedding_pos = None
 
-        return self.conditional_model(
+        out = self.conditional_model(
             x,
             Context(
                 embedding_scalar=None,
@@ -170,6 +222,9 @@ class NoiseConditionedModel(torch.nn.Module):
                 noise=noise,
             ),
         )
+        if self.spectral_noise_shaping is not None:
+            out = out + self.spectral_noise_shaping(out.shape[0], out.device)
+        return out
 
 
 # Backward-compatible alias
@@ -261,6 +316,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             within the observed envelope (no-op when it already does).
             Bounds the global-mean of the latent the transformer blocks see
             at inference to the range observed in training.
+        spectral_noise_shaping: If True, add a stochastic spectral
+            perturbation with learnable per-(channel, degree) amplitude to
+            the model output, giving the loss a direct, high-leverage
+            parameterization of per-scale stochastic variance.
+        spectral_noise_shaping_init_amplitude: Initial value of the learnable
+            per-degree noise amplitude (in normalized-output units).
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -302,6 +363,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     filter_preserves_global_mean: bool = False
     spectral_ratio: float = 1.0
     clip_latent_global_means: bool = False
+    spectral_noise_shaping: bool = False
+    spectral_noise_shaping_init_amplitude: float = 1e-3
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -385,6 +448,16 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             inverse_sht = None
             lmax = 0
             mmax = 0
+        if self.spectral_noise_shaping:
+            noise_shaping: SpectralNoiseShaping | None = SpectralNoiseShaping(
+                n_channels=n_out_channels,
+                lmax=sfno_net.itrans_up.lmax,
+                mmax=sfno_net.itrans_up.mmax,
+                isht=sfno_net.itrans_up,
+                init_amplitude=self.spectral_noise_shaping_init_amplitude,
+            )
+        else:
+            noise_shaping = None
         return NoiseConditionedModel(
             sfno_net,
             embed_dim_noise=self.noise_embed_dim,
@@ -395,4 +468,5 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             inverse_sht=inverse_sht,
             lmax=lmax,
             mmax=mmax,
+            spectral_noise_shaping=noise_shaping,
         )

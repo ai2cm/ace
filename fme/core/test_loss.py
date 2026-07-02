@@ -15,6 +15,7 @@ from fme.core.loss import (
     LossConfig,
     LossOutput,
     LpLoss,
+    SpectralPowerCRPSLoss,
     StandardLoss,
     StepLossConfig,
     VariableWeightingLoss,
@@ -934,3 +935,165 @@ def test_ensemble_loss_with_whitening_builds_and_runs():
     out = loss(x, y)
     assert all(isinstance(c, LossComponent) for c in out)
     assert torch.isfinite(_components_total(out))
+
+
+def test_energy_score_whitening_exponent_partial():
+    """gamma < 1 compresses the factor's dynamic range: ratio_gamma = ratio^gamma."""
+    DEVICE = get_device()
+    n_l = n_m = 16
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).unsqueeze(-1)
+    y_hat = (amp * valid).to(torch.cfloat)[None, None]  # (1, 1, L, M)
+    full = (
+        EnergyScoreLoss(sht=lambda z: z, spectral_whitening="per_sample")
+        ._spectral_whitening_factor(y_hat)
+        .reshape(-1)
+    )
+    half = (
+        EnergyScoreLoss(
+            sht=lambda z: z,
+            spectral_whitening="per_sample",
+            whitening_exponent=0.5,
+        )
+        ._spectral_whitening_factor(y_hat)
+        .reshape(-1)
+    )
+    ratio_full = full.max() / full.min()
+    ratio_half = half.max() / half.min()
+    # the per-(sample, channel) normalization preserves the max/min ratio,
+    # so partial whitening's ratio is the full ratio to the gamma power
+    torch.testing.assert_close(ratio_half, ratio_full**0.5, rtol=1e-4, atol=1e-5)
+    assert torch.all(half[1:] >= half[:-1] - 1e-5)  # still boosts small scales
+
+
+def test_energy_score_whitening_max_ratio_caps():
+    """whitening_max_ratio bounds the factor's max/min ratio across degrees."""
+    DEVICE = get_device()
+    n_l = n_m = 16
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float()) ** 2).unsqueeze(-1)
+    y_hat = (amp * valid).to(torch.cfloat)[None, None]
+    uncapped = (
+        EnergyScoreLoss(sht=lambda z: z, spectral_whitening="per_sample")
+        ._spectral_whitening_factor(y_hat)
+        .reshape(-1)
+    )
+    assert uncapped.max() / uncapped.min() > 10.0  # steep spectrum: cap will bind
+    capped = (
+        EnergyScoreLoss(
+            sht=lambda z: z,
+            spectral_whitening="per_sample",
+            whitening_max_ratio=10.0,
+        )
+        ._spectral_whitening_factor(y_hat)
+        .reshape(-1)
+    )
+    assert capped.max() / capped.min() <= 10.0 * (1 + 1e-5)
+
+
+def test_energy_score_whitening_param_validation():
+    with pytest.raises(ValueError):
+        EnergyScoreLoss(
+            sht=lambda z: z, spectral_whitening="per_sample", whitening_exponent=0.0
+        )
+    with pytest.raises(ValueError):
+        EnergyScoreLoss(
+            sht=lambda z: z, spectral_whitening="per_sample", whitening_exponent=1.5
+        )
+    with pytest.raises(ValueError):
+        EnergyScoreLoss(
+            sht=lambda z: z, spectral_whitening="per_sample", whitening_max_ratio=1.0
+        )
+    with pytest.raises(ValueError):
+        EnergyScoreLoss(sht=lambda z: z, whitening_exponent=0.5)
+    with pytest.raises(ValueError):
+        EnergyScoreLoss(sht=lambda z: z, whitening_max_ratio=10.0)
+
+
+def test_spectral_power_crps_phase_invariant():
+    """The spectral-power CRPS ignores phase: random phase rotations are a no-op."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_l = n_m = 12
+    valid = _valid_mask(n_l, n_m, DEVICE).to(torch.cfloat)
+    gen = torch.randn(4, 2, 3, n_l, n_m, dtype=torch.cfloat, device=DEVICE) * valid
+    target = torch.randn(4, 1, 3, n_l, n_m, dtype=torch.cfloat, device=DEVICE) * valid
+    loss = SpectralPowerCRPSLoss(sht=lambda z: z)
+    base = _components_total(loss(gen, target))
+    angles = 2 * torch.pi * torch.rand(4, 2, 3, n_l, n_m, device=DEVICE)
+    phases = torch.exp(1j * angles)
+    rotated = _components_total(loss(gen * phases, target))
+    torch.testing.assert_close(base, rotated, rtol=1e-4, atol=1e-6)
+
+
+def test_spectral_power_crps_prefers_correct_amplitude():
+    """Members with the target's per-degree power beat spectrally damped members."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_batch, n_l, n_m = 500, 12, 12
+    valid = _valid_mask(n_l, n_m, DEVICE).to(torch.cfloat)
+    red = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).reshape(
+        1, 1, 1, -1, 1
+    )
+
+    def draw(shape):
+        return torch.randn(*shape, dtype=torch.cfloat, device=DEVICE) * red * valid
+
+    target = draw((n_batch, 1, 1, n_l, n_m))
+    matched = draw((n_batch, 2, 1, n_l, n_m))
+    damped = matched.clone()
+    damping = torch.linspace(1.0, 0.2, n_l, device=DEVICE).reshape(1, 1, 1, -1, 1)
+    damped = damped * damping
+    loss = SpectralPowerCRPSLoss(sht=lambda z: z)
+    matched_score = _components_total(loss(matched, target))
+    damped_score = _components_total(loss(damped, target))
+    assert matched_score < damped_score
+
+
+def test_ensemble_loss_with_spectral_power_crps_builds_and_runs():
+    """EnsembleLoss accepts spectral_power_crps_weight and adds a component."""
+    DEVICE = get_device()
+    n_lat, n_lon = 8, 16
+    ops = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE))
+    base_config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={"crps_weight": 0.9, "energy_score_weight": 0.1},
+    )
+    with_term = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            "crps_weight": 0.9,
+            "energy_score_weight": 0.1,
+            "spectral_power_crps_weight": 0.05,
+        },
+    )
+    x = torch.rand(4, 2, 3, n_lat, n_lon, device=DEVICE)
+    y = torch.rand(4, 1, 3, n_lat, n_lon, device=DEVICE)
+    base_out = base_config.build(gridded_operations=ops)(x, y)
+    term_out = with_term.build(gridded_operations=ops)(x, y)
+    assert len(term_out) == len(base_out) + 1
+    total = _components_total(term_out)
+    assert torch.isfinite(total)
+
+
+def test_ensemble_loss_with_partial_whitening_builds_and_runs():
+    """EnsembleLoss accepts the partial/capped whitening kwargs and runs finite."""
+    DEVICE = get_device()
+    n_lat, n_lon = 8, 16
+    config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            "crps_weight": 0.9,
+            "energy_score_weight": 0.1,
+            "energy_score_whitening": "per_sample",
+            "energy_score_whitening_exponent": 0.5,
+            "energy_score_whitening_max_ratio": 30.0,
+        },
+    )
+    loss = config.build(
+        gridded_operations=LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE))
+    )
+    x = torch.rand(4, 2, 3, n_lat, n_lon, device=DEVICE)
+    y = torch.rand(4, 1, 3, n_lat, n_lon, device=DEVICE)
+    total = _components_total(loss(x, y))
+    assert torch.isfinite(total)

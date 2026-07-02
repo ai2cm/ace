@@ -112,7 +112,41 @@ run_training() {
 # =============================================================================
 
 # --- v2 eswhiten (with residual), seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-eswhiten.yaml" "train-4deg-daily-v2-era5-only-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched as wandb nfknkl0j / beaker 01KW2NYBYXKQEX7M389NEDW5P7; commented out so this script does not relaunch it.
+# run_training "train-4deg-daily-v2-era5-only-eswhiten.yaml" "train-4deg-daily-v2-era5-only-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
 
 # --- v2 no-residual eswhiten, seed 0 (1 GPU; Jupiter+Titan, high) ---
-run_training "train-4deg-daily-v2-era5-only-no-residual-eswhiten.yaml" "train-4deg-daily-v2-era5-only-no-residual-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+# Already launched as wandb 53em1oyx / beaker 01KW2NZ0Z3MJ5QYQKX3QGRWYMR; commented out so this script does not relaunch it.
+# run_training "train-4deg-daily-v2-era5-only-no-residual-eswhiten.yaml" "train-4deg-daily-v2-era5-only-no-residual-eswhiten-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# =============================================================================
+# Small-scale spectral-calibration arms (research task
+# 2026-07-02-small-scale-calibration-four-arms). All are single-knob
+# perturbations of the v2 residual baseline (oshj5u79):
+#
+#   1. eswhiten-gamma0p5 — PARTIAL energy-score whitening (exponent 0.5):
+#      full whitening (nfknkl0j) blew up the long rollout with residual ON
+#      (stratospheric at0-led, onset ~ep 60-80); gamma=0.5 halves the log-boost
+#      of noise-dominated high-l modes. 120 epochs.
+#   2. spower-crps — CRPS of the per-degree log spectral power (weight 0.1),
+#      a phase-free high-SNR gradient toward correct per-scale amplitude.
+#      120 epochs.
+#   3. noise-shaping — stochastic spectral output perturbation with learnable
+#      per-(channel, degree) amplitude (init 1e-3), a direct parameterization
+#      of per-scale stochastic variance. 120 epochs.
+#   4. nens4 — n_ensemble 2->4 mechanism test (does more ensemble members'
+#      higher-SNR dispersion estimate steepen early small-scale spectral
+#      convergence?), truncated to 30 epochs.
+# =============================================================================
+
+# --- arm 1: partial whitening gamma=0.5, residual ON, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- arm 2: spectral-power CRPS term, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-spower-crps.yaml" "train-4deg-daily-v2-era5-only-spower-crps-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- arm 3: learned spectral noise shaping, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-noise-shaping.yaml" "train-4deg-daily-v2-era5-only-noise-shaping-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
+
+# --- arm 4: n_ensemble 4 truncated SNR test, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-nens4.yaml" "train-4deg-daily-v2-era5-only-nens4-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
