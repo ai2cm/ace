@@ -61,8 +61,8 @@ for model in "${!MODELS[@]}"; do
             --name $job_name \
             --description 'Run inference with ACE' \
             --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-            --workspace ai2/climate-titan \
-            --priority urgent \
+            --workspace ai2/ace \
+            --priority high \
             --preemptible \
             --cluster ai2/titan \
             --env WANDB_USERNAME=$WANDB_USERNAME \
