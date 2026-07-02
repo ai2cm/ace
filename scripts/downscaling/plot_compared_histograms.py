@@ -209,8 +209,8 @@ def main():
             td = tempfile.mkdtemp()
             temp_dirs.append(td)
             print(f"Fetching beaker dataset: {ds_id}")
-            fetch_beaker_dataset(ds_id, td)
-            event_files = find_event_files(td)
+            data_dir = fetch_beaker_dataset(ds_id, td)
+            event_files = find_event_files(data_dir)
             print(f"  Found {len(event_files)} event(s): {list(event_files.keys())}")
             event_files_per_dataset.append(event_files)
 

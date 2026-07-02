@@ -62,8 +62,10 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.output import CorrectorOutput
+from fme.core.corrector.registry import CorrectionSequence, CorrectorABC
 from fme.core.corrector.state import CorrectorState
+from fme.core.corrector.test_registry import ConstantOffsetCorrection
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -80,7 +82,7 @@ from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
-from fme.core.step import SingleModuleStepConfig, StepSelector
+from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
@@ -91,7 +93,13 @@ from fme.core.testing import (
 )
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
-from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorMapping
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -1075,14 +1083,194 @@ def _get_train_stepper(
     return train_config.get_train_stepper(stepper_config, dataset_info)
 
 
+class _DummyParamModule(torch.nn.Module):
+    """Returns the first output channel; has a parameter so Adam can build."""
+
+    def __init__(self):
+        super().__init__()
+        self.dummy = torch.nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        return x[:, :1] + 0.0 * self.dummy
+
+
+def _input_dropout_stepper_config(
+    in_names: list[str], out_names: list[str], input_dropout: VariableMaskingConfig
+) -> StepperConfig:
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _DummyParamModule()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=trivial_network_and_loss_normalization(in_names),
+                    include_channel_mask_inputs=True,
+                    input_dropout=input_dropout,
+                )
+            ),
+        ),
+    )
+
+
+def test_input_dropout_same_mask_across_batch_and_ensemble():
+    """The mask is broadcast over the whole batch, so all members share it.
+
+    With include_channel_mask_inputs=True the indicator channels reflect the
+    dropout mask; every base sample and every ensemble member must see
+    identical indicators.
+    """
+    torch.manual_seed(0)
+    n_base, n_ensemble, n_steps = 4, 3, 1
+    config = _input_dropout_stepper_config(
+        ["a", "b"],
+        ["a"],
+        VariableMaskingConfig(
+            default=UniformMaskingConfig(1),
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["a"], masking=BernoulliMaskingConfig(rate=0.5)
+                ),
+                MaskingGroupConfig(
+                    variables=["b"], masking=BernoulliMaskingConfig(rate=0.5)
+                ),
+            ],
+        ),
+    )
+    stepper = _get_train_stepper(
+        config, n_ensemble=n_ensemble, loss=StepLossConfig(type="MSE")
+    )
+    data = get_data(["a", "b"], n_samples=n_base, n_time=n_steps + 1).data
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert captured, "module should have been called in train mode"
+    packed = captured[0]  # [n_base * n_ensemble, 4, lat, lon]
+    n_channels = 2  # inputs "a", "b"; second half is the indicator
+    indicators = packed[:, n_channels:, 0, 0]  # [batch, 2]
+    grouped = indicators.view(n_base, n_ensemble, n_channels)
+    assert (
+        grouped == grouped[:1, :1]
+    ).all(), "every batch and ensemble member must share the dropout mask"
+
+
+def test_input_dropout_mask_sampled_per_forward_step():
+    """The Step samples an independent dropout mask on every forward step.
+
+    Each step() draws its own mask (no per-rollout caching), so the underlying
+    _draw_input_dropout_mask fires once per forward step. A fixed side_effect
+    keeps the assertion deterministic while still exercising every draw.
+    """
+    n_base, n_ensemble, n_steps = 3, 1, 3
+    config = _input_dropout_stepper_config(
+        ["a"], ["a"], VariableMaskingConfig(default=UniformMaskingConfig(1))
+    )
+    stepper = _get_train_stepper(
+        config, n_ensemble=n_ensemble, loss=StepLossConfig(type="MSE")
+    )
+    data = get_data(["a"], n_samples=n_base, n_time=n_steps + 1).data
+    base_mask = torch.tensor([False], dtype=torch.bool, device=DEVICE)  # [1], broadcast
+
+    def _fixed_input_dropout_mask():
+        return {"a": base_mask}
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        with patch.object(
+            stepper._stepper._step_obj,
+            "_draw_input_dropout_mask",
+            side_effect=_fixed_input_dropout_mask,
+        ) as draw_mask:
+            stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert draw_mask.call_count == n_steps
+    assert len(captured) == n_steps
+    for packed in captured:
+        indicators = packed[:, 1:, 0, 0]  # [batch, 1]
+        assert (indicators == 0.0).all(), "dropped channel indicator must be 0"
+
+
+def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
+    """A NullOptimization train_on_batch (eval mode) applies no input dropout.
+
+    _draw_input_dropout_mask returns None in eval mode, so the result must
+    match a stepper with no input_dropout configured.
+    """
+    n_steps = 2
+
+    def _run(input_dropout):
+        torch.manual_seed(0)
+        stepper = _get_stepper(["a"], ["a"], input_dropout=input_dropout)
+        data = get_data(["a"], n_samples=3, n_time=n_steps + 1).data
+        train_stepper = _init_train_stepper(
+            stepper, loss=StepLossConfig(type="MSE"), n_forward_steps=n_steps
+        )
+        return train_stepper.train_on_batch(
+            data, optimization=NullOptimization()
+        ).gen_data
+
+    out_dropout = _run(VariableMaskingConfig(default=UniformMaskingConfig(1)))
+    out_none = _run(None)
+    for name in out_none:
+        torch.testing.assert_close(out_dropout[name], out_none[name])
+
+
+def test_input_dropout_inactive_in_inference():
+    """Serialized input_dropout does not affect the inference predict path.
+
+    Inference runs in eval mode, so _draw_input_dropout_mask returns None and
+    output matches a stepper with no input_dropout configured (same weights).
+    """
+    n_steps = 3
+
+    def _run(input_dropout):
+        torch.manual_seed(0)
+        stepper = _get_stepper(["a"], ["a"], input_dropout=input_dropout)
+        stepper.set_eval()  # inference runs in eval mode: no dropout
+        input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+        forcing_data.data = {}
+        output, _ = stepper.predict(input_data, forcing_data)
+        return output.data
+
+    out_dropout = _run(VariableMaskingConfig(default=UniformMaskingConfig(1)))
+    out_none = _run(None)
+    for name in out_none:
+        torch.testing.assert_close(out_dropout[name], out_none[name])
+
+
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -1092,9 +1280,9 @@ def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
     n_samples = 3
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -1110,9 +1298,9 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -1128,9 +1316,9 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
-    )
+    ).output
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],
@@ -1237,7 +1425,7 @@ class _RecordingCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
+    ) -> CorrectorOutput:
         self.call_count += 1
         self.seen_states.append(corrector_state)
         if corrector_state is None or corrector_state.global_dry_air_mass is None:
@@ -1248,7 +1436,9 @@ class _RecordingCorrector(CorrectorABC):
             corrector_state = CorrectorState(
                 global_dry_air_mass=(corrector_state.global_dry_air_mass + 1.0),
             )
-        return dict(gen_data), corrector_state
+        return CorrectorOutput(
+            corrected=dict(gen_data), corrector_state=corrector_state
+        )
 
 
 def test_predict_threads_stepper_state_across_calls():
@@ -1296,6 +1486,29 @@ def test_predict_threads_stepper_state_across_calls():
     pres_after_2 = ic_after_2.stepper_state.corrector_state.global_dry_air_mass
     assert pres_after_2 is not None
     torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
+
+
+def test_predict_generator_yields_detached_stepoutput():
+    stepper = _get_stepper(["a"], ["a"])
+    assert isinstance(stepper._step_obj, SingleModuleStep)
+    stepper._step_obj._corrector = CorrectionSequence(
+        [ConstantOffsetCorrection("a", 1.0)]
+    )
+    n_steps = 2
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+
+    # the per-step generator yields StepOutput with a populated, detached delta
+    items = list(
+        stepper.get_prediction_generator(
+            input_data, forcing_data, n_steps, NullOptimization()
+        )
+    )
+    assert len(items) == n_steps
+    for item in items:
+        assert isinstance(item, StepOutput)
+        assert set(item.corrector_diagnostics.delta) == {"a"}
+        assert not item.corrector_diagnostics.delta["a"].requires_grad
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])
@@ -2061,6 +2274,79 @@ def test_get_serialized_stepper_vertical_coordinate():
     assert isinstance(vertical_coordinate, VerticalCoordinate)
 
 
+def _get_scheduled_force_positive_stepper(corrector_disabled_epochs: int) -> Stepper:
+    return _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=["a"],
+            corrector_disabled_epochs=corrector_disabled_epochs,
+        ),
+    )
+
+
+def _step_negative_input(stepper: Stepper) -> tuple[torch.Tensor, torch.Tensor]:
+    """Step on all-negative input and return (output, raw prediction).
+
+    The stepper adds one to its input, so the raw prediction is negative
+    everywhere and the force-positive corrector clamps it to zero.
+    """
+    input_data = {"a": torch.full((3, 5, 5), -5.0, device=DEVICE)}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    return output["a"], input_data["a"] + 1
+
+
+def test_scheduled_corrector_disabled_during_first_epoch():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+
+    stepper.set_train()
+    stepper.set_epoch(1)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, raw_prediction)
+
+    # the corrector is still applied in eval mode (validation/inference)
+    stepper.set_eval()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+    stepper.set_train()
+    stepper.set_epoch(2)
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_unwrapped_corrector_applied_in_train_mode():
+    stepper = _get_stepper(
+        ["a"],
+        ["a"],
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["a"]),
+    )
+    stepper.set_train()
+    output, raw_prediction = _step_negative_input(stepper)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
+def test_scheduled_corrector_disabled_state_restored_on_resume():
+    stepper = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+    stepper.set_train()
+    stepper.set_epoch(2)
+    state = stepper.get_state()
+
+    # a freshly-built stepper assumes the first epoch, so the corrector is
+    # disabled for train-mode steps until load_state restores the state of
+    # the interrupted epoch (mid-epoch resume does not call set_epoch)
+    resumed = _get_scheduled_force_positive_stepper(corrector_disabled_epochs=1)
+    resumed.set_train()
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, raw_prediction)
+
+    resumed.load_state(state)
+    output, raw_prediction = _step_negative_input(resumed)
+    torch.testing.assert_close(output, torch.zeros_like(raw_prediction))
+
+
 def _get_stepper_with_input_masking(
     dataset_info_has_spatial_mask_provider: bool = True,
 ):
@@ -2505,6 +2791,106 @@ def test_train_on_batch_masked_variable_has_zero_loss_count():
     assert stepped.per_channel_losses is not None
     assert stepped.per_channel_losses["b"].count == 0
     assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_unmasked_nan_forcing_raises():
+    """A NaN forcing not covered by data_mask raises a located error.
+
+    Without the guard this silently propagates to a NaN loss with no
+    indication that an unmasked forcing variable was the cause (cf. PR #1262).
+    """
+    n_samples = 2
+    data: BatchData = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan  # NaN forcing, no data_mask to cover it
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.train_on_batch(data=data, optimization=NullOptimization())
+
+
+def test_step_unmasked_nan_input_raises():
+    """A NaN input not covered by data_mask raises a located error in step()."""
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    n_samples = 2
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data["b"][1] = torch.nan
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.step(StepArgs(input=input_data, next_step_input_data={}, labels=None))
+
+
+def test_step_masked_nan_input_does_not_raise():
+    """A NaN input covered by data_mask is zeroed, so the guard does not fire."""
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    n_samples = 2
+    input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data["b"][1] = torch.nan
+    data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    output = stepper.step(
+        StepArgs(
+            input=input_data,
+            next_step_input_data={},
+            labels=None,
+            data_mask=data_mask,
+        )
+    ).output
+    assert not torch.isnan(output["a"]).any()
+
+
+def test_train_on_batch_masked_output_only_variable_has_zero_loss_count():
+    """Masked output-only variable contributes 0 samples to loss."""
+    n_samples = 4
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data_mask = {
+        "a": torch.ones(n_samples, dtype=torch.bool, device=DEVICE),
+        "b": torch.zeros(n_samples, dtype=torch.bool, device=DEVICE),
+    }
+    config = _get_stepper_config(["a"], ["a", "b"], module_name="RepeatChannel")
+    stepper = _get_train_stepper(config, loss=StepLossConfig(type="MSE"))
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert stepped.per_channel_losses is not None
+    assert stepped.per_channel_losses["b"].count == 0
+    assert stepped.per_channel_losses["a"].count == n_samples
+
+
+def test_train_on_batch_masked_forcing_repeats_mask_across_ensemble():
+    """NaN forcing for a masked sample does not produce NaN loss in ensemble."""
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    data.data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert not torch.isnan(stepped.metrics["loss"])
+
+
+def test_train_on_batch_unmasked_nan_forcing_raises_in_ensemble():
+    """NaN forcing without a mask raises a located error in ensemble training.
+
+    Before the network-input guard (PR #1297) this silently propagated to a
+    NaN loss; the guard now raises a located error instead.
+    """
+    n_samples, n_ensemble = 2, 2
+    data = get_data(["a", "b"], n_samples=n_samples, n_time=2).data
+    data.data["b"][1] = torch.nan
+    config = _get_stepper_config(["a", "b"], ["a"], module_name="ChannelSum")
+    stepper = _get_train_stepper(
+        config,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        ),
+        n_ensemble=n_ensemble,
+    )
+    with pytest.raises(ValueError, match=r"NaN found in network input.*\bb\b"):
+        stepper.train_on_batch(data=data, optimization=NullOptimization())
 
 
 def test_predict_with_data_mask_zeros_masked_forcing():

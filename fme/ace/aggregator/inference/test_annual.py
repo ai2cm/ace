@@ -12,6 +12,7 @@ import fme
 from fme.ace.aggregator.inference.annual import (
     GlobalMeanAnnualAggregator,
     PairedGlobalMeanAnnualAggregator,
+    get_crps,
     get_r2,
     get_rmse,
 )
@@ -26,7 +27,12 @@ from fme.core.testing import mock_distributed
 TIMESTEP = datetime.timedelta(hours=6)
 
 
-def test_paired_annual_aggregator(tmpdir):
+def _record_paired_annual_aggregator(
+    tmpdir, report_crps: bool = True, report_rmse: bool = True
+) -> PairedGlobalMeanAnnualAggregator:
+    """Build a paired annual aggregator and record one batch of two full years
+    of random target/prediction data (enough for the plotting and metric paths
+    to be exercised)."""
     n_lat = 16
     n_lon = 32
     # need to have two actual full years of data for plotting to get exercised
@@ -53,6 +59,8 @@ def test_paired_annual_aggregator(tmpdir):
         ops=LatLonOperations(area_weights),
         timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
+        report_crps=report_crps,
+        report_rmse=report_rmse,
     )
     target_data = {
         "a": torch.randn(n_sample, n_time, n_lat, n_lon, device=get_device())
@@ -80,12 +88,18 @@ def test_paired_annual_aggregator(tmpdir):
         i_time_start=0,
     )
     agg.record_batch(batch)
+    return agg
+
+
+def test_paired_annual_aggregator(tmpdir):
+    agg = _record_paired_annual_aggregator(tmpdir)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     assert "test/a" in logs
     assert isinstance(logs["test/a"], plt.Figure)
     assert "test/r2/a_target" in logs
     assert "test/rmse/a" in logs
+    assert "test/crps/a" in logs
 
     # the reported RMSE should equal the RMSE between the ensemble-mean annual
     # evolution of the prediction and that of the target
@@ -96,6 +110,28 @@ def test_paired_annual_aggregator(tmpdir):
         np.sqrt(np.nanmean((gen_ensemble_mean - target_ensemble_mean).values ** 2))
     )
     np.testing.assert_allclose(logs["test/rmse/a"], expected_rmse, rtol=1e-5)
+
+    # the reported CRPS should be the fair CRPS of the predicted ensemble annual
+    # evolution against the target ensemble-mean annual evolution
+    expected_crps = get_crps(ds["a"].sel(source="prediction"), target_ensemble_mean)
+    assert not np.isnan(logs["test/crps/a"])
+    np.testing.assert_allclose(logs["test/crps/a"], expected_crps, rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "report_crps,report_rmse",
+    [(True, True), (True, False), (False, True), (False, False)],
+)
+def test_paired_annual_aggregator_metric_toggles(tmpdir, report_crps, report_rmse):
+    agg = _record_paired_annual_aggregator(
+        tmpdir, report_crps=report_crps, report_rmse=report_rmse
+    )
+    logs = agg.get_logs(label="test")
+    assert ("test/crps/a" in logs) == report_crps
+    assert ("test/rmse/a" in logs) == report_rmse
+    # the annual-evolution plot and R2 are reported regardless of the toggles
+    assert "test/a" in logs
+    assert "test/r2/a_target" in logs
 
 
 def test_paired_annual_aggregator_with_nans(tmpdir):
@@ -187,6 +223,7 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
     )
     logs = agg.get_logs(label="test")
     assert not np.isnan(logs["test/rmse/a"])
+    assert not np.isnan(logs["test/crps/a"])
     for source in ["target", "gen"]:
         r2 = logs[f"test/r2/a_{source}"]
         assert not np.isnan(r2)
@@ -228,6 +265,30 @@ def test_get_r2_ignores_nan_gap_years():
     result = get_r2(da, reference)
     assert not np.isnan(result)
     np.testing.assert_allclose(result, expected, rtol=1e-12)
+
+
+def test_get_crps_ignores_nan_gap_years():
+    # gap years from reindexing show up as NaN in either the prediction or the
+    # reference; the CRPS over the remaining years must match a hand-computed
+    # value, not propagate NaN.
+    years = [2000, 2001, 2002, 2003]
+    da = xr.DataArray(
+        [[1.0, np.nan, 3.0, 5.0], [2.0, np.nan, 4.0, 6.0]],
+        dims=["sample", "year"],
+        coords={"year": years},
+    )
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, np.nan], dims=["year"], coords={"year": years}
+    )
+    # fair CRPS per year (2 members) is mean_i|x_i - y| - 0.5 |x_0 - x_1|:
+    #   2000: members [1, 2], y=1 -> (0 + 1)/2 - 0.5 * 1 = 0.0
+    #   2002: members [3, 4], y=2 -> (1 + 2)/2 - 0.5 * 1 = 1.0
+    # 2001 is dropped (NaN prediction) and 2003 is dropped (NaN reference):
+    #   mean over the remaining years 2000/2002: (0 + 1)/2 = 0.5
+    expected = 0.5
+    result = get_crps(da, reference)
+    assert not np.isnan(result)
+    np.testing.assert_allclose(result, expected, rtol=1e-6)
 
 
 @pytest.mark.parametrize("use_mock_distributed", [False, True])
