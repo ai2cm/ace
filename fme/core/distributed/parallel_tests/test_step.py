@@ -458,12 +458,12 @@ def test_step_regression(
     input_data = dist.scatter_spatial(input_data, img_shape)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
 
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     # Gather local outputs back to global for comparison
     output = dist.gather_spatial(output, img_shape)
@@ -519,7 +519,16 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
     torch.manual_seed(dist.rank)
     mask = step._draw_input_dropout_mask()
     assert mask is not None
-    stacked = torch.stack([mask[name].float() for name in in_names])  # [C, 1]
+    # Absent key means the channel is present (not dropped); reconstruct the
+    # full per-channel indicator so tiles that drop different channels compare.
+    stacked = torch.stack(
+        [
+            mask[name].float()
+            if name in mask
+            else torch.ones(1, device=fme.get_device())
+            for name in in_names
+        ]
+    )  # [C, 1]
     gathered = dist.gather(stacked)
     if dist.is_root():
         assert gathered is not None

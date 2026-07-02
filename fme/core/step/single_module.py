@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
@@ -29,6 +30,7 @@ from fme.core.step.global_mean_removal import (
     NoGlobalMeanRemoval,
     extra_channel_source_field,
 )
+from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -392,7 +394,7 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         input_dropout_mask = self._draw_input_dropout_mask()
 
         def network_call(input_norm: TensorDict) -> TensorDict:
@@ -600,7 +602,7 @@ def step_with_adjustments(
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
-) -> tuple[TensorDict, StepperState | None]:
+) -> StepOutput:
     """
     Step the model forward one timestep given input data.
 
@@ -635,8 +637,9 @@ def step_with_adjustments(
             ``StepperState``. Pass-through unchanged when no corrector is set.
 
     Returns:
-        A tuple ``(output, stepper_state)`` where ``output`` is the
-        denormalized data at the next time step.
+        A ``StepOutput`` carrying the denormalized data at the next time step,
+        the updated per-sample state, and the corrector's per-variable
+        correction diagnostics.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -659,15 +662,34 @@ def step_with_adjustments(
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
+    diagnostics = CorrectorDiagnostics()
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None
         )
-        output, corrector_state = corrector(
-            input, output, next_step_input_data, corrector_state
+        result = corrector(input, output, next_step_input_data, corrector_state)
+        output = result.corrected
+        # Detach the corrector diagnostic tensors.
+        diagnostics = CorrectorDiagnostics(
+            delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
         )
-        if corrector_state is not None:
-            stepper_state = StepperState(corrector_state=corrector_state)
+        if result.corrector_state is not None:
+            stepper_state = StepperState(corrector_state=result.corrector_state)
+
+    # The post-corrector adjustments below run after the corrector and are
+    # excluded from the diagnostics. Their written names must stay disjoint from
+    # the corrector's modified names, or ``delta = output - input_snapshot``
+    # would no longer be exact for an overlapping variable.
+    post_corrector_names: set[str] = set(prescribed_prognostic_names)
+    if ocean is not None:
+        post_corrector_names.add(ocean.surface_temperature_name)
+    overlap = post_corrector_names & set(diagnostics.delta)
+    if overlap:
+        raise ValueError(
+            "post-corrector adjustment names overlap the corrector's modified "
+            f"names: {sorted(overlap)}"
+        )
+
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -677,4 +699,8 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output, stepper_state
+    return StepOutput(
+        output=output,
+        stepper_state=stepper_state,
+        corrector_diagnostics=diagnostics,
+    )

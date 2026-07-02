@@ -366,4 +366,4 @@ cm4_like_am4_random_co2_ensemble_coupled:
 
 .PHONY: shield_amip_constant_co2_c96_dataset
 shield_amip_constant_co2_c96_dataset:
-	./compute_dataset.sh --config configs/shield-amip-constant-co2-c96-1deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-amip-constant-co2-c96-$(RESOLUTION)-$(LAYERS).yaml
