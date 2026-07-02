@@ -15,6 +15,7 @@ from fme.downscaling.data.datasets import (
     VideoBatchItem,
 )
 from fme.downscaling.data.time_encoding import compute_calendar_features
+from fme.downscaling.modules.video_modules import FIRBlur
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
@@ -375,3 +376,18 @@ def test_marginal_consistency_config_validation():
         _model(9, marginal_consistency_weight=-0.1)
     with pytest.raises(ValueError, match="n_timesteps >="):
         _model(3, marginal_consistency_weight=1.0)  # only 1 interior frame
+
+
+def test_firblur_survives_inplace_kernel_mutation():
+    # Regression: under DDP (broadcast_buffers=True) each forward re-syncs buffers
+    # with an in-place copy_ into the kernel. When two forwards run before one
+    # backward (the marginal-consistency loss), that mutation must not invalidate
+    # the first forward's saved-for-backward conv weight. Simulate the buffer sync
+    # by mutating the kernel in place between forward and backward.
+    blur = FIRBlur()
+    x = torch.randn(2, 8, 3, 8, 8, requires_grad=True)
+    y = blur(x)
+    with torch.no_grad():
+        blur.kernel.copy_(blur.kernel)  # what DDP's buffer broadcast does
+    y.sum().backward()  # must not raise "modified by an inplace operation"
+    assert x.grad is not None and torch.isfinite(x.grad).all()

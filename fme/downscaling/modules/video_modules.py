@@ -259,7 +259,14 @@ class FIRBlur(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         c = x.shape[1]
-        w = self.kernel.expand(c, 1, 1, 3, 3)
+        # Materialize the conv weight into its own storage rather than an
+        # ``expand`` view of ``kernel``. Under DDP (broadcast_buffers=True) each
+        # forward re-syncs buffers with an in-place copy_ into ``kernel``; if two
+        # forwards run before one backward (e.g. the marginal-consistency loss),
+        # the second forward's sync would bump the shared buffer's version and
+        # invalidate the first forward's saved-for-backward weight. A copy
+        # decouples each forward's weight from the mutated buffer.
+        w = self.kernel.expand(c, 1, 1, 3, 3).contiguous()
         x = torch.cat([x[..., -1:], x, x[..., :1]], dim=-1)
         x = F.pad(x, (0, 0, 1, 1))
         return F.conv3d(x, w, groups=c)
