@@ -2013,21 +2013,21 @@ def test_input_dropout_mask_not_passed_to_global_mean_removal():
     )
     dropout_mask = _presence_mask(step, present=False)
     _inject_input_dropout_mask(step, dropout_mask)
-    out_with_mask, _ = step.step(
+    out_with_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
             labels=None,
         )
-    )
+    ).output
     _inject_input_dropout_mask(step, None)
-    out_without_mask, _ = step.step(
+    out_without_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step,
             labels=None,
         )
-    )
+    ).output
     # Step runs without GMR raising on a "missing" reference field; GMR never sees mask.
     assert set(out_with_mask) == set(out_without_mask)
 
