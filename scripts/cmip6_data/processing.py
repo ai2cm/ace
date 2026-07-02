@@ -37,14 +37,26 @@ BOUNDS_NAMES: frozenset[str] = frozenset(
 
 
 def rss_mib() -> float:
-    """Resident-set memory in MiB. Returns NaN if psutil is unavailable
-    so callers can log unconditionally without try/except."""
+    """Current resident-set memory in MiB.
+
+    Prefers psutil; falls back to ``/proc/self/status`` (Linux, no deps — the
+    ingest image lacks psutil) so RSS logging works in the pod. Returns NaN only
+    if neither is available.
+    """
     try:
         import psutil
 
         return psutil.Process().memory_info().rss / 1024 / 1024
     except Exception:
-        return float("nan")
+        pass
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return float(line.split()[1]) / 1024  # kB -> MiB
+    except Exception:
+        pass
+    return float("nan")
 
 
 class RssSampler:
@@ -736,6 +748,7 @@ def assemble_masked_3d_state(
         if fill:
             da = fill_below_surface_smooth(da, invalid)
         fields[name] = da
+        logging.info("    assemble: filled %s (rss %.0f MiB)", name, rss_mib())
 
     ds = xr.Dataset(fields)
 
@@ -743,6 +756,7 @@ def assemble_masked_3d_state(
     if has_zg:
         for k, v in derive_layer_thickness(fields["zg"], hgtsfc).items():
             ds[k] = v
+    logging.info("    assemble: thickness done (rss %.0f MiB)", rss_mib())
 
     ds[surface_height_name] = hgtsfc
 
@@ -751,6 +765,7 @@ def assemble_masked_3d_state(
     if has_zg:
         for k, v in build_thickness_masks(valid_target).items():
             ds[k] = v
+    logging.info("    assemble: masks done (rss %.0f MiB)", rss_mib())
 
     plev_hpa = _plev_hpa(valid_target["plev"].values)
     field_to_mask: dict[str, str] = {}

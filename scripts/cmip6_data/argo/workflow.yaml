@@ -362,13 +362,17 @@ spec:
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
         resources:
+          # 64Gi (was 32Gi): the schema-1.0.0 source-grid masked path holds the
+          # full-historical target-grid 3D state (5 fields) + generic vars +
+          # fill/thickness transients in memory during assembly, which exceeds
+          # 32Gi for full 1979-2014 daily. highmem-sim-pool has the headroom.
           limits:
             cpu: "8000m"
-            memory: "32Gi"
+            memory: "64Gi"
             ephemeral-storage: "100Gi"
           requests:
             cpu: "8000m"
-            memory: "32Gi"
+            memory: "64Gi"
             ephemeral-storage: "100Gi"
         command: ["bash", "-c", "-e"]
         args:

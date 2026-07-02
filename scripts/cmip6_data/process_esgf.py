@@ -672,7 +672,12 @@ def _masked_regrid_3d_state(
             valid_full = np.empty((n_time, *seg_valid.shape[1:]), dtype=seg_valid.dtype)
             valid_template = seg_valid
         valid_full[sl] = seg_valid.values
-        logging.info("    masked 3D segment %d/%d done", seg_i + 1, n_seg)
+        logging.info(
+            "    masked 3D segment %d/%d done (rss %.0f MiB)",
+            seg_i + 1,
+            n_seg,
+            rss_mib(),
+        )
 
     time_coord = zg_native["time"]
 
@@ -684,7 +689,7 @@ def _masked_regrid_3d_state(
     regridded_3d = {v: _rewrap(full_arrays[v], template[v]) for v in full_arrays}
     valid_target = _rewrap(valid_full, valid_template)
     hgtsfc_target = regrid_data(orog_native).load()  # static, no time dim
-    logging.info("    masked 3D regrid complete")
+    logging.info("    masked 3D regrid complete (rss %.0f MiB)", rss_mib())
 
     for v in downloaded:
         cleanup_variable_files(scratch, v)
