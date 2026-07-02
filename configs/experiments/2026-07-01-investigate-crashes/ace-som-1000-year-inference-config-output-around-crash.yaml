@@ -7,11 +7,11 @@ data_writer:
       time_selection:
         start: 142400
         stop: 143860
-      format:
-        name: zarr
-        chunks:
-          time: 40
-          sample: 1
+      names:
+        - air_temperature_0
+        - eastward_wind_0
+        - northward_wind_0
+        - specific_total_water_0
 logging:
   project: ace-shield
   log_to_screen: true

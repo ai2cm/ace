@@ -49,9 +49,7 @@ for model in "${!MODELS[@]}"; do
     for climate in "${!INITIAL_CONDITION_DATASETS[@]}"; do
         co2_concentration=${CO2_CONCENTRATIONS[$climate]}
         initial_condition_path="${INITIAL_CONDITION_DATASETS[$climate]}"
-        experiment_dir="gs://vcm-ml-scratch/spencerc/${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-output-around-crash"
         override="\
-            experiment_dir=${experiment_dir} \
             forcing_loader.dataset.overwrite.constant.global_mean_co2=$co2_concentration \
             initial_condition.path=$initial_condition_path \
             initial_condition.start_indices.times=[$INITIAL_CONDITION_TIME] \
