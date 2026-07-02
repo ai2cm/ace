@@ -1,16 +1,13 @@
 runs:
-  2026-07-01-X-SHiELD-AMIP-4deg-8layer-11yr: gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_45_by_90/control
-data_output_directory: gs://vcm-ml-intermediate
+  AMIP-constant-CO2: gs://vcm-ml-raw-flexible-retention/2025-12-16-C96-SHiELD-AMIP-constant-CO2/regridded-zarrs/gaussian_grid_45_by_90/AMIP-constant-CO2
+data_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset
 stats:
-  output_directory: gs://vcm-ml-intermediate/2026-07-01-X-SHiELD-AMIP-4deg-8layer-11yr-stats
-  beaker_dataset: 2026-07-01-X-SHiELD-AMIP-4deg-8layer-11yr-stats
-  start_date: "2014-01-01T06:00:00"  # Ignore first year as spin-up.
-  end_date: "2024-01-01T00:00:00"  # Span exactly 10 years (note datetime string indexing is inclusive).
+  output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2020
+  beaker_dataset: 2026-07-01-vertically-resolved-c96-4deg-shield-amip-constant-co2-dataset-stats-1979-2020
+  start_date: "1979-01-01T06:00:00"
+  end_date: "2021-01-01T00:00:00"  # Only use whole years for computing the stats
   data_type: FV3GFS
 dataset_computation:
-  sharding:
-    time_dim: 3600
-  n_split: 10
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:
     - [0, 11]
@@ -26,8 +23,6 @@ dataset_computation:
     air_temperature_at_two_meters: TMP2m
     eastward_wind_at_ten_meters: UGRD10m
     northward_wind_at_ten_meters: VGRD10m
-    eastward_surface_wind_stress: eastward_surface_stress
-    northward_surface_wind_stress: northward_surface_stress
   variable_sources:
     fluxes_2d.zarr:
       - PRATEsfc
@@ -40,49 +35,13 @@ dataset_computation:
       - ULWRFtoa
       - USWRFsfc
       - USWRFtoa
+      - precipitable_water_path
       - GRAUPELsfc
       - ICEsfc
       - SNOWsfc
-      - eastward_surface_wind_stress
-      - northward_surface_wind_stress
-    column_integrated_dynamical_fields.zarr:
-      - precipitable_water_path
+    full_state.zarr:
       - PRESsfc
-    air_temperature.zarr:
-      - air_temperature
-    eastward_wind.zarr:
-      - eastward_wind
-    northward_wind.zarr:
-      - northward_wind
-    specific_humidity.zarr:
-      - specific_humidity
-    cloud_water_mixing_ratio.zarr:
-      - cloud_water_mixing_ratio
-    cloud_ice_mixing_ratio.zarr:
-      - cloud_ice_mixing_ratio
-    rain_mixing_ratio.zarr:
-      - rain_mixing_ratio
-    snow_mixing_ratio.zarr:
-      - snow_mixing_ratio
-    graupel_mixing_ratio.zarr:
-      - graupel_mixing_ratio
-    pressure_thickness_of_atmospheric_layer.zarr:
-      - pressure_thickness_of_atmospheric_layer
-    instantaneous_physics_fields.zarr:
-      - air_temperature_at_two_meters
-      - eastward_wind_at_ten_meters
-      - northward_wind_at_ten_meters
-      - surface_temperature
-      - soil_moisture_0
-      - soil_moisture_1
-      - soil_moisture_2
-      - soil_moisture_3
-      - land_fraction
-      - ocean_fraction
-      - sea_ice_fraction
-      - snow_cover_fraction
-      - specific_humidity_at_two_meters
-    pressure_interpolated_fields.zarr:
+      - HGTsfc
       - RH200
       - RH500
       - RH850
@@ -101,23 +60,41 @@ dataset_computation:
       - h500
       - h850
       - h1000
-    PRMSL.zarr:
+      - air_temperature_at_two_meters
+      - eastward_wind_at_ten_meters
+      - northward_wind_at_ten_meters
+      - surface_temperature
+      - air_temperature
+      - specific_humidity
+      - cloud_water_mixing_ratio
+      - cloud_ice_mixing_ratio
+      - graupel_mixing_ratio
+      - rain_mixing_ratio
+      - snow_mixing_ratio
+      - northward_wind
+      - eastward_wind
+      - pressure_thickness_of_atmospheric_layer
+      - soil_moisture_0
+      - soil_moisture_1
+      - soil_moisture_2
+      - soil_moisture_3
+      - snow_cover_fraction
+      - specific_humidity_at_two_meters
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
       - PRMSL
-    static.zarr:
-      - HGTsfc
     scalar.zarr:
       - global_mean_co2
   standard_names:
     total_frozen_precip_rate: None
 time_coarsen:
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset
-  stats_output_directory: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset-stats
+  data_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset
+  stats_output_directory: gs://vcm-ml-intermediate/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset-stats-1979-2020
   snapshot_names:
     - PRESsfc
     - PRMSL
-    - eastward_surface_stress
-    - northward_surface_stress
     - Q2m
     - RH200
     - RH500
@@ -203,5 +180,3 @@ time_coarsen:
     - HGTsfc
     - grid_xt
     - grid_yt
-  input_time_slice:  # ensures coarsened data starts on 2013-01-02T00:00:00
-    start: "2013-01-01T06:00:00"
