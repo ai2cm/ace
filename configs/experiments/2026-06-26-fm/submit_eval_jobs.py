@@ -13,6 +13,7 @@ import os
 import pathlib
 import subprocess
 
+from _version_select import add_version_arg, stem_matches_version
 from generate_eval_configs import (
     EVAL_SUITE_CONFIG_PREFIX,
     TRAINING_RESULT_DATASETS,
@@ -33,11 +34,14 @@ CHECKPOINTS = [
     ("training_checkpoints/ckpt.tar", "-lastepoch"),
 ]
 
-CONFIGS = sorted(
-    path.name
-    for path in HERE.glob("*.yaml")
-    if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
-)
+
+def configs_for_version(version: str) -> list[str]:
+    return sorted(
+        path.name
+        for path in HERE.glob("*.yaml")
+        if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
+        and stem_matches_version(path.stem, version)
+    )
 
 
 def validate_configs(config_filenames: list[str]) -> None:
@@ -57,6 +61,7 @@ def config_to_jobs(config_filename: str) -> list[tuple[str, str, str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_version_arg(parser)
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -81,10 +86,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    configs = configs_for_version(args.version)
     if not args.dry_run:
-        validate_configs(CONFIGS)
+        validate_configs(configs)
 
-    for config_filename in CONFIGS:
+    for config_filename in configs:
         config_path = HERE / config_filename
         if not config_path.exists():
             raise FileNotFoundError(

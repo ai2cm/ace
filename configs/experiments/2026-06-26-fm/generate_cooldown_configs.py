@@ -19,12 +19,12 @@ import json
 import pathlib
 
 import yaml
+from _version_select import add_version_arg, stem_matches_version
 
 HERE = pathlib.Path(__file__).parent
 WANDB_PROJECT = "FM"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-fm-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v1"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = (
     "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
 )
@@ -36,9 +36,10 @@ ERA5_MARKER = "era5"  # substring identifying ERA5 members in a concat entry
 
 
 def source_config_to_run_name(config_filename: str) -> str:
+    # The version tag (-v1 / -v2) is already part of the source config stem.
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def _build_scheduler(epochs: int) -> dict:
@@ -52,9 +53,6 @@ def _build_scheduler(epochs: int) -> dict:
         ],
         "milestones": [],
     }
-
-
-COOLDOWN_SUFFIXES = ("-bestinfcooldown", "-cooldown")
 
 
 def _restrict_train_loader_to_era5(cfg: dict) -> None:
@@ -92,17 +90,13 @@ def _out_path_to_run_name(out_path: pathlib.Path) -> str:
     """Reconstruct the wandb run name for a generated cooldown config.
 
     Config stem: {CONFIG_PREFIX}{base}{cooldown_suffix}
-    Run name:    {WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}
-    (the -v1 version tag sits before the cooldown suffix).
+    Run name:    {WANDB_PREFIX}{base}{cooldown_suffix}
+    (the version tag -v1 / -v2 is already part of {base}).
     """
     stem = out_path.stem
     if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
         stem = stem[len(CONFIG_PREFIX) :]
-    for cooldown_suffix in COOLDOWN_SUFFIXES:
-        if stem.endswith(cooldown_suffix):
-            base = stem[: -len(cooldown_suffix)]
-            return f"{WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}"
-    return f"{WANDB_PREFIX}{stem}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{stem}"
 
 
 def _write_config(
@@ -179,6 +173,7 @@ def generate_cooldown_config(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_version_arg(parser)
     default_source_map = str(HERE / "wandb_to_beaker_map.json")
     parser.add_argument(
         "--source-map",
@@ -238,6 +233,7 @@ def main() -> None:
         for p in HERE.glob("*.yaml")
         if p.name.startswith(CONFIG_PREFIX)
         and "nc-sfno" in p.name
+        and stem_matches_version(p.stem, args.version)
         and not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
         and not p.name.endswith("-bestinfcooldown.yaml")

@@ -11,13 +11,14 @@ import json
 import pathlib
 
 import yaml
+from _version_select import add_version_arg, stem_matches_version
 
 # WandB project and run-name convention shared across the FM submit scripts.
 # A training config stem "{CONFIG_PREFIX}{suffix}" maps to run name
-# "{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}" (matches submit_fm_jobs.py).
+# "{WANDB_PREFIX}{suffix}" (matches submit_fm_jobs.py); the version tag
+# -v1 / -v2 is part of {suffix}.
 WANDB_PROJECT = "FM"
 WANDB_PREFIX = "ace2-fm-"
-WANDB_SUFFIX = "-v1"
 CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 
 HERE = pathlib.Path(__file__).parent
@@ -34,13 +35,13 @@ with open(DEFAULT_SOURCE_MAP) as _f:
 def source_config_to_run_name(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def eval_suite_config_to_run_name(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(EVAL_SUITE_CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def source_config_to_eval_suite_config(config_filename: str) -> str:
@@ -170,6 +171,7 @@ def generate_eval_config(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_version_arg(parser)
     parser.add_argument(
         "--inference-name",
         nargs="+",
@@ -205,6 +207,7 @@ def main() -> None:
         for p in HERE.glob("*.yaml")
         if p.name.startswith(CONFIG_PREFIX)
         and "nc-sfno" in p.name
+        and stem_matches_version(p.stem, args.version)
         and not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
         and not p.name.endswith("-bestinfcooldown.yaml")

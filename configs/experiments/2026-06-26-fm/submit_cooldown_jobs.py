@@ -4,7 +4,8 @@ Each config produced by generate_cooldown_configs.py is submitted via
 run-ace-train.sh, which validates the config and calls gantry.
 
 Usage:
-    python submit_cooldown_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
+    python submit_cooldown_jobs.py [--version {v1,v2}] [--dry-run]
+                                   [--beaker-workspace WORKSPACE]
                                    [--beaker-cluster CLUSTER [CLUSTER ...]]
                                    [--beaker-priority PRIORITY]
 """
@@ -14,31 +15,37 @@ import os
 import pathlib
 import subprocess
 
+from _version_select import add_version_arg, stem_matches_version
+
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
 WANDB_PROJECT = "FM"
 WANDB_GROUP = "ace2-fm-cooldown-2026-06-26"
+CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 
-CONFIGS = sorted(
-    path.name
-    for path in HERE.glob("*cooldown.yaml")
-    if path.name.startswith("ace-train-config-4deg-AIMIP-")
-)
+
+def configs_for_version(version: str) -> list[str]:
+    return sorted(
+        path.name
+        for path in HERE.glob("*cooldown.yaml")
+        if path.name.startswith(CONFIG_PREFIX)
+        and stem_matches_version(path.stem, version)
+    )
 
 
 def config_to_job_name(config_filename: str) -> str:
+    # The version tag (-v1 / -v2) already sits before the cooldown suffix in
+    # the filename, e.g. ...-nc-sfno-fm-0.1-v1-cooldown.yaml → run name
+    # ace2-fm-nc-sfno-fm-0.1-v1-cooldown.
     stem = pathlib.Path(config_filename).stem
-    suffix = stem.removeprefix("ace-train-config-4deg-AIMIP-")
-    for cooldown_suffix in ("-bestinfcooldown", "-cooldown"):
-        if suffix.endswith(cooldown_suffix):
-            base = suffix.removesuffix(cooldown_suffix)
-            return f"ace2-fm-{base}-v1{cooldown_suffix}"
-    return f"ace2-fm-{suffix}-v1-cooldown"
+    suffix = stem.removeprefix(CONFIG_PREFIX)
+    return f"ace2-fm-{suffix}"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_version_arg(parser)
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -66,7 +73,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    for config_filename in CONFIGS:
+    configs = configs_for_version(args.version)
+    for config_filename in configs:
         config_path = HERE / config_filename
         if not config_path.exists():
             raise FileNotFoundError(

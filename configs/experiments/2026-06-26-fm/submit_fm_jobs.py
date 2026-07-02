@@ -4,7 +4,8 @@ Each nc-sfno config in this directory is submitted via run-ace-train.sh, which
 validates the config and calls gantry.
 
 Usage:
-    python submit_fm_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
+    python submit_fm_jobs.py [--version {v1,v2}] [--dry-run]
+                             [--beaker-workspace WORKSPACE]
                              [--beaker-cluster CLUSTER [CLUSTER ...]]
                              [--beaker-priority PRIORITY]
 """
@@ -14,32 +15,43 @@ import os
 import pathlib
 import subprocess
 
+from _version_select import add_version_arg, stem_matches_version
+
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
 WANDB_PROJECT = "FM"
 WANDB_PREFIX = "ace2-fm-"
-WANDB_SUFFIX = "-v1"
 WANDB_GROUP = "ace2-fm-2026-06-26"
 CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 
-CONFIGS = sorted(
-    path.name
-    for path in HERE.glob("*.yaml")
-    if path.name.startswith(CONFIG_PREFIX) and "nc-sfno" in path.name
-)
+
+def configs_for_version(version: str) -> list[str]:
+    # Training configs only: cooldown configs are submitted by
+    # submit_cooldown_jobs.py, and eval suites use a different prefix.
+    return sorted(
+        path.name
+        for path in HERE.glob("*.yaml")
+        if path.name.startswith(CONFIG_PREFIX)
+        and "nc-sfno" in path.name
+        and stem_matches_version(path.stem, version)
+        and not path.name.endswith("-finetune.yaml")
+        and not path.name.endswith("-cooldown.yaml")
+        and not path.name.endswith("-bestinfcooldown.yaml")
+    )
 
 
 def config_to_job_name(config_filename: str) -> str:
-    # ace-train-config-4deg-AIMIP-nc-sfno-fm.yaml
-    # → ace2-fm-nc-sfno-fm-v1
+    # ace-train-config-4deg-AIMIP-nc-sfno-fm-0.1-v1.yaml
+    # → ace2-fm-nc-sfno-fm-0.1-v1
     stem = pathlib.Path(config_filename).stem  # strip .yaml
     suffix = stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_version_arg(parser)
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -64,7 +76,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    for config_filename in CONFIGS:
+    configs = configs_for_version(args.version)
+    for config_filename in configs:
         config_path = HERE / config_filename
         if not config_path.exists():
             raise FileNotFoundError(f"{config_filename} not found")
