@@ -29,7 +29,7 @@ WANDB_GROUP = "ace2-var-masking-2026-06-30"
 
 def config_to_job_name(config_filename: str) -> str:
     # ace-train-config-4deg-nc-sfno-c96-mask10-co2default-vgdefault.yaml
-    # -> ace2-var-mask-nc-sfno-c96-mask10-co2default-vgdefault-v4
+    # -> ace2-var-mask-nc-sfno-c96-mask10-co2default-vgdefault-v1
     suffix = pathlib.Path(config_filename).stem.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
 

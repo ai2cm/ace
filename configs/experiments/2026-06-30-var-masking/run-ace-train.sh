@@ -64,4 +64,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "${1:-ace-train-config-4deg-nc-sfno-c96-mask10-co2default-vgdefault.yaml}" "${2:-ace2-var-mask-nc-sfno-c96-mask10-co2default-vgdefault-v4}" "${3:-ace2-var-masking-2026-06-30}"
+run_training "${1:-ace-train-config-4deg-nc-sfno-c96-mask10-co2default-vgdefault.yaml}" "${2:-ace2-var-mask-nc-sfno-c96-mask10-co2default-vgdefault-v1}" "${3:-ace2-var-masking-2026-06-30}"

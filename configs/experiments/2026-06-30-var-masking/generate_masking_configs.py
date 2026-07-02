@@ -26,7 +26,7 @@ import yaml
 WANDB_PROJECT = "VarMasking"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v4"  # stripped from wandb run names before comparison
+WANDB_SUFFIX = "-v1"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = "ace-train-config-4deg-"  # stripped from config stems
 
 CO2_FIELD = "global_mean_co2"
