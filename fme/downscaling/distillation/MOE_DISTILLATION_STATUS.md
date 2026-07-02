@@ -348,9 +348,13 @@ run — and *low-k only* — the base is smooth, ~no high-k):
   **precip** (small base fraction); **relative run-to-run comparisons on the hi-band**
   (common base cancels) → the **non-monotone tap finding (64² sweet spot) and 2-step >
   1-step both stand**.
-- **Bunk/confounded:** absolute **PRMSL lo/mid spectra**, the **PRMSL deep-low tail**
-  (negative-tail analysis), **CRPS_PRMSL**, and PRMSL-driven **checkpoint selection**;
-  the "PRMSL large-scale collapse" as a real phenomenon.
+- **Bunk/confounded:** absolute **PRMSL lo/mid spectra**, the **PRMSL deep-low tail**,
+  the **PRMSL histogram / full distribution shape** (the tail metric *is* the
+  histogram — the student's PRMSL histogram was a narrow spike near the ~1013 mean:
+  `denorm(residual) ≈ fine − coarse + mean`, no synoptic spread/deep lows),
+  **CRPS_PRMSL**, and PRMSL-driven **checkpoint selection**; the "PRMSL large-scale
+  collapse" as a real phenomenon. (Evaluator histograms via `model.generate_on_batch`
+  add the base → not affected, but were never run on the students.)
 - **GAN-reg runs (r1-instr/allfix): not bunk** — their conclusion (R1/allfix did NOT
   stop the GAN tipping / hi-band degradation) rests on training dynamics + hi-band,
   both valid. What was inflated is the *motivation* — the PRMSL "catastrophe" was
