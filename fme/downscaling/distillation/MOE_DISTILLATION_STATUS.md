@@ -334,6 +334,29 @@ bug was validation-only** — but it confounded every PRMSL metric (CRPS/spectra
 interpolated-coarse base (guarded by `predict_residual`), added back to the student
 output for both modes; `lo_renoise` also subtracts it from the target before re-noising.
 
+**Reset runs (submitted 2026-07-02, commit `184fa298b`) — CHECK THESE.** Correct-
+validation baseline + tap2, 2-step expert-0:
+- **baseline-fixed** (offset 0, original bottleneck critic): `01KWJAFKZ96YBR73F0TETBKC0Q`
+- **tap2-fixed** (offset 2, 64²): `01KWJAFQW38E8AQ70YK7JYHCAK`
+
+(The old confounded runs — tap4/tap6/tap2-gan3e3 — are canceled.)
+
+**What's still valid vs. bunk** (the bug is *common-mode* — same missing base every
+run — and *low-k only* — the base is smooth, ~no high-k):
+- **Valid:** all **training metrics** (GAN losses / `fake_score` / `f_distill` /
+  `ar1`) → the **GAN-collapse dynamics are real**; **all hi-band spectra** (base-free);
+  **precip** (small base fraction); **relative run-to-run comparisons on the hi-band**
+  (common base cancels) → the **non-monotone tap finding (64² sweet spot) and 2-step >
+  1-step both stand**.
+- **Bunk/confounded:** absolute **PRMSL lo/mid spectra**, the **PRMSL deep-low tail**
+  (negative-tail analysis), **CRPS_PRMSL**, and PRMSL-driven **checkpoint selection**;
+  the "PRMSL large-scale collapse" as a real phenomenon.
+- **GAN-reg runs (r1-instr/allfix): not bunk** — their conclusion (R1/allfix did NOT
+  stop the GAN tipping / hi-band degradation) rests on training dynamics + hi-band,
+  both valid. What was inflated is the *motivation* — the PRMSL "catastrophe" was
+  largely the bug. Reset will show whether the real (milder, hi-band) collapse is even
+  worth chasing.
+
 **Consequences for the record below:**
 - The **"PRMSL spectral collapse"**, the **negative deep-low tail**, and much of the
   **lo/mid-PRMSL tap comparison** are largely this bug, NOT a model/GAN failure. The
