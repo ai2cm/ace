@@ -243,6 +243,100 @@ def test_sample_student_output_from_noise_shape():
 
 
 # --------------------------------------------------------------------------
+# Generation-logic parity: the validation base add-back must match the real
+# DiffusionModel generation path (postprocess_generated).  This is the guard
+# that catches the residual-base bug (validation forgetting the base) and any
+# future divergence of the validation sampler from actual generation.
+# --------------------------------------------------------------------------
+
+
+def _build_residual_model(coarse_shape=(8, 16), fine_shape=(16, 32)):
+    """A tiny real residual ``DiffusionModel`` (predict_residual=True).
+
+    Uses only ``fme.downscaling.models`` (no FastGen), so this runs in the
+    plain ``fme`` env. PRMSL-like normalization stats exercise the base scaling.
+    """
+    from fme.core.coordinates import LatLonCoordinates
+    from fme.core.loss import LossConfig
+    from fme.core.normalizer import NormalizationConfig
+    from fme.downscaling.data import StaticInputs
+    from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
+    from fme.downscaling.modules.diffusion_registry import (
+        DiffusionModuleRegistrySelector,
+    )
+
+    def _coord(n: int) -> torch.Tensor:
+        bounds = torch.linspace(0, float(n), n + 1)
+        return (bounds[:-1] + bounds[1:]) / 2
+
+    fine_coords = LatLonCoordinates(
+        lat=_coord(fine_shape[0]), lon=_coord(fine_shape[1])
+    )
+    norm = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 1000.0}, stds={"x": 15.0}),
+        NormalizationConfig(means={"x": 1000.0}, stds={"x": 15.0}),
+    )
+    return DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=["x"],
+        out_names=["x"],
+        normalization=norm,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.0,
+        num_diffusion_generation_steps=3,
+        predict_residual=True,
+        use_fine_topography=False,
+    ).build(
+        coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=fine_coords),
+    )
+
+
+class _CoarseBatch:
+    """Minimal stand-in for the coarse batch (only ``.data`` is read)."""
+
+    def __init__(self, data: dict[str, torch.Tensor]) -> None:
+        self.data = data
+
+
+def test_validation_base_addback_matches_model_generation():
+    """The callback's residual→full-field processing (``_base_prediction_norm`` +
+    add-back + denormalize) must exactly equal the model's real generation path
+    (``postprocess_generated``). This is the invariant the residual bug broke."""
+    model = _build_residual_model()
+    cb = _make_callback(model, validation_mode="from_noise", n_student_samples=1)
+
+    B, C = 1, 1
+    Hc, Wc = 8, 16
+    Hf, Wf = 16, 32
+    torch.manual_seed(0)
+    coarse = {"x": torch.randn(B, Hc, Wc) * 15.0 + 1000.0}
+    residual_norm = torch.randn(B, C, Hf, Wf)  # student residual (B*n, C, H, W), n=1
+
+    # Real generation path: adds base + separates samples + denormalizes.
+    full_real, _ = model.postprocess_generated(residual_norm.clone(), coarse, 1)
+
+    # Callback path: base add-back in normalized space, then same denormalize.
+    base = cb._base_prediction_norm(_CoarseBatch(coarse), np.array([True] * B))
+    assert base is not None  # residual model
+    full_norm_cb = residual_norm.reshape(B, 1, C, Hf, Wf) + base.unsqueeze(1)
+    full_cb = model.normalizer.fine.denormalize(
+        model.out_packer.unpack(full_norm_cb, axis=-3)
+    )
+
+    for k in full_real:
+        torch.testing.assert_close(full_cb[k], full_real[k])
+
+
+# --------------------------------------------------------------------------
 # Reduction helpers: direction-aware tails + std-normalized cross-var CRPS.
 # --------------------------------------------------------------------------
 
