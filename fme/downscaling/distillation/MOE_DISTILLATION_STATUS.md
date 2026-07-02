@@ -302,6 +302,49 @@ distill from a standalone expert checkpoint that is *not* in a bundle.
 
 ---
 
+## ★★ ROOT-CAUSE BUG (2026-07-02): PRMSL "collapse" was a residual-model validation bug (fixed `b2a47628b`)
+
+**Much of the PRMSL story below is confounded by a validation bug — read this first.**
+
+The teachers are **residual models** (`predict_residual=True`): the net predicts
+`fine − interpolate(coarse)`; the full field is recovered only by **adding the
+interpolated-coarse base back** (`models.py::postprocess_generated`). The audit found:
+
+- **Teacher val zarr = full field** (built by the standard `fme.downscaling.inference`
+  path → base added).
+- **Student validation output = residual only** — `BestStudentCheckpointCallback`
+  sampled via `fastgen_sampler` on the raw module and **never added the base**
+  (no `predict_residual` handling anywhere in `samplers.py` / `student_sampling.py`
+  / the callback).
+- ⇒ validation compared a **residual student to a full-field teacher**. For **PRMSL**
+  (signal ≈ entirely the smooth large-scale base) the residual is nearly empty →
+  the ~**100× low-k PSD deficit**, the **collapsed-inward / negative deep-low tail**,
+  and the PRMSL-worst/precip-mildest pattern. It also explains why `spec_mae_lo_PRMSL`
+  was ~constant-bad across all runs (the base bug) while `spec_mae_hi_PRMSL` varied
+  with tap/GAN (the real fine-scale residual). `lo_renoise` had a second bug: it built
+  the re-noise state from the **full** target, but the student expects `residual+noise`.
+
+**Training and deployment were already correct** — training is residual-consistent
+(teacher targets, VSD, GAN all residual), and `save_student_checkpoint` preserves
+`predict_residual=True`, so `DiffusionModel.generate` adds the base at inference. **The
+bug was validation-only** — but it confounded every PRMSL metric (CRPS/spectra/tail →
+**checkpoint selection**).
+
+**Fix (`b2a47628b`, validation only):** `_base_prediction_norm` computes the
+interpolated-coarse base (guarded by `predict_residual`), added back to the student
+output for both modes; `lo_renoise` also subtracts it from the target before re-noising.
+
+**Consequences for the record below:**
+- The **"PRMSL spectral collapse"**, the **negative deep-low tail**, and much of the
+  **lo/mid-PRMSL tap comparison** are largely this bug, NOT a model/GAN failure. The
+  **hi-band PRMSL** and precip/wind findings, and the GAN-collapse dynamics, still
+  stand (those are the real residual/fine-scale signal).
+- **Re-run validation on the fixed code** before trusting any PRMSL number or
+  re-deciding tap depth / GAN weight. The tap "64² sweet spot / finer collapses" read
+  is on the hi-band (real), but re-confirm once PRMSL low-k is measured correctly.
+
+---
+
 ## ★ RESULT (2026-06-29): per-expert pivot did NOT fix the spectral collapse — GAN-fix runs launched
 
 **Both Lo runs completed** (~30–32k steps, ~44 h; wandb `6xt93hci` = Lo-1step,
