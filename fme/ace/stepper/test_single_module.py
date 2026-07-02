@@ -62,8 +62,10 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.output import CorrectorOutput
+from fme.core.corrector.registry import CorrectionSequence, CorrectorABC
 from fme.core.corrector.state import CorrectorState
+from fme.core.corrector.test_registry import ConstantOffsetCorrection
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -80,7 +82,7 @@ from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
-from fme.core.step import SingleModuleStepConfig, StepSelector
+from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
@@ -91,7 +93,7 @@ from fme.core.testing import (
 )
 from fme.core.testing.regression import validate_tensor_dict
 from fme.core.training_history import TrainingJob
-from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -1080,9 +1082,9 @@ def test_step():
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
 
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     torch.testing.assert_close(output["b"], input_data["b"] + 1)
@@ -1092,9 +1094,9 @@ def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
     n_samples = 3
     input_data = {"a": torch.rand(n_samples, 5, 5).to(DEVICE)}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
 
@@ -1110,9 +1112,9 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     )
     n_samples = 3
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     if residual_prediction:
         expected_a_output = 2 * input_data["a"] + 1 - norm_mean
     else:
@@ -1128,9 +1130,9 @@ def test_step_with_prescribed_ocean():
     )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data=ocean_data, labels=None)
-    )
+    ).output
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
         ocean_data["a"],
@@ -1237,7 +1239,7 @@ class _RecordingCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
+    ) -> CorrectorOutput:
         self.call_count += 1
         self.seen_states.append(corrector_state)
         if corrector_state is None or corrector_state.global_dry_air_mass is None:
@@ -1248,7 +1250,9 @@ class _RecordingCorrector(CorrectorABC):
             corrector_state = CorrectorState(
                 global_dry_air_mass=(corrector_state.global_dry_air_mass + 1.0),
             )
-        return dict(gen_data), corrector_state
+        return CorrectorOutput(
+            corrected=dict(gen_data), corrector_state=corrector_state
+        )
 
 
 def test_predict_threads_stepper_state_across_calls():
@@ -1296,6 +1300,29 @@ def test_predict_threads_stepper_state_across_calls():
     pres_after_2 = ic_after_2.stepper_state.corrector_state.global_dry_air_mass
     assert pres_after_2 is not None
     torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
+
+
+def test_predict_generator_yields_detached_stepoutput():
+    stepper = _get_stepper(["a"], ["a"])
+    assert isinstance(stepper._step_obj, SingleModuleStep)
+    stepper._step_obj._corrector = CorrectionSequence(
+        [ConstantOffsetCorrection("a", 1.0)]
+    )
+    n_steps = 2
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+
+    # the per-step generator yields StepOutput with a populated, detached delta
+    items = list(
+        stepper.get_prediction_generator(
+            input_data, forcing_data, n_steps, NullOptimization()
+        )
+    )
+    assert len(items) == n_steps
+    for item in items:
+        assert isinstance(item, StepOutput)
+        assert set(item.corrector_diagnostics.delta) == {"a"}
+        assert not item.corrector_diagnostics.delta["a"].requires_grad
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])
@@ -2079,9 +2106,9 @@ def _step_negative_input(stepper: Stepper) -> tuple[torch.Tensor, torch.Tensor]:
     everywhere and the force-positive corrector clamps it to zero.
     """
     input_data = {"a": torch.full((3, 5, 5), -5.0, device=DEVICE)}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(input=input_data, next_step_input_data={}, labels=None)
-    )
+    ).output
     return output["a"], input_data["a"] + 1
 
 
@@ -2612,14 +2639,14 @@ def test_step_masked_nan_input_does_not_raise():
     input_data = {x: torch.rand(n_samples, 5, 5).to(DEVICE) for x in ["a", "b"]}
     input_data["b"][1] = torch.nan
     data_mask = {"b": torch.tensor([True, False], dtype=torch.bool, device=DEVICE)}
-    output, _ = stepper.step(
+    output = stepper.step(
         StepArgs(
             input=input_data,
             next_step_input_data={},
             labels=None,
             data_mask=data_mask,
         )
-    )
+    ).output
     assert not torch.isnan(output["a"]).any()
 
 
