@@ -25,6 +25,7 @@ Before starting any task, read (both co-located with this folder):
 | `07-docs.md` | Consolidate README/ARCHITECTURE; user-facing docs | all |
 | `08-known-gaps-and-hardening.md` | Backlog of known correctness/robustness gaps | — |
 | `09-inference-sigma-schedule-fidelity.md` | Carry the trained sigma list into the exported checkpoint; stop re-deriving it at inference | — |
+| `10-share-generation-postprocessing.md` | Single-source the residual base + reuse `postprocess_generated` in validation (de-dup the logic that caused the residual-base bug) | — |
 
 Tasks 01 and 02 are independent and unblock everything else; do them first.
 
