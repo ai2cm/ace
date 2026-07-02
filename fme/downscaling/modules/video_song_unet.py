@@ -46,6 +46,7 @@ class VideoSongUNet(nn.Module):
 
         self._temporal = nn.ModuleList()
         self._bt = (1, 1)
+        self._frame_index: torch.Tensor | None = None
         for name, block in list(self.unet.enc.items()) + list(self.unet.dec.items()):
             if isinstance(block, UNetBlock) and getattr(block, "attention", False):
                 ta = TemporalAttention(block.out_channels, n_heads, seq_length)
@@ -57,7 +58,7 @@ class VideoSongUNet(nn.Module):
             b, t = self._bt
             bt, c, h, w = output.shape
             x = output.reshape(b, t, c, h, w).permute(0, 2, 1, 3, 4)
-            x = temporal(x)
+            x = temporal(x, self._frame_index)
             return x.permute(0, 2, 1, 3, 4).reshape(bt, c, h, w)
 
         return hook
@@ -69,6 +70,7 @@ class VideoSongUNet(nn.Module):
         day_of_year: torch.Tensor,
         second_of_day: torch.Tensor,
         lon: torch.Tensor,
+        frame_index: torch.Tensor | None = None,
     ) -> torch.Tensor:
         b, _, t, h, w = x.shape
         cal = self.calendar(day_of_year, second_of_day, lon, h)
@@ -78,5 +80,8 @@ class VideoSongUNet(nn.Module):
         if noise.shape[0] == b:
             noise = noise.repeat_interleave(t)
         self._bt = (b, t)
+        # stashed for the temporal-attention forward hooks (true grid positions of
+        # the frames, so the relative bias reflects real spacing; None = full grid)
+        self._frame_index = frame_index
         out = self.unet(folded, noise, None)
         return out.reshape(b, t, -1, h, w).permute(0, 2, 1, 3, 4)
