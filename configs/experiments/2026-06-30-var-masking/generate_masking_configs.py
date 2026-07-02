@@ -12,8 +12,7 @@ Full-factorial design over three orthogonal masking factors, 16 runs total:
 4 x 2 x 2 = 16 configs, written to ``run_configs/``.
 
 global_mean_co2 is already an input channel in the base config
-(in_names + next_step_forcing_names). We add pre_cooldown_checkpoint_epoch so a
-checkpoint is saved right before cooldown starts.
+(in_names + next_step_forcing_names).
 """
 
 import argparse
@@ -90,10 +89,6 @@ def _apply_settings(cfg: dict, input_dropout: dict) -> None:
     step_cfg["input_dropout"] = input_dropout
     step_cfg["include_channel_mask_inputs"] = True
     cfg["logging"]["project"] = WANDB_PROJECT
-    # Save a checkpoint right before cooldown starts (cooldown milestone).
-    cfg["pre_cooldown_checkpoint_epoch"] = cfg["optimization"]["scheduler"][
-        "milestones"
-    ][-1]
 
 
 def generate_configs() -> None:

@@ -396,27 +396,6 @@ optimization:
   lr: 0.0001
   optimizer_type: FusedAdam
   use_gradient_accumulation: true
-  scheduler:
-    schedulers:
-    - type: LinearLR
-      kwargs:
-        start_factor: 0.01
-        end_factor: 1.0
-        total_iters: 8
-      step_each_iteration: false
-    - type: ConstantLR
-      kwargs:
-        factor: 1.0
-        total_iters: 134
-      step_each_iteration: false
-    - type: PolynomialLR
-      kwargs:
-        power: 0.5
-        total_iters: 8
-      step_each_iteration: false
-    milestones:
-    - 8
-    - 142
   kwargs:
     weight_decay: 0.01
 stepper_training:
@@ -450,11 +429,11 @@ stepper:
           clip_latent_global_means: true
       normalization:
         network:
-          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-full-field.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-residual.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
@@ -633,4 +612,3 @@ stepper:
           masking:
             rate: 0.2
       include_channel_mask_inputs: true
-pre_cooldown_checkpoint_epoch: 142
