@@ -36,7 +36,7 @@ gantry run \
     --name "$JOB_NAME" \
     --description 'Video PMD (BB + per-channel noise + subset training + L_marg), global 1deg 24h->3h, 4x B200 DDP' \
     --workspace "$WORKSPACE" \
-    --priority urgent \
+    --priority high \
     --cluster "$CLUSTER" \
     --beaker-image "$DEPS_ONLY_IMAGE" \
     --gpus "$N_GPUS" \
