@@ -187,6 +187,15 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
     # A real roll moved the model's fine grid into the seam-crossing convention.
     assert float(built.model.full_fine_coords.lon.min()) < 0.0
 
+    # The target (fine data) and its coords are rolled together at the data layer,
+    # via a path independent of the model roll above. Assert the target's fine coords
+    # landed in the same seam-crossing convention as the model, so the two independent
+    # roll paths agree and predictions/targets stay aligned (rather than being compared
+    # in mismatched longitude conventions).
+    batch = next(iter(built.data.get_generator()))
+    target_fine_lon = batch.fine.latlon_coordinates.lon[0]
+    assert float(target_fine_lon.min()) < 0.0
+
 
 @pytest.mark.parametrize(
     "evaluator_model_config, num_samples",
