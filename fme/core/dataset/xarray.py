@@ -333,8 +333,30 @@ def get_raw_paths(path, file_pattern):
     return raw_paths
 
 
+def get_loss_mask_variables(ds: xr.Dataset, names: Sequence[str]) -> set[str]:
+    """Names of per-cell loss/eval mask variables referenced by the requested
+    output variables via their self-describing ``mask_variable`` attribute.
+
+    Each masked field carries a ``mask_variable`` attribute naming its mask
+    data variable (the time-varying-or-broadcast ``mask_<field>`` convention).
+    Such masks are loaded as ordinary data variables (so they ride in the batch
+    and are applied per timestep in the loss/eval), as opposed to the static
+    output-masking ``SpatialMaskProvider`` masks. Only masks present in ``ds``
+    are returned.
+    """
+    referenced: set[str] = set()
+    for name in names:
+        if name in ds.variables:
+            mask_var = ds[name].attrs.get("mask_variable")
+            if mask_var is not None and mask_var in ds.variables:
+                referenced.add(str(mask_var))
+    return referenced
+
+
 def _get_spatial_mask_provider(
-    ds: xr.Dataset, dtype: torch.dtype | None
+    ds: xr.Dataset,
+    dtype: torch.dtype | None,
+    exclude: set[str] | None = None,
 ) -> SpatialMaskProvider:
     """Get mask provider from a dataset.
 
@@ -346,12 +368,18 @@ def _get_spatial_mask_provider(
         ds: Dataset to get vertical coordinates from.
         dtype: Data type of the returned tensors. If None, the dtype is not
             changed from the original in ds.
+        exclude: Mask variable names to skip — the per-cell loss/eval masks
+            (referenced by a ``mask_variable`` attribute) which ride in the
+            batch as data variables rather than feeding this static provider.
+            These may be time-dependent, so they must be excluded before the
+            time-independence check below.
 
     """
+    exclude = exclude or set()
     masks: dict[str, torch.Tensor] = {
         name: torch.as_tensor(ds[name].values, dtype=dtype)
         for name in ds.data_vars
-        if name.startswith("mask_")
+        if name.startswith("mask_") and name not in exclude
     }
     for name in masks:
         if "time" in ds[name].dims:
@@ -577,8 +605,17 @@ class XarrayDataset(DatasetABC):
             engine=self.engine,
             chunks=None,
         )
+        # Per-cell loss/eval masks referenced by requested fields' self-describing
+        # ``mask_variable`` attribute are loaded as ordinary data variables (so
+        # they ride in the batch and are applied per timestep), and excluded from
+        # the static output-masking SpatialMaskProvider. Add them to the names to
+        # load before grouping (they may be time-dependent or time-invariant).
+        self._loss_mask_variables = get_loss_mask_variables(first_dataset, names)
+        self._names = list(names) + [
+            m for m in self._loss_mask_variables if m not in names
+        ]
         self._spatial_mask_provider = _get_spatial_mask_provider(
-            first_dataset, self.dtype
+            first_dataset, self.dtype, exclude=self._loss_mask_variables
         )
         (
             self._horizontal_coordinates,

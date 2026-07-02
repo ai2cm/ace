@@ -1,0 +1,1007 @@
+# CMIP6 daily multi-model training, F22.5 4deg, schema 0.8.1,
+# cohort normalization variant. See
+# ``scripts/cmip6_data/training_run_1.md`` for the full design (cohort
+# holdouts, eval entries, metric pruning rules) — this YAML is the
+# concrete config that implements it.
+#
+# Variant: cohort (single global mean/std across all 196 train
+# datasets). The per-source variant lives next to this file as
+# ``train-4deg-daily-cmip6-multimodel-per-source-norm.yaml`` — only
+# the stepper's ``per_source_normalization`` block + the builder's
+# ``conditional: true`` flag differ. Use the per-source variant when
+# systematic per-model biases (e.g. MIROC6's ~290 Pa psl shift)
+# would otherwise dominate the cohort-scale loss landscape.
+
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_every_n_batches: 5000
+validate_using_ema: true
+max_epochs: 5
+# Skipping pre-training eval: on jupiter we get frequent preemption,
+# and the bootstrap problem (no checkpoint exists until after epoch 1
+# training, so each restart redoes eval-before-training from scratch)
+# keeps us from ever clearing the gate. Defer the first val/inf pass
+# to end-of-epoch-1, which lands behind a checkpoint that survives
+# preemption.
+evaluate_before_training: false
+# 2x the framework default so per-epoch in-sample loss has tight SE
+# (training_run_1 §validation).
+train_evaluation_samples: 2000
+
+ema:
+  decay: 0.999
+
+# ---------------------------------------------------------------------
+# Inline inference entries (11 total, one dataset per entry).
+# ---------------------------------------------------------------------
+# Convention from training_run_1 §inference: 4 ICs at the first of
+# Mar/Jun/Sep/Dec, 1 ensemble per IC, except the 5-day weather entry
+# which uses 8 ICs × 5 ensemble for CRPS / ensemble-spread metrics.
+#
+# Metric-pruning per §metric-pruning:
+#   power_spectrum: report_directional_bias=false everywhere;
+#     plot_variables restricted to upper-level + h500 + precip on
+#     non-reference entries, full on reference entries.
+#   histogram: percentile_variables=[PRATEsfc] cohort-wide.
+#     Full histograms only on inf_era5_analog_canesm5 + inf_holdout_ssp585_ukesm.
+#     Subset on other long entries; disabled on weather.
+#   step_means / ensembles: step=5 (not the framework default 20).
+#   ENSO / IPO: on for long ocean-tracking rollouts (B/C/D + 30yr
+#     in-sample); off for 10y (A) variants and weather.
+#   zonal_mean: full on inf_era5_analog_canesm5; sparse on
+#     inf_holdout_variants_ecearth3_shape; off elsewhere.
+#   annual: 3D plev subset (10/250/700 for ua/va/hus; 10/250/500/1000
+#     for zg).
+#
+# YAML anchors below capture the per-bucket aggregator templates.
+
+# Anchors used below to keep per-entry aggregator configs DRY are
+# declared at their first occurrence (YAML's & / * mechanism). The
+# four anchors used in this file are:
+#
+#   &power_spectrum_plot_default — variables that get a spectrum-pair
+#     PNG on non-reference entries (uppermost-level + h500 + precip).
+#   &histogram_subset — histogram-plot variable list for non-reference
+#     long-rollout entries (precip + stratospheric tracers).
+#   &annual_variables — annual-mean variable list; 3D plev subset
+#     (10/250/700 + 10/250/500/1000 for zg) plus full 2D surface.
+#   &zonal_mean_ecearth3_shape — used only at the EC-Earth3 shape probe
+#     entry; defined inline there.
+
+inference:
+  # --- in-sample weather (8 ICs × 5 ensemble) ---
+  - name: inf_in_sample_5day
+    weight: 1.0
+    n_forward_steps: 5
+    forward_steps_in_memory: 5
+    n_ensemble_per_ic: 5
+    loader:
+      start_indices:
+        # 8 ICs spread across the historical period; ensemble of 5 per IC.
+        times:
+          - '1950-03-01T12:00:00'
+          - '1950-09-01T12:00:00'
+          - '1970-03-01T12:00:00'
+          - '1970-09-01T12:00:00'
+          - '1990-03-01T12:00:00'
+          - '1990-09-01T12:00:00'
+          - '2010-03-01T12:00:00'
+          - '2010-09-01T12:00:00'
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/EC-Earth3/historical/r1i1p1f1
+        labels: ["EC-Earth3.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+          name: day_5
+        - step: 5
+          target: norm
+          name: day_5_norm
+      ensembles:
+        - step: 5
+          name: day_5_ensemble
+      power_spectrum:
+        report_directional_bias: false
+        # Anchor used by all non-reference entries below.
+        plot_variables: &power_spectrum_plot_default
+          - ua10
+          - va10
+          - hus10
+          - zg10
+          - h500
+          - PRATEsfc
+      histogram:
+        enabled: false
+      zonal_mean:
+        enabled: false
+      enso_index: {enabled: false}
+      enso_coefficient: {enabled: false}
+      ipo_index: {enabled: false}
+      annual: {enabled: false}
+
+  # --- in-sample long (30 years, 4 seasonal ICs, 1 source) ---
+  - name: inf_in_sample_30yr
+    weight: 0.5
+    n_forward_steps: 10950
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['1950-03-01T12:00:00', '1950-06-01T12:00:00', '1950-09-01T12:00:00', '1950-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/EC-Earth3/historical/r1i1p1f1
+        labels: ["EC-Earth3.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+          name: day_5
+        - step: 5
+          target: norm
+          name: day_5_norm
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        # Anchor used by all non-reference long-rollout entries.
+        variables: &histogram_subset
+          - PRATEsfc
+          - hus10
+          - hus50
+          - ua10
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        # Anchor used by all long-rollout entries' annual aggregator.
+        # 3D plev subset: drop 50/100/500 for ua/va/hus + 50/100/700/
+        # 850 for zg, keep 10/250/700 (and 500/1000 for zg). 2D
+        # surface variables kept in full.
+        variables: &annual_variables
+          - TMP2m
+          - Q2m
+          - UGRD10m
+          - VGRD10m
+          - PRATEsfc
+          - h500
+          - surface_temperature
+          - psl
+          - DLWRFsfc
+          - DSWRFsfc
+          - ULWRFsfc
+          - USWRFsfc
+          - USWRFtoa
+          - ULWRFtoa
+          - SHTFLsfc
+          - LHTFLsfc
+          - ua10
+          - ua250
+          - ua700
+          - va10
+          - va250
+          - va700
+          - hus10
+          - hus250
+          - hus700
+          - zg10
+          - zg250
+          - zg1000
+
+  # --- (A) held-out variants: 3 picks across families + scenarios ---
+  - name: inf_holdout_variants_cnrm
+    weight: 0.0
+    n_forward_steps: 3650
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['2015-03-01T12:00:00', '2015-06-01T12:00:00', '2015-09-01T12:00:00', '2015-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/CNRM-CM6-1/ssp585/r2i1p1f2
+        labels: ["CNRM-CM6-1.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        variables: *histogram_subset
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        variables: *annual_variables
+      enso_index: {enabled: false}
+      enso_coefficient: {enabled: false}
+      ipo_index: {enabled: false}
+
+  - name: inf_holdout_variants_ipsl
+    weight: 0.0
+    n_forward_steps: 3650
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['1940-03-01T12:00:00', '1940-06-01T12:00:00', '1940-09-01T12:00:00', '1940-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/IPSL-CM6A-LR/historical/r2i1p1f1
+        labels: ["IPSL-CM6A-LR.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        variables: *histogram_subset
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        variables: *annual_variables
+      enso_index: {enabled: false}
+      enso_coefficient: {enabled: false}
+      ipo_index: {enabled: false}
+
+  # EC-Earth3 shape-probe: r2 doesn't exist in v2 for ssp585; use r3.
+  # The held-out EC-Earth3 ssp585 r3 also drops out of training via
+  # exclude_variants below.
+  - name: inf_holdout_variants_ecearth3_shape
+    weight: 0.0
+    n_forward_steps: 3650
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['2015-03-01T12:00:00', '2015-06-01T12:00:00', '2015-09-01T12:00:00', '2015-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/EC-Earth3/ssp585/r3i1p1f1
+        labels: ["EC-Earth3.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        variables: *histogram_subset
+        percentile_variables: [PRATEsfc]
+      # Sparse zonal-mean output: the stratospheric-shape probe is the
+      # one A-cohort entry where zonal-mean is informative beyond
+      # default scalars.
+      zonal_mean:
+        variables:
+          - TMP2m
+          - amon_ts
+          - hus250
+          - ua250
+          - ua10
+          - zg10
+      annual:
+        variables: *annual_variables
+      enso_index: {enabled: false}
+      enso_coefficient: {enabled: false}
+      ipo_index: {enabled: false}
+
+  # --- (B) future-scenario rollouts (one entry per source, 30y) ---
+  # inf_holdout_ssp585_ukesm is one of the two "reference" runs for
+  # metric output (full histograms + full power-spectrum plot).
+  - name: inf_holdout_ssp585_ukesm
+    weight: 0.0
+    n_forward_steps: 10950
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['2015-03-01T12:00:00', '2015-06-01T12:00:00', '2015-09-01T12:00:00', '2015-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/UKESM1-0-LL/ssp585/r1i1p1f2
+        labels: ["UKESM1-0-LL.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        # Reference run: full plot coverage.
+        plot_variables: null
+      histogram:
+        enabled: true
+        # Reference run: full histogram coverage.
+        variables: null
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        variables: *annual_variables
+
+  - name: inf_holdout_ssp585_mpi
+    weight: 0.0
+    n_forward_steps: 10950
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['2015-03-01T12:00:00', '2015-06-01T12:00:00', '2015-09-01T12:00:00', '2015-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/MPI-ESM1-2-LR/ssp585/r1i1p1f1
+        labels: ["MPI-ESM1-2-LR.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        variables: *histogram_subset
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        variables: *annual_variables
+
+  # --- (C) ERA5-analog rollouts ---
+  # inf_era5_analog_canesm5 is the other "reference" run.
+  - name: inf_era5_analog_canesm5
+    weight: 0.0
+    n_forward_steps: 10950
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['2015-03-01T12:00:00', '2015-06-01T12:00:00', '2015-09-01T12:00:00', '2015-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/CanESM5/ssp585/r1i1p1f1
+        labels: ["CanESM5.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: null  # reference run
+      histogram:
+        enabled: true
+        variables: null
+        percentile_variables: [PRATEsfc]
+      # Full zonal-mean output on this one reference run.
+      zonal_mean:
+        enabled: true
+      annual:
+        variables: *annual_variables
+
+  - name: inf_era5_analog_gfdl
+    weight: 0.0
+    n_forward_steps: 10950
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['2015-03-01T12:00:00', '2015-06-01T12:00:00', '2015-09-01T12:00:00', '2015-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/GFDL-CM4/ssp585/r1i1p1f1
+        labels: ["GFDL-CM4.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        variables: *histogram_subset
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        variables: *annual_variables
+
+  # --- (D) temporal-interpolation rollouts (19y, ICs in 1970) ---
+  - name: inf_holdout_years_inm
+    weight: 0.0
+    n_forward_steps: 6935
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['1970-03-01T12:00:00', '1970-06-01T12:00:00', '1970-09-01T12:00:00', '1970-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/INM-CM5-0/historical/r1i1p1f1
+        labels: ["INM-CM5-0.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        variables: *histogram_subset
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        variables: *annual_variables
+
+  - name: inf_holdout_years_noresm
+    weight: 0.0
+    n_forward_steps: 6935
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times: ['1970-03-01T12:00:00', '1970-06-01T12:00:00', '1970-09-01T12:00:00', '1970-12-01T12:00:00']
+      dataset:
+        data_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/NorESM2-LM/historical/r1i1p1f1
+        labels: ["NorESM2-LM.p1"]
+        file_pattern: data.*.nc
+        engine: netcdf4
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - {step: 5, target: denorm, name: day_5}
+        - {step: 5, target: norm, name: day_5_norm}
+      ensembles: []
+      power_spectrum:
+        report_directional_bias: false
+        plot_variables: *power_spectrum_plot_default
+      histogram:
+        enabled: true
+        variables: *histogram_subset
+        percentile_variables: [PRATEsfc]
+      zonal_mean: {enabled: false}
+      annual:
+        variables: *annual_variables
+
+# ---------------------------------------------------------------------
+# Validation entries (one-step error). ``subsample_step`` is sized
+# per-entry to target a few thousand samples total per validation
+# segment — enough for a stable estimator of the loss without paying
+# the full multi-million-sample cost of iterating the cohort.
+# val_holdout_variants carries weight 1.0 and drives checkpoint
+# selection per training_run_1 §validation.
+# ---------------------------------------------------------------------
+validation:
+  - name: val_holdout_variants
+    weight: 1.0
+    loader:
+      batch_size: 32
+      num_data_workers: 8
+      prefetch_factor: 2
+      time_buffer: 16
+      dataset:
+        data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+        engine: netcdf4
+        source_ids: [CNRM-CM6-1, CNRM-ESM2-1, MRI-ESM2-0, EC-Earth3, IPSL-CM6A-LR]
+        experiments: [historical, ssp245, ssp585]
+        # The realizations filter narrows to r2 across all matched
+        # sources; combined with the source filter this lands the
+        # exact 6 held-out (A) variants (with r2 of EC-Earth3 ssp585
+        # absent in v2, the matched eval set is 5).
+        realizations: [2]
+        # ~14 datasets × ~85 yr × 365 ≈ 410k samples → ~4100 post-step.
+        subsample_step: 100
+
+  - name: val_holdout_ssp585_ukesm
+    weight: 0.0
+    loader:
+      batch_size: 32
+      num_data_workers: 8
+      prefetch_factor: 2
+      time_buffer: 16
+      dataset:
+        data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+        engine: netcdf4
+        source_ids: [UKESM1-0-LL]
+        experiments: [ssp585]
+        # ~16 variants × 86 yr × 365 ≈ 500k samples → ~4000 post-step.
+        subsample_step: 125
+  - name: val_holdout_ssp585_mpi
+    weight: 0.0
+    loader:
+      batch_size: 32
+      num_data_workers: 8
+      prefetch_factor: 2
+      time_buffer: 16
+      dataset:
+        data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+        engine: netcdf4
+        source_ids: [MPI-ESM1-2-LR]
+        experiments: [ssp585]
+        # ~30 variants × 86 yr × 365 ≈ 940k samples → ~3700 post-step.
+        subsample_step: 250
+
+  - name: val_era5_analog_canesm5
+    weight: 0.0
+    loader:
+      batch_size: 32
+      num_data_workers: 8
+      prefetch_factor: 2
+      time_buffer: 16
+      dataset:
+        data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+        engine: netcdf4
+        source_ids: [CanESM5]
+        experiments: [historical, ssp245, ssp585]
+        # The kept-in-train r1i1p1f1 historical is dropped via
+        # exclude_variants in the train_loader; on the eval side we
+        # want EVERY non-train variant. The exclude here mirrors that
+        # by removing the same row from the eval set as well, so
+        # there's no overlap of train + eval.
+        exclude_variants:
+          - [CanESM5, historical, r1i1p1f1]
+        # ~99 datasets × ~85 yr × 365 ≈ 3M samples → ~4000 post-step.
+        # CanESM5's large ensemble makes this the dominant val by far;
+        # without this step it iterates ~2.5 h on the cohort run.
+        subsample_step: 750
+  - name: val_era5_analog_gfdl
+    weight: 0.0
+    loader:
+      batch_size: 32
+      num_data_workers: 8
+      prefetch_factor: 2
+      time_buffer: 16
+      dataset:
+        data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+        engine: netcdf4
+        source_ids: [GFDL-CM4]
+        # historical r1 stays in train; eval is ssp245 + ssp585 only.
+        experiments: [ssp245, ssp585]
+        # ~8 datasets × 86 yr × 365 ≈ 250k samples → ~4200 post-step.
+        subsample_step: 60
+
+  # (D) eval window: 1970-07-01 to 1989-06-30 — inverse of the
+  # train_loader.time_masks block. The 6-month gap on either side of
+  # the cut (train ends 1969-12-31, starts again 1990-01-01) means no
+  # eval timestep sits within 6 months of a training timestep.
+  - name: val_holdout_years
+    weight: 0.0
+    loader:
+      batch_size: 32
+      num_data_workers: 8
+      prefetch_factor: 2
+      time_buffer: 16
+      dataset:
+        data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+        engine: netcdf4
+        source_ids: [INM-CM5-0, NorESM2-LM]
+        experiments: [historical]
+        time_keeps:
+          - source_ids: [INM-CM5-0, NorESM2-LM]
+            experiments: [historical]
+            keep_start: '1970-07-01'
+            keep_end: '1989-06-30'
+        # ~40 datasets × 19 yr × 365 ≈ 280k samples → ~4000 post-step.
+        subsample_step: 70
+
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: cmip6
+  entity: ai2cm
+
+# ---------------------------------------------------------------------
+# Train + validation loaders (cohort minus all holdouts).
+# ---------------------------------------------------------------------
+# 196-dataset train set per training_run_1 §holdouts. The dataset
+# layer drops the (A) variants via exclude_variants, the (B) ssp585
+# variants of UKESM1+MPI via exclude_variants (listing every variant),
+# all-but-r1-historical of CanESM5+GFDL via exclude_variants, and
+# masks 1970-1989 from INM-CM5-0/NorESM2-LM historical via time_masks.
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 16
+  time_buffer_pool_size: 32
+  dataset:
+    data_dir: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+    engine: netcdf4
+    experiments: [historical, ssp245, ssp585]
+    exclude_variants:
+      # (A) held-out variants (6 rows; EC-Earth3 ssp585 r2 doesn't exist,
+      # so the shape-probe uses r3 instead — drop r3 here too).
+      - [CNRM-CM6-1, ssp245, r2i1p1f2]
+      - [CNRM-CM6-1, ssp585, r2i1p1f2]
+      - [CNRM-ESM2-1, historical, r2i1p1f2]
+      - [MRI-ESM2-0, historical, r2i1p1f1]
+      - [EC-Earth3, ssp585, r3i1p1f1]
+      - [IPSL-CM6A-LR, historical, r2i1p1f1]
+      # (B) UKESM1-0-LL ssp585 — every variant (5 rows).
+      - [UKESM1-0-LL, ssp585, r1i1p1f2]
+      - [UKESM1-0-LL, ssp585, r2i1p1f2]
+      - [UKESM1-0-LL, ssp585, r3i1p1f2]
+      - [UKESM1-0-LL, ssp585, r4i1p1f2]
+      - [UKESM1-0-LL, ssp585, r8i1p1f2]
+      # (B) MPI-ESM1-2-LR ssp585 — every variant (5 rows).
+      - [MPI-ESM1-2-LR, ssp585, r1i1p1f1]
+      - [MPI-ESM1-2-LR, ssp585, r2i1p1f1]
+      - [MPI-ESM1-2-LR, ssp585, r3i1p1f1]
+      - [MPI-ESM1-2-LR, ssp585, r4i1p1f1]
+      - [MPI-ESM1-2-LR, ssp585, r5i1p1f1]
+      # (C) CanESM5 — keep only historical/r1i1p1f1, drop everything
+      # else. 29 rows.
+      - [CanESM5, historical, r1i1p2f1]
+      - [CanESM5, historical, r2i1p1f1]
+      - [CanESM5, historical, r2i1p2f1]
+      - [CanESM5, historical, r3i1p1f1]
+      - [CanESM5, historical, r3i1p2f1]
+      - [CanESM5, historical, r4i1p1f1]
+      - [CanESM5, historical, r4i1p2f1]
+      - [CanESM5, historical, r5i1p1f1]
+      - [CanESM5, historical, r5i1p2f1]
+      - [CanESM5, ssp245, r1i1p1f1]
+      - [CanESM5, ssp245, r1i1p2f1]
+      - [CanESM5, ssp245, r2i1p1f1]
+      - [CanESM5, ssp245, r2i1p2f1]
+      - [CanESM5, ssp245, r3i1p1f1]
+      - [CanESM5, ssp245, r3i1p2f1]
+      - [CanESM5, ssp245, r4i1p1f1]
+      - [CanESM5, ssp245, r4i1p2f1]
+      - [CanESM5, ssp245, r5i1p1f1]
+      - [CanESM5, ssp245, r5i1p2f1]
+      - [CanESM5, ssp585, r1i1p1f1]
+      - [CanESM5, ssp585, r1i1p2f1]
+      - [CanESM5, ssp585, r2i1p1f1]
+      - [CanESM5, ssp585, r2i1p2f1]
+      - [CanESM5, ssp585, r3i1p1f1]
+      - [CanESM5, ssp585, r3i1p2f1]
+      - [CanESM5, ssp585, r4i1p1f1]
+      - [CanESM5, ssp585, r4i1p2f1]
+      - [CanESM5, ssp585, r5i1p1f1]
+      - [CanESM5, ssp585, r5i1p2f1]
+      # (C) GFDL-CM4 — keep only historical/r1i1p1f1, drop ssp245 + ssp585.
+      - [GFDL-CM4, ssp245, r1i1p1f1]
+      - [GFDL-CM4, ssp585, r1i1p1f1]
+    time_masks:
+      # (D) temporal-interpolation: drop 1970-1989 from INM-CM5-0 and
+      # NorESM2-LM historical. Per-variant splits happen inside the
+      # data loader.
+      - source_ids: [INM-CM5-0, NorESM2-LM]
+        experiments: [historical]
+        keep_before: '1969-12-31'
+        keep_after: '1990-01-01'
+
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.01
+
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 1
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    # Uniform per-variable weights per training_run_1 §validation
+    # ("Omit per-variable weights"). Reference's ERA5-tuned weights
+    # don't transfer cleanly to v2's variable set.
+    weights: {}
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+
+# ---------------------------------------------------------------------
+# Stepper: NoiseConditionedSFNO backbone, cohort normalization.
+# Per-source variant lives in the sibling
+# train-4deg-daily-cmip6-multimodel-per-source-norm.yaml — only the
+# per_source_normalization block + builder's conditional flag differ.
+# ---------------------------------------------------------------------
+stepper:
+  step:
+    type: cmip6
+    config:
+      residual_prediction: false
+      builder:
+        type: NoiseConditionedSFNO
+        # ``conditional: true`` because Cmip6DataConfig emits labels
+        # unconditionally and the stepper passes them through to the
+        # model. The framework rejects labels for unconditional
+        # builders (``TypeError: Labels are not allowed for
+        # unconditional models``) so we can't run cohort norm with
+        # ``conditional: false`` without a framework change. The
+        # practical difference from the per-source variant: this
+        # variant uses cohort centering / scaling rather than
+        # per-source, but the network still receives the label
+        # embedding into its conditional layer norms. Treat it as
+        # "label-aware-but-cohort-normalized" rather than truly
+        # unconditional.
+        conditional: true
+        # Tolerate sub-universal output variables (radiation /
+        # heat-flux diagnostics missing from ~half the cohort) by
+        # masking them per-sample rather than dropping the dataset.
+        # Cmip6StepConfig delegates allow_missing_variables to this
+        # flag.
+        allow_missing_variables: true
+        config:
+          embed_dim: 512
+          noise_embed_dim: 32
+          noise_type: isotropic
+          filter_type: linear
+          affine_norms: true
+          normalize_big_skip: true
+          filter_num_groups: 1
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+      normalization:
+        # ``fill_nans_on_normalize: true`` is required because
+        # ``allow_missing_variables: true`` on the builder lets
+        # datasets without a given output variable contribute
+        # NaN-filled slabs. The per-sample ``data_mask`` zeroes out
+        # those contributions in the loss aggregator, but ``0 * NaN``
+        # is still NaN; the fill on normalize step replaces them
+        # with zeros first so the loss tensors stay finite.
+        network:
+          global_means_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/centering.nc
+          global_stds_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/scaling.nc
+          fill_nans_on_normalize: true
+        residual:
+          global_means_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/residual_centering.nc
+          global_stds_path: /climate-default/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2/normalization_full/residual_scaling.nc
+          fill_nans_on_normalize: true
+      corrector:
+        # Dry-air mass conservation is OFF for this run: it requires
+        # a vertical coordinate the v2 data layer doesn't expose —
+        # the ingest "flattens plev" so each level is a separate 2D
+        # channel (``ua10``, ``ua50``, ...) rather than a 3D field
+        # with a plev coord. With ``conserve_dry_air: true`` the
+        # step build raises ``ValueError: conserve_dry_air is set
+        # to True, but no vertical coordinate is available.``.
+        # Moisture-budget correction is similarly off: v2 lacks the
+        # evap + advection-tendency variables it needs.
+        # force_positive on hus / radiation isn't enforced either —
+        # not guaranteed at the source by all publishers.
+        # TODO: revisit ``conserve_dry_air`` once the flatten-plev
+        # → vertical-coord mapping is exposed to the corrector path.
+        conserve_dry_air: false
+      # Pass per-variable mask channels to the model. With
+      # ``allow_missing_variables: true`` on the builder, the loader
+      # NaN-fills variables a dataset doesn't publish. The step
+      # logic then zeros those entries in normalized space and
+      # appends one mask channel per ``in_names`` entry (1.0
+      # present, 0.0 masked). Without these channels the model
+      # would see "0" indistinguishable from "missing" — see
+      # ``fme.core.step.masking`` and Cmip6Step.step for the
+      # mechanics.
+      include_channel_mask_inputs: true
+      # Input-only variables are restricted to statics + exogenous
+      # forcings (training_run_1 §variables — "I'd like the only
+      # input-only variables to be the static and input4mips ones").
+      # Everything else is a real prognostic and lives in both
+      # ``in_names`` and ``out_names``. Monthly-causal variables
+      # (amon_ts, omon_*, simon_*) are dropped entirely from this
+      # run because their stepped-monthly cadence would teach the
+      # model an artificially smooth target.
+      in_names:
+        # ---- input-only: statics ----
+        - HGTsfc
+        - land_fraction
+        # ---- input-only: exogenous forcings ----
+        - log_input4mips_co2
+        - input4mips_so2
+        - input4mips_bc
+        - luh2_forest
+        # ---- prognostic-class: in + out (every variable below
+        # is also in out_names — foundation-model framing, with
+        # allow_missing handling per-dataset coverage gaps).
+        # Monthly-causal variables (amon_ts, omon_*, simon_*) are
+        # excluded because their stepped-monthly cadence would
+        # teach an artificially smooth daily target.
+        # CFday-augmented variables (clear-sky + TOA radiation, w500,
+        # cloud-water paths, surface pressure) are included as
+        # sub-universal daily variables with allow_missing handling.
+        # process_esgf.py's day-cadence augmenter (commit 025c294fd)
+        # pulled them from ESGF for the (source, experiment, member)
+        # tuples that publish on CFday/day; v2.5 cohort coverage is
+        # listed inline below per variable. ``total_water_path``
+        # (derived from water_vapor_path + clwvi) is omitted — only
+        # 2% of v2.5 datasets have both inputs present.
+        # ---- Surface (universal) ----
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - PRATEsfc
+        - h500
+        - psl
+        # ---- Surface (sub-universal daily) ----
+        - sfcWind                  # 85%
+        - surface_temperature      # 43% — daily Eday.ts (was eday_ts pre-0.8.0)
+        - water_vapor_path         # 40% — Eday.prw
+        - oday_tos                 # 56% — daily SST
+        - oday_sos                 # 23% — daily sea surface salinity
+        - oday_tossq               # 19% — daily SST²
+        - oday_omldamax            # 10% — daily max mixed-layer depth
+        - siday_sitemptop          # 39% — daily sea-ice top T
+        - siday_sithick            # 28% — daily sea-ice thickness
+        - siday_sea_ice_fraction   # 27% — daily sea-ice fraction
+        - TMP700                   # 22% — 700 hPa T
+        - PRESsfc                  # 38% — surface pressure
+        # ---- Radiative + heat-flux diagnostics (day + CFday) ----
+        - DLWRFsfc                 # 93%
+        - DSWRFsfc                 # 97%
+        - ULWRFsfc                 # 93%
+        - USWRFsfc                 # 74%
+        - ULWRFtoa                 # 88%
+        - SHTFLsfc                 # 80% (assumed; existed pre-augment)
+        - LHTFLsfc                 # 89% (assumed; existed pre-augment)
+        # CFday TOA / clear-sky radiation (new in v2.5 cohort).
+        - DSWRFtoa                 # 27% — TOA incoming SW
+        - USWRFtoa                 # 27% — TOA outgoing SW
+        - UCLWRFtoa                # 22% — TOA clear-sky outgoing LW
+        - UCSWRFsfc                # 28% — surface clear-sky outgoing SW
+        - UCSWRFtoa                # 28% — TOA clear-sky outgoing SW
+        - DCLWRFsfc                # 28% — surface clear-sky incoming LW
+        - DCSWRFsfc                # 32% — surface clear-sky incoming SW
+        # CFday dynamics / cloud-water tracers (new in v2.5 cohort).
+        - wap500                   # 23% — pressure velocity at 500 hPa
+        - clivi                    # 19% — cloud ice water path
+        - clwvi                    # 16% — total cloud water path
+        # ---- 3D plev prognostics (universal) ----
+        - ua10
+        - ua50
+        - ua100
+        - ua250
+        - ua500
+        - ua700
+        - ua850
+        - ua1000
+        - va10
+        - va50
+        - va100
+        - va250
+        - va500
+        - va700
+        - va850
+        - va1000
+        - hus10
+        - hus50
+        - hus100
+        - hus250
+        - hus500
+        - hus700
+        - hus850
+        - hus1000
+        - zg10
+        - zg50
+        - zg100
+        - zg250
+        - zg700
+        - zg850
+        - zg1000
+        # NB: Mask channels (``below_surface_mask*``, ``oday_*_mask``,
+        # ``siday_*_mask``) intentionally excluded from this first
+        # training run — we don't want to prescribe them as inputs
+        # and the long-rollout-cycle case for them is shaky (model
+        # has to keep predicting a sensible 0/1 field for hundreds of
+        # steps). Sub-universal-ocean variables are still in
+        # in_names + out_names; on datasets that lack them, the
+        # ``allow_missing_variables`` + ``fill_nans_on_normalize``
+        # path handles them with infilling rather than masking.
+        # Plan: add masks back in a follow-up run after baseline.
+      out_names:
+        # Surface prognostics (universal)
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - PRATEsfc
+        - h500
+        - psl
+        # Surface (sub-universal daily)
+        - sfcWind
+        - surface_temperature
+        - water_vapor_path
+        - oday_tos
+        - oday_sos
+        - oday_tossq
+        - oday_omldamax
+        - siday_sitemptop
+        - siday_sithick
+        - siday_sea_ice_fraction
+        - TMP700
+        - PRESsfc
+        # Radiative + heat-flux diagnostics (day + CFday)
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - ULWRFtoa
+        - SHTFLsfc
+        - LHTFLsfc
+        - DSWRFtoa
+        - USWRFtoa
+        - UCLWRFtoa
+        - UCSWRFsfc
+        - UCSWRFtoa
+        - DCLWRFsfc
+        - DCSWRFsfc
+        # CFday dynamics / cloud-water tracers
+        - wap500
+        - clivi
+        - clwvi
+        # 3D plev prognostics
+        - ua10
+        - ua50
+        - ua100
+        - ua250
+        - ua500
+        - ua700
+        - ua850
+        - ua1000
+        - va10
+        - va50
+        - va100
+        - va250
+        - va500
+        - va700
+        - va850
+        - va1000
+        - hus10
+        - hus50
+        - hus100
+        - hus250
+        - hus500
+        - hus700
+        - hus850
+        - hus1000
+        - zg10
+        - zg50
+        - zg100
+        - zg250
+        - zg700
+        - zg850
+        - zg1000
+        # NB: Mask channels excluded from this first run — see
+        # in_names above for the rationale.

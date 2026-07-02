@@ -48,7 +48,11 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
+from fme.core.spatial_masking import (
+    NullSpatialMasking,
+    StaticSpatialMaskingConfig,
+    resolve_mask_var_name,
+)
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
@@ -313,6 +317,14 @@ class SingleModuleStepperConfig:
             residual_prediction=self.residual_prediction,
             global_mean_removal=self.global_mean_removal,
         )
+
+
+def _labels_semantically_equal(a: BatchLabels | None, b: BatchLabels | None) -> bool:
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    return a.semantically_equal(b)
 
 
 def _prepend_timesteps(
@@ -1083,7 +1095,7 @@ class Stepper:
             Generator yielding (output, stepper_state) tuples at each timestep.
         """
         ic_batch_data = initial_condition.as_batch_data()
-        if ic_batch_data.labels != forcing_data.labels:
+        if not _labels_semantically_equal(ic_batch_data.labels, forcing_data.labels):
             raise ValueError(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {ic_batch_data.labels} and {forcing_data.labels}."
@@ -1439,6 +1451,11 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        mask_loss: When True, exclude per-cell invalid cells from the loss
+            spatial reduction (both numerator and denominator), using the
+            dataset's SpatialMaskProvider masks resolved per output variable via
+            the ``mask_`` naming convention. No-op when the dataset ships no
+            spatial masks. Default False, so existing configs are unaffected.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1448,6 +1465,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    mask_loss: bool = False
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1571,6 +1589,36 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+        self._mask_loss = config.mask_loss
+        # Optional authoritative out_var -> mask_var mapping from the dataset's
+        # self-describing per-field "mask_variable" attributes; None falls back
+        # to the mask_ naming convention (see resolve_mask_var_name).
+        self._mask_var_mapping: Mapping[str, str] | None = (
+            getattr(self._stepper.training_dataset_info, "mask_variable_mapping", None)
+            if self._mask_loss
+            else None
+        )
+
+    def _build_step_spatial_mask(
+        self, target_data: BatchData, step: int
+    ) -> dict[str, torch.Tensor] | None:
+        """Per-output-variable validity masks for the loss at one forward step.
+
+        Masks are time-varying (or broadcast time-invariant) data variables
+        riding in the batch; each loss variable's mask is resolved by
+        :func:`resolve_mask_var_name` and sliced at ``step`` to ``[batch, lat,
+        lon]``. Variables without a mask are omitted (left unmasked). Returns
+        ``None`` when masking is disabled.
+        """
+        if not self._mask_loss:
+            return None
+        available = set(target_data.data.keys())
+        out: dict[str, torch.Tensor] = {}
+        for name in self.loss_names:
+            mask_var = resolve_mask_var_name(name, available, self._mask_var_mapping)
+            if mask_var is not None:
+                out[name] = target_data.data[mask_var].select(self.TIME_DIM, step)
+        return out or None
 
     def train_on_batch(
         self,
@@ -1659,7 +1707,7 @@ class TrainStepper(
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
-        if input_batch_data.labels != data.labels:
+        if not _labels_semantically_equal(input_batch_data.labels, data.labels):
             raise ValueError(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
@@ -1702,6 +1750,7 @@ class TrainStepper(
                     target_step=target_step,
                     step=step,
                     data_mask=data.data_mask,
+                    spatial_mask=self._build_step_spatial_mask(target_data, step),
                     optimize=optimize_step,
                     metrics=metrics,
                     weighted_sums=weighted_sums,
@@ -1717,6 +1766,7 @@ class TrainStepper(
         target_step: TensorMapping,
         step: int,
         data_mask: TensorMapping | None,
+        spatial_mask: TensorMapping | None,
         optimize: bool,
         metrics: dict[str, float],
         weighted_sums: dict[str, torch.Tensor],
@@ -1727,6 +1777,7 @@ class TrainStepper(
             target_step,
             step=step,
             data_mask=data_mask,
+            spatial_mask=spatial_mask,
         )
         step_total_loss = step_loss.total()
         metrics[f"loss_step_{step}"] = step_total_loss.detach()

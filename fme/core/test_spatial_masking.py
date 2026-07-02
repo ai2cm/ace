@@ -4,9 +4,54 @@ import pytest
 import torch
 
 import fme
-from fme.core.spatial_masking import StaticSpatialMasking, StaticSpatialMaskingConfig
+from fme.core.spatial_masking import (
+    StaticSpatialMasking,
+    StaticSpatialMaskingConfig,
+    extract_spatial_masks,
+    resolve_mask_var_name,
+)
 
 DEVICE = fme.get_device()
+
+
+def test_resolve_mask_var_name_precedence():
+    available = {"mask_ta1000", "mask_1000", "mask_2d"}
+    # explicit mapping wins
+    assert (
+        resolve_mask_var_name("ta1000", available, {"ta1000": "mask_1000"})
+        == "mask_1000"
+    )
+    # explicit mapping to an absent mask -> None
+    assert resolve_mask_var_name("ta1000", available, {"ta1000": "nope"}) is None
+    # mask_<var> beats mask_<level>
+    assert resolve_mask_var_name("ta1000", available) == "mask_ta1000"
+    # mask_<level> from trailing digits when no mask_<var>
+    assert resolve_mask_var_name("ua1000", available) == "mask_1000"
+    # catch-all mask_2d
+    assert resolve_mask_var_name("pr", available) == "mask_2d"
+    # nothing resolves
+    assert resolve_mask_var_name("pr", {"mask_1000"}) is None
+
+
+def test_extract_spatial_masks():
+    m1000 = torch.ones(2, 3, 4, 8)
+    data = {
+        "ta1000": torch.randn(2, 3, 4, 8),
+        "ua1000": torch.randn(2, 3, 4, 8),
+        "pr": torch.randn(2, 3, 4, 8),
+        "mask_1000": m1000,
+    }
+    masks = extract_spatial_masks(data, ["ta1000", "ua1000", "pr"])
+    # ta1000 + ua1000 share mask_1000 (level convention); pr has no mask
+    assert masks is not None
+    assert set(masks) == {"ta1000", "ua1000"}
+    assert masks["ta1000"] is m1000 and masks["ua1000"] is m1000
+    # explicit mapping honored
+    masks2 = extract_spatial_masks(data, ["ta1000"], {"ta1000": "mask_1000"})
+    assert masks2 is not None
+    assert masks2["ta1000"] is m1000
+    # no masks present -> None (clean no-op for callers)
+    assert extract_spatial_masks({"pr": torch.randn(1)}, ["pr"]) is None
 
 
 class _Mask:

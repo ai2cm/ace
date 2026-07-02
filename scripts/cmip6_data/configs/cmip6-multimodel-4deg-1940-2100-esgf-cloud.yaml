@@ -1,0 +1,79 @@
+# CMIP6 multi-model daily dataset — ESGF source, cloud bucket.
+#
+# Production config (not pilot). Used by ``process_esgf.py`` to
+# backfill the bucket with datasets that aren't on Pangeo, plus
+# ssp126 / ssp370 (which Pangeo lacks daily 3D state for entirely).
+# Pairs with the Pangeo-side ``cmip6-multimodel-4deg-1940-2100-cloud.yaml``
+# and writes into the same ``output_directory``.
+
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v2
+# See the Pangeo prod config for rationale. Shared across versions
+# so externals are staged once.
+external_forcings_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/external_forcings
+
+esgf:
+  # See the matching inventory config for rationale; LLNL is the more
+  # comprehensive federation index.
+  search_node: https://esgf-node.llnl.gov/esg-search/search
+  scratch_dir: /scratch
+
+defaults:
+  time_subset:
+    historical: {start: "1940-01-01", end: "2014-12-31"}
+    ssp126: {start: "2015-01-01", end: "2100-12-31"}
+    ssp245: {start: "2015-01-01", end: "2100-12-31"}
+    ssp370: {start: "2015-01-01", end: "2100-12-31"}
+    ssp585: {start: "2015-01-01", end: "2100-12-31"}
+  chunking:
+    # See the Pangeo prod config for rationale.
+    chunk_time: 360
+    shard_time: 7200
+    variable_batch_size: 8
+
+selection:
+  exclude_source_ids:
+    # INM-CM4-8 publishes anomalously low ``zg`` at 10 hPa for a
+    # subset of grid cells, which collapses the derived layer-6 T
+    # to ~60 K (unphysical). See README's "Known model-side data
+    # quirks" and figures/inm_cm4_8_zg_top.png.
+    - INM-CM4-8
+    # AWI-CM-1-1-MR publishes 3D variables on a non-standard plev
+    # grid (1, 5, 10, 20, 30, 50, 70, 100, 150, 200, 250, 300, 400,
+    # 500, 600, 700, 850, 925, 1000 hPa — not the plev8 set we
+    # assume), so the flattened per-level variable names
+    # (``ua5``, ``ua20``, ...) and the derived-layer variables
+    # (``ta_derived_layer_5_1``, ...) don't match the rest of the
+    # cohort. Mirror the Pangeo exclude.
+    - AWI-CM-1-1-MR
+    # KACE-1-0-G has sparse NaN values at 10 hPa that propagate to
+    # all-NaN model output. Mirror the Pangeo exclude.
+    - KACE-1-0-G
+    # AWI-ESM-1-1-LR + AWI-ESM-1-REcoM Jan-1 corruption (see Pangeo
+    # config + report/v5/README.md).
+    - AWI-ESM-1-1-LR
+    - AWI-ESM-1-REcoM
+    # MPI-ESM1-2-HR excluded for runtime, not data quality. See the
+    # Pangeo config for rationale. Mirrored here so the ESGF backfill
+    # doesn't pull it in either. The MPI-ESM1-2-LR family is retained.
+    - MPI-ESM1-2-HR
+    # HadGEM3-GC31-MM excluded for runtime — see Pangeo config.
+    # HadGEM3-GC31-LL family is the retained HadGEM3 representative.
+    - HadGEM3-GC31-MM
+  exclude_variants:
+    - {source_id: HadGEM3-GC31-MM, experiment: historical, variant_label: r2i1p1f3}
+    - {source_id: EC-Earth3, experiment: historical, variant_label: r4i1p1f1}
+    # CESM2-WACCM ssp585 r1i1p1f1 has 41 consecutive days of
+    # all-NaN data starting 2016-02-15 (publisher missing chunk).
+    # Sibling variants of CESM2-WACCM ssp585 are fine.
+    - {source_id: CESM2-WACCM, experiment: ssp585, variant_label: r1i1p1f1}
+  # ssp126 + ssp370 dropped 2026-05-28; mirror the Pangeo config.
+  experiments: [historical, ssp245, ssp585]
+
+overrides:
+  # CESM2-WACCM-FV2 publishes files on ESGF with overlapping time
+  # ranges that produce data-identical duplicate timestamps after
+  # concatenation. Handled via allow_dedupe; the duplicates are
+  # verified to be data-identical before deduplication.
+  - match:
+      source_id: CESM2-WACCM-FV2
+    allow_dedupe: true

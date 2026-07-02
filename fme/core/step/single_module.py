@@ -27,8 +27,8 @@ from fme.core.step.global_mean_removal import (
     GlobalMeanRemovalConfigUnion,
     GlobalMeanRemovalState,
     NoGlobalMeanRemoval,
-    extra_channel_source_field,
 )
+from fme.core.step.masking import apply_input_mask, build_channel_mask_dict
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -381,7 +381,7 @@ class SingleModuleStep(StepABC):
     ) -> tuple[TensorDict, StepperState | None]:
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.data_mask)
+                input_norm = apply_input_mask(input_norm, args.data_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             # Fail loud if a NaN survives masking/normalization to the network
             # input (cf. PR #1262). Gated on grad-enabled so the no_grad
@@ -389,7 +389,7 @@ class SingleModuleStep(StepABC):
             if torch.is_grad_enabled() and torch.isnan(input_tensor).any():
                 _raise_input_nan_error(input_norm)
             if self._config.include_channel_mask_inputs:
-                mask_dict = _build_channel_mask_dict(
+                mask_dict = build_channel_mask_dict(
                     self.in_packer.names, args.data_mask, input_tensor
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
@@ -478,57 +478,6 @@ def _raise_input_nan_error(input_norm: TensorMapping) -> None:
         "the data_mask passed to the stepper includes every input variable that "
         "may be masked (cf. PR #1262), or enable fill_nans_on_normalize."
     )
-
-
-def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:
-    """Zero out masked input variables in normalized space.
-
-    For each variable in data_mask with False entries, sets those batch
-    members' values to 0 in the normalized input. This is equivalent to
-    replacing with the climatological mean in physical space.
-    """
-    result = dict(input_norm)
-    for name, mask in data_mask.items():
-        if name in result:
-            # mask shape: [batch], data shape: [batch, ...spatial...]
-            broadcast_mask = mask.view(mask.shape[0], *([1] * (result[name].ndim - 1)))
-            result[name] = torch.where(broadcast_mask, result[name], 0.0)
-    return result
-
-
-def _build_channel_mask_dict(
-    in_names: list[str],
-    data_mask: TensorMapping | None,
-    packed_input: torch.Tensor,
-) -> TensorDict:
-    """Build a dict of per-variable spatial mask tensors.
-
-    Returns a ``TensorDict`` keyed by variable name, with each value a
-    ``(batch, *spatial)`` float tensor (1.0 = present, 0.0 = masked).
-    The caller is responsible for packing this dict into the correct
-    channel order.
-
-    Args:
-        in_names: Input variable names.
-        data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
-        packed_input: The packed input tensor, used to infer shape and device.
-    """
-    batch = packed_input.shape[0]
-    spatial = packed_input.shape[-2:]
-    device = packed_input.device
-    result: TensorDict = {}
-    for name in in_names:
-        # GMR sentinel channels share their source field's mask: the extra
-        # value is already zeroed in forward_transform when the source is
-        # masked, so the mask channel must agree rather than default to 1.
-        source = extra_channel_source_field(name)
-        lookup_name = source if source is not None else name
-        if data_mask is not None and lookup_name in data_mask:
-            mask_1d = data_mask[lookup_name].to(device=device, dtype=torch.float)
-            result[name] = mask_1d.view(batch, 1, 1).expand(batch, *spatial)
-        else:
-            result[name] = torch.ones(batch, *spatial, device=device)
-    return result
 
 
 def step_with_adjustments(

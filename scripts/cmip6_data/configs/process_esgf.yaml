@@ -1,0 +1,29 @@
+# Local ESGF smoke-test scope. One year per scenario for pipeline
+# validation. Production cloud config is
+# ``cmip6-multimodel-4deg-1940-2100-esgf-cloud.yaml``.
+output_directory: ./data/cmip6-daily-pilot/v0
+
+esgf:
+  search_node: https://esgf-data.dkrz.de/esg-search/search
+  scratch_dir: ./scratch
+
+defaults:
+  time_subset:
+    historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp126: {start: "2015-01-01", end: "2015-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
+    ssp370: {start: "2015-01-01", end: "2015-12-31"}
+    ssp585: {start: "2015-01-01", end: "2015-12-31"}
+
+selection:
+  exclude_source_ids:
+    - INM-CM4-8
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+
+overrides:
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_surface_and_ocean_variables: [simon_sea_ice_fraction, simon_sitemptop, siday_sea_ice_fraction, siday_sitemptop, siday_sithick]
+  - match:
+      source_id: CESM2-WACCM-FV2
+    allow_dedupe: true

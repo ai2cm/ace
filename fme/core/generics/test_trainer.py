@@ -1775,7 +1775,7 @@ class TestBuildInferenceCallback:
         return InferenceTask(
             name=name,
             data=data,
-            aggregator_factory=lambda: aggregator,
+            aggregator_factory=lambda epoch: aggregator,
             epoch_set=epoch_set,
             weight=weight,
         )
@@ -1900,7 +1900,7 @@ class TestBuildInferenceCallback:
 
     def test_missing_loss_for_weighted_entry_raises(self):
         tasks = [self._make_task("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce a loss"):
+        with pytest.raises(RuntimeError, match="did not produce expected metric"):
             self._call(
                 tasks,
                 [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],

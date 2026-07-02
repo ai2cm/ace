@@ -1,0 +1,66 @@
+# Benchmark config template for data loading throughput.
+# Override loader.dataset.data_dir, loader.dataset.engine, and
+# loader.num_data_workers via the benchmark runner script.
+
+loader:
+  batch_size: 4
+  num_data_workers: 0
+  dataset:
+    data_dir: ./scripts/cmip6_data/data/cmip6-daily-pilot/v0
+    exclude_source_ids: [AWI-CM-1-1-MR, KACE-1-0-G]
+    experiments: [historical, ssp245, ssp585]
+
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+
+names:
+  - ts
+  - ua1000
+  - ua850
+  - ua700
+  - ua500
+  - ua250
+  - ua100
+  - ua50
+  - ua10
+  - va1000
+  - va850
+  - va700
+  - va500
+  - va250
+  - va100
+  - va50
+  - va10
+  - hus1000
+  - hus850
+  - hus700
+  - hus500
+  - hus250
+  - hus100
+  - hus50
+  - hus10
+  - zg1000
+  - zg850
+  - zg700
+  - zg500
+  - zg250
+  - zg100
+  - zg50
+  - zg10
+  - tas
+  - huss
+  - psl
+  - pr
+  - ta_derived_layer_1000_850
+  - ta_derived_layer_850_700
+  - ta_derived_layer_700_500
+  - ta_derived_layer_500_250
+  - ta_derived_layer_250_100
+  - ta_derived_layer_100_50
+  - ta_derived_layer_50_10
+
+n_timesteps: 2
+train: true
+sleep: 1.0

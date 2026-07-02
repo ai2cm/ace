@@ -1,0 +1,64 @@
+inventory_path: ./inventory.csv
+output_directory: ./data/cmip6-daily-pilot/v0
+# index_path is derived at process.py runtime: <output_directory>/index.{csv,parquet}
+
+# Small smoke-test scope. One year per scenario — just enough to
+# validate the pipeline end-to-end on a developer workstation without
+# committing to the full ~11.5 TB production run. The production
+# config lives at
+# ``configs/cmip6-multimodel-4deg-1940-2100-cloud.yaml``.
+defaults:
+  time_subset:
+    historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp126: {start: "2015-01-01", end: "2015-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
+    ssp370: {start: "2015-01-01", end: "2015-12-31"}
+    ssp585: {start: "2015-01-01", end: "2015-12-31"}
+
+# target_grid, regrid, fill, chunking, and variable lists all take
+# dataclass defaults — only set them here to deviate from the default.
+
+selection:
+  # source_ids: null              # default: all models in the inventory
+  exclude_source_ids:
+    # INM-CM4-8 publishes anomalously low ``zg`` at 10 hPa for a
+    # subset of grid cells, which collapses the derived layer-6 T to
+    # ~60 K (unphysical). See README's "Known model-side data quirks"
+    # and figures/inm_cm4_8_zg_top.png.
+    - INM-CM4-8
+    # AWI-CM-1-1-MR publishes 3D variables on a non-standard plev grid
+    # (not plev8), so derived layer variable names don't match the
+    # pipeline's plev8 convention.
+    - AWI-CM-1-1-MR
+    # KACE-1-0-G has sparse NaN values at 10 hPa (ua10, va10, hus10,
+    # zg10) — typically 1 grid cell per timestep — which propagate
+    # through the network and produce all-NaN model output.
+    - KACE-1-0-G
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+  # require_i: 1                  # default: i1 only; null = keep all i
+  # max_members_per_f: 3          # default: 3 r per (source_id, exp, p, f)
+                                  # null = no cap
+
+# Per-dataset overrides. Sparse; match on any subset of
+# (source_id, experiment, variant_label). source_id is required.
+overrides:
+  # CESM2-WACCM historical r2i1p1f1 has its psl variable concatenated
+  # twice end-to-end on Pangeo (mirror-side ingest error; see README's
+  # "Known Pangeo data-quality issues"). The two halves are
+  # bit-identical, so dedupe is safe — but we want this to be opt-in,
+  # not silent.
+  - match:
+      source_id: CESM2-WACCM
+      experiment: historical
+      variant_label: r2i1p1f1
+    allow_dedupe: true
+  # AWI-ESM-1-1-LR's unstructured ocean grid (~127k cells) causes xesmf
+  # to build a 127k×127k weight matrix for siconc regridding, which
+  # either OOMs or hangs indefinitely depending on available memory.
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_surface_and_ocean_variables: [simon_sea_ice_fraction, simon_sitemptop, siday_sea_ice_fraction, siday_sitemptop, siday_sithick]
+# Example time_subset override:
+# - match: {source_id: GISS-E2-1-G, variant_label: r1i1p3f1}
+#   time_subset:
+#     historical: {start: "2005-01-01", end: "2006-12-31"}

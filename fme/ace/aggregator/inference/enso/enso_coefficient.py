@@ -365,8 +365,16 @@ def get_sample_index_series(
     data_calendar = initial_time.dt.calendar
     index_calendar = index_data.time.dt.calendar
     if data_calendar != index_calendar:
+        # ``align_on`` is required when either side is a 360_day calendar
+        # (e.g. UKESM1-0-LL, HadGEM3). The reference ENSO index is monthly,
+        # so year-aligned conversion (uniform drop/insert across the year)
+        # is the appropriate mapping; ``align_on`` is harmless for the
+        # non-360_day pairs xarray would otherwise accept.
         index_data = index_data.convert_calendar(
-            calendar=data_calendar, dim="time", use_cftime=True
+            calendar=data_calendar,
+            dim="time",
+            use_cftime=True,
+            align_on="year",
         )
     sample_index_series: list[xr.DataArray | None] = []
     for initial_time_sample in initial_time:

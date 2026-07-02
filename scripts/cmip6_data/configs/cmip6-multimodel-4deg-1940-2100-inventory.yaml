@@ -1,0 +1,11 @@
+# Inventory build config for the production CMIP6 multi-model run.
+#
+# Used by ``inventory.py`` (Pangeo) to write the per-row catalog that
+# ``process.py`` reads via ``cmip6-multimodel-4deg-1940-2100-cloud.yaml``.
+# Matches the bucket path of the corresponding processing configs.
+#
+# Queries and experiments take defaults from ``config.py``:
+#   queries = day (core+optional+diagnostic) + heterogeneous source
+#             tables (Amon, Eday, SImon, SIday, Oday, Omon) + fx
+#   experiments = [historical, ssp126, ssp245, ssp370, ssp585]
+output_path: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/inventory.csv

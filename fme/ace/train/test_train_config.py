@@ -361,11 +361,13 @@ class TestGetValidationCallback:
 
 class TestGetInferenceCallback:
     @staticmethod
-    def _make_entry(name, weight=1.0):
+    def _make_entry(name, weight=1.0, forward_steps_in_memory=None):
         config = MagicMock()
         config.weight = weight
         config.n_forward_steps = 1
         config.n_ensemble_per_ic = 1
+        if forward_steps_in_memory is not None:
+            config.forward_steps_in_memory = forward_steps_in_memory
         data = MagicMock()
         dataset_info = MagicMock()
         return (config, data, dataset_info, name)
@@ -481,7 +483,7 @@ class TestGetInferenceCallback:
 
     def test_weighted_entry_missing_metric_raises(self):
         entries = [self._make_entry("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce a loss"):
+        with pytest.raises(RuntimeError, match="did not produce expected metric"):
             self._call(
                 entries,
                 [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],

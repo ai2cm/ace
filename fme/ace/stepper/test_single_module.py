@@ -2692,3 +2692,51 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     output, _ = stepper.predict(input_data, forcing_data)
     ic_a = input_data.as_batch_data().data["a"][:, 0]
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
+
+
+def test_resolve_mask_var_name():
+    """Per-output-variable mask resolution: explicit mapping wins, then
+    mask_<var>, then mask_<level>, then mask_2d, else None."""
+    from fme.ace.stepper.single_module import resolve_mask_var_name
+
+    avail = {"mask_a", "mask_1000", "mask_2d"}
+    assert resolve_mask_var_name("a", avail) == "mask_a"  # variable-specific
+    assert resolve_mask_var_name("ta1000", avail) == "mask_1000"  # level-shared
+    assert resolve_mask_var_name("zg850", avail) == "mask_2d"  # catch-all
+    assert resolve_mask_var_name("x", {"mask_b"}) is None  # no match
+    # explicit mapping (the dataset's self-describing attribute) is authoritative
+    assert resolve_mask_var_name("a", {"mask_q"}, {"a": "mask_q"}) == "mask_q"
+    assert resolve_mask_var_name("a", {"mask_a"}, {"a": "mask_missing"}) is None
+
+
+def test_train_stepper_mask_loss_per_timestep():
+    """mask_loss gates per-step masking sourced from time-varying mask_<field>
+    data variables in the batch (not the static provider); when on, error
+    confined to masked cells changes the optimized loss."""
+    torch.manual_seed(0)
+    base = get_data(["a"], n_samples=3, n_time=2).data
+    # time-varying mask_a riding in the batch: invalidate the bottom 2 rows
+    mask = torch.ones(3, 2, 5, 5, device=DEVICE)
+    mask[:, :, 3:, :] = 0.0
+    data = dataclasses.replace(base, data={**base.data, "mask_a": mask})
+    config = _get_stepper_config(["a"], ["a"])
+
+    masked = _get_train_stepper(config, loss=StepLossConfig(type="MSE"), mask_loss=True)
+    unmasked = _get_train_stepper(
+        config, loss=StepLossConfig(type="MSE"), mask_loss=False
+    )
+    assert masked._mask_loss is True
+    assert unmasked._mask_loss is False
+    # the resolver finds mask_a for output "a" and slices it per step
+    step_mask = masked._build_step_spatial_mask(data, step=0)
+    assert step_mask is not None and set(step_mask) == {"a"}
+    assert step_mask["a"].shape == (3, 5, 5)
+    assert unmasked._build_step_spatial_mask(data, step=0) is None
+
+    masked_loss = masked.train_on_batch(
+        data=data, optimization=NullOptimization()
+    ).metrics["loss"]
+    unmasked_loss = unmasked.train_on_batch(
+        data=data, optimization=NullOptimization()
+    ).metrics["loss"]
+    assert not torch.allclose(masked_loss, unmasked_loss)

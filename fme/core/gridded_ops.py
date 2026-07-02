@@ -69,6 +69,7 @@ class GriddedOperations(abc.ABC):
         data: torch.Tensor,
         keepdim: bool = False,
         name: str | None = None,
+        cell_weights: torch.Tensor | None = None,
     ) -> torch.Tensor: ...
 
     @final
@@ -89,8 +90,11 @@ class GriddedOperations(abc.ABC):
         truth: torch.Tensor,
         predicted: torch.Tensor,
         name: str | None = None,
+        cell_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        return self.area_weighted_mean(predicted - truth, name=name)
+        return self.area_weighted_mean(
+            predicted - truth, name=name, cell_weights=cell_weights
+        )
 
     @final
     def area_weighted_mean_bias_dict(
@@ -110,8 +114,13 @@ class GriddedOperations(abc.ABC):
         truth: torch.Tensor,
         predicted: torch.Tensor,
         name: str | None = None,
+        cell_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        return torch.sqrt(self.area_weighted_mean((predicted - truth) ** 2, name=name))
+        return torch.sqrt(
+            self.area_weighted_mean(
+                (predicted - truth) ** 2, name=name, cell_weights=cell_weights
+            )
+        )
 
     @final
     def area_weighted_rmse_dict(
@@ -319,6 +328,7 @@ class LatLonOperations(GriddedOperations):
         data: torch.Tensor,
         name: str | None = None,
         regional_weights: torch.Tensor | None = None,
+        cell_weights: torch.Tensor | None = None,
     ):
         if data.device == torch.device("cpu"):
             area_weights = self._cpu_area
@@ -329,6 +339,14 @@ class LatLonOperations(GriddedOperations):
         area_weights = _spatial_mask_area_weights(
             area_weights, spatial_mask_provider, name
         )
+        # Per-cell validity weights (e.g. time-varying loss/eval masks): a cell
+        # with zero weight drops from both numerator and denominator of the
+        # weighted mean. Distinct from ``regional_weights`` (a region selector)
+        # so both can compose.
+        if cell_weights is not None:
+            if cell_weights.device.type != data.device.type:
+                cell_weights = cell_weights.to(data.device)
+            area_weights = area_weights * cell_weights
         if regional_weights is None:
             return area_weights
         if regional_weights.device.type != data.device.type:
@@ -352,8 +370,9 @@ class LatLonOperations(GriddedOperations):
         data: torch.Tensor,
         keepdim: bool = False,
         name: str | None = None,
+        cell_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        area_weights = self._get_area_weights(data, name)
+        area_weights = self._get_area_weights(data, name, cell_weights=cell_weights)
         return Distributed.get_instance().weighted_mean(
             data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
         )
@@ -491,9 +510,18 @@ class HEALPixOperations(GriddedOperations):
         data: torch.Tensor,
         keepdim: bool = False,
         name: str | None = None,
+        cell_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        # For HEALPix, area weights are uniform, so mean is sufficient
-        return data.mean(dim=self.HORIZONTAL_DIMS, keepdim=keepdim)
+        # For HEALPix, area weights are uniform, so mean is sufficient — unless
+        # per-cell validity weights are supplied, in which case fall back to a
+        # weighted mean so zero-weight cells drop from numerator + denominator.
+        if cell_weights is None:
+            return data.mean(dim=self.HORIZONTAL_DIMS, keepdim=keepdim)
+        if cell_weights.device.type != data.device.type:
+            cell_weights = cell_weights.to(data.device)
+        return metrics.weighted_mean(
+            data, cell_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
 
     def area_weighted_gradient_magnitude_percent_diff(
         self,

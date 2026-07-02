@@ -472,7 +472,7 @@ class TestGetInferenceCallback:
 
     def test_weighted_entry_missing_metric_raises(self):
         entries = [self._make_entry("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce a loss"):
+        with pytest.raises(RuntimeError, match="did not produce expected metric"):
             self._call(
                 entries,
                 [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],

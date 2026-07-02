@@ -1,0 +1,5 @@
+output_path: ./inventory_esgf.csv
+search_node: https://esgf-data.dkrz.de/esg-search/search
+# queries, experiments all take dataclass defaults:
+#   queries = day (core+optional+diagnostic) + Amon (ts) + SImon (siconc) + fx (sftlf, orog)
+#   experiments = [historical, ssp245, ssp585]

@@ -1,0 +1,18 @@
+# Fresh ESGF inventory for the v3 masked MPI reprocess.
+#
+# Built new (not the shared production inventory_esgf.csv) so it reflects the
+# CURRENT query set — in particular ``ta`` on the ``day`` table, which was
+# added to OPTIONAL_VARIABLES/DIAGNOSTIC_VARIABLES for the schema-1.0.0 line and
+# is absent from the older shared inventory. The default query set
+# (_default_inventory_queries) covers day = core + optional(non-CFday) +
+# diagnostic (includes ``ta``), CFday, the surface/ocean tables, and fx.
+#
+# Node: LLNL (most comprehensive federation index; ORNL is the equivalent
+# fallback if LLNL is down). Historical only — matches the v3 process config.
+# The inventory enumerates all models for these tables (no source-id filter);
+# process_esgf's selection + --variant-labels scope the run to
+# MPI-ESM1-2-LR r1i1p1f1 + r2i1p1f1.
+
+output_path: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v3/inventory_esgf.csv
+search_node: https://esgf-node.llnl.gov/esg-search/search
+experiments: [historical]

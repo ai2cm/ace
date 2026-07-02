@@ -152,6 +152,15 @@ class DynamicHistogram:
             value: tensor of values of shape (n_times, n_values) to add to the histogram
             i_time_start: index of the first time to add values to
         """
+        # Skip empty inputs — happens upstream when the caller has
+        # NaN-stripped a variable that's all-NaN for the current batch
+        # (the CMIP6 ``allow_missing_variables`` path can produce a
+        # full all-NaN batch for an inference dataset that doesn't
+        # publish a given variable). ``torch.min``/``max`` on an empty
+        # tensor raises ``RuntimeError: min(): Expected reduction dim
+        # to be specified for input.numel() == 0``.
+        if value.numel() == 0:
+            return
         # add epsilon to ensure all values stay within (and not just equal to)
         # the bin edges, and to avoid the case where vmin == vmax
         vmin = float((torch.min(value) - self._epsilon).cpu().numpy())
@@ -280,6 +289,13 @@ class DynamicHistogramAggregator:
             raise ValueError("No data has been added to the histogram")
         return_dict: dict[str, _Histogram] = {}
         for k, histogram in self.histograms.items():
+            if histogram.bin_edges is None:
+                # No data was added for this variable (the upstream
+                # NaN-stripper produced only empty tensors — typical of
+                # the CMIP6 ``allow_missing_variables`` path). Skip
+                # rather than passing ``bin_edges=None`` to
+                # ``trim_zero_bins``.
+                continue
             counts, bin_edges = trim_zero_bins(
                 histogram.counts.squeeze(self._time_dim),
                 histogram.bin_edges,
@@ -292,6 +308,8 @@ class DynamicHistogramAggregator:
             raise ValueError("No data has been added to the histogram")
         data = {}
         for var_name, histogram in self.histograms.items():
+            if histogram.bin_edges is None:
+                continue
             data[var_name] = xr.DataArray(
                 histogram.counts[0, :],
                 dims=("bin",),
@@ -412,6 +430,12 @@ class ComparedDynamicHistograms:
         target_histograms = self.target_aggregator.get_histograms()
         prediction_histograms = self.prediction_aggregator.get_histograms()
         for k in self._variables:
+            # Skip variables that received no data on either side — the
+            # downstream plot/percentile code can't render a histogram
+            # without bin edges, and there's nothing meaningful to log
+            # for an all-NaN-batch variable anyway.
+            if k not in target_histograms or k not in prediction_histograms:
+                continue
             return_dict[k]["target"] = target_histograms[k]
             return_dict[k]["prediction"] = prediction_histograms[k]
         return return_dict

@@ -1,0 +1,636 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: cmip6-daily-pilot-
+spec:
+  entrypoint: cmip6-daily-pilot
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: config
+    - name: dataset_keys
+      # Space-separated "source_id/experiment/variant_label" triples,
+      # one per dataset to process.  Built by submit.sh from the
+      # inventory + config via process.py --dry-run.
+    - name: datasets_count_minus_one
+    - name: run_process
+      value: "false"
+    - name: run_process_esgf
+      value: "false"
+    - name: run_stats
+      value: "false"
+    - name: run_normalization
+      value: "false"
+    - name: run_stage_externals
+      value: "false"
+    - name: experiments
+      # Space-separated list of experiments to stage external forcings
+      # for; matches the ``--experiments`` flag of external_forcings.py.
+      value: "historical ssp126 ssp245 ssp370 ssp585"
+    # ESGF-side parameters (used by run_process_esgf only). The ESGF
+    # processing pipeline reuses the same ``output_directory`` from
+    # ``config`` so its per-model zarrs land alongside Pangeo's.
+    - name: esgf_config
+      value: ""
+    - name: esgf_inventory_path
+      value: ""
+    - name: esgf_dataset_keys
+      value: ""
+    - name: esgf_datasets_count_minus_one
+      value: "-1"
+    # When "true", process_esgf.py is invoked with
+    # ``--retry-failed-augments`` for the augment-mode path. Use to
+    # re-try variables a prior pass recorded in the sidecar's
+    # ``esgf_failed_augment_variables`` (typically after fixing the
+    # upstream regrid / library issue that caused the original
+    # failure).
+    - name: retry_failed_augments
+      value: "false"
+    # Migrate-side parameters (used by run_migrate only).
+    - name: run_migrate
+      value: "false"
+    - name: migrate_dataset_keys
+      # Space-separated "source_id/experiment/variant_label" triples,
+      # one per dataset that needs a schema bump. Built by submit.sh
+      # from a sidecar scan: any dataset whose stored schema_version
+      # is older than the image's SCHEMA_VERSION.
+      value: ""
+    - name: migrate_datasets_count_minus_one
+      value: "-1"
+    # Stats-side filters (used by run_stats only). When non-empty,
+    # ``stats_source_ids`` restricts compute_stats.py to those source
+    # models — useful when re-running stats for a targeted subset
+    # (e.g. the 10 datasets whose statics were refreshed in place,
+    # so their stats.nc needs a fresh sweep without redoing the
+    # other 236).
+    - name: stats_source_ids
+      value: ""
+    - name: stats_force
+      value: "false"
+    # Worker pool size for compute_stats.py inside the compute-stats
+    # pod. Each worker loads its dataset's zarr fully (~6 GB RSS for
+    # the larger 86-year ssp datasets); the pod has 32 GiB so 4 is
+    # safe, 8 OOMKills. Tune up only if the resource request below
+    # is raised in tandem.
+    - name: stats_workers
+      value: "4"
+    # Per-dataset stats fan-out. When set to a non-empty list (and
+    # ``stats_datasets_count_minus_one`` ≥ 0), the entry point spawns
+    # one ``compute-stats-dataset`` pod per element instead of the
+    # bucket-wide ``compute-stats`` template. Used for targeted
+    # refreshes (e.g. the 10 datasets whose statics were just
+    # rewritten) where each pod handles a single zarr-path under
+    # ``--workers 1``, avoiding the in-pod-worker-pool memory
+    # contention that the 86-year ssp variables trigger.
+    - name: stats_dataset_keys
+      value: ""
+    - name: stats_datasets_count_minus_one
+      value: "-1"
+  templates:
+    # ------------------------------------------------------------------
+    # Entry point: sequential stages, each with a conditional gate.
+    # ------------------------------------------------------------------
+    - name: cmip6-daily-pilot
+      steps:
+      - - name: stage-externals
+          when: "{{workflow.parameters.run_stage_externals}} == true"
+          template: stage-externals
+      - - name: process-dataset
+          when: "{{workflow.parameters.run_process}} == true"
+          template: process-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.datasets_count_minus_one}}"
+      - - name: process-esgf-dataset
+          when: "{{workflow.parameters.run_process_esgf}} == true"
+          template: process-esgf-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.esgf_datasets_count_minus_one}}"
+      - - name: rebuild-index
+          when: "{{workflow.parameters.run_process}} == true"
+          template: rebuild-index
+      - - name: migrate-dataset
+          when: "{{workflow.parameters.run_migrate}} == true"
+          template: migrate-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.migrate_datasets_count_minus_one}}"
+      # Second rebuild-index pass after migrate-dataset: every migrated
+      # sidecar got its ``schema_version`` bumped (and possibly other
+      # fields, e.g. ``n_timesteps`` / ``time_end`` for migrations that
+      # truncate data) so the top-level ``index.csv`` is stale until we
+      # re-scan. Gated on ``run_migrate`` only — the post-process
+      # rebuild-index above already covers ``run_process``.
+      - - name: rebuild-index-after-migrate
+          when: "{{workflow.parameters.run_migrate}} == true"
+          template: rebuild-index
+      - - name: compute-stats
+          when: "{{workflow.parameters.run_stats}} == true && {{workflow.parameters.stats_datasets_count_minus_one}} == -1"
+          template: compute-stats
+      - - name: compute-stats-dataset
+          when: "{{workflow.parameters.run_stats}} == true && {{workflow.parameters.stats_datasets_count_minus_one}} != -1"
+          template: compute-stats-dataset
+          arguments:
+            parameters:
+            - name: dataset_index
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.stats_datasets_count_minus_one}}"
+      - - name: make-normalization
+          when: "{{workflow.parameters.run_normalization}} == true"
+          template: make-normalization
+          arguments:
+            parameters:
+            - name: period
+              value: "{{item}}"
+          withItems:
+          - full
+          - 1940-2014
+          - 1979-2014
+      - - name: make-presence
+          when: "{{workflow.parameters.run_stats}} == true"
+          template: make-presence
+
+    # ------------------------------------------------------------------
+    # stage-externals: run external_forcings.py once to download the
+    # input4MIPs/LUH2 forcing files, regrid to F22.5, and write the
+    # per-scenario zarrs under <output_directory>/external_forcings/.
+    # Subsequent process-dataset pods read those zarrs via
+    # attach_external_forcings.  Total source download is ~30-35 GB
+    # (mostly LUH2 + CMIP7 CEDS historical); the staged zarrs are tiny
+    # (~few MB per scenario). Run with run_stage_externals=true once
+    # per pilot version; results are persisted to GCS so subsequent
+    # runs can skip.
+    # ------------------------------------------------------------------
+    - name: stage-externals
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+            ephemeral-storage: "60Gi"
+          requests:
+            cpu: "4000m"
+            memory: "16Gi"
+            ephemeral-storage: "60Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            # Resolve the externals destination — prefer the explicit
+            # ``external_forcings_directory`` (shared cross-version
+            # cache) and fall back to ``<output_directory>/external_forcings``.
+            external_forcings_directory=$(python -c "
+            import yaml
+            cfg = yaml.safe_load(open('config.yaml'))
+            efd = cfg.get('external_forcings_directory')
+            print(efd or f\"{cfg['output_directory'].rstrip('/')}/external_forcings\")
+            ")
+            echo "Staging externals into ${external_forcings_directory}"
+
+            python external_forcings.py \
+              --external-forcings-directory "${external_forcings_directory}" \
+              --experiments {{workflow.parameters.experiments}}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # process-dataset: run process.py for one (source_id, exp, member).
+    # Each pod downloads from Pangeo GCS and writes to the configured
+    # output_directory (a GCS path).
+    # ------------------------------------------------------------------
+    - name: process-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "32Gi"
+          requests:
+            cpu: "8000m"
+            memory: "32Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            echo "Processing ${source_id} ${experiment} ${variant}"
+            python process.py \
+              --config config.yaml \
+              --skip-index \
+              --source-ids "${source_id}" \
+              --experiments "${experiment}" \
+              --variant-labels "${variant}" \
+              --max-datasets 1
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # migrate-dataset: run migrate.py on a single (source_id, exp,
+    # variant) dataset, chaining whatever migration steps are needed
+    # to bring it to the image's SCHEMA_VERSION. Selection happens at
+    # submit time (submit.sh scans sidecars and builds the keys list
+    # of datasets with non-current schema_version), so the pod just
+    # has to migrate the one path it was handed. Smaller resource
+    # ask than process-dataset since migrations are mostly chunk
+    # rewrites + small stats updates, not regrid.
+    # ------------------------------------------------------------------
+    - name: migrate-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "16Gi"
+          requests:
+            cpu: "4000m"
+            memory: "16Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.migrate_dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            output_directory=$(python -c "
+            from config import ProcessConfig
+            print(ProcessConfig.from_file('config.yaml').output_directory.rstrip('/'))
+            ")
+            zarr_path="${output_directory}/${source_id}/${experiment}/${variant}/data.zarr"
+
+            echo "Migrating ${source_id} ${experiment} ${variant} at ${zarr_path}"
+            python migrate.py \
+              --config config.yaml \
+              --zarr-path "${zarr_path}" \
+              --workers 1
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # process-esgf-dataset: run process_esgf.py for one (source_id,
+    # exp, member). Each pod downloads native NetCDFs from an ESGF
+    # node into a local scratch dir, regrids variable-by-variable to
+    # bound disk usage, then writes the per-dataset zarr to the same
+    # ``output_directory`` as the Pangeo pipeline. Needs more
+    # ephemeral storage than process-dataset because of the local
+    # NetCDF cache.
+    # ------------------------------------------------------------------
+    - name: process-esgf-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          # 64Gi (was 32Gi): the schema-1.0.0 source-grid masked path holds the
+          # full-historical target-grid 3D state (5 fields) + generic vars +
+          # fill/thickness transients in memory during assembly, which exceeds
+          # 32Gi for full 1979-2014 daily. highmem-sim-pool has the headroom.
+          limits:
+            cpu: "8000m"
+            memory: "64Gi"
+            ephemeral-storage: "100Gi"
+          requests:
+            cpu: "8000m"
+            memory: "64Gi"
+            ephemeral-storage: "100Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > esgf_config.yaml
+            {{workflow.parameters.esgf_config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.esgf_dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            echo "Processing ESGF ${source_id} ${experiment} ${variant}"
+            retry_flag=""
+            if [ "{{workflow.parameters.retry_failed_augments}}" = "true" ]; then
+              retry_flag="--retry-failed-augments"
+            fi
+            python process_esgf.py \
+              --config esgf_config.yaml \
+              --inventory "{{workflow.parameters.esgf_inventory_path}}" \
+              --skip-index \
+              --source-ids "${source_id}" \
+              --experiments "${experiment}" \
+              --variant-labels "${variant}" \
+              --max-datasets 1 \
+              ${retry_flag}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # rebuild-index: scan all metadata.json sidecars on GCS to rebuild
+    # index.csv after parallel processing.
+    # ------------------------------------------------------------------
+    - name: rebuild-index
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "8Gi"
+          requests:
+            cpu: "4000m"
+            memory: "8Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            python rebuild_index.py --config config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # compute-stats: per-dataset statistics (all datasets, single pod).
+    # Parallelized within the pod with ProcessPoolExecutor — one zarr
+    # read is ~minutes against GCS, and the per-dataset work is
+    # embarrassingly parallel.
+    # ------------------------------------------------------------------
+    - name: compute-stats
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "32Gi"
+          requests:
+            cpu: "8000m"
+            memory: "32Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            ARGS="--config config.yaml --workers {{workflow.parameters.stats_workers}}"
+            if [ -n "{{workflow.parameters.stats_source_ids}}" ]; then
+              ARGS="${ARGS} --source-ids {{workflow.parameters.stats_source_ids}}"
+            fi
+            if [ "{{workflow.parameters.stats_force}}" = "true" ]; then
+              ARGS="${ARGS} --force"
+            fi
+            python compute_stats.py ${ARGS}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # compute-stats-dataset: run compute_stats.py --zarr-path X on one
+    # dataset per pod. Used for targeted stats regen (e.g. the 10
+    # datasets whose statics were rewritten) where putting multiple
+    # large ssp datasets through one pod's ProcessPoolExecutor blew
+    # the 32 GiB memory limit. One pod per dataset, --workers 1, so
+    # each pod stays under ~4 GiB RSS; Argo parallelism is naturally
+    # set by the cluster's available pods.
+    # ------------------------------------------------------------------
+    - name: compute-stats-dataset
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: highmem-sim-pool
+      inputs:
+        parameters:
+          - name: dataset_index
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          # Peak RSS observed on the heaviest dataset (GFDL-CM4 ssp585,
+          # 86 years × 85 vars × 3 periods) was 1.27 GiB with the
+          # xarray-on-dask refactor — chunk-by-chunk reductions never
+          # hold more than a couple of zarr chunks at a time. 4 GiB
+          # gives a 3× safety margin (other ssp datasets are similar
+          # size; CMCC monthly oceans run smaller; future scaling could
+          # raise the peak somewhat) and lets us pack ~4× more pods
+          # per node than the old 16 GiB request.
+          limits:
+            cpu: "4000m"
+            memory: "4Gi"
+          requests:
+            cpu: "4000m"
+            memory: "4Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            idx={{inputs.parameters.dataset_index}}
+            keys=({{workflow.parameters.stats_dataset_keys}})
+            key="${keys[${idx}]}"
+
+            source_id=$(echo "${key}" | cut -d/ -f1)
+            experiment=$(echo "${key}" | cut -d/ -f2)
+            variant=$(echo "${key}" | cut -d/ -f3)
+
+            output_directory=$(python -c "
+            from config import ProcessConfig
+            print(ProcessConfig.from_file('config.yaml').output_directory.rstrip('/'))
+            ")
+            zarr_path="${output_directory}/${source_id}/${experiment}/${variant}/data.zarr"
+
+            ARGS="--config config.yaml --workers 1 --zarr-path ${zarr_path}"
+            if [ "{{workflow.parameters.stats_force}}" = "true" ]; then
+              ARGS="${ARGS} --force"
+            fi
+            echo "Computing stats for ${source_id} ${experiment} ${variant} at ${zarr_path}"
+            python compute_stats.py ${ARGS}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # make-normalization: pooled centering/scaling/time-mean + per-source
+    # files for one StatsPeriod (``full`` | ``1940-2014`` | ``1979-2014``).
+    # The entry-point loops over the three periods with ``withItems``.
+    # ------------------------------------------------------------------
+    - name: make-normalization
+      inputs:
+        parameters:
+        - name: period
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "32Gi"
+          requests:
+            cpu: "8000m"
+            memory: "32Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            python make_normalization.py --config config.yaml \
+                --period "{{inputs.parameters.period}}"
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+
+    # ------------------------------------------------------------------
+    # make-presence: presence table, heatmap, markdown rollup.
+    # ------------------------------------------------------------------
+    - name: make-presence
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/cmip6-processing:latest
+        resources:
+          limits:
+            cpu: "4000m"
+            memory: "8Gi"
+          requests:
+            cpu: "4000m"
+            memory: "8Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << 'CONFIGEOF' > config.yaml
+            {{workflow.parameters.config}}
+            CONFIGEOF
+
+            python make_presence.py --config config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret

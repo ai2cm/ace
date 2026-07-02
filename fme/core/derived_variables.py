@@ -166,6 +166,62 @@ def windspeed_at_10m(data: AtmosphereData, timestep: datetime.timedelta):
     return data.windspeed_at_10m
 
 
+# Geopotential height reconstructed from predicted layer thicknesses.
+#
+# The residual-off / thickness-predicting CMIP6 line (schema 1.0.0) emits
+# offset-free, surface-anchored layer thicknesses instead of ``zg``. ``zg`` at
+# each plev8 level is reconstructed for diagnostics by integrating the
+# thicknesses upward from the surface height:
+#   zg1000 = HGTsfc + thickness_surface_1000
+#   zg850  = zg1000 + thickness_1000_850
+#   ...
+# Because the derive function runs over both prediction and target and derived
+# computation now skips variables already present (see
+# ``_compute_derived_variable``), these fill in ``zg`` only on the prediction
+# side; the target keeps its stored ``zg``, so the aggregators compare
+# reconstructed-from-thickness against truth under the same names. The chain
+# mirrors ``processing.derive_layer_thickness``'s naming; if a required
+# thickness (or the surface height) is absent, the reconstruction is skipped.
+_ZG_THICKNESS_CHAIN: tuple[tuple[int, str], ...] = (
+    (1000, "thickness_surface_1000"),
+    (850, "thickness_1000_850"),
+    (700, "thickness_850_700"),
+    (500, "thickness_700_500"),
+    (250, "thickness_500_250"),
+    (100, "thickness_250_100"),
+    (50, "thickness_100_50"),
+    (10, "thickness_50_10"),
+)
+
+
+def _make_zg_reconstruction(upto_index: int) -> DerivedVariableFunc:
+    thickness_names = [name for _, name in _ZG_THICKNESS_CHAIN[: upto_index + 1]]
+
+    def _reconstruct(
+        data: AtmosphereData, timestep: datetime.timedelta
+    ) -> torch.Tensor:
+        # KeyError on a missing thickness / surface height propagates and the
+        # caller skips this derived variable (e.g. on non-thickness datasets).
+        zg = data.surface_height
+        for name in thickness_names:
+            zg = zg + data.data[name]
+        return zg
+
+    return _reconstruct
+
+
+for _idx, (_level, _thickness) in enumerate(_ZG_THICKNESS_CHAIN):
+    _zg_func = _make_zg_reconstruction(_idx)
+    _zg_func.__name__ = f"zg{_level}"
+    register(
+        VariableMetadata(
+            "m",
+            f"Geopotential height at {_level} hPa reconstructed from "
+            "predicted layer thicknesses",
+        )
+    )(_zg_func)
+
+
 def _compute_derived_variable(
     data: TensorDict,
     vertical_coordinate: HasAtmosphereVerticalIntegral | None,
@@ -195,10 +251,15 @@ def _compute_derived_variable(
         A new data dictionary with the derived variable added.
     """
     if label in data:
-        raise ValueError(
-            f"Variable {label} already exists. It is not permitted "
-            "to overwrite existing variables with derived variables."
-        )
+        # A stored variable of the same name takes precedence over its derived
+        # form — real data beats a reconstruction, and the derive function runs
+        # over both prediction and target (see single_module.py), so a variable
+        # may legitimately be stored on one side and derived-when-absent on the
+        # other. Example: ``zg`` is stored in the target but reconstructed from
+        # the predicted layer thicknesses on the prediction side (which emits
+        # thickness, not zg). Keep the existing value and skip.
+        logging.debug(f"Not computing derived {label}; already present in data")
+        return data
     new_data = data.copy()
     if forcing_data is not None:
         for key, value in forcing_data.items():

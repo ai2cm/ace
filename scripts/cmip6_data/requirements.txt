@@ -1,0 +1,13 @@
+cftime
+dacite
+dask[distributed]
+fsspec
+gcsfs
+numpy
+pandas
+pyarrow
+pyyaml
+scipy
+xarray>=2025.1.2
+xesmf
+zarr>=3.0.3

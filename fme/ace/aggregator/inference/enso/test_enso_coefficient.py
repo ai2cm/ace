@@ -202,6 +202,7 @@ def test_enso_index_inference_overlap(shift):
     [
         pytest.param("julian", id="both_julian"),
         pytest.param("proleptic_gregorian", id="data_proleptic_gregorian_index_julian"),
+        pytest.param("360_day", id="data_360_day_index_julian"),
     ],
 )
 def test_enso_agg_calendar(calendar):
@@ -217,7 +218,9 @@ def test_enso_agg_calendar(calendar):
     enso_index, sample_time, target_data, gen_data = _get_data(
         data_scale, n_samples, n_times, n_lat, n_lon, calendar=calendar
     )
-    enso_index = enso_index.convert_calendar("julian", dim="time", use_cftime=True)
+    enso_index = enso_index.convert_calendar(
+        "julian", dim="time", use_cftime=True, align_on="year"
+    )
     with change_aggregator_enso_index(EnsoCoefficientEvaluatorAggregator, enso_index):
         enso_agg = EnsoCoefficientEvaluatorAggregator(
             initial_time=sample_time.isel(time=0),

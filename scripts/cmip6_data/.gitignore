@@ -1,0 +1,15 @@
+# Inventory output (produced by inventory.py)
+inventory.csv
+inventory.parquet
+inventory.csv.gz
+
+# Processed data outputs
+data/
+
+# Diagnostic / scratch zarrs
+tmp_*.zarr/
+
+# ESMF (xesmf backend) log files — emitted as PET*.ESMF_LogFile
+# on regrid failures
+*.ESMF_LogFile
+PET*.ESMF_LogFile

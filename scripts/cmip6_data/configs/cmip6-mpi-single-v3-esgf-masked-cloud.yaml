@@ -1,0 +1,59 @@
+# MPI-ESM1-2-LR single-model reprocess — schema 1.0.0 / v3 line.
+#
+# Task 2026-06-25-reprocess-mpi-esm1-2-lr-...-residual-off. Reprocesses
+# MPI-ESM1-2-LR historical 1979-2014 from ESGF with:
+#   * source-grid below-surface masking (native zg<orog, NaN-aware masked
+#     regrid) -> per-cell validity masks ``mask_<hPa>`` / ``mask_thickness_*``
+#     with self-describing ``mask_variable`` attributes,
+#   * real daily-mean ``ta`` on plev8 (ESGF ``day`` table; via
+#     OPTIONAL_VARIABLES),
+#   * geopotential layer thicknesses ``thickness_surface_1000`` /
+#     ``thickness_<lo>_<hi>`` (offset-free, surface-anchored on HGTsfc) stored
+#     alongside ``zg`` for the thickness-predicting / residual-off training run.
+#
+# Schema 1.0.0 is a CLEAN BREAK from the v2 0.x cohort (no migration), so this
+# writes a fresh ``/v3`` version dir that coexists with ``/v2``.
+#
+# Members: run with
+#   --source-ids MPI-ESM1-2-LR --variant-labels r1i1p1f1 r2i1p1f1
+# (r1 = train, r2 = held-out). Both are i1p1f1; the selection below scopes to
+# the model + historical and the launcher pins the two members.
+#
+# NOTE (confirm at launch): the ``/v3`` bucket path. Search node is LLNL, the
+# production standard (see the multimodel inventory config): LLNL is the more
+# comprehensive federation index — DKRZ's search under-reports ~50% of some
+# datasets (Eday.prw / siday_* / omon_tob) even with distrib=true, which is why
+# prod switched off it on 2026-05-28. MPI's daily ``ta`` + complete ``zg500``
+# (a Pangeo-mirror gap, present on ESGF) are live-confirmed on the DKRZ data
+# node; LLNL is a superset so it indexes them too. ORNL
+# (esgf-node.ornl.gov/esgf-1-5-bridge) is the equivalent fallback if LLNL is
+# down. submit.sh's local --dry-run enumerates against the node before any pods
+# launch, so a missing MPI/ta would surface there rather than mid-run.
+
+output_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/v3
+# Shared across versions so external forcings are staged once (version-
+# independent until external_forcings.py changes).
+external_forcings_directory: gs://vcm-ml-intermediate/2026-05-22-cmip6-multimodel-daily-4deg-8plev-1940-2100/external_forcings
+
+esgf:
+  # LLNL: most comprehensive federation index (prod standard since 2026-05-28;
+  # DKRZ search under-reports some datasets). ORNL is the equivalent fallback.
+  search_node: https://esgf-node.llnl.gov/esg-search/search
+  scratch_dir: /scratch
+  download_workers: 4
+
+defaults:
+  time_subset:
+    historical: {start: "1979-01-01", end: "2014-12-31"}
+  chunking:
+    chunk_time: 360
+    shard_time: 7200
+    variable_batch_size: 8
+
+selection:
+  source_ids: [MPI-ESM1-2-LR]
+  experiments: [historical]
+  # r1i1p1f1 (train) + r2i1p1f1 (held-out). submit.sh enumerates from the
+  # config selection (no --variant-labels), so keep the two lowest-r members
+  # per (p,f) group — for MPI-ESM1-2-LR historical that is exactly r1 + r2.
+  max_members_per_f: 2

@@ -35,6 +35,13 @@ class InferenceBatchData:
         target_norm: Normalized target tensors (may be unavailable).
         time: Datetime array of shape (sample, time).
         i_time_start: Global timestep offset for this batch.
+        target_mask: Optional per-output-variable per-cell validity masks
+            (1 = valid, 0 = invalid), each broadcast-compatible with the field
+            (typically ``[sample, time, lat, lon]``). Carries the time-varying
+            ``mask_<field>`` loss/eval masks, which are dropped from ``target``
+            (that is filtered to prediction ∩ reference keys). ``None`` when the
+            dataset ships no per-cell masks — aggregators then behave exactly as
+            before (no masking).
     """
 
     def __init__(
@@ -46,6 +53,7 @@ class InferenceBatchData:
         prediction_norm: TensorMapping | None = None,
         target: TensorMapping | None = None,
         target_norm: TensorMapping | None = None,
+        target_mask: TensorMapping | None = None,
     ):
         self._prediction = prediction
         self._prediction_norm = prediction_norm
@@ -53,6 +61,7 @@ class InferenceBatchData:
         self._target_norm = target_norm
         self._time = time
         self._i_time_start = i_time_start
+        self._target_mask = target_mask
 
     def replace(self, **kwargs: Any) -> InferenceBatchData:
         defaults = {
@@ -62,6 +71,7 @@ class InferenceBatchData:
             "target_norm": self._target_norm,
             "time": self._time,
             "i_time_start": self._i_time_start,
+            "target_mask": self._target_mask,
         }
         defaults.update(kwargs)
         return InferenceBatchData(**defaults)
@@ -96,6 +106,15 @@ class InferenceBatchData:
                 "it was not provided when constructing this InferenceBatchData."
             )
         return self._target_norm
+
+    @property
+    def target_mask(self) -> TensorMapping | None:
+        """Per-variable per-cell validity masks, or None when unmasked.
+
+        Optional by design (returns None rather than raising) so aggregators can
+        branch on presence and no-op cleanly when the dataset has no masks.
+        """
+        return self._target_mask
 
     @property
     def has_prediction_norm(self) -> bool:

@@ -1,0 +1,32 @@
+# Cloud smoke-test scope. One year per scenario into the original
+# pilot bucket — for cloud-side pipeline validation without
+# committing to the full production run (see
+# ``cmip6-multimodel-4deg-1940-2100-cloud.yaml`` for that).
+inventory_path: gs://vcm-ml-intermediate/2026-04-28-cmip6-daily-pilot/inventory.csv
+output_directory: gs://vcm-ml-intermediate/2026-04-28-cmip6-daily-pilot/v0
+
+defaults:
+  time_subset:
+    historical: {start: "2010-01-01", end: "2010-12-31"}
+    ssp126: {start: "2015-01-01", end: "2015-12-31"}
+    ssp245: {start: "2015-01-01", end: "2015-12-31"}
+    ssp370: {start: "2015-01-01", end: "2015-12-31"}
+    ssp585: {start: "2015-01-01", end: "2015-12-31"}
+
+selection:
+  exclude_source_ids:
+    - INM-CM4-8
+  experiments: [historical, ssp126, ssp245, ssp370, ssp585]
+
+overrides:
+  - match:
+      source_id: CESM2-WACCM
+      experiment: historical
+      variant_label: r2i1p1f1
+    allow_dedupe: true
+  # AWI-ESM-1-1-LR's unstructured ocean grid (~127k cells) causes xesmf
+  # to build a 127k×127k weight matrix for siconc regridding, which
+  # either OOMs or hangs indefinitely in the Argo pod's memory limit.
+  - match:
+      source_id: AWI-ESM-1-1-LR
+    skip_surface_and_ocean_variables: [simon_sea_ice_fraction, simon_sitemptop, siday_sea_ice_fraction, siday_sitemptop, siday_sithick]

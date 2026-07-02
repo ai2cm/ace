@@ -25,15 +25,12 @@ from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
 )
+from fme.core.step.masking import apply_input_mask as _apply_input_mask
+from fme.core.step.masking import build_channel_mask_dict as _build_channel_mask_dict
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
-from fme.core.step.single_module import (
-    SingleModuleStep,
-    SingleModuleStepConfig,
-    _apply_input_mask,
-    _build_channel_mask_dict,
-)
+from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict

@@ -20,6 +20,7 @@ from fme.core.generics.aggregator import (
     InferenceSummary,
 )
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.spatial_masking import extract_spatial_masks
 from fme.core.tensors import unfold_ensemble_dim
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
@@ -555,6 +556,11 @@ class InferenceEvaluatorAggregator(
         if len(data.target) == 0:
             raise ValueError("No target values in data")
         target_data = data.target
+        # Per-cell validity masks ride in ``reference`` (all loaded vars) but are
+        # dropped from ``target`` (filtered to prediction ∩ reference). Pull them
+        # out here so the aggregators can mask per cell; None when the dataset
+        # has no masks (aggregators then behave exactly as before).
+        target_mask = extract_spatial_masks(data.reference, list(data.prediction))
         batch = InferenceBatchData(
             prediction=data.prediction,
             prediction_norm=self._normalize(data.prediction),
@@ -562,6 +568,7 @@ class InferenceEvaluatorAggregator(
             target_norm=self._normalize(target_data),
             time=data.time,
             i_time_start=self._n_timesteps_seen,
+            target_mask=target_mask,
         )
         for aggregator in self._aggregators.values():
             aggregator.record_batch(batch)

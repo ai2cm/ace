@@ -282,9 +282,20 @@ class PairedRegionalIndexAggregator:
                     target_indices[sst_name],
                 )
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
+            # Skip the power-spectrum block if EITHER side is all-NaN.
+            # The previous gate checked only ``prediction_indices``, which
+            # lets target-side all-NaN through and crashes the FFT call
+            # with ``Invalid number of FFT data points (0)`` — a real
+            # case when the inference entry's source dataset doesn't
+            # publish the SST variable (the loader NaN-fills it under
+            # ``allow_missing_variables``). The comparison between
+            # prediction and target is meaningless without target data,
+            # so dropping both sides is the right behaviour.
             if (
                 sst_name in prediction_indices
                 and prediction_indices[sst_name].notnull().any().item()
+                and sst_name in target_indices
+                and target_indices[sst_name].notnull().any().item()
             ):
                 pred_freq, prediction_power_spectrum = (
                     _calculate_sample_average_power_spectrum(

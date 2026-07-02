@@ -102,6 +102,45 @@ def test_latlon_area_weighted_mean_dict():
         )
 
 
+def test_latlon_cell_weights_drop_cells():
+    """Per-cell validity weights: zero-weight cells drop from numerator AND
+    denominator of the area-weighted mean (and hence rmse/bias)."""
+    area_weights = torch.ones(2, 2)
+    ops = LatLonOperations(area_weights=area_weights)
+    data = torch.tensor([[[1.0, 2.0], [3.0, 100.0]]])  # (1, 2, 2)
+    # mask out the outlier cell (bottom-right)
+    cell_weights = torch.tensor([[1.0, 1.0], [1.0, 0.0]])
+    masked = ops.area_weighted_mean(data, cell_weights=cell_weights)
+    torch.testing.assert_close(masked, torch.tensor([(1.0 + 2.0 + 3.0) / 3]))
+    # default (no cell_weights) is unchanged — includes the outlier
+    unmasked = ops.area_weighted_mean(data)
+    torch.testing.assert_close(unmasked, torch.tensor([(1.0 + 2.0 + 3.0 + 100.0) / 4]))
+    # rmse/bias thread the same weights through
+    truth = torch.zeros(1, 2, 2)
+    rmse = ops.area_weighted_rmse(truth, data, cell_weights=cell_weights)
+    torch.testing.assert_close(rmse, torch.sqrt(torch.tensor([(1.0 + 4.0 + 9.0) / 3])))
+    bias = ops.area_weighted_mean_bias(truth, data, cell_weights=cell_weights)
+    torch.testing.assert_close(bias, torch.tensor([(1.0 + 2.0 + 3.0) / 3]))
+
+
+def test_healpix_cell_weights_drop_cells():
+    ops = HEALPixOperations()
+    # HEALPix reduces the last three dims (face, y, x); batch dim leads.
+    vals = torch.arange(1.0, 9.0).reshape(2, 2, 2)  # 1..8 over the 8 cells
+    vals[1, 1, 1] = 100.0  # outlier at the last cell
+    data = vals.unsqueeze(0)  # (1, 2, 2, 2)
+    cell_weights = torch.ones(2, 2, 2)
+    cell_weights[1, 1, 1] = 0.0  # drop the outlier
+    masked = ops.area_weighted_mean(data, cell_weights=cell_weights)
+    torch.testing.assert_close(
+        masked, torch.tensor([(1.0 + 2 + 3 + 4 + 5 + 6 + 7) / 7])
+    )
+    # no cell_weights -> plain uniform mean (unchanged behavior)
+    torch.testing.assert_close(
+        ops.area_weighted_mean(data), data.mean(dim=(-3, -2, -1))
+    )
+
+
 def test_latlon_area_weighted_rmse_dict():
     area_weights = torch.rand(4).unsqueeze(-1).broadcast_to(4, 5)
     ops = LatLonOperations(area_weights=area_weights)

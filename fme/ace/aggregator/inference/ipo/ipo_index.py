@@ -277,8 +277,15 @@ class PairedIPOIndexAggregator:
                     pred_filtered, tgt_filtered
                 )
 
-                fig = self._plot_power_spectrum(pred_da, tgt_da, sst_name)
-                logs[f"{sst_name}_ipo_tpi_power_spectrum"] = fig
+                # Skip the power spectrum if either side is all-NaN
+                # — happens when the inference entry's source dataset
+                # doesn't publish the SST variable; the loader fills
+                # NaN under ``allow_missing_variables`` and the FFT
+                # call would otherwise raise
+                # ``ValueError: Invalid number of FFT data points (0)``.
+                if pred_da.notnull().any().item() and tgt_da.notnull().any().item():
+                    fig = self._plot_power_spectrum(pred_da, tgt_da, sst_name)
+                    logs[f"{sst_name}_ipo_tpi_power_spectrum"] = fig
 
         if len(label) > 0:
             label = label + "/"
