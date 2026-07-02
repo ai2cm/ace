@@ -1,4 +1,4 @@
-"""Submit a gantry training job for each generated var-masking cooldown config.
+"""Submit a gantry training job for each generated FM cooldown config.
 
 Each config produced by generate_cooldown_configs.py is submitted via
 run-ace-train.sh, which validates the config and calls gantry.
@@ -17,8 +17,8 @@ import subprocess
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
-WANDB_PROJECT = "VarMasking6"
-WANDB_GROUP = "ace2-var-masking-cooldown-2026-06-17"
+WANDB_PROJECT = "FM"
+WANDB_GROUP = "ace2-fm-cooldown-2026-06-26"
 
 CONFIGS = sorted(
     path.name
@@ -33,8 +33,8 @@ def config_to_job_name(config_filename: str) -> str:
     for cooldown_suffix in ("-bestinfcooldown", "-cooldown"):
         if suffix.endswith(cooldown_suffix):
             base = suffix.removesuffix(cooldown_suffix)
-            return f"ace2-var-mask-{base}-v6{cooldown_suffix}"
-    return f"ace2-var-mask-{suffix}-v6-cooldown"
+            return f"ace2-fm-{base}-v1{cooldown_suffix}"
+    return f"ace2-fm-{suffix}-v1-cooldown"
 
 
 def main() -> None:

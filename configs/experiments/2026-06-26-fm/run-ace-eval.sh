@@ -12,7 +12,7 @@ CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
-WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
+WANDB_PROJECT=${WANDB_PROJECT:-FM}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}

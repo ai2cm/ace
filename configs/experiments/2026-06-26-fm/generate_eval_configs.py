@@ -1,4 +1,4 @@
-"""Generate evaluator suite configs for the VarMasking6 training runs.
+"""Generate evaluator suite configs for the FM training runs.
 
 Each suite config contains all inline inference entries from the corresponding
 training config.  submit_eval_jobs.py submits one job per checkpoint, and that
@@ -11,7 +11,14 @@ import json
 import pathlib
 
 import yaml
-from generate_masking_configs import CONFIG_PREFIX, WANDB_PREFIX, WANDB_SUFFIX
+
+# WandB project and run-name convention shared across the FM submit scripts.
+# A training config stem "{CONFIG_PREFIX}{suffix}" maps to run name
+# "{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}" (matches submit_fm_jobs.py).
+WANDB_PROJECT = "FM"
+WANDB_PREFIX = "ace2-fm-"
+WANDB_SUFFIX = "-v1"
+CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 
 HERE = pathlib.Path(__file__).parent
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
@@ -195,8 +202,9 @@ def main() -> None:
 
     source_configs = sorted(
         p
-        for p in HERE.glob("*-mask*.yaml")
+        for p in HERE.glob("*.yaml")
         if p.name.startswith(CONFIG_PREFIX)
+        and "nc-sfno" in p.name
         and not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
         and not p.name.endswith("-bestinfcooldown.yaml")

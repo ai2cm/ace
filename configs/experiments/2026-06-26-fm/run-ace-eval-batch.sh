@@ -5,7 +5,7 @@ set -e
 CONFIG_FILENAME="${1:-ace-eval-config-4deg-AIMIP.yaml}"
 JOB_GROUP="${2:-ace2-era5}"
 SCRIPT_DIR=$(dirname "$0")
-WANDB_PROJECT=${WANDB_PROJECT:-VarMasking}
+WANDB_PROJECT=${WANDB_PROJECT:-FM}
 
 # List of (EXISTING_RESULTS_DATASET, JOB_NAME) pairs to evaluate
 JOBS=(

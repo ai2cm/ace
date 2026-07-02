@@ -1,4 +1,4 @@
-"""Run all evaluator entries in a generated VarMasking6 eval suite."""
+"""Run all evaluator entries in a generated FM eval suite."""
 
 import argparse
 import logging

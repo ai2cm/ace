@@ -1,10 +1,16 @@
-"""Generate cooldown configs from var-masking training configs.
+"""Generate cooldown configs from FM training configs.
 
-For each *-mask*.yaml training config in this directory, produces a
-corresponding *-cooldown.yaml that loads the pre-cooldown checkpoint saved at
-epoch 142 (training_checkpoints/pre_cooldown_ckpt.tar) and re-runs the final
-8-epoch PolynomialLR cooldown with masking disabled (no input_dropout). This
-isolates the effect of the cooldown phase from the input-masking schedule.
+For each nc-sfno training config in this directory, produces a corresponding
+*-cooldown.yaml that loads the pre-cooldown checkpoint saved at epoch 142
+(training_checkpoints/pre_cooldown_ckpt.tar) and re-runs the final 8-epoch
+PolynomialLR cooldown with masking disabled (no input_dropout). This isolates
+the effect of the cooldown phase from the input-masking schedule.
+
+The cooldown also restricts the training data to ERA5 only: the FM configs
+train on a mix of datasets (SHiELD AMIP, random-CO2, SOM, and ERA5), so the
+cooldown "cools down" from that multi-dataset mixture onto ERA5 alone. The
+non-ERA5 members are dropped from the train_loader concat and the multi-group
+group_weights are removed.
 """
 
 import argparse
@@ -15,10 +21,10 @@ import pathlib
 import yaml
 
 HERE = pathlib.Path(__file__).parent
-WANDB_PROJECT = "VarMasking6"
+WANDB_PROJECT = "FM"
 WANDB_ENTITY = "ai2cm"
-WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v6"  # stripped from wandb run names before comparison
+WANDB_PREFIX = "ace2-fm-"  # stripped from wandb run names before comparison
+WANDB_SUFFIX = "-v1"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = (
     "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
 )
@@ -26,6 +32,7 @@ DEFAULT_CHECKPOINT_NAME = "training_checkpoints/pre_cooldown_ckpt.tar"
 BEST_INFERENCE_CHECKPOINT_NAME = "training_checkpoints/best_inference_ckpt.tar"
 DEFAULT_EPOCHS = 8
 DEFAULT_LR = 0.0001
+ERA5_MARKER = "era5"  # substring identifying ERA5 members in a concat entry
 
 
 def source_config_to_run_name(config_filename: str) -> str:
@@ -50,6 +57,29 @@ def _build_scheduler(epochs: int) -> dict:
 COOLDOWN_SUFFIXES = ("-bestinfcooldown", "-cooldown")
 
 
+def _restrict_train_loader_to_era5(cfg: dict) -> None:
+    """Keep only ERA5 members in the train_loader concat.
+
+    The FM configs train on a mix of datasets; the cooldown runs on ERA5 alone.
+    Drops non-ERA5 concat entries and the now-invalid multi-group group_weights.
+    """
+    dataset = cfg["train_loader"]["dataset"]
+    if "concat" not in dataset:
+        raise ValueError(
+            "Expected train_loader.dataset.concat; cannot restrict to ERA5."
+        )
+    era5_members = [
+        entry
+        for entry in dataset["concat"]
+        if ERA5_MARKER in entry.get("file_pattern", "")
+    ]
+    if not era5_members:
+        raise ValueError("No ERA5 members found in train_loader.dataset.concat.")
+    dataset["concat"] = era5_members
+    # group_weights partitions the (previously multi-dataset) concat; now stale.
+    cfg["train_loader"].pop("group_weights", None)
+
+
 def _fetch_wandb_run_names() -> set[str]:
     import wandb  # lazy import: only needed with --delete-if-in-wandb
 
@@ -63,7 +93,7 @@ def _out_path_to_run_name(out_path: pathlib.Path) -> str:
 
     Config stem: {CONFIG_PREFIX}{base}{cooldown_suffix}
     Run name:    {WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}
-    (the -v6 version tag sits before the cooldown suffix).
+    (the -v1 version tag sits before the cooldown suffix).
     """
     stem = out_path.stem
     if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
@@ -137,6 +167,9 @@ def generate_cooldown_config(
     step_cfg = cfg["stepper"]["step"]["config"]
     step_cfg.pop("input_dropout", None)
 
+    # Cool down onto ERA5 only (training used a multi-dataset mixture).
+    _restrict_train_loader_to_era5(cfg)
+
     cfg["optimization"]["lr"] = lr
     cfg["optimization"]["scheduler"] = _build_scheduler(epochs)
     cfg["max_epochs"] = epochs
@@ -202,11 +235,12 @@ def main() -> None:
 
     source_configs = sorted(
         p
-        for p in HERE.glob("*-mask*.yaml")
-        if not p.name.endswith("-finetune.yaml")
+        for p in HERE.glob("*.yaml")
+        if p.name.startswith(CONFIG_PREFIX)
+        and "nc-sfno" in p.name
+        and not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
         and not p.name.endswith("-bestinfcooldown.yaml")
-        and p.name.startswith("ace-train-config-")
     )
 
     variants = [
