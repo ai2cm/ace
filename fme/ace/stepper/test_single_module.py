@@ -76,6 +76,7 @@ from fme.core.optimization import (
     Optimization,
     OptimizationConfig,
 )
+from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -84,6 +85,7 @@ from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.step.single_module import SingleModuleStep
+from fme.core.stepper_state import StepperState
 from fme.core.testing import (
     get_dataset_info,
     trivial_network_and_loss_normalization,
@@ -1296,6 +1298,30 @@ def test_predict_threads_stepper_state_across_calls():
     pres_after_2 = ic_after_2.stepper_state.corrector_state.global_dry_air_mass
     assert pres_after_2 is not None
     torch.testing.assert_close(pres_after_2, pres_after_1 + float(n_steps))
+
+
+def test_predict_threads_random_state_alongside_corrector_state():
+    """The random_state must survive a step that rebuilds StepperState to seed
+    corrector state (otherwise propagation would silently break)."""
+    stepper = _get_stepper(["a"], ["a"])
+    stepper._step_obj._corrector = _RecordingCorrector()  # type: ignore[attr-defined]
+
+    n_steps = 2
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    ic = PrognosticState(
+        dataclasses.replace(
+            input_data.as_batch_data(),
+            stepper_state=StepperState(random_state=RandomState.from_seed(0)),
+        )
+    )
+
+    _, new_state = stepper.predict(ic, forcing_data)
+    terminal = new_state.as_batch_data().stepper_state
+    assert terminal is not None
+    # Both sub-states are present on the returned state.
+    assert terminal.corrector_state is not None
+    assert terminal.random_state is not None
 
 
 @pytest.mark.parametrize("n_ensemble", [1, 3])
