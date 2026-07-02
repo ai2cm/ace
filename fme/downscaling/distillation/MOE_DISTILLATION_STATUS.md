@@ -3,7 +3,7 @@
 Living notes for the multivariate MoE FastGen distillation effort on branch
 `experiment/fastgen-distill`. Pick up here from any clone.
 
-_Last updated: 2026-07-01._
+_Last updated: 2026-07-02._
 
 ---
 
@@ -639,6 +639,38 @@ high-k up further or destabilize (`fake_score_loss`, `gan_loss_*`); (5) the
 **depth-based PRMSL tail** (`tail_99.99_PRMSL`) is now real here — watch whether it
 drops below 1.0 (student under-deepening lows) rather than the old offset-blind
 ~1.0. NB: 512² is a near-pixel critic (expensive; big head) — watch throughput.
+
+##### Check-in (2026-07-02) — ★ tap depth is NON-MONOTONE; 64² is the sweet spot
+
+wandb: tap4 `bl59c5c5` @11.7k, tap6 `5x0409tg` @8.2k, tap2-gan3e3 `orzudu08` @4.5k.
+PRMSL `spec_mae` (best→last):
+
+| run | tap | mid_PRMSL | hi_PRMSL | verdict |
+|---|---|---|---|---|
+| tap2 (orig, `kutgg3xo`) | 64² | held | 0.05 @11.4k | ✓ **held** |
+| tap4 (`bl59c5c5`) | 256² | 0.17→**0.80** | 0.05→**0.79** | ✗ collapsed |
+| tap6 (`5x0409tg`) | 512² | 0.15→**0.87** | 0.03→**0.86** | ✗ collapsed |
+| tap2-gan3e3 (`orzudu08`) | 64² + 3× GAN | 0.13→0.17 | 0.06→**0.50** (young) | ✗ degrading faster than orig |
+
+**Finer than 64² does NOT help — 256²/512² collapse, and raising the GAN weight on
+64² also collapses.** So it's not "finer/stronger = better"; there's an **optimum
+around 64²** at the baseline 1e-3 weight, and going past it (finer critic OR higher
+weight) tips the discriminator into winning → collapse (`gan_loss_gen`↑ to 1.1–1.4,
+`gan_loss_disc`↓). At over-fine taps the critic likely **injects incoherent hi-k**
+(the original texture-injection failure mode, now real). This supersedes the
+tap1(32²)-vs-tap2(64²) "finer is better" read — that trend does NOT extrapolate.
+
+**Unfixed by any tap:** winds high-k still degrades (`spec_mae_hi_eastward_wind`
+0.58–0.75); the **PRMSL deep-low tail stays negative** (−0.1 to −0.25, *more*
+negative in the collapsed 256²/512²) — the large-scale/deep-low deficit is
+independent of tap; precip similar (hi→~0.4, tail~0.6).
+
+**Caveats:** single runs (collapse *timing* may carry seed noise, but 64²-held vs
+256²-collapsed at matched steps is a clear gap); tap2-gan3e3 young (4.5k). **Next:
+64² is the operating point** — don't go finer or raise GAN weight. To fix winds /
+deep lows, the tap lever alone is insufficient; per-variable critics or a
+deficit-penalizing spectral term are the remaining levers (deep lows also need the
+bundle's Hi expert, not testable in lo_renoise-Lo-alone).
 
 ### Checkpoint-selection fix (2026-06-29, `best_student_callback.py`)
 
