@@ -61,7 +61,7 @@ def _fetch_wandb_run_names() -> set[str]:
 
 
 def _eval_run_names(out_path: pathlib.Path) -> list[str]:
-    """wandb run names submit_eval_jobs.py creates for this eval suite config."""
+    """Wandb run names submit_eval_jobs.py creates for this eval suite config."""
     suite_run_name = eval_suite_config_to_run_name(out_path.name)
     return [f"{suite_run_name}{suffix}" for suffix in CHECKPOINT_NAME_SUFFIXES]
 
@@ -253,7 +253,7 @@ def main() -> None:
         for p in HERE.glob("*-mask*.yaml")
         if p.name.startswith(CONFIG_PREFIX)
         and not p.name.endswith("-finetune.yaml")
-        and not p.name.endswith("-cooldown.yaml")
+        and not p.name.endswith("cooldown.yaml")
     )
 
     for source_path in source_configs:
