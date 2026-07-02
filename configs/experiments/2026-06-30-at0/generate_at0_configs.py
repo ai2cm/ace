@@ -33,6 +33,7 @@ import pathlib
 import yaml
 
 WANDB_PROJECT = "AirTemp0"
+WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-at0-"  # prepended to wandb run names
 WANDB_SUFFIX = "-v1"  # appended to wandb run names
 CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"  # stripped from config stems
@@ -42,6 +43,35 @@ EARLIEST_ERA5_TIME = "1940-01-03"
 
 HERE = pathlib.Path(__file__).parent
 BASE_CONFIG_STEM = "ace-train-config-4deg-AIMIP-nc-sfno"
+
+# Derived-config suffixes that must be excluded when collecting the generated
+# training configs (used by generate_eval_configs.py / generate_cooldown_configs.py).
+DERIVED_CONFIG_SUFFIXES = (
+    "-cooldown.yaml",
+    "-bestinfcooldown.yaml",
+    "-finetune.yaml",
+)
+
+
+def source_config_to_run_name(config_filename: str) -> str:
+    """Map an ablation training config filename to its wandb run name."""
+    stem = pathlib.Path(config_filename).stem
+    suffix = stem.removeprefix(CONFIG_PREFIX)
+    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+
+
+def source_config_paths() -> list[pathlib.Path]:
+    """Paths of the generated factorial ablation training configs.
+
+    Matches ``{BASE_CONFIG_STEM}-*.yaml`` (the 8 factorial configs) while
+    excluding the base config itself and any derived cooldown/finetune
+    variants.
+    """
+    return sorted(
+        p
+        for p in HERE.glob(f"{BASE_CONFIG_STEM}-*.yaml")
+        if not p.name.endswith(DERIVED_CONFIG_SUFFIXES)
+    )
 
 
 def _set_wandb_project(cfg: dict) -> None:

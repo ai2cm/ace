@@ -2,8 +2,7 @@
 
 Each project is expected to hold runs launched from one branch:
 
-  VarMasking4 -> exp/alexey4
-  VarMasking5 -> exp/alexey5
+  AirTemp0 -> exp/alexey7
 
 Resolution path for each run:
   wandb run name
@@ -26,8 +25,7 @@ import subprocess
 
 WANDB_ENTITY = "ai2cm"
 PROJECT_BRANCHES = {
-    "VarMasking4": "exp/alexey4",
-    "VarMasking5": "exp/alexey5",
+    "AirTemp0": "exp/alexey7",
 }
 # Only training runs are versioned with these suffixes; eval/export runs and
 # stragglers without one are skipped.

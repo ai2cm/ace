@@ -1,4 +1,4 @@
-"""Submit evaluator-suite jobs for the VarMasking4 checkpoints.
+"""Submit evaluator-suite jobs for the AirTemp0 checkpoints.
 
 Each generated evaluator suite is run against three checkpoints from the
 corresponding training result dataset:
@@ -13,19 +13,19 @@ import os
 import pathlib
 import subprocess
 
+from generate_at0_configs import WANDB_PROJECT
 from generate_eval_configs import (
     EVAL_SUITE_CONFIG_PREFIX,
     TRAINING_RESULT_DATASETS,
     eval_suite_config_to_run_name,
 )
-from generate_masking_configs import WANDB_PROJECT
 from run_eval_suite import run_eval_suite
 
 from fme.core.distributed import Distributed
 
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-eval.sh"
-WANDB_GROUP = "ace2-var-masking-eval-2026-06-17"
+WANDB_GROUP = "ace2-at0-eval-2026-06-30"
 
 CHECKPOINTS = [
     ("training_checkpoints/best_ckpt.tar", "-besttrain"),

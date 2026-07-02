@@ -1,9 +1,9 @@
-"""Generate cooldown configs from var-masking training configs.
+"""Generate cooldown configs from the AirTemp0 ablation training configs.
 
-For each *-mask*.yaml training config in this directory, produces a
-corresponding *-cooldown.yaml that loads the pre-cooldown checkpoint saved at
-epoch 142 (training_checkpoints/pre_cooldown_ckpt.tar) and re-runs the final
-8-epoch PolynomialLR cooldown with masking disabled (no input_dropout). This
+For each generated ablation training config in this directory, produces a
+corresponding *-cooldown.yaml that loads the pre-cooldown checkpoint
+(training_checkpoints/pre_cooldown_ckpt.tar) and re-runs the final 8-epoch
+PolynomialLR cooldown with input masking disabled (no input_dropout). This
 isolates the effect of the cooldown phase from the input-masking schedule.
 """
 
@@ -13,25 +13,21 @@ import json
 import pathlib
 
 import yaml
+from generate_at0_configs import (
+    CONFIG_PREFIX,
+    WANDB_ENTITY,
+    WANDB_PREFIX,
+    WANDB_PROJECT,
+    WANDB_SUFFIX,
+    source_config_paths,
+    source_config_to_run_name,
+)
 
 HERE = pathlib.Path(__file__).parent
-WANDB_PROJECT = "VarMasking4"
-WANDB_ENTITY = "ai2cm"
-WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v4"  # stripped from wandb run names before comparison
-CONFIG_PREFIX = (
-    "ace-train-config-4deg-AIMIP-"  # stripped from config stems before comparison
-)
 DEFAULT_CHECKPOINT_NAME = "training_checkpoints/pre_cooldown_ckpt.tar"
 BEST_INFERENCE_CHECKPOINT_NAME = "training_checkpoints/best_inference_ckpt.tar"
 DEFAULT_EPOCHS = 8
 DEFAULT_LR = 0.0001
-
-
-def source_config_to_run_name(config_filename: str) -> str:
-    stem = pathlib.Path(config_filename).stem
-    suffix = stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
 
 
 def _build_scheduler(epochs: int) -> dict:
@@ -200,14 +196,7 @@ def main() -> None:
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
 
-    source_configs = sorted(
-        p
-        for p in HERE.glob("*-mask*.yaml")
-        if not p.name.endswith("-finetune.yaml")
-        and not p.name.endswith("-cooldown.yaml")
-        and not p.name.endswith("-bestinfcooldown.yaml")
-        and p.name.startswith("ace-train-config-")
-    )
+    source_configs = source_config_paths()
 
     variants = [
         (args.checkpoint_name, "-cooldown"),

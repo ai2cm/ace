@@ -1,4 +1,4 @@
-"""Generate evaluator suite configs for the VarMasking4 training runs.
+"""Generate evaluator suite configs for the AirTemp0 ablation training runs.
 
 Each suite config contains all inline inference entries from the corresponding
 training config.  submit_eval_jobs.py submits one job per checkpoint, and that
@@ -11,12 +11,13 @@ import json
 import pathlib
 
 import yaml
-from generate_masking_configs import (
+from generate_at0_configs import (
     CONFIG_PREFIX,
     WANDB_ENTITY,
     WANDB_PREFIX,
     WANDB_PROJECT,
     WANDB_SUFFIX,
+    source_config_paths,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -242,14 +243,7 @@ def main() -> None:
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
 
-    source_configs = sorted(
-        p
-        for p in HERE.glob("*-mask*.yaml")
-        if p.name.startswith(CONFIG_PREFIX)
-        and not p.name.endswith("-finetune.yaml")
-        and not p.name.endswith("-cooldown.yaml")
-        and not p.name.endswith("-bestinfcooldown.yaml")
-    )
+    source_configs = source_config_paths()
 
     for source_path in source_configs:
         generate_eval_config(

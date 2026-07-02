@@ -1,4 +1,4 @@
-"""Submit a gantry training job for each generated var-masking cooldown config.
+"""Submit a gantry training job for each generated AirTemp0 cooldown config.
 
 Each config produced by generate_cooldown_configs.py is submitted via
 run-ace-train.sh, which validates the config and calls gantry.
@@ -14,27 +14,33 @@ import os
 import pathlib
 import subprocess
 
+from generate_at0_configs import (
+    CONFIG_PREFIX,
+    WANDB_PREFIX,
+    WANDB_PROJECT,
+    WANDB_SUFFIX,
+)
+
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
-WANDB_PROJECT = "VarMasking4"
-WANDB_GROUP = "ace2-var-masking-cooldown-2026-06-17"
+WANDB_GROUP = "ace2-at0-cooldown-2026-06-30"
 
 CONFIGS = sorted(
     path.name
     for path in HERE.glob("*cooldown.yaml")
-    if path.name.startswith("ace-train-config-4deg-AIMIP-")
+    if path.name.startswith(CONFIG_PREFIX)
 )
 
 
 def config_to_job_name(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
-    suffix = stem.removeprefix("ace-train-config-4deg-AIMIP-")
+    suffix = stem.removeprefix(CONFIG_PREFIX)
     for cooldown_suffix in ("-bestinfcooldown", "-cooldown"):
         if suffix.endswith(cooldown_suffix):
             base = suffix.removesuffix(cooldown_suffix)
-            return f"ace2-var-mask-{base}-v4{cooldown_suffix}"
-    return f"ace2-var-mask-{suffix}-v4-cooldown"
+            return f"{WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}"
+    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}-cooldown"
 
 
 def main() -> None:
