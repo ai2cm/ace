@@ -152,7 +152,9 @@ class TemporalAttention(nn.Module):
         nn.init.zeros_(self.proj.bias)
         self.relative_embedding = nn.Parameter(torch.zeros(n_heads, 2 * seq_length))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, frame_index: torch.Tensor | None = None
+    ) -> torch.Tensor:
         B, C, T, H, W = x.shape
         if T > self.seq_length:
             raise ValueError(
@@ -168,7 +170,18 @@ class TemporalAttention(nn.Module):
 
         q, k, v = reshape(q), reshape(k), reshape(v)
         attn = torch.einsum("nhqc,nhkc->nhqk", q, k) / math.sqrt(cdim)
-        i = torch.arange(T, device=x.device)
+        # ``frame_index`` gives each frame's position on the full n_timesteps grid,
+        # so the learned relative bias reflects true frame spacing. For a subset it
+        # is the frames' true grid indices (e.g. [0, 4, 8]); the default arange is
+        # the full grid, identical to the pre-subset behavior.
+        if frame_index is None:
+            i = torch.arange(T, device=x.device)
+        else:
+            if frame_index.numel() != T:
+                raise ValueError(
+                    f"frame_index length {frame_index.numel()} != clip length {T}."
+                )
+            i = frame_index.to(device=x.device, dtype=torch.long)
         pairwise = (i[:, None] - i[None, :]) + self.seq_length - 1
         bias = self.relative_embedding[:, pairwise]
         attn = (attn + bias[None]).softmax(dim=-1)
@@ -236,11 +249,13 @@ class _BlockAttn(nn.Module):
             TemporalAttention(channels, n_heads, seq_length) if temporal else None
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, frame_index: torch.Tensor | None = None
+    ) -> torch.Tensor:
         if self.spatial is not None:
             x = self.spatial(x)
         if self.temporal is not None:
-            x = self.temporal(x)
+            x = self.temporal(x, frame_index)
         return x
 
 
@@ -371,6 +386,7 @@ class VideoUNet(nn.Module):
         day_of_year: torch.Tensor,
         second_of_day: torch.Tensor,
         lon: torch.Tensor,
+        frame_index: torch.Tensor | None = None,
     ) -> torch.Tensor:
         cal = self.calendar(day_of_year, second_of_day, lon, x.shape[-2])
         emb = self.noise_embed(c_noise)
@@ -380,19 +396,20 @@ class VideoUNet(nn.Module):
         idx = 0
         for level in range(self.levels):
             for _ in range(self.num_blocks):
-                h = self.enc_attn[idx](self.enc_blocks[idx](h, emb))
+                h = self.enc_attn[idx](self.enc_blocks[idx](h, emb), frame_index)
                 skips.append(h)
                 idx += 1
             if level < self.levels - 1:
                 h = self.downsamples[level](self.blur(h))
                 skips.append(h)
 
-        h = self.mid_block2(self.mid_attn(self.mid_block1(h, emb)), emb)
+        h = self.mid_block1(h, emb)
+        h = self.mid_block2(self.mid_attn(h, frame_index), emb)
 
         for idx in range(len(self.dec_blocks)):
             skip = skips.pop()
             h = torch.cat([_resize_spatial(h, skip.shape[-2:], self.blur), skip], dim=1)
-            h = self.dec_attn[idx](self.dec_blocks[idx](h, emb))
+            h = self.dec_attn[idx](self.dec_blocks[idx](h, emb), frame_index)
 
         return self.out_conv(F.silu(self.out_norm(h)))
 
@@ -417,6 +434,7 @@ class VideoEDMPrecond(nn.Module):
         day_of_year: torch.Tensor,
         second_of_day: torch.Tensor,
         lon: torch.Tensor,
+        frame_index: torch.Tensor | None = None,
     ) -> torch.Tensor:
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32)
@@ -449,5 +467,5 @@ class VideoEDMPrecond(nn.Module):
             arg = torch.cat([arg, condition, sigma_features], dim=1)
         else:
             arg = torch.cat([arg, sigma_features], dim=1)
-        f_x = self.model(arg, c_noise, day_of_year, second_of_day, lon)
+        f_x = self.model(arg, c_noise, day_of_year, second_of_day, lon, frame_index)
         return c_skip * x + c_out * f_x

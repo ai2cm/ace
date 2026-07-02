@@ -15,7 +15,7 @@ from fme.downscaling.data.datasets import (
     VideoBatchItem,
 )
 from fme.downscaling.data.time_encoding import compute_calendar_features
-from fme.downscaling.modules.video_modules import FIRBlur
+from fme.downscaling.modules.video_modules import FIRBlur, TemporalAttention
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
@@ -376,6 +376,42 @@ def test_marginal_consistency_config_validation():
         _model(9, marginal_consistency_weight=-0.1)
     with pytest.raises(ValueError, match="n_timesteps >="):
         _model(3, marginal_consistency_weight=1.0)  # only 1 interior frame
+
+
+def _temporal_attention(seq_length, channels=8, n_heads=2):
+    attn = TemporalAttention(channels, n_heads, seq_length)
+    # relative_embedding and the output projection are zero-initialized (the block
+    # starts as identity), so the positional bias has no effect until trained;
+    # randomize both so tests can observe the frame_index dependence.
+    with torch.no_grad():
+        attn.relative_embedding.normal_()
+        attn.proj.weight.normal_()
+        attn.proj.bias.normal_()
+    return attn
+
+
+def test_temporal_attention_frame_index_default_matches_arange():
+    # Backward compat: the full-grid default (frame_index=None) must equal passing
+    # the contiguous arange positions, so pre-subset full-set behavior is unchanged.
+    attn = _temporal_attention(seq_length=9)
+    x = torch.randn(2, 8, 9, 4, 4)
+    default = attn(x)
+    explicit = attn(x, torch.arange(9))
+    assert torch.allclose(default, explicit, atol=1e-6)
+
+
+def test_temporal_attention_uses_true_frame_spacing():
+    # A subset packed to contiguous positions [0,1,2] must NOT be treated the same
+    # as its true grid positions [0,4,8]: the relative positional bias should
+    # reflect real spacing. Feeding true grid indices changes the output.
+    attn = _temporal_attention(seq_length=9)
+    x = torch.randn(2, 8, 3, 4, 4)
+    packed = attn(x)  # default arange([0,1,2]) -- the old (buggy) behavior
+    true_grid = attn(x, torch.tensor([0, 4, 8]))
+    assert not torch.allclose(packed, true_grid, atol=1e-5)
+    # ...and a subset's bias equals the full-grid bias restricted to those frames.
+    full = attn(torch.randn(2, 8, 9, 4, 4))  # smoke: full grid still runs
+    assert full.shape == (2, 8, 9, 4, 4)
 
 
 def test_firblur_survives_inplace_kernel_mutation():

@@ -580,8 +580,11 @@ class VideoDiffusionModel:
         noise = self._sample_residual_noise(residual, mixing)
         noised = residual + noise * sigma * interior
 
+        # ``idx`` (or None for the full grid) is exactly the frames' true grid
+        # positions, so the temporal attention's relative bias reflects real
+        # spacing rather than packed-contiguous order.
         denoised = self.module(
-            noised, condition, sigma, day_of_year, second_of_day, lon
+            noised, condition, sigma, day_of_year, second_of_day, lon, frame_index=idx
         )
 
         weight = (
@@ -606,6 +609,13 @@ class VideoDiffusionModel:
         if self._marginal_consistency_weight > 0.0 and can_subset:
             sub = self._sample_consistency_subset_indices(n_times, clip.device)
             interior_s = _interior_mask(int(sub.numel()), clip.device)
+            # True grid positions of the consistency frames: map the subset picks
+            # through the current frames' own grid positions (``idx`` when the
+            # batch was already augmented, else the full grid).
+            base_index = (
+                idx if idx is not None else torch.arange(n_times, device=clip.device)
+            )
+            sub_frame_index = base_index.index_select(0, sub)
             denoised_s = self.module(
                 noised.index_select(2, sub),
                 condition.index_select(2, sub),
@@ -613,6 +623,7 @@ class VideoDiffusionModel:
                 day_of_year.index_select(1, sub),
                 second_of_day.index_select(1, sub),
                 lon,
+                frame_index=sub_frame_index,
             )
             residual_s = residual.index_select(2, sub)
             n_interior_s = interior_s.expand_as(residual_s).sum()
@@ -733,6 +744,7 @@ class VideoDiffusionModel:
             sigma_max=sigma_max,
             s_churn=self.config.churn,
             noise_mixing=mixing,
+            frame_index=idx,
         )
         full_norm = baseline + residual
         generated = self._denormalize_invert(full_norm)
@@ -763,6 +775,7 @@ def _video_edm_sample(
     rho: float = 7.0,
     s_churn: float = 0.0,
     noise_mixing: torch.Tensor | None = None,
+    frame_index: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """EDM stochastic sampler that keeps the observed endpoints pinned (re-zeroed
     after every update). When ``noise_mixing`` is given, the stochastic churn noise
@@ -795,6 +808,7 @@ def _video_edm_sample(
             day_of_year,
             second_of_day,
             lon,
+            frame_index=frame_index,
         )
         return out.to(compute_dtype)
 
