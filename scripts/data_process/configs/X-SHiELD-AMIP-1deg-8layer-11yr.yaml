@@ -1,5 +1,5 @@
 runs:
-  2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr: gs://vcm-ml-raw-flexible-retention/2026-07-01-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control
+  2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr: gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control
 data_output_directory: gs://vcm-ml-intermediate
 stats:
   output_directory: gs://vcm-ml-intermediate/2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr-stats
