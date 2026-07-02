@@ -75,13 +75,6 @@ class UniformMaskingGenerator(MaskingGenerator):
         return [self._names[i] for i in perm.tolist()]
 
 
-def _validate_probability(probability: float) -> None:
-    # bool is a subclass of int, so reject it explicitly to avoid a
-    # silently-coerced True/False being treated as a probability.
-    if isinstance(probability, bool) or not 0.0 <= probability <= 1.0:
-        raise ValueError(f"probability must be in [0, 1], got {probability!r}")
-
-
 @dataclasses.dataclass(frozen=True)
 class BernoulliMaskingConfig:
     """All-or-nothing Bernoulli masking of a channel pool.
@@ -131,7 +124,10 @@ class UniformMaskingConfig:
                 "max_masked_vars must be a non-negative int, got "
                 f"{self.max_masked_vars!r}"
             )
-        _validate_probability(self.probability)
+        # bool is a subclass of int, so reject it explicitly to avoid a
+        # silently-coerced True/False being treated as a probability.
+        if isinstance(self.probability, bool) or not 0.0 <= self.probability <= 1.0:
+            raise ValueError(f"probability must be in [0, 1], got {self.probability!r}")
 
     def build(self, names: list[str]) -> UniformMaskingGenerator:
         return UniformMaskingGenerator(names, self.max_masked_vars, self.probability)
