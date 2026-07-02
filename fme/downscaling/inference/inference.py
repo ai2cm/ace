@@ -57,9 +57,7 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        input_shape: tuple[int, int],
         output: DownscalingOutput,
-        coarse_lon: torch.Tensor,
     ) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
         """
         Set up the model for inference: roll coordinates to match the coarse lon
@@ -68,9 +66,16 @@ class Downscaler:
         smaller than the model patch size, so we raise an error in that case, and prompt
         the user to use patching for larger domains because that provides better
         generations.
+
+        The coarse coordinates covering the output's full extent live on
+        ``output.data`` (fixed at build time, independent of the per-batch work-item
+        slices), so both the input shape and the longitude convention to roll to are
+        derived from there.
         """
+        coarse_coords = output.data.coarse_extent_latlon_coords
+        input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
         # No-op when coarse_lon does not cross the prime meridian.
-        base_model = self.model.with_rolled_lon(coarse_lon)
+        base_model = self.model.with_rolled_lon(coarse_coords.lon)
         model_patch_shape = base_model.coarse_shape
 
         if model_patch_shape == input_shape:
@@ -112,11 +117,7 @@ class Downscaler:
         """Execute the generation loop for this output."""
         logging.info(f"Generating downscaled outputs for output: {output.name}")
 
-        coarse_coords = output.data.coarse_extent_latlon_coords
-        input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
-        model = self._get_generation_model(
-            input_shape=input_shape, output=output, coarse_lon=coarse_coords.lon
-        )
+        model = self._get_generation_model(output=output)
 
         writer = None
         total_batches = len(output.data.loader)
