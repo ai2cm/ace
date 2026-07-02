@@ -382,6 +382,12 @@ run — and *low-k only* — the base is smooth, ~no high-k):
 
 ## ★ RESULT (2026-06-29): per-expert pivot did NOT fix the spectral collapse — GAN-fix runs launched
 
+> ⚠️ **Residual-bug caveat** (see "ROOT-CAUSE BUG (2026-07-02)" above): the "PRMSL
+> spectral collapse" central to this section is **largely the residual-base
+> validation bug** (residual student vs full-field zarr; fixed `b2a47628b`), not a
+> real large-scale failure. Hi-band spectra, GAN/training dynamics, and precip
+> stand; the PRMSL lo/mid/tail claims are confounded — re-confirm on the reset runs.
+
 **Both Lo runs completed** (~30–32k steps, ~44 h; wandb `6xt93hci` = Lo-1step,
 `3vk3or7v` = Lo-2step). Wiring confirmed correct in logs (`expert_index=0,
 sigma range [0.005, 200.0] (no dispatch)`, `validation_mode=lo_renoise`). Two
@@ -441,6 +447,11 @@ works, the LR-decay/weight cut were load-bearing. Compare both at matched steps.
 
 #### Check-in (2026-06-30): both GAN fixes FAILED to stop the collapse
 
+> ⚠️ **Residual-bug caveat:** the PRMSL-`spec_mae` table below is confounded — the
+> lo/mid rows are mostly the residual-base bug (constant common-mode); the hi rows
+> and the GAN-balance rows are real. "Neither fix stopped the tipping" holds (rests
+> on training dynamics + hi-band), but the PRMSL-collapse framing is inflated.
+
 Read both live runs (`rzisfp5c` r1-instr @6.4k, `3lrjuahv` allfix @13k/20k). The
 canceled non-instr r1 (`p1jxfj9x`) is superseded. **Neither fix prevented the
 PRMSL collapse**; both reproduce the disc-winning signature.
@@ -493,6 +504,12 @@ Audited `compute_zonal_power_spectrum` + the `spec_mae` band reduction. Findings
 
 #### Tail-generation verified (2026-06-30) — tails are healthy, not failing
 
+> ⚠️ **Residual-bug caveat:** the **PRMSL** tail row here is confounded (residual
+> student vs full-field zarr → narrow histogram near the mean; the later
+> depth-based metric then read negative — both the residual bug, not real). Precip
+> tails (small base) are approximately valid; winds intermediate. The general "tails
+> are generated / improve with maturity" conclusion holds for precip.
+
 Checked per-variable tail ratios (student pXX ÷ target pXX, ideal 1.0) across
 runs. **The model is generating the tails.**
 
@@ -542,6 +559,13 @@ adversarial fine-scale critic is better for coherent extremes, with the spectral
 term as a cheaper scaffold.
 
 #### Corrected diagnosis (2026-06-30): the student is too SMOOTH (high-k deficit), not over-textured
+
+> ⚠️ **Superseded in large part by the residual bug (2026-07-02).** The "uniformly
+> too smooth / low-k deficit" read below was taken from `val/psd` curves that
+> compared a **residual student to a full-field teacher** — so the PRMSL (and some
+> wind) *low-k* deficit was mostly the missing base, NOT a real model deficit. What
+> survives: the **high-k** deficit (base-free) and precip. Re-derive the smoothness
+> picture from the reset runs before trusting the low-k story.
 
 Reading the raw `val/psd_<var>` curves directly (not `spec_mae`): **the student PSD
 sits BELOW the teacher across all variables, with a deficit that grows toward high
@@ -658,6 +682,12 @@ more targeted than cranking the GAN). A PSD loss will not move tails (2nd moment
 
 ##### Check-in (2026-07-01, tap1 @9.6k / tap2 @11.2k) — ★ finer tap WORKS on PRMSL
 
+> ⚠️ **Residual-bug caveat:** these PRMSL `spec_mae` numbers (esp. lo/mid) are
+> confounded by the residual base bug, so "finer tap fixes PRMSL" overstates it —
+> the **hi_PRMSL** difference (tap2 0.05 vs collapsed 0.8) is base-free and real, so
+> the tap-depth *effect on the fine-scale* stands, but the low-k "prevents collapse"
+> framing is the bug. Re-confirm on the reset runs (baseline vs tap2, fixed).
+
 **The finer critic largely prevents the PRMSL spectral collapse — confirming
 tap-location (fine-scale visibility) was the binding constraint.** PRMSL
 `spec_mae` last values (real deficits, no floor):
@@ -719,6 +749,11 @@ drops below 1.0 (student under-deepening lows) rather than the old offset-blind
 ~1.0. NB: 512² is a near-pixel critic (expensive; big head) — watch throughput.
 
 ##### Check-in (2026-07-02) — ★ tap depth is NON-MONOTONE; 64² is the sweet spot
+
+> ⚠️ **Residual-bug caveat:** the PRMSL `spec_mae` table below is confounded at
+> lo/mid by the residual base bug, but the **non-monotone finding rests on hi_PRMSL
+> (base-free) collapsing 0.05→0.8+ for 256²/512²** vs 64² holding — so "64² sweet
+> spot, finer collapses" is a real (hi-band + training-dynamics) result and stands.
 
 wandb: tap4 `bl59c5c5` @11.7k, tap6 `5x0409tg` @8.2k, tap2-gan3e3 `orzudu08` @4.5k.
 PRMSL `spec_mae` (best→last):
@@ -1038,6 +1073,12 @@ artifacts). Two distinct bugs:
 
 ## Results status (previous, pre-fix runs)
 
+> ⚠️ **Residual-bug caveat:** all `crps_PRMSL` / PRMSL-spectra numbers in this and
+> the following legacy sections predate the residual-base fix (`b2a47628b`) and use
+> the buggy validation (residual student vs full-field zarr), so **PRMSL values here
+> are unreliable**. The flat-CRPS diagnosis for precip/winds and the training/GAN
+> observations stand.
+
 wandb project `ai2cm/fastgen`. Per-variable validation (first → best@frac → last):
 
 **`z5usj8so`** (v3: loguniform noise but max_t still 200, MoE):
@@ -1167,6 +1208,15 @@ precip; the separate full-dispatch teacher is **no longer the priority**.
 its job; nothing more to learn from it.
 
 #### Late-stage diagnosis (dispatch-v2 decile trajectories)
+
+> ⚠️ **Residual-bug caveat (2026-07-02):** this "PRMSL large-scale spectral
+> collapse" — the original observation that motivated the whole per-expert pivot —
+> is measured with the buggy validation (residual student vs full-field zarr), so
+> the PRMSL lo/mid-band collapse is **substantially the residual base bug**. A
+> *late-in-training* worsening beyond the constant base offset may still be real
+> (GAN-timed, visible in hi-band + GAN losses), but the large-scale-collapse framing
+> and its magnitude are unreliable. The pivot may have been chasing a partly-illusory
+> problem — reassess against the reset runs.
 
 The "late degradation" seen in first/best/last is **not generic** — it is a
 **PRMSL large-scale spectral collapse** starting ≈decile 6 (**step ~7700**), while
