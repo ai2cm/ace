@@ -1,8 +1,8 @@
-experiment_dir: gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/frameworkA-era5
+experiment_dir: gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/frameworkA-era5-v2
 n_forward_steps: 29200
 forward_steps_in_memory: 100
 checkpoint_path: /ckpt.tar
-n_ensemble_per_ic: 5
+n_ensemble_per_ic: 1
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -12,7 +12,13 @@ initial_condition:
   path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
   engine: zarr
   start_indices:
+    # 5 stochastic members via repeated IC (n_ensemble_per_ic=1 required with
+    # segmented inference); duplicate ICs diverge via per-sample stochastic noise.
     times:
+      - '1940-01-01T12:00:00'
+      - '1940-01-01T12:00:00'
+      - '1940-01-01T12:00:00'
+      - '1940-01-01T12:00:00'
       - '1940-01-01T12:00:00'
 forcing_loader:
   dataset:

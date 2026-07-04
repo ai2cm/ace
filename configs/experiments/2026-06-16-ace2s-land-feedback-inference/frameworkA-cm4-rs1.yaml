@@ -1,8 +1,11 @@
-experiment_dir: gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/frameworkA-cm4-rs1
-n_forward_steps: 29200
+experiment_dir: gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/frameworkA-cm4-rs1-v2
+# 10 segments x 29199 = 291990 forward steps; with the initial condition this
+# consumes 291991 of the dataset's 292000 time points (running to the dataset end
+# would require 292001, so 29200 overruns by one step and the last segment fails).
+n_forward_steps: 29199
 forward_steps_in_memory: 100
 checkpoint_path: /ckpt.tar
-n_ensemble_per_ic: 5
+n_ensemble_per_ic: 1
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -12,9 +15,15 @@ initial_condition:
   path: /climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
   engine: zarr
   start_indices:
-    n_initial_conditions: 1
-    first: 0
-    interval: 1
+    # 5 stochastic members via repeated IC (n_ensemble_per_ic=1 required with
+    # segmented inference); duplicate ICs diverge via per-sample stochastic noise.
+    # '0151-01-01T06:00:00' is the first timestamp of the CM4 piControl dataset.
+    times:
+      - '0151-01-01T06:00:00'
+      - '0151-01-01T06:00:00'
+      - '0151-01-01T06:00:00'
+      - '0151-01-01T06:00:00'
+      - '0151-01-01T06:00:00'
 forcing_loader:
   dataset:
     data_path: /climate-default/

@@ -10,10 +10,19 @@ analysis/ingestion side (reading these zarrs, computing E1–E7 diagnostics) sta
 Every run writes one **6-hourly, global** zarr to GCS with the same 10-variable set, so the output
 is a drop-in third data `source` (alongside ERA5 and CM4 reanalysis/model data) for the analysis
 pipeline. Two complementary frameworks:
-- **Framework A** — long free-running rollout, 1 IC × 5 stochastic members. Climate statistics
-  (E1 timescales, E2 hot-day composites, E3, E4 diurnal) + within-checkpoint stochastic noise floor.
-- **Framework B** — initialized, 48 Jan-1 ICs × 2 stochastic members (96 samples, single job),
-  1-year rollouts. Seasonal/initialized skill (E5 cold-season short-lead, E6 spring→summer).
+- **Framework A** — long free-running rollout, 1 IC repeated into 5 stochastic members. Climate
+  statistics (E1 timescales, E2 hot-day composites, E3, E4 diurnal) + within-checkpoint stochastic
+  noise floor.
+- **Framework B** — initialized, 48 Jan-1 ICs each repeated into 2 stochastic members (96 samples,
+  single job), 1-year rollouts. Seasonal/initialized skill (E5 cold-season short-lead, E6
+  spring→summer).
+
+Members are realized by **repeating each initial condition** in `initial_condition.start_indices`
+with `n_ensemble_per_ic: 1`, rather than via an ensemble axis: a stochastic checkpoint draws fresh
+per-sample noise, so duplicate ICs diverge into distinct members. This is required because
+`n_ensemble_per_ic > 1` is rejected under segmented inference (see Runs below). Each IC's repeats
+are listed consecutively, so the per-sample `<label>_ic{index}.zarr` output layout matches what an
+ensemble axis would have produced.
 
 Three checkpoints: 1× ACE2S-ERA5, 2× ACE2S-CM4-piControl (RS0/RS1, **seed-only difference** → an
 empirical model noise floor). Combined with the inference-stochastic member spread, the analysis
@@ -32,16 +41,23 @@ downstream).
 | Checkpoint ACE2S-CM4-piControl-RS1 | beaker `01KTWGH2VEZ4DNXXF1H5FTJK1S` |
 | ERA5 IC + forcing | `/climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr` (Weka) |
 | CM4 IC + forcing | `/climate-default/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr` (Weka) |
-| Output prefix (GCS) | `gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/<run>` |
+| Output prefix (GCS) | `gs://vcm-ml-intermediate/2026-06-16-ace2s-land-feedback-inference/<run>-v2` |
 
 All checkpoints use `training_checkpoints/best_inference_ckpt.tar`. CM4 checkpoints are the
 **uncoupled atmosphere-only** flavor (`fme.ace.inference`), trained on the single atmosphere-land
 zarr above (not the merged coupled-SST dataset).
 
+The `-v2` output suffix distinguishes this re-run (repeated-IC members + corrected CM4 step count)
+from the original outputs so the earlier run's zarrs are not clobbered.
+
 ## Runs
 All runs are launched from one script, `run-inference.sh`, which holds the common gantry settings
 (clusters, image, budget, secrets) in a single `submit()` function and calls it once per run. Each
-call validates its config then submits a single-GPU `fme.ace.inference` job.
+call validates its config then submits a single-GPU `fme.ace.inference` job. The 4th `submit`
+argument is the number of chained `--segments` (total forward steps = `segments ×
+config.n_forward_steps`); completed `segment_NNNN/` folders are skipped on resubmit, and each
+segment is sized to fit the 8 h job cap. Because segmented inference rejects `n_ensemble_per_ic >
+1`, members come from repeated ICs (see Design above).
 
 | config | checkpoint | job name | experiments |
 |---|---|---|---|
@@ -60,19 +76,23 @@ call validates its config then submits a single-GPU `fme.ace.inference` job.
 ```
 
 ## Notes / things to confirm before production
-- **Memory lever**: per-window cost ∝ `n_ics × n_ensemble_per_ic × forward_steps_in_memory`; all
-  runs sit at ≤96 IC-steps/window. If a job OOMs, drop `forward_steps_in_memory` (A) or trim ICs (B).
-- **CM4 record**: dataset spans `0151-01-01T06:00:00` → `0351-01-01T00:00:00` (200 yr, noleap;
-  train ≤`0306`, val `0306`–`0311`, holdout/test `0311`–`0351`). **Framework A** free-runs the
-  *whole* record (`n_forward_steps=291900` ≈ 199.9 yr from the first IC) — in-sample is fine for a
-  long free-running climate characterization. **Framework B** uses the **holdout** (Jan-1 of
-  `0311`–`0349`, 39 ICs; `0350` is dropped because a full 1460-step year from it runs 1 step past the
-  data end) — cleaner out-of-sample for initialized seasonal skill.
+- **Memory lever**: per-window cost ∝ `n_samples × forward_steps_in_memory`, where `n_samples` is
+  the number of (repeated) ICs since `n_ensemble_per_ic: 1`; all runs sit at ≤96 IC-steps/window. If
+  a job OOMs, drop `forward_steps_in_memory` (A) or trim ICs (B).
+- **CM4 record**: dataset spans `0151-01-01T06:00:00` → `0351-01-01T00:00:00` (200 yr, noleap =
+  **292,000 time points**; train ≤`0306`, val `0306`–`0311`, holdout/test `0311`–`0351`).
+  **Framework A** free-runs nearly the *whole* record: `--segments 10 × n_forward_steps 29199 =
+  291,990` steps (≈199.99 yr from the first IC). Running to the data end (292,000 steps) would need
+  292,001 points (1 IC + steps), one past the record, so `n_forward_steps` is 29199 rather than
+  29200 — the last ~9 steps of the record are left unused. In-sample is fine for a long
+  free-running climate characterization. **Framework B** uses the **holdout** (Jan-1 of `0311`–
+  `0349`, 39 ICs; `0350` is dropped because a full 1460-step year from it runs 1 step past the data
+  end) — cleaner out-of-sample for initialized seasonal skill.
 - **ERA5 record**: 1940–2025; Framework A runs 80 yr from 1940. Note ERA5's holdout (1998–2010 +
   2020 ≈ 14 yr) is too small for robust seasonal skill, so `frameworkB-era5` uses 48 Jan-1 ICs across
   1977–2024 (accepts in-sample) — unlike CM4 B, which has a large holdout. Flag if you'd rather
   restrict ERA5 B to the 14 holdout years.
-- **Long A runs**: add `--segments N` to the `fme.ace.inference` call (chained restarts) if you want
-  checkpointing across the multi-hour CM4 rollout.
+- **Segmentation**: every run is already launched with chained `--segments` (see `run-inference.sh`),
+  which both checkpoints the multi-hour rollouts and keeps each segment under the 8 h cap.
 - The zarr `time` dim is **lead time**; `init_time` / `valid_time(sample, time)` are coordinates —
   downstream ingestion must build the calendar axis from `valid_time` per sample.
