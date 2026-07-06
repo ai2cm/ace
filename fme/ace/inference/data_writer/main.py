@@ -41,6 +41,12 @@ class DataWriterConfig:
             containing the monthly predictions and target values.
         names: Names of variables to save in the prediction and monthly
             netCDF files.
+        prediction_names: Names of variables to save in the prediction netCDF
+            files. When set, this overrides ``names`` for the prediction files
+            only (the monthly files continue to use ``names``); when None, the
+            prediction files fall back to ``names``. Useful for saving a small
+            subset in the high-frequency prediction files while retaining all
+            variables in the monthly aggregates.
         time_coarsen: Configuration for time coarsening of written outputs to the
             raw data writer.
         files: Configuration for a sequence of individual data writers. Each data
@@ -50,6 +56,7 @@ class DataWriterConfig:
     save_prediction_files: bool = True
     save_monthly_files: bool = True
     names: Sequence[str] | None = None
+    prediction_names: Sequence[str] | None = None
     time_coarsen: TimeCoarsenConfig | None = None
     files: list[FileWriterConfig] | None = None
 
@@ -61,6 +68,10 @@ class DataWriterConfig:
             warnings.warn(
                 "names provided but all options to "
                 "save subsettable output files are False."
+            )
+        if self.prediction_names is not None and not self.save_prediction_files:
+            warnings.warn(
+                "prediction_names provided but save_prediction_files is False."
             )
         all_filenames = self._get_all_filenames()
         if len(set(all_filenames)) != len(all_filenames):
@@ -74,6 +85,13 @@ class DataWriterConfig:
         for file in self.files or []:
             filenames.extend(file.filenames)
         return filenames
+
+    @property
+    def _prediction_save_names(self) -> Sequence[str] | None:
+        """Names to save in the prediction files, falling back to ``names``."""
+        if self.prediction_names is not None:
+            return self.prediction_names
+        return self.names
 
     def validate_time_coarsen(self, forward_steps_in_memory: int, n_forward_steps: int):
         """Validate time coarsening (top-level and per-file) against the schedule."""
@@ -97,7 +115,7 @@ class DataWriterConfig:
             raw_writer: PairedSubwriter = PairedRawDataWriter(
                 path=experiment_dir,
                 initial_condition_times=initial_condition_times,
-                save_names=self.names,
+                save_names=self._prediction_save_names,
                 variable_metadata=variable_metadata,
                 coords=coords,
                 dataset_metadata=dataset_metadata,
@@ -157,7 +175,7 @@ class DataWriterConfig:
                     path=experiment_dir,
                     label="autoregressive_predictions",
                     initial_condition_times=initial_condition_times,
-                    save_names=self.names,
+                    save_names=self._prediction_save_names,
                     variable_metadata=variable_metadata,
                     coords=coords,
                     dataset_metadata=dataset_metadata,
