@@ -14,6 +14,28 @@ separate PR.
 
 ---
 
+## `fme/core/spatial_masking.py` (modified)
+
+```python
+SpatialMasking = StaticSpatialMasking | NullSpatialMasking  # NEW — the output-masking type
+```
+
+The masking-specific type that everything downstream is annotated with, so a
+non-masking callable (e.g. a derived-variables function) can no longer flow in
+silently — assigning one is a mypy error, not a latent bug.
+`build_output_spatial_masker` (on `SpatialMaskProviderABC`, its
+implementations, and the `HasGetSpatialMask` protocol) narrows its return
+annotation from the bare `Callable[[TensorMapping], TensorDict]` to
+`SpatialMasking`. This rename (together with the two renames below) lands as a
+standalone, behavior-preserving first commit, separable from the carriage work.
+
+## `fme/core/coordinates.py` (modified)
+
+`NullPostProcessFn` and `PostProcessFnType` are **deleted**. Their only
+consumer is the stepper, and `NullSpatialMasking` already provides the same
+no-op with the masking-specific type; the generic "post-process" vocabulary
+goes away entirely so nothing suggests an arbitrary func is acceptable here.
+
 ## `fme/core/corrector/output.py` (modified)
 
 ```python
@@ -22,13 +44,13 @@ class CorrectorDiagnostics:
     delta: TensorMapping = dataclasses.field(default_factory=dict)
 
     def apply_output_masking(  # NEW — map the stepper's output spatial masker over delta
-        self, masking: PostProcessFnABC
+        self, masking: SpatialMasking
     ) -> "CorrectorDiagnostics":
         # Returns a new CorrectorDiagnostics; input unmutated. Named and typed
         # for masking specifically — NOT an arbitrary output-process func:
         # masking a difference is correct ONLY because the output masker is
         # NaN-fill (StaticSpatialMasking with fill_value=NaN, or the
-        # NullPostProcessFn no-op): NaN off-mask matches
+        # NullSpatialMasking no-op): NaN off-mask matches
         # masked_output − masked_snapshot. A finite fill, or any func that
         # derives/transforms values, would break the delta = output − snapshot
         # invariant; this is documented inline.
@@ -40,24 +62,29 @@ class CorrectorDiagnostics:
 ```python
 @dataclasses.dataclass
 class StepOutput:
-    @classmethod  # NEW — encapsulate how per-step corrector deltas stack into a series
-    def stack_corrector_deltas(
+    @classmethod  # NEW — encapsulate how per-step diagnostics stack into a series
+    def stack_diagnostics(
         cls, outputs: Sequence["StepOutput"]
-    ) -> TensorMapping:
+    ) -> StepDiagnostics | None:
         # Stacks each output's corrector_diagnostics.delta along a new time dim
-        # (dim 1), forward-step-aligned. Returns an empty mapping when no output
-        # carries a delta. Keeps Stepper.predict independent of how StepOutput
-        # stores its diagnostics (no direct stack_list_of_tensor_dicts call at
-        # the predict site).
+        # (dim 1), forward-step-aligned, and returns the stacked container
+        # itself; returns None when no output carries a delta. The corrector
+        # internals (that the diagnostics are a per-variable delta mapping)
+        # stay hidden inside StepOutput/StepDiagnostics — Stepper.predict just
+        # attaches the returned object, and the data writer reads it through
+        # StepDiagnostics.to_dataset().
         ...
 ```
 
-## `fme/ace/data_loading/step_diagnostics.py` (new)
+## `fme/core/step/step_diagnostics.py` (new)
 
-Opaque per-sample diagnostics container, modeled on `StepperState`. Holds the
-stacked per-step correction series, aligned with the prediction `data` along
+Opaque per-sample diagnostics container, modeled on `StepperState`. It lives in
+`fme/core/step/` (not `fme/ace/data_loading/`) because it is the return type of
+`StepOutput.stack_diagnostics` and `fme/core` cannot import from `fme.ace`;
+`batch_data.py` imports it in the allowed direction. Holds the stacked per-step
+correction series, aligned with the prediction `data` along
 `(sample, time, ...)`. An **empty `delta` is valid** — all ops are safe no-ops
-on it and nothing asserts non-emptiness — but `Stepper.predict` still attaches
+on it and nothing asserts non-emptiness — but `stack_diagnostics` returns
 `None` when nothing was modified, so `step_diagnostics is None` remains the
 single "no correction file" gate for now. It deliberately has **no** time-slice
 or prepend-time op — the series is attached only after time-windowing is
@@ -147,25 +174,36 @@ class PairedData:
 
 ```python
 class Stepper:
+    def __init__(self, ..., output_masking: SpatialMasking, ...):
+        # RENAMED — was output_process_func / _output_process_func, typed as a
+        # bare Callable. The masking-specific name and SpatialMasking type
+        # propagate everywhere the value flows (constructor param, private
+        # attr, the StepperConfig builder local that feeds it), so wiring in a
+        # non-masking callable is a visible type error. The builder's
+        # MissingDatasetInfo fallback becomes NullSpatialMasking() (was
+        # NullPostProcessFn()). No checkpoint/state schema change: the value is
+        # rebuilt from config on every load.
+        ...
+
     def step(self, args: StepArgs, wrapper=...) -> StepOutput:
         # CHANGED — also apply the output spatial masker to the carried
         # diagnostics, so delta is NaN-masked off-mask consistently with
         # .output:
         #   corrector_diagnostics=result.corrector_diagnostics
-        #       .apply_output_masking(self._output_process_func)
-        # (_output_process_func is always the NaN-fill output spatial masker or
-        # the NullPostProcessFn no-op; apply_output_masking's name and contract
+        #       .apply_output_masking(self._output_masking)
+        # (_output_masking is always the NaN-fill output spatial masker or the
+        # NullSpatialMasking no-op; apply_output_masking's name and contract
         # pin that restriction.)
         ...
 
     def predict(self, ...) -> tuple[BatchData, PrognosticState]:
-        # CHANGED — stack the per-step deltas via
-        # StepOutput.stack_corrector_deltas(output_list) and attach at the
+        # CHANGED — attach StepOutput.stack_diagnostics(output_list) at the
         # closing BatchData.new_on_device(...) reconstruction — i.e. AFTER the
         # prepend → compute_derived → remove_initial_condition dance and the
         # get_end call, where data and series are both n_forward_steps long.
-        # Attach None when the stacked series has no keys (no corrector, or
-        # nothing modified this rollout).
+        # stack_diagnostics returns None when no output carries a delta (no
+        # corrector, or nothing modified this rollout), so predict attaches
+        # its result unconditionally.
         ...
 ```
 
@@ -244,7 +282,7 @@ carriage.
 
 ## Tests
 
-## `fme/ace/data_loading/test_step_diagnostics.py` (new)
+## `fme/core/step/test_step_diagnostics.py` (new)
 
 ```python
 def test_to_device_to_cpu_pin_memory_preserve_keys():
@@ -297,9 +335,9 @@ def test_paired_data_threads_step_diagnostics():
 ## `fme/core/step/test_output.py` (modified)
 
 ```python
-def test_stack_corrector_deltas():
-    # GOAL: stacks per-step deltas forward-step-aligned along dim 1; returns an
-    # empty mapping when no output carries a delta.
+def test_stack_diagnostics():
+    # GOAL: stacks per-step deltas forward-step-aligned along dim 1 into a
+    # StepDiagnostics; returns None when no output carries a delta.
     ...
 ```
 
@@ -308,7 +346,7 @@ def test_stack_corrector_deltas():
 ```python
 def test_apply_output_masking():
     # GOAL: maps the masking over delta and returns a NEW CorrectorDiagnostics
-    # (input unmutated); NullPostProcessFn preserves values.
+    # (input unmutated); NullSpatialMasking preserves values.
     ...
 ```
 
@@ -328,7 +366,7 @@ def test_predict_without_corrector_has_no_step_diagnostics():
 
 def test_step_masks_corrector_diagnostics():
     # GOAL: with a NaN-fill output masker, delta is NaN exactly where .output
-    # is masked and unchanged on-mask; with NullPostProcessFn (no mask
+    # is masked and unchanged on-mask; with NullSpatialMasking (no mask
     # provider) delta is unchanged.
     ...
 ```
