@@ -27,16 +27,14 @@ RUN_SCRIPT = HERE / "run-ace-eval.sh"
 WANDB_GROUP = "ace2-var-masking-eval-2026-06-17"
 
 CHECKPOINTS = [
-    # ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
-    # ("training_checkpoints/best_ckpt.tar", "-besttrain"),
+    ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
+    ("training_checkpoints/best_ckpt.tar", "-besttrain"),
     ("training_checkpoints/ckpt.tar", "-lastepoch"),
 ]
 
-CONFIGS = sorted(
-    path.name
-    for path in HERE.glob("*.yaml")
-    if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
-)
+CONFIGS = [
+    "ace-eval-suite-config-4deg-AIMIP-nc-sfno-mask30-uniform-co2-0.9-double.yaml"
+]
 
 
 def validate_configs(config_filenames: list[str]) -> None:
