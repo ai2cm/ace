@@ -150,12 +150,11 @@ def test_predictor_runs(tmp_path):
 
 
 def _build_seam_crossing_model_and_data(tmp_path):
-    """A real (4, 4) model on a global fine grid plus a seam-crossing GriddedData.
+    """A real model on a global fine grid plus a seam-crossing GriddedData.
 
-    Global coarse grid is 4 lat x 8 lon (45 deg spacing); a (-90, 90) lon extent
-    selects 4 of 8 coarse cells across the seam, matching the (4, 4) model so no
-    patching is needed. No HGTsfc field, so StaticInputs is empty and the model
-    runs with use_fine_topography=False.
+    The lon extent straddles the 0/360 seam and is sized to match the model's
+    coarse patch, so no patching is needed. No HGTsfc field, so StaticInputs is
+    empty and the model runs with use_fine_topography=False.
     """
     coarse_shape = (4, 4)
     downscale_factor = 2

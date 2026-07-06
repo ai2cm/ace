@@ -100,7 +100,7 @@ def get_trainer_model_config():
 
 
 def _seam_crossing_model_config(fine_shape: tuple[int, int]) -> DiffusionModelConfig:
-    """A (4, 4)-patch model config whose module fits the seam-crossing fine shape."""
+    """A model config whose module fits the given seam-crossing fine shape."""
     return DiffusionModelConfig(
         DiffusionModuleRegistrySelector(
             "prebuilt",
@@ -138,10 +138,8 @@ def _seam_crossing_model_config(fine_shape: tuple[int, int]) -> DiffusionModelCo
 
 def test_evaluator_rolls_for_seam_crossing(tmp_path):
     """The evaluator entrypoint rolls the model and generates end-to-end on real
-    data (no mocks) for a seam-crossing domain. Global coarse grid is 4 lat x 8
-    lon (45 deg spacing), fine is 8 lat x 16 lon; a (-90, 90) lon extent selects
-    4 of 8 coarse cells across the seam, matching the (4, 4) model so no patching
-    is needed.
+    data (no mocks) for a seam-crossing domain. The lon extent straddles the 0/360
+    seam and is sized to match the model's coarse patch, so no patching is needed.
 
     The generated output lands on the model's rolled fine grid, while the target
     is rolled at the data layer via an independent path. We assert those two grids
@@ -157,10 +155,10 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
     )
     paths = global_data_paths_helper(tmp_path)
 
-    # full_fine_coords spans the entire fine domain (8 lat x 16 lon global), i.e.
-    # the coarse grid scaled by downscale_factor, so the fine coordinates the model
-    # derives for a batch are at the same resolution as the fine target data and
-    # can be compared directly.
+    # full_fine_coords spans the entire global fine domain, i.e. the coarse grid
+    # scaled by downscale_factor, so the fine coordinates the model derives for a
+    # batch are at the same resolution as the fine target data and can be compared
+    # directly.
     full_fine_coords = LatLonCoordinates(
         lat=cell_centered_coordinate(0.0, 8.0, coarse_shape[0] * downscale_factor),
         lon=cell_centered_coordinate(0.0, 360.0, 8 * downscale_factor),
