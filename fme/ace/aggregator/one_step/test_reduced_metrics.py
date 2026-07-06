@@ -9,11 +9,15 @@ DEVICE = get_device()
 
 
 def mock_area_weighted_metric(
-    truth: TensorMapping, predicted: TensorMapping
+    truth: TensorMapping,
+    predicted: TensorMapping,
+    cell_weights: TensorMapping | None = None,
 ) -> TensorDict:
     result = {}
     for name in truth:
         diff = predicted[name] - truth[name]
+        if cell_weights is not None and name in cell_weights:
+            diff = diff * cell_weights[name]
         result[name] = diff.mean(dim=list(range(1, diff.ndim)))
     return result
 

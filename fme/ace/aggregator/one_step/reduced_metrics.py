@@ -25,6 +25,7 @@ class AreaWeightedFunction(Protocol):
         self,
         truth: TensorMapping,
         predicted: TensorMapping,
+        cell_weights: TensorMapping | None = None,
     ) -> TensorDict: ...
 
 
@@ -33,7 +34,12 @@ class ReducedMetric(Protocol):
     and then get the total metric at the end.
     """
 
-    def record(self, target: TensorMapping, gen: TensorMapping):
+    def record(
+        self,
+        target: TensorMapping,
+        gen: TensorMapping,
+        cell_weights: TensorMapping | None = None,
+    ):
         """
         Update metric for a batch of data.
         """
@@ -74,16 +80,27 @@ class AreaWeightedReducedMetric:
             return list(tensors.keys())
         return self._channel_mean_names
 
-    def record(self, target: TensorMapping, gen: TensorMapping):
+    def record(
+        self,
+        target: TensorMapping,
+        gen: TensorMapping,
+        cell_weights: TensorMapping | None = None,
+    ):
         """Add a batch of data to the metric.
 
         Args:
             target: Target data. Should have shape [batch, time, height, width].
             gen: Generated data. Should have shape [batch, time, height, width].
+            cell_weights: Optional per-variable per-cell validity weights
+                (1 = valid, 0 = invalid) applied to the area-weighted metric so
+                invalid cells drop from numerator and denominator. ``None`` (the
+                default) leaves the metric unmasked, identical to prior behavior.
         """
         batch_avgs = {
             name: tensor.mean(dim=0)
-            for name, tensor in self._compute_metric(target, gen).items()
+            for name, tensor in self._compute_metric(
+                target, gen, cell_weights=cell_weights
+            ).items()
         }
         if self._channel_mean is None:
             self._channel_mean = torch.tensor(0.0, device=self._device)

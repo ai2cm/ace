@@ -98,7 +98,10 @@ class GriddedOperations(abc.ABC):
 
     @final
     def area_weighted_mean_bias_dict(
-        self, truth: TensorMapping, predicted: TensorMapping
+        self,
+        truth: TensorMapping,
+        predicted: TensorMapping,
+        cell_weights: TensorMapping | None = None,
     ) -> TensorDict:
         result = {}
         for name in truth:
@@ -106,6 +109,7 @@ class GriddedOperations(abc.ABC):
                 truth=truth[name],
                 predicted=predicted[name],
                 name=name,
+                cell_weights=None if cell_weights is None else cell_weights.get(name),
             )
         return result
 
@@ -124,7 +128,10 @@ class GriddedOperations(abc.ABC):
 
     @final
     def area_weighted_rmse_dict(
-        self, truth: TensorMapping, predicted: TensorMapping
+        self,
+        truth: TensorMapping,
+        predicted: TensorMapping,
+        cell_weights: TensorMapping | None = None,
     ) -> TensorDict:
         result = {}
         for name in truth:
@@ -132,6 +139,7 @@ class GriddedOperations(abc.ABC):
                 truth=truth[name],
                 predicted=predicted[name],
                 name=name,
+                cell_weights=None if cell_weights is None else cell_weights.get(name),
             )
         return result
 
@@ -172,8 +180,16 @@ class GriddedOperations(abc.ABC):
 
     @final
     def area_weighted_gradient_magnitude_percent_diff_dict(
-        self, truth: TensorMapping, predicted: TensorMapping
+        self,
+        truth: TensorMapping,
+        predicted: TensorMapping,
+        cell_weights: TensorMapping | None = None,
     ) -> TensorDict:
+        # cell_weights is accepted for a uniform metric signature but ignored:
+        # a per-cell validity mask does not compose with a spatial-gradient
+        # magnitude (the gradient stencil straddles masked boundaries), so this
+        # metric stays unmasked.
+        del cell_weights
         result = {}
         for name in truth:
             result[name] = self.area_weighted_gradient_magnitude_percent_diff(

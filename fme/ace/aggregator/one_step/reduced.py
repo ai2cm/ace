@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 import torch
@@ -102,6 +102,12 @@ class MeanAggregator:
         gen_data_norm: TensorMapping | None = None,
         loss: float = float("nan"),
         i_time_start: int = 0,
+        # Optional per-variable per-cell validity masks (1 = valid, 0 = invalid),
+        # broadcast-compatible with the fields (typically [sample, time, lat, lon]).
+        # Applied per timestep to the area-weighted metrics so invalid cells drop
+        # from numerator and denominator. None leaves every metric unmasked
+        # (identical to prior behavior); variables absent from masks are unmasked.
+        masks: Mapping[str, torch.Tensor] | None = None,
     ):
         self._loss += loss
         time_dim = 1
@@ -125,10 +131,22 @@ class MeanAggregator:
                 gen_snapshot[name] = gen_data[name].select(
                     dim=time_dim, index=target_time
                 )
+            weights_snapshot: dict[str, torch.Tensor] = {}
+            if masks is not None:
+                for name in gen_data.keys():
+                    mask = masks.get(name)
+                    if mask is None:
+                        continue
+                    # Broadcast time-invariant masks (time dim of size 1) hold
+                    # at index 0; time-varying masks index the same snapshot.
+                    idx = 0 if mask.shape[time_dim] == 1 else target_time
+                    weights_snapshot[name] = mask.select(dim=time_dim, index=idx)
+            cell_weights = weights_snapshot or None
             for metric in self._variable_metrics.values():
                 metric.record(
                     target=target_snapshot,
                     gen=gen_snapshot,
+                    cell_weights=cell_weights,
                 )
             # only increment n_batches if we actually recorded a batch
             self._n_batches += 1
@@ -195,6 +213,7 @@ class OneStepMeanAdapter:
             target_data_norm=data.target_norm,
             gen_data_norm=data.prediction_norm,
             i_time_start=data.i_time_start,
+            masks=data.target_mask,
         )
 
     def get_logs(self, label: str) -> dict[str, Any]:

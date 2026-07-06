@@ -9,6 +9,48 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.testing import mock_distributed
 
 
+def test_mean_aggregator_per_cell_mask_drops_invalid_cells():
+    """A per-timestep mask (1=valid) excludes invalid cells from the
+    area-weighted RMSE, so a discrepancy confined to invalid cells does not
+    register. masks=None reproduces the unmasked value exactly."""
+    device = get_device()
+    area_weights = torch.ones([2, 2], device=device)
+    target = {"a": torch.zeros([1, 2, 2, 2], device=device)}
+    # gen differs from target only at spatial cell (0, 0) at the recorded step.
+    gen = {"a": torch.zeros([1, 2, 2, 2], device=device)}
+    gen["a"][:, 1, 0, 0] = 4.0
+    # Mask marks the discrepant cell (0, 0) invalid (0) everywhere.
+    mask = torch.ones([1, 2, 2, 2], device=device)
+    mask[:, :, 0, 0] = 0.0
+
+    masked = MeanAggregator(
+        LatLonOperations(area_weights),
+        target_time=1,
+        include_grad_mag_percent_diff=False,
+    )
+    masked.record_batch(target_data=target, gen_data=gen, masks={"a": mask})
+    # (0,0) dropped -> the remaining 3 valid cells all match -> RMSE 0.
+    assert masked.get_logs(label="m")["m/weighted_rmse/a"] == pytest.approx(0.0)
+
+    unmasked = MeanAggregator(
+        LatLonOperations(area_weights),
+        target_time=1,
+        include_grad_mag_percent_diff=False,
+    )
+    unmasked.record_batch(target_data=target, gen_data=gen)
+    # 1 of 4 equally-weighted cells off by 4 -> RMSE = sqrt(16/4) = 2.
+    val = unmasked.get_logs(label="m")["m/weighted_rmse/a"]
+    assert val == pytest.approx(2.0)
+
+    none_mask = MeanAggregator(
+        LatLonOperations(area_weights),
+        target_time=1,
+        include_grad_mag_percent_diff=False,
+    )
+    none_mask.record_batch(target_data=target, gen_data=gen, masks=None)
+    assert none_mask.get_logs(label="m")["m/weighted_rmse/a"] == pytest.approx(val)
+
+
 def test_mean_metrics_call_distributed():
     """
     All reduced metrics should be reduced across processes using Distributed.
