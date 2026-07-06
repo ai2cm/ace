@@ -19,5 +19,6 @@ from .reduced import MeanMetricConfig
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig
 from .time_mean import TimeMeanMetricConfig
+from .trend import TrendMetricConfig
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig

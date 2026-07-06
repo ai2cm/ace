@@ -10,6 +10,7 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
+from fme.core.random_state import RandomState
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict
 
@@ -326,6 +327,20 @@ def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps
         )
 
 
+def test_with_random_state_attaches_to_stepper_state():
+    batch_data = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
+    assert ic.as_batch_data().stepper_state is None
+    random_state = RandomState.from_seed(0)
+    seeded = ic.with_random_state(random_state)
+    # The original is unchanged; the copy carries the random_state.
+    assert ic.as_batch_data().stepper_state is None
+    assert seeded.as_batch_data().stepper_state is not None
+    assert seeded.as_batch_data().stepper_state.random_state is random_state
+
+
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
 def test_remove_initial_condition(n_ic_timesteps: int):
     names = ["foo", "bar"]
@@ -532,16 +547,17 @@ def test_broadcast_ensemble(n_ensemble):
     assert len(ensemble_gen_data.time.sample) == n_ensemble * n_samples
     assert len(ensemble_gen_data.time.time) == n_times
 
-    for i in range(n_ensemble):
+    # broadcast uses block ordering (repeat_interleave): sample s occupies
+    # positions [s * n_ensemble, (s + 1) * n_ensemble), so ensemble member j of
+    # every sample is at positions j, j + n_ensemble, ... The labels and the time
+    # coordinate must follow the same ordering as the data (see
+    # test_broadcast_ensemble_aligns_distinct_sample_times).
+    for j in range(n_ensemble):
         torch.testing.assert_close(
-            ensemble_gen_data.labels.tensor[
-                i * n_samples : (i * n_samples) + n_samples
-            ],
+            ensemble_gen_data.labels.tensor[j::n_ensemble],
             gen_data.labels.tensor,
         )
-        assert ensemble_gen_data.time[
-            i * n_samples : (i * n_samples) + n_samples
-        ].equals(gen_data.time)
+        assert ensemble_gen_data.time[j::n_ensemble].equals(gen_data.time)
 
     for i in range(n_samples):
         torch.testing.assert_close(
@@ -566,6 +582,73 @@ def test_broadcast_ensemble(n_ensemble):
                 ensemble_gen_data.data_mask["bar"][i * n_ensemble + e].item()
                 == original_val
             )
+
+
+@pytest.mark.parametrize("n_ensemble", [2, 3])
+def test_broadcast_ensemble_aligns_distinct_sample_times(n_ensemble):
+    """Regression for a concurrent inline-inference crash.
+
+    First seen when a 4deg-daily training run crashed at the end of its first
+    epoch's inline inference (beaker
+    https://beaker.org/ex/01KV6P5MG100PTXNV436HD40AY).
+
+    ``broadcast_ensemble`` expands the data with ``repeat_interleave`` (block
+    ordering: sample ``s`` lands at positions ``[s * n_ensemble,
+    (s + 1) * n_ensemble)``) but previously tiled the time coordinate with
+    ``xr.concat([time] * n_ensemble)`` (``[s0, s1, ..., s0, s1, ...]``). When
+    samples carry distinct times -- e.g. an inference task whose initial
+    conditions start on different dates with ``n_ensemble_per_ic > 1`` -- data
+    and time then disagreed on sample order, which downstream surfaced as
+    ``ValueError: Forcing data must have the same time coordinate as the batch
+    data.`` in ``compute_derived_variables``.
+
+    Mark each sample's identity in both its data values and its time values and
+    assert the two stay aligned after broadcasting.
+    """
+    n_samples, n_times, n_lat, n_lon = 3, 4, 2, 2
+    # Sample s: data value and time value both encode s as 1000 * s.
+    time = xr.DataArray(
+        np.stack([np.arange(n_times) + 1000 * s for s in range(n_samples)]),
+        dims=["sample", "time"],
+    )
+    data = {"a": torch.zeros(n_samples, n_times, n_lat, n_lon)}
+    for s in range(n_samples):
+        data["a"][s] = 1000 * s
+    batch = BatchData.new_on_cpu(data=data, time=time, epoch=0)
+
+    bcast = batch.broadcast_ensemble(n_ensemble)
+
+    assert bcast.data["a"].shape[0] == n_samples * n_ensemble
+    assert len(bcast.time["sample"]) == n_samples * n_ensemble
+    for p in range(n_samples * n_ensemble):
+        data_sample = int(bcast.data["a"][p, 0, 0, 0].item()) // 1000
+        time_sample = int(bcast.time.values[p, 0]) // 1000
+        assert data_sample == time_sample == p // n_ensemble
+
+
+@pytest.mark.parametrize("n_ensemble", [2, 3])
+def test_paired_data_broadcast_ensemble_aligns_distinct_sample_times(n_ensemble):
+    """Same regression as test_broadcast_ensemble_aligns_distinct_sample_times,
+    for ``PairedData.broadcast_ensemble``."""
+    n_samples, n_times, n_lat, n_lon = 3, 4, 2, 2
+    time = xr.DataArray(
+        np.stack([np.arange(n_times) + 1000 * s for s in range(n_samples)]),
+        dims=["sample", "time"],
+    )
+    prediction = {"a": torch.zeros(n_samples, n_times, n_lat, n_lon)}
+    reference = {"a": torch.zeros(n_samples, n_times, n_lat, n_lon)}
+    for s in range(n_samples):
+        prediction["a"][s] = 1000 * s
+        reference["a"][s] = 1000 * s
+    paired = PairedData(prediction=prediction, reference=reference, time=time)
+
+    bcast = paired.broadcast_ensemble(n_ensemble)
+
+    assert len(bcast.time["sample"]) == n_samples * n_ensemble
+    for p in range(n_samples * n_ensemble):
+        data_sample = int(bcast.prediction["a"][p, 0, 0, 0].item()) // 1000
+        time_sample = int(bcast.time.values[p, 0]) // 1000
+        assert data_sample == time_sample == p // n_ensemble
 
 
 @pytest.mark.parallel

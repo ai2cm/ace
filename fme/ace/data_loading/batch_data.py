@@ -14,6 +14,7 @@ from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
+from fme.core.random_state import RandomState
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -88,6 +89,22 @@ class PrognosticState:
 
     def to_device(self) -> "PrognosticState":
         return PrognosticState(self._data.to_device())
+
+    def with_random_state(self, random_state: RandomState) -> "PrognosticState":
+        """Return a copy with a seeded RandomState attached to its stepper_state.
+
+        Used to seed stochastic inference: the random_state threads through the
+        rollout via the stepper_state so the noise sequence is reproducible.
+        """
+        stepper_state = self._data.stepper_state or StepperState()
+        return PrognosticState(
+            dataclasses.replace(
+                self._data,
+                stepper_state=dataclasses.replace(
+                    stepper_state, random_state=random_state
+                ),
+            )
+        )
 
     def as_batch_data(self) -> "BatchData":
         return self._data
@@ -574,7 +591,15 @@ class BatchData:
                 f"n_ensemble={self.n_ensemble} and cannot be broadcast."
             )
         data = repeat_interleave_batch_dim(self.data, n_ensemble)
-        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        # Repeat-interleave the time coordinate to match the block ordering of
+        # ``repeat_interleave_batch_dim`` (and of the labels/data_mask below):
+        # sample s lands at positions [s * n_ensemble, (s + 1) * n_ensemble). A
+        # plain ``xr.concat([time] * n_ensemble)`` would instead tile the samples
+        # ([s0, s1, ..., s0, s1, ...]), misaligning data and time whenever the
+        # samples carry distinct times (e.g. inference ICs at different start
+        # dates with n_ensemble_per_ic > 1).
+        n_samples = self.time.sizes["sample"]
+        time = self.time.isel(sample=np.repeat(np.arange(n_samples), n_ensemble))
         if self.labels is None:
             labels = None
         else:
@@ -660,7 +685,11 @@ class PairedData:
             )
         prediction = repeat_interleave_batch_dim(self.prediction, n_ensemble)
         reference = repeat_interleave_batch_dim(self.reference, n_ensemble)
-        time = xr.concat([self.time] * n_ensemble, dim="sample")
+        # Match the block ordering of repeat_interleave_batch_dim (see
+        # BatchData.broadcast_ensemble): repeat-interleave time per sample rather
+        # than tiling, so data and time stay aligned for distinct-time samples.
+        n_samples = self.time.sizes["sample"]
+        time = self.time.isel(sample=np.repeat(np.arange(n_samples), n_ensemble))
         if self.labels is None:
             labels = None
         else:
