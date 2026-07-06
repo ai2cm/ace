@@ -1,4 +1,4 @@
-# SESSION HANDOFF — MoE distillation (2026-07-02)
+# SESSION HANDOFF — MoE distillation (2026-07-05)
 
 > **This is a transient session-handoff note, not the living record.** It captures
 > the *current* state and *immediate* next actions so work can resume in a fresh
@@ -7,104 +7,116 @@
 > **`specs/10-share-generation-postprocessing.md`**. When this note goes stale,
 > trust those.
 
-Branch: `experiment/fastgen-distill` — HEAD `45c7a0e73`, pushed/synced to origin.
+Branch: `experiment/fastgen-distill` — HEAD `e920ca7f4`, pushed/synced to origin.
 Env: conda `fme`. Cluster: Beaker `ai2/climate-titan`, wandb `ai2cm/fastgen`.
 
 ---
 
 ## TL;DR — the headline of this session
 
-**Found and fixed a validation bug that confounded all PRMSL results.** Teachers
-are **residual** models (`predict_residual=True`): the net predicts
-`fine − interpolate(coarse)` and the full field only exists after adding the
-interpolated-coarse **base** back. The distillation *validation* callback sampled
-the student via `fastgen_sampler` on the raw module and **never added the base**,
-so it compared a **residual student** to a **full-field** teacher zarr. For PRMSL
-(≈ all large-scale base) that manifested as the "~100× low-k spectral collapse,"
-the negative deep-low tail, the narrow histogram — **all of it largely the bug,
-not a model failure.** Training and deployment were already correct.
+**The residual-bug fix is CONFIRMED by the reset runs, and Student-Hi is now
+launched.** Two things happened:
 
-- **Fix:** `b2a47628b` (validation adds the base back for `from_noise` &
-  `lo_renoise`; `lo_renoise` also subtracts it from the re-noise target).
-- **Guard:** `febd81f37` — parity test that the callback's residual→full
-  processing equals `DiffusionModel.postprocess_generated`.
-- **Backlog:** `specs/10` — de-duplicate the residual/base logic (single-source
-  `DiffusionModel.residual_base` + reuse `postprocess_generated`) so this class of
-  bug can't recur.
+1. **Reset runs (expert-0 Student-Lo, fixed validation) confirm the residual bug
+   was the cause of the "PRMSL catastrophe."** Both trained ~75 h to 47–51k steps,
+   then canceled. PRMSL `spec_mae` lo/mid/hi dropped from the old collapsed
+   0.5–0.9 to **0.01–0.05 and held stable** to 50k; `tail_99.99_PRMSL` is now
+   **~0.98–1.0** (was negative); winds hi-band healthy (0.04–0.08). **The offset-0
+   bottleneck critic no longer collapses** → the whole tap-depth saga (64² sweet
+   spot, finer-collapses) was **largely a validation artifact**. baseline-fixed ≈
+   tap2-fixed → the simpler offset-0 critic is fine; the 64²/256ch tap is not
+   needed.
+2. **`hi_cascade` validation is now wired** (`e920ca7f4`) and **Student-Hi is
+   launched** (see Live runs). This unblocks the per-expert Hi milestone.
 
-**What's still valid vs. bunk** (bug is common-mode + low-k):
-- **Valid:** all training metrics → GAN-collapse dynamics are real; **all hi-band
-  spectra**; **precip** (small base); relative hi-band comparisons → the
-  **non-monotone tap finding (64² sweet spot, finer collapses)** and
-  **2-step > 1-step** both stand.
-- **Bunk/confounded:** absolute PRMSL lo/mid spectra, PRMSL deep-low tail, PRMSL
-  histogram, CRPS_PRMSL, and PRMSL-driven checkpoint selection.
+Prior-session context (still true): teachers are **residual** models; the
+validation bug compared a residual student to a full-field zarr. Fix `b2a47628b`
+adds the base back; guard `febd81f37`. Backlog `specs/10` de-dups the logic.
 
 ---
 
-## Live runs — CHECK THESE (reset on fixed code)
+## Live runs — CHECK THESE
 
-Submitted 2026-07-02 from `184fa298b` (has the residual fix). **Status: queued /
-not yet started (waiting on GPUs)** as of this note — re-check.
+**Student-Hi (expert 1), launched 2026-07-05 from `e920ca7f4`** — the first run
+with `hi_cascade` validation (cascades the trained Hi through the frozen
+baseline-fixed Lo). 1-step Hi, `lo` frozen at 2-step.
+
+| Run | Beaker | Notes |
+|---|---|---|
+| **hi-1step** | `01KWTXGADFPB4GKVZ33C7ZGJP4` | expert 1, `hi_cascade`, frozen-Lo = baseline-fixed |
+
+Frozen Lo checkpoint: dataset `01KWJAFM694MAE55M2JMZSE89M`, path
+`fastgen/…-baseline-fixed-…-expert0/student_checkpoints/best_student.ckpt`
+(mounted at `/frozen_lo`).
+
+**Reset Lo runs (expert-0, canceled/finalized — DONE, results committed):**
 
 | Run | Critic | Beaker | wandb |
 |---|---|---|---|
-| **baseline-fixed** | offset 0 (original bottleneck) | `01KWJAFKZ96YBR73F0TETBKC0Q` | (name `…-baseline-fixed-…-expert0`) |
-| **tap2-fixed** | offset 2 (64²) | `01KWJAFQW38E8AQ70YK7JYHCAK` | (name `…-tap2-fixed-…-expert0`) |
+| **baseline-fixed** | offset 0 (bottleneck) | `01KWJAFKZ96YBR73F0TETBKC0Q` | `zct08386` (step 46.8k) |
+| **tap2-fixed** | offset 2 (64²) | `01KWJAFQW38E8AQ70YK7JYHCAK` | `985c6mia` (step 51.4k) |
 
-All older tap/GAN-fix runs are **canceled** (confounded validation). Both are
-2-step, expert-0, `lo_renoise` validation.
-
-**What to read once they train (~7–12k steps before the picture is clear):**
-1. **Does PRMSL now validate correctly?** `spec_mae_lo_PRMSL` should track the
-   teacher (not the constant ~0.5–0.8 base artifact); the depth-based
-   `val/tail_99.99_PRMSL` should be **positive / near 1** (not the old negative);
-   the raw `val/power_spectrum/PRMSL` curve's low-k should sit near the teacher.
-2. **baseline vs tap2 under correct PRMSL validation** — does the 64²-tap
-   advantage persist, or was it mostly the (now-removed) low-k confound?
-3. **Is the real (hi-band, GAN-timed) collapse even worth chasing** now that the
-   PRMSL "catastrophe" is gone? (`spec_mae_hi_*`, `gan_loss_gen/disc`,
-   `fake_score_loss`.)
+**What to read on hi-1step once it trains:**
+1. **Does hi_cascade validate cleanly?** Confirm startup logged "Frozen Lo student
+   loaded … for hi_cascade validation" and no load error. Then watch
+   `val/spec_mae_*_PRMSL`, `val/tail_99.99_PRMSL`, `val/crps_*` — the Hi's job is
+   the deep lows / large-scale PRMSL that Lo-alone couldn't reach.
+2. **Does the frozen-Lo cascade improve PRMSL deep lows** vs the Lo-alone
+   `lo_renoise` numbers (the reset runs)?
+3. GAN/training stability as usual (`gan_loss_*`, `fake_score_loss`).
 
 Check commands:
 ```bash
 conda run -n fme python -m fme.downscaling.distillation.check_runs --list
 conda run -n fme python -m fme.downscaling.distillation.check_runs <wandb_id> --keys \
-  val/spec_mae_lo_PRMSL val/spec_mae_hi_PRMSL val/tail_99.99_PRMSL \
-  val/spec_mae_hi_PRATEsfc train/gan_loss_gen train/gan_loss_disc train/fake_score_loss
-conda run -n fme beaker experiment get 01KWJAFKZ96YBR73F0TETBKC0Q
+  val/spec_mae_lo_PRMSL val/spec_mae_mid_PRMSL val/spec_mae_hi_PRMSL \
+  val/tail_99.99_PRMSL val/crps_PRMSL train/gan_loss_gen train/gan_loss_disc \
+  train/fake_score_loss
+conda run -n fme beaker experiment get 01KWTXGADFPB4GKVZ33C7ZGJP4
 ```
-Raw PSD curves: wandb run → **Media** section → `val/power_spectrum/<var>` (interactive,
-step-slidable; the evaluator-style chart).
+(NB: pass the **exact** wandb key names — `check_runs --keys` silently drops
+non-existent keys. Wind vars are `…_at_ten_meters`.)
 
 ---
 
 ## Immediate next actions (priority order)
 
-1. **Read the reset runs** once they've trained (see above). This gates every
-   downstream decision — most of the prior analysis needs re-confirming on correct
-   PRMSL validation.
-2. **Operating point is settled from valid results:** 64² tap, 2-step, GAN weight
-   1e-3. Do **not** go finer than 64² or raise GAN weight (both confirmed
-   counterproductive — non-monotone; see status doc 2026-07-02 tap check-in).
-3. **Original next milestone still pending: Student-Hi + the bundle sampler.**
-   `hi_cascade` validation isn't wired in (needs a frozen-Lo arg + mode calling
-   `student_sampling.sample_student_hi_cascade`); the bundle sampler
-   (`DenoisingMoEPredictor.generate` → boundary-aligned fastgen `t_list`) is
-   scaffolded (`boundary_aligned_t_list`, `sample_student_hi_cascade`) but not
-   wired into the predictor. Deep lows / large-scale PRMSL are genuinely the Hi
-   expert's job, testable only in the bundle.
-4. **Candidate levers (post-reset, if a real gap remains):** per-variable /
-   output-space critics (with per-variable weights — smooth PRMSL is collapse-
-   prone, keep it weak; see status "per-variable / multi-critic" design note); a
-   deficit-penalizing spectral loss (helps PRMSL low-k + precip fine-scale, but a
-   pure PSD match won't fix tails; a critic is better for coherent extremes).
-5. **Backlog refactor:** `specs/10` (de-dup residual/postprocess). Low-risk,
-   no-behavior-change; do before more validation-path changes.
+1. **Watch hi-1step start** — verify the frozen-Lo load line appears and the first
+   validation logs plausible PRMSL numbers (hi_cascade path is new code, first
+   real-env run). If it errors on load/unwrap, that's the place to look.
+2. **Read hi-1step once it trains** (see above). Its marginal job is deep
+   lows / large-scale PRMSL, only testable in the cascade.
+3. **Operating point for the critic is settled:** offset-0 bottleneck is fine
+   (tap saga was a validation artifact); 2-step Lo, GAN weight 1e-3. Do **not**
+   chase finer taps / higher GAN weight.
+4. **Then: bundle sampler + final eval.** Assemble `[Student-Hi, Student-Lo]` via
+   `DenoisingMoEConfig.build()`; generalize `DenoisingMoEPredictor.generate` to a
+   fastgen predict-x0-renoise cascade over a boundary-aligned `t_list` (primitives
+   `boundary_aligned_t_list` / `sample_student_hi_cascade` exist and are now
+   exercised by the callback). Then eval the bundle on the full-teacher zarr.
+5. **Candidate levers (if a real gap remains):** per-variable / output-space
+   critics; a deficit-penalizing spectral loss (scaffold only — a critic is better
+   for coherent extremes).
+6. **Backlog refactor:** `specs/10` (de-dup residual/postprocess). Low-risk;
+   do before more validation-path changes.
 
 ---
 
-## Code landed this session (all committed + pushed)
+## Code landed 2026-07-05 (this session)
+
+- **`hi_cascade` validation wired** (`e920ca7f4`): `best_student_callback.py`
+  accepts `validation_mode="hi_cascade"` + a pre-loaded `frozen_lo_net`
+  (`frozen_lo_sample_steps` / `frozen_lo_sigma_min`), dispatching to the existing
+  `student_sampling.sample_student_hi_cascade`. **Boundary σ=200 is taken from the
+  trained Hi student's own `_sigma_min`** (not the frozen Lo checkpoint's recorded
+  range, which is unreliable — inherits the MoE `_primary` range). `fastgen_train.py`
+  adds `--val-mode hi_cascade` + `--frozen-lo-checkpoint` / `--frozen-lo-steps` /
+  `--frozen-lo-sigma-min` (env `ACE_FROZEN_LO_*`) and loads the frozen Lo via
+  `CheckpointModelConfig` + `_unwrap_denoiser`. `run.sh --expert 1` now uses
+  `hi_cascade` and requires `--frozen-lo <dataset>` (+ `--frozen-lo-path`). Tests:
+  hi_cascade shape / residual-base / missing-frozen-lo guard.
+
+## Code landed prior session (2026-07-02)
 
 - **Residual bug fix** (`b2a47628b`) + **parity test** (`febd81f37`):
   `best_student_callback.py` `_base_prediction_norm` / `_sample_student_output`;
@@ -137,7 +149,11 @@ validation to make Student-Lo runnable; GAN-reg knobs `--gan-r1/--gan-weight/
 - **`run.sh` clones the *pushed* commit** — commit + push before launching.
 - Expert 0 UNet has 6 levels (finest→coarsest `[512,256,128,64,32,16]`); tap
   `offset = 5 − level`; offset ≥5 clamps to finest 512².
-- Validation is `lo_renoise` on the **Lo student alone** from σ=200 — a faithful
-  proxy for its bundle role, but deep lows/large-scale ultimately need the Hi
-  expert (not testable standalone).
+- **hi_cascade** validates the Hi student **through the frozen Lo** — the real
+  bundle deployment path. The frozen Lo is a beaker-dataset checkpoint mounted at
+  `/frozen_lo`; `run.sh --frozen-lo <dataset> [--frozen-lo-path <rel/path.ckpt>]`.
+  The boundary comes from the Hi student's `_sigma_min`, so it's exact regardless
+  of the Lo checkpoint's recorded range.
+- `test_best_student_callback.py` (incl. new hi_cascade tests) runs in the plain
+  `fme` env; `test_teacher.py` needs the distillation Docker image.
 - Don't re-trust any PRMSL number from before `b2a47628b`.
