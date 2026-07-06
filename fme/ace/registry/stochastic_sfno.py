@@ -67,8 +67,21 @@ class NoiseConditionedModel(torch.nn.Module):
             labels to a shared embedding before downstream conditioning.
             When 0, one-hot labels are used directly (legacy behavior).
         inverse_sht: Optional inverse spherical harmonic transform callable.
-            If provided, isotropic noise is generated via SHT; otherwise
-            gaussian noise is used.
+            Required whenever any noise pathway is isotropic (conditioning
+            noise and/or input-noise channels). Shared by both pathways.
+        conditioning_noise_isotropic: Whether the conditioning noise
+            (Context.noise) is isotropic (generated via inverse_sht) rather
+            than gaussian. Defaults to None, in which case it is inferred
+            from ``inverse_sht is not None`` for backward compatibility.
+        input_noise_channels: Number of extra noise channels concatenated
+            to the normalized network input. 0 (default) disables this
+            second pathway. This noise is sampled fresh every forward call
+            (hence independently per step and per ensemble member, since
+            members are folded into the batch dim) and is independent of the
+            conditioning noise.
+        input_noise_type: Distribution of the input-noise channels,
+            "gaussian" (default) or "isotropic" (generated via inverse_sht).
+            Independent of the conditioning-noise distribution.
     """
 
     def __init__(
@@ -82,6 +95,9 @@ class NoiseConditionedModel(torch.nn.Module):
         inverse_sht: Callable[[torch.Tensor], torch.Tensor] | None = None,
         lmax: int = 0,
         mmax: int = 0,
+        conditioning_noise_isotropic: bool | None = None,
+        input_noise_channels: int = 0,
+        input_noise_type: Literal["isotropic", "gaussian"] = "gaussian",
     ):
         super().__init__()
         self.conditional_model = conditional_model
@@ -90,6 +106,11 @@ class NoiseConditionedModel(torch.nn.Module):
         self._inverse_sht = inverse_sht
         self._lmax = lmax
         self._mmax = mmax
+        if conditioning_noise_isotropic is None:
+            conditioning_noise_isotropic = inverse_sht is not None
+        self._conditioning_noise_isotropic = conditioning_noise_isotropic
+        self._input_noise_channels = input_noise_channels
+        self._input_noise_isotropic = input_noise_type == "isotropic"
 
         if label_embed_dim > 0 and n_labels == 0:
             raise ValueError("label_embed_dim > 0 requires n_labels > 0")
@@ -129,7 +150,26 @@ class NoiseConditionedModel(torch.nn.Module):
         self, x: torch.Tensor, labels: torch.Tensor | None = None
     ) -> torch.Tensor:
         x = x.reshape(-1, *x.shape[-3:])
-        if self._inverse_sht is not None:
+        if self._input_noise_channels > 0:
+            if self._input_noise_isotropic:
+                assert self._inverse_sht is not None
+                input_noise = isotropic_noise(
+                    (x.shape[0], self._input_noise_channels),
+                    self._lmax,
+                    self._mmax,
+                    self._inverse_sht,
+                    device=x.device,
+                ).to(x.dtype)
+            else:
+                input_noise = randn(
+                    torch.Size([x.shape[0], self._input_noise_channels, *x.shape[-2:]]),
+                    device=x.device,
+                    dtype=x.dtype,
+                )
+            x = torch.cat([x, input_noise], dim=1)
+
+        if self._conditioning_noise_isotropic:
+            assert self._inverse_sht is not None
             noise = isotropic_noise(
                 (x.shape[0], self.embed_dim),
                 self._lmax,
@@ -195,6 +235,17 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
         noise_type: Type of noise to use for conditioning.
+        input_noise_channels: Number of extra noise channels appended to the
+            normalized input channels fed to the network (a second noise
+            pathway, independent of the conditioning noise). 0 (default)
+            disables it. The channels are sampled fresh every forward call —
+            hence independently per step and per ensemble member, since
+            members are folded into the batch dim.
+        input_noise_type: Distribution of the input-noise channels,
+            "gaussian" (default) or "isotropic" (generated via an inverse
+            SHT). Independent of ``noise_type`` (the conditioning-noise
+            distribution), so e.g. gaussian conditioning with isotropic input
+            noise is a valid combination.
         context_pos_embed_dim: Dimension of the position embedding to use
             for conditioning.
         label_embed_dim: Dimension of the learned label embedding space.
@@ -272,6 +323,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     context_pos_embed_dim: int = 0
     label_embed_dim: int = 0
     noise_type: Literal["isotropic", "gaussian"] = "gaussian"
+    input_noise_channels: int = 0
+    input_noise_type: Literal["isotropic", "gaussian"] = "gaussian"
     global_layer_norm: bool = False
     num_layers: int = 12
     use_mlp: bool = True
@@ -366,7 +419,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
-            in_chans=n_in_channels,
+            in_chans=n_in_channels + self.input_noise_channels,
             out_chans=n_out_channels,
             img_shape=dataset_info.img_shape,
             data_grid=self.data_grid,
@@ -377,7 +430,11 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 embed_dim_labels=effective_label_dim,
             ),
         )
-        if self.noise_type == "isotropic":
+        conditioning_noise_isotropic = self.noise_type == "isotropic"
+        input_noise_isotropic = (
+            self.input_noise_channels > 0 and self.input_noise_type == "isotropic"
+        )
+        if conditioning_noise_isotropic or input_noise_isotropic:
             inverse_sht = sfno_net.itrans_up
             lmax = inverse_sht.lmax
             mmax = inverse_sht.mmax
@@ -395,4 +452,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             inverse_sht=inverse_sht,
             lmax=lmax,
             mmax=mmax,
+            conditioning_noise_isotropic=conditioning_noise_isotropic,
+            input_noise_channels=self.input_noise_channels,
+            input_noise_type=self.input_noise_type,
         )

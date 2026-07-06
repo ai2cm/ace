@@ -158,6 +158,8 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
             "spectral_transform": "sht",
             "label_embed_dim": 3,
             "clip_latent_global_means": True,
+            "input_noise_channels": 4,
+            "input_noise_type": "isotropic",
         },
     )
     module = selector.build(

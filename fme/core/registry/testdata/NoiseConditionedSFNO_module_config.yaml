@@ -16,6 +16,8 @@ filter_preserves_global_mean: false
 filter_residual: false
 filter_type: linear
 global_layer_norm: false
+input_noise_channels: 4
+input_noise_type: isotropic
 label_embed_dim: 3
 local_blocks: null
 lora_alpha: null
