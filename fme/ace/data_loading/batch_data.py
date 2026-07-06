@@ -1,5 +1,6 @@
 import dataclasses
 import json
+import logging
 import warnings
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, TypeVar
@@ -11,6 +12,7 @@ import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
+from fme.ace.requirements import InitialConditionRequirements
 from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -187,6 +189,34 @@ class PrognosticState:
                 ),
             )
         )
+
+    def apply_config_seed(self, seed: int | None) -> "PrognosticState":
+        """Return a state seeded from ``config.seed``, unless one is already
+        present.
+
+        A random state already on the stepper_state (restored from a full-state
+        restart) takes precedence: segment 0 (no restored state) seeds from
+        ``seed``, while later segments continue the restored generator, keeping
+        a resumed rollout bitwise-identical to the single-run seeded rollout.
+        When a restored random state supersedes the config seed, an info line is
+        logged so the skipped seed is not silently confusing. This intentionally
+        does not check the config seed against the seed that created the
+        restored state.
+
+        Args:
+            seed: The configured seed, or None to leave the state unseeded.
+        """
+        if seed is None:
+            return self
+        stepper_state = self._data.stepper_state
+        if stepper_state is not None and stepper_state.random_state is not None:
+            logging.info(
+                "Ignoring config seed because a random state was restored from "
+                "the restart stepper state; the restored generator continues "
+                "instead."
+            )
+            return self
+        return self.with_random_state(RandomState.from_seed(seed))
 
     def as_batch_data(self) -> "BatchData":
         return self._data
@@ -463,49 +493,49 @@ class BatchData:
         return _SCHEMA_ATTR in ds.attrs
 
     def validate_initial_condition(
-        self,
-        prognostic_names: Collection[str],
-        labels: list[str] | None,
-        n_ensemble: int,
+        self, requirements: InitialConditionRequirements
     ) -> None:
-        """Check that config values are consistent with this loaded full-state
-        initial condition.
+        """Check that the run's requirements are consistent with this loaded
+        full-state initial condition.
 
         A full-state restart already had its prognostic names, labels, and
         ensemble broadcast applied before it was saved, so on load we validate
-        rather than re-derive: the config must agree with what was saved, and a
-        mismatch is an error (never a silent re-application).
+        rather than re-derive: the requirements must agree with what was saved,
+        and a mismatch is an error (never a silent re-application).
 
         Raises:
-            ValueError: if any ``prognostic_names`` is absent from ``data``; if
-                ``labels`` is given but does not match the loaded labels (including
-                the loaded-None case); or if ``n_ensemble`` differs from the
-                loaded state (a full-state restart cannot be re-broadcast - its
-                sample dimension already carries the ensemble).
+            ValueError: if any of ``requirements.prognostic_names`` is absent
+                from ``data``; if ``requirements.labels`` is given but does not
+                match the loaded labels (including the loaded-None case); or if
+                ``requirements.n_ensemble`` differs from the loaded state (a
+                full-state restart cannot be re-broadcast - its sample dimension
+                already carries the ensemble).
         """
-        missing = [name for name in prognostic_names if name not in self.data]
+        missing = [
+            name for name in requirements.prognostic_names if name not in self.data
+        ]
         if missing:
             raise ValueError(
                 f"Loaded initial condition is missing prognostic variables "
                 f"{missing}. Present variables: {sorted(self.data)}."
             )
-        if labels is not None:
+        if requirements.labels is not None:
             if self.labels is None:
                 raise ValueError(
-                    f"Config provided labels {labels} but the loaded initial "
-                    "condition carries none."
+                    f"Config provided labels {requirements.labels} but the loaded "
+                    "initial condition carries none."
                 )
-            if self.labels.names != list(labels):
+            if self.labels.names != list(requirements.labels):
                 raise ValueError(
-                    f"Config labels {list(labels)} do not match the loaded initial "
-                    f"condition's labels {self.labels.names}."
+                    f"Config labels {list(requirements.labels)} do not match the "
+                    f"loaded initial condition's labels {self.labels.names}."
                 )
-        if n_ensemble != self.n_ensemble:
+        if requirements.n_ensemble != self.n_ensemble:
             raise ValueError(
-                f"Requested n_ensemble={n_ensemble} but the loaded full-state "
-                f"initial condition represents n_ensemble={self.n_ensemble}. A "
-                "full-state restart cannot be re-broadcast: its sample dimension "
-                "already carries the ensemble."
+                f"Requested n_ensemble={requirements.n_ensemble} but the loaded "
+                f"full-state initial condition represents "
+                f"n_ensemble={self.n_ensemble}. A full-state restart cannot be "
+                "re-broadcast: its sample dimension already carries the ensemble."
             )
 
     def to_xarray_dataset(self) -> xr.Dataset:

@@ -13,6 +13,7 @@ from fme.ace.data_loading.batch_data import (
     PairedData,
     _collate_with_masking,
 )
+from fme.ace.requirements import InitialConditionRequirements
 from fme.core.corrector.state import CorrectorState
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -346,6 +347,39 @@ def test_with_random_state_attaches_to_stepper_state():
     assert ic.as_batch_data().stepper_state is None
     assert seeded.as_batch_data().stepper_state is not None
     assert seeded.as_batch_data().stepper_state.random_state is random_state
+
+
+def test_apply_config_seed_seeds_an_unseeded_state():
+    batch_data = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
+    seeded = ic.apply_config_seed(0)
+    # The original is unchanged; the copy carries a seeded random_state.
+    assert ic.as_batch_data().stepper_state is None
+    stepper_state = seeded.as_batch_data().stepper_state
+    assert stepper_state is not None
+    assert stepper_state.random_state is not None
+
+
+def test_apply_config_seed_none_is_a_no_op():
+    batch_data = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
+    assert ic.apply_config_seed(None) is ic
+
+
+def test_apply_config_seed_defers_to_a_restored_random_state():
+    batch_data = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    restored = RandomState.from_seed(11)
+    ic = batch_data.get_start(["foo"], n_ic_timesteps=1).with_random_state(restored)
+    result = ic.apply_config_seed(0)
+    # The restored generator wins over the config seed.
+    assert result is ic
+    assert result.as_batch_data().stepper_state.random_state is restored
 
 
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
@@ -1338,34 +1372,42 @@ def test_validate_initial_condition_passes_when_consistent():
     labels = BatchLabels(torch.ones(2, 2), names=["a", "b"])
     batch = _restart_batch(names=("prog", "sst"), labels=labels)
     # consistent config: subset of names present, matching labels, n_ensemble=1
-    batch.validate_initial_condition(["prog"], ["a", "b"], 1)
+    batch.validate_initial_condition(
+        InitialConditionRequirements(["prog"], labels=["a", "b"])
+    )
     # labels=None skips the label check
-    batch.validate_initial_condition(["prog", "sst"], None, 1)
+    batch.validate_initial_condition(InitialConditionRequirements(["prog", "sst"]))
 
 
 def test_validate_initial_condition_raises_on_missing_prognostic_name():
     batch = _restart_batch(names=("prog",))
     with pytest.raises(ValueError, match="missing prognostic variables"):
-        batch.validate_initial_condition(["prog", "sst"], None, 1)
+        batch.validate_initial_condition(InitialConditionRequirements(["prog", "sst"]))
 
 
 def test_validate_initial_condition_raises_on_labels_mismatch():
     labels = BatchLabels(torch.ones(2, 2), names=["a", "b"])
     batch = _restart_batch(labels=labels)
     with pytest.raises(ValueError, match="do not match"):
-        batch.validate_initial_condition(["prog"], ["a", "c"], 1)
+        batch.validate_initial_condition(
+            InitialConditionRequirements(["prog"], labels=["a", "c"])
+        )
 
 
 def test_validate_initial_condition_raises_on_labels_provided_but_none_saved():
     batch = _restart_batch(labels=None)
     with pytest.raises(ValueError, match="carries none"):
-        batch.validate_initial_condition(["prog"], ["a"], 1)
+        batch.validate_initial_condition(
+            InitialConditionRequirements(["prog"], labels=["a"])
+        )
 
 
 def test_validate_initial_condition_raises_on_n_ensemble_mismatch():
     batch = _restart_batch(n_ensemble=1)
     with pytest.raises(ValueError, match="cannot be re-broadcast"):
-        batch.validate_initial_condition(["prog"], None, 2)
+        batch.validate_initial_condition(
+            InitialConditionRequirements(["prog"], n_ensemble=2)
+        )
 
 
 def test_non_per_sample_reserved_var_not_subselected_when_length_matches_samples():

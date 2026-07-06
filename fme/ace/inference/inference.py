@@ -26,6 +26,7 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
@@ -47,7 +48,7 @@ from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 
-from .evaluator import apply_config_seed, resolve_variable_metadata
+from .evaluator import resolve_variable_metadata
 
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
@@ -104,9 +105,7 @@ class InitialConditionConfig:
 
 def get_initial_condition(
     ds: xr.Dataset,
-    prognostic_names: Sequence[str],
-    labels: list[str] | None = None,
-    n_ensemble: int = 1,
+    requirements: InitialConditionRequirements,
 ) -> PrognosticState:
     """Build the initial-condition ``PrognosticState`` from a dataset.
 
@@ -116,75 +115,62 @@ def get_initial_condition(
     - Embedded state present: the whole ``BatchData`` is rebuilt via
       ``BatchData.from_xarray_dataset`` (see ``_initial_condition_from_state``).
       It already had prognostic-name selection, labels, and ensemble broadcast
-      applied before it was saved, so config values are *validated* for
-      consistency rather than re-applied - a mismatch raises. The restored
-      ``stepper_state`` is moved to the compute device so the resumed rollout
-      continues exactly.
+      applied before it was saved, so the requirements are *validated* for
+      consistency rather than re-applied - a mismatch raises.
     - No embedded state (external ICs and legacy plain restarts): the lenient
       path (``_initial_condition_from_variables``) builds prognostic tensors from
-      the named variables, sets labels from config, and broadcasts the ensemble -
-      unchanged behavior.
+      the named variables, sets labels from the requirements, and broadcasts the
+      ensemble - unchanged behavior.
+
+    Either way the returned state is on CPU; ``InferenceGriddedData`` moves it
+    to the compute device.
 
     Args:
-        ds: Dataset containing initial condition data. Must include prognostic_names
-            as variables, and they must each have shape (n_samples, n_lat, n_lon).
-            Dataset must also include a 'time' variable with length n_samples.
-        prognostic_names: Names of prognostic variables to extract from the dataset.
-        labels: Labels for the initial conditions. If provided, these labels will be
-            provided to the stepper for every initial condition. For an embedded-state
-            restart they are validated against the saved labels rather than applied.
-        n_ensemble: Number of ensemble members per initial state
+        ds: Dataset containing initial condition data. Must include the required
+            prognostic names as variables, and they must each have shape
+            (n_samples, n_lat, n_lon). Dataset must also include a 'time'
+            variable with length n_samples.
+        requirements: What the run requires of the initial condition: the
+            prognostic names to extract, labels to provide to the stepper for
+            every initial condition (for an embedded-state restart they are
+            validated against the saved labels rather than applied), and the
+            number of ensemble members per initial state.
 
     Returns:
         The initial condition and the time coordinate.
     """
     if BatchData.dataset_has_embedded_state(ds):
-        return _initial_condition_from_state(ds, prognostic_names, labels, n_ensemble)
-    return _initial_condition_from_variables(ds, prognostic_names, labels, n_ensemble)
+        return _initial_condition_from_state(ds, requirements)
+    return _initial_condition_from_variables(ds, requirements)
 
 
 def _initial_condition_from_state(
     ds: xr.Dataset,
-    prognostic_names: Sequence[str],
-    labels: list[str] | None,
-    n_ensemble: int,
+    requirements: InitialConditionRequirements,
 ) -> PrognosticState:
     """Build the IC from a full-state restart (embedded ``BatchData`` state).
 
     Rebuilds the whole ``BatchData`` and validates - does not re-derive - that
-    the config values agree with what was saved; the prognostic names, labels,
+    the requirements agree with what was saved; the prognostic names, labels,
     and ensemble broadcast were already applied before the restart was written.
-    The restored ``stepper_state`` is moved to the compute device
-    (``RandomState.to_device`` is a no-op, keeping the generator on CPU).
     """
     batch_data = BatchData.from_xarray_dataset(ds)
-    batch_data.validate_initial_condition(prognostic_names, labels, n_ensemble)
-    initial_state = batch_data.get_start(prognostic_names, n_ic_timesteps=1)
-    stepper_state = initial_state.as_batch_data().stepper_state
-    if stepper_state is not None:
-        initial_state = PrognosticState(
-            dataclasses.replace(
-                initial_state.as_batch_data(),
-                stepper_state=stepper_state.to_device(),
-            )
-        )
-    return initial_state
+    batch_data.validate_initial_condition(requirements)
+    return batch_data.get_start(requirements.prognostic_names, n_ic_timesteps=1)
 
 
 def _initial_condition_from_variables(
     ds: xr.Dataset,
-    prognostic_names: Sequence[str],
-    labels: list[str] | None,
-    n_ensemble: int,
+    requirements: InitialConditionRequirements,
 ) -> PrognosticState:
     """Build the IC from a plain netCDF of prognostic variables + time.
 
     The lenient path for external ICs and legacy restarts: builds prognostic
-    tensors from the named variables, sets labels from config, and broadcasts the
-    ensemble.
+    tensors from the named variables, sets labels from the requirements, and
+    broadcasts the ensemble.
     """
     initial_condition = {}
-    for name in prognostic_names:
+    for name in requirements.prognostic_names:
         if len(ds[name].shape) != 3:
             raise ValueError(
                 f"Initial condition variables {name} must have shape "
@@ -205,8 +191,11 @@ def _initial_condition_from_variables(
             f"and {n_samples}."
         )
 
-    if labels is not None:
-        batch_labels = BatchLabels(torch.ones(n_samples, len(labels)), names=labels)
+    if requirements.labels is not None:
+        batch_labels = BatchLabels(
+            torch.ones(n_samples, len(requirements.labels)),
+            names=requirements.labels,
+        )
     else:
         batch_labels = None
 
@@ -216,8 +205,8 @@ def _initial_condition_from_variables(
         horizontal_dims=["lat", "lon"],
         labels=batch_labels,
     )
-    batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
-    return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
+    batch_data = batch_data.broadcast_ensemble(n_ensemble=requirements.n_ensemble)
+    return batch_data.get_start(requirements.prognostic_names, n_ic_timesteps=1)
 
 
 @dataclasses.dataclass
@@ -374,8 +363,10 @@ def run_inference_from_config(config: InferenceConfig):
         logging.info("Loading initial condition data")
         initial_condition = get_initial_condition(
             config.initial_condition.get_dataset(),
-            stepper_config.prognostic_names,
-            labels=config.labels,
+            InitialConditionRequirements(
+                prognostic_names=stepper_config.prognostic_names,
+                labels=config.labels,
+            ),
         )
         stepper = config.load_stepper()
         stepper.set_eval()
@@ -401,7 +392,7 @@ def run_inference_from_config(config: InferenceConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
-        apply_config_seed(config.seed, data)
+        data.apply_config_seed(config.seed)
 
         if not config.allow_incompatible_dataset:
             try:

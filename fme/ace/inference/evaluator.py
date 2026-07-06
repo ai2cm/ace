@@ -22,7 +22,6 @@ from fme.ace.aggregator.inference import (
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
-from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
@@ -51,7 +50,6 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
-from fme.core.random_state import RandomState
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -99,33 +97,6 @@ def resolve_variable_metadata(
         if name in resolved_metadata
     }
     return get_derived_variable_metadata() | resolved_metadata
-
-
-def apply_config_seed(seed: int | None, data: InferenceGriddedData) -> None:
-    """Seed the rollout from ``config.seed`` only when the IC carries no random
-    state yet.
-
-    A random state restored from a segment's restart stepper state takes
-    precedence:
-    segment 0 (no restored state) seeds from ``seed``, while later segments
-    continue the restored generator, keeping a resumed rollout bitwise-identical
-    to the single-run seeded rollout. When a restored random state supersedes the
-    config seed, an info line is logged so the skipped seed is not silently
-    confusing. This intentionally does not check the config seed against the seed
-    that created the restored state; see the design note on the PR.
-    """
-    if seed is None:
-        return
-    stepper_state = data.initial_condition.as_batch_data().stepper_state
-    if stepper_state is not None and stepper_state.random_state is not None:
-        logging.info(
-            "Ignoring config seed because a random state was restored from the "
-            "restart stepper state; the restored generator continues instead."
-        )
-        return
-    data._initial_condition = data.initial_condition.with_random_state(
-        RandomState.from_seed(seed)
-    )
 
 
 @dataclasses.dataclass
@@ -389,7 +360,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
-        apply_config_seed(config.seed, data)
+        data.apply_config_seed(config.seed)
         stepper = config.load_stepper()
         stepper.set_eval()
 

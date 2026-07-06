@@ -33,6 +33,7 @@ from fme.ace.inference.inference import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
@@ -519,8 +520,7 @@ def test_plain_restart_netcdf_is_backcompat(tmp_path):
 
     ic = get_initial_condition(
         InitialConditionConfig(path=str(restart)).get_dataset(),
-        prognostic_names=["prog"],
-        labels=["from_config"],
+        InitialConditionRequirements(prognostic_names=["prog"], labels=["from_config"]),
     )
     restored = ic.as_batch_data()
     assert restored.stepper_state is None
@@ -559,8 +559,8 @@ def test_full_state_restart_roundtrip(tmp_path):
 
     ic = get_initial_condition(
         InitialConditionConfig(path=str(restart)).get_dataset(),
-        prognostic_names=["prog"],
-        labels=["a", "b"],  # matches the embedded labels (validated, not re-set)
+        # labels match the embedded labels (validated, not re-set)
+        InitialConditionRequirements(prognostic_names=["prog"], labels=["a", "b"]),
     )
     restored = ic.as_batch_data()
 
@@ -568,14 +568,10 @@ def test_full_state_restart_roundtrip(tmp_path):
     assert ss is not None
     assert ss.corrector_state is not None
     assert ss.corrector_state.global_dry_air_mass is not None
-    # The restored stepper_state is moved to the compute device (see
-    # _initial_condition_from_state), so on GPU the corrector tensor is on cuda
-    # while the CPU-built expected tensor is not; compare on the compute device.
+    # get_initial_condition returns the state on CPU; InferenceGriddedData
+    # moves it to the compute device.
     torch.testing.assert_close(
-        ss.corrector_state.global_dry_air_mass,
-        mass.to(fme.get_device()),
-        rtol=0,
-        atol=0,
+        ss.corrector_state.global_dry_air_mass, mass, rtol=0, atol=0
     )
     assert ss.random_state is not None
     # get_state() is non-consuming, so stored_random still sits at the point it
@@ -611,7 +607,9 @@ def test_full_state_restart_start_indices(tmp_path):
     config = InitialConditionConfig(
         path=str(restart), start_indices=ExplicitIndices([1])
     )
-    ic = get_initial_condition(config.get_dataset(), prognostic_names=["prog"])
+    ic = get_initial_condition(
+        config.get_dataset(), InitialConditionRequirements(prognostic_names=["prog"])
+    )
     restored = ic.as_batch_data()
 
     ss = restored.stepper_state
@@ -619,10 +617,7 @@ def test_full_state_restart_start_indices(tmp_path):
     # Only sample index 1 was selected, so the corrector state is mass[[1]].
     assert ss.corrector_state.global_dry_air_mass is not None
     torch.testing.assert_close(
-        ss.corrector_state.global_dry_air_mass,
-        mass[[1]].to(fme.get_device()),
-        rtol=0,
-        atol=0,
+        ss.corrector_state.global_dry_air_mass, mass[[1]], rtol=0, atol=0
     )
     # The generator (no sample dim) is untouched by subselection.
     assert ss.random_state is not None

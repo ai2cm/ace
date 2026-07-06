@@ -135,6 +135,7 @@ from fme.core.var_masking import (
 
 from . import step
 from .inference.inference import get_initial_condition
+from .requirements import InitialConditionRequirements
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,

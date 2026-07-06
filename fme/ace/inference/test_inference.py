@@ -29,6 +29,7 @@ from fme.ace.inference.inference import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
@@ -461,7 +462,9 @@ def test_get_initial_condition(n_ensemble):
         np.random.rand(sample, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition = get_initial_condition(data, ["prog"], n_ensemble=n_ensemble)
+    initial_condition = get_initial_condition(
+        data, InitialConditionRequirements(["prog"], n_ensemble=n_ensemble)
+    )
     assert isinstance(initial_condition, PrognosticState)
     batch_data = initial_condition.as_batch_data()
     assert batch_data.time.shape == (sample * n_ensemble, 1)
@@ -490,7 +493,7 @@ def test_get_initial_condition_raises_bad_variable_shape():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, InitialConditionRequirements(["prog"]))
 
 
 def test_get_initial_condition_raises_missing_time():
@@ -499,7 +502,7 @@ def test_get_initial_condition_raises_missing_time():
     )
     data = xr.Dataset({"prog": prognostic_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, InitialConditionRequirements(["prog"]))
 
 
 def test_get_initial_condition_raises_mismatched_time_length():
@@ -509,7 +512,7 @@ def test_get_initial_condition_raises_mismatched_time_length():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, InitialConditionRequirements(["prog"]))
 
 
 @pytest.mark.parametrize(
