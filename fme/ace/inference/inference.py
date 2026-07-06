@@ -372,10 +372,11 @@ def run_inference_from_config(config: InferenceConfig):
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
         if config.initial_condition.stepper_state_path is not None:
-            # The sidecar is serialized on CPU; move it to the compute device
-            # before attaching so a restored corrector_state (e.g. the pinned
-            # global_dry_air_mass) is on the same device as the rollout tensors.
-            # (RandomState.to_device is a no-op: the generator stays on CPU.)
+            # The stepper state file is serialized on CPU; move it to the compute
+            # device before attaching so a restored corrector_state (e.g. the
+            # pinned global_dry_air_mass) is on the same device as the rollout
+            # tensors. (RandomState.to_device is a no-op: the generator stays on
+            # CPU.)
             data._initial_condition = data.initial_condition.with_stepper_state(
                 config.initial_condition.get_stepper_state().to_device()
             )
