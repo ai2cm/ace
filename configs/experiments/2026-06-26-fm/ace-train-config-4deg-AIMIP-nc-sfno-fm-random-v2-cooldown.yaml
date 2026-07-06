@@ -1,4 +1,4 @@
-# arg: --dataset REPLACE_WITH_BEAKER_DATASET_ID:/checkpoints
+# arg: --dataset 01KWJK4ZSCV7Z47PXKGAJS2YNM:/checkpoints
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
