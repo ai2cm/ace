@@ -1,7 +1,7 @@
 import abc
 import dataclasses
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Literal, TypeVar
 
@@ -107,14 +107,6 @@ class OceanDeriveFn(DeriveFnABC):
             forcing_data=dict(forcing_data),
             cell_area_provider=cell_area_provider,
         )
-
-
-PostProcessFnType = Callable[[TensorMapping], TensorDict]
-
-
-class NullPostProcessFn:
-    def __call__(self, data: TensorMapping) -> TensorDict:
-        return dict(data)
 
 
 class VerticalCoordinate(abc.ABC):
