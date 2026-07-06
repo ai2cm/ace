@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG = os.path.join(
     HERE,
     "run_configs",
-    "ace-train-config-4deg-nc-sfno-c96-mask5-co2default-vgbern20.yaml",
+    "ace-train-config-4deg-nc-sfno-c96-mask5-co2default.yaml",
 )
 # Config data_paths point at the /climate-default mount; the datasets actually
 # live in this GCS bucket, keyed by the same basename.
