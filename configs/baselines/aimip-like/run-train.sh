@@ -221,13 +221,41 @@ run_training() {
 # =============================================================================
 
 # --- arm 1: partial whitening gamma=0.5, residual ON, seed 0 (1 GPU) ---
-run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5-rs0" 1
+# Completed 2026-07-04 as wandb erug2fqs / beaker 01KWHS1DHTR858DC51720J1Q5C.
+# run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5-rs0" 1
 
 # --- arm 2: spectral-power CRPS term, seed 0 (1 GPU) ---
-run_training "train-4deg-daily-v2-era5-only-spower-crps.yaml" "train-4deg-daily-v2-era5-only-spower-crps-rs0" 1
+# Completed 2026-07-04 as wandb 5k3fmlif / beaker 01KWHS22YPCTCPC8BN8VREXGDP.
+# run_training "train-4deg-daily-v2-era5-only-spower-crps.yaml" "train-4deg-daily-v2-era5-only-spower-crps-rs0" 1
 
 # --- arm 3: learned spectral noise shaping, seed 0 (1 GPU) ---
-run_training "train-4deg-daily-v2-era5-only-noise-shaping.yaml" "train-4deg-daily-v2-era5-only-noise-shaping-rs0" 1
+# Completed 2026-07-04 as wandb zdg7s6qx / beaker 01KWHS2RKHWBHZBAG81QPTRTWG.
+# run_training "train-4deg-daily-v2-era5-only-noise-shaping.yaml" "train-4deg-daily-v2-era5-only-noise-shaping-rs0" 1
 
 # --- arm 4: n_ensemble 4 truncated SNR test, seed 0 (1 GPU) ---
-run_training "train-4deg-daily-v2-era5-only-nens4.yaml" "train-4deg-daily-v2-era5-only-nens4-rs0" 1
+# Completed 2026-07-03 as wandb tdoubcqt / beaker 01KWHS3EEGP5CDND6KMCKFPA5X.
+# run_training "train-4deg-daily-v2-era5-only-nens4.yaml" "train-4deg-daily-v2-era5-only-nens4-rs0" 1
+
+# =============================================================================
+# Whitening-exponent adoption sweep (research task
+# 2026-07-06-whitening-gamma-adoption-sweep). Seed verification + gamma
+# bracket for the gamma=0.5 partial-whitening adoption candidate: gamma in
+# {0.2, 0.8} x seeds {0,1}, gamma=0.5 seed 1 (seed 0 = erug2fqs above), and a
+# plain v2 baseline seed-1 replicate (seed 0 = oshj5u79) referenced from
+# baselines/2026-06-22-4deg-daily-v2-era5-only.md. All 120 epochs, single-knob
+# (gamma, seed) diffs of the v2 residual baseline config.
+# =============================================================================
+
+# --- gamma=0.2, seeds 0 and 1 (1 GPU each) ---
+run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p2.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p2-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p2-rs1.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p2-rs1" 1
+
+# --- gamma=0.8, seeds 0 and 1 (1 GPU each) ---
+run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p8.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p8-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p8-rs1.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p8-rs1" 1
+
+# --- gamma=0.5, seed 1 (seed replicate of erug2fqs) ---
+run_training "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5-rs1.yaml" "train-4deg-daily-v2-era5-only-eswhiten-gamma0p5-rs1" 1
+
+# --- v2 baseline, seed 1 (plain-named seed replicate of oshj5u79) ---
+run_training "train-4deg-daily-v2-era5-only-rs1.yaml" "train-4deg-daily-v2-era5-only-rs1" 1
