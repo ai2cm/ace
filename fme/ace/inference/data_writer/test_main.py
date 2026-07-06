@@ -172,7 +172,8 @@ def test_step_diagnostics_writer_writes_delta_series(
         with xr.open_dataset(filename, decode_timedelta=False) as ds:
             expected_names = {"a"} if save_names == ["a"] else {"a", "b"}
             assert expected_names.issubset(set(ds.data_vars))
-            assert "b" not in ds.data_vars if save_names == ["a"] else True
+            if save_names == ["a"]:
+                assert "b" not in ds.data_vars
             for name in expected_names:
                 expected = delta[name]
                 if coarsen_factor > 1:

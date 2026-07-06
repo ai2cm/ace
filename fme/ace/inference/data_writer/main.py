@@ -20,7 +20,7 @@ from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
-from .step_diagnostics import StepDiagnosticsWriter
+from .step_diagnostics import STEP_DIAGNOSTICS_LABEL, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
@@ -167,17 +167,18 @@ class DataWriterConfig:
     ) -> StepDiagnosticsWriter | None:
         if not self.save_step_diagnostics:
             return None
-        return StepDiagnosticsWriter(
+        writer: RawDataWriter | TimeCoarsen = RawDataWriter(
             path=experiment_dir,
+            label=STEP_DIAGNOSTICS_LABEL,
             initial_condition_times=initial_condition_times,
             save_names=self.names,
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
-            coarsen_factor=(
-                self.time_coarsen.coarsen_factor if self.time_coarsen is not None else 1
-            ),
         )
+        if self.time_coarsen is not None:
+            writer = self.time_coarsen.build(writer)
+        return StepDiagnosticsWriter(writer)
 
     def build(
         self,
