@@ -137,12 +137,17 @@ def _seam_crossing_model_config(fine_shape: tuple[int, int]) -> DiffusionModelCo
 
 
 def test_evaluator_rolls_for_seam_crossing(tmp_path):
-    """The evaluator entrypoint rolls the model end-to-end on real data (no mocks):
-    a seam-crossing PairedGriddedData yields coarse coords that cross the prime
-    meridian, and _build_default_evaluator returns a model rolled to that
-    convention. Global coarse grid is 4 lat x 8 lon (45 deg spacing); a (-90, 90)
-    lon extent selects 4 of 8 coarse cells across the seam, matching the (4, 4)
-    model so no patching is needed.
+    """The evaluator entrypoint rolls the model and generates end-to-end on real
+    data (no mocks) for a seam-crossing domain. Global coarse grid is 4 lat x 8
+    lon (45 deg spacing), fine is 8 lat x 16 lon; a (-90, 90) lon extent selects
+    4 of 8 coarse cells across the seam, matching the (4, 4) model so no patching
+    is needed.
+
+    The generated output lands on the model's rolled fine grid, while the target
+    is rolled at the data layer via an independent path. We assert those two grids
+    are identical -- not merely that both crossed the seam -- then run generation
+    and aggregation so the predictions and targets are actually produced and
+    compared on that shared grid.
     """
     coarse_shape = (4, 4)
     downscale_factor = 2
@@ -152,9 +157,13 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
     )
     paths = global_data_paths_helper(tmp_path)
 
+    # full_fine_coords spans the entire fine domain (8 lat x 16 lon global), i.e.
+    # the coarse grid scaled by downscale_factor, so the fine coordinates the model
+    # derives for a batch are at the same resolution as the fine target data and
+    # can be compared directly.
     full_fine_coords = LatLonCoordinates(
-        lat=cell_centered_coordinate(0.0, 8.0, fine_shape[0]),
-        lon=cell_centered_coordinate(0.0, 360.0, fine_shape[1]),
+        lat=cell_centered_coordinate(0.0, 8.0, coarse_shape[0] * downscale_factor),
+        lon=cell_centered_coordinate(0.0, 360.0, 8 * downscale_factor),
     )
     model = _seam_crossing_model_config(fine_shape).build(
         coarse_shape=coarse_shape,
@@ -180,6 +189,7 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
             lon_extent=ClosedInterval(-90.0, 90.0),
         ),
         logging=LoggingConfig(),
+        n_samples=2,
     )
 
     built = config._build_default_evaluator()
@@ -187,14 +197,25 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
     # A real roll moved the model's fine grid into the seam-crossing convention.
     assert float(built.model.full_fine_coords.lon.min()) < 0.0
 
-    # The target (fine data) and its coords are rolled together at the data layer,
-    # via a path independent of the model roll above. Assert the target's fine coords
-    # landed in the same seam-crossing convention as the model, so the two independent
-    # roll paths agree and predictions/targets stay aligned (rather than being compared
-    # in mismatched longitude conventions).
+    # The generated output uses the model's rolled fine grid; the target is rolled
+    # independently at the data layer. Assert the per-batch fine coordinates the
+    # model derives exactly equal the target's fine coordinates, so predictions and
+    # targets are compared on the same grid rather than mismatched conventions.
     batch = next(iter(built.data.get_generator()))
     target_fine_lon = batch.fine.latlon_coordinates.lon[0]
     assert float(target_fine_lon.min()) < 0.0
+    assert torch.allclose(
+        built.model.get_fine_coords_for_batch(batch.coarse).lon, target_fine_lon
+    )
+
+    # Run the full generation + aggregation entrypoint on the crossing domain to
+    # confirm predictions and targets are produced and compared without error.
+    with unittest.mock.patch(
+        "fme.downscaling.aggregators.GenerationAggregator.get_wandb"
+    ):
+        with mock_wandb():
+            built.run()
+    assert (experiment_dir / "evaluator_maps_and_metrics.nc").exists()
 
 
 @pytest.mark.parametrize(
