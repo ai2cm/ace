@@ -115,7 +115,6 @@ class StreamConfig:
     source_url: str
     variables: list[VariableConfig]
     time_subsample: int = 1             # e.g. 20 = every 20th 6-hourly step
-    relabel_time_offset: str | None = None  # e.g. "-12h" flux-label HACK
     dim_renames: Mapping[str, str] = ...    # ice xT/yT/xB/yB -> xh/yh/xq/yq
     sea_ice_conventions: bool = False   # NaN->0 pre-regrid, zero thickness where no ice
     process_time_chunksize: int = 1
@@ -178,11 +177,6 @@ def derive_hfds_total_area(ds: xr.Dataset) -> xr.DataArray:
     apply_sea_ice_conventions. The SST-threshold sea-ice masks are NOT: they
     need a full-run time-mean, which doesn't fit per-chunk processing.)"""
 
-def relabel_flux_time(ds: xr.Dataset, offset: str) -> xr.Dataset:
-    """TEMPORARY HACK: shift the coarsened-daily flux store's time labels
-    (12 h after the state stores') onto the shared snapshot coordinate.
-    Logs a loud warning every run; remove once upstream labeling is resolved."""
-
 def process_stream_chunk(
     key: xbeam.Key, ds: xr.Dataset, *, stream: StreamConfig,
     regridding: RegriddingConfig, wetmask: xr.DataArray, n_levels: int
@@ -201,7 +195,7 @@ shards).
 
 ```python
 def open_stream(stream: StreamConfig, time_slice: slice | None) -> xr.Dataset:
-    """Open source zarr via obstore, select vars, subsample, relabel time."""
+    """Open source zarr via obstore, select vars, subsample."""
 
 def derive_wetmask(source: xr.Dataset) -> xr.DataArray:
     """3D wetmask from the 19-level data (NaN pattern or deptho — resolved at
@@ -215,14 +209,14 @@ def build_template(
     stamp statics; set store-level history attr listing all input URLs."""
 
 def validate_time_alignment(streams: Mapping[str, xr.Dataset]) -> None:
-    """Assert exact time-coordinate equality across streams after relabeling
-    and snapshot-instant / mean-interval-end coincidence. Fail fast."""
+    """Assert exact time-coordinate equality across streams and
+    snapshot-instant / mean-interval-end coincidence. Fail fast."""
 
 def main() -> None:
     """CLI: config path + optional --start_time/--end_time/--output_url
     overrides + beam pipeline args. Stage-labeled one-line logging (config
-    summary, template build, per-stream chunk counts, weight load, hack
-    activations, write completion)."""
+    summary, template build, per-stream chunk counts, weight load, write
+    completion)."""
 ```
 
 ### Critical detail — masking and naming conventions
