@@ -91,6 +91,8 @@ def _make_callback(
     validation_mode: str = "from_noise",
     n_student_samples: int = 2,
     student_sample_steps: int = 1,
+    frozen_lo_net: torch.nn.Module | None = None,
+    frozen_lo_sample_steps: int = 2,
 ) -> BestStudentCheckpointCallback:
     return BestStudentCheckpointCallback(
         val_dataset_path="unused.zarr",
@@ -100,6 +102,8 @@ def _make_callback(
         n_student_samples=n_student_samples,
         student_sample_steps=student_sample_steps,
         validation_mode=validation_mode,
+        frozen_lo_net=frozen_lo_net,
+        frozen_lo_sample_steps=frozen_lo_sample_steps,
     )
 
 
@@ -107,6 +111,12 @@ def test_validation_mode_rejects_unknown():
     tm = _FakeTeacherModel(["a"])
     with pytest.raises(ValueError, match="validation_mode"):
         _make_callback(tm, validation_mode="bogus")
+
+
+def test_hi_cascade_requires_frozen_lo_net():
+    tm = _FakeTeacherModel(["a"])
+    with pytest.raises(ValueError, match="frozen_lo_net"):
+        _make_callback(tm, validation_mode="hi_cascade", frozen_lo_net=None)
 
 
 def test_packed_target_norm_packs_normalized_first_n_members():
@@ -240,6 +250,82 @@ def test_sample_student_output_from_noise_shape():
         C_out,
     )
     assert out.shape == (B, 3, C_out, H, W)
+
+
+def test_sample_student_output_hi_cascade_shape():
+    """hi_cascade cascades the trained Hi student (sigma [200, 2000]) through a
+    frozen Lo net (sigma [0.005, 200]); the ensemble comes from n fresh noise
+    draws, so the output is (B, n_student_samples, C_out, H, W)."""
+    tm = _FakeTeacherModel(["a", "b"])
+    C_out, C_cond = 2, 3
+    frozen_lo = _TinyNet(C_out, C_cond).eval()
+    cb = _make_callback(
+        tm,
+        validation_mode="hi_cascade",
+        n_student_samples=3,
+        student_sample_steps=1,
+        frozen_lo_net=frozen_lo,
+        frozen_lo_sample_steps=2,
+    )
+    # The Hi student spans the high segment; its sigma_min IS the boundary.
+    student = _FakeStudent(_TinyNet(C_out, C_cond).eval(), 200.0, 2000.0)
+
+    B, H, W = 2, 4, 4
+    condition = torch.randn(B, C_cond, H, W)
+    out = cb._sample_student_output(
+        student,  # type: ignore[arg-type]  # fake exposes the attrs used
+        condition,
+        {},
+        None,  # base_norm (non-residual)
+        B,
+        H,
+        W,
+        C_out,
+    )
+    assert out.shape == (B, 3, C_out, H, W)
+
+
+def test_sample_student_output_hi_cascade_adds_residual_base():
+    """hi_cascade output is a residual (both segment nets are residual), so the
+    interpolated-coarse base is added back — a const base shifts every sample."""
+    tm = _FakeTeacherModel(["a", "b"])
+    C_out, C_cond = 2, 3
+    frozen_lo = _TinyNet(C_out, C_cond).eval()
+    cb = _make_callback(
+        tm,
+        validation_mode="hi_cascade",
+        n_student_samples=2,
+        student_sample_steps=1,
+        frozen_lo_net=frozen_lo,
+    )
+    student = _FakeStudent(_TinyNet(C_out, C_cond).eval(), 200.0, 2000.0)
+    B, H, W = 1, 4, 4
+    torch.manual_seed(0)
+    condition = torch.randn(B, C_cond, H, W)
+
+    torch.manual_seed(1)
+    out_zero = cb._sample_student_output(
+        student,  # type: ignore[arg-type]
+        condition,
+        {},
+        torch.zeros(B, C_out, H, W),
+        B,
+        H,
+        W,
+        C_out,
+    )
+    torch.manual_seed(1)
+    out_base = cb._sample_student_output(
+        student,  # type: ignore[arg-type]
+        condition,
+        {},
+        torch.full((B, C_out, H, W), 5.0),
+        B,
+        H,
+        W,
+        C_out,
+    )
+    torch.testing.assert_close(out_base - out_zero, torch.full_like(out_base, 5.0))
 
 
 # --------------------------------------------------------------------------

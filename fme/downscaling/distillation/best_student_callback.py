@@ -260,9 +260,22 @@ class BestStudentCheckpointCallback:
               needed.  Requires every output variable to be present in the
               teacher zarr (the target is re-noised, not just compared).  Use
               for per-expert Student-Lo.
-
-            ``"hi_cascade"`` (Student-Hi through a frozen Lo) is not yet wired
-            in here; it needs a frozen-Lo checkpoint argument.
+            - ``"hi_cascade"``: a high-noise *segment* student (the one being
+              trained) is validated end-to-end through a frozen low-noise
+              student — fresh noise at ``sigma_max`` → this student → re-noise
+              to the boundary → ``frozen_lo_net`` → clean x0.  The bundle
+              deployment path.  Requires ``frozen_lo_net``.  Use for per-expert
+              Student-Hi.
+        frozen_lo_net: The frozen low-noise segment student denoiser
+            (``net(x, condition, sigma) -> x0``) to cascade through in
+            ``"hi_cascade"`` mode.  Required for that mode, ignored otherwise.
+        frozen_lo_sample_steps: FastGen step count for the frozen Lo segment of
+            the ``hi_cascade`` cascade (default 2, matching the 2-step Lo).
+        frozen_lo_sigma_min: Lower sigma bound of the frozen Lo's segment
+            (default 0.005).  The segment boundary (Lo's ``sigma_max`` = this
+            student's ``sigma_min``) is taken from the trained Hi student, not
+            from this argument, so the handoff is exact regardless of what the
+            frozen Lo checkpoint recorded as its range.
 
     To run validation on less data, thin at the data-config level via
     ``subset.step`` in the val YAML (see ``fme.core.dataset.time.TimeSlice``).
@@ -286,6 +299,9 @@ class BestStudentCheckpointCallback:
         tail_hist_bins: int = 10000,
         best_tail_checkpoint_path: str | None = None,
         validation_mode: str = "from_noise",
+        frozen_lo_net: torch.nn.Module | None = None,
+        frozen_lo_sample_steps: int = 2,
+        frozen_lo_sigma_min: float = 0.005,
     ) -> None:
         self._tail_percentiles: list[float] = (
             [99.99, 99.9999] if tail_percentiles is None else list(tail_percentiles)
@@ -327,12 +343,22 @@ class BestStudentCheckpointCallback:
         self._crps_scales: dict[str, float] = self._per_var_scales(teacher_model)
         self._tail_hist_bins = tail_hist_bins
         self._best_tail_checkpoint_path = best_tail_checkpoint_path
-        if validation_mode not in ("from_noise", "lo_renoise"):
+        if validation_mode not in ("from_noise", "lo_renoise", "hi_cascade"):
             raise ValueError(
-                f"validation_mode must be 'from_noise' or 'lo_renoise', "
-                f"got {validation_mode!r}."
+                f"validation_mode must be 'from_noise', 'lo_renoise', or "
+                f"'hi_cascade', got {validation_mode!r}."
+            )
+        if validation_mode == "hi_cascade" and frozen_lo_net is None:
+            raise ValueError(
+                "validation_mode='hi_cascade' requires frozen_lo_net (the "
+                "frozen low-noise segment student to cascade through)."
             )
         self._validation_mode = validation_mode
+        self._frozen_lo_net = frozen_lo_net
+        if frozen_lo_net is not None:
+            frozen_lo_net.eval()
+        self._frozen_lo_sample_steps = frozen_lo_sample_steps
+        self._frozen_lo_sigma_min = frozen_lo_sigma_min
         self._best_crps = float("inf")
         # Tracks min mean-over-vars |ratio - 1.0| for best_tail_checkpoint_path
         # selection, using the highest (most extreme) percentile.
@@ -566,6 +592,7 @@ class BestStudentCheckpointCallback:
         """
         from fme.downscaling.distillation.student_sampling import (
             sample_student_from_noise,
+            sample_student_hi_cascade,
             sample_student_lo_renoise,
         )
 
@@ -580,6 +607,29 @@ class BestStudentCheckpointCallback:
                 num_steps=self._student_sample_steps,
                 sigma_min=student._sigma_min,
                 sigma_max=student._sigma_max,
+            )
+        elif self._validation_mode == "hi_cascade":
+            # The segment boundary (Lo's sigma_max = this Hi student's
+            # sigma_min) comes from the trained Hi student, so the handoff node
+            # is placed exactly at it regardless of the frozen Lo's recorded
+            # range.  Ranges ascending: low segment first, then this student.
+            assert self._frozen_lo_net is not None  # guaranteed by __init__
+            boundary = student._sigma_min
+            sigma_ranges = [
+                (self._frozen_lo_sigma_min, boundary),
+                (boundary, student._sigma_max),
+            ]
+            out = sample_student_hi_cascade(
+                hi_net=student._ace_module,
+                lo_net=self._frozen_lo_net,
+                condition=condition,
+                c_out=C_out,
+                n_samples=self._n_student_samples,
+                sigma_ranges=sigma_ranges,
+                steps_per_range=[
+                    self._frozen_lo_sample_steps,
+                    self._student_sample_steps,
+                ],
             )
         else:
             out = sample_student_from_noise(

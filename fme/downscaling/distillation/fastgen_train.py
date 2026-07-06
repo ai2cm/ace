@@ -73,6 +73,24 @@ def _copy_ace_teacher(teacher: AceDiffusionTeacher) -> AceDiffusionTeacher:
     return copy.deepcopy(teacher)
 
 
+def _unwrap_denoiser(module: torch.nn.Module) -> torch.nn.Module:
+    """Unwrap DDP / DummyWrapper to reach the bare UNetDiffusionModule.
+
+    ``DiffusionModel.module`` is ``dist.wrap_module(...)`` — a ``DDP`` (under
+    torchrun) or ``DummyWrapper`` (non-distributed) around the denoiser whose
+    forward is ``(x, condition, sigma) -> x0``.  Mirrors the unwrap in
+    ``AceDiffusionTeacher.__init__``.
+    """
+    from torch.nn.parallel import DistributedDataParallel as DDP
+
+    from fme.core.distributed.non_distributed import DummyWrapper
+
+    raw = module.module if isinstance(module, DDP) else module
+    if isinstance(raw, DummyWrapper):
+        raw = raw.module
+    return raw
+
+
 def _channels_to_grid(
     tensor: torch.Tensor, channel_names: list[str], max_samples: int = 8
 ) -> tuple[torch.Tensor, str]:
@@ -277,13 +295,52 @@ def _parse_args() -> argparse.Namespace:
         "--val-mode",
         default=os.environ.get("ACE_VAL_MODE", "from_noise"),
         dest="val_mode",
-        choices=["from_noise", "lo_renoise"],
+        choices=["from_noise", "lo_renoise", "hi_cascade"],
         help=(
             "How BestStudentCheckpointCallback produces the student ensemble "
             "for validation. 'from_noise' (default) denoises fresh noise to a "
             "clean x0 (full-range student); 'lo_renoise' re-noises the teacher "
             "target to the student's sigma_max and denoises from there "
-            "(per-expert Student-Lo). Defaults to $ACE_VAL_MODE."
+            "(per-expert Student-Lo); 'hi_cascade' validates a high-noise "
+            "segment student end-to-end through a frozen Lo student "
+            "(per-expert Student-Hi, requires --frozen-lo-checkpoint). "
+            "Defaults to $ACE_VAL_MODE."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-lo-checkpoint",
+        default=os.environ.get("ACE_FROZEN_LO_CKPT", ""),
+        dest="frozen_lo_checkpoint",
+        metavar="CKPT",
+        help=(
+            "Path to a frozen low-noise segment student checkpoint (a "
+            "DiffusionModel .ckpt written by save_student_checkpoint) to "
+            "cascade through in --val-mode hi_cascade. Defaults to "
+            "$ACE_FROZEN_LO_CKPT."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-lo-steps",
+        type=int,
+        default=int(os.environ.get("ACE_FROZEN_LO_STEPS", "2")),
+        dest="frozen_lo_steps",
+        metavar="N",
+        help=(
+            "FastGen step count for the frozen Lo segment of the hi_cascade "
+            "cascade (default 2). Defaults to $ACE_FROZEN_LO_STEPS."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-lo-sigma-min",
+        type=float,
+        default=float(os.environ.get("ACE_FROZEN_LO_SIGMA_MIN", "0.005")),
+        dest="frozen_lo_sigma_min",
+        metavar="SIGMA",
+        help=(
+            "Lower sigma bound of the frozen Lo segment for hi_cascade "
+            "(default 0.005). The segment boundary is taken from the trained "
+            "Hi student's sigma_min, not this. Defaults to "
+            "$ACE_FROZEN_LO_SIGMA_MIN."
         ),
     )
     parser.add_argument(
@@ -710,6 +767,27 @@ def main() -> None:
             if isinstance(teacher_model, DenoisingMoEPredictor)
             else teacher_model
         )
+        # hi_cascade validation cascades the trained Hi student through a frozen
+        # Lo student; load it here (as its own DiffusionModel architecture) and
+        # unwrap to the bare UNetDiffusionModule the sampler expects.
+        frozen_lo_net = None
+        if args.val_mode == "hi_cascade":
+            if not args.frozen_lo_checkpoint:
+                raise ValueError(
+                    "--val-mode hi_cascade requires --frozen-lo-checkpoint "
+                    "(or $ACE_FROZEN_LO_CKPT)."
+                )
+            frozen_lo_model = CheckpointModelConfig(
+                checkpoint_path=args.frozen_lo_checkpoint
+            ).build()
+            frozen_lo_net = _unwrap_denoiser(frozen_lo_model.module)
+            frozen_lo_net.eval()
+            logger.info(
+                f"Frozen Lo student loaded from {args.frozen_lo_checkpoint!r} "
+                f"for hi_cascade validation "
+                f"(steps={args.frozen_lo_steps}, "
+                f"sigma_min={args.frozen_lo_sigma_min})."
+            )
         fastgen_trainer.callbacks._callbacks["best_student"] = (
             BestStudentCheckpointCallback(
                 val_dataset_path=args.val_dataset,
@@ -720,6 +798,9 @@ def main() -> None:
                 student_sample_steps=config.model.student_sample_steps,
                 best_tail_checkpoint_path=best_student_tail_path,
                 validation_mode=args.val_mode,
+                frozen_lo_net=frozen_lo_net,
+                frozen_lo_sample_steps=args.frozen_lo_steps,
+                frozen_lo_sigma_min=args.frozen_lo_sigma_min,
             )
         )
         logger.info(

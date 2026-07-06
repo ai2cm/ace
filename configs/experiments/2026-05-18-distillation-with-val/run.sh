@@ -19,10 +19,14 @@
 #   --expert:    per-expert distillation (requires --moe-teacher). Distil a
 #                single expert in-domain over its own sigma range, no dispatch:
 #                  0 = low-noise  Student-Lo, sigma [0.005, 200], val=lo_renoise
-#                  1 = high-noise Student-Hi, sigma [200, 2000]
-#                Expert 1 validation (hi_cascade through a frozen Lo) is not yet
-#                wired in; it falls back to from_noise (mis-specified) — train
-#                Lo first.
+#                  1 = high-noise Student-Hi, sigma [200, 2000], val=hi_cascade
+#                Expert 1 validates end-to-end through a frozen Lo student, so it
+#                requires --frozen-lo <dataset> (train Lo first). The sigma=200
+#                boundary is taken from the Hi student's own sigma_min.
+#   --frozen-lo: Beaker dataset id holding the trained Student-Lo checkpoint,
+#                mounted at /frozen_lo for expert-1 hi_cascade validation.
+#   --frozen-lo-path: filename of the Lo checkpoint within --frozen-lo
+#                (default best_student.ckpt).
 #   --student-steps: override ACE_STUDENT_STEPS (student denoising steps).
 #                Lo: try 1 vs 2; Hi: 1.
 #   --gan-r1:    R1 discriminator regularization weight (ACE_GAN_R1_REG_WEIGHT;
@@ -51,6 +55,8 @@ GAN_R1=""
 GAN_WEIGHT=""
 LR_DECAY_STEPS=""
 DISC_FEATURE_DEPTH=""
+FROZEN_LO_DATASET=""
+FROZEN_LO_PATH="best_student.ckpt"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --suffix)
@@ -63,6 +69,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --expert)
             EXPERT="${2:?--expert requires 0 or 1}"
+            shift 2
+            ;;
+        --frozen-lo)
+            FROZEN_LO_DATASET="${2:?--frozen-lo requires a Beaker dataset id}"
+            shift 2
+            ;;
+        --frozen-lo-path)
+            FROZEN_LO_PATH="${2:?--frozen-lo-path requires a value}"
             shift 2
             ;;
         --student-steps)
@@ -161,10 +175,15 @@ if [[ "$MOE_TEACHER" == "true" ]]; then
     if [[ -n "$EXPERT" ]]; then
         case "$EXPERT" in
             0) E_SIGMA_MIN=0.005; E_SIGMA_MAX=200.0;  E_VAL_MODE=lo_renoise ;;
-            1) E_SIGMA_MIN=200.0; E_SIGMA_MAX=2000.0; E_VAL_MODE=from_noise
-               echo "WARNING: expert 1 (Student-Hi) validation falls back to "\
-                    "from_noise; hi_cascade through a frozen Lo is not yet "\
-                    "wired in. Train Lo (expert 0) first." >&2 ;;
+            1) E_SIGMA_MIN=200.0; E_SIGMA_MAX=2000.0; E_VAL_MODE=hi_cascade
+               if [[ -z "$FROZEN_LO_DATASET" ]]; then
+                   echo "expert 1 (Student-Hi) uses hi_cascade validation, which "\
+                        "requires a frozen Lo student: pass --frozen-lo "\
+                        "<beaker-dataset-id> (the dataset holding the trained "\
+                        "Student-Lo best_student.ckpt). Train Lo (expert 0) "\
+                        "first." >&2
+                   exit 1
+               fi ;;
             *) echo "--expert must be 0 or 1, got $EXPERT" >&2; exit 1 ;;
         esac
         TEACHER_ENV_FLAGS=(
@@ -175,6 +194,17 @@ if [[ "$MOE_TEACHER" == "true" ]]; then
             --env ACE_EXPERT_INDEX=$EXPERT
             --env ACE_VAL_MODE=$E_VAL_MODE
         )
+        if [[ "$EXPERT" == "1" ]]; then
+            # hi_cascade cascades the trained Hi student through the frozen Lo
+            # mounted at /frozen_lo (see the --dataset flag below).  The segment
+            # boundary (sigma=200) is taken from the Hi student's own sigma_min,
+            # so ACE_FROZEN_LO_SIGMA_MIN only sets the low end of the Lo segment.
+            TEACHER_ENV_FLAGS+=(
+                --env ACE_FROZEN_LO_CKPT=/frozen_lo/$FROZEN_LO_PATH
+                --env ACE_FROZEN_LO_STEPS=2
+                --env ACE_FROZEN_LO_SIGMA_MIN=0.005
+            )
+        fi
         JOB_NAME="${JOB_NAME}-expert${EXPERT}"
     fi
 else
@@ -212,6 +242,13 @@ if [[ -n "$DISC_FEATURE_DEPTH" ]]; then
     TEACHER_ENV_FLAGS+=(--env ACE_DISC_FEATURE_DEPTH=$DISC_FEATURE_DEPTH)
 fi
 
+# Frozen Lo student for hi_cascade validation (expert 1): mount the dataset
+# holding its best_student.ckpt at /frozen_lo.
+EXTRA_DATASET_FLAGS=()
+if [[ -n "$FROZEN_LO_DATASET" ]]; then
+    EXTRA_DATASET_FLAGS+=(--dataset $FROZEN_LO_DATASET:/frozen_lo)
+fi
+
 gantry run \
     --name $JOB_NAME \
     --description "$DESCRIPTION" \
@@ -228,6 +265,7 @@ gantry run \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $TEACHER_DATASET:/checkpoints \
+    "${EXTRA_DATASET_FLAGS[@]}" \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 100GiB \
