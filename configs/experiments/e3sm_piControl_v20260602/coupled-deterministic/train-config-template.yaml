@@ -183,17 +183,15 @@ stepper_training:
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
-    loss_contributions:
-      weight: 1.0
-      n_steps: 4
+    loss_weight: 1.0
+    n_steps: 4
     loss:
       type: MSE
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
-    loss_contributions:
-      weight: 1.0
-      n_steps: 2
+    loss_weight: 1.0
+    n_steps: 2
     loss:
       type: MSE
 stepper:
@@ -203,7 +201,37 @@ stepper:
   sst_name: sst
   ocean:
     timedelta: 5D
-    # stepper added by job_runner/create_coupled_train_config.sh
-  atmosphere:
+    stepper:
+      input_masking:
+        mask_value: 0
+        fill_value: 0
+        exclude_names_and_prefixes:
+          - LANDFRAC
+      step:
+        type: single_module
+        config:
+          builder:
+            type: Samudra
+            config:
+              ch_width:
+                - 280
+                - 380
+                - 480
+                - 520
+              dilation:
+                - 1
+                - 2
+                - 4
+                - 8
+              n_layers:
+                - 1
+                - 1
+                - 1
+                - 1
+              norm: instance
+              upscale_factor: 2
+              checkpoint_strategy: all
+              zonally_periodic_upsample: true
+    # stepper added by job_runner/create_coupled_train_config.sh  atmosphere:
     timedelta: 6h
     # stepper added by job_runner/create_coupled_train_config.sh
