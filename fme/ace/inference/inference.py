@@ -26,11 +26,6 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
-from fme.ace.inference.data_writer.restart import (
-    RestartExtras,
-    decode_restart_extras,
-    has_restart_extras,
-)
 from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
@@ -116,15 +111,16 @@ def get_initial_condition(
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
 
-    A full-state restart netCDF (one written by inference) additionally carries
-    the round-trippable ``BatchData`` extras — ``stepper_state``, ``labels``,
-    ``data_mask`` — under reserved ``_fme_state__`` variables. When present these
-    are reconstructed and attached so the rollout resumes exactly: the embedded
-    ``labels`` take precedence over the ``labels`` argument, and the
-    ``stepper_state`` continues the noise generator and corrector state. A plain
-    netCDF without the schema marker (a legacy restart or any user-supplied IC)
-    is read exactly as before: ``stepper_state=None`` and labels from the
-    argument.
+    A full-state restart netCDF (one written by inference) carries the embedded
+    ``BatchData`` state (``stepper_state``, ``labels``, ``data_mask``) and is
+    detected by its schema marker; it is rebuilt via
+    ``BatchData.from_xarray_dataset`` so the rollout resumes exactly (the
+    generator continues and the corrector state is preserved). The restored
+    ``stepper_state`` is moved to the compute device so a restored corrector
+    tensor lives on the same device as the rollout (``RandomState.to_device`` is
+    a no-op, keeping the generator on CPU). A plain netCDF without the marker (a
+    legacy restart or any user-supplied external IC) is read by the lenient path
+    below exactly as before: ``stepper_state=None`` and labels from the argument.
 
     Args:
         ds: Dataset containing initial condition data. Must include prognostic_names
@@ -139,7 +135,26 @@ def get_initial_condition(
     Returns:
         The initial condition and the time coordinate.
     """
-    extras = decode_restart_extras(ds) if has_restart_extras(ds) else RestartExtras()
+    if BatchData.dataset_has_embedded_state(ds):
+        batch_data = BatchData.from_xarray_dataset(ds)
+        # Fall back to config labels only if the restart embedded none.
+        if batch_data.labels is None and labels is not None:
+            n_samples = batch_data.time.shape[0]
+            batch_data = dataclasses.replace(
+                batch_data,
+                labels=BatchLabels(torch.ones(n_samples, len(labels)), names=labels),
+            )
+        batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
+        initial_state = batch_data.get_start(prognostic_names, n_ic_timesteps=1)
+        stepper_state = initial_state.as_batch_data().stepper_state
+        if stepper_state is not None:
+            initial_state = PrognosticState(
+                dataclasses.replace(
+                    initial_state.as_batch_data(),
+                    stepper_state=stepper_state.to_device(),
+                )
+            )
+        return initial_state
 
     initial_condition = {}
     for name in prognostic_names:
@@ -163,11 +178,7 @@ def get_initial_condition(
             f"and {n_samples}."
         )
 
-    # Embedded labels win over the config argument; fall back to the argument
-    # (today's behavior) for a plain IC that carries none.
-    if extras.labels is not None:
-        batch_labels: BatchLabels | None = extras.labels
-    elif labels is not None:
+    if labels is not None:
         batch_labels = BatchLabels(torch.ones(n_samples, len(labels)), names=labels)
     else:
         batch_labels = None
@@ -177,13 +188,9 @@ def get_initial_condition(
         time=initial_times,
         horizontal_dims=["lat", "lon"],
         labels=batch_labels,
-        data_mask=extras.data_mask,
     )
     batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
-    initial_state = batch_data.get_start(prognostic_names, n_ic_timesteps=1)
-    if extras.stepper_state is not None:
-        initial_state = initial_state.with_stepper_state(extras.stepper_state)
-    return initial_state
+    return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
 
 
 @dataclasses.dataclass

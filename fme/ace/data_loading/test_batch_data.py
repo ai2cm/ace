@@ -1,11 +1,18 @@
 import dataclasses
 
+import cftime
 import numpy as np
 import pytest
 import torch
 import xarray as xr
+from xarray.coding.times import CFDatetimeCoder
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, _collate_with_masking
+from fme.ace.data_loading.batch_data import (
+    _RESERVED_PREFIX,
+    BatchData,
+    PairedData,
+    _collate_with_masking,
+)
 from fme.core.corrector.state import CorrectorState
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -1122,3 +1129,193 @@ def test_stepper_state_pin_memory():
     p = state.corrector_state.global_dry_air_mass
     assert p is not None
     assert p.is_pinned()
+
+
+def _batch_for_serialization(
+    stepper_kind: str,
+    with_labels: bool,
+    with_data_mask: bool,
+    n_samples: int = 2,
+    n_timesteps: int = 1,
+    lat: int = 3,
+    lon: int = 4,
+) -> BatchData:
+    """A BatchData covering a chosen combination of the serialized fields.
+
+    ``stepper_kind`` is one of none/empty/corrector/random/both. A present
+    random state is advanced so its serialized generator state is not merely the
+    raw seed.
+    """
+    time = xr.DataArray(
+        np.array(
+            [
+                [
+                    cftime.DatetimeProlepticGregorian(2000, 1, 1 + t)
+                    for t in range(n_timesteps)
+                ]
+            ]
+            * n_samples
+        ),
+        dims=["sample", "time"],
+    )
+    if stepper_kind == "none":
+        stepper_state: StepperState | None = None
+    elif stepper_kind == "empty":
+        stepper_state = StepperState()
+    else:
+        corrector = (
+            CorrectorState(global_dry_air_mass=torch.randn(n_samples, 1, 1))
+            if stepper_kind in ("corrector", "both")
+            else None
+        )
+        random_state = None
+        if stepper_kind in ("random", "both"):
+            random_state = RandomState.from_seed(4)
+            torch.randn(3, generator=random_state.generator)  # advance past the seed
+        stepper_state = StepperState(
+            corrector_state=corrector, random_state=random_state
+        )
+    labels = (
+        BatchLabels(
+            torch.arange(n_samples * 2, dtype=torch.float32).reshape(n_samples, 2),
+            names=["a", "b"],
+        )
+        if with_labels
+        else None
+    )
+    data_mask = {"prog": torch.tensor([True, False])} if with_data_mask else None
+    return BatchData.new_on_cpu(
+        data={"prog": torch.randn(n_samples, n_timesteps, lat, lon)},
+        time=time,
+        stepper_state=stepper_state,
+        labels=labels,
+        data_mask=data_mask,
+    )
+
+
+def _stepper_is_empty(state: StepperState | None) -> bool:
+    return state is None or (
+        state.corrector_state is None and state.random_state is None
+    )
+
+
+def _assert_stepper_state_round_trips(
+    original: StepperState | None, restored: StepperState | None
+) -> None:
+    # An empty (all-None) stepper state serializes to nothing and restores as
+    # None; the two are equivalent (no state to thread).
+    if _stepper_is_empty(original):
+        assert _stepper_is_empty(restored)
+        return
+    assert original is not None
+    assert restored is not None
+    original_corrector = original.corrector_state
+    restored_corrector = restored.corrector_state
+    if original_corrector is None or original_corrector.global_dry_air_mass is None:
+        assert restored_corrector is None or (
+            restored_corrector.global_dry_air_mass is None
+        )
+    else:
+        assert restored_corrector is not None
+        assert restored_corrector.global_dry_air_mass is not None
+        torch.testing.assert_close(
+            restored_corrector.global_dry_air_mass,
+            original_corrector.global_dry_air_mass,
+            rtol=0,
+            atol=0,
+        )
+    if original.random_state is None:
+        assert restored.random_state is None
+    else:
+        assert restored.random_state is not None
+        # The generator stays on CPU and continues the identical draw stream
+        # (get_state() is non-consuming, so `original` still sits where it was
+        # serialized).
+        assert restored.random_state.generator.device.type == "cpu"
+        torch.testing.assert_close(
+            torch.randn(4, generator=original.random_state.generator),
+            torch.randn(4, generator=restored.random_state.generator),
+            rtol=0,
+            atol=0,
+        )
+
+
+@pytest.mark.parametrize(
+    "stepper_kind", ["none", "empty", "corrector", "random", "both"]
+)
+@pytest.mark.parametrize("with_labels", [False, True])
+@pytest.mark.parametrize("with_data_mask", [False, True])
+def test_batch_data_xarray_dataset_round_trip(
+    stepper_kind: str, with_labels: bool, with_data_mask: bool
+):
+    """to_xarray_dataset -> from_xarray_dataset is an exact inverse over every
+    combination of the serialized fields, tested directly (no writer/inference)."""
+    batch = _batch_for_serialization(stepper_kind, with_labels, with_data_mask)
+    restored = BatchData.from_xarray_dataset(batch.to_xarray_dataset())
+
+    assert set(restored.data) == set(batch.data)
+    torch.testing.assert_close(
+        restored.data["prog"], batch.data["prog"], rtol=0, atol=0
+    )
+    assert restored.data["prog"].shape == batch.data["prog"].shape
+    assert (restored.time.values == batch.time.values).all()
+    assert restored.horizontal_dims == ["lat", "lon"]
+
+    _assert_stepper_state_round_trips(batch.stepper_state, restored.stepper_state)
+
+    if with_labels:
+        assert batch.labels is not None
+        assert restored.labels is not None
+        assert restored.labels.names == ["a", "b"]
+        torch.testing.assert_close(restored.labels.tensor, batch.labels.tensor)
+    else:
+        assert restored.labels is None
+
+    if with_data_mask:
+        assert restored.data_mask is not None
+        assert restored.data_mask["prog"].dtype == torch.bool
+        torch.testing.assert_close(
+            restored.data_mask["prog"], torch.tensor([True, False])
+        )
+    else:
+        assert restored.data_mask is None
+
+
+def test_batch_data_xarray_dataset_round_trip_multi_timestep():
+    """The non-squeezed (multi-timestep) branch also round-trips."""
+    batch = _batch_for_serialization(
+        "both", with_labels=True, with_data_mask=True, n_timesteps=3
+    )
+    restored = BatchData.from_xarray_dataset(batch.to_xarray_dataset())
+    assert restored.data["prog"].shape == batch.data["prog"].shape == (2, 3, 3, 4)
+    assert (restored.time.values == batch.time.values).all()
+    _assert_stepper_state_round_trips(batch.stepper_state, restored.stepper_state)
+
+
+def test_batch_data_xarray_dataset_round_trip_through_netcdf(tmp_path):
+    """The reserved encoding survives real netCDF I/O: the generator uint8 state
+    round-trips through ubyte and reproduces the stream, dtypes are exact, and a
+    marker-free batch stays byte-clean."""
+    batch = _batch_for_serialization("both", with_labels=True, with_data_mask=True)
+    path = tmp_path / "batch.nc"
+    batch.to_xarray_dataset().to_netcdf(path)
+    ds = xr.open_dataset(
+        path,
+        decode_times=CFDatetimeCoder(use_cftime=True),
+        decode_timedelta=False,
+    )
+    restored = BatchData.from_xarray_dataset(ds)
+
+    assert restored.stepper_state is not None
+    assert restored.stepper_state.random_state is not None
+    generator = restored.stepper_state.random_state.generator
+    assert generator.get_state().dtype == torch.uint8
+    _assert_stepper_state_round_trips(batch.stepper_state, restored.stepper_state)
+    assert restored.data_mask is not None
+    assert restored.data_mask["prog"].dtype == torch.bool
+
+    # A batch with no extras produces a marker-free, reserved-var-free dataset.
+    plain = _batch_for_serialization("none", with_labels=False, with_data_mask=False)
+    plain_ds = plain.to_xarray_dataset()
+    assert not BatchData.dataset_has_embedded_state(plain_ds)
+    assert not any(str(v).startswith(_RESERVED_PREFIX) for v in plain_ds.variables)

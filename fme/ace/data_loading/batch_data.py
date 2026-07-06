@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import warnings
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import Any, TypeVar
@@ -20,6 +21,83 @@ from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
+
+# ``BatchData`` serializes to an xarray ``Dataset`` in which the prognostic
+# ``data`` variables keep their plain names (so the file stays a normal,
+# inspectable netCDF), and the round-trippable extras that a plain data+time
+# file would drop (``stepper_state``, ``labels``, ``data_mask``) are embedded
+# under this reserved prefix. The prefix cannot collide with a prognostic
+# variable name. A dataset attribute records the schema version and doubles as
+# the presence marker: a dataset without it carries no embedded state.
+_RESERVED_PREFIX = "_fme_state__"
+_SCHEMA_ATTR = "_fme_schema_version"
+_SCHEMA_VERSION = 1
+_DTYPE_ATTR = "_fme_dtype"
+_SAMPLE_DIM = "sample"
+_TIME_DIM = "time"
+
+_STEPPER_PREFIX = f"{_RESERVED_PREFIX}stepper__"
+_LABELS_VALUES_VAR = f"{_RESERVED_PREFIX}labels_values"
+_LABELS_NAMES_ATTR = f"{_RESERVED_PREFIX}labels_names"
+_LABEL_INDEX_DIM = f"{_RESERVED_PREFIX}label_index"
+_DATA_MASK_PREFIX = f"{_RESERVED_PREFIX}data_mask__"
+
+# netCDF4 has no native bool; bool tensors are stored as uint8 and cast back to
+# their recorded dtype on read.
+_DTYPE_BY_NAME: dict[str, torch.dtype] = {
+    str(dtype): dtype
+    for dtype in (
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+    )
+}
+
+
+def _to_storage_array(tensor: torch.Tensor) -> tuple[np.ndarray, str]:
+    """Return a netCDF-storable array plus the original torch dtype name.
+
+    Bool is stored as uint8 (netCDF4 has no bool); the recorded dtype lets
+    ``from_xarray_dataset`` restore the exact original dtype.
+    """
+    cpu = tensor.detach().cpu()
+    dtype_name = str(cpu.dtype)
+    if cpu.dtype == torch.bool:
+        return cpu.to(torch.uint8).numpy(), dtype_name
+    return cpu.numpy(), dtype_name
+
+
+def _restore_tensor(da: xr.DataArray) -> torch.Tensor:
+    tensor = torch.as_tensor(np.asarray(da.values))
+    dtype_name = da.attrs.get(_DTYPE_ATTR)
+    if dtype_name is not None:
+        tensor = tensor.to(_DTYPE_BY_NAME[str(dtype_name)])
+    return tensor
+
+
+def _reserved_var_dims(var_name: str, array: np.ndarray, n_samples: int) -> list[str]:
+    """Dim names for a reserved variable.
+
+    A leading axis sized like the batch's sample dimension is named ``sample`` so
+    ``start_indices`` subselection (``ds.isel(sample=...)``) subsets it in step
+    with the prognostic variables; every other axis gets a variable-private
+    reserved dim so distinct variables never share (and thus constrain) a dim.
+    The corrector's ``global_dry_air_mass`` (n_samples, 1, 1) is the per-sample
+    case; the generator state (a flat uint8 vector) is not.
+    """
+    dims: list[str] = []
+    for axis, size in enumerate(array.shape):
+        if axis == 0 and size == n_samples:
+            dims.append(_SAMPLE_DIM)
+        else:
+            dims.append(f"{var_name}_d{axis}")
+    return dims
 
 
 def _check_device(data: TensorMapping, device: torch.device):
@@ -90,17 +168,6 @@ class PrognosticState:
     def to_device(self) -> "PrognosticState":
         return PrognosticState(self._data.to_device())
 
-    def with_stepper_state(self, stepper_state: StepperState) -> "PrognosticState":
-        """Return a copy with ``stepper_state`` attached, replacing any existing one.
-
-        Used to restore a segment's serialized ``StepperState`` (corrector state
-        + random state) onto the initial condition so the rollout continues
-        exactly where the previous segment left off.
-        """
-        return PrognosticState(
-            dataclasses.replace(self._data, stepper_state=stepper_state)
-        )
-
     def with_random_state(self, random_state: RandomState) -> "PrognosticState":
         """Return a copy with a seeded RandomState attached to its stepper_state.
 
@@ -109,8 +176,13 @@ class PrognosticState:
         other sub-state already present on the stepper_state is preserved.
         """
         stepper_state = self._data.stepper_state or StepperState()
-        return self.with_stepper_state(
-            dataclasses.replace(stepper_state, random_state=random_state)
+        return PrognosticState(
+            dataclasses.replace(
+                self._data,
+                stepper_state=dataclasses.replace(
+                    stepper_state, random_state=random_state
+                ),
+            )
         )
 
     def as_batch_data(self) -> "BatchData":
@@ -376,6 +448,176 @@ class BatchData:
             stepper_state=stepper_state,
             **kwargs,
         )
+
+    @staticmethod
+    def dataset_has_embedded_state(ds: xr.Dataset) -> bool:
+        """Whether ``ds`` carries embedded ``BatchData`` state.
+
+        True iff it was produced by ``to_xarray_dataset`` with extras present
+        (the schema-version marker attribute). Used by the restart reader to
+        decide between ``from_xarray_dataset`` and the lenient plain reader.
+        """
+        return _SCHEMA_ATTR in ds.attrs
+
+    def to_xarray_dataset(self) -> xr.Dataset:
+        """Serialize this ``BatchData`` to a single xarray ``Dataset``.
+
+        The prognostic ``data`` variables keep their plain names and ``time`` is
+        written alongside, so the file stays a normal, inspectable netCDF; a
+        single-timestep batch has its length-1 time dimension squeezed (the
+        restart presentation). The round-trippable extras a plain data+time file
+        would drop - ``stepper_state``, ``labels``, ``data_mask`` - are embedded
+        under reserved ``_fme_state__`` variables with a schema-version marker
+        attribute, but only when present, so a batch carrying none of them
+        serializes to a plain data+time dataset. Inverse: ``from_xarray_dataset``.
+
+        Structural fields (``n_ensemble``, ``horizontal_dims``, ``epoch``) are
+        not serialized: ``horizontal_dims`` is recovered from the variable dims
+        on load, and ``n_ensemble`` is intentionally left to be re-derived (the
+        sample dimension already carries any broadcast ensemble).
+        """
+        if self.time.sizes[_TIME_DIM] == 1:
+            time_dim = self.dims.index(_TIME_DIM)
+            dims_to_write = self.dims[:time_dim] + self.dims[time_dim + 1 :]
+
+            def present(x: torch.Tensor) -> torch.Tensor:
+                return x.squeeze(dim=time_dim)
+
+            time_array = self.time.isel(time=0)
+        else:
+            dims_to_write = self.dims
+
+            def present(x: torch.Tensor) -> torch.Tensor:
+                return x
+
+            time_array = self.time
+
+        data_arrays: dict[str, xr.DataArray] = {}
+        for name, tensor in self.data.items():
+            data_arrays[name] = xr.DataArray(
+                present(tensor).detach().cpu().numpy(), dims=dims_to_write
+            )
+        data_arrays[_TIME_DIM] = time_array
+
+        extra_arrays, attrs = self._encode_reserved_state()
+        data_arrays.update(extra_arrays)
+        ds = xr.Dataset(data_arrays)
+        ds.attrs.update(attrs)
+        return ds
+
+    @classmethod
+    def from_xarray_dataset(cls, ds: xr.Dataset) -> "BatchData":
+        """Reconstruct a ``BatchData`` from ``to_xarray_dataset``'s output.
+
+        Strict inverse of ``to_xarray_dataset``: recovers the prognostic data,
+        time, and any embedded ``stepper_state``/``labels``/``data_mask``,
+        restoring exact tensor dtypes. Only guaranteed for datasets produced by
+        ``to_xarray_dataset``; it is NOT intended to interpret arbitrary external
+        IC datasets or legacy plain restart files (those go through the lenient
+        reader in ``get_initial_condition``). ``horizontal_dims`` is recovered
+        from the prognostic variables' dims.
+        """
+        time_da = ds[_TIME_DIM]
+        squeezed = list(time_da.dims) == [_SAMPLE_DIM]
+        if squeezed:
+            time = xr.DataArray(time_da.values[:, None], dims=[_SAMPLE_DIM, _TIME_DIM])
+        else:
+            time = xr.DataArray(time_da.values, dims=[_SAMPLE_DIM, _TIME_DIM])
+
+        data: dict[str, torch.Tensor] = {}
+        horizontal_dims: list[str] | None = None
+        for name in ds.data_vars:
+            name_str = str(name)
+            if name_str == _TIME_DIM or name_str.startswith(_RESERVED_PREFIX):
+                continue
+            da = ds[name]
+            tensor = torch.as_tensor(np.asarray(da.values))
+            if squeezed:
+                tensor = tensor.unsqueeze(1)
+            data[name_str] = tensor
+            if horizontal_dims is None:
+                horizontal_dims = [
+                    str(d) for d in da.dims if d not in (_SAMPLE_DIM, _TIME_DIM)
+                ]
+
+        stepper_state, labels, data_mask = cls._decode_reserved_state(ds)
+        return cls.new_on_cpu(
+            data=data,
+            time=time,
+            labels=labels,
+            data_mask=data_mask,
+            stepper_state=stepper_state,
+            horizontal_dims=horizontal_dims,
+        )
+
+    def _encode_reserved_state(
+        self,
+    ) -> tuple[dict[str, xr.DataArray], dict[str, Any]]:
+        """Reserved data variables and dataset attributes embedding the
+        round-trippable extras (stepper_state, labels, data_mask), or ``({}, {})``
+        when none are present.
+        """
+        data_arrays: dict[str, xr.DataArray] = {}
+        attrs: dict[str, Any] = {}
+        n_samples = self.time.shape[0]
+
+        if self.stepper_state is not None:
+            # to_state_dict()/from_state_dict() are the tensor intermediate; the
+            # stepper stays opaque - this layer only maps its namespaced keys to
+            # reserved variables and never inspects sub-state fields.
+            state_dict = self.stepper_state.to_cpu().to_state_dict()
+            for key, tensor in state_dict.items():
+                var_name = f"{_STEPPER_PREFIX}{key}"
+                array, dtype_name = _to_storage_array(tensor)
+                data_arrays[var_name] = xr.DataArray(
+                    array,
+                    dims=_reserved_var_dims(var_name, array, n_samples),
+                    attrs={_DTYPE_ATTR: dtype_name},
+                )
+
+        if self.labels is not None:
+            array, dtype_name = _to_storage_array(self.labels.tensor)
+            data_arrays[_LABELS_VALUES_VAR] = xr.DataArray(
+                array,
+                dims=[_SAMPLE_DIM, _LABEL_INDEX_DIM],
+                attrs={_DTYPE_ATTR: dtype_name},
+            )
+            attrs[_LABELS_NAMES_ATTR] = json.dumps(list(self.labels.names))
+
+        if self.data_mask is not None:
+            for name, mask in self.data_mask.items():
+                array, dtype_name = _to_storage_array(mask)
+                data_arrays[f"{_DATA_MASK_PREFIX}{name}"] = xr.DataArray(
+                    array, dims=[_SAMPLE_DIM], attrs={_DTYPE_ATTR: dtype_name}
+                )
+
+        if data_arrays:
+            attrs[_SCHEMA_ATTR] = _SCHEMA_VERSION
+        return data_arrays, attrs
+
+    @classmethod
+    def _decode_reserved_state(
+        cls, ds: xr.Dataset
+    ) -> tuple[StepperState | None, BatchLabels | None, dict[str, torch.Tensor] | None]:
+        state_dict: dict[str, torch.Tensor] = {}
+        data_mask: dict[str, torch.Tensor] = {}
+        for name in ds.data_vars:
+            name_str = str(name)
+            if name_str.startswith(_STEPPER_PREFIX):
+                state_dict[name_str[len(_STEPPER_PREFIX) :]] = _restore_tensor(ds[name])
+            elif name_str.startswith(_DATA_MASK_PREFIX):
+                data_mask[name_str[len(_DATA_MASK_PREFIX) :]] = _restore_tensor(
+                    ds[name]
+                )
+
+        stepper_state = StepperState.from_state_dict(state_dict) if state_dict else None
+        labels: BatchLabels | None = None
+        if _LABELS_VALUES_VAR in ds:
+            names = json.loads(ds.attrs[_LABELS_NAMES_ATTR])
+            labels = BatchLabels(
+                _restore_tensor(ds[_LABELS_VALUES_VAR]), names=list(names)
+            )
+        return stepper_state, labels, (data_mask or None)
 
     def __post_init__(self):
         if len(self.time.shape) != 2:

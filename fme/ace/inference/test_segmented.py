@@ -16,7 +16,7 @@ import yaml
 
 import fme
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
-from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.data_loading.batch_data import _RESERVED_PREFIX, BatchData, PrognosticState
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -25,7 +25,6 @@ from fme.ace.data_loading.inference import (
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
-from fme.ace.inference.data_writer.restart import RESERVED_PREFIX, has_restart_extras
 from fme.ace.inference.inference import (
     InitialConditionConfig,
     get_initial_condition,
@@ -513,8 +512,8 @@ def test_plain_restart_netcdf_is_backcompat(tmp_path):
     restart = _write_restart(tmp_path, _prognostic_state(n_samples=2))
 
     ds = xr.open_dataset(restart, decode_timedelta=False)
-    assert not has_restart_extras(ds)
-    assert not any(str(v).startswith(RESERVED_PREFIX) for v in ds.variables)
+    assert not BatchData.dataset_has_embedded_state(ds)
+    assert not any(str(v).startswith(_RESERVED_PREFIX) for v in ds.variables)
     # The prognostic variable is still a normal, readable xarray variable.
     assert "prog" in ds and ds["prog"].shape == (2, 4, 8)
 
@@ -555,7 +554,7 @@ def test_full_state_restart_roundtrip(tmp_path):
 
     # Inspectability: the full-state restart still opens as a normal Dataset.
     ds = xr.open_dataset(restart, decode_timedelta=False)
-    assert has_restart_extras(ds)
+    assert BatchData.dataset_has_embedded_state(ds)
     assert ds["prog"].shape == (n, 4, 8)
 
     ic = get_initial_condition(
