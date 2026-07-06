@@ -141,6 +141,7 @@ stepper:
           norm: instance
           upscale_factor: 2
           checkpoint_strategy: all
+          zonally_periodic_upsample: true
       normalization:
         network:
           global_means_path: /ocean_stats/centering.nc

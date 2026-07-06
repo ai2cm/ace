@@ -1,4 +1,6 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-BK-v20260602-Samudra-piControl-105yr|rs0|train|normal|a100|8|400GiB|1|ai2/ace|seed=0
-BK-v20260602-Samudra-piControl-105yr|rs1|train|normal|a100|8|400GiB|1|ai2/ace|seed=1
+BK-v20260602-Samudra-piControl-105yr|rs0|done|normal|a100|8|400GiB|1|ai2/ace|seed=0
+BK-v20260602-Samudra-piControl-105yr|rs1|done|normal|a100|8|400GiB|1|ai2/ace|seed=1
+BK-v20260602-Samudra-piControl-105yr-upsample-fix|rs0|train|high|h100|2|400GiB|1|ai2/ace|seed=0
+BK-v20260602-Samudra-piControl-105yr-upsample-fix|rs1|train|high|h100|2|400GiB|1|ai2/ace|seed=1
