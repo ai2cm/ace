@@ -20,4 +20,16 @@ generate_weights_four_degree:
 		--target-grid F22.5 \
 		--output-url $(WEIGHTS_URL_ROOT)/om4-tripolar-0.25deg-to-F22.5
 
-.PHONY: create_environment generate_weights_one_degree generate_weights_four_degree
+CONFIG ?= configs/om4-picontrol-1deg.yaml
+TEST_NUM_TIMESTEPS ?= 6
+TEST_OUTPUT_PATH ?= gs://vcm-ml-scratch/jamesd/gfdl-om4-test/om4-picontrol-1deg-subset.zarr
+
+test_run:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.run \
+		--config $(CONFIG) \
+		--num-timesteps $(TEST_NUM_TIMESTEPS) \
+		--output-path $(TEST_OUTPUT_PATH) \
+		--runner DirectRunner \
+		--job_server_timeout 3600
+
+.PHONY: create_environment generate_weights_one_degree generate_weights_four_degree test_run

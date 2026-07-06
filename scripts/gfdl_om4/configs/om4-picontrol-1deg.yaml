@@ -1,0 +1,32 @@
+# 5-daily 1-degree ocean (Samudra) store from the piControl sample year.
+target_grid: F90
+weights_url: gs://vcm-ml-scratch/jamesd/gfdl-om4-regridding-weights/v1/om4-tripolar-0.25deg-to-F90
+expected_level_count: 19
+shift_timestamps_to_avg_interval_midpoint: false
+output:
+  path: gs://vcm-ml-scratch/jamesd/2026-07-06-om4-picontrol-sample-1deg.zarr
+  time_chunk_size: 1
+  time_shard_size: 365
+wetmask:
+  store: gs://vcm-ml-scratch/spencerc/2026-06-24-trial-samudra-floenet-post-processing/zarrs/piControl/ocean_1daily_snap_subset_to_5daily_snap.zarr
+  variable: thetao
+statics:
+  store: gs://vcm-ml-scratch/spencerc/2026-06-24-trial-samudra-floenet-post-processing/zarrs/piControl/ocean_static.zarr
+  variables:
+    - deptho
+    - hfgeou
+streams:
+  - name: snapshot_ocean
+    store: gs://vcm-ml-scratch/spencerc/2026-06-24-trial-samudra-floenet-post-processing/zarrs/piControl/ocean_1daily_snap_subset_to_5daily_snap.zarr
+    variables:
+      - thetao
+      - so
+      - uo
+      - vo
+      - tos
+      - zos
+      - SSH
+      - mlotst
+      - rhoinsitu
+    rotated_pairs:
+      - [uo, vo]
