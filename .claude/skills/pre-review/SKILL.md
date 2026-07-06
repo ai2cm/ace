@@ -97,13 +97,14 @@ The rules to check are:
  - **Builder constructs sub-objects.** When a builder `Config` class is paired with an implementation class, the builder should construct sub-objects from any sub-configuration fields and pass those to the implementation class, rather than the implementation class building those sub-objects. The implementation class receives built collaborators, never a sub-config to build itself.
 
 Exceptions:
- - A config may be passed to the one implementation class its `build()` constructs, and that impl may read the config's fields — but only if the config is a **leaf**, i.e. none of its fields are themselves dataclasses. `list[Config]`, `dict[str, Config]`, and `Config | None` all make a config non-leaf. A non-leaf config must not be handed to its impl; its `build()` builds the sub-objects (per the second rule) and may pack the scalars the impl needs into a separate, non-dacite-loaded leaf dataclass passed as an argument.
+ - A config may be passed to the one implementation class its `build()` constructs, and that impl may read the config's fields. If the config is a **leaf**, i.e. none of its fields are themselves dataclasses, your work is done on this point. `list[Config]`, `dict[str, Config]`, and `Config | None` all make a config non-leaf. If the config is non-leaf, consider whether the code is improved by packing the scalars the impl needs into a separate, non-dacite-loaded leaf dataclass passed as an argument. Would this better separate concerns and make the impl easier to test? If so, recommend doing so, perhaps strongly if it's a significant improvement, but it's not a rule-violation. Is the configuration clearly an extension of the class itself, and adding the params doesn't make the code clearer and just adds boilerplate? Then it's fine to pass it to the impl.
  - A test reading a config's fields should be avoided if easy to do so, but is not a violation.
 
 A config reading another config's fields — even one it directly contains — is still a violation.
 Fix it with a public `@property` on the child for a derived value (e.g. `loss.requires_ensemble` rather than `loss.type == "EnsembleLoss"`), or a `validate(...)` method on the child for an invariant (e.g. `metric.validate(required_target="denorm")`). The parent then goes through that sanctioned API.
 
-These rules still apply for top-level entrypoints. A run-config consumed by a free function (e.g. `run_*_from_config`) that reads the config as a parameter bag is a violation, unless that config is a leaf (it almost certainly isn't).
+These rules still apply for top-level entrypoints.
+A run-config consumed by a free function (e.g. `run_*_from_config`) that reads the config as a parameter bag is a violation, unless that config is a leaf (it almost certainly isn't) since the free function isn't built by the config.
 Instead of the config having a .build() method, it should likely have a .run() method that performs all building and side-effects, then calls a free function that takes the built objects and explicit values as arguments.
 The free function should not read the config class itself.
 The config's `build()` should assemble the runtime object(s); a thin entrypoint then performs the process side-effects (IO, logging, distributed setup) and invokes the built object.
