@@ -568,8 +568,14 @@ def test_full_state_restart_roundtrip(tmp_path):
     assert ss is not None
     assert ss.corrector_state is not None
     assert ss.corrector_state.global_dry_air_mass is not None
+    # The restored stepper_state is moved to the compute device (see
+    # _initial_condition_from_state), so on GPU the corrector tensor is on cuda
+    # while the CPU-built expected tensor is not; compare on the compute device.
     torch.testing.assert_close(
-        ss.corrector_state.global_dry_air_mass, mass, rtol=0, atol=0
+        ss.corrector_state.global_dry_air_mass,
+        mass.to(fme.get_device()),
+        rtol=0,
+        atol=0,
     )
     assert ss.random_state is not None
     # get_state() is non-consuming, so stored_random still sits at the point it
@@ -614,7 +620,7 @@ def test_full_state_restart_start_indices(tmp_path):
     assert ss.corrector_state.global_dry_air_mass is not None
     torch.testing.assert_close(
         ss.corrector_state.global_dry_air_mass,
-        mass[[1]],
+        mass[[1]].to(fme.get_device()),
         rtol=0,
         atol=0,
     )
