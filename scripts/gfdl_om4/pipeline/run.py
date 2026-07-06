@@ -316,11 +316,11 @@ def process_chunk(
     assert target_grid_name is not None
     level_index = key.offsets.get(LEVEL_DIM)
     if level_index is not None:
-        wetmask = wetmask.isel({LEVEL_DIM: level_index})
+        wetmask = wetmask.isel({LEVEL_DIM: level_index}, drop=True)
     elif LEVEL_DIM in wetmask.dims:
         # 2D (surface) variables are checked and normalized against the
         # surface level of the wetmask.
-        wetmask = wetmask.isel({LEVEL_DIM: 0})
+        wetmask = wetmask.isel({LEVEL_DIM: 0}, drop=True)
     output = _process_chunk(
         ds, stream, wetmask, weights_url, target_grid_name, level_index
     )
@@ -361,7 +361,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
     surface_fraction = None
     for k in range(level_count):
         fraction = regridder(
-            wetmask.isel({LEVEL_DIM: k}).astype("float64"), keep_attrs=False
+            wetmask.isel({LEVEL_DIM: k}, drop=True).astype("float64"), keep_attrs=False
         ).fillna(0.0)
         if k == 0:
             surface_fraction = fraction
@@ -437,7 +437,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
             f"{sorted(missing)}"
         )
     fields = source[config.statics.variables].load()
-    surface_wetmask = wetmask.isel({LEVEL_DIM: 0})
+    surface_wetmask = wetmask.isel({LEVEL_DIM: 0}, drop=True)
     regridded, _ = regrid_normalized(fields, regridder, surface_wetmask)
     for name, da in regridded.data_vars.items():
         statics[name] = da.astype(OUTPUT_DTYPE).assign_attrs(
@@ -643,6 +643,12 @@ def main():
             "template variables disagree with the expected output set; "
             f"missing={sorted(expected - set(template.data_vars))} "
             f"unexpected={sorted(set(template.data_vars) - expected)}"
+        )
+    expected_coords = {TIME_DIM, "lat", "lon"}
+    if set(template.coords) != expected_coords:
+        raise AssertionError(
+            "unexpected coordinates leaked into the output template: "
+            f"{sorted(set(template.coords) - expected_coords)}"
         )
     logger.info("[template] %d output variables", len(template.data_vars))
 
