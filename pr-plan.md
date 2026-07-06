@@ -1,10 +1,16 @@
-# Carry corrector deltas onto prediction data and add a correction netCDF writer
+# Carry corrector deltas onto prediction data and add a step-diagnostics netCDF writer
 
 Carries the per-step corrector `delta` series out of `Stepper.predict` in a new
 opaque `StepDiagnostics` container on `BatchData`/`PairedData`, NaN-masks the
 delta consistently with the prediction at the stepper step seam, and adds an
-off-by-default `autoregressive_corrections.nc` writer as the carriage's first
-consumer. No aggregator, no normalizer wiring, no metric flags.
+off-by-default `autoregressive_step_diagnostics.nc` writer as the carriage's
+first consumer. No aggregator, no normalizer wiring, no metric flags.
+
+Coupled runs are explicit follow-up work, not silently unsupported: the coupled
+generator's `ComponentStepPrediction` drops diagnostics at the component-step
+seam, so carrying deltas through `CoupledStepper` requires threading
+`ComponentStepPrediction`, per-realm stacking, and `CoupledBatchData` — a
+separate PR.
 
 ---
 
@@ -15,15 +21,34 @@ consumer. No aggregator, no normalizer wiring, no metric flags.
 class CorrectorDiagnostics:
     delta: TensorMapping = dataclasses.field(default_factory=dict)
 
-    def apply_output_process_func(  # NEW — map the stepper's output masker over delta
-        self, func: Callable[[TensorMapping], TensorDict]
+    def apply_output_masking(  # NEW — map the stepper's output spatial masker over delta
+        self, masking: PostProcessFnABC
     ) -> "CorrectorDiagnostics":
-        # Returns a new CorrectorDiagnostics; input unmutated. Correct ONLY
-        # because the output masker is NaN-fill (StaticSpatialMasking with
-        # fill_value=NaN, or the NullPostProcessFn no-op): NaN off-mask matches
-        # masked_output − masked_snapshot. A finite fill would inject a spurious
-        # offset and break the delta = output − snapshot invariant; this is
-        # documented inline.
+        # Returns a new CorrectorDiagnostics; input unmutated. Named and typed
+        # for masking specifically — NOT an arbitrary output-process func:
+        # masking a difference is correct ONLY because the output masker is
+        # NaN-fill (StaticSpatialMasking with fill_value=NaN, or the
+        # NullPostProcessFn no-op): NaN off-mask matches
+        # masked_output − masked_snapshot. A finite fill, or any func that
+        # derives/transforms values, would break the delta = output − snapshot
+        # invariant; this is documented inline.
+        ...
+```
+
+## `fme/core/step/output.py` (modified)
+
+```python
+@dataclasses.dataclass
+class StepOutput:
+    @classmethod  # NEW — encapsulate how per-step corrector deltas stack into a series
+    def stack_corrector_deltas(
+        cls, outputs: Sequence["StepOutput"]
+    ) -> TensorMapping:
+        # Stacks each output's corrector_diagnostics.delta along a new time dim
+        # (dim 1), forward-step-aligned. Returns an empty mapping when no output
+        # carries a delta. Keeps Stepper.predict independent of how StepOutput
+        # stores its diagnostics (no direct stack_list_of_tensor_dicts call at
+        # the predict site).
         ...
 ```
 
@@ -31,12 +56,13 @@ class CorrectorDiagnostics:
 
 Opaque per-sample diagnostics container, modeled on `StepperState`. Holds the
 stacked per-step correction series, aligned with the prediction `data` along
-`(sample, time, ...)`. When attached it always carries a non-empty `delta`
-(`Stepper.predict` attaches `None` instead of an empty container), so
-`step_diagnostics is None` is the single "no correction" gate. It deliberately
-has **no** time-slice or prepend-time op — the series is attached only after
-time-windowing is finished, and the time-touching `BatchData` methods guard
-against carrying it (below).
+`(sample, time, ...)`. An **empty `delta` is valid** — all ops are safe no-ops
+on it and nothing asserts non-emptiness — but `Stepper.predict` still attaches
+`None` when nothing was modified, so `step_diagnostics is None` remains the
+single "no correction file" gate for now. It deliberately has **no** time-slice
+or prepend-time op — the series is attached only after time-windowing is
+finished, and the time-touching `BatchData` methods guard against carrying it
+(below).
 
 ```python
 @dataclasses.dataclass
@@ -46,10 +72,18 @@ class StepDiagnostics:
     def to_device(self) -> "StepDiagnostics": ...
     def to_cpu(self) -> "StepDiagnostics": ...
     def pin_memory(self) -> "StepDiagnostics": ...
-    def scatter_spatial(self, global_img_shape: tuple[int, int]) -> "StepDiagnostics": ...
     def broadcast_ensemble(self, n_ensemble: int) -> "StepDiagnostics": ...
     def sample_dim_size(self) -> int | None: ...
+    def to_dataset(self, time: xr.DataArray) -> xr.Dataset:
+        # NEW — the container's only data-export API: the delta variables with
+        # the given time coordinate, ready for netCDF writing. Consumers (the
+        # step-diagnostics writer) use this instead of reaching into `delta`.
+        ...
 ```
+
+No `scatter_spatial`: diagnostics are produced rank-locally by `predict`, never
+read centrally and scattered, so `BatchData.scatter_spatial` raise-guards
+instead (below).
 
 ## `fme/ace/data_loading/batch_data.py` (modified)
 
@@ -61,7 +95,6 @@ class BatchData:
     # CHANGED — forward step_diagnostics via the matching container op:
     def to_device(self) -> "BatchData": ...
     def to_cpu(self) -> "BatchData": ...
-    def scatter_spatial(self, global_img_shape: tuple[int, int]) -> "BatchData": ...
     def pin_memory(self: SelfType) -> SelfType: ...
     def broadcast_ensemble(self: SelfType, n_ensemble: int) -> SelfType: ...
 
@@ -74,20 +107,20 @@ class BatchData:
     def __post_init__(self):  # CHANGED — also validate step_diagnostics.sample_dim_size()
         ...
 
-    def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
-        # CHANGED — pass step_diagnostics through UNCHANGED (delta is its own
-        # sparse name set; not filtered to `names`)
-        ...
-
-    # CHANGED — time-touching methods RAISE when step_diagnostics is not None.
-    # delta is time-indexed and these would silently misalign it; no current
-    # caller windows a diagnostics-bearing batch, so a call here is a bug:
+    # CHANGED — these RAISE when step_diagnostics is not None. The time-touching
+    # methods would silently misalign the time-indexed delta; subset_names is an
+    # input-side op with undefined semantics for the sparse delta name set; and
+    # scatter_spatial is a central-read→scatter input op that never sees
+    # diagnostics. No current caller hits any of these with a diagnostics-bearing
+    # batch, so a call here is a bug — fail loudly:
     def select_time_slice(self: SelfType, time_slice: slice) -> SelfType: ...
     def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType: ...
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType: ...
     def compute_derived_variables(self: SelfType, ...) -> SelfType: ...
     def get_start(self: SelfType, ...) -> PrognosticState: ...
     def get_end(self: SelfType, ...) -> PrognosticState: ...
+    def subset_names(self: SelfType, names: Collection[str]) -> SelfType: ...
+    def scatter_spatial(self: SelfType, global_img_shape: tuple[int, int]) -> SelfType: ...
 
 
 @dataclasses.dataclass
@@ -115,39 +148,47 @@ class PairedData:
 ```python
 class Stepper:
     def step(self, args: StepArgs, wrapper=...) -> StepOutput:
-        # CHANGED — also apply _output_process_func to the carried diagnostics,
-        # so delta is NaN-masked off-mask consistently with .output:
+        # CHANGED — also apply the output spatial masker to the carried
+        # diagnostics, so delta is NaN-masked off-mask consistently with
+        # .output:
         #   corrector_diagnostics=result.corrector_diagnostics
-        #       .apply_output_process_func(self._output_process_func)
+        #       .apply_output_masking(self._output_process_func)
+        # (_output_process_func is always the NaN-fill output spatial masker or
+        # the NullPostProcessFn no-op; apply_output_masking's name and contract
+        # pin that restriction.)
         ...
 
     def predict(self, ...) -> tuple[BatchData, PrognosticState]:
-        # CHANGED — collect each StepOutput.corrector_diagnostics.delta from the
-        # prediction generator, stack forward-step-aligned via
-        # stack_list_of_tensor_dicts(..., time_dim=1), and attach at the closing
-        # BatchData.new_on_device(...) reconstruction — i.e. AFTER the
-        # prepend → compute_derived → remove_initial_condition dance, where data
-        # and series are both n_forward_steps long. Attach None when the stacked
-        # series has no keys (no corrector, or nothing modified this rollout).
+        # CHANGED — stack the per-step deltas via
+        # StepOutput.stack_corrector_deltas(output_list) and attach at the
+        # closing BatchData.new_on_device(...) reconstruction — i.e. AFTER the
+        # prepend → compute_derived → remove_initial_condition dance and the
+        # get_end call, where data and series are both n_forward_steps long.
+        # Attach None when the stacked series has no keys (no corrector, or
+        # nothing modified this rollout).
         ...
 ```
 
 `CoupledStepper` is unchanged: it leaves `step_diagnostics` at its `None`
-default (no correction file for coupled runs).
+default (coupled carriage is follow-up work, per the note at the top).
 
 ## `fme/ace/inference/data_writer/main.py` (modified)
 
 ```python
 @dataclasses.dataclass
 class DataWriterConfig:
-    save_correction_files: bool = False  # NEW — write autoregressive_corrections.nc
+    save_step_diagnostics: bool = False  # NEW — write autoregressive_step_diagnostics.nc
 
     def build_paired(self, ...) -> "PairedDataWriter":
-        # CHANGED — when save_correction_files, build a single-source
-        # RawDataWriter(label="autoregressive_corrections", save_names=self.names, ...),
-        # wrapped with self.time_coarsen.build(...) (single-source, NOT
-        # build_paired — there is no target series), and pass it to
-        # PairedDataWriter as correction_writer.
+        # CHANGED — when save_step_diagnostics, build a StepDiagnosticsWriter
+        # (label="autoregressive_step_diagnostics", save_names=self.names,
+        # time_coarsen=self.time_coarsen) and pass it to PairedDataWriter as
+        # step_diagnostics_writer.
+        ...
+
+    def build(self, ...) -> "DataWriter":
+        # CHANGED — same wiring for the single-source writer, so forcing-only
+        # inference runs also get the file.
         ...
 
 
@@ -155,23 +196,43 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
         writers: list[PairedSubwriter],
-        correction_writer: RawDataWriter | TimeCoarsen | None = None,  # NEW
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None,  # NEW
         ...
     ):
         # Held as a separate member, not in the homogeneous paired-writer list:
         # the paired fan-out calls append_batch(target=, prediction=, batch_time=),
-        # which a single-source writer can't accept.
+        # which the step-diagnostics writer doesn't accept.
         ...
 
     def append_batch(self, batch: PairedData):
         # CHANGED — additionally dispatch
-        #   self._correction_writer.append_batch(
-        #       data=dict(batch.step_diagnostics.delta), batch_time=batch.time)
-        # skipped when batch.step_diagnostics is None or no correction writer.
+        #   self._step_diagnostics_writer.append_batch(
+        #       batch.step_diagnostics.to_dataset(batch.time))
+        # skipped when batch.step_diagnostics is None or no writer configured.
         ...
 
-    def flush(self): ...     # CHANGED — include correction writer
-    def finalize(self): ...  # CHANGED — include correction writer
+    def flush(self): ...     # CHANGED — include step-diagnostics writer
+    def finalize(self): ...  # CHANGED — include step-diagnostics writer
+
+
+class DataWriter(WriterABC[PrognosticState, PairedData]):
+    # CHANGED — same step_diagnostics_writer member and append_batch dispatch
+    # (its append_batch also receives PairedData).
+    ...
+```
+
+## `fme/ace/inference/data_writer/step_diagnostics.py` (new)
+
+```python
+class StepDiagnosticsWriter:
+    # Appends the xr.Dataset from StepDiagnostics.to_dataset() to
+    # autoregressive_step_diagnostics.nc, modeled on RawDataWriter's file
+    # handling. Consumes only the Dataset — no knowledge of StepDiagnostics
+    # internals. Honors the save_names subset and applies the configured
+    # time-coarsening to the dataset before appending.
+    def append_batch(self, dataset: xr.Dataset): ...
+    def flush(self): ...
+    def finalize(self): ...
 ```
 
 The delta series is written as-is (already denormalized/physical units),
@@ -191,17 +252,23 @@ def test_to_device_to_cpu_pin_memory_preserve_keys():
     # right device/pinned-memory transform applied per tensor.
     ...
 
-def test_scatter_spatial_slices_local_chunk():
-    # GOAL: scatter_spatial applies the same spatial slicing as BatchData.data.
-    ...
-
 def test_broadcast_ensemble_repeat_interleaves_sample_dim():
     # GOAL: leading dim grows sample→sample*n_ensemble with block ordering
     # matching repeat_interleave_batch_dim.
     ...
 
+def test_empty_delta_is_valid():
+    # GOAL: a StepDiagnostics with an empty delta constructs, every op is a
+    # safe no-op, and sample_dim_size returns None.
+    ...
+
 def test_sample_dim_size():
     # GOAL: returns the leading dim of the delta tensors, or None when empty.
+    ...
+
+def test_to_dataset():
+    # GOAL: returns an xr.Dataset with exactly the delta variables and the
+    # given time coordinate; values round-trip.
     ...
 ```
 
@@ -211,16 +278,14 @@ def test_sample_dim_size():
 # PARAMETERIZE each over step_diagnostics present vs. None.
 
 def test_batch_data_forwards_step_diagnostics():
-    # GOAL: to_device / to_cpu / scatter_spatial / pin_memory /
-    # broadcast_ensemble / subset_names forward a populated step_diagnostics
-    # consistently with data (and pass None through). subset_names does not
-    # drop or filter it.
+    # GOAL: to_device / to_cpu / pin_memory / broadcast_ensemble forward a
+    # populated step_diagnostics consistently with data (and pass None through).
     ...
 
-def test_batch_data_time_ops_raise_with_step_diagnostics():
+def test_batch_data_guarded_ops_raise_with_step_diagnostics():
     # GOAL: select_time_slice / prepend / remove_initial_condition /
-    # compute_derived_variables / get_start / get_end raise when
-    # step_diagnostics is present, pass when None.
+    # compute_derived_variables / get_start / get_end / subset_names /
+    # scatter_spatial raise when step_diagnostics is present, pass when None.
     ...
 
 def test_paired_data_threads_step_diagnostics():
@@ -229,12 +294,21 @@ def test_paired_data_threads_step_diagnostics():
     ...
 ```
 
+## `fme/core/step/test_output.py` (modified)
+
+```python
+def test_stack_corrector_deltas():
+    # GOAL: stacks per-step deltas forward-step-aligned along dim 1; returns an
+    # empty mapping when no output carries a delta.
+    ...
+```
+
 ## `fme/core/corrector/test_output.py` (modified)
 
 ```python
-def test_apply_output_process_func():
-    # GOAL: maps the func over delta and returns a NEW CorrectorDiagnostics
-    # (input unmutated); identity func preserves values.
+def test_apply_output_masking():
+    # GOAL: maps the masking over delta and returns a NEW CorrectorDiagnostics
+    # (input unmutated); NullPostProcessFn preserves values.
     ...
 ```
 
@@ -264,15 +338,15 @@ def test_step_masks_corrector_diagnostics():
 ```python
 # Reuse the existing data-writer fixtures/helpers.
 
-def test_correction_writer_writes_delta_series():
-    # GOAL: with save_correction_files=True, autoregressive_corrections.nc
+def test_step_diagnostics_writer_writes_delta_series():
+    # GOAL: with save_step_diagnostics=True, autoregressive_step_diagnostics.nc
     # exists and contains exactly the corrector-modified variables with the
-    # expected values and no target series.
+    # expected values and no target series — via both build_paired() and build().
     # PARAMETERIZE: save_names subset ∈ {None, subset}; time_coarsen ∈ {None, factor 2}.
     ...
 
-def test_no_correction_file_by_default_or_without_corrector():
-    # GOAL: flag off ⇒ no correction file; flag on but step_diagnostics absent
-    # (no corrector) ⇒ no correction file content.
+def test_no_step_diagnostics_file_by_default_or_without_corrector():
+    # GOAL: flag off ⇒ no file; flag on but step_diagnostics absent (no
+    # corrector) ⇒ no file content.
     ...
 ```
