@@ -90,20 +90,27 @@ class PrognosticState:
     def to_device(self) -> "PrognosticState":
         return PrognosticState(self._data.to_device())
 
+    def with_stepper_state(self, stepper_state: StepperState) -> "PrognosticState":
+        """Return a copy with ``stepper_state`` attached, replacing any existing one.
+
+        Used to restore a segment's serialized ``StepperState`` (corrector state
+        + random state) onto the initial condition so the rollout continues
+        exactly where the previous segment left off.
+        """
+        return PrognosticState(
+            dataclasses.replace(self._data, stepper_state=stepper_state)
+        )
+
     def with_random_state(self, random_state: RandomState) -> "PrognosticState":
         """Return a copy with a seeded RandomState attached to its stepper_state.
 
         Used to seed stochastic inference: the random_state threads through the
-        rollout via the stepper_state so the noise sequence is reproducible.
+        rollout via the stepper_state so the noise sequence is reproducible. Any
+        other sub-state already present on the stepper_state is preserved.
         """
         stepper_state = self._data.stepper_state or StepperState()
-        return PrognosticState(
-            dataclasses.replace(
-                self._data,
-                stepper_state=dataclasses.replace(
-                    stepper_state, random_state=random_state
-                ),
-            )
+        return self.with_stepper_state(
+            dataclasses.replace(stepper_state, random_state=random_state)
         )
 
     def as_batch_data(self) -> "BatchData":

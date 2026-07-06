@@ -8,6 +8,7 @@ from typing import Literal
 
 import cftime
 import dacite
+import fsspec
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -45,10 +46,10 @@ from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
-from fme.core.random_state import RandomState
+from fme.core.stepper_state import StepperState
 from fme.core.timing import GlobalTimer
 
-from .evaluator import resolve_variable_metadata
+from .evaluator import apply_config_seed, resolve_variable_metadata
 
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
@@ -70,11 +71,21 @@ class InitialConditionConfig:
         engine: The engine used to open the dataset.
         start_indices: optional specification of the subset of
             initial conditions to use.
+        stepper_state_path: Optional path to a ``StepperState`` restart sidecar
+            (a ``.pt`` written by inference alongside ``restart.nc``). When
+            ``None`` (the default), no stepper state is restored and the rollout
+            starts fresh — this preserves the current behavior and is
+            back-compatible with restart files written before this feature.
+            When set, the sidecar is loaded and its ``StepperState`` (corrector
+            state + random state) is attached to the initial condition so the
+            rollout continues exactly where the previous segment left off. A set
+            path that does not exist is a user error and raises.
     """
 
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
     start_indices: StartIndices | None = None
+    stepper_state_path: str | None = None
 
     def get_dataset(self) -> xr.Dataset:
         open_kwargs = dict(
@@ -101,6 +112,24 @@ class InitialConditionConfig:
         # time is a required variable but not necessarily a dimension
         sample_dim_name = ds.time.dims[0]
         return ds.isel({sample_dim_name: ic_indices})
+
+    def get_stepper_state(self) -> StepperState:
+        """Load the ``StepperState`` restart sidecar named by ``stepper_state_path``.
+
+        ``fsspec`` handles remote paths, mirroring the remote-restart handling in
+        ``get_dataset``. Raises if ``stepper_state_path`` is unset or missing.
+        """
+        if self.stepper_state_path is None:
+            raise ValueError(
+                "stepper_state_path is not set; cannot load a stepper state."
+            )
+        if not exists(self.stepper_state_path):
+            raise FileNotFoundError(
+                f"stepper_state_path {self.stepper_state_path} does not exist."
+            )
+        with fsspec.open(self.stepper_state_path, "rb") as f:
+            state_dict = torch.load(f, weights_only=True)
+        return StepperState.from_state_dict(state_dict)
 
 
 def get_initial_condition(
@@ -342,10 +371,11 @@ def run_inference_from_config(config: InferenceConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
-        if config.seed is not None:
-            data._initial_condition = data.initial_condition.with_random_state(
-                RandomState.from_seed(config.seed)
+        if config.initial_condition.stepper_state_path is not None:
+            data._initial_condition = data.initial_condition.with_stepper_state(
+                config.initial_condition.get_stepper_state()
             )
+        apply_config_seed(config.seed, data)
 
         if not config.allow_incompatible_dataset:
             try:
@@ -451,6 +481,14 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
             with GlobalTimer():
                 run_inference_from_config(config_copy)
+        # Point the next segment at this segment's stepper-state sidecar so the
+        # random/corrector state continues across the restart. The sidecar is
+        # written only when there is state to save (a seeded and/or corrector
+        # rollout), so a deterministic rollout - or a pre-feature restart dir -
+        # has none, and the next segment starts fresh (stepper_state_path=None).
+        sidecar_path = os.path.join(segment_dir, "restart_stepper_state.pt")
         config_copy.initial_condition = InitialConditionConfig(
-            path=restart_path, engine="netcdf4"
+            path=restart_path,
+            engine="netcdf4",
+            stepper_state_path=sidecar_path if exists(sidecar_path) else None,
         )

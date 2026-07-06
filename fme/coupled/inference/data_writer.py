@@ -89,6 +89,10 @@ class CoupledPairedDataWriter(WriterABC[CoupledPrognosticState, CoupledPairedDat
         self._ocean_writer.write(data.ocean_data, filename)
         self._atmosphere_writer.write(data.atmosphere_data, filename)
 
+    def write_stepper_state(self, data: CoupledPrognosticState, filename: str):
+        self._ocean_writer.write_stepper_state(data.ocean_data, filename)
+        self._atmosphere_writer.write_stepper_state(data.atmosphere_data, filename)
+
     def append_batch(self, batch: CoupledPairedData):
         self._ocean_writer.append_batch(batch.ocean_data)
         self._atmosphere_writer.append_batch(batch.atmosphere_data)

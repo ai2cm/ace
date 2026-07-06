@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import TypeAlias
 
 import cftime
+import fsspec
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -15,6 +16,7 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
+from fme.core.stepper_state import StepperState
 
 from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
@@ -238,6 +240,9 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             dataset_metadata=self.dataset_metadata,
         )
 
+    def write_stepper_state(self, data: PrognosticState, filename: str):
+        _write_stepper_state(data, path=self.path, filename=filename)
+
     def append_batch(
         self,
         batch: PairedData,
@@ -316,6 +321,21 @@ def _write(
     to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
 
 
+def _write_stepper_state(data: PrognosticState, path: str, filename: str):
+    """Serialize the prognostic state's ``StepperState`` to a restart sidecar.
+
+    A no-op when there is no ``StepperState`` to save. Uses ``fsspec`` so the
+    ``.pt`` sidecar lands beside a local or remote ``restart.nc``.
+    """
+    stepper_state: StepperState | None = data.as_batch_data().stepper_state
+    if stepper_state is None:
+        return
+    # Serialize on CPU so the sidecar restores independently of the device the
+    # rollout ran on (the random generator is already CPU by construction).
+    with fsspec.open(os.path.join(path, filename), "wb") as f:
+        torch.save(stepper_state.to_cpu().to_state_dict(), f)
+
+
 class DataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
@@ -385,3 +405,6 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             coords=self.coords,
             dataset_metadata=self.dataset_metadata,
         )
+
+    def write_stepper_state(self, data: PrognosticState, filename: str):
+        _write_stepper_state(data, path=self.path, filename=filename)

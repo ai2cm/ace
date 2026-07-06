@@ -12,6 +12,16 @@ class WriterABC(abc.ABC, Generic[PS, SD]):
         ...
 
     @abc.abstractmethod
+    def write_stepper_state(self, data: PS, filename: str):
+        """Write the prognostic state's ``StepperState`` to a restart sidecar.
+
+        A no-op when the state carries no ``StepperState`` (e.g. an unseeded,
+        no-corrector-state rollout), so the sidecar is written only when there
+        is something to restore.
+        """
+        ...
+
+    @abc.abstractmethod
     def append_batch(
         self,
         batch: SD,
@@ -43,6 +53,9 @@ class NullDataWriter(WriterABC[Any, Any]):
         pass
 
     def write(self, data: Any, filename: str):
+        pass
+
+    def write_stepper_state(self, data: Any, filename: str):
         pass
 
     def finalize(self):

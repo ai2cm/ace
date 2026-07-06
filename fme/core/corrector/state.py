@@ -66,3 +66,16 @@ class CorrectorState:
         if self.global_dry_air_mass is not None:
             return self.global_dry_air_mass.shape[0]
         return None
+
+    def to_state_dict(self) -> dict[str, torch.Tensor]:
+        """Serialize the set fields for a restart. An unseeded (all-None) field
+        is omitted, so a round-trip of an empty ``CorrectorState`` stays empty.
+        """
+        if self.global_dry_air_mass is None:
+            return {}
+        return {"global_dry_air_mass": self.global_dry_air_mass}
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> "CorrectorState":
+        """Rebuild from a serialized state; absent fields stay ``None``."""
+        return cls(global_dry_air_mass=state.get("global_dry_air_mass"))

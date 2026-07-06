@@ -46,6 +46,22 @@ class RandomState:
         generator.manual_seed(seed)
         return cls(generator=generator)
 
+    def to_state_dict(self) -> dict[str, torch.Tensor]:
+        """Serialize the (advanced) generator state for a restart.
+
+        ``get_state`` returns the generator's full Mersenne-Twister state as a
+        CPU ``uint8`` ByteTensor, not the original seed, so restoring it
+        continues the exact draw sequence rather than reseeding.
+        """
+        return {"generator_state": self.generator.get_state()}
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> "RandomState":
+        """Rebuild a CPU generator from a serialized state (see ``to_state_dict``)."""
+        generator = torch.Generator()
+        generator.set_state(state["generator_state"])
+        return cls(generator=generator)
+
     # The generator lives on the CPU and is consumed in place; device and
     # ensemble transforms must preserve the same advancing object rather than
     # reset or copy it, so they return self unchanged.
