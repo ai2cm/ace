@@ -3,7 +3,11 @@ import datetime
 
 import torch
 
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigABC
+from fme.core.corrector.registry import (
+    Correction,
+    CorrectionSequence,
+    CorrectorConfigABC,
+)
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
@@ -132,14 +136,21 @@ class IceBudgetCorrectionConfig:
     def __call__(
         self, gen_data: TensorMapping, input_data: TensorMapping, timestep: float
     ) -> TensorDict:
-        x_in = {**input_data}
-        out = {**gen_data}
-
+        """
+        Returns:
+            A ``TensorDict`` containing only the fields modified by this
+            correction (each reconstructed prognostic variable and its three
+            budget terms); empty when ``corrected_variables`` is None.
+        """
         if self.corrected_variables is None:
-            return {key: value.float() for key, value in gen_data.items()}
+            return {}
 
         x_in = {key: value.double() for key, value in input_data.items()}
-        out = {key: value.double() for key, value in gen_data.items()}
+        # A full-precision working copy is needed for the read-after-write
+        # dependencies below (the ice mask reads a prognostic written in an
+        # earlier iteration); only the fields actually written are returned.
+        work = {key: value.double() for key, value in gen_data.items()}
+        modified: TensorDict = {}
 
         sic_vars = {"siconc", "sea_ice_fraction", "ocean_sea_ice_fraction"}
         mask_var = None
@@ -163,94 +174,41 @@ class IceBudgetCorrectionConfig:
             area_mode = key in sic_vars
             ice_mask = None
             if key != processing_order[0] and mask_var is not None:
-                ice_mask = out[mask_var]
+                ice_mask = work[mask_var]
 
+            terms = self.corrected_variables[key]
             budgets = self.constrain_budgets(
                 x_in[key],
-                out[self.corrected_variables[key][0]],
-                out[self.corrected_variables[key][1]],
-                out[self.corrected_variables[key][2]],
+                work[terms[0]],
+                work[terms[1]],
+                work[terms[2]],
                 area_mode=area_mode,
                 timestep=timestep,
                 ice_mask=ice_mask,
             )
-            out[self.corrected_variables[key][0]] = budgets[0]
-            out[self.corrected_variables[key][1]] = budgets[1]
-            out[self.corrected_variables[key][2]] = budgets[2]
-            out[key] = x_in[key] + timestep * (budgets[0] + budgets[1] + budgets[2])
+            work[terms[0]] = budgets[0]
+            work[terms[1]] = budgets[1]
+            work[terms[2]] = budgets[2]
+            work[key] = x_in[key] + timestep * (budgets[0] + budgets[1] + budgets[2])
+            # record each field as it is written -- the writes determine the
+            # modified set.
+            for name in (terms[0], terms[1], terms[2], key):
+                modified[name] = work[name]
 
-        return {key: value.float() for key, value in out.items()}
-    
+        return {key: value.float() for key, value in modified.items()}
+
+
 @dataclasses.dataclass
-class AlbedoCorrectionConfig:
-    """
-    Make sure that upward shortwave, and hence surface albedo,
-    are greater than or equal to zero and also upward shorwave
-    is zero when the incoming shortwave is below an etol threshold.
-    """
+class IceBudgetCorrection:
+    """Correction that reconstructs ice/snow state from budget terms.
 
-    upward_shortwave_name: str = "SWUP"
-    downward_shortwave_name: str = "SWDN"
-
-    def __call__(
-        self, gen_data: TensorMapping, forcing_data: TensorMapping
-    ) -> TensorDict:
-        force = {**forcing_data}
-        out = {**gen_data}
-
-        force = {key: value.double() for key, value in forcing_data.items()}
-        out = {key: value.double() for key, value in gen_data.items()}
-
-        etol = 1e-3
-        swdn = force[self.downward_shortwave_name]
-        swup = out[self.upward_shortwave_name]
-        
-        # Ensure swup >= 0
-        swup = torch.clamp(swup, min=0.0)
-        
-        # When incoming radiation is negligible, set outgoing to zero
-        swup = torch.where(swdn < etol, 0.0, swup)
-        
-        # For physical albedo constraint: albedo = swup/swdn <= 1
-        # This means swup <= swdn, so clamp swup to not exceed swdn
-        swup = torch.where(swdn >= etol, torch.clamp(swup, max=swdn), swup)
-        
-        out[self.upward_shortwave_name] = swup
-        return {key: value.float() for key, value in out.items()}
-
-
-
-@CorrectorSelector.register("ice_corrector")
-@dataclasses.dataclass
-class IceCorrectorConfig(CorrectorConfigABC):
-    budget_correction: IceBudgetCorrectionConfig | None = None
-    albedo_correction: AlbedoCorrectionConfig | None = None
-
-    def _get_corrector(
-        self,
-        dataset_info: DatasetInfo,
-    ) -> "IceCorrector":
-        return IceCorrector(
-            self,
-            dataset_info.gridded_operations,
-            dataset_info.timestep,
-        )
-
-
-class IceCorrector(CorrectorABC):
-    """
-    Implement choice of sea ice corrector.
+    Wraps ``IceBudgetCorrectionConfig`` so the corrector applies the operation
+    without reading config fields. ``forcing_data`` and ``corrector_state`` are
+    unused and passed through.
     """
 
-    def __init__(
-        self,
-        config: IceCorrectorConfig,
-        gridded_operations: GriddedOperations,
-        timestep: datetime.timedelta,
-    ):
-        self._config = config
-        self._gridded_operations = gridded_operations
-        self._timestep = timestep
+    config: IceBudgetCorrectionConfig
+    timestep_seconds: float
 
     def __call__(
         self,
@@ -259,10 +217,46 @@ class IceCorrector(CorrectorABC):
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        timestep = self._timestep.total_seconds()
-        if self._config.budget_correction is not None:
-            gen_data = self._config.budget_correction(gen_data, input_data, timestep)
-        if self._config.albedo_correction is not None:
-            gen_data = self._config.albedo_correction(gen_data, forcing_data)
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (each reconstructed prognostic variable and its
+            budget terms); empty when no variables are corrected.
+            ``IceBudgetCorrectionConfig.__call__`` already returns only those
+            fields.
+        """
+        corrected = self.config(gen_data, input_data, self.timestep_seconds)
+        return corrected, corrector_state
 
-        return dict(gen_data), corrector_state
+
+@CorrectorSelector.register("ice_corrector")
+@dataclasses.dataclass
+class IceCorrectorConfig(CorrectorConfigABC):
+    budget_correction: IceBudgetCorrectionConfig | None = None
+
+    def _get_corrector(
+        self,
+        dataset_info: DatasetInfo,
+    ) -> "IceCorrector":
+        return self._build(
+            dataset_info.gridded_operations,
+            dataset_info.timestep,
+        )
+
+    def _build(
+        self,
+        gridded_operations: GriddedOperations,
+        timestep: datetime.timedelta,
+    ) -> "IceCorrector":
+        corrections: list[Correction] = []
+        if self.budget_correction is not None:
+            corrections.append(
+                IceBudgetCorrection(self.budget_correction, timestep.total_seconds())
+            )
+        return IceCorrector(corrections)
+
+
+class IceCorrector(CorrectionSequence):
+    """
+    Implement choice of sea ice corrector.
+    """
