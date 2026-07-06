@@ -13,6 +13,7 @@ from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import DataWriterConfig, _write
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.device import get_device
 from fme.core.step.step_diagnostics import StepDiagnostics
 
 
@@ -119,6 +120,7 @@ def _get_step_diagnostics_setup(n_samples=2, n_times=4, n_lat=4, n_lon=5):
         dims=["sample", "time"],
     )
     initial_condition_times = times.values[:, 0]
+    device = get_device()
     delta = {
         "a": torch.arange(
             n_samples * n_times * n_lat * n_lon, dtype=torch.float32
@@ -127,15 +129,17 @@ def _get_step_diagnostics_setup(n_samples=2, n_times=4, n_lat=4, n_lon=5):
     }
     batch = PairedData(
         prediction={
-            "a": torch.rand(n_samples, n_times, n_lat, n_lon),
-            "b": torch.rand(n_samples, n_times, n_lat, n_lon),
+            "a": torch.rand(n_samples, n_times, n_lat, n_lon, device=device),
+            "b": torch.rand(n_samples, n_times, n_lat, n_lon, device=device),
         },
         reference={
-            "a": torch.rand(n_samples, n_times, n_lat, n_lon),
-            "b": torch.rand(n_samples, n_times, n_lat, n_lon),
+            "a": torch.rand(n_samples, n_times, n_lat, n_lon, device=device),
+            "b": torch.rand(n_samples, n_times, n_lat, n_lon, device=device),
         },
         time=times,
-        step_diagnostics=StepDiagnostics(delta=delta),
+        step_diagnostics=StepDiagnostics(
+            delta={k: v.to(device) for k, v in delta.items()}
+        ),
     )
     build_kwargs = dict(
         initial_condition_times=initial_condition_times,
