@@ -73,6 +73,7 @@ from fme.core.coordinates import (
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.generics.trainer import _restore_checkpoint
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import StepLossConfig
@@ -87,6 +88,7 @@ from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing.model import compare_parameters, compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
+from fme.core.typing_ import Slice
 
 JOB_SUBMISSION_SCRIPT_PATH = (
     pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
@@ -165,6 +167,7 @@ def _get_test_yaml_files(
     partial_train_data_path: pathlib.Path | None = None,
     batch_size: int = 2,
     sample_with_replacement: int | None = 10,
+    lr_tuning: LRTuningConfig | None = None,
 ):
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
@@ -367,9 +370,15 @@ def _get_test_yaml_files(
             optimizer_type="Adam",
             lr=0.0001,
             kwargs=dict(weight_decay=0.01),
-            scheduler=SchedulerConfig(
-                type="CosineAnnealingLR",
-                kwargs=dict(T_max=1),
+            # lr_tuning is an alternative form of LR scheduling and cannot be
+            # combined with an explicit scheduler (see TrainConfig validation).
+            scheduler=(
+                SchedulerConfig()
+                if lr_tuning is not None
+                else SchedulerConfig(
+                    type="CosineAnnealingLR",
+                    kwargs=dict(T_max=1),
+                )
             ),
         ),
         stepper=StepperConfig(
@@ -399,7 +408,7 @@ def _get_test_yaml_files(
                             ),
                         ),
                         ocean=OceanConfig(
-                            surface_temperature_name=in_variable_names[0],
+                            surface_temperature_name="surface_temperature",
                             ocean_fraction_name=mask_name,
                         ),
                         corrector=corrector_config,
@@ -420,6 +429,7 @@ def _get_test_yaml_files(
         logging=logging_config,
         experiment_dir=str(results_dir),
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+        lr_tuning=lr_tuning,
     )
 
     inference_config = InferenceEvaluatorConfig(
@@ -495,6 +505,7 @@ def _setup(
     validate_using_ema: bool = False,
     multi_validation: bool = False,
     use_variable_masking: bool = False,
+    lr_tuning: LRTuningConfig | None = None,
 ):
     if not path.exists():
         path.mkdir()
@@ -605,6 +616,7 @@ def _setup(
         validate_using_ema=validate_using_ema,
         multi_validation=multi_validation,
         partial_train_data_path=partial_data_dir,
+        lr_tuning=lr_tuning,
     )
     return train_config_filename, inference_config_filename
 
@@ -1081,6 +1093,44 @@ def test_train_without_inline_inference(tmp_path):
     assert "val_extra/mean/loss" in epoch_logs
     val_extra_output = tmp_path / "results" / "output" / "val_extra" / "epoch_0001"
     assert val_extra_output.exists()
+
+
+@pytest.mark.medium_duration
+def test_lr_tuning_with_loss_schedule(tmp_path):
+    """LR tuning combined with an epoch-based loss schedule trains without error.
+
+    Regression test for ace#1275: the LR-tuning validation path never advanced
+    the validation data to the trial's epoch, so the validation batches carried
+    epoch=None and tripped EpochNotProvidedError in LossSchedule.init_for_epoch
+    whenever a loss schedule with milestones was active. This exercises both
+    together end-to-end; before the fix it raised during the first LR-tuning
+    trial.
+    """
+    train_config, _ = _setup(
+        tmp_path,
+        "SphericalFourierNeuralOperatorNet",
+        log_to_wandb=True,
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,  # must be even
+        skip_inline_inference=True,
+        # epoch-based loss schedule with a milestone (the use_schedule branch
+        # only triggers when the constant-probability path is disabled)
+        use_time_length_probabilities=False,
+        use_schedule=True,
+        lr_tuning=LRTuningConfig(
+            epochs=Slice(),
+            lr_factor=0.5,
+            num_batches=1,
+            improvement_threshold=0.1,
+        ),
+    )
+    with mock_wandb() as wandb:
+        train_main(yaml_config=train_config)
+        wandb_logs = wandb.get_logs()
+    # Training completed through both epochs (the schedule milestone is at
+    # epoch 1) without an EpochNotProvidedError, logging a validation loss.
+    assert any("val/mean/loss" in epoch_logs for epoch_logs in wandb_logs)
 
 
 @pytest.mark.skipif(torch.cuda.is_available(), reason="flaky on GPU")

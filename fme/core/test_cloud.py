@@ -6,9 +6,11 @@ import pytest
 import xarray as xr
 
 from fme.core.cloud import (
+    exists,
     inter_filesystem_copy,
     is_local,
     makedirs,
+    open_dataset_via_inter_filesystem_copy,
     to_netcdf_via_inter_filesystem_copy,
 )
 
@@ -69,3 +71,34 @@ def test_to_netcdf_via_inter_filesystem_copy(tmp_path: Path):
     to_netcdf_via_inter_filesystem_copy(ds, filename)
     result = xr.open_dataset(filename)
     xr.testing.assert_identical(ds, result)
+
+
+def test_exists(tmp_path: Path):
+    local = tmp_path / "f.txt"
+    assert not exists(local)
+    local.write_text("x")
+    assert exists(local)
+
+    remote = "memory://exists-test/f.txt"
+    fs, _ = fsspec.url_to_fs(remote)
+    assert not exists(remote)
+    inter_filesystem_copy(local, remote)
+    assert exists(remote)
+    fs.rm(remote, recursive=True)
+
+
+def test_open_dataset_via_inter_filesystem_copy():
+    # round-trip through a NON-LOCAL filesystem (memory://) -- the case plain
+    # xr.open_dataset on a netCDF can't handle (e.g. restart.nc on gs://).
+    ds = xr.Dataset(
+        data_vars={"var": ("x", [1.0, 2.0, 3.0])},
+        coords={"x": [1, 2, 3]},
+    )
+    filename = "memory://roundtrip-test/test.nc"
+    to_netcdf_via_inter_filesystem_copy(ds, filename)
+    result = open_dataset_via_inter_filesystem_copy(filename)
+    # values are present even though the temporary copy is gone (helper calls .load())
+    xr.testing.assert_identical(ds, result)
+
+    fs, _ = fsspec.url_to_fs(filename)
+    fs.rm(filename, recursive=True)
