@@ -14,8 +14,8 @@ def test_force_positive():
     new_min = torch.min(fixed_data["foo"])
     # Ensure the minimum value of 'foo' is now 0
     torch.testing.assert_close(new_min, torch.tensor(0.0))
-    # Ensure other variables are not modified
-    torch.testing.assert_close(fixed_data["bar"], data["bar"])
+    # Only the clamped field is returned; unmodified variables are absent
+    assert set(fixed_data) == {"foo"}
 
 
 def test_replace_value_keep_gradient():

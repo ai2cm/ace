@@ -69,6 +69,11 @@ class ConserveDryAir:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the surface pressure adjusted to conserve dry air).
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "conserve_dry_air is set to True, but no vertical coordinate is "
@@ -82,14 +87,14 @@ class ConserveDryAir:
             precision=self.precision,
         )
         assert corrector_state.global_dry_air_mass is not None
-        gen_data = _adjust_gen_dry_air_to_target(
+        corrected = _adjust_gen_dry_air_to_target(
             gen_data,
             target_global_dry_air=corrector_state.global_dry_air_mass,
             area_weighted_mean=self.area_weighted_mean,
             vertical_coordinate=self.vertical_coordinate,
             precision=self.precision,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
@@ -105,11 +110,16 @@ class ZeroGlobalMeanMoistureAdvection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        gen_data = _force_zero_global_mean_moisture_advection(
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the field modified by this
+            correction (the moisture advection tendency).
+        """
+        corrected = _force_zero_global_mean_moisture_advection(
             gen_data=gen_data,
             area_weighted_mean=self.area_weighted_mean,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
@@ -133,12 +143,17 @@ class MoistureBudgetCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction.
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Moisture budget correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        gen_data = _force_conserve_moisture(
+        corrected = _force_conserve_moisture(
             input_data=input_data,
             gen_data=gen_data,
             area_weighted_mean=self.area_weighted_mean,
@@ -146,7 +161,7 @@ class MoistureBudgetCorrection:
             timestep_seconds=self.timestep_seconds,
             terms_to_modify=self.terms_to_modify,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
@@ -166,12 +181,17 @@ class TotalEnergyBudgetCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the air temperature at every vertical level).
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Energy budget correction is turned on, but no vertical coordinate"
                 " is available."
             )
-        gen_data = _force_conserve_total_energy(
+        corrected = _force_conserve_total_energy(
             input_data=input_data,
             gen_data=gen_data,
             forcing_data=forcing_data,
@@ -181,7 +201,7 @@ class TotalEnergyBudgetCorrection:
             method=self.method,
             unaccounted_heating=self.unaccounted_heating,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @CorrectorSelector.register("atmosphere_corrector")
@@ -415,7 +435,7 @@ def _adjust_gen_dry_air_to_target(
         1 - (bk_diff * wat).sum(-1)
     )
     gen.set_surface_pressure(new_pressure.to(dtype=gen.surface_pressure.dtype))
-    return gen.data
+    return gen.modified_data
 
 
 def _force_zero_global_mean_moisture_advection(
@@ -441,7 +461,7 @@ def _force_zero_global_mean_moisture_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
     )
-    return gen.data
+    return gen.modified_data
 
 
 def _force_conserve_moisture(
@@ -534,7 +554,7 @@ def _force_conserve_moisture(
             gen.evaporation_rate - gen.precipitation_rate
         )
         gen.set_tendency_of_total_water_path_due_to_advection(new_advection)
-    return gen.data
+    return gen.modified_data
 
 
 def _force_conserve_total_energy(
@@ -589,10 +609,9 @@ def _force_conserve_total_energy(
 
     # apply same temperature correction to all vertical layers
     air_temperature_names = gen.get_all_vertical_level_names("air_temperature")
-    for name in air_temperature_names:
-        gen.data[name] = gen.data[name] + temperature_correction
-    # filter required here because we merged forcing data into gen above
-    return {k: v for k, v in gen.data.items() if k in gen_data}
+    return {
+        name: gen.data[name] + temperature_correction for name in air_temperature_names
+    }
 
 
 def _energy_correction_factor(
