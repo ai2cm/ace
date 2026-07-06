@@ -97,8 +97,11 @@ class SpectralMatchingLoss(torch.nn.Module):
         self.min_wavenumber = min_wavenumber
         self.eps = eps
         self.log = log
-        # (C,) reshaped to broadcast against (..., C, K)
-        self.register_buffer("variable_weights", variable_weights.reshape(-1, 1))
+        # (C,) reshaped to broadcast against (..., C, K). Non-persistent: it is
+        # derived from config, so it should not enter checkpoints.
+        self.register_buffer(
+            "variable_weights", variable_weights.reshape(-1, 1), persistent=False
+        )
 
     def _band_weights(self, n_wavenumbers: int, device, dtype) -> torch.Tensor:
         k = torch.arange(n_wavenumbers, device=device, dtype=dtype)

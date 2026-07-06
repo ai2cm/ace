@@ -382,6 +382,46 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--spectral-loss-weight",
+        type=float,
+        default=float(os.environ.get("ACE_SPECTRAL_LOSS_WEIGHT", "0.0")),
+        dest="spectral_loss_weight",
+        metavar="W",
+        help=(
+            "Overall weight of the auxiliary spectral-matching generator loss "
+            "(zonal power spectrum, student vs teacher). 0 (default) disables "
+            "it and leaves the method unchanged. Currently wired for the "
+            "f-distill method only. Defaults to $ACE_SPECTRAL_LOSS_WEIGHT."
+        ),
+    )
+    parser.add_argument(
+        "--spectral-band-gamma",
+        type=float,
+        default=float(os.environ.get("ACE_SPECTRAL_BAND_GAMMA", "0.0")),
+        dest="spectral_band_gamma",
+        metavar="GAMMA",
+        help=(
+            "High-wavenumber emphasis exponent for the spectral loss. Band "
+            "weights ~ (k / k_max) ** gamma, normalized to mean 1 over included "
+            "wavenumbers. 0 (default) weights all wavenumbers equally; larger "
+            "values concentrate on the small-scale tail. "
+            "Defaults to $ACE_SPECTRAL_BAND_GAMMA."
+        ),
+    )
+    parser.add_argument(
+        "--spectral-min-wavenumber",
+        type=int,
+        default=int(os.environ.get("ACE_SPECTRAL_MIN_WAVENUMBER", "0")),
+        dest="spectral_min_wavenumber",
+        metavar="K",
+        help=(
+            "Exclude zonal wavenumbers below this index from the spectral loss, "
+            "so it does not spend its budget on the large scales the "
+            "distribution-matching term already reproduces. 0 (default) "
+            "includes all. Defaults to $ACE_SPECTRAL_MIN_WAVENUMBER."
+        ),
+    )
+    parser.add_argument(
         "--dryrun",
         action="store_true",
         help="Load teacher, build one batch, run one forward pass, and exit.",
@@ -450,8 +490,6 @@ def main() -> None:
     # render every output channel (variable) as its own per-channel-normalized
     # panel — one row per sample, one column per variable.  Column labels come
     # from the teacher out_packer, populated below once the teacher loads.
-    from omegaconf import DictConfig
-
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -462,6 +500,7 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
     # Output-variable names for panel labels; filled once the teacher loads.
@@ -731,11 +770,40 @@ def main() -> None:
         return
 
     # ------------------------------------------------------------------
+    # 8b. Optional spectral-matching auxiliary loss (f-distill only).
+    #     Swap the method class for the spectral-aware subclass and build the
+    #     loss module; it is attached to the model after instantiation.
+    # ------------------------------------------------------------------
+    spectral_loss = None
+    if args.spectral_loss_weight > 0.0:
+        from fme.downscaling.distillation.spectral_method import AceFdistillModel
+        from fme.downscaling.spectral_loss import SpectralMatchingLossConfig
+
+        target = config.model_class.get("_target_", "")
+        if not target.endswith("FdistillModel"):
+            raise ValueError(
+                "--spectral-loss-weight is currently wired for the f-distill "
+                f"method only, but model_class is {target!r}."
+            )
+        spectral_loss = SpectralMatchingLossConfig(
+            band_gamma=args.spectral_band_gamma,
+            min_wavenumber=args.spectral_min_wavenumber,
+        ).build(list(_ref_model.out_packer.names))
+        config.model_class = L(AceFdistillModel)(config=None)
+        logger.info(
+            f"Spectral matching loss enabled: weight={args.spectral_loss_weight} "
+            f"band_gamma={args.spectral_band_gamma} "
+            f"min_wavenumber={args.spectral_min_wavenumber}"
+        )
+
+    # ------------------------------------------------------------------
     # 9. Instantiate FastGen model and run training.
     # ------------------------------------------------------------------
     config.model_class.config = config.model
     model = instantiate(config.model_class)
     config.model_class.config = None
+    if spectral_loss is not None:
+        model.set_spectral_loss(spectral_loss, args.spectral_loss_weight)
     synchronize()
 
     logger.info("Initialising FastGen Trainer...")

@@ -40,10 +40,13 @@ weight, and for DMD2 (where `gan_loss_weight_gen` may be 0) potentially remove i
 
 ## Design decisions (agreed 2026-07-06)
 
-1. **Placement:** a generic optional auxiliary-loss hook in fastgen, with the
-   atmosphere-specific spectral op implemented on the ACE side. Keeps the
-   FFT/grid code in `fme/`, keeps fastgen domain-agnostic, and covers both DMD2
-   and f-distill through one hook.
+1. **Placement:** FastGen is a *pinned upstream submodule* (`NVlabs/FastGen`),
+   not a vendored copy, so we do **not** edit its source. Instead the ACE side
+   subclasses the method (`AceFdistillModel(FdistillModel)`) and adds the
+   spectral term by overriding the generator step; the subclass is selected by
+   pointing `config.model_class` at it from `fastgen_train.py`. Scoped to
+   **f-distill only** for v1 (the run being tuned); DMD2 is a trivial parallel
+   subclass if needed later.
 2. **Target:** match the student spectrum to the **teacher** spectrum
    (`teacher_x0`), not ground truth. Distillation-consistent (same target as
    VSD), recovers exactly what few-step sampling loses, and cannot fight the
@@ -108,33 +111,31 @@ Validate in `__post_init__`. Unit tests: differentiability, correct shape,
 matches a numpy reference spectrum, band weighting monotonic in `gamma`, zero
 loss when `gen == teacher`, per-variable weighting selects the right channel.
 
-### B. fastgen side — generic auxiliary-loss hook
+### B. ACE method subclass — `spectral_method.AceFdistillModel`
 
-- Add optional `config.model.auxiliary_loss` (lazy `L(...)` module, default
-  `None`) and `config.model.auxiliary_loss_weight: float = 0.0` to the shared
-  method config.
-- In `dmd2.py._student_update_step` and `f_distill.py` generator step, after
-  `gen_data`/`teacher_x0` are available:
-  ```
-  aux_loss = torch.tensor(0.0, device=..., dtype=...)
-  if self.auxiliary_loss is not None:
-      aux_loss = self.auxiliary_loss(gen_data, teacher_x0)
-  loss = ... + self.config.auxiliary_loss_weight * aux_loss
-  loss_map["aux_loss"] = aux_loss
-  ```
-- Keep the hook signature `(gen_data, teacher_x0) -> scalar` domain-agnostic
-  (no atmosphere terms in fastgen). fastgen unit test: with a stub module the
-  term is added and weighted; with `None` the loss is unchanged.
+`AceFdistillModel(FdistillModel)` (`fme/downscaling/distillation/spectral_method.py`):
+- `set_spectral_loss(module, weight)` stores `(module.to(device), weight)` in a
+  **tuple** attribute so `nn.Module.__setattr__` does not register it as a
+  submodule — the param-less loss must stay out of the optimizer, DDP parameter
+  list, and state_dict.
+- Overrides `_student_update_step`: delegates verbatim to `super()` when no
+  spectral loss is set (or weight 0), otherwise mirrors the parent body (FastGen
+  pinned at `123e6a2`) and adds `weight * spectral_loss(gen_data, teacher_x0)`
+  to `loss`, logging `spectral_loss` / `spectral_loss_weighted` in `loss_map`.
+  Manual mirror because upstream exposes no hook at the `loss=` line; the guard
+  test `test_overrides_student_update_step` flags upstream drift.
 
-### C. ACE adapter — build + inject
+### C. ACE entry point — build + inject
 
-- In `fastgen_train.py`, next to the discriminator auto-wiring (~`:606-627`),
-  build the `SpectralMatchingLoss` from CLI/config and set
-  `config.model.auxiliary_loss = L(SpectralMatchingLoss)(...)` and
-  `config.model.auxiliary_loss_weight`.
-- New CLI args mirroring the existing style: `--spectral-loss-weight`,
-  `--spectral-band-gamma`, `--spectral-min-wavenumber` (+ env-var fallbacks like
-  the others).
+- In `fastgen_train.py`, when `--spectral-loss-weight > 0`: assert
+  `config.model_class._target_` is the f-distill method, build
+  `SpectralMatchingLoss` from `SpectralMatchingLossConfig` and the teacher's
+  `out_packer.names`, swap `config.model_class = L(AceFdistillModel)(config=None)`,
+  and after `instantiate` call `model.set_spectral_loss(...)`.
+- CLI args (env-var fallbacks like the others): `--spectral-loss-weight`
+  (`$ACE_SPECTRAL_LOSS_WEIGHT`, the single overall weight), `--spectral-band-gamma`
+  (`$ACE_SPECTRAL_BAND_GAMMA`), `--spectral-min-wavenumber`
+  (`$ACE_SPECTRAL_MIN_WAVENUMBER`). Default weight 0 → method unchanged.
 
 ## Rollout / experiments
 
@@ -157,11 +158,19 @@ loss when `gen == teacher`, per-variable weighting selects the right channel.
 - **Per-sample vs batch spectra:** gen and teacher share condition + noise, so
   per-sample spectra are directly comparable; batch-mean log-power is the
   estimator. Confirm variance is acceptable at the training batch size.
+- **Field space is resolved:** the loss compares `gen_data` to `teacher_x0`,
+  both of which are the network's output in the *same* (residual/normalized)
+  space at the `loss=` line, so no residual add-back / denorm is needed — it
+  compares like with like. (Consequence: it matches the teacher's spectrum *in
+  that space*, which is exactly the distillation-consistent target.)
+- **log-power near-zero sensitivity (confirmed in tests):** `log(power + eps)`
+  amplifies the rfft roundoff floor at near-empty wavenumbers, so `eps` must be
+  set relative to the field's power scale, not left at the tiny default, or the
+  loss will chase FP noise at the highest wavenumbers. Revisit `eps` (or use
+  `log=False`) once we see real PRATEsfc spectra.
 - **PRATEsfc positivity / heavy tail:** precip is non-negative and highly
-  intermittent; its spectrum is dominated by rare intense cells. Check whether
-  log-power L1 on the raw field is well-behaved or whether the loss should act in
-  the model's (already residual/normalized) space — align with where `gen_data`
-  lives at the `loss=` line.
+  intermittent; its spectrum is dominated by rare intense cells. Confirm the
+  log-power L1 tail behaves on real fields.
 - **f-distill GAN coupling:** v1 keeps the GAN in f-distill (assert). Only
   revisit removing it if the DMD2 GAN-off arm shows the spectral term is
   sufficient on its own.
