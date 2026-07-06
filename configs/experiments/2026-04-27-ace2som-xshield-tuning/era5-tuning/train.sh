@@ -19,17 +19,17 @@ SEED_OFFSET=10
 cd $REPO_ROOT
 
 # ERA5 pretraining https://beaker.org/orgs/ai2/workspaces/ace/work/01KSN76D3GQ7MVP058Y2Z2TGKE
-#PRE_TRAINED_WEIGHTS_DATASETS=("01KSVC6YS7C18SGYV4VPZYZ232")
+PRE_TRAINED_WEIGHTS_DATASETS=("01KSVC6YS7C18SGYV4VPZYZ232")
 
 # ERA5 1 step pretraining
-PRE_TRAINED_WEIGHTS_DATASETS=("01KSK9T5C7PXVR66ERW1E26HFF")
+#PRE_TRAINED_WEIGHTS_DATASETS=("01KSK9T5C7PXVR66ERW1E26HFF")
 
 # ERA5 pretraining, different random seed, with energy correction and embed_dim 32
 #PRE_TRAINED_WEIGHTS_DATASETS=("01KVZV0DFM43B7XREKTYK210VX")
 
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-era5-1step-tune-xshield-10yr-seed${seed}"
+    job_name="ace2s-era5-tune-xshield-10yr-no-missing-vars-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override

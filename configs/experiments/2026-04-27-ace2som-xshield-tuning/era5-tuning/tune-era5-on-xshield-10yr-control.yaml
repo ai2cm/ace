@@ -21,7 +21,7 @@ inference:
       #- '2014-11-15T00:00:00'
     dataset:
       data_path: /climate-default/
-      file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
       engine: zarr
     num_data_workers: 8
   aggregator:
@@ -49,7 +49,7 @@ train_loader:
   dataset:
     concat:
     - data_path: /climate-default/
-      file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
       engine: zarr
       subset:
         stop_time: '2022-12-31'
@@ -103,7 +103,7 @@ stepper:
     config:
       builder:
         type: NoiseConditionedSFNO
-        allow_missing_variables: true
+        #allow_missing_variables: true
         config:
           embed_dim: 512
           noise_embed_dim: 64
