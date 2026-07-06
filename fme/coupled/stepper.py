@@ -1719,8 +1719,12 @@ class CoupledStepper:
             self.ice.set_eval()
 
     def set_epoch(self, epoch: int) -> None:
-        self.atmosphere.set_epoch(epoch)
-        self.ocean.set_epoch(epoch)
+        if self.atmosphere is not None:
+            self.atmosphere.set_epoch(epoch)
+        if self.ocean is not None:
+            self.ocean.set_epoch(epoch)
+        if self.ice is not None:
+            self.ice.set_epoch(epoch)
 
     def get_state(self):
         """

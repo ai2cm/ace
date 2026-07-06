@@ -6,7 +6,99 @@ import torch.nn as nn
 import torch.utils.checkpoint
 
 from .activations import CappedGELU
+from .utils import PartialDepthwiseConv2d
 
+class ChannelLayerNorm(nn.Module):
+    def __init__(self, channels: int):
+        super().__init__()
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.permute(0, 2, 3, 1)
+        x = self.norm(x)
+        return x.permute(0, 3, 1, 2).contiguous()
+
+
+class MaskAwareInputBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int = 3,
+        dilation: int = 1,
+        upscale_factor: int = 4,
+    ):
+        super().__init__()
+
+        self.partial_spatial = PartialDepthwiseConv2d(
+            channels=in_channels,
+            kernel_size=kernel_size,
+            dilation=dilation,
+        )
+
+        # We concatenate the partial-convolution features and masks.
+        mixing_channels = 2 * in_channels
+        expanded_channels = upscale_factor * in_channels
+
+        self.norm = ChannelLayerNorm(mixing_channels)
+
+        self.expand = nn.Conv2d(
+            mixing_channels,
+            expanded_channels,
+            kernel_size=1,
+        )
+        self.activation = CappedGELU()
+        self.contract = nn.Conv2d(
+            expanded_channels,
+            out_channels,
+            kernel_size=1,
+        )
+
+        self.skip = nn.Conv2d(
+            mixing_channels,
+            out_channels,
+            kernel_size=1,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        channel_mask: torch.Tensor,
+        ocean_column_mask: torch.Tensor,
+    ) -> torch.Tensor:
+
+        channel_mask = channel_mask.to(dtype=x.dtype)
+        # channel_mask is stored as [1, C, H, W]; torch.cat requires an exact
+        # batch-dim match, so expand it here before any concatenation.
+        channel_mask = channel_mask.expand(x.shape[0], -1, -1, -1)
+        masked_input = x * channel_mask
+
+        spatial_features, _ = self.partial_spatial(
+            masked_input,
+            channel_mask,
+        )
+
+        # The network sees both the locally estimated values and which
+        # original values were genuinely present.
+        features = torch.cat(
+            [spatial_features, channel_mask],
+            dim=1,
+        )
+
+        residual_input = torch.cat(
+            [masked_input, channel_mask],
+            dim=1,
+        )
+
+        y = self.norm(features)
+        y = self.expand(y)
+        y = self.activation(y)
+        y = self.contract(y)
+
+        output = self.skip(residual_input) + y
+
+        # Latent features are only valid over actual ocean columns.
+        return output * ocean_column_mask
 
 class BilinearUpsample(torch.nn.Module):
     def __init__(self, upsampling: int = 2, **kwargs):

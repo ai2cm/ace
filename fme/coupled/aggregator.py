@@ -67,11 +67,12 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
     def record_batch(self, batch: CoupledTrainOutput):
         self._loss += batch.total_metrics["loss"]
         self._n_batches += 1
-        for component in (batch.ocean, batch.atmosphere):
-            step_metrics = {
-                k: v for k, v in component.metrics.items() if k.startswith("loss/")
-            }
-            self._per_step_losses.record(step_metrics)
+        for component in (batch.ocean, batch.ice, batch.atmosphere):
+            if component is not None:
+                step_metrics = {
+                    k: v for k, v in component.metrics.items() if k.startswith("loss/")
+                }
+                self._per_step_losses.record(step_metrics)
 
     @torch.no_grad()
     def get_summary(self, label: str) -> AggregatorSummary:
@@ -248,7 +249,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             .cpu()
             .numpy()
         )
-        if self.atmosphere is None:
+        if self._aggregators["atmosphere"] is None:
             duplicates = set(ocean_logs.keys()) & set(ice_logs.keys())
             if len(duplicates) > 0:
                 raise ValueError(
@@ -265,7 +266,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             logs[f"{label}/mean/loss/ocean"] = float(
                 self._dist.reduce_mean(loss_ocean.detach()).cpu().numpy()
             )
-        elif self.ice is None:
+        elif self._aggregators["ice"] is None:
             duplicates = set(ocean_logs.keys()) & set(atmos_logs.keys())
             if len(duplicates) > 0:
                 raise ValueError(
@@ -282,7 +283,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             logs[f"{label}/mean/loss/atmosphere"] = float(
                 self._dist.reduce_mean(loss_atmos.detach()).cpu().numpy()
             )
-        elif self.ocean is None:
+        elif self._aggregators["ocean"] is None:
             duplicates = set(ice_logs.keys()) & set(atmos_logs.keys())
             if len(duplicates) > 0:
                 raise ValueError(

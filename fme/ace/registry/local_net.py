@@ -75,6 +75,7 @@ class AnkurLocalNetBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ) -> nn.Module:
         params = AnkurLocalNetConfig(
             embed_dim=self.embed_dim,
@@ -186,6 +187,7 @@ class LocalNetBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ) -> nn.Module:
         params = LocalNetConfig(
             embed_dim=self.embed_dim,

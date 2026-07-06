@@ -31,6 +31,7 @@ class ModuleConfig(abc.ABC):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ) -> nn.Module:
         """
         Build a nn.Module given information about the input and output channels
@@ -172,6 +173,7 @@ class ModuleSelector:
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ) -> Module:
         """
         Build a nn.Module given information about the input and output channels
@@ -183,6 +185,8 @@ class ModuleSelector:
             dataset_info: Information about the dataset, including img_shape
                 (shape of last two dimensions of data, e.g. latitude and
                 longitude), horizontal coordinates, vertical coordinate, etc.
+            in_names: Optional list of input variable names. Passed through
+                to builders that accept it (e.g. mask-aware architectures).
 
         Returns:
             a Module object
@@ -197,6 +201,7 @@ class ModuleSelector:
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
+            in_names=in_names,
         )
         return Module(module, label_encoding)
 

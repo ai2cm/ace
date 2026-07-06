@@ -334,6 +334,7 @@ class SingleModuleStep(StepABC):
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
+            in_names=packed_in_names,
         )
         self.module = module.to(get_device())
 
