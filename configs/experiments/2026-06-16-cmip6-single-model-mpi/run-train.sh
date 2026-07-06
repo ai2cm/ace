@@ -74,7 +74,8 @@ run_training() {
 # run_training "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual.yaml" "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual-rs0" 1
 # --- v3 masked / thickness / residual-off runs (D): reads GCS v3 zarr directly
 #     (engine: zarr, no Weka staging), mask_loss on, thickness predicted (zg
-#     diagnosed). Uncomment the target to launch; leave the other commented so a
-#     re-run doesn't duplicate a live job.
-run_training "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness.yaml" "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness-rs0" 1
+#     diagnosed). Both launched 2026-07-06 (beaker 01KWWACQEV… masked-thickness,
+#     01KWWACV79… no-energy; wandb ai2cm/cmip6 xxwtj01p / tfa4td9t). Commented out
+#     so a re-run doesn't duplicate the live jobs; uncomment to relaunch.
+# run_training "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness.yaml" "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness-rs0" 1
 # run_training "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness-no-energy.yaml" "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness-no-energy-rs0" 1
