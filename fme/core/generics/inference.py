@@ -164,4 +164,3 @@ def run_inference(
     with timer.context("data_writer"):
         prognostic_state = looper.get_prognostic_state()
         writer.write(prognostic_state, "restart.nc")
-        writer.write_stepper_state(prognostic_state, "restart_stepper_state.pt")

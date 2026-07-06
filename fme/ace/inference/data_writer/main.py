@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from typing import TypeAlias
 
 import cftime
-import fsspec
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -16,12 +15,12 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
-from fme.core.stepper_state import StepperState
 
 from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
+from .restart import encode_restart_extras
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
@@ -240,9 +239,6 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             dataset_metadata=self.dataset_metadata,
         )
 
-    def write_stepper_state(self, data: PrognosticState, filename: str):
-        _write_stepper_state(data, path=self.path, filename=filename)
-
     def append_batch(
         self,
         batch: PairedData,
@@ -283,7 +279,10 @@ def _write(
     """Write provided data to a single netCDF at specified path/filename.
 
     If the data has only one timestep, the data is squeezed to remove
-    the time dimension.
+    the time dimension. The round-trippable extras of ``data`` (stepper_state,
+    labels, data_mask) are embedded under reserved ``_fme_state__`` variables
+    when present, so a restart netCDF fully restores the ``PrognosticState``;
+    when absent the file is byte-identical to a data+time-only file.
 
     Args:
         data: Batch data to written.
@@ -316,24 +315,12 @@ def _write(
         if name in variable_metadata:
             data_arrays[name].attrs = variable_metadata[name].as_attrs()
     data_arrays["time"] = time_array
+    extra_arrays, extra_attrs = encode_restart_extras(data)
+    data_arrays.update(extra_arrays)
     ds = xr.Dataset(data_arrays, coords=coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
+    ds.attrs.update(extra_attrs)
     to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
-
-
-def _write_stepper_state(data: PrognosticState, path: str, filename: str):
-    """Serialize the prognostic state's ``StepperState`` to a restart file.
-
-    A no-op when there is no ``StepperState`` to save. Uses ``fsspec`` so the
-    ``.pt`` file lands beside a local or remote ``restart.nc``.
-    """
-    stepper_state: StepperState | None = data.as_batch_data().stepper_state
-    if stepper_state is None:
-        return
-    # Serialize on CPU so the state restores independently of the device the
-    # rollout ran on (the random generator is already CPU by construction).
-    with fsspec.open(os.path.join(path, filename), "wb") as f:
-        torch.save(stepper_state.to_cpu().to_state_dict(), f)
 
 
 class DataWriter(WriterABC[PrognosticState, PairedData]):
@@ -405,6 +392,3 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             coords=self.coords,
             dataset_metadata=self.dataset_metadata,
         )
-
-    def write_stepper_state(self, data: PrognosticState, filename: str):
-        _write_stepper_state(data, path=self.path, filename=filename)

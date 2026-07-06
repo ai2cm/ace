@@ -8,7 +8,6 @@ from typing import Literal
 
 import cftime
 import dacite
-import fsspec
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -27,6 +26,11 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
+from fme.ace.inference.data_writer.restart import (
+    RestartExtras,
+    decode_restart_extras,
+    has_restart_extras,
+)
 from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
@@ -46,7 +50,6 @@ from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
-from fme.core.stepper_state import StepperState
 from fme.core.timing import GlobalTimer
 
 from .evaluator import apply_config_seed, resolve_variable_metadata
@@ -71,21 +74,11 @@ class InitialConditionConfig:
         engine: The engine used to open the dataset.
         start_indices: optional specification of the subset of
             initial conditions to use.
-        stepper_state_path: Optional path to a restart stepper state file
-            (a ``.pt`` written by inference alongside ``restart.nc``). When
-            ``None`` (the default), no stepper state is restored and the rollout
-            starts fresh — this preserves the current behavior and is
-            back-compatible with restart files written before this feature.
-            When set, the file is loaded and its ``StepperState`` (corrector
-            state + random state) is attached to the initial condition so the
-            rollout continues exactly where the previous segment left off. A set
-            path that does not exist is a user error and raises.
     """
 
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
     start_indices: StartIndices | None = None
-    stepper_state_path: str | None = None
 
     def get_dataset(self) -> xr.Dataset:
         open_kwargs = dict(
@@ -113,24 +106,6 @@ class InitialConditionConfig:
         sample_dim_name = ds.time.dims[0]
         return ds.isel({sample_dim_name: ic_indices})
 
-    def get_stepper_state(self) -> StepperState:
-        """Load the ``StepperState`` file named by ``stepper_state_path``.
-
-        ``fsspec`` handles remote paths, mirroring the remote-restart handling in
-        ``get_dataset``. Raises if ``stepper_state_path`` is unset or missing.
-        """
-        if self.stepper_state_path is None:
-            raise ValueError(
-                "stepper_state_path is not set; cannot load a stepper state."
-            )
-        if not exists(self.stepper_state_path):
-            raise FileNotFoundError(
-                f"stepper_state_path {self.stepper_state_path} does not exist."
-            )
-        with fsspec.open(self.stepper_state_path, "rb") as f:
-            state_dict = torch.load(f, weights_only=True)
-        return StepperState.from_state_dict(state_dict)
-
 
 def get_initial_condition(
     ds: xr.Dataset,
@@ -141,18 +116,31 @@ def get_initial_condition(
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
 
+    A full-state restart netCDF (one written by inference) additionally carries
+    the round-trippable ``BatchData`` extras — ``stepper_state``, ``labels``,
+    ``data_mask`` — under reserved ``_fme_state__`` variables. When present these
+    are reconstructed and attached so the rollout resumes exactly: the embedded
+    ``labels`` take precedence over the ``labels`` argument, and the
+    ``stepper_state`` continues the noise generator and corrector state. A plain
+    netCDF without the schema marker (a legacy restart or any user-supplied IC)
+    is read exactly as before: ``stepper_state=None`` and labels from the
+    argument.
+
     Args:
         ds: Dataset containing initial condition data. Must include prognostic_names
             as variables, and they must each have shape (n_samples, n_lat, n_lon).
             Dataset must also include a 'time' variable with length n_samples.
         prognostic_names: Names of prognostic variables to extract from the dataset.
         labels: Labels for the initial conditions. If provided, these labels will be
-            provided to the stepper for every initial condition.
+            provided to the stepper for every initial condition. Ignored when the
+            dataset embeds its own labels.
         n_ensemble: Number of ensemble members per initial state
 
     Returns:
         The initial condition and the time coordinate.
     """
+    extras = decode_restart_extras(ds) if has_restart_extras(ds) else RestartExtras()
+
     initial_condition = {}
     for name in prognostic_names:
         if len(ds[name].shape) != 3:
@@ -175,7 +163,11 @@ def get_initial_condition(
             f"and {n_samples}."
         )
 
-    if labels is not None:
+    # Embedded labels win over the config argument; fall back to the argument
+    # (today's behavior) for a plain IC that carries none.
+    if extras.labels is not None:
+        batch_labels: BatchLabels | None = extras.labels
+    elif labels is not None:
         batch_labels = BatchLabels(torch.ones(n_samples, len(labels)), names=labels)
     else:
         batch_labels = None
@@ -185,9 +177,13 @@ def get_initial_condition(
         time=initial_times,
         horizontal_dims=["lat", "lon"],
         labels=batch_labels,
+        data_mask=extras.data_mask,
     )
     batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
-    return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
+    initial_state = batch_data.get_start(prognostic_names, n_ic_timesteps=1)
+    if extras.stepper_state is not None:
+        initial_state = initial_state.with_stepper_state(extras.stepper_state)
+    return initial_state
 
 
 @dataclasses.dataclass
@@ -371,15 +367,6 @@ def run_inference_from_config(config: InferenceConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
-        if config.initial_condition.stepper_state_path is not None:
-            # The stepper state file is serialized on CPU; move it to the compute
-            # device before attaching so a restored corrector_state (e.g. the
-            # pinned global_dry_air_mass) is on the same device as the rollout
-            # tensors. (RandomState.to_device is a no-op: the generator stays on
-            # CPU.)
-            data._initial_condition = data.initial_condition.with_stepper_state(
-                config.initial_condition.get_stepper_state().to_device()
-            )
         apply_config_seed(config.seed, data)
 
         if not config.allow_incompatible_dataset:
@@ -486,13 +473,8 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
             with GlobalTimer():
                 run_inference_from_config(config_copy)
-        # Continue the next segment from this segment's stepper state when one
-        # was written (only a seeded and/or corrector rollout writes one).
-        stepper_state_path = os.path.join(segment_dir, "restart_stepper_state.pt")
+        # The full state (stepper_state, labels, data_mask) rides restart.nc, so
+        # the next segment just points at it and resumes exactly.
         config_copy.initial_condition = InitialConditionConfig(
-            path=restart_path,
-            engine="netcdf4",
-            stepper_state_path=(
-                stepper_state_path if exists(stepper_state_path) else None
-            ),
+            path=restart_path, engine="netcdf4"
         )

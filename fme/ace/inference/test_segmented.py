@@ -17,12 +17,18 @@ import yaml
 import fme
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.data_loading.inference import ForcingDataLoaderConfig, TimestampList
+from fme.ace.data_loading.inference import (
+    ExplicitIndices,
+    ForcingDataLoaderConfig,
+    TimestampList,
+)
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
+from fme.ace.inference.data_writer.restart import RESERVED_PREFIX, has_restart_extras
 from fme.ace.inference.inference import (
     InitialConditionConfig,
+    get_initial_condition,
     main,
     run_segmented_inference,
 )
@@ -38,6 +44,7 @@ from fme.core.coordinates import (
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
+from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.random_state import RandomState
@@ -462,7 +469,7 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
 
 
 def _paired_writer(tmp_path: pathlib.Path) -> PairedDataWriter:
-    """A minimal PairedDataWriter for exercising the stepper state file."""
+    """A minimal PairedDataWriter for exercising the full-state restart netCDF."""
     return PairedDataWriter(
         writers=[],
         path=str(tmp_path),
@@ -472,71 +479,151 @@ def _paired_writer(tmp_path: pathlib.Path) -> PairedDataWriter:
     )
 
 
-def _prognostic_state_with(stepper_state: StepperState | None) -> PrognosticState:
+def _prognostic_state(
+    n_samples: int = 1,
+    stepper_state: StepperState | None = None,
+    labels: BatchLabels | None = None,
+    data_mask: dict[str, torch.Tensor] | None = None,
+    lat: int = 4,
+    lon: int = 8,
+) -> PrognosticState:
+    time = xr.DataArray(
+        [[cftime.DatetimeProlepticGregorian(2000, 1, 1)]] * n_samples,
+        dims=["sample", "time"],
+    )
     batch = BatchData.new_on_cpu(
-        data={"prog": torch.zeros(1, 1, 4, 8)},
-        time=xr.DataArray(
-            [[cftime.DatetimeProlepticGregorian(2000, 1, 1)]],
-            dims=["sample", "time"],
-        ),
+        data={"prog": torch.zeros(n_samples, 1, lat, lon)},
+        time=time,
         stepper_state=stepper_state,
+        labels=labels,
+        data_mask=data_mask,
     )
     return PrognosticState(batch)
 
 
-def test_stepper_state_file_none_is_backcompat_noop(tmp_path):
-    """A restart with no stepper state writes no file, and a config that does
-    not point at one restores nothing (stepper_state stays None) - the pre-feature
-    behavior for restart files written before the stepper state file existed."""
-    writer = _paired_writer(tmp_path)
-    writer.write_stepper_state(_prognostic_state_with(None), "restart_stepper_state.pt")
-    assert not (tmp_path / "restart_stepper_state.pt").exists()
+def _write_restart(tmp_path: pathlib.Path, state: PrognosticState) -> pathlib.Path:
+    _paired_writer(tmp_path).write(state, "restart.nc")
+    return tmp_path / "restart.nc"
 
-    # A config that names no stepper state file restores nothing.
-    config = InitialConditionConfig(path=str(tmp_path / "ic.nc"))
-    assert config.stepper_state_path is None
-    with pytest.raises(ValueError, match="not set"):
-        config.get_stepper_state()
 
-    # A set-but-missing stepper state file is a user error and raises clearly.
-    missing = InitialConditionConfig(
-        path=str(tmp_path / "ic.nc"),
-        stepper_state_path=str(tmp_path / "does_not_exist.pt"),
+def test_plain_restart_netcdf_is_backcompat(tmp_path):
+    """A deterministic run's restart embeds no reserved variables (byte-clean),
+    and reading a plain netCDF (no schema marker) restores stepper_state=None with
+    labels from config - legacy restart resume unchanged."""
+    restart = _write_restart(tmp_path, _prognostic_state(n_samples=2))
+
+    ds = xr.open_dataset(restart, decode_timedelta=False)
+    assert not has_restart_extras(ds)
+    assert not any(str(v).startswith(RESERVED_PREFIX) for v in ds.variables)
+    # The prognostic variable is still a normal, readable xarray variable.
+    assert "prog" in ds and ds["prog"].shape == (2, 4, 8)
+
+    ic = get_initial_condition(
+        InitialConditionConfig(path=str(restart)).get_dataset(),
+        prognostic_names=["prog"],
+        labels=["from_config"],
     )
-    with pytest.raises(FileNotFoundError, match="does not exist"):
-        missing.get_stepper_state()
+    restored = ic.as_batch_data()
+    assert restored.stepper_state is None
+    assert restored.labels is not None and restored.labels.names == ["from_config"]
 
 
-def test_stepper_state_file_corrector_and_random_continuity(tmp_path):
-    """The stepper state file written by the writer and loaded via
-    InitialConditionConfig preserves the corrector's pinned global_dry_air_mass
-    exactly and continues the random generator's draw sequence."""
-    mass = torch.randn(1, 1, 1)
-    random_state = RandomState.from_seed(11)
+def test_full_state_restart_roundtrip(tmp_path):
+    """Writing a PrognosticState carrying stepper_state (+labels +data_mask) to a
+    restart netCDF and reading it back via InitialConditionConfig restores every
+    field: the corrector tensor exactly, the generator continues its stream, and
+    labels/data_mask round-trip. The embedded labels win over the config labels."""
+    n = 2
+    mass = torch.randn(n, 1, 1)
+    stored_random = RandomState.from_seed(11)
+    torch.randn(3, generator=stored_random.generator)  # advance past the raw seed
     stepper_state = StepperState(
         corrector_state=CorrectorState(global_dry_air_mass=mass.clone()),
-        random_state=RandomState.from_seed(11),
+        random_state=stored_random,
     )
-    writer = _paired_writer(tmp_path)
-    writer.write_stepper_state(
-        _prognostic_state_with(stepper_state), "restart_stepper_state.pt"
+    labels = BatchLabels(torch.ones(n, 2), names=["a", "b"])
+    data_mask = {"prog": torch.tensor([True, False])}
+    restart = _write_restart(
+        tmp_path,
+        _prognostic_state(
+            n_samples=n,
+            stepper_state=stepper_state,
+            labels=labels,
+            data_mask=data_mask,
+        ),
+    )
+
+    # Inspectability: the full-state restart still opens as a normal Dataset.
+    ds = xr.open_dataset(restart, decode_timedelta=False)
+    assert has_restart_extras(ds)
+    assert ds["prog"].shape == (n, 4, 8)
+
+    ic = get_initial_condition(
+        InitialConditionConfig(path=str(restart)).get_dataset(),
+        prognostic_names=["prog"],
+        labels=["ignored"],
+    )
+    restored = ic.as_batch_data()
+
+    ss = restored.stepper_state
+    assert ss is not None
+    assert ss.corrector_state is not None
+    assert ss.corrector_state.global_dry_air_mass is not None
+    torch.testing.assert_close(
+        ss.corrector_state.global_dry_air_mass, mass, rtol=0, atol=0
+    )
+    assert ss.random_state is not None
+    # get_state() is non-consuming, so stored_random still sits at the point it
+    # was serialized; the restored generator must continue the same stream.
+    torch.testing.assert_close(
+        torch.randn(4, generator=stored_random.generator),
+        torch.randn(4, generator=ss.random_state.generator),
+        rtol=0,
+        atol=0,
+    )
+    assert restored.labels is not None
+    assert restored.labels.names == ["a", "b"]  # embedded labels, not config
+    torch.testing.assert_close(restored.labels.tensor, torch.ones(n, 2))
+    assert restored.data_mask is not None
+    torch.testing.assert_close(restored.data_mask["prog"], torch.tensor([True, False]))
+
+
+def test_full_state_restart_start_indices(tmp_path):
+    """start_indices subselection on a full-state restart subsets the per-sample
+    corrector state in step with the prognostic variables while leaving the shared
+    generator state untouched."""
+    n = 3
+    mass = torch.arange(n, dtype=torch.float32).reshape(n, 1, 1)
+    stored_random = RandomState.from_seed(0)
+    stepper_state = StepperState(
+        corrector_state=CorrectorState(global_dry_air_mass=mass.clone()),
+        random_state=RandomState.from_seed(0),
+    )
+    restart = _write_restart(
+        tmp_path, _prognostic_state(n_samples=n, stepper_state=stepper_state)
     )
 
     config = InitialConditionConfig(
-        path=str(tmp_path / "ic.nc"),
-        stepper_state_path=str(tmp_path / "restart_stepper_state.pt"),
+        path=str(restart), start_indices=ExplicitIndices([1])
     )
-    restored = config.get_stepper_state()
+    ic = get_initial_condition(config.get_dataset(), prognostic_names=["prog"])
+    restored = ic.as_batch_data()
 
-    assert restored.corrector_state is not None
-    assert restored.corrector_state.global_dry_air_mass is not None
+    ss = restored.stepper_state
+    assert ss is not None and ss.corrector_state is not None
+    # Only sample index 1 was selected, so the corrector state is mass[[1]].
+    assert ss.corrector_state.global_dry_air_mass is not None
     torch.testing.assert_close(
-        restored.corrector_state.global_dry_air_mass, mass, rtol=0, atol=0
+        ss.corrector_state.global_dry_air_mass,
+        mass[[1]],
+        rtol=0,
+        atol=0,
     )
-    assert restored.random_state is not None
+    # The generator (no sample dim) is untouched by subselection.
+    assert ss.random_state is not None
     torch.testing.assert_close(
-        torch.randn(4, generator=random_state.generator),
-        torch.randn(4, generator=restored.random_state.generator),
+        torch.randn(4, generator=stored_random.generator),
+        torch.randn(4, generator=ss.random_state.generator),
         rtol=0,
         atol=0,
     )
