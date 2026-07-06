@@ -1058,9 +1058,6 @@ class Stepper:
         random_state = (
             args.stepper_state.random_state if args.stepper_state is not None else None
         )
-        # The inner step preserves random_state on the StepperState it returns
-        # (advancing the generator in place as it consumes it), so it threads
-        # unchanged into the next step and predict call.
         with use_generator(None if random_state is None else random_state.generator):
             output, stepper_state = self._step_obj.step(args=args, wrapper=wrapper)
         return self._output_process_func(output), stepper_state
