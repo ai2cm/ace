@@ -408,7 +408,7 @@ def _get_test_yaml_files(
                             ),
                         ),
                         ocean=OceanConfig(
-                            surface_temperature_name=in_variable_names[0],
+                            surface_temperature_name="surface_temperature",
                             ocean_fraction_name=mask_name,
                         ),
                         corrector=corrector_config,
@@ -1095,6 +1095,7 @@ def test_train_without_inline_inference(tmp_path):
     assert val_extra_output.exists()
 
 
+@pytest.mark.medium_duration
 def test_lr_tuning_with_loss_schedule(tmp_path):
     """LR tuning combined with an epoch-based loss schedule trains without error.
 
