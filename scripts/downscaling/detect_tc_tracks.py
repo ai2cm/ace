@@ -17,9 +17,13 @@ The pipeline is:
   2. Run ``DetectNodes`` to find candidate TC centers at each timestep.
   3. Run ``StitchNodes`` to link candidates into tracks.
   4. Parse the StitchNodes output into a tidy CSV (one row per track point).
+  5. Pickle a per-track xarray ``.sel(..., method="nearest")`` kwargs dict
+     for pulling storm-following data out of the original ACE dataset
+     (on by default; disable with ``--no-write-sel-args``).
 
-TempestExtremes must be installed and on ``PATH`` (e.g.
-``conda install -c conda-forge tempest-extremes``).
+TempestExtremes must be installed and on ``PATH``, or its binaries passed via
+``--detect-exe``/``--stitch-exe``. Build it from source with
+``make -C scripts/downscaling tc_deps`` (see that target for dependencies).
 
 Usage examples:
     # Basic run on a local zarr, writing intermediates + tracks to out/
@@ -34,10 +38,17 @@ Usage examples:
 
     # Only build the NetCDF inputs, don't run TempestExtremes
     python detect_tc_tracks.py /path/to/ace_output.zarr out/ --convert-only
+
+    # Remove the NetCDF intermediates once DetectNodes has consumed them
+    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --cleanup
+
+    # Skip writing per-track xarray .sel kwargs
+    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --no-write-sel-args
 """
 
 import argparse
 import logging
+import pickle
 import shutil
 import subprocess
 from pathlib import Path
@@ -60,6 +71,45 @@ STITCH_MAXGAP = "24h"  # maximum time gap within a track
 # Track must have wind >= 10 m/s for >= 10 steps and stay within +/- 50 lat.
 STITCH_THRESHOLD = "wind,>=,10.0,10;lat,<=,50.0,10;lat,>=,-50.0,10"
 IN_FMT = "lon,lat,slp,wind"
+
+_HPA_UNITS = {"hpa", "mb", "millibar", "millibars"}
+
+# Matches TC_INSTALL_PREFIX's default in scripts/downscaling/Makefile.
+_TC_INSTALL_BIN = Path.home() / ".local" / "tempestextremes" / "bin"
+
+# (lat, lon) coordinate name pairs to try, in order, when --lat-name/--lon-name
+# are not given.
+LAT_LON_NAME_CANDIDATES = [
+    ("grid_yt", "grid_xt"),
+    ("lat", "lon"),
+    ("latitude", "longitude"),
+]
+
+
+def detect_lat_lon_names(ds: xr.Dataset) -> tuple[str, str]:
+    """Guess the lat/lon coordinate names from a set of known conventions."""
+    for lat_name, lon_name in LAT_LON_NAME_CANDIDATES:
+        if lat_name in ds.variables and lon_name in ds.variables:
+            return lat_name, lon_name
+    raise ValueError(
+        "Could not auto-detect lat/lon coordinate names from any of "
+        f"{LAT_LON_NAME_CANDIDATES}; pass --lat-name/--lon-name explicitly. "
+        f"Available variables: {list(ds.variables)}"
+    )
+
+
+def _pressure_to_pa(da: xr.DataArray) -> xr.DataArray:
+    """Convert a pressure DataArray to Pascals if its units attr indicates hPa/mb.
+
+    TempestExtremes' closed-contour thresholds (e.g. PSL_CONTOUR) are
+    calibrated in Pa; ACE pressure fields like PRMSL are commonly stored in
+    hPa/mb, and silently searching that data in the wrong units means the
+    threshold is effectively never met.
+    """
+    units = str(da.attrs.get("units", "")).strip().lower()
+    if units in _HPA_UNITS:
+        da = da * 100.0
+    return da
 
 
 def build_te_dataset(
@@ -97,6 +147,10 @@ def build_te_dataset(
             f"Neither {psl_var!r} nor {psfc_var!r} found in dataset; "
             f"available: {list(ds.data_vars)}"
         )
+    orig_units = psl.attrs.get("units")
+    psl = _pressure_to_pa(psl)
+    if str(orig_units).strip().lower() in _HPA_UNITS:
+        logger.info("Converted PSL from %s to Pa", orig_units)
 
     for name in (t3_var, u_var, v_var):
         if name not in ds:
@@ -144,6 +198,14 @@ def write_netcdf_chunks(ds: xr.Dataset, out_dir: Path, chunk_size: int) -> Path:
     return list_path
 
 
+def cleanup_netcdf_chunks(out_dir: Path) -> None:
+    """Remove the per-chunk NetCDF intermediates written by write_netcdf_chunks."""
+    nc_dir = out_dir / "netcdf"
+    if nc_dir.is_dir():
+        logger.info("Removing intermediate NetCDF directory %s", nc_dir)
+        shutil.rmtree(nc_dir)
+
+
 def _check_exe(exe: str) -> None:
     """Raise a helpful error if a TempestExtremes binary is not on PATH.
 
@@ -153,12 +215,11 @@ def _check_exe(exe: str) -> None:
     if shutil.which(exe) is None and not Path(exe).is_file():
         raise FileNotFoundError(
             f"TempestExtremes executable {exe!r} not found on PATH. "
-            "TempestExtremes is only distributed on conda-forge (not pip); "
-            "install it with:\n"
+            "Build and install it from source with:\n"
             "    make -C scripts/downscaling tc_deps\n"
-            "or, directly:\n"
-            "    conda install -c conda-forge tempest-extremes\n"
-            "Alternatively pass an explicit path via --detect-exe/--stitch-exe."
+            "then pass its location via --detect-exe/--stitch-exe, e.g.\n"
+            "    --detect-exe ~/.local/tempestextremes/bin/DetectNodes\n"
+            "    --stitch-exe ~/.local/tempestextremes/bin/StitchNodes"
         )
 
 
@@ -263,6 +324,53 @@ def parse_stitch_output(path: Path) -> pd.DataFrame:
     return df
 
 
+def track_to_sel_kwargs(
+    track_df: pd.DataFrame,
+    lat_name: str,
+    lon_name: str,
+    point_dim: str = "track_point",
+) -> dict:
+    """Build xarray ``.sel(..., method="nearest")`` kwargs following one track.
+
+    Wraps the track's time/lat/lon values in DataArrays sharing ``point_dim``
+    so that ``ds.sel(**kwargs, method="nearest")`` does pointwise selection
+    along the track (one point per track timestep) instead of an outer
+    product over every combination of the three coordinates.
+
+    ``lat_name``/``lon_name`` should match the coordinate names of the
+    dataset this will be applied to (e.g. the ``--lat-name``/``--lon-name``
+    used to build the TempestExtremes input, such as ``grid_yt``/``grid_xt``
+    for X-SHiELD output), not the ``lat``/``lon`` column names in the tracks
+    DataFrame itself.
+    """
+    track_df = track_df.sort_values("time")
+    return {
+        "time": xr.DataArray(track_df["time"].values, dims=point_dim),
+        lat_name: xr.DataArray(track_df["lat"].values, dims=point_dim),
+        lon_name: xr.DataArray(track_df["lon"].values, dims=point_dim),
+    }
+
+
+def write_track_sel_args(
+    df: pd.DataFrame, out_dir: Path, lat_name: str, lon_name: str
+) -> Path:
+    """Write one pickled xarray .sel kwargs dict per track to out_dir/sel_args.
+
+    Each file holds the dict returned by track_to_sel_kwargs for that track,
+    ready to use as ``ds.sel(**kwargs, method="nearest")`` against the
+    original ACE dataset. Returns the sel_args directory.
+    """
+    sel_dir = out_dir / "sel_args"
+    sel_dir.mkdir(parents=True, exist_ok=True)
+    for track_id, track_df in df.groupby("track_id"):
+        kwargs = track_to_sel_kwargs(track_df, lat_name, lon_name)
+        path = sel_dir / f"track_{track_id:04d}.pkl"
+        with open(path, "wb") as f:
+            pickle.dump(kwargs, f)
+    logger.info("Wrote %d track sel-arg files to %s", df["track_id"].nunique(), sel_dir)
+    return sel_dir
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -281,8 +389,8 @@ def main() -> None:
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=1460,
-        help="Timesteps per NetCDF file (1460 = one year at 6-hourly).",
+        default=112,
+        help="Timesteps per NetCDF file (112 = 28 days at 6-hourly).",
     )
     parser.add_argument("--psl-var", default="PRMSL", help="Sea-level pressure var.")
     parser.add_argument(
@@ -297,10 +405,29 @@ def main() -> None:
     )
     parser.add_argument("--u-var", default="UGRD10m", help="10m eastward wind var.")
     parser.add_argument("--v-var", default="VGRD10m", help="10m northward wind var.")
-    parser.add_argument("--lat-name", default="lat", help="Latitude coord name.")
-    parser.add_argument("--lon-name", default="lon", help="Longitude coord name.")
-    parser.add_argument("--detect-exe", default="DetectNodes")
-    parser.add_argument("--stitch-exe", default="StitchNodes")
+    parser.add_argument(
+        "--lat-name",
+        default=None,
+        help="Latitude coord name. If not set, auto-detected from known "
+        f"conventions: {LAT_LON_NAME_CANDIDATES}.",
+    )
+    parser.add_argument(
+        "--lon-name",
+        default=None,
+        help="Longitude coord name. If not set, auto-detected alongside " "--lat-name.",
+    )
+    parser.add_argument(
+        "--detect-exe",
+        default=str(_TC_INSTALL_BIN / "DetectNodes"),
+        help="Path to DetectNodes (default: install location of "
+        "`make -C scripts/downscaling tc_deps`).",
+    )
+    parser.add_argument(
+        "--stitch-exe",
+        default=str(_TC_INSTALL_BIN / "StitchNodes"),
+        help="Path to StitchNodes (default: install location of "
+        "`make -C scripts/downscaling tc_deps`).",
+    )
     parser.add_argument(
         "--skip-convert",
         action="store_true",
@@ -311,17 +438,38 @@ def main() -> None:
         action="store_true",
         help="Only build the NetCDF inputs; do not run TempestExtremes.",
     )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove the intermediate NetCDF files after DetectNodes finishes.",
+    )
+    parser.add_argument(
+        "--write-sel-args",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "For each track, pickle an xarray .sel(..., method='nearest') "
+            "kwargs dict (following the track's time/lat/lon) to "
+            "out_dir/sel_args/track_<id>.pkl. On by default; disable with "
+            "--no-write-sel-args."
+        ),
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     list_path = out_dir / "input_files.txt"
 
+    lat_name, lon_name = args.lat_name, args.lon_name
+
     if not args.skip_convert:
         logger.info("Opening zarr %s", args.zarr)
         ds = xr.open_zarr(args.zarr)
         if args.time_start is not None or args.time_end is not None:
             ds = ds.sel(time=slice(args.time_start, args.time_end))
+        if lat_name is None or lon_name is None:
+            lat_name, lon_name = detect_lat_lon_names(ds)
+            logger.info("Auto-detected lat/lon coord names: %s, %s", lat_name, lon_name)
         te_ds = build_te_dataset(
             ds,
             psl_var=args.psl_var,
@@ -332,10 +480,16 @@ def main() -> None:
             sample=args.sample,
         )
         list_path = write_netcdf_chunks(te_ds, out_dir, args.chunk_size)
-    elif not list_path.exists():
-        raise FileNotFoundError(
-            f"--skip-convert set but {list_path} not found; run conversion first."
-        )
+    else:
+        if not list_path.exists():
+            raise FileNotFoundError(
+                f"--skip-convert set but {list_path} not found; run conversion first."
+            )
+        if lat_name is None or lon_name is None:
+            first_file = list_path.read_text().splitlines()[0]
+            with xr.open_dataset(first_file) as probe_ds:
+                lat_name, lon_name = detect_lat_lon_names(probe_ds)
+            logger.info("Auto-detected lat/lon coord names: %s, %s", lat_name, lon_name)
 
     if args.convert_only:
         logger.info("--convert-only set; stopping after NetCDF conversion.")
@@ -345,14 +499,17 @@ def main() -> None:
     tracks_path = out_dir / "tracks.dat"
     csv_path = out_dir / "tracks.csv"
 
-    run_detect_nodes(
-        list_path, nodes_path, args.detect_exe, args.lat_name, args.lon_name
-    )
+    run_detect_nodes(list_path, nodes_path, args.detect_exe, lat_name, lon_name)
+    if args.cleanup:
+        cleanup_netcdf_chunks(out_dir)
     run_stitch_nodes(nodes_path, tracks_path, args.stitch_exe)
 
     df = parse_stitch_output(tracks_path)
     df.to_csv(csv_path, index=False)
     logger.info("Wrote tracks to %s", csv_path)
+
+    if args.write_sel_args and not df.empty:
+        write_track_sel_args(df, out_dir, lat_name, lon_name)
 
 
 if __name__ == "__main__":
