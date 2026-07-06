@@ -9,7 +9,12 @@ import cftime
 import numpy as np
 import numpy.typing as npt
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.batch_data import (
+    _RESERVED_PREFIX,
+    BatchData,
+    PairedData,
+    PrognosticState,
+)
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
@@ -293,6 +298,10 @@ def _write(
     """
     ds = data.to_xarray_dataset()
     for name in ds.data_vars:
+        # Metadata applies only to physical prognostic variables, never to
+        # ``time`` or the reserved embedded-state variables.
+        if str(name) == "time" or str(name).startswith(_RESERVED_PREFIX):
+            continue
         if str(name) in variable_metadata:
             ds[name].attrs.update(variable_metadata[str(name)].as_attrs())
     ds = ds.assign_coords(coords)

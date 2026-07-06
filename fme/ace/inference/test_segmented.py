@@ -560,7 +560,7 @@ def test_full_state_restart_roundtrip(tmp_path):
     ic = get_initial_condition(
         InitialConditionConfig(path=str(restart)).get_dataset(),
         prognostic_names=["prog"],
-        labels=["ignored"],
+        labels=["a", "b"],  # matches the embedded labels (validated, not re-set)
     )
     restored = ic.as_batch_data()
 
@@ -581,7 +581,7 @@ def test_full_state_restart_roundtrip(tmp_path):
         atol=0,
     )
     assert restored.labels is not None
-    assert restored.labels.names == ["a", "b"]  # embedded labels, not config
+    assert restored.labels.names == ["a", "b"]  # embedded labels preserved
     torch.testing.assert_close(restored.labels.tensor, torch.ones(n, 2))
     assert restored.data_mask is not None
     torch.testing.assert_close(restored.data_mask["prog"], torch.tensor([True, False]))

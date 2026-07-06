@@ -1319,3 +1319,74 @@ def test_batch_data_xarray_dataset_round_trip_through_netcdf(tmp_path):
     plain_ds = plain.to_xarray_dataset()
     assert not BatchData.dataset_has_embedded_state(plain_ds)
     assert not any(str(v).startswith(_RESERVED_PREFIX) for v in plain_ds.variables)
+
+
+def _restart_batch(n_samples=2, names=("prog",), labels=None, n_ensemble=1):
+    time = xr.DataArray(
+        [[cftime.DatetimeProlepticGregorian(2000, 1, 1)]] * n_samples,
+        dims=["sample", "time"],
+    )
+    return BatchData(
+        data={name: torch.zeros(n_samples, 1, 2, 2) for name in names},
+        time=time,
+        labels=labels,
+        n_ensemble=n_ensemble,
+    )
+
+
+def test_validate_initial_condition_passes_when_consistent():
+    labels = BatchLabels(torch.ones(2, 2), names=["a", "b"])
+    batch = _restart_batch(names=("prog", "sst"), labels=labels)
+    # consistent config: subset of names present, matching labels, n_ensemble=1
+    batch.validate_initial_condition(["prog"], ["a", "b"], 1)
+    # labels=None skips the label check
+    batch.validate_initial_condition(["prog", "sst"], None, 1)
+
+
+def test_validate_initial_condition_raises_on_missing_prognostic_name():
+    batch = _restart_batch(names=("prog",))
+    with pytest.raises(ValueError, match="missing prognostic variables"):
+        batch.validate_initial_condition(["prog", "sst"], None, 1)
+
+
+def test_validate_initial_condition_raises_on_labels_mismatch():
+    labels = BatchLabels(torch.ones(2, 2), names=["a", "b"])
+    batch = _restart_batch(labels=labels)
+    with pytest.raises(ValueError, match="do not match"):
+        batch.validate_initial_condition(["prog"], ["a", "c"], 1)
+
+
+def test_validate_initial_condition_raises_on_labels_provided_but_none_saved():
+    batch = _restart_batch(labels=None)
+    with pytest.raises(ValueError, match="carries none"):
+        batch.validate_initial_condition(["prog"], ["a"], 1)
+
+
+def test_validate_initial_condition_raises_on_n_ensemble_mismatch():
+    batch = _restart_batch(n_ensemble=1)
+    with pytest.raises(ValueError, match="cannot be re-broadcast"):
+        batch.validate_initial_condition(["prog"], None, 2)
+
+
+def test_non_per_sample_reserved_var_not_subselected_when_length_matches_samples():
+    """Regression: per-sample-ness is explicit, not inferred from length. A batch
+    whose sample count equals the generator-state length must still keep the
+    generator variable on a private dim, so start_indices does not subselect it."""
+    n_gen = RandomState.from_seed(0).generator.get_state().numel()
+    time = xr.DataArray(
+        [[cftime.DatetimeProlepticGregorian(2000, 1, 1)]] * n_gen,
+        dims=["sample", "time"],
+    )
+    batch = BatchData.new_on_cpu(
+        data={"prog": torch.zeros(n_gen, 1, 1, 1)},
+        time=time,
+        stepper_state=StepperState(random_state=RandomState.from_seed(0)),
+    )
+    ds = batch.to_xarray_dataset()
+    generator_var = f"{_RESERVED_PREFIX}stepper__random_state.generator_state"
+    # The generator variable does not carry the shared sample dim ...
+    assert "sample" not in ds[generator_var].dims
+    # ... so subselecting the sample dim leaves it untouched while prog subsets.
+    subselected = ds.isel(sample=[0])
+    assert subselected[generator_var].sizes == ds[generator_var].sizes
+    assert subselected["prog"].sizes["sample"] == 1

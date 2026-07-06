@@ -123,6 +123,26 @@ class StepperState:
             )
         return cls(corrector_state=corrector_state, random_state=random_state)
 
+    @staticmethod
+    def per_sample_state_keys() -> set[str]:
+        """Namespaced ``to_state_dict`` keys whose tensors carry a leading
+        per-sample dimension, delegated to each sub-state's own declaration.
+
+        Lets a serializer mark those variables per-sample explicitly (so they are
+        subselected along the sample axis with the prognostic variables) instead
+        of inferring per-sample-ness from a tensor length that happens to match
+        the sample count.
+        """
+        keys: set[str] = set()
+        for name, sub_state_class in (
+            ("corrector_state", CorrectorState),
+            ("random_state", RandomState),
+        ):
+            keys.update(
+                f"{name}.{key}" for key in sub_state_class.per_sample_state_keys()
+            )
+        return keys
+
 
 def _sub_state_dict(
     state: dict[str, torch.Tensor], name: str

@@ -108,19 +108,22 @@ def get_initial_condition(
     labels: list[str] | None = None,
     n_ensemble: int = 1,
 ) -> PrognosticState:
-    """Given a dataset, extract a mapping of variables to tensors.
-    and the time coordinate corresponding to the initial conditions.
+    """Build the initial-condition ``PrognosticState`` from a dataset.
 
-    A full-state restart netCDF (one written by inference) carries the embedded
-    ``BatchData`` state (``stepper_state``, ``labels``, ``data_mask``) and is
-    detected by its schema marker; it is rebuilt via
-    ``BatchData.from_xarray_dataset`` so the rollout resumes exactly (the
-    generator continues and the corrector state is preserved). The restored
-    ``stepper_state`` is moved to the compute device so a restored corrector
-    tensor lives on the same device as the rollout (``RandomState.to_device`` is
-    a no-op, keeping the generator on CPU). A plain netCDF without the marker (a
-    legacy restart or any user-supplied external IC) is read by the lenient path
-    below exactly as before: ``stepper_state=None`` and labels from the argument.
+    Dispatches on whether the dataset carries embedded ``BatchData`` state - a
+    full-state restart written by inference, detected by its schema marker:
+
+    - Embedded state present: the whole ``BatchData`` is rebuilt via
+      ``BatchData.from_xarray_dataset`` (see ``_initial_condition_from_state``).
+      It already had prognostic-name selection, labels, and ensemble broadcast
+      applied before it was saved, so config values are *validated* for
+      consistency rather than re-applied - a mismatch raises. The restored
+      ``stepper_state`` is moved to the compute device so the resumed rollout
+      continues exactly.
+    - No embedded state (external ICs and legacy plain restarts): the lenient
+      path (``_initial_condition_from_variables``) builds prognostic tensors from
+      the named variables, sets labels from config, and broadcasts the ensemble -
+      unchanged behavior.
 
     Args:
         ds: Dataset containing initial condition data. Must include prognostic_names
@@ -128,34 +131,58 @@ def get_initial_condition(
             Dataset must also include a 'time' variable with length n_samples.
         prognostic_names: Names of prognostic variables to extract from the dataset.
         labels: Labels for the initial conditions. If provided, these labels will be
-            provided to the stepper for every initial condition. Ignored when the
-            dataset embeds its own labels.
+            provided to the stepper for every initial condition. For an embedded-state
+            restart they are validated against the saved labels rather than applied.
         n_ensemble: Number of ensemble members per initial state
 
     Returns:
         The initial condition and the time coordinate.
     """
     if BatchData.dataset_has_embedded_state(ds):
-        batch_data = BatchData.from_xarray_dataset(ds)
-        # Fall back to config labels only if the restart embedded none.
-        if batch_data.labels is None and labels is not None:
-            n_samples = batch_data.time.shape[0]
-            batch_data = dataclasses.replace(
-                batch_data,
-                labels=BatchLabels(torch.ones(n_samples, len(labels)), names=labels),
-            )
-        batch_data = batch_data.broadcast_ensemble(n_ensemble=n_ensemble)
-        initial_state = batch_data.get_start(prognostic_names, n_ic_timesteps=1)
-        stepper_state = initial_state.as_batch_data().stepper_state
-        if stepper_state is not None:
-            initial_state = PrognosticState(
-                dataclasses.replace(
-                    initial_state.as_batch_data(),
-                    stepper_state=stepper_state.to_device(),
-                )
-            )
-        return initial_state
+        return _initial_condition_from_state(ds, prognostic_names, labels, n_ensemble)
+    return _initial_condition_from_variables(ds, prognostic_names, labels, n_ensemble)
 
+
+def _initial_condition_from_state(
+    ds: xr.Dataset,
+    prognostic_names: Sequence[str],
+    labels: list[str] | None,
+    n_ensemble: int,
+) -> PrognosticState:
+    """Build the IC from a full-state restart (embedded ``BatchData`` state).
+
+    Rebuilds the whole ``BatchData`` and validates - does not re-derive - that
+    the config values agree with what was saved; the prognostic names, labels,
+    and ensemble broadcast were already applied before the restart was written.
+    The restored ``stepper_state`` is moved to the compute device
+    (``RandomState.to_device`` is a no-op, keeping the generator on CPU).
+    """
+    batch_data = BatchData.from_xarray_dataset(ds)
+    batch_data.validate_initial_condition(prognostic_names, labels, n_ensemble)
+    initial_state = batch_data.get_start(prognostic_names, n_ic_timesteps=1)
+    stepper_state = initial_state.as_batch_data().stepper_state
+    if stepper_state is not None:
+        initial_state = PrognosticState(
+            dataclasses.replace(
+                initial_state.as_batch_data(),
+                stepper_state=stepper_state.to_device(),
+            )
+        )
+    return initial_state
+
+
+def _initial_condition_from_variables(
+    ds: xr.Dataset,
+    prognostic_names: Sequence[str],
+    labels: list[str] | None,
+    n_ensemble: int,
+) -> PrognosticState:
+    """Build the IC from a plain netCDF of prognostic variables + time.
+
+    The lenient path for external ICs and legacy restarts: builds prognostic
+    tensors from the named variables, sets labels from config, and broadcasts the
+    ensemble.
+    """
     initial_condition = {}
     for name in prognostic_names:
         if len(ds[name].shape) != 3:
@@ -480,8 +507,6 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
             with GlobalTimer():
                 run_inference_from_config(config_copy)
-        # The full state (stepper_state, labels, data_mask) rides restart.nc, so
-        # the next segment just points at it and resumes exactly.
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path, engine="netcdf4"
         )

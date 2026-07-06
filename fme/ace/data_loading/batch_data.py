@@ -81,19 +81,22 @@ def _restore_tensor(da: xr.DataArray) -> torch.Tensor:
     return tensor
 
 
-def _reserved_var_dims(var_name: str, array: np.ndarray, n_samples: int) -> list[str]:
-    """Dim names for a reserved variable.
+def _reserved_var_dims(var_name: str, ndim: int, per_sample: bool) -> list[str]:
+    """Dim names for a reserved-state variable.
 
-    A leading axis sized like the batch's sample dimension is named ``sample`` so
-    ``start_indices`` subselection (``ds.isel(sample=...)``) subsets it in step
-    with the prognostic variables; every other axis gets a variable-private
-    reserved dim so distinct variables never share (and thus constrain) a dim.
-    The corrector's ``global_dry_air_mass`` (n_samples, 1, 1) is the per-sample
-    case; the generator state (a flat uint8 vector) is not.
+    A ``per_sample`` variable (declared via the sub-state's
+    ``per_sample_state_keys``, e.g. the corrector's ``global_dry_air_mass``)
+    carries the shared ``sample`` dim on axis 0 so ``start_indices`` subselection
+    (``ds.isel(sample=...)``) subsets it in step with the prognostic variables.
+    Per-sample-ness is explicit, never inferred from a length matching the sample
+    count: a variable that is not per-sample (the generator state) always uses
+    private dims regardless of its length. Every non-sample axis gets a
+    variable-private reserved dim so distinct variables never share (and thus
+    constrain) a dim.
     """
     dims: list[str] = []
-    for axis, size in enumerate(array.shape):
-        if axis == 0 and size == n_samples:
+    for axis in range(ndim):
+        if per_sample and axis == 0:
             dims.append(_SAMPLE_DIM)
         else:
             dims.append(f"{var_name}_d{axis}")
@@ -459,6 +462,52 @@ class BatchData:
         """
         return _SCHEMA_ATTR in ds.attrs
 
+    def validate_initial_condition(
+        self,
+        prognostic_names: Collection[str],
+        labels: list[str] | None,
+        n_ensemble: int,
+    ) -> None:
+        """Check that config values are consistent with this loaded full-state
+        initial condition.
+
+        A full-state restart already had its prognostic names, labels, and
+        ensemble broadcast applied before it was saved, so on load we validate
+        rather than re-derive: the config must agree with what was saved, and a
+        mismatch is an error (never a silent re-application).
+
+        Raises:
+            ValueError: if any ``prognostic_names`` is absent from ``data``; if
+                ``labels`` is given but does not match the loaded labels (including
+                the loaded-None case); or if ``n_ensemble`` differs from the
+                loaded state (a full-state restart cannot be re-broadcast - its
+                sample dimension already carries the ensemble).
+        """
+        missing = [name for name in prognostic_names if name not in self.data]
+        if missing:
+            raise ValueError(
+                f"Loaded initial condition is missing prognostic variables "
+                f"{missing}. Present variables: {sorted(self.data)}."
+            )
+        if labels is not None:
+            if self.labels is None:
+                raise ValueError(
+                    f"Config provided labels {labels} but the loaded initial "
+                    "condition carries none."
+                )
+            if self.labels.names != list(labels):
+                raise ValueError(
+                    f"Config labels {list(labels)} do not match the loaded initial "
+                    f"condition's labels {self.labels.names}."
+                )
+        if n_ensemble != self.n_ensemble:
+            raise ValueError(
+                f"Requested n_ensemble={n_ensemble} but the loaded full-state "
+                f"initial condition represents n_ensemble={self.n_ensemble}. A "
+                "full-state restart cannot be re-broadcast: its sample dimension "
+                "already carries the ensemble."
+            )
+
     def to_xarray_dataset(self) -> xr.Dataset:
         """Serialize this ``BatchData`` to a single xarray ``Dataset``.
 
@@ -559,19 +608,23 @@ class BatchData:
         """
         data_arrays: dict[str, xr.DataArray] = {}
         attrs: dict[str, Any] = {}
-        n_samples = self.time.shape[0]
 
         if self.stepper_state is not None:
             # to_state_dict()/from_state_dict() are the tensor intermediate; the
             # stepper stays opaque - this layer only maps its namespaced keys to
-            # reserved variables and never inspects sub-state fields.
+            # reserved variables and never inspects sub-state fields. Per-sample
+            # variables are marked explicitly by the stepper's declaration, not
+            # inferred from a length matching the sample count.
             state_dict = self.stepper_state.to_cpu().to_state_dict()
+            per_sample_keys = self.stepper_state.per_sample_state_keys()
             for key, tensor in state_dict.items():
                 var_name = f"{_STEPPER_PREFIX}{key}"
                 array, dtype_name = _to_storage_array(tensor)
                 data_arrays[var_name] = xr.DataArray(
                     array,
-                    dims=_reserved_var_dims(var_name, array, n_samples),
+                    dims=_reserved_var_dims(
+                        var_name, array.ndim, per_sample=key in per_sample_keys
+                    ),
                     attrs={_DTYPE_ATTR: dtype_name},
                 )
 

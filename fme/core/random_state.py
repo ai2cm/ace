@@ -62,6 +62,14 @@ class RandomState:
         generator.set_state(state["generator_state"])
         return cls(generator=generator)
 
+    @staticmethod
+    def per_sample_state_keys() -> set[str]:
+        """``to_state_dict`` keys with a leading per-sample dimension. Empty: a
+        single generator drives the whole batch, so its state has no per-sample
+        dimension and must never be subselected along the sample axis.
+        """
+        return set()
+
     # The generator lives on the CPU and is consumed in place; device and
     # ensemble transforms must preserve the same advancing object rather than
     # reset or copy it, so they return self unchanged.
