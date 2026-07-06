@@ -87,7 +87,7 @@ class StepperState:
         return None
 
     def to_state_dict(self) -> dict[str, torch.Tensor]:
-        """Serialize present sub-states for a restart sidecar.
+        """Serialize present sub-states for a restart stepper state file.
 
         Each present sub-state is delegated to and its keys namespaced
         (e.g. ``"corrector_state.global_dry_air_mass"``). A ``<name>.present``

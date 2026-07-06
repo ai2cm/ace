@@ -71,12 +71,12 @@ class InitialConditionConfig:
         engine: The engine used to open the dataset.
         start_indices: optional specification of the subset of
             initial conditions to use.
-        stepper_state_path: Optional path to a ``StepperState`` restart sidecar
+        stepper_state_path: Optional path to a restart stepper state file
             (a ``.pt`` written by inference alongside ``restart.nc``). When
             ``None`` (the default), no stepper state is restored and the rollout
             starts fresh — this preserves the current behavior and is
             back-compatible with restart files written before this feature.
-            When set, the sidecar is loaded and its ``StepperState`` (corrector
+            When set, the file is loaded and its ``StepperState`` (corrector
             state + random state) is attached to the initial condition so the
             rollout continues exactly where the previous segment left off. A set
             path that does not exist is a user error and raises.
@@ -114,7 +114,7 @@ class InitialConditionConfig:
         return ds.isel({sample_dim_name: ic_indices})
 
     def get_stepper_state(self) -> StepperState:
-        """Load the ``StepperState`` restart sidecar named by ``stepper_state_path``.
+        """Load the ``StepperState`` file named by ``stepper_state_path``.
 
         ``fsspec`` handles remote paths, mirroring the remote-restart handling in
         ``get_dataset``. Raises if ``stepper_state_path`` is unset or missing.
@@ -486,14 +486,13 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
             with GlobalTimer():
                 run_inference_from_config(config_copy)
-        # Point the next segment at this segment's stepper-state sidecar so the
-        # random/corrector state continues across the restart. The sidecar is
-        # written only when there is state to save (a seeded and/or corrector
-        # rollout), so a deterministic rollout - or a pre-feature restart dir -
-        # has none, and the next segment starts fresh (stepper_state_path=None).
-        sidecar_path = os.path.join(segment_dir, "restart_stepper_state.pt")
+        # Continue the next segment from this segment's stepper state when one
+        # was written (only a seeded and/or corrector rollout writes one).
+        stepper_state_path = os.path.join(segment_dir, "restart_stepper_state.pt")
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path,
             engine="netcdf4",
-            stepper_state_path=sidecar_path if exists(sidecar_path) else None,
+            stepper_state_path=(
+                stepper_state_path if exists(stepper_state_path) else None
+            ),
         )

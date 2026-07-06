@@ -322,15 +322,15 @@ def _write(
 
 
 def _write_stepper_state(data: PrognosticState, path: str, filename: str):
-    """Serialize the prognostic state's ``StepperState`` to a restart sidecar.
+    """Serialize the prognostic state's ``StepperState`` to a restart file.
 
     A no-op when there is no ``StepperState`` to save. Uses ``fsspec`` so the
-    ``.pt`` sidecar lands beside a local or remote ``restart.nc``.
+    ``.pt`` file lands beside a local or remote ``restart.nc``.
     """
     stepper_state: StepperState | None = data.as_batch_data().stepper_state
     if stepper_state is None:
         return
-    # Serialize on CPU so the sidecar restores independently of the device the
+    # Serialize on CPU so the state restores independently of the device the
     # rollout ran on (the random generator is already CPU by construction).
     with fsspec.open(os.path.join(path, filename), "wb") as f:
         torch.save(stepper_state.to_cpu().to_state_dict(), f)

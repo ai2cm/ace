@@ -105,7 +105,8 @@ def apply_config_seed(seed: int | None, data: InferenceGriddedData) -> None:
     """Seed the rollout from ``config.seed`` only when the IC carries no random
     state yet.
 
-    A random state restored from a segment's restart sidecar takes precedence:
+    A random state restored from a segment's restart stepper state takes
+    precedence:
     segment 0 (no restored state) seeds from ``seed``, while later segments
     continue the restored generator, keeping a resumed rollout bitwise-identical
     to the single-run seeded rollout. When a restored random state supersedes the

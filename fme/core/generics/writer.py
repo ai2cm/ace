@@ -13,10 +13,10 @@ class WriterABC(abc.ABC, Generic[PS, SD]):
 
     @abc.abstractmethod
     def write_stepper_state(self, data: PS, filename: str):
-        """Write the prognostic state's ``StepperState`` to a restart sidecar.
+        """Write the prognostic state's ``StepperState`` to a restart file.
 
         A no-op when the state carries no ``StepperState`` (e.g. an unseeded,
-        no-corrector-state rollout), so the sidecar is written only when there
+        no-corrector-state rollout), so the file is written only when there
         is something to restore.
         """
         ...

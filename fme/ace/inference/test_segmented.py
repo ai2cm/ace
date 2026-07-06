@@ -296,7 +296,7 @@ def save_noise_conditioned_stepper(
 ):
     """Save a minimal NoiseConditionedSFNO stepper whose noise actually affects the
     output, so a stochastic rollout is only reproducible across a restart if the
-    random state is threaded through the sidecar."""
+    random state is threaded through the restart stepper state file."""
     all_names = list(set(in_names).union(out_names))
     config = StepperConfig(
         step=StepSelector(
@@ -354,7 +354,7 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
 
     This only holds if the random state (advancing noise generator) is serialized
     at the segment boundary and restored for the next segment, which is the point
-    of the restart sidecar. With a deterministic stepper this would pass
+    of the restart stepper state file. With a deterministic stepper this would pass
     vacuously; the NoiseConditionedSFNO here has active noise (asserted below via
     seed sensitivity), so the cross-restart match is a real reproducibility
     result."""
@@ -462,7 +462,7 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
 
 
 def _paired_writer(tmp_path: pathlib.Path) -> PairedDataWriter:
-    """A minimal PairedDataWriter for exercising the stepper-state sidecar."""
+    """A minimal PairedDataWriter for exercising the stepper state file."""
     return PairedDataWriter(
         writers=[],
         path=str(tmp_path),
@@ -484,21 +484,21 @@ def _prognostic_state_with(stepper_state: StepperState | None) -> PrognosticStat
     return PrognosticState(batch)
 
 
-def test_stepper_state_sidecar_none_is_backcompat_noop(tmp_path):
-    """A restart with no stepper state writes no sidecar, and a config that does
+def test_stepper_state_file_none_is_backcompat_noop(tmp_path):
+    """A restart with no stepper state writes no file, and a config that does
     not point at one restores nothing (stepper_state stays None) - the pre-feature
-    behavior for restart files written before the sidecar existed."""
+    behavior for restart files written before the stepper state file existed."""
     writer = _paired_writer(tmp_path)
     writer.write_stepper_state(_prognostic_state_with(None), "restart_stepper_state.pt")
     assert not (tmp_path / "restart_stepper_state.pt").exists()
 
-    # A config that names no sidecar restores nothing.
+    # A config that names no stepper state file restores nothing.
     config = InitialConditionConfig(path=str(tmp_path / "ic.nc"))
     assert config.stepper_state_path is None
     with pytest.raises(ValueError, match="not set"):
         config.get_stepper_state()
 
-    # A set-but-missing sidecar is a user error and raises clearly.
+    # A set-but-missing stepper state file is a user error and raises clearly.
     missing = InitialConditionConfig(
         path=str(tmp_path / "ic.nc"),
         stepper_state_path=str(tmp_path / "does_not_exist.pt"),
@@ -507,10 +507,10 @@ def test_stepper_state_sidecar_none_is_backcompat_noop(tmp_path):
         missing.get_stepper_state()
 
 
-def test_stepper_state_sidecar_corrector_and_random_continuity(tmp_path):
-    """The sidecar written by the writer and loaded via InitialConditionConfig
-    preserves the corrector's pinned global_dry_air_mass exactly and continues the
-    random generator's draw sequence."""
+def test_stepper_state_file_corrector_and_random_continuity(tmp_path):
+    """The stepper state file written by the writer and loaded via
+    InitialConditionConfig preserves the corrector's pinned global_dry_air_mass
+    exactly and continues the random generator's draw sequence."""
     mass = torch.randn(1, 1, 1)
     random_state = RandomState.from_seed(11)
     stepper_state = StepperState(
