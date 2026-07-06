@@ -2,18 +2,18 @@
 
 set -e
 
-JOB_NAME="ace2s-era-tuned-xshield-inference"
+JOB_NAME="ace2s-shieldplus-tuned-xshield-inference"
 JOB_GROUP=""
-EXISTING_RESULTS_DATASET="01KR20DK354DQRW6FY8CMCZ0YE"  # this contains the checkpoint to use for inference
-CONFIG_FILENAME="inference-4k-tuned.yaml"
+EXISTING_RESULTS_DATASET="01KWMYV98Q79G2FNY3CE95N2NG"  # this contains the checkpoint to use for inference
+CONFIG_FILENAME="inference-0k.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-STATS_DATASET="annak/2026-04-27-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-xshield-prmsl-stats"
-
+#STATS_DATASET="annak/2026-04-27-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-xshield-prmsl-stats"
+STATS_DATASET="andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 IMAGE="$(cat latest_deps_only_image.txt)"
 
@@ -25,11 +25,10 @@ cd $REPO_ROOT && gantry run \
     --description 'Run ACE2S evaluator' \
     --beaker-image $IMAGE \
     --workspace ai2/climate-titan \
-    --priority high \
+    --priority urgent \
     --not-preemptible \
-    --cluster ai2/saturn \
+    --cluster ai2/titan \
     --cluster ai2/jupiter \
-    --cluster ai2/ceres  \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
