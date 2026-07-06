@@ -10,6 +10,7 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
+from fme.core.random_state import RandomState
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict
 
@@ -324,6 +325,20 @@ def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps
             start.data[name].cpu().numpy(),
             batch_data.data[name][:, :n_ic_timesteps, ...].cpu().numpy(),
         )
+
+
+def test_with_random_state_attaches_to_stepper_state():
+    batch_data = get_batch_data(
+        names=["foo"], n_samples=2, n_times=3, horizontal_dims=["lat", "lon"]
+    )
+    ic = batch_data.get_start(["foo"], n_ic_timesteps=1)
+    assert ic.as_batch_data().stepper_state is None
+    random_state = RandomState.from_seed(0)
+    seeded = ic.with_random_state(random_state)
+    # The original is unchanged; the copy carries the random_state.
+    assert ic.as_batch_data().stepper_state is None
+    assert seeded.as_batch_data().stepper_state is not None
+    assert seeded.as_batch_data().stepper_state.random_state is random_state
 
 
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])

@@ -14,6 +14,7 @@ from fme.core.dataset.dataset import DatasetItem
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
+from fme.core.random_state import RandomState
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -88,6 +89,22 @@ class PrognosticState:
 
     def to_device(self) -> "PrognosticState":
         return PrognosticState(self._data.to_device())
+
+    def with_random_state(self, random_state: RandomState) -> "PrognosticState":
+        """Return a copy with a seeded RandomState attached to its stepper_state.
+
+        Used to seed stochastic inference: the random_state threads through the
+        rollout via the stepper_state so the noise sequence is reproducible.
+        """
+        stepper_state = self._data.stepper_state or StepperState()
+        return PrognosticState(
+            dataclasses.replace(
+                self._data,
+                stepper_state=dataclasses.replace(
+                    stepper_state, random_state=random_state
+                ),
+            )
+        )
 
     def as_batch_data(self) -> "BatchData":
         return self._data
