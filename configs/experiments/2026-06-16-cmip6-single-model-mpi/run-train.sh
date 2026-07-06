@@ -71,4 +71,10 @@ run_training() {
 # -all and -lowrisk launched 2026-06-24 (256b11433); -no-residual added after.
 # run_training "train-4deg-daily-cmip6-mpi-single-all.yaml" "train-4deg-daily-cmip6-mpi-single-all-rs0" 1
 # run_training "train-4deg-daily-cmip6-mpi-single-lowrisk.yaml" "train-4deg-daily-cmip6-mpi-single-lowrisk-rs0" 1
-run_training "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual.yaml" "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual-rs0" 1
+# run_training "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual.yaml" "train-4deg-daily-cmip6-mpi-single-lowrisk-no-residual-rs0" 1
+# --- v3 masked / thickness / residual-off runs (D): reads GCS v3 zarr directly
+#     (engine: zarr, no Weka staging), mask_loss on, thickness predicted (zg
+#     diagnosed). Uncomment the target to launch; leave the other commented so a
+#     re-run doesn't duplicate a live job.
+run_training "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness.yaml" "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness-rs0" 1
+# run_training "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness-no-energy.yaml" "train-4deg-daily-cmip6-mpi-single-v3-masked-thickness-no-energy-rs0" 1
