@@ -258,3 +258,25 @@ run_training "train-4deg-daily-v2-era5-only-ftens8.yaml" "train-4deg-daily-v2-er
 
 # --- ftens16: n_ensemble 16, seed 0 (1 GPU) ---
 run_training "train-4deg-daily-v2-era5-only-ftens16.yaml" "train-4deg-daily-v2-era5-only-ftens16-rs0" 1
+
+# =============================================================================
+# Frozen-eval controls (metric-effect isolation, 2026-07-07): load the v2
+# baseline (oshj5u79) epoch-120 weights via parameter_init as a FRESH run
+# (epoch 0) and, with evaluate_before_training + max_epochs 0, run ONE
+# validation and exit — NO training. Gives val 1-step SSR bias at each N on the
+# SAME epoch-120 weights. The frozen val-SSR curve over N is the pure
+# evaluation/metric effect; overlaid on the trained ftens arms it separates the
+# training effect from the metric. Launch with:  ./run-train.sh ftens-eval
+# =============================================================================
+
+# --- frozen eval, n_ensemble 2 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens-eval-n2.yaml" "train-4deg-daily-v2-era5-only-ftens-eval-n2-rs0" 1
+
+# --- frozen eval, n_ensemble 4 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens-eval-n4.yaml" "train-4deg-daily-v2-era5-only-ftens-eval-n4-rs0" 1
+
+# --- frozen eval, n_ensemble 8 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens-eval-n8.yaml" "train-4deg-daily-v2-era5-only-ftens-eval-n8-rs0" 1
+
+# --- frozen eval, n_ensemble 16 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens-eval-n16.yaml" "train-4deg-daily-v2-era5-only-ftens-eval-n16-rs0" 1
