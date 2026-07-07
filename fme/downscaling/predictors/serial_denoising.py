@@ -16,6 +16,7 @@ from fme.downscaling.models import (
     _repeat_batch_by_samples,
 )
 from fme.downscaling.requirements import DataRequirements
+from fme.downscaling.samplers import boundary_aligned_t_list, fastgen_sampler
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 
 
@@ -366,6 +367,210 @@ class DenoisingMoEBundledConfig:
 
     def build(self) -> "DenoisingMoEPredictor":
         predictor = DenoisingMoEPredictor.from_state(self._bundle)
+        for expert in predictor._experts:
+            expert.module.eval()
+        return predictor
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        expert_config = self._bundle["experts"][0]["config"]
+        renames = self._bundle.get("expert_renames") or [None]
+        rename = renames[0] or {}
+        in_names = [rename.get(n, n) for n in expert_config["in_names"]]
+        out_names = [rename.get(n, n) for n in expert_config["out_names"]]
+        return DataRequirements(
+            fine_names=out_names,
+            coarse_names=list(set(in_names).union(out_names)),
+            n_timesteps=1,
+            use_fine_topography=expert_config["use_fine_topography"],
+        )
+
+
+class DenoisingMoEStudentPredictor(DenoisingMoEPredictor):
+    """MoE of FastGen-distilled single-segment students, sampled as a cascade.
+
+    Unlike the teacher :class:`DenoisingMoEPredictor` — which runs the Heun/EDM
+    ``edm_sampler`` over a continuous Karras grid — a bundle of distilled
+    students is sampled with the **fastgen predict-x0-then-renoise cascade** over
+    a boundary-aligned ``t_list``: each student predicts x0 only at the sigmas it
+    was distilled against, then that x0 is re-noised down to the next (lower)
+    segment's start sigma (the boundary handoff). This is the trajectory the
+    students were trained for; running them through the teacher's continuous grid
+    would query them at sigmas they never saw and would never place a node at the
+    segment boundary.
+
+    ``steps_per_range`` aligns with ``sigma_ranges`` (ascending) and sets each
+    segment's step count, e.g. ``[2, 1]`` for a 2-step low-noise student and a
+    1-step high-noise student over ``[(0.005, 200), (200, 2000)]``.
+    """
+
+    _SAMPLER_TYPE = "fastgen_cascade"
+
+    def __init__(
+        self,
+        experts: list[DiffusionModel],
+        sigma_ranges: list[tuple[float, float]],
+        steps_per_range: list[int],
+        expert_renames: list[dict[str, str] | None] | None = None,
+    ) -> None:
+        if len(steps_per_range) != len(experts):
+            raise ValueError(
+                "steps_per_range and experts must have the same length, got "
+                f"{len(steps_per_range)} vs {len(experts)}."
+            )
+        if any(s < 1 for s in steps_per_range):
+            raise ValueError(
+                f"steps_per_range entries must be >= 1; got {steps_per_range}."
+            )
+        # The parent builds the sigma-dispatch module and stores sigma ranges;
+        # a student bundle has no single EDM step count or churn, so we pass a
+        # nominal (unused) step count and zero churn.
+        super().__init__(
+            experts=experts,
+            sigma_ranges=sigma_ranges,
+            num_diffusion_generation_steps=sum(steps_per_range),
+            churn=0.0,
+            expert_renames=expert_renames,
+        )
+        self._steps_per_range = list(steps_per_range)
+
+    @torch.no_grad()
+    def generate(
+        self,
+        coarse_data: TensorMapping,
+        static_inputs: StaticInputs | None,
+        n_samples: int = 1,
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
+        inputs, latents = self._primary.prepare_generation_inputs(
+            coarse_data, static_inputs, n_samples
+        )
+        t_list = boundary_aligned_t_list(
+            self._sigma_ranges, self._steps_per_range, device=latents.device
+        )
+        generated_norm, latent_steps = fastgen_sampler(
+            self._dispatch_module,
+            latents,
+            inputs,
+            t_list=t_list,
+        )
+        generated, generated_norm = self._primary.postprocess_generated(
+            generated_norm, coarse_data, n_samples
+        )
+        return generated, generated_norm, latent_steps
+
+    def get_state(self) -> Mapping[str, Any]:
+        return {
+            "experts": [expert.get_state() for expert in self._experts],
+            "sigma_ranges": [list(r) for r in self._sigma_ranges],
+            "steps_per_range": list(self._steps_per_range),
+            "expert_renames": self._expert_renames,
+            "sampler_type": self._SAMPLER_TYPE,
+        }
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "DenoisingMoEStudentPredictor":
+        expert_states = state["experts"]
+        expert_renames = state.get("expert_renames") or [None] * len(expert_states)
+        experts = [
+            DiffusionModel.from_state(s, rename=r)
+            for s, r in zip(expert_states, expert_renames, strict=True)
+        ]
+        sigma_ranges = [(float(lo), float(hi)) for lo, hi in state["sigma_ranges"]]
+        return cls(
+            experts=experts,
+            sigma_ranges=sigma_ranges,
+            steps_per_range=[int(s) for s in state["steps_per_range"]],
+            expert_renames=list(expert_renames),
+        )
+
+
+@dataclasses.dataclass
+class DenoisingMoEStudentConfig:
+    """
+    Assemble FastGen-distilled single-segment students into a cascade predictor.
+
+    Sibling of :class:`DenoisingMoEConfig` for distilled students: replaces the
+    teacher's single ``num_diffusion_generation_steps`` (a continuous EDM grid
+    count) with per-segment ``steps_per_range``, and has no ``churn`` (the
+    fastgen cascade is not the stochastic Heun sampler).
+
+    Parameters:
+        denoising_expert_configs: One entry per student (checkpoint + sigma
+            range), listed in any order (sorted ascending by ``sigma_min``).
+        steps_per_range: Fastgen step count per segment, aligned with the
+            sorted ranges (ascending). E.g. ``[2, 1]`` = 2-step low-noise
+            student, 1-step high-noise student.
+    """
+
+    denoising_expert_configs: list[DenoisingExpertCheckpointConfig]
+    steps_per_range: list[int]
+
+    def __post_init__(self) -> None:
+        order = sorted(
+            range(len(self.denoising_expert_configs)),
+            key=lambda i: self.denoising_expert_configs[i].sigma_min,
+        )
+        self.denoising_expert_configs = [
+            self.denoising_expert_configs[i] for i in order
+        ]
+        self.steps_per_range = [self.steps_per_range[i] for i in order]
+        if len(self.steps_per_range) != len(self.denoising_expert_configs):
+            raise ValueError(
+                "steps_per_range and denoising_expert_configs must have the same "
+                f"length, got {len(self.steps_per_range)} vs "
+                f"{len(self.denoising_expert_configs)}."
+            )
+
+    def build(self) -> DenoisingMoEStudentPredictor:
+        experts = [rc.checkpoint_config.build() for rc in self.denoising_expert_configs]
+        _validate_experts_compatible(experts)
+        sigma_ranges = [
+            (rc.sigma_min, rc.sigma_max) for rc in self.denoising_expert_configs
+        ]
+        expert_renames = [
+            rc.checkpoint_config.rename for rc in self.denoising_expert_configs
+        ]
+        return DenoisingMoEStudentPredictor(
+            experts=experts,
+            sigma_ranges=sigma_ranges,
+            steps_per_range=self.steps_per_range,
+            expert_renames=expert_renames,
+        )
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        return self.denoising_expert_configs[0].checkpoint_config.data_requirements
+
+
+@dataclasses.dataclass
+class DenoisingMoEStudentBundledConfig:
+    """
+    Loads a :class:`DenoisingMoEStudentPredictor` from a bundle written by
+    ``DenoisingMoEStudentPredictor.save``. Sibling of
+    :class:`DenoisingMoEBundledConfig` for distilled-student bundles; the teacher
+    bundle config and format are left untouched.
+    """
+
+    mixture_of_experts_path: str
+
+    def __post_init__(self) -> None:
+        self._state_is_loaded = False
+        self._state: Mapping[str, Any] | None = None
+
+    @property
+    def _bundle(self) -> Mapping[str, Any]:
+        if not self._state_is_loaded:
+            self._state = torch.load(
+                self.mixture_of_experts_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            self._state_is_loaded = True
+        assert self._state is not None
+        return self._state
+
+    def build(self) -> DenoisingMoEStudentPredictor:
+        predictor = DenoisingMoEStudentPredictor.from_state(self._bundle)
         for expert in predictor._experts:
             expert.module.eval()
         return predictor

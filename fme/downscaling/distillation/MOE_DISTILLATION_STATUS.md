@@ -113,12 +113,12 @@ NFE, or whether Lo-only suffices.
 
 ---
 
-## SPEC (2026-07-07): distilled 2-step bundle sampler + end-to-end eval  ⏳ TODO
+## SPEC (2026-07-07): distilled 2-step bundle sampler + end-to-end eval  ✅ DONE
 
-> Status: **planned** — spec'd, not yet implemented. Deliverable:
-> `DenoisingMoEStudentPredictor` + `DenoisingMoEStudentConfig` /
-> `DenoisingMoEStudentBundledConfig` landing the predict-x0-renoise cascade as a
-> deployable predictor. Closes the ⏳ "Bundle sampler" checklist item.
+> Status: **implemented** — `DenoisingMoEStudentPredictor` +
+> `DenoisingMoEStudentConfig` / `DenoisingMoEStudentBundledConfig` land the
+> predict-x0-renoise cascade as a deployable predictor. See "Implementation" below.
+> Closes the ⏳ "Bundle sampler" checklist item.
 
 ### Goal
 
@@ -247,9 +247,35 @@ as a refactor smell); the two sampling semantics are genuinely different objects
 - The Lo-only (from-noise@200) ablation — separate eval config, decided after this.
 - YAML wiring for the student bundle in the production config union (spec 03 area).
 
-### Implementation
+### Implementation (done 2026-07-07)
 
-`<filled in at commit time>`
+`predictors/serial_denoising.py` — three new symbols; teacher path untouched:
+- **`DenoisingMoEStudentPredictor(DenoisingMoEPredictor)`** — overrides `generate`
+  to run `boundary_aligned_t_list(self._sigma_ranges, self._steps_per_range)` →
+  `fastgen_sampler(self._dispatch_module, latents, inputs, t_list=…)` →
+  `_primary.postprocess_generated`. `__init__` takes `steps_per_range` (validates
+  length + ≥1), calls `super().__init__` with `num_diffusion_generation_steps=
+  sum(steps_per_range)`, `churn=0.0`. `get_state`/`from_state` carry
+  `steps_per_range` + `sampler_type="fastgen_cascade"`. `generate_on_batch` /
+  `_no_target` inherited unchanged.
+- **`DenoisingMoEStudentConfig`** — assembles from per-expert
+  `DenoisingExpertCheckpointConfig`s; `__post_init__` sorts experts *and*
+  `steps_per_range` together by ascending `sigma_min`; `build()` →
+  `DenoisingMoEStudentPredictor`.
+- **`DenoisingMoEStudentBundledConfig`** — loads a saved student bundle;
+  `build()` → `from_state` + `.eval()`.
+
+Tests (`predictors/test_serial_denoising.py`, 8 new, all pass; reuse
+`_get_diffusion_model` + forward-pre-hooks to record dispatch σ): cascade routes
+hi@>boundary / lo@≤boundary; per-step σ == `boundary_aligned_t_list` (not the EDM
+grid); `steps_per_range=[2,1]` → lo×2/hi×1; length mismatch raises; save/load
+round-trip preserves `steps_per_range` + seeded generation; config sorts steps
+with ranges + bundle carries the `fastgen_cascade` marker; `predict_residual=True`
+output is full-field via `postprocess_generated`. Clean on ruff/ruff-format/mypy.
+
+**Not yet wired:** the YAML model-union entry for a student bundle (production
+config, spec 03 area) and the actual bundle-build/eval *run* against the teacher
+zarr — the predictor + configs are the reusable pieces those will call.
 
 ---
 
@@ -502,11 +528,11 @@ conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.s
   Needs: a `frozen_lo_checkpoint` arg on the callback + a `"hi_cascade"`
   `validation_mode` that runs `student_sampling.sample_student_hi_cascade`
   through the frozen Lo from the step above.
-- ⏳ **Bundle sampler** (structural finding 3) — spec'd, see
+- ✅ **Bundle sampler** (structural finding 3) — **DONE**, see
   "SPEC (2026-07-07): distilled 2-step bundle sampler + end-to-end eval" above.
-  Add `DenoisingMoEStudentPredictor` running the fastgen predict-x0-renoise cascade
-  over a boundary-aligned `t_list`; the explicit `sigma_ranges` are authoritative
-  (the Lo `_primary` σ-range caveat is moot). Teacher EDM path untouched.
+  `DenoisingMoEStudentPredictor` runs the fastgen predict-x0-renoise cascade over a
+  boundary-aligned `t_list`; the explicit `sigma_ranges` are authoritative (the Lo
+  `_primary` σ-range caveat is moot). Teacher EDM path untouched.
 - ⏳ **Eval**: bundled 2-/3-step student on the same full-teacher val zarr
   (CRPS/spectra/tail). Per-student selection via the fixed-partner cascade.
 

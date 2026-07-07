@@ -12,6 +12,9 @@ from fme.downscaling.predictors.serial_denoising import (
     DenoisingMoEBundledConfig,
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
+    DenoisingMoEStudentBundledConfig,
+    DenoisingMoEStudentConfig,
+    DenoisingMoEStudentPredictor,
     _SigmaDispatchModule,
     _validate_experts_compatible,
     _validate_sigma_ranges,
@@ -320,3 +323,196 @@ def test_save_preserves_rename_applied_by_checkpoint_model_config(tmp_path):
     ).data_requirements
     assert reqs.fine_names == ["renamed_x"]
     assert set(reqs.coarse_names) == {"renamed_x"}
+
+
+def _build_student_predictor(
+    steps_per_range: list[int],
+    sigma_ranges: list[tuple[float, float]] | None = None,
+    predict_residual: bool = False,
+) -> DenoisingMoEStudentPredictor:
+    """Two-student cascade predictor with real DiffusionModel experts."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    experts = [
+        _get_diffusion_model(
+            coarse_shape=coarse_shape,
+            downscale_factor=2,
+            full_fine_coords=fine_coords,
+            predict_residual=predict_residual,
+            use_fine_topography=False,
+            static_inputs=StaticInputs(fields=[], coords=fine_coords),
+        )
+        for _ in range(2)
+    ]
+    return DenoisingMoEStudentPredictor(
+        experts=experts,
+        sigma_ranges=sigma_ranges or [(0.1, 0.5), (0.5, 1.0)],
+        steps_per_range=steps_per_range,
+    )
+
+
+def _record_dispatch_sigmas(
+    predictor: DenoisingMoEStudentPredictor,
+) -> tuple[list[float], list[float]]:
+    """Register forward-pre-hooks capturing the sigma each expert is queried at.
+
+    Returns (lo_sigmas, hi_sigmas) — experts are sorted ascending, so index 0 is
+    the low-noise segment and index 1 the high-noise segment.
+    """
+    lo_sigmas: list[float] = []
+    hi_sigmas: list[float] = []
+    recorders = [lo_sigmas, hi_sigmas]
+
+    def make_hook(sink: list[float]):
+        def hook(_module, args):
+            sink.append(float(args[2].reshape(-1)[0].item()))
+
+        return hook
+
+    for expert, sink in zip(predictor._experts, recorders):
+        expert.module.register_forward_pre_hook(make_hook(sink))
+    return lo_sigmas, hi_sigmas
+
+
+def test_student_predictor_cascade_routes_high_then_low():
+    """The student cascade queries the high segment above the boundary and the
+    low segment at/below it — the fastgen predict-x0-renoise handoff, not the
+    teacher's continuous EDM grid."""
+    predictor = _build_student_predictor(steps_per_range=[1, 1])
+    lo_sigmas, hi_sigmas = _record_dispatch_sigmas(predictor)
+
+    batch = make_paired_batch_data((8, 16), (16, 32), batch_size=1)
+    predictor.generate_on_batch_no_target(batch.coarse, n_samples=1)
+
+    assert len(hi_sigmas) == 1 and hi_sigmas[0] > 0.5
+    assert len(lo_sigmas) == 1 and lo_sigmas[0] <= 0.5
+
+
+def test_student_predictor_uses_boundary_aligned_t_list():
+    """The per-step sigmas equal ``boundary_aligned_t_list`` (with the boundary
+    node present), distinguishing the fastgen cascade from the teacher's
+    continuous Karras grid."""
+    from fme.downscaling.samplers import boundary_aligned_t_list
+
+    predictor = _build_student_predictor(steps_per_range=[1, 1])
+    lo_sigmas, hi_sigmas = _record_dispatch_sigmas(predictor)
+
+    batch = make_paired_batch_data((8, 16), (16, 32), batch_size=1)
+    predictor.generate_on_batch_no_target(batch.coarse, n_samples=1)
+
+    expected = boundary_aligned_t_list(
+        predictor._sigma_ranges, predictor._steps_per_range
+    )
+    # Steps visit the t_list nodes except the trailing 0 (highest sigma first).
+    visited = sorted(hi_sigmas + lo_sigmas, reverse=True)
+    expected_nodes = sorted([float(t) for t in expected[:-1]], reverse=True)
+    assert visited == pytest.approx(expected_nodes, rel=1e-6)
+
+
+def test_student_predictor_steps_per_range_honored():
+    """``steps_per_range=[2, 1]`` runs the low segment twice and the high once."""
+    predictor = _build_student_predictor(steps_per_range=[2, 1])
+    lo_sigmas, hi_sigmas = _record_dispatch_sigmas(predictor)
+
+    batch = make_paired_batch_data((8, 16), (16, 32), batch_size=1)
+    predictor.generate_on_batch_no_target(batch.coarse, n_samples=1)
+
+    assert len(hi_sigmas) == 1
+    assert len(lo_sigmas) == 2
+
+
+def test_student_predictor_length_mismatch_raises():
+    with pytest.raises(ValueError, match="steps_per_range"):
+        _build_student_predictor(steps_per_range=[1, 1, 1])
+
+
+def test_student_predictor_save_load_roundtrip(tmp_path):
+    predictor = _build_student_predictor(steps_per_range=[2, 1])
+    ckpt = tmp_path / "student_moe.pt"
+    predictor.save(str(ckpt))
+
+    loaded = DenoisingMoEStudentBundledConfig(mixture_of_experts_path=str(ckpt)).build()
+
+    assert loaded._sigma_ranges == predictor._sigma_ranges
+    assert loaded._steps_per_range == predictor._steps_per_range
+    for orig, new in zip(predictor._experts, loaded._experts):
+        for p_orig, p_new in zip(orig.module.parameters(), new.module.parameters()):
+            assert torch.equal(p_orig.cpu(), p_new.cpu())
+
+    # Seeded generation is identical after a save/load round-trip. Both must be
+    # in eval mode (the bundled config eval()s the loaded one) so dropout etc.
+    # don't diverge the comparison.
+    for expert in predictor._experts:
+        expert.module.eval()
+    batch = make_paired_batch_data((8, 16), (16, 32), batch_size=1)
+    torch.manual_seed(0)
+    out_orig = predictor.generate_on_batch_no_target(batch.coarse, n_samples=1)
+    torch.manual_seed(0)
+    out_new = loaded.generate_on_batch_no_target(batch.coarse, n_samples=1)
+    for k in out_orig:
+        torch.testing.assert_close(out_orig[k], out_new[k])
+
+
+def test_student_predictor_config_build_and_state_marker(tmp_path):
+    """``DenoisingMoEStudentConfig`` assembles from per-expert checkpoints, sorts
+    by sigma_min, and the saved bundle carries the fastgen_cascade marker."""
+
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    fine_coords = make_fine_coords(fine_shape)
+    expert_ckpts = []
+    for i in range(2):
+        model = _get_diffusion_model(
+            coarse_shape=coarse_shape,
+            downscale_factor=2,
+            full_fine_coords=fine_coords,
+            predict_residual=False,
+            use_fine_topography=False,
+            static_inputs=StaticInputs(fields=[], coords=fine_coords),
+        )
+        path = tmp_path / f"student_{i}.ckpt"
+        torch.save({"model": model.get_state()}, path)
+        expert_ckpts.append(str(path))
+
+    # Pass ranges out of order to confirm __post_init__ sorts steps alongside.
+    config = DenoisingMoEStudentConfig(
+        denoising_expert_configs=[
+            DenoisingExpertCheckpointConfig(
+                checkpoint_config=CheckpointModelConfig(
+                    checkpoint_path=expert_ckpts[0]
+                ),
+                sigma_min=0.5,
+                sigma_max=1.0,
+            ),
+            DenoisingExpertCheckpointConfig(
+                checkpoint_config=CheckpointModelConfig(
+                    checkpoint_path=expert_ckpts[1]
+                ),
+                sigma_min=0.1,
+                sigma_max=0.5,
+            ),
+        ],
+        steps_per_range=[1, 2],  # aligned with the given (unsorted) order
+    )
+    predictor = config.build()
+    assert predictor._sigma_ranges == [(0.1, 0.5), (0.5, 1.0)]
+    # steps re-ordered to follow the ascending-sigma sort: low-noise gets 2.
+    assert predictor._steps_per_range == [2, 1]
+
+    bundle = tmp_path / "bundle.pt"
+    predictor.save(str(bundle))
+    state = torch.load(str(bundle), map_location="cpu", weights_only=False)
+    assert state["sampler_type"] == "fastgen_cascade"
+    assert state["steps_per_range"] == [2, 1]
+
+
+def test_student_predictor_adds_residual_base():
+    """With ``predict_residual=True`` the cascade output is post-processed into a
+    full field via ``_primary.postprocess_generated`` (base added back)."""
+    predictor = _build_student_predictor(steps_per_range=[1, 1], predict_residual=True)
+    batch = make_paired_batch_data((8, 16), (16, 32), batch_size=1)
+    out = predictor.generate_on_batch_no_target(batch.coarse, n_samples=1)
+    assert set(out) == {"x"}
+    assert out["x"].shape == (1, 1, 16, 32)
+    assert torch.isfinite(out["x"]).all()
