@@ -14,7 +14,7 @@ loader:
       - '2014-01-01T00:00:00'
   dataset:
     data_path: /climate-default/
-    file_pattern: 2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+    file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
     engine: zarr
   num_data_workers: 16
 aggregator:

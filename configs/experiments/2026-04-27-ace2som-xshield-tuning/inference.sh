@@ -13,7 +13,7 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 #STATS_DATASET="annak/2026-04-27-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-xshield-prmsl-stats"
-STATS_DATASET="andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
+STATS_DATASET="andrep/2026-06-08-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats"
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 IMAGE="$(cat latest_deps_only_image.txt)"
 
@@ -42,7 +42,7 @@ cd $REPO_ROOT && gantry run \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
     --budget ai2/atec-climate \
-    --no-conda \
+    --no-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- python -I -m fme.ace.inference $CONFIG_PATH

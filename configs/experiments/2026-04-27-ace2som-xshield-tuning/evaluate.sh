@@ -26,11 +26,13 @@ cd $REPO_ROOT
 #MODEL_CHECKPOINT_DATASETS=("01K9FW2KRSDB52ZDR6GPYM0B9Z")
 
 # SHiELD+ tuned on XSHiELD with PRMSL
-MODEL_CHECKPOINT_DATASETS=("01KWMYV98Q79G2FNY3CE95N2NG")
+#MODEL_CHECKPOINT_DATASETS=("01KWMYV98Q79G2FNY3CE95N2NG")
+
+MODEL_CHECKPOINT_DATASETS=("01KWWVBNV0SW7D53JKFB5KE6E7")
 
 for seed in {0..0}; do
     #job_name="evaluate-4k-ace2som-xshield-continue-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="evaluate-ace2s-shieldplus-tuned-on-xshield-prmsl-best-val-ckpt-seed${seed}"
+    job_name="evaluate-ace2s-era5-no-missing-vars-tuned-on-xshield-seed${seed}"
     gantry run \
         --name $job_name \
         --description 'Run ACE training' \
@@ -47,7 +49,7 @@ for seed in {0..0}; do
         --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
         --env-secret WANDB_API_KEY=wandb-api-key-annak \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset ${MODEL_CHECKPOINT_DATASETS[$seed]}:training_checkpoints/best_ckpt.tar:/ckpt.tar \
+        --dataset ${MODEL_CHECKPOINT_DATASETS[$seed]}:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
         --gpus 1 \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
