@@ -170,3 +170,7 @@ run_training "train-4deg-daily-ace2s-shield-plus-v2arch.yaml" "train-4deg-daily-
 
 # --- v2arch residual arm (matched pair: only residual_prediction flipped), seed 0 (1 GPU) ---
 run_training "train-4deg-daily-ace2s-shield-plus-v2arch-residual.yaml" "train-4deg-daily-ace2s-shield-plus-v2arch-residual-rs0" 1
+
+# --- v2arch no-CO2 ablation (v2arch arm minus the global_mean_co2 input; CO2
+#     on/off A/B partner of the v2arch arm above), seed 0 (1 GPU) ---
+run_training "train-4deg-daily-ace2s-shield-plus-v2arch-no-co2.yaml" "train-4deg-daily-ace2s-shield-plus-v2arch-no-co2-rs0" 1
