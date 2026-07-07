@@ -104,6 +104,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
+        config: OneStepAggregatorConfig | None = None,
     ):
         """
         Args:
@@ -116,6 +117,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             ocean_channel_mean_names: Names to include in ocean channel-mean metrics.
             atmosphere_channel_mean_names: Names to include in atmosphere channel-mean
                 metrics.
+            config: Configuration applied to both the ocean and atmosphere
+                sub-aggregators. Defaults to ``OneStepAggregatorConfig()``.
 
         """
         self._dist = Distributed.get_instance()
@@ -123,7 +126,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._loss_ocean = torch.tensor(0.0, device=get_device())
         self._loss_atmos = torch.tensor(0.0, device=get_device())
         self._n_batches = 0
-        config = OneStepAggregatorConfig()
+        config = config or OneStepAggregatorConfig()
         self._aggregators = {
             "ocean": config.build(
                 dataset_info=dataset_info.ocean,
