@@ -12,11 +12,7 @@ from xarray.coding.times import CFDatetimeCoder
 from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
-from fme.ace.inference.data_writer.main import (
-    DataWriter,
-    DataWriterConfig,
-    PairedDataWriter,
-)
+from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
@@ -73,6 +69,15 @@ def test_data_writer_config_save_names():
         kwargs_copy = kwargs.copy()
         kwargs_copy.update({save_writer: True})
         DataWriterConfig(names=variable_names, **kwargs_copy)  # type: ignore
+
+
+def test_data_writer_config_prediction_names_warns_when_predictions_disabled():
+    with pytest.warns(UserWarning, match="prediction_names provided"):
+        DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=True,
+            prediction_names=["temp"],
+        )
 
 
 def get_paired_data(
@@ -204,16 +209,17 @@ class TestDataWriter:
             start_time, calendar, n_initial_conditions
         )
         n_timesteps = 6
-        writer = PairedDataWriter(
-            str(tmp_path),
+        writer = DataWriterConfig(
+            save_prediction_files=True,
+            save_monthly_files=True,
+            names=None,
+        ).build_paired(
+            experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             timestep=TIMESTEP,
             variable_metadata=sample_metadata,
             coords=coords,
-            enable_prediction_netcdfs=True,
-            enable_monthly_netcdfs=True,
-            save_names=None,
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -362,16 +368,17 @@ class TestDataWriter:
         initial_condition_times = get_initial_condition_times(
             start_time, calendar, n_samples
         )
-        writer = PairedDataWriter(
-            str(tmp_path),
+        writer = DataWriterConfig(
+            save_prediction_files=True,
+            save_monthly_files=True,
+            names=save_names,
+        ).build_paired(
+            experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=4,  # unused
             timestep=TIMESTEP,
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
-            enable_prediction_netcdfs=True,
-            enable_monthly_netcdfs=True,
-            save_names=save_names,
             dataset_metadata=DatasetMetadata(),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
@@ -426,6 +433,79 @@ class TestDataWriter:
         [pytest.param((2, 3, 4, 5), (2, 3, 4, 5), id="LatLon")],
         indirect=True,
     )
+    def test_append_batch_prediction_names_override(
+        self,
+        sample_metadata,
+        sample_target_data,
+        sample_prediction_data,
+        tmp_path,
+    ):
+        """prediction_names subsets prediction files while monthly saves all."""
+        n_samples = 2
+        calendar = "julian"
+        start_time = (2020, 1, 1, 0, 0, 0)
+        initial_condition_times = get_initial_condition_times(
+            start_time, calendar, n_samples
+        )
+        writer = DataWriterConfig(
+            save_prediction_files=True,
+            save_monthly_files=True,
+            names=None,  # save all variables in monthly files
+            prediction_names=["temp"],  # only a subset in prediction files
+        ).build_paired(
+            experiment_dir=str(tmp_path),
+            initial_condition_times=initial_condition_times,
+            n_timesteps=4,  # unused
+            timestep=TIMESTEP,
+            variable_metadata=sample_metadata,
+            coords={"lat": np.arange(4), "lon": np.arange(5)},
+            dataset_metadata=DatasetMetadata(),
+        )
+        end_time = (2020, 1, 1, 12, 0, 0)
+        batch_time = self.get_batch_time(
+            start_time=start_time,
+            end_time=end_time,
+            freq="6h",
+            n_initial_conditions=n_samples,
+        )
+        writer.append_batch(
+            batch=get_paired_data(
+                prediction=sample_prediction_data,
+                reference=sample_target_data,
+                time=batch_time,
+            ),
+        )
+        writer.finalize()
+
+        prediction_dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
+        assert set(prediction_dataset.variables.keys()) == {
+            "temp",
+            "init_time",
+            "time",
+            "lat",
+            "lon",
+            "valid_time",
+        }
+
+        monthly_dataset = Dataset(tmp_path / "monthly_mean_predictions.nc", "r")
+        assert set(monthly_dataset.variables.keys()) == set(
+            sample_prediction_data.keys()
+        ).union(
+            {
+                "init_time",
+                "time",
+                "valid_time",
+                "counts",
+                "lat",
+                "lon",
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "sample_target_data, sample_prediction_data",
+        [pytest.param((2, 3, 4, 5), (2, 3, 4, 5), id="LatLon")],
+        indirect=True,
+    )
     def test_append_batch_data_time_mismatch(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):
@@ -435,16 +515,17 @@ class TestDataWriter:
         initial_condition_times = get_initial_condition_times(
             start_time, calendar, n_samples
         )
-        writer = PairedDataWriter(
-            str(tmp_path),
+        writer = DataWriterConfig(
+            save_prediction_files=True,
+            save_monthly_files=True,
+            names=None,
+        ).build_paired(
+            experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=3,
             timestep=TIMESTEP,
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
-            enable_prediction_netcdfs=True,
-            enable_monthly_netcdfs=True,
-            save_names=None,
             dataset_metadata=DatasetMetadata(),
         )
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -494,18 +575,19 @@ class TestDataWriter:
             format=ZarrWriterConfig(),
         )
 
-        writer = DataWriter(
-            str(tmp_path),
+        writer = DataWriterConfig(
+            save_prediction_files=True,
+            save_monthly_files=True,
+            names=None,
+            time_coarsen=TimeCoarsenConfig(coarsen_factor),
+            files=[region_config],
+        ).build(
+            experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             timestep=TIMESTEP,
-            enable_prediction_netcdfs=True,
-            enable_monthly_netcdfs=True,
-            save_names=None,
-            time_coarsen=TimeCoarsenConfig(coarsen_factor),
-            files=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         end_time = (2020, 1, 1, 18, 0, 0)
@@ -624,18 +706,19 @@ class TestDataWriter:
             separate_ensemble_members=True,
             format=ZarrWriterConfig(),
         )
-        writer = DataWriter(
-            str(tmp_path),
+        writer = DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            names=None,
+            time_coarsen=None,
+            files=[region_config],
+        ).build(
+            experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
             variable_metadata=sample_metadata,
             coords={"lat": np.arange(n_lat), "lon": np.arange(n_lon)},
             timestep=TIMESTEP,
-            enable_prediction_netcdfs=False,
-            enable_monthly_netcdfs=False,
-            save_names=None,
-            time_coarsen=None,
-            files=[region_config],
             dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         end_time = (2020, 1, 1, 18, 0, 0)

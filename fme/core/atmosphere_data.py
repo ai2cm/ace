@@ -97,6 +97,8 @@ class AtmosphereData:
         self._prefix_map = atmosphere_field_name_prefixes
         self._vertical_coordinate = vertical_coordinate
         self._stacker = Stacker(atmosphere_field_name_prefixes)
+        # Concrete data keys written through this instance's ``set_*`` methods.
+        self._modified_keys: set[str] = set()
 
     @property
     def data(self) -> TensorDict:
@@ -118,6 +120,16 @@ class AtmosphereData:
 
     def _set_prefix(self, prefix, value):
         self.data[prefix] = value
+        self._modified_keys.add(prefix)
+
+    @property
+    def modified_data(self) -> TensorDict:
+        """Return the data keys written through this instance's setters.
+
+        The returned tensors are references into this instance's data (not
+        clones).
+        """
+        return {key: self._data[key] for key in self._modified_keys}
 
     def _get(self, name):
         for prefix in self._prefix_map[name]:

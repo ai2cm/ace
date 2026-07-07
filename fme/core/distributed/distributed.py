@@ -437,6 +437,9 @@ class Distributed:
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return self._distributed.spatial_reduce_sum(tensor)
 
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        return self._distributed.broadcast_spatial(tensor)
+
     def weighted_mean(
         self,
         data: torch.Tensor,
