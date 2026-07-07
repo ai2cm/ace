@@ -84,6 +84,6 @@ job_group="${base_name}-era5"
 #   "01KWD8DZVJFKYC5A9PNW8259GH"
 
 run_evaluator "ace-evaluator-config-10day.yaml" \
-  "$base_name-era5-multi-step-ft-no-channel-weightings-32-noise-embed-dim-energy-and-frozen-precip-corrector-on-new-order-rs2-10day-forecast" \
+  "$base_name-era5-multi-step-ft-no-channel-weightings-32-noise-embed-dim-energy-and-frozen-precip-corrector-new-order-rs2-10day-cast" \
   "$job_group" \
   "01KWD8DZVJFKYC5A9PNW8259GH"
