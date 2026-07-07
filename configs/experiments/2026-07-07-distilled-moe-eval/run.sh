@@ -43,28 +43,38 @@ usage() {
     exit 1
 }
 
-# Assemble the [2,1] student cascade bundle from the two per-expert checkpoints
-# and write it to weka. Bundling only loads + re-saves weights, so it runs
-# CPU-only on the ai2/phobos cluster (no GPUs). Subpath mounts keep the download
-# to just the student_checkpoints dirs. Source datasets are recorded both as
-# gantry inputs (the mounts below) and explicitly in the description.
+# Repair the Hi checkpoint (saved with expert-0's 128-wide config over expert-1's
+# 256-wide weights) using expert-1's config from the teacher bundle, then assemble
+# the [2,1] student cascade bundle and write it to weka. Both steps only load +
+# re-save weights, so this runs CPU-only on ai2/phobos (no GPUs). Subpath mounts
+# keep the download to just the student_checkpoints dirs; the teacher bundle is
+# mounted read-only for the repair's reference config. Source datasets are
+# recorded as gantry inputs (the mounts) and in the description.
+HI_FIXED="$BUNDLE_DIR/hi_best_student_tail_fixed.ckpt"
 run_bundle() {
     gantry run \
         --name "bundle-distilled-moe-student" \
-        --description "Bundle distilled 2-step MoE student: Lo=expert0 baseline-fixed (beaker://${DATASET_LO}) + Hi=expert1 hi-1step (beaker://${DATASET_HI}); best_student_tail.ckpt each, steps_per_range [2,1]" \
+        --description "Repair+bundle distilled 2-step MoE student: Lo=expert0 baseline-fixed (beaker://${DATASET_LO}) + Hi=expert1 hi-1step (beaker://${DATASET_HI}, config repaired from teacher bundle beaker://${DATASET_TEACHER}); best_student_tail.ckpt each, steps_per_range [2,1]" \
         --workspace ai2/climate-titan \
         --priority normal \
         --cluster ai2/phobos \
         --beaker-image "$IMAGE" \
         --dataset "${DATASET_LO}:fastgen/${RUN_LO}/student_checkpoints:/lo" \
         --dataset "${DATASET_HI}:fastgen/${RUN_HI}/student_checkpoints:/hi" \
+        --dataset "${DATASET_TEACHER}:/teacher" \
         --weka climate-default:/climate-default \
         --gpus 0 \
         --shared-memory 100GiB \
         --budget ai2/atec-climate \
         --system-python \
         --install "pip install --no-deps ." \
-        -- bash -c "mkdir -p '$BUNDLE_DIR' && python scripts/downscaling/bundle_denoising_moe_checkpoint.py '$SCRIPT_PATH/distilled-bundle.yaml' '$BUNDLE_PATH'"
+        -- bash -c "mkdir -p '$BUNDLE_DIR' && \
+python scripts/downscaling/repair_student_checkpoint_config.py \
+    --student-ckpt /hi/best_student_tail.ckpt \
+    --teacher-bundle /teacher/bundled_moe_multivariate.ckpt \
+    --expert-index 1 \
+    --output '$HI_FIXED' && \
+python scripts/downscaling/bundle_denoising_moe_checkpoint.py '$SCRIPT_PATH/distilled-bundle.yaml' '$BUNDLE_PATH'"
 }
 
 run_eval() {

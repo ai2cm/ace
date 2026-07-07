@@ -289,13 +289,26 @@ bundle's `sampler_type` tag, so no new union member was needed.
 - **Dataset:** CONUS 2023, **100km→3km** (not 25km). Coarse merge `100km.zarr` +
   `prmsl_100km.zarr`; fine merge `3km.zarr` +
   `instantaneous_surface_and_sea_level_pressure_3km.zarr`.
-- **Bundle assembly:** `./run.sh bundle` — gantry job mounts *only* the
-  `student_checkpoints` subpath of each source dataset (Lo=expert0 baseline-fixed
-  `01KWJAFM694MAE55M2JMZSE89M`, Hi=expert1 hi-1step `01KWTXGAM1CCGDH29JWDSN9KPF`),
-  runs `scripts/downscaling/bundle_denoising_moe_checkpoint.py` on
-  `distilled-bundle.yaml` (`best_student_tail.ckpt` each, `steps_per_range [2,1]`),
-  writes `distilled_moe_bundle.ckpt` to weka
-  `/climate-default/2026-07-07-distilled-moe-bundle/`.
+- **★ Checkpoint-config bug (fixed `ef856920a`):** `save_student_checkpoint`
+  baked in the config of `teacher_model._primary` (always experts[0], the 128-wide
+  low-noise expert) regardless of which expert was distilled. So the **Student-Hi**
+  checkpoint holds expert-1's **256-wide weights under a 128-wide config** and fails
+  to reload (size mismatch — crashed the first bundle attempt, beaker
+  `01KWZAZXH12VFH4XKMT1PVKTSD`). Fixed forward in `fastgen_train.py` (select
+  `experts[expert_index]`, or the last/high-noise expert for a whole-MoE student).
+  Lo is unaffected (`_primary` *was* its expert).
+- **Bundle assembly:** `./run.sh bundle` — CPU gantry job on `ai2/phobos` that
+  (1) **repairs** the Hi ckpt with
+  `scripts/downscaling/repair_student_checkpoint_config.py` (rewrites it with
+  expert-1's config from the teacher bundle + the student's 256-wide weights, no
+  retrain; verifies weight shapes match first) → weka `hi_best_student_tail_fixed.ckpt`,
+  then (2) runs `scripts/downscaling/bundle_denoising_moe_checkpoint.py` on
+  `distilled-bundle.yaml` (`best_student_tail.ckpt`, `steps_per_range [2,1]`) → weka
+  `/climate-default/2026-07-07-distilled-moe-bundle/distilled_moe_bundle.ckpt`.
+  Mounts *only* each source dataset's `student_checkpoints` subpath (Lo=expert0
+  baseline-fixed `01KWJAFM694MAE55M2JMZSE89M`, Hi=expert1 hi-1step
+  `01KWTXGAM1CCGDH29JWDSN9KPF`) plus the teacher bundle
+  `01KTCHVDHY0SATWH9E0AW2PDS6` read-only for the repair reference.
 - **Eval:** `./run.sh all` — two `EvaluatorConfig`s (teacher bundle via beaker
   dataset, distilled bundle via weka), identical data/patch/`n_samples=4`, logged
   to `andrep-downscaling`. Run `bundle` first and let it finish.
