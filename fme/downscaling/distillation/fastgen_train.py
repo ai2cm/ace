@@ -776,14 +776,17 @@ def main() -> None:
     # ------------------------------------------------------------------
     spectral_loss = None
     if args.spectral_loss_weight > 0.0:
+        from fme.downscaling.distillation._lazy_target import lazy_target_name
         from fme.downscaling.distillation.spectral_method import AceFdistillModel
         from fme.downscaling.spectral_loss import SpectralMatchingLossConfig
 
-        target = config.model_class.get("_target_", "")
-        if not target.endswith("FdistillModel"):
+        # LazyCall stores _target_ as the class object (dataclasses become
+        # strings); normalize to a name that works for either form.
+        target_name = lazy_target_name(config.model_class.get("_target_", None))
+        if not target_name.endswith("FdistillModel"):
             raise ValueError(
                 "--spectral-loss-weight is currently wired for the f-distill "
-                f"method only, but model_class is {target!r}."
+                f"method only, but model_class is {target_name!r}."
             )
         spectral_loss = SpectralMatchingLossConfig(
             band_gamma=args.spectral_band_gamma,
