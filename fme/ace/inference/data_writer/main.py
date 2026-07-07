@@ -20,7 +20,7 @@ from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
-from .step_diagnostics import STEP_DIAGNOSTICS_LABEL, StepDiagnosticsWriter
+from .step_diagnostics import STEP_DIAGNOSTICS_DIR, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
@@ -40,10 +40,12 @@ class DataWriterConfig:
             containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
-        save_step_diagnostics: Whether to enable writing of a netCDF file
-            containing per-step diagnostics of the prediction (currently the
-            corrector's per-step correction delta). No file content is
-            written when no corrector modified anything.
+        save_step_diagnostics: Whether to enable writing of netCDF files
+            containing per-step diagnostics of the prediction, one file per
+            named diagnostics dataset under a ``step_diagnostics/`` directory
+            (currently the corrector's per-step correction delta, written to
+            ``step_diagnostics/correction_deltas.nc``). Nothing is written
+            when no corrector modified anything.
         names: Names of variables to save in the prediction and monthly
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
@@ -167,18 +169,24 @@ class DataWriterConfig:
     ) -> StepDiagnosticsWriter | None:
         if not self.save_step_diagnostics:
             return None
-        writer: RawDataWriter | TimeCoarsen = RawDataWriter(
-            path=experiment_dir,
-            label=STEP_DIAGNOSTICS_LABEL,
-            initial_condition_times=initial_condition_times,
-            save_names=self.names,
-            variable_metadata=variable_metadata,
-            coords=coords,
-            dataset_metadata=dataset_metadata,
-        )
-        if self.time_coarsen is not None:
-            writer = self.time_coarsen.build(writer)
-        return StepDiagnosticsWriter(writer)
+
+        def build_writer(name: str) -> RawDataWriter | TimeCoarsen:
+            path = os.path.join(experiment_dir, STEP_DIAGNOSTICS_DIR)
+            os.makedirs(path, exist_ok=True)
+            writer: RawDataWriter | TimeCoarsen = RawDataWriter(
+                path=path,
+                label=name,
+                initial_condition_times=initial_condition_times,
+                save_names=self.names,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            )
+            if self.time_coarsen is not None:
+                writer = self.time_coarsen.build(writer)
+            return writer
+
+        return StepDiagnosticsWriter(build_writer)
 
     def build(
         self,
@@ -314,7 +322,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             and batch.step_diagnostics is not None
         ):
             self._step_diagnostics_writer.append_batch(
-                batch.step_diagnostics.to_dataset(batch.time)
+                batch.step_diagnostics.to_datasets(batch.time)
             )
 
     def flush(self):
@@ -434,7 +442,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             and batch.step_diagnostics is not None
         ):
             self._step_diagnostics_writer.append_batch(
-                batch.step_diagnostics.to_dataset(batch.time)
+                batch.step_diagnostics.to_datasets(batch.time)
             )
 
     def _append_batch(self, batch: BatchData):

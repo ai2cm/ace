@@ -4,18 +4,22 @@
 the prediction ``BatchData``. Like ``StepperState``, the structure-preserving
 operations (device moves, ensemble broadcast, pin-memory) apply without
 inspecting its contents. Data consumers have two sanctioned read surfaces:
-``to_dataset`` for serialization (a self-describing, detached CPU export for
-the step-diagnostics writer), and the ``delta`` field directly for in-memory
-consumers that need the tensors on device (e.g. inference metrics).
+``to_datasets`` for serialization (self-describing, detached CPU exports for
+the step-diagnostics writer, keyed by dataset name), and the ``delta`` field
+directly for in-memory consumers that need the tensors on device (e.g.
+inference metrics).
 """
 
 import dataclasses
+from collections.abc import Mapping
 
 import xarray as xr
 
 from fme.core.device import get_device
 from fme.core.tensors import repeat_interleave_batch_dim
 from fme.core.typing_ import TensorMapping
+
+CORRECTION_DELTAS = "correction_deltas"
 
 
 @dataclasses.dataclass
@@ -29,7 +33,7 @@ class StepDiagnostics:
             every operation is a safe no-op on an empty mapping.
             The tensors carry the stepper's output masking (NaN off-mask) and
             are the on-device read surface for in-memory consumers; use
-            ``to_dataset`` when exporting for writing.
+            ``to_datasets`` when exporting for writing.
     """
 
     delta: TensorMapping
@@ -58,8 +62,9 @@ class StepDiagnostics:
             return tensor.shape[0]
         return None
 
-    def to_dataset(self, time: xr.DataArray) -> xr.Dataset:
-        """Export the diagnostics for writing, with the given time coordinate.
+    def to_datasets(self, time: xr.DataArray) -> Mapping[str, xr.Dataset]:
+        """Export the diagnostics as named datasets for writing, with the
+        given time coordinate.
 
         Args:
             time: The valid-time coordinate of the prediction data this
@@ -67,9 +72,11 @@ class StepDiagnostics:
                 ``(sample, time)``.
 
         Returns:
-            A dataset with one variable per delta entry, dims
-            ``(sample, time, ...)``, and the given times as a ``valid_time``
-            coordinate.
+            A mapping of dataset name to dataset. The correction deltas appear
+            under ``CORRECTION_DELTAS``, with one variable per delta entry,
+            dims ``(sample, time, ...)``, and the given times as a
+            ``valid_time`` coordinate; the dataset is empty when the delta is
+            empty.
         """
         data_vars = {}
         for name, tensor in self.delta.items():
@@ -77,4 +84,8 @@ class StepDiagnostics:
             dims = ["sample", "time"] + [f"dim_{i}" for i in range(array.ndim - 2)]
             data_vars[name] = xr.DataArray(array, dims=dims)
         ds = xr.Dataset(data_vars)
-        return ds.assign_coords(valid_time=(("sample", "time"), time.values))
+        return {
+            CORRECTION_DELTAS: ds.assign_coords(
+                valid_time=(("sample", "time"), time.values)
+            )
+        }

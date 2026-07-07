@@ -4,7 +4,7 @@ import torch
 import xarray as xr
 
 from fme.core.device import get_device
-from fme.core.step.step_diagnostics import StepDiagnostics
+from fme.core.step.step_diagnostics import CORRECTION_DELTAS, StepDiagnostics
 
 
 def _get_diagnostics(n_samples: int = 2, n_times: int = 3) -> StepDiagnostics:
@@ -55,22 +55,27 @@ def test_empty_delta_is_valid():
     assert diagnostics.pin_memory().delta == {}
     assert diagnostics.broadcast_ensemble(3).delta == {}
     assert diagnostics.sample_dim_size() is None
-    ds = diagnostics.to_dataset(xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]))
-    assert len(ds.data_vars) == 0
+    datasets = diagnostics.to_datasets(
+        xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"])
+    )
+    assert set(datasets) == {CORRECTION_DELTAS}
+    assert len(datasets[CORRECTION_DELTAS].data_vars) == 0
 
 
 def test_sample_dim_size():
     assert _get_diagnostics(n_samples=4).sample_dim_size() == 4
 
 
-def test_to_dataset_round_trips_values_with_time():
+def test_to_datasets_round_trips_values_with_time():
     n_samples, n_times = 2, 3
     diagnostics = _get_diagnostics(n_samples=n_samples, n_times=n_times)
     time = xr.DataArray(
         np.arange(n_samples * n_times).reshape(n_samples, n_times),
         dims=["sample", "time"],
     )
-    ds = diagnostics.to_dataset(time)
+    datasets = diagnostics.to_datasets(time)
+    assert set(datasets) == {CORRECTION_DELTAS}
+    ds = datasets[CORRECTION_DELTAS]
     assert set(ds.data_vars) == {"a", "b"}
     for name in ("a", "b"):
         assert ds[name].dims[:2] == ("sample", "time")
