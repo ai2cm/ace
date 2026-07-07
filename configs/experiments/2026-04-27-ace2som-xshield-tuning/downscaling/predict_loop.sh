@@ -4,7 +4,7 @@
 set -e
 
 RANGE_START=1
-RANGE_END=8
+RANGE_END=4
 
 JOB_NAME_BASE="predict-ace2s-xshield-tc-tracks"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
@@ -34,6 +34,7 @@ wandb_group=""
 #     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
 
 #    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
+#--not-preemptible \
 
 for i in $(seq "$RANGE_START" "$RANGE_END"); do
     CONFIG_PATH="$CONFIG_DIR/tc_tracks_predict_${i}.yaml"
@@ -48,7 +49,6 @@ for i in $(seq "$RANGE_START" "$RANGE_END"); do
         --description 'Run 100km to 3km evaluation on ACE2S-SHiELD-4k-tuned' \
         --workspace ai2/climate-titan \
         --priority urgent \
-        --not-preemptible \
         --cluster ai2/titan \
         --beaker-image $IMAGE \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
@@ -64,7 +64,7 @@ for i in $(seq "$RANGE_START" "$RANGE_END"); do
         --gpus $NGPU \
         --shared-memory 400GiB \
         --budget ai2/atec-climate \
-        --no-conda \
+        --no-python \
         --install "pip install --no-deps ." \
         --allow-dirty \
         -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH

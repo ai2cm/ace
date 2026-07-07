@@ -3,17 +3,20 @@ model:
   denoising_expert_configs:
     - checkpoint_config:
         checkpoint_path: /checkpoints_low_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
       sigma_min: 0.005
       sigma_max: 200.0
     - checkpoint_config:
         checkpoint_path: /checkpoints_high_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
       sigma_min: 200.0
       sigma_max: 2000.0
   num_diffusion_generation_steps: 18
   churn: 0.0
-  rename:
-    eastward_wind_at_ten_meters: UGRD10m
-    northward_wind_at_ten_meters: VGRD10m
 data:
   coarse:
     - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield/output_6hourly_predictions_ic0000.zarr
