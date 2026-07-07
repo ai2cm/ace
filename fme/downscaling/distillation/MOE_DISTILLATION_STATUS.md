@@ -3,7 +3,253 @@
 Living notes for the multivariate MoE FastGen distillation effort on branch
 `experiment/fastgen-distill`. Pick up here from any clone.
 
-_Last updated: 2026-07-02._
+_Last updated: 2026-07-07._
+
+---
+
+## ★ RESULT (2026-07-07): Student-Hi run — trained fine, but hi_cascade validation can't see it
+
+**Run** `4mez4kmn` / `…-hi-1step-moe-teacher-expert1` (beaker
+`01KWTXGADFPB4GKVZ33C7ZGJP4`), the first per-expert **Student-Hi** (expert 1,
+σ∈[200,2000], `student_sample_steps=1`, GAN weight 1e-3, R1 off, `hi_cascade`
+validation through the frozen Lo). Launched 2026-07-06, **stopped 2026-07-07 at
+~step 20.3k** (max_iter was 100k) because the metrics looked flat. Post
+residual-fix era, so the absolute numbers are trustworthy.
+
+**Stopping was justified — training had converged.** `f_distill_loss` did the
+real work: 1.40 → ~0.72 by step ~9k, then oscillates flat 0.63–0.79 through 20k.
+The last ~10k steps added nothing. So "flat converged" is correct on the
+*training* side.
+
+**★ Two things the flat metrics actually reveal:**
+
+1. **The GAN never engaged.** `gan_loss_gen ≈ 0.693 (=ln2)` and
+   `gan_loss_disc ≈ 1.386 (=2·ln2)` are pinned at their chance-level values the
+   *entire* run (gen 0.6924→0.6931, disc 1.387→1.386). The discriminator stays at
+   coin-flip — it never learns to tell teacher-x0 from student-x0. This is exactly
+   the design-note prediction: a **coarse/bottleneck critic at high σ (200–2000,
+   near-pure-noise) is uninformative** — there's no coherent structure at that σ
+   for a coarse critic to grade. So **Student-Hi is effectively f-distill-only**;
+   the GAN is inert. Good news: **no GAN collapse here** (unlike every Lo run, where
+   the critic tipped and dragged spectra to 0.8+). `fake_score_loss` shows the mild
+   familiar late rise (0.001→~0.02) but nothing tips.
+
+2. **★ The `hi_cascade` end-to-end validation is nearly INSENSITIVE to Hi
+   training.** Every val metric is flat **to 4 significant figures** across 18k
+   steps while f_distill halved: `crps_mean` 0.082016→0.082034 (<0.02% drift),
+   `crps_PRMSL` 0.17378→0.17382, `spec_mae_*` and tails all pinned. That is far too
+   flat to be "the model converged instantly" — it means the validated final sample
+   **barely depends on Hi's weights**. Mechanism: Hi does a single σ=2000→boundary
+   step, then the **frozen Lo** finishes; at the σ=200 handoff the `200·ε` term
+   dominates the O(1) clean part ~200×, washing out *which* x0 Hi produced. The very
+   "washout" argument the plan used to justify the Lo train/deploy mismatch (§
+   "Re-noise the target zarr") **cuts both ways** — it also means the cascade metric
+   cannot *see* Hi. ⇒ **`hi_cascade` CRPS/spectra/tails are a poor checkpoint-
+   selection signal for Student-Hi**; `best_student.ckpt` selection is ~arbitrary
+   here. Select a mid/late Hi ckpt by the f_distill plateau (~step 10k+), not by
+   val CRPS.
+
+**Absolute val numbers (last ckpt, all trustworthy post-fix):**
+- **PRMSL spectra excellent, no collapse:** `spec_mae` hi **0.018** / mid 0.053 /
+  lo 0.077. (Contrast the Lo runs that collapsed to 0.8+.)
+- **Tails near 1.0:** `tail_99.99_mean` 0.957 (PRMSL 0.978, precip 0.905, winds
+  ~0.97); `tail_99.9999_mean` 1.09.
+- **Winds moderate:** `spec_mae` ~0.14–0.20 overall, mid-band worse (eastward 0.31,
+  northward 0.23).
+- **Precip under-powered at high-k:** `spec_mae_hi_PRATEsfc` 0.35 — the familiar
+  too-smooth fine-scale deficit. `crps_mean` 0.082.
+
+**Next / actionable:**
+- **The discriminating test is the assembled bundle, not `hi_cascade`.** Bundle
+  the chosen Hi ckpt (~step 10k+) with the selected Lo into the 2-step MoE student
+  and evaluate end-to-end vs the full-teacher zarr (the "Bundle sampler" +
+  "Eval" checklist items). Only there will Hi's coarse contribution be visible.
+- Don't spend more compute tuning the Hi GAN (tap depth, weight, R1): at high σ the
+  coarse critic is structurally blind, so those levers are moot for Hi. If the
+  bundle eval shows a coarse/deep-low deficit, that's the Hi lever to revisit —
+  otherwise leave Hi as f-distill-only.
+- **Open question for the checklist:** whether `hi_cascade` needs a more
+  Hi-sensitive variant (e.g. validate Hi's boundary x0 directly at σ=200 against
+  the teacher's σ=200 state, rather than end-to-end through Lo) — otherwise Hi runs
+  have no usable early-stopping/selection signal.
+
+#### Loss-mechanics trace (2026-07-07): Hi is a COARSE-ONLY distillation by construction
+
+Traced the f-distill/DMD2 training path (`f_distill.py`, `dmd2.py`,
+`fastgen_teacher.py`, `fastgen_loader.py`) to answer "how does training respect
+the teacher only being defined on [200,2000]?" **Every teacher query is in-domain,
+and the objective is structurally blind to any structure finer than what survives
+re-noising to σ≥200.** Three legs, all confirmed:
+
+1. **VSD/f-distill score term** (`dmd2.py:_student_update_step`): student emits an
+   x0 estimate `gen_data`; it is **re-noised to a random `t`** via
+   `forward_process(gen_data, eps, t)`, and the frozen teacher is queried at
+   `(perturbed_data, t)` — never at σ=0. `t ~ sample_t`, **clamped to
+   `[min_t=200, max_t=2000]`** (`fastgen_teacher.py:73-74`, scheduler built with
+   `min_t=sigma_min=200, max_t=sigma_max=2000`). It is *score matching in the band*,
+   not L2 to a clean target ⇒ zero gradient for any x0 content that washes out under
+   `t·ε`, i.e. Hi is supervised **only on the ≥200-surviving coarse modes.**
+2. **GAN real + fake branches** (`_compute_real_feat`, `dmd2.py:250`): the real data
+   is re-noised (`forward_process(real_data, eps_real, t_real)`) with `t_real` also
+   from `sample_t` clamped to `[200,2000]` before the teacher-encoder feature tap.
+   Both real and fake features are extracted in-domain. (R1 same; off here anyway.)
+3. **The "real" target itself** (`data["real"] = teacher.sample()`,
+   `fastgen_loader.py:91`): for the Hi teacher `expert_index=1` sets
+   **`moe_experts=None` (no dispatch)** (`fastgen_teacher.py:169`), so `sample()`
+   runs **expert-1 alone** via `stochastic_sampler(sigma_min=200, sigma_max=2000)`.
+   The EDM grid runs 2000→200 and the final Euler step goes 200→0 **without a net
+   eval at 0**, so expert 1 is queried only at grid points ≥200 (lone exception: a
+   negligible `S_churn` overshoot slightly above 2000 at the pure-noise top).
+
+**Consequence for "is Hi worth keeping":** the target, the score-matching band, and
+the surviving-renoise content **all** agree Hi's job is the coarse (≥200) band and
+nothing finer. Note `data["real"]` is **expert-1's own solo sample** (a coarse
+field), not ground-truth fine data nor the full-MoE output — so the discriminator
+compares student-coarse vs expert1-coarse. This is why the flat `hi_cascade`
+metric, the σ=200 handoff washout, and the loss design tell one story: Hi's
+marginal budget is small by construction. The Lo-from-noise@200 ablation remains
+the way to decide whether that small coarse contribution is worth an expert + an
+NFE, or whether Lo-only suffices.
+
+---
+
+## SPEC (2026-07-07): distilled 2-step bundle sampler + end-to-end eval  ⏳ TODO
+
+> Status: **planned** — spec'd, not yet implemented. Deliverable:
+> `DenoisingMoEStudentPredictor` + `DenoisingMoEStudentConfig` /
+> `DenoisingMoEStudentBundledConfig` landing the predict-x0-renoise cascade as a
+> deployable predictor. Closes the ⏳ "Bundle sampler" checklist item.
+
+### Goal
+
+Assemble the per-expert students (Student-Hi + Student-Lo) into a single
+**deployable 2-step MoE predictor** that generates via the **fastgen
+predict-x0-then-renoise cascade** over a boundary-aligned `t_list`, and can be run
+end-to-end through the standard evaluator (`generate_on_batch` vs the full-teacher
+val zarr). This is the discriminating test that `hi_cascade` validation cannot be
+(see the 2026-07-07 RESULT) — the only place Hi's coarse contribution is measured
+against a fixed Lo in the real deployment path.
+
+### Why a new predictor variant (not a flag on the existing one)
+
+`DenoisingMoEPredictor.generate` (`predictors/serial_denoising.py:234`) runs
+`edm_sampler` (Heun/EDM stochastic sampler) over a **continuous Karras grid**
+`[sigma_schedule_max → min]`. Correct for the **teacher** (each expert is a full
+multi-step denoiser, valid at any Karras σ). **Wrong for distilled one-shot
+students:** it queries each student at continuous σ it was never distilled against
+and never places a node at the σ=200 boundary, so there is no renoise handoff.
+
+Distilled students need the **fastgen predict-x0-renoise cascade** instead: each
+student predicts x0 at its own query σ, then x0 is re-noised down to the next
+student's start σ (the boundary handoff). This is the same "renoise between steps"
+mechanism as the 2-step Lo, generalized across experts.
+
+A **sibling predictor class** (not a `sampler_type` flag inside `generate`) is
+chosen because: (a) **teacher-checkpoint backward-compat is critical** (AGENTS.md)
+— the existing EDM path and bundle format must stay byte-for-byte untouched; a new
+config type + a `sampler_type` marker in the student state leaves it alone;
+(b) it avoids an `isinstance`/flag branch inside `generate` (AGENTS.md flags those
+as a refactor smell); the two sampling semantics are genuinely different objects.
+
+### Verified mechanics (do not re-derive)
+
+- **The cascade sampler already exists and is tested** as
+  `sample_student_hi_cascade` (`distillation/student_sampling.py:122`): it builds a
+  `_SigmaDispatchModule(sigma_ranges, [lo_net, hi_net])` + `boundary_aligned_t_list`
+  and calls `fastgen_sampler(dispatch, noise, cond, t_list=...)`. The new predictor
+  reuses these three primitives directly — the deployable path == the validated path.
+- **`boundary_aligned_t_list(sigma_ranges, steps_per_range)`**
+  (`samplers.py:211`): descending schedule visiting each student's own query nodes
+  (its `_fastgen_t_list` minus the trailing 0) then a single final 0. `steps_per_range`
+  aligns with `sigma_ranges` (ascending) and sets each segment's step count
+  (e.g. `[2, 1]` = 2-step Lo + 1-step Hi for `[(0.005,200),(200,2000)]`).
+- **`fastgen_sampler(net, latents, img_lr, t_list=...)`** (`samplers.py:264`):
+  when `t_list` is given, `num_steps`/`sigma_min`/`sigma_max` are ignored; with
+  default `skip_noise_scale=False` the initial state is `latents * t_list[0]`
+  (unit-variance `latents` → noised to the top σ). Returns `(x_pred, latent_steps)`.
+- **`_SigmaDispatchModule`** (`serial_denoising.py:64`) routes each `t_list` step to
+  the expert whose inclusive range contains it (boundary → lower-σ expert). The
+  predictor already builds `self._dispatch_module` from its experts in `__init__` —
+  reuse it as-is.
+- **Residual base is handled by `_primary.postprocess_generated`** (unchanged from
+  the teacher path): the students are `predict_residual=True`; the cascade runs
+  entirely in residual space and the interpolated-coarse base is added back **once**
+  at the end (consistent with the `b2a47628b` residual-bug fix and spec 10).
+- **`prepare_generation_inputs`** (`models.py`) returns `(inputs, latents)` with
+  unit-variance `latents` — exactly what `fastgen_sampler` expects.
+- **Sigma ranges are authoritative from the bundle config**, not the expert
+  modules: dispatch and `boundary_aligned_t_list` both read the explicit
+  `sigma_ranges`, so the Lo checkpoint's recorded σ range (which may inherit the MoE
+  `_primary`) is irrelevant here (resolves the open checklist caveat).
+
+### Design / implementation steps
+
+1. **`DenoisingMoEStudentPredictor(DenoisingMoEPredictor)`**
+   (`predictors/serial_denoising.py`). `__init__(experts, sigma_ranges,
+   steps_per_range, expert_renames=None)` calls `super().__init__(...,
+   num_diffusion_generation_steps=sum(steps_per_range), churn=0.0, ...)` (parent
+   builds `_dispatch_module`), validates `len(steps_per_range) == len(experts)` in
+   `__post_init__`-style guard, stores `self._steps_per_range`. Override:
+   - `generate()`: `prepare_generation_inputs` → `boundary_aligned_t_list(
+     self._sigma_ranges, self._steps_per_range, device=…)` →
+     `fastgen_sampler(self._dispatch_module, latents, inputs, t_list=t_list)` →
+     `self._primary.postprocess_generated(...)`. Returns
+     `(generated, generated_norm, latent_steps)` (same signature; inherited
+     `generate_on_batch` / `_no_target` work unchanged).
+   - `get_state()`: experts + sigma_ranges + `steps_per_range` + expert_renames +
+     `sampler_type="fastgen_cascade"`.
+   - `from_state()`: reads the above.
+2. **`DenoisingMoEStudentConfig`** — sibling of `DenoisingMoEConfig` for assembling
+   from per-expert `DenoisingExpertCheckpointConfig`s, with `steps_per_range:
+   list[int]` replacing `num_diffusion_generation_steps` (no `churn`). `build()` →
+   `DenoisingMoEStudentPredictor`.
+3. **`DenoisingMoEStudentBundledConfig`** — sibling of `DenoisingMoEBundledConfig`
+   to load a saved student bundle; `build()` → `DenoisingMoEStudentPredictor
+   .from_state`. (Teacher `DenoisingMoEBundledConfig` untouched.)
+4. **Reuse, don't fork, the cascade math** — the predictor calls
+   `boundary_aligned_t_list` + `fastgen_sampler` + `self._dispatch_module` directly;
+   no new sampler code. `sample_student_hi_cascade` stays as the validation helper.
+
+### Tests (`predictors/test_serial_denoising.py`; reuse `_mock_expert` /
+`_build_two_expert_predictor`)
+
+- **Dispatch/step order:** `generate_on_batch_no_target` on a 2-expert student
+  predictor (steps `[1,1]`) queries the hi expert only above the boundary and the
+  lo expert at/below — mirror `test_sample_student_hi_cascade_routes_high_then_low`
+  using a tracked module.
+- **Uses the fastgen cascade, not EDM:** assert the student predictor's per-step σ
+  sequence equals `boundary_aligned_t_list(...)` (the boundary node is present),
+  distinguishing it from the teacher's continuous Karras grid.
+- **`steps_per_range` honored:** `[2,1]` yields the expected number of net calls per
+  expert.
+- **Save/load round-trip:** `save` → `DenoisingMoEStudentBundledConfig.build`
+  preserves `steps_per_range` + `sampler_type` and produces identical generation
+  (seeded) — parallel to `test_save_and_load_roundtrip_preserves_predictor`.
+- **Residual add-back:** generated full field = residual cascade output +
+  interpolated-coarse base (via `postprocess_generated`), matching the teacher
+  predictor's post-processing for a known input.
+- **No regressions:** `python -m pytest fme/downscaling/predictors/ fme/downscaling/distillation/ -q` clean.
+
+### Acceptance criteria
+
+- A `[Student-Hi, Student-Lo]` bundle assembles + saves via
+  `DenoisingMoEStudentConfig` and reloads via `DenoisingMoEStudentBundledConfig`.
+- `generate` runs the boundary-aligned predict-x0-renoise cascade (hi @≥200 →
+  renoise to 200 → lo @≤200 → 0), never invoking the EDM Heun grid.
+- The teacher `DenoisingMoEPredictor` / `DenoisingMoEBundledConfig` / bundle format
+  are unchanged (existing tests pass byte-for-byte).
+- Runs end-to-end through the evaluator against the full-teacher val zarr.
+
+### Out of scope
+
+- Choosing the Lo checkpoint / Lo step count (a runtime eval decision; base case
+  `steps_per_range=[2,1]` per the 2-step-Lo finding).
+- The Lo-only (from-noise@200) ablation — separate eval config, decided after this.
+- YAML wiring for the student bundle in the production config union (spec 03 area).
+
+### Implementation
+
+`<filled in at commit time>`
 
 ---
 
@@ -256,12 +502,11 @@ conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.s
   Needs: a `frozen_lo_checkpoint` arg on the callback + a `"hi_cascade"`
   `validation_mode` that runs `student_sampling.sample_student_hi_cascade`
   through the frozen Lo from the step above.
-- ⏳ **Bundle sampler** (structural finding 3): generalize
-  `DenoisingMoEPredictor.generate` to a fastgen predict-x0-renoise cascade over a
-  boundary-aligned `t_list` (the primitives `boundary_aligned_t_list` /
-  `sample_student_hi_cascade` already exist). Also: the Lo checkpoint's recorded
-  σ range inherits from the MoE `_primary`, not the expert range — confirm
-  `DenoisingExpertCheckpointConfig`'s explicit range overrides it at bundle time.
+- ⏳ **Bundle sampler** (structural finding 3) — spec'd, see
+  "SPEC (2026-07-07): distilled 2-step bundle sampler + end-to-end eval" above.
+  Add `DenoisingMoEStudentPredictor` running the fastgen predict-x0-renoise cascade
+  over a boundary-aligned `t_list`; the explicit `sigma_ranges` are authoritative
+  (the Lo `_primary` σ-range caveat is moot). Teacher EDM path untouched.
 - ⏳ **Eval**: bundled 2-/3-step student on the same full-teacher val zarr
   (CRPS/spectra/tail). Per-student selection via the fixed-partner cascade.
 
