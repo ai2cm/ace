@@ -1,6 +1,6 @@
+import abc
 import dataclasses
 import datetime
-from typing import Protocol
 
 import torch
 
@@ -11,7 +11,7 @@ from .constants import DENSITY_OF_WATER, SPECIFIC_HEAT_OF_WATER
 from .prescriber import Prescriber
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class SlabOceanConfig:
     """
     Configuration for a slab ocean model.
@@ -29,7 +29,7 @@ class SlabOceanConfig:
         return [self.mixed_layer_depth_name, self.q_flux_name]
 
 
-class SurfaceTemperature(Protocol):
+class SurfaceTemperature(abc.ABC):
     """Computes the next-step sea surface temperature for an :class:`Ocean`.
 
     Each ocean model (prescribed or slab) is a self-contained callable object
@@ -37,6 +37,7 @@ class SurfaceTemperature(Protocol):
     it without reading any config fields itself.
     """
 
+    @abc.abstractmethod
     def __call__(
         self,
         input_data: TensorMapping,
@@ -45,8 +46,8 @@ class SurfaceTemperature(Protocol):
     ) -> torch.Tensor: ...
 
 
-@dataclasses.dataclass
-class PrescribedSurfaceTemperature:
+@dataclasses.dataclass(frozen=True)
+class PrescribedSurfaceTemperature(SurfaceTemperature):
     """Next-step surface temperature taken directly from the target data."""
 
     surface_temperature_name: str
@@ -60,8 +61,8 @@ class PrescribedSurfaceTemperature:
         return target_data[self.surface_temperature_name]
 
 
-@dataclasses.dataclass
-class SlabSurfaceTemperature:
+@dataclasses.dataclass(frozen=True)
+class SlabSurfaceTemperature(SurfaceTemperature):
     """Next-step surface temperature from a slab ocean mixed-layer tendency."""
 
     surface_temperature_name: str
@@ -86,7 +87,7 @@ class SlabSurfaceTemperature:
         )
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class OceanConfig:
     """
     Configuration for determining sea surface temperature from an ocean model.
