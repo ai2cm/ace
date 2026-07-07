@@ -139,6 +139,10 @@ dmypy.json
 # scratch directory for testing
 scratch/
 
+# TempestExtremes DetectNodes per-file logs (logNNNNNN.txt), written to the
+# working dir when --logdir is not set (see scripts/downscaling/detect_tc_tracks.py)
+log[0-9][0-9][0-9][0-9][0-9][0-9].txt
+
 # Some in progress data pipelines get added here
 scripts/data_process/.nfs*
 

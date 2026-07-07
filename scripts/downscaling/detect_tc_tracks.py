@@ -12,14 +12,22 @@ instead of a Z300-Z500 thickness decrease. The required temperature drop is
 standard recipe under hydrostatic balance.
 
 The pipeline is:
-  1. Open the ACE zarr and assemble the four fields TempestExtremes needs
-     (sea-level pressure, T3, 10m u/v wind) into per-chunk NetCDF files.
-  2. Run ``DetectNodes`` to find candidate TC centers at each timestep.
-  3. Run ``StitchNodes`` to link candidates into tracks.
-  4. Parse the StitchNodes output into a tidy CSV (one row per track point).
-  5. Pickle a per-track xarray ``.sel(..., method="nearest")`` kwargs dict
+  1. Split the zarr's time axis into shard-sized bundles and, per bundle,
+     assemble the fields TempestExtremes needs (sea-level pressure, 10m u/v
+     wind, and -- for the warm-core recipe -- T3), write them to a transient
+     NetCDF, run ``DetectNodes`` on it, and delete the NetCDF. Bundles are
+     processed in parallel across ``--workers`` processes, so peak disk stays
+     bounded (~``workers`` x bundle) instead of materializing the whole dataset.
+  2. Run ``StitchNodes`` to link the candidate nodes into tracks (reading the
+     per-bundle candidate files in time order, so tracks span bundles).
+  3. Parse the StitchNodes output into a tidy CSV (one row per track point).
+  4. Pickle a per-track xarray ``.sel(..., method="nearest")`` kwargs dict
      for pulling storm-following data out of the original ACE dataset
      (on by default; disable with ``--no-write-sel-args``).
+
+For datasets without an upper-tropospheric temperature field (e.g. the 3h
+downscaling outputs), pass ``--no-warm-core`` to run the SLP-only recipe
+(closed SLP contour + wind), and set ``--timefilter`` to the data cadence.
 
 TempestExtremes must be installed and on ``PATH``, or its binaries passed via
 ``--detect-exe``/``--stitch-exe``. Build it from source with
@@ -33,14 +41,13 @@ Usage examples:
     python detect_tc_tracks.py gs://bucket/ace_output.zarr out/ \
         --sample 2 --time-start 2020-01-01 --time-end 2020-12-31
 
-    # Reuse already-written NetCDF intermediates (skip step 1)
-    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --skip-convert
+    # 3h SLP-only run (no upper-air T), shard-aligned bundles, 6 parallel workers
+    python detect_tc_tracks.py gs://bucket/downscaling_3h.zarr out/ \
+        --no-warm-core --timefilter 3hr --chunk-size 128 --workers 6 \
+        --u-var eastward_wind_at_ten_meters --v-var northward_wind_at_ten_meters
 
-    # Only build the NetCDF inputs, don't run TempestExtremes
-    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --convert-only
-
-    # Remove the NetCDF intermediates once DetectNodes has consumed them
-    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --cleanup
+    # Keep the per-bundle NetCDF intermediates instead of deleting them
+    python detect_tc_tracks.py /path/to/ace_output.zarr out/ --keep-netcdf
 
     # Skip writing per-track xarray .sel kwargs
     python detect_tc_tracks.py /path/to/ace_output.zarr out/ --no-write-sel-args
@@ -48,9 +55,12 @@ Usage examples:
 
 import argparse
 import logging
+import multiprocessing
 import pickle
 import shutil
 import subprocess
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
@@ -120,12 +130,16 @@ def build_te_dataset(
     u_var: str,
     v_var: str,
     sample: int,
+    warm_core: bool = True,
 ) -> xr.Dataset:
     """Assemble the TempestExtremes input fields from an ACE dataset.
 
     Selects sea-level pressure (preferring ``psl_var`` if present, else falling
-    back to surface pressure), the T3 temperature layer, and 10m winds, and
-    renames them to the canonical names used in the DetectNodes command.
+    back to surface pressure), the 10m winds, and (when ``warm_core``) the T3
+    temperature layer, renaming them to the canonical names used in the
+    DetectNodes command. Pass ``warm_core=False`` for datasets without an
+    upper-tropospheric temperature field (e.g. the 3h downscaling outputs),
+    which run the SLP-only recipe and so do not need ``t3_var``.
     """
     if "sample" in ds.dims:
         logger.info("Selecting sample=%d of %d", sample, ds.sizes["sample"])
@@ -152,58 +166,23 @@ def build_te_dataset(
     if str(orig_units).strip().lower() in _HPA_UNITS:
         logger.info("Converted PSL from %s to Pa", orig_units)
 
-    for name in (t3_var, u_var, v_var):
+    required = (u_var, v_var) + ((t3_var,) if warm_core else ())
+    for name in required:
         if name not in ds:
             raise KeyError(
                 f"{name!r} not found in dataset; available: {list(ds.data_vars)}"
             )
 
-    out = xr.Dataset(
-        {
-            "PSL": psl,
-            "T3": ds[t3_var],
-            "U10": ds[u_var],
-            "V10": ds[v_var],
-        }
-    )
+    data = {"PSL": psl, "U10": ds[u_var], "V10": ds[v_var]}
+    if warm_core:
+        data["T3"] = ds[t3_var]
+    out = xr.Dataset(data)
     out["PSL"].attrs["units"] = "Pa"
-    out["T3"].attrs["units"] = "K"
     out["U10"].attrs["units"] = "m/s"
     out["V10"].attrs["units"] = "m/s"
+    if warm_core:
+        out["T3"].attrs["units"] = "K"
     return out
-
-
-def write_netcdf_chunks(ds: xr.Dataset, out_dir: Path, chunk_size: int) -> Path:
-    """Write the dataset to per-chunk NetCDF files and a DetectNodes file list.
-
-    TempestExtremes reads NetCDF (not zarr), and splitting the record dimension
-    into multiple files keeps memory bounded and lets DetectNodes stream via
-    ``--in_data_list``. Returns the path to the written file list.
-    """
-    n_time = ds.sizes["time"]
-    nc_dir = out_dir / "netcdf"
-    nc_dir.mkdir(parents=True, exist_ok=True)
-
-    paths = []
-    for start in range(0, n_time, chunk_size):
-        sub = ds.isel(time=slice(start, start + chunk_size))
-        path = nc_dir / f"te_input_{start:06d}.nc"
-        logger.info("Writing %s (%d timesteps)", path.name, sub.sizes["time"])
-        sub.to_netcdf(path)
-        paths.append(path)
-
-    list_path = out_dir / "input_files.txt"
-    list_path.write_text("\n".join(str(p) for p in paths) + "\n")
-    logger.info("Wrote file list %s (%d files)", list_path, len(paths))
-    return list_path
-
-
-def cleanup_netcdf_chunks(out_dir: Path) -> None:
-    """Remove the per-chunk NetCDF intermediates written by write_netcdf_chunks."""
-    nc_dir = out_dir / "netcdf"
-    if nc_dir.is_dir():
-        logger.info("Removing intermediate NetCDF directory %s", nc_dir)
-        shutil.rmtree(nc_dir)
 
 
 def _check_exe(exe: str) -> None:
@@ -223,31 +202,67 @@ def _check_exe(exe: str) -> None:
         )
 
 
-def run_detect_nodes(
-    in_list: Path, out_base: Path, exe: str, lat_name: str, lon_name: str
-) -> Path:
-    """Run DetectNodes to find candidate TC centers at each timestep.
+@dataclass(frozen=True)
+class BundleSpec:
+    """Everything a worker process needs to detect one time-bundle.
 
-    With ``--in_data_list`` (multiple input files) DetectNodes writes one
-    candidate file per input file, appending a zero-padded index to
-    ``--out`` (e.g. ``candidate_nodes.dat000000.dat``) rather than writing a
-    single ``candidate_nodes.dat``. This collects the per-chunk candidate
-    files into a list file (in input order) and returns its path, ready for
-    StitchNodes' ``--in_list``.
+    Passed by value to worker processes, so every field is a plain
+    picklable scalar/string. The worker re-opens the zarr and re-applies the
+    same deterministic time subset, so bundles are reproducible regardless of
+    which process runs them.
+    """
+
+    zarr: str
+    time_start: str | None
+    time_end: str | None
+    sample: int
+    start: int
+    size: int
+    psl_var: str
+    psfc_var: str
+    t3_var: str
+    u_var: str
+    v_var: str
+    warm_core: bool
+    lat_name: str
+    lon_name: str
+    timefilter: str
+    detect_exe: str
+    nc_dir: str
+    nodes_dir: str
+    keep_netcdf: bool
+
+
+def _detect_on_file(
+    nc_path: Path,
+    out_path: Path,
+    exe: str,
+    lat_name: str,
+    lon_name: str,
+    warm_core: bool,
+    timefilter: str,
+    logdir: Path,
+) -> None:
+    """Run DetectNodes on a single NetCDF bundle, writing one candidate file.
+
+    The closed-contour command includes the T3 warm-core term only when
+    ``warm_core`` is set; otherwise it is the SLP-only recipe used for datasets
+    without upper-tropospheric temperature.
     """
     _check_exe(exe)
+    contour = f"{PSL_CONTOUR};{T3_CONTOUR}" if warm_core else PSL_CONTOUR
     cmd = [
         exe,
-        "--in_data_list",
-        str(in_list),
+        "--in_data",
+        str(nc_path),
         "--out",
-        str(out_base),
+        str(out_path),
         "--timefilter",
-        "6hr",
+        timefilter,
         "--searchbymin",
         "PSL",
         "--closedcontourcmd",
-        f"{PSL_CONTOUR};{T3_CONTOUR}",
+        contour,
         "--mergedist",
         str(MERGE_DIST),
         "--outputcmd",
@@ -256,27 +271,160 @@ def run_detect_nodes(
         lat_name,
         "--lonname",
         lon_name,
+        "--logdir",
+        str(logdir),
     ]
-    logger.info("Running DetectNodes: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
-
-    # DetectNodes appends a zero-padded per-file index to out_base; sorted glob
-    # recovers the candidate files in input (time) order. Fall back to the bare
-    # out_base for the single-input case where no index is appended.
-    node_files = sorted(out_base.parent.glob(out_base.name + "[0-9]*"))
-    if not node_files and out_base.exists():
-        node_files = [out_base]
-    if not node_files:
-        raise FileNotFoundError(
-            f"DetectNodes produced no candidate files matching '{out_base}*'; "
-            "check the DetectNodes output above."
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"DetectNodes failed on {nc_path.name} (exit {result.returncode}):\n"
+            + result.stderr[-2000:]
         )
-    node_list_path = out_base.parent / "candidate_files.txt"
-    node_list_path.write_text("\n".join(str(p) for p in node_files) + "\n")
+
+
+def _process_bundle(spec: BundleSpec) -> tuple[int, str]:
+    """Read one time-bundle, write NetCDF, run DetectNodes, delete NetCDF.
+
+    Returns ``(start, candidate_path)``. The NetCDF intermediate is removed in
+    a ``finally`` (unless ``keep_netcdf``) so a failure cannot orphan it, and
+    peak disk stays bounded to roughly ``workers x bundle_size``.
+    """
+    nc_path = Path(spec.nc_dir) / f"te_input_{spec.start:06d}.nc"
+    cand_path = Path(spec.nodes_dir) / f"cand_{spec.start:06d}.dat"
+    try:
+        if not (spec.keep_netcdf and nc_path.exists()):
+            ds = xr.open_zarr(spec.zarr)
+            if spec.time_start is not None or spec.time_end is not None:
+                ds = ds.sel(time=slice(spec.time_start, spec.time_end))
+            te = build_te_dataset(
+                ds,
+                psl_var=spec.psl_var,
+                psfc_var=spec.psfc_var,
+                t3_var=spec.t3_var,
+                u_var=spec.u_var,
+                v_var=spec.v_var,
+                sample=spec.sample,
+                warm_core=spec.warm_core,
+            )
+            sub = te.isel(time=slice(spec.start, spec.start + spec.size)).load()
+            sub.to_netcdf(nc_path)
+        _detect_on_file(
+            nc_path,
+            cand_path,
+            spec.detect_exe,
+            spec.lat_name,
+            spec.lon_name,
+            spec.warm_core,
+            spec.timefilter,
+            Path(spec.nodes_dir),
+        )
+        return spec.start, str(cand_path)
+    finally:
+        if not spec.keep_netcdf and nc_path.exists():
+            nc_path.unlink()
+
+
+def run_bundled_detection(
+    zarr: str,
+    out_dir: Path,
+    n_time: int,
+    chunk_size: int,
+    workers: int,
+    *,
+    time_start: str | None,
+    time_end: str | None,
+    sample: int,
+    psl_var: str,
+    psfc_var: str,
+    t3_var: str,
+    u_var: str,
+    v_var: str,
+    warm_core: bool,
+    lat_name: str,
+    lon_name: str,
+    timefilter: str,
+    detect_exe: str,
+    keep_netcdf: bool,
+) -> Path:
+    """Detect candidate nodes in parallel over shard-sized time-bundles.
+
+    Each bundle is read from the zarr, written to a transient NetCDF, consumed
+    by its own DetectNodes, and deleted -- interleaved across ``workers``
+    processes so peak disk is bounded and DetectNodes runs concurrently.
+    Returns the path to a file listing the per-bundle candidate files in time
+    order, ready for StitchNodes' ``--in_list``.
+    """
+    _check_exe(detect_exe)
+    nc_dir = out_dir / "netcdf"
+    nodes_dir = out_dir / "nodes"
+    nc_dir.mkdir(parents=True, exist_ok=True)
+    nodes_dir.mkdir(parents=True, exist_ok=True)
+
+    specs = [
+        BundleSpec(
+            zarr=zarr,
+            time_start=time_start,
+            time_end=time_end,
+            sample=sample,
+            start=start,
+            size=chunk_size,
+            psl_var=psl_var,
+            psfc_var=psfc_var,
+            t3_var=t3_var,
+            u_var=u_var,
+            v_var=v_var,
+            warm_core=warm_core,
+            lat_name=lat_name,
+            lon_name=lon_name,
+            timefilter=timefilter,
+            detect_exe=detect_exe,
+            nc_dir=str(nc_dir),
+            nodes_dir=str(nodes_dir),
+            keep_netcdf=keep_netcdf,
+        )
+        for start in range(0, n_time, chunk_size)
+    ]
     logger.info(
-        "DetectNodes wrote %d candidate file(s); list at %s",
-        len(node_files),
-        node_list_path,
+        "DetectNodes over %d bundles of %d timesteps, %d worker(s), warm_core=%s",
+        len(specs),
+        chunk_size,
+        workers,
+        warm_core,
+    )
+
+    results: list[tuple[int, str]] = []
+    if workers == 1:
+        for spec in specs:
+            results.append(_process_bundle(spec))
+            logger.info("  bundle %06d done", spec.start)
+    else:
+        # "spawn" (not the Linux default "fork"): the parent has already
+        # initialized gcsfs' asyncio/aiohttp state via xr.open_zarr, and
+        # forking that into workers corrupts it (BrokenProcessPool). Spawned
+        # workers start a clean interpreter and open the zarr themselves.
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
+            futures = {ex.submit(_process_bundle, s): s.start for s in specs}
+            for fut in as_completed(futures):
+                results.append(fut.result())
+                logger.info(
+                    "  bundle %06d done (%d/%d)",
+                    futures[fut],
+                    len(results),
+                    len(specs),
+                )
+
+    # Sort by bundle start so StitchNodes reads candidates in time order, and
+    # drop any that DetectNodes left empty/absent.
+    cand_files = [c for _, c in sorted(results) if Path(c).is_file()]
+    if not cand_files:
+        raise FileNotFoundError(
+            "No candidate files were produced; check the DetectNodes output."
+        )
+    node_list_path = out_dir / "candidate_files.txt"
+    node_list_path.write_text("\n".join(cand_files) + "\n")
+    logger.info(
+        "Wrote candidate file list %s (%d files)", node_list_path, len(cand_files)
     )
     return node_list_path
 
@@ -462,19 +610,32 @@ def main() -> None:
         "`make -C scripts/downscaling tc_deps`).",
     )
     parser.add_argument(
-        "--skip-convert",
-        action="store_true",
-        help="Reuse existing NetCDF inputs in out_dir (skip zarr conversion).",
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel worker processes for the read->NetCDF->DetectNodes->delete "
+        "pipeline (one time-bundle per task). Bound by RAM: each holds ~one "
+        "bundle in memory (~1.6 GB for a 128-step 720x1440 bundle).",
     )
     parser.add_argument(
-        "--convert-only",
-        action="store_true",
-        help="Only build the NetCDF inputs; do not run TempestExtremes.",
+        "--warm-core",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require the T3 upper-tropospheric warm-core criterion (standard TC "
+        "recipe). Use --no-warm-core for datasets without upper-air temperature "
+        "(e.g. 3h downscaling outputs); that runs the SLP-only recipe.",
     )
     parser.add_argument(
-        "--cleanup",
+        "--timefilter",
+        default="6hr",
+        help="DetectNodes --timefilter (e.g. '6hr' for 6-hourly data, '3hr' for "
+        "3-hourly). Restricts detection to timesteps on this cadence.",
+    )
+    parser.add_argument(
+        "--keep-netcdf",
         action="store_true",
-        help="Remove the intermediate NetCDF files after DetectNodes finishes.",
+        help="Keep the per-bundle NetCDF intermediates instead of deleting each "
+        "after its DetectNodes finishes (default deletes, bounding peak disk).",
     )
     parser.add_argument(
         "--write-sel-args",
@@ -491,52 +652,42 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    list_path = out_dir / "input_files.txt"
 
     lat_name, lon_name = args.lat_name, args.lon_name
 
-    if not args.skip_convert:
-        logger.info("Opening zarr %s", args.zarr)
-        ds = xr.open_zarr(args.zarr)
-        if args.time_start is not None or args.time_end is not None:
-            ds = ds.sel(time=slice(args.time_start, args.time_end))
-        if lat_name is None or lon_name is None:
-            lat_name, lon_name = detect_lat_lon_names(ds)
-            logger.info("Auto-detected lat/lon coord names: %s, %s", lat_name, lon_name)
-        te_ds = build_te_dataset(
-            ds,
-            psl_var=args.psl_var,
-            psfc_var=args.psfc_var,
-            t3_var=args.t3_var,
-            u_var=args.u_var,
-            v_var=args.v_var,
-            sample=args.sample,
-        )
-        list_path = write_netcdf_chunks(te_ds, out_dir, args.chunk_size)
-    else:
-        if not list_path.exists():
-            raise FileNotFoundError(
-                f"--skip-convert set but {list_path} not found; run conversion first."
-            )
-        if lat_name is None or lon_name is None:
-            first_file = list_path.read_text().splitlines()[0]
-            with xr.open_dataset(first_file) as probe_ds:
-                lat_name, lon_name = detect_lat_lon_names(probe_ds)
-            logger.info("Auto-detected lat/lon coord names: %s, %s", lat_name, lon_name)
+    logger.info("Opening zarr %s", args.zarr)
+    ds = xr.open_zarr(args.zarr)
+    if args.time_start is not None or args.time_end is not None:
+        ds = ds.sel(time=slice(args.time_start, args.time_end))
+    if lat_name is None or lon_name is None:
+        lat_name, lon_name = detect_lat_lon_names(ds)
+        logger.info("Auto-detected lat/lon coord names: %s, %s", lat_name, lon_name)
+    n_time = ds.sizes["time"]
 
-    if args.convert_only:
-        logger.info("--convert-only set; stopping after NetCDF conversion.")
-        return
-
-    nodes_base = out_dir / "candidate_nodes.dat"
     tracks_path = out_dir / "tracks.dat"
     csv_path = out_dir / "tracks.csv"
 
-    node_list_path = run_detect_nodes(
-        list_path, nodes_base, args.detect_exe, lat_name, lon_name
+    node_list_path = run_bundled_detection(
+        args.zarr,
+        out_dir,
+        n_time,
+        args.chunk_size,
+        args.workers,
+        time_start=args.time_start,
+        time_end=args.time_end,
+        sample=args.sample,
+        psl_var=args.psl_var,
+        psfc_var=args.psfc_var,
+        t3_var=args.t3_var,
+        u_var=args.u_var,
+        v_var=args.v_var,
+        warm_core=args.warm_core,
+        lat_name=lat_name,
+        lon_name=lon_name,
+        timefilter=args.timefilter,
+        detect_exe=args.detect_exe,
+        keep_netcdf=args.keep_netcdf,
     )
-    if args.cleanup:
-        cleanup_netcdf_chunks(out_dir)
     run_stitch_nodes(node_list_path, tracks_path, args.stitch_exe)
 
     df = parse_stitch_output(tracks_path)
