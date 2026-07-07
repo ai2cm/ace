@@ -44,21 +44,22 @@ usage() {
 }
 
 # Assemble the [2,1] student cascade bundle from the two per-expert checkpoints
-# and write it to weka. Subpath mounts keep the download to just the
-# student_checkpoints dirs. Source datasets are recorded both as gantry inputs
-# (the mounts below) and explicitly in the description.
+# and write it to weka. Bundling only loads + re-saves weights, so it runs
+# CPU-only on the ai2/phobos cluster (no GPUs). Subpath mounts keep the download
+# to just the student_checkpoints dirs. Source datasets are recorded both as
+# gantry inputs (the mounts below) and explicitly in the description.
 run_bundle() {
     gantry run \
         --name "bundle-distilled-moe-student" \
         --description "Bundle distilled 2-step MoE student: Lo=expert0 baseline-fixed (beaker://${DATASET_LO}) + Hi=expert1 hi-1step (beaker://${DATASET_HI}); best_student_tail.ckpt each, steps_per_range [2,1]" \
         --workspace ai2/climate-titan \
         --priority normal \
-        --cluster ai2/titan \
+        --cluster ai2/phobos \
         --beaker-image "$IMAGE" \
         --dataset "${DATASET_LO}:fastgen/${RUN_LO}/student_checkpoints:/lo" \
         --dataset "${DATASET_HI}:fastgen/${RUN_HI}/student_checkpoints:/hi" \
         --weka climate-default:/climate-default \
-        --gpus 1 \
+        --gpus 0 \
         --shared-memory 100GiB \
         --budget ai2/atec-climate \
         --system-python \
