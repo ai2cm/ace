@@ -1,0 +1,60 @@
+# CONUS evaluation of the original bundled multivariate MoE teacher on the 2023
+# holdout year, against 3 km X-SHiELD AMIP ground truth (merged PRMSL + others).
+# Companion to config-distilled.yaml — identical data/patch/n_samples so the two
+# runs are directly comparable; only the model section differs.
+experiment_dir: /results
+n_samples: 4
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  # Teacher bundle: beaker dataset 01KTCHVDHY0SATWH9E0AW2PDS6 mounted at
+  # /checkpoints (root, no checkpoints/ subdir). Loaded as the EDM
+  # DenoisingMoEPredictor (no sampler_type tag).
+  mixture_of_experts_path: /checkpoints/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: false
+events: []
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm

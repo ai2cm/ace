@@ -1,0 +1,61 @@
+# CONUS evaluation of the distilled 2-step MoE student bundle (Student-Hi +
+# Student-Lo, fastgen predict-x0-renoise cascade) on the 2023 holdout year,
+# against 3 km X-SHiELD AMIP ground truth. Identical data/patch/n_samples to
+# config-teacher.yaml for a direct comparison; only the model section differs.
+experiment_dir: /results
+n_samples: 4
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  # Distilled student bundle assembled via DenoisingMoEStudentConfig(...).save().
+  # Carries sampler_type="fastgen_cascade", so DenoisingMoEBundledConfig.build()
+  # loads it as the DenoisingMoEStudentPredictor (renoise cascade), not the EDM
+  # teacher predictor. Mounted at /checkpoints from its beaker dataset.
+  mixture_of_experts_path: /checkpoints/distilled_moe_bundle.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: false
+events: []
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
