@@ -9,11 +9,11 @@ patch:
   composite_prediction: true
   coarse_horizontal_overlap: 1
 model:
-  # Distilled student bundle assembled via DenoisingMoEStudentConfig(...).save().
-  # Carries sampler_type="fastgen_cascade", so DenoisingMoEBundledConfig.build()
-  # loads it as the DenoisingMoEStudentPredictor (renoise cascade), not the EDM
-  # teacher predictor. Mounted at /checkpoints from its beaker dataset.
-  mixture_of_experts_path: /checkpoints/distilled_moe_bundle.ckpt
+  # Distilled student bundle assembled by run.sh's `bundle` mode and written to
+  # weka (mounted via --weka climate-default:/climate-default). Carries
+  # sampler_type="fastgen_cascade", so DenoisingMoEBundledConfig.build() loads it
+  # as the DenoisingMoEStudentPredictor (renoise cascade), not the EDM teacher.
+  mixture_of_experts_path: /climate-default/2026-07-07-distilled-moe-bundle/distilled_moe_bundle.ckpt
 data:
   coarse:
   - merge:

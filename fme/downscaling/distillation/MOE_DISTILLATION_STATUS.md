@@ -285,12 +285,23 @@ YAML via the existing `model: {mixture_of_experts_path: …}` union member —
 `DenoisingMoEBundledConfig.build()` now dispatches teacher vs student on the
 bundle's `sampler_type` tag, so no new union member was needed.
 
-**Still to do for the CONUS comparison eval:** (1) assemble a student bundle from
-the chosen Hi + Lo per-expert `.ckpt`s via `DenoisingMoEStudentConfig(...).save()`
-(training saves single-net checkpoints, not bundles); (2) two `EvaluatorConfig`s
-(distilled bundle + teacher bundle) on the same CONUS multivar dataset
-(100km-merge coarse + 25km fine), logged to `andrep-downscaling`; (3) launch via
-gantry (mirroring `configs/experiments/2026-05-20-distilled-model-eval/run.sh`).
+**CONUS comparison eval — wired, ready to launch** (`configs/experiments/2026-07-07-distilled-moe-eval/`):
+- **Dataset:** CONUS 2023, **100km→3km** (not 25km). Coarse merge `100km.zarr` +
+  `prmsl_100km.zarr`; fine merge `3km.zarr` +
+  `instantaneous_surface_and_sea_level_pressure_3km.zarr`.
+- **Bundle assembly:** `./run.sh bundle` — gantry job mounts *only* the
+  `student_checkpoints` subpath of each source dataset (Lo=expert0 baseline-fixed
+  `01KWJAFM694MAE55M2JMZSE89M`, Hi=expert1 hi-1step `01KWTXGAM1CCGDH29JWDSN9KPF`),
+  runs `scripts/downscaling/bundle_denoising_moe_checkpoint.py` on
+  `distilled-bundle.yaml` (`best_student_tail.ckpt` each, `steps_per_range [2,1]`),
+  writes `distilled_moe_bundle.ckpt` to weka
+  `/climate-default/2026-07-07-distilled-moe-bundle/`.
+- **Eval:** `./run.sh all` — two `EvaluatorConfig`s (teacher bundle via beaker
+  dataset, distilled bundle via weka), identical data/patch/`n_samples=4`, logged
+  to `andrep-downscaling`. Run `bundle` first and let it finish.
+- **Verify before trusting the comparison:** teacher and students must share the
+  same output vars (status says 4: u10/v10/PRMSL/PRATEsfc; `ARCHITECTURE.md` notes
+  a 5-var T2m teacher variant — if the bundle is 5-var the fine merge needs T2m).
 
 ---
 

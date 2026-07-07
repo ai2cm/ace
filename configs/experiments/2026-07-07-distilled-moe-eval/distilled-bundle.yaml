@@ -11,11 +11,12 @@
 #   Expert 1 (Hi, sigma[200,2000], 1-step): beaker 01KWTXGAM1CCGDH29JWDSN9KPF
 #     (…-hi-1step-moe-teacher-expert1)
 #
-# NB the checkpoint_path values below assume each dataset's student_checkpoints
-# dir is mounted at /lo and /hi respectively — CONFIRM the exact filenames /
-# subpaths (`beaker dataset ls <id>`). Hi's best_student is an essentially
-# arbitrary-but-fine pick: the cascade metric was flat across training, so every
-# Hi checkpoint performs ~identically end-to-end (see MOE_DISTILLATION_STATUS.md).
+# run.sh's `bundle` mode mounts ONLY each dataset's
+# fastgen/<experiment>/student_checkpoints subpath at /lo and /hi (subpath mount,
+# so unrelated files are not downloaded). Both use best_student_tail.ckpt.
+# Hi's checkpoint choice is essentially arbitrary-but-fine: the cascade metric
+# was flat across training, so every Hi checkpoint performs ~identically
+# end-to-end (see MOE_DISTILLATION_STATUS.md).
 
 # steps_per_range aligns with ascending-sigma order: 2-step Lo, 1-step Hi.
 steps_per_range: [2, 1]
@@ -23,8 +24,8 @@ denoising_expert_configs:
   - sigma_min: 0.005
     sigma_max: 200.0
     checkpoint_config:
-      checkpoint_path: /lo/best_student.ckpt
+      checkpoint_path: /lo/best_student_tail.ckpt
   - sigma_min: 200.0
     sigma_max: 2000.0
     checkpoint_config:
-      checkpoint_path: /hi/best_student.ckpt
+      checkpoint_path: /hi/best_student_tail.ckpt
