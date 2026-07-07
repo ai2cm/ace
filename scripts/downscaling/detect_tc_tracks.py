@@ -173,6 +173,23 @@ def build_te_dataset(
     return out
 
 
+def _te_time_encoding(ds: xr.Dataset) -> dict:
+    """CF time units/calendar that TempestExtremes will actually accept.
+
+    TempestExtremes' Time::FromCFCompliantUnitsOffsetInt only recognizes
+    "days|hours|minutes|seconds since ..." unit prefixes (TimeObj.cpp); left
+    to its own defaults, xarray can encode datetime64[ns] data as
+    "nanoseconds since ...", which TempestExtremes rejects with
+    'Unknown "time::units" format'. Forcing seconds-since-epoch avoids that.
+    """
+    calendar = ds["time"].encoding.get("calendar", "standard")
+    return {
+        "units": "seconds since 1970-01-01 00:00:00",
+        "calendar": calendar,
+        "dtype": "int64",
+    }
+
+
 def write_netcdf_chunks(ds: xr.Dataset, out_dir: Path, chunk_size: int) -> Path:
     """Write the dataset to per-chunk NetCDF files and a DetectNodes file list.
 
@@ -184,18 +201,37 @@ def write_netcdf_chunks(ds: xr.Dataset, out_dir: Path, chunk_size: int) -> Path:
     nc_dir = out_dir / "netcdf"
     nc_dir.mkdir(parents=True, exist_ok=True)
 
+    time_encoding = _te_time_encoding(ds)
     paths = []
     for start in range(0, n_time, chunk_size):
         sub = ds.isel(time=slice(start, start + chunk_size))
         path = nc_dir / f"te_input_{start:06d}.nc"
         logger.info("Writing %s (%d timesteps)", path.name, sub.sizes["time"])
-        sub.to_netcdf(path)
+        sub.to_netcdf(path, encoding={"time": time_encoding})
         paths.append(path)
 
     list_path = out_dir / "input_files.txt"
     list_path.write_text("\n".join(str(p) for p in paths) + "\n")
     logger.info("Wrote file list %s (%d files)", list_path, len(paths))
     return list_path
+
+
+def build_node_file_list(in_list_path: Path, out_dir: Path) -> Path:
+    """Write a DetectNodes ``--out_file_list`` matching an ``--in_data_list``.
+
+    TempestExtremes only honors a single ``--out`` path when there is exactly
+    one input file; with multiple input files (our per-chunk NetCDF split)
+    it instead invents its own ``<out>XXXXXX.dat``-style names and ignores
+    the path we asked for. Passing an explicit, equal-length output list via
+    ``--out_file_list`` makes it write exactly the files we expect.
+    """
+    nodes_dir = out_dir / "nodes"
+    nodes_dir.mkdir(parents=True, exist_ok=True)
+    in_paths = [Path(p) for p in in_list_path.read_text().splitlines() if p.strip()]
+    node_paths = [nodes_dir / f"{p.stem}.dat" for p in in_paths]
+    node_list_path = out_dir / "candidate_nodes_files.txt"
+    node_list_path.write_text("\n".join(str(p) for p in node_paths) + "\n")
+    return node_list_path
 
 
 def cleanup_netcdf_chunks(out_dir: Path) -> None:
@@ -224,16 +260,24 @@ def _check_exe(exe: str) -> None:
 
 
 def run_detect_nodes(
-    in_list: Path, out_path: Path, exe: str, lat_name: str, lon_name: str
+    in_list: Path,
+    out_file_list: Path,
+    exe: str,
+    lat_name: str,
+    lon_name: str,
+    log_dir: Path,
 ) -> None:
     """Run DetectNodes to find candidate TC centers at each timestep."""
     _check_exe(exe)
+    log_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         exe,
         "--in_data_list",
         str(in_list),
-        "--out",
-        str(out_path),
+        "--out_file_list",
+        str(out_file_list),
+        "--logdir",
+        str(log_dir),
         "--timefilter",
         "6hr",
         "--searchbymin",
@@ -252,14 +296,27 @@ def run_detect_nodes(
     logger.info("Running DetectNodes: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
+    # DetectNodes catches its own internal exceptions and always exits 0, so a
+    # nonzero return code never signals failure here; the only reliable check
+    # is whether it actually wrote every file we told it to.
+    expected = [Path(p) for p in out_file_list.read_text().splitlines() if p.strip()]
+    missing = [p for p in expected if not p.exists()]
+    if missing:
+        raise RuntimeError(
+            f"DetectNodes did not produce {len(missing)}/{len(expected)} expected "
+            f"output file(s); first missing: {missing[0]}. DetectNodes exits 0 even "
+            f"when it hits an internal error, so check its per-file logs under "
+            f"{log_dir} (e.g. {log_dir}/log000000.txt) for the actual cause."
+        )
 
-def run_stitch_nodes(in_path: Path, out_path: Path, exe: str) -> None:
+
+def run_stitch_nodes(in_list: Path, out_path: Path, exe: str) -> None:
     """Run StitchNodes to link candidate centers into tracks."""
     _check_exe(exe)
     cmd = [
         exe,
-        "--in",
-        str(in_path),
+        "--in_list",
+        str(in_list),
         "--out",
         str(out_path),
         "--in_fmt",
@@ -275,6 +332,16 @@ def run_stitch_nodes(in_path: Path, out_path: Path, exe: str) -> None:
     ]
     logger.info("Running StitchNodes: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
+
+    # As with DetectNodes, StitchNodes catches its own exceptions and always
+    # exits 0, so check the output actually exists rather than trusting the
+    # return code.
+    if not out_path.exists():
+        raise RuntimeError(
+            f"StitchNodes did not produce {out_path}. StitchNodes exits 0 even "
+            "when it hits an internal error, so check its stdout above for an "
+            "EXCEPTION line."
+        )
 
 
 def parse_stitch_output(path: Path) -> pd.DataFrame:
@@ -495,14 +562,21 @@ def main() -> None:
         logger.info("--convert-only set; stopping after NetCDF conversion.")
         return
 
-    nodes_path = out_dir / "candidate_nodes.dat"
     tracks_path = out_dir / "tracks.dat"
     csv_path = out_dir / "tracks.csv"
 
-    run_detect_nodes(list_path, nodes_path, args.detect_exe, lat_name, lon_name)
+    node_list_path = build_node_file_list(list_path, out_dir)
+    run_detect_nodes(
+        list_path,
+        node_list_path,
+        args.detect_exe,
+        lat_name,
+        lon_name,
+        out_dir / "logs",
+    )
     if args.cleanup:
         cleanup_netcdf_chunks(out_dir)
-    run_stitch_nodes(nodes_path, tracks_path, args.stitch_exe)
+    run_stitch_nodes(node_list_path, tracks_path, args.stitch_exe)
 
     df = parse_stitch_output(tracks_path)
     df.to_csv(csv_path, index=False)
