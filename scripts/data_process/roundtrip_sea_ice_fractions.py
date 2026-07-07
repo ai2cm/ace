@@ -117,11 +117,15 @@ def _gsmooth_np(arr: np.ndarray) -> np.ndarray:
     Latitude: fixed sigma (reflect at poles). Longitude: per-row sigma
     (area-aware, periodic). No NaNs expected here (caller pre-fills).
     """
+    assert _SIGMA_LON is not None, "call _init_sigma_lon before _gsmooth_np"
     a = gaussian_filter1d(arr.astype("float32"), SIGMA_LAT, axis=-2, mode="nearest")
     out = np.empty_like(a)
     for j in range(a.shape[-2]):
         out[..., j, :] = gaussian_filter1d(
-            a[..., j, :], float(_SIGMA_LON[j]), axis=-1, mode="wrap"
+            a[..., j, :],
+            float(_SIGMA_LON[j]),
+            axis=-1,
+            mode="wrap",
         )
     return out.astype("float32")
 
@@ -195,7 +199,7 @@ def build_modified_dataset(ds: xr.Dataset, realm: str) -> xr.Dataset:
     out.attrs["history"] = (
         out.attrs.get("history", "")
         + f" | sea-ice fractions area-aware-Gaussian smoothed "
-        f"(sigma_lat={SIGMA_LAT}, sigma_lon_base={SIGMA_LON_BASE}, cap={SIGMA_LON_CAP}) "
+        f"(sigma_lat={SIGMA_LAT}, sigma_lon_base={SIGMA_LON_BASE}, cap={SIGMA_LON_CAP})"
         "by roundtrip_sea_ice_fractions.py"
     )
     return out
@@ -243,11 +247,15 @@ def verify(realm: str, ds: xr.Dataset, n_samples: int):
 
     logging.info(f"  partition sum-to-1 (in mask) : {max_sum_err:.2e}")
     logging.info(f"  OCNFRAC unchanged out-of-mask: {ocn_outside:.2e}")
-    logging.info(f"  ICEFRAC within [0,1]         : {bounds_ok} "
-                 f"(min={np.nanmin(icef):.3f} max={np.nanmax(icef):.3f})")
+    logging.info(
+        f"  ICEFRAC within [0,1]         : {bounds_ok} "
+        f"(min={np.nanmin(icef):.3f} max={np.nanmax(icef):.3f})"
+    )
     logging.info(f"  ICEFRAC NaN pattern preserved: {nan_ok}")
-    logging.info(f"  MIZ blockiness ICEFRAC       : {cb:.4f} -> {ca:.4f} "
-                 f"({100*(ca-cb)/cb:+.0f}%)")
+    logging.info(
+        f"  MIZ blockiness ICEFRAC       : {cb:.4f} -> {ca:.4f} "
+        f"({100 * (ca - cb) / cb:+.0f}%)"
+    )
     if realm == "ocean" and ICEVOL in mod:
         sic = mod[SIC].values
         bad = int(np.nansum((mod[ICEVOL].values > 0) & (sic == 0)))
@@ -270,8 +278,10 @@ def write_zarr(ds: xr.Dataset, output_store: str, n_dask_workers):
     client = None
     if n_dask_workers:
         import dask
+
         dask.config.set({"logging.distributed": "error"})
         from dask.distributed import Client
+
         client = Client(n_workers=n_dask_workers)
         logging.info(client.dashboard_link)
 
@@ -288,10 +298,13 @@ def write_zarr(ds: xr.Dataset, output_store: str, n_dask_workers):
                 try:
                     logging.info(f"  writing segment {i + 1}/{n_split}")
                     ds.partition.write(
-                        output_store, n_split, ["time"], i,
+                        output_store,
+                        n_split,
+                        ["time"],
+                        i,
                         collect_variable_writes=True,
                     )
-                    logging.info(f"  segment {i + 1} done in {time.time()-t0:.1f}s")
+                    logging.info(f"  segment {i + 1} done in {time.time() - t0:.1f}s")
                     break
                 except RuntimeError:
                     if n_retries > 10:
@@ -337,16 +350,31 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument("--realm", choices=["ocean", "atmosphere", "both"], default="both")
-    p.add_argument("--sigma-lat", type=float, default=1.0,
-                   help="meridional Gaussian sigma (grid cells)")
-    p.add_argument("--sigma-lon-base", type=float, default=1.0,
-                   help="zonal Gaussian sigma at the equator (grid cells); "
-                        "scaled by 1/cos(lat) toward the poles")
-    p.add_argument("--sigma-lon-cap", type=float, default=6.0,
-                   help="cap on the zonal sigma near the poles")
+    p.add_argument(
+        "--sigma-lat",
+        type=float,
+        default=1.0,
+        help="meridional Gaussian sigma (grid cells)",
+    )
+    p.add_argument(
+        "--sigma-lon-base",
+        type=float,
+        default=1.0,
+        help="zonal Gaussian sigma at the equator (grid cells); "
+        "scaled by 1/cos(lat) toward the poles",
+    )
+    p.add_argument(
+        "--sigma-lon-cap",
+        type=float,
+        default=6.0,
+        help="cap on the zonal sigma near the poles",
+    )
     p.add_argument("--out-dir", default=DATA_DIR)
-    p.add_argument("--write", action="store_true",
-                   help="actually write zarrs (default: verify on a sample only)")
+    p.add_argument(
+        "--write",
+        action="store_true",
+        help="actually write zarrs (default: verify on a sample only)",
+    )
     p.add_argument("--sample", type=int, default=24)
     p.add_argument("--n-dask-workers", type=int, default=None)
     args = p.parse_args()
@@ -355,8 +383,10 @@ def main():
     SIGMA_LAT = args.sigma_lat
     SIGMA_LON_BASE = args.sigma_lon_base
     SIGMA_LON_CAP = args.sigma_lon_cap
-    logging.info(f"Area-aware Gaussian smoother: sigma_lat={SIGMA_LAT} "
-                 f"sigma_lon_base={SIGMA_LON_BASE} (cap {SIGMA_LON_CAP})")
+    logging.info(
+        f"Area-aware Gaussian smoother: sigma_lat={SIGMA_LAT} "
+        f"sigma_lon_base={SIGMA_LON_BASE} (cap {SIGMA_LON_CAP})"
+    )
 
     realms = ["ocean", "atmosphere"] if args.realm == "both" else [args.realm]
     for realm in realms:
