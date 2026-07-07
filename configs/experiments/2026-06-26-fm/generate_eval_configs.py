@@ -103,6 +103,11 @@ def _build_eval_config(
             "save_monthly_files": False,
         },
         "n_ensemble_per_ic": inference_cfg.get("n_ensemble_per_ic", 1),
+        # Training mixes datasets on different vertical grids via strict:false and
+        # pins the first concat member's coordinate into the checkpoint; inline
+        # inference never checks compatibility. The standalone evaluator does, so
+        # allow the same mismatch here to reproduce training's inference exactly.
+        "allow_incompatible_dataset": True,
     }
 
 

@@ -43,6 +43,7 @@ inferences:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
+    allow_incompatible_dataset: true
 - name: 10year
   config:
     experiment_dir: /results/10year
@@ -132,6 +133,7 @@ inferences:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
+    allow_incompatible_dataset: true
 - name: weather_2024
   config:
     experiment_dir: /results/weather_2024
@@ -235,6 +237,7 @@ inferences:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 8
+    allow_incompatible_dataset: true
 - name: weather_1994
   config:
     experiment_dir: /results/weather_1994
@@ -338,6 +341,7 @@ inferences:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 8
+    allow_incompatible_dataset: true
 - name: long_46year
   config:
     experiment_dir: /results/long_46year
@@ -427,3 +431,4 @@ inferences:
       save_prediction_files: false
       save_monthly_files: false
     n_ensemble_per_ic: 1
+    allow_incompatible_dataset: true

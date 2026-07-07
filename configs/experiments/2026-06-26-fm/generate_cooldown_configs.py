@@ -78,6 +78,27 @@ def _restrict_train_loader_to_era5(cfg: dict) -> None:
     cfg["train_loader"].pop("group_weights", None)
 
 
+def _restrict_inference_to_era5(cfg: dict) -> None:
+    """Keep only ERA5 inline-inference entries in a cooldown config.
+
+    The cooldown stepper's vertical coordinate comes from its ERA5-only
+    train_loader. Inline-inference entries on other datasets (e.g. SHiELD, which
+    use a different hybrid sigma-pressure coordinate) would be run against a
+    mismatched coordinate, producing coordinate-inconsistent diagnostics. Drop
+    them so cooldown inline inference stays on the ERA5 coordinate.
+    """
+    entries = cfg.get("inference")
+    if entries is None:
+        return
+    if not isinstance(entries, list):
+        entries = [entries]
+    cfg["inference"] = [
+        entry
+        for entry in entries
+        if ERA5_MARKER in entry["loader"]["dataset"].get("file_pattern", "")
+    ]
+
+
 def _fetch_wandb_run_names() -> set[str]:
     import wandb  # lazy import: only needed with --delete-if-in-wandb
 
@@ -163,6 +184,10 @@ def generate_cooldown_config(
 
     # Cool down onto ERA5 only (training used a multi-dataset mixture).
     _restrict_train_loader_to_era5(cfg)
+
+    # Drop non-ERA5 inline-inference entries: the cooldown stepper uses the ERA5
+    # vertical coordinate, so SHiELD-coordinate entries would be mismatched.
+    _restrict_inference_to_era5(cfg)
 
     cfg["optimization"]["lr"] = lr
     cfg["optimization"]["scheduler"] = _build_scheduler(epochs)
