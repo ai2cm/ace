@@ -93,24 +93,9 @@ stepper_training:
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
-    weights:
-      air_temperature_0: 0.5
-      air_temperature_1: 0.5
-      eastward_wind_0: 0.5
-      northward_wind_0: 0.5
-      specific_total_water_0: 0.5
-      specific_total_water_1: 0.25
-      specific_total_water_2: 0.5
-      PRATEsfc: 2.0
-      h500: 10
-      TMP850: 5
-      Q2m: 0.5
-      DLWRFsfc: 2
-      ULWRFsfc: 5
-      USWRFsfc: 2
-      DSWRFsfc: 2
-      USWRFtoa: 2
-      tendency_of_total_water_path_due_to_advection: 0.5
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
 stepper:
   # Warm-start from the corresponding pretrain job's checkpoint, mounted at /weights
   # by run-ace-train.sh (--ckpt). Matches the CM4 finetune convention.
