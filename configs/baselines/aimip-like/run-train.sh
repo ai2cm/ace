@@ -231,3 +231,30 @@ run_training "train-4deg-daily-v2-era5-only-noise-shaping.yaml" "train-4deg-dail
 
 # --- arm 4: n_ensemble 4 truncated SNR test, seed 0 (1 GPU) ---
 run_training "train-4deg-daily-v2-era5-only-nens4.yaml" "train-4deg-daily-v2-era5-only-nens4-rs0" 1
+
+# =============================================================================
+# Ensemble-size fine-tuning sweep (2026-07-07): does a larger TRAINING ensemble
+# relax the 1-step SSR under-dispersion, and does it converge?
+#
+# All arms resume the v2 baseline (oshj5u79) epoch-120 checkpoint (mounted at
+# /prior-results via each config's `# arg: --dataset ...:/prior-results`) and
+# fine-tune 30 epochs (120->150) at constant LR 1e-4, resume_wandb: false (each
+# is a fresh wandb run continuing the same weights). Sole change across arms is
+# n_ensemble (2 = fine-tuning control, 4, 8, 16); inference: [] since the metric
+# (train/val 1-step SSR bias) is logged every epoch from the train/val loops.
+# Peak activation ~ batch_size x n_ensemble (baseline 8x2); the 8/16-member arms
+# may OOM at batch 8 -> relaunch that arm at a lower batch (comparison is
+# per-epoch). Launch with:  ./run-train.sh ftens
+# =============================================================================
+
+# --- ftens2: n_ensemble 2 fine-tuning control, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens2.yaml" "train-4deg-daily-v2-era5-only-ftens2-rs0" 1
+
+# --- ftens4: n_ensemble 4, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens4.yaml" "train-4deg-daily-v2-era5-only-ftens4-rs0" 1
+
+# --- ftens8: n_ensemble 8, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens8.yaml" "train-4deg-daily-v2-era5-only-ftens8-rs0" 1
+
+# --- ftens16: n_ensemble 16, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-v2-era5-only-ftens16.yaml" "train-4deg-daily-v2-era5-only-ftens16-rs0" 1
