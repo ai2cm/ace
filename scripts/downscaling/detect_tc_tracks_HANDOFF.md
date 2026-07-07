@@ -10,6 +10,53 @@ Produce a CSV of tropical-cyclone tracks from
 then fill in the 3h in-between points from a **separate 3-hourly dataset**
 (this zarr is 6-hourly) and derive cyclone characteristics for comparison.
 
+## 3h / high-res detection (SLP-only) — the current work
+
+The 3h downscaling datasets have SLP, 10m winds, sfc-T, rain but **no upper-air
+temperature**, so the warm-core criterion can't run on them. Plan: detect TCs on
+the coarse 6h store (warm-core, done), and independently run an **SLP-only**
+detection on the 3h data, then match those tracks to the 6h warm-core tracks to
+keep only real TCs (StitchNodes handles genesis/death by construction).
+
+3h datasets:
+- 25km: `gs://vcm-ml-scratch/andrep/2025-08-12-X-SHiELD-AMIP-downscaling-3h.zarr/` (720×1440)
+- 100km: `gs://vcm-ml-scratch/andrep/2025-07-25-X-SHiELD-AMIP-FME-3h.zarr/` (180×360)
+- vars: `PRMSL` (mb), `eastward_wind_at_ten_meters`, `northward_wind_at_ten_meters`,
+  `PRATEsfc`, `air_temperature_at_two_meters`; coords `latitude`/`longitude`; 3-hourly.
+
+**Key I/O finding:** both 3h stores chunk the **whole globe into one chunk per
+timestep** (zarr v3, sharded 128 timesteps). So spatial windowing saves *zero*
+I/O — any read fetches the whole global chunk. TCs are active 77% of timesteps,
+so temporal subsetting only trims ~23%. Measured read ~107–167 MB/s (8 vCPU, not
+network-bound — <10% of NIC; scales ~1.5× with concurrency). Full 25km 3-var
+pass ≈ 40 min; DetectNodes compute is comparable (~30 min) → parallelism helps.
+
+**Pipeline upgrade (this session):** `detect_tc_tracks.py` now processes
+shard-sized time-bundles in parallel (`--workers`, spawn processes) with
+read→NetCDF→DetectNodes→**delete** per bundle, so peak disk ≈ `workers × bundle`
+(~1.6 GB each) instead of the whole dataset. New flags: `--no-warm-core`
+(SLP-only recipe), `--timefilter 3hr`, `--keep-netcdf`. Example 25km run:
+
+```bash
+python scripts/downscaling/detect_tc_tracks.py \
+  gs://vcm-ml-scratch/andrep/2025-08-12-X-SHiELD-AMIP-downscaling-3h.zarr/ scratch/tc25/ \
+  --no-warm-core --timefilter 3hr --chunk-size 128 --workers 6 \
+  --u-var eastward_wind_at_ten_meters --v-var northward_wind_at_ten_meters \
+  --detect-exe ~/miniconda3/envs/tempest/bin/DetectNodes \
+  --stitch-exe ~/miniconda3/envs/tempest/bin/StitchNodes --no-write-sel-args
+```
+
+**Validated** on a 2-month 25km subset (Aug–Oct 2013, 4 shard bundles, 6 workers):
+67 s wall, peak RSS ~4 GB, NetCDF deleted per bundle (bounded disk), exit 0 →
+150 tracks / 8368 points, SLP to 920 mb, wind to 52 m/s. The 150 includes many
+**extratropical** systems (lat up to 82, Southern Ocean) since SLP-only catches
+all closed lows — the 6h warm-core match is what filters to real TCs. Full 11yr
+25km SLP-only ≈ ~75 min at 6 workers (extrapolated). Note: needed `spawn` start
+method for the process pool (fork corrupts gcsfs' asyncio state → BrokenProcessPool).
+
+TODO: (1) match 3h SLP-only tracks to 6h warm-core tracks; (2) revisit StitchNodes
+threshold *count* — `wind,>=,10.0,10` = 30h at 3h vs 60h at 6h (shapes the 3h set).
+
 ## Environment / install (done)
 
 ### Installing TempestExtremes (conda-forge — the method used)
@@ -74,10 +121,10 @@ boundaries). Note: `--out_file_list` does **not** work in this conda-forge build
 → `scratch/tc_test_2013/tracks.csv`: 701 points / 28 tracks, SLP down to 952 mb,
 wind to 30 m/s. Correct.
 
-## NEXT STEP — full 11-year run (not yet done)
+## Full 11-year run (DONE)
 
-Run in background; ~16.7 GB of NetCDF intermediates (`--cleanup` removes them
-after DetectNodes consumes them):
+Command used (~16.7 GB NetCDF intermediates, `--cleanup` removes them after
+DetectNodes; ~3 min wall time on this machine):
 
 ```bash
 conda activate fme && cd ~/repos/ace
@@ -88,10 +135,33 @@ python scripts/downscaling/detect_tc_tracks.py \
   --cleanup --no-write-sel-args
 ```
 
-Deliverable: `scratch/tc_full/tracks.csv`. Using `--no-write-sel-args` because
-the pickled `.sel` kwargs use pandas `datetime64` values that won't
-`.sel(method="nearest")` against the cftime-Julian source index (the 3h fill-in
-is done separately anyway).
+Result: `scratch/tc_full/tracks.csv` — **853 tracks / 21,954 points**, 2013→2024,
+SLP to 948 mb, peak wind 33 m/s. Using `--no-write-sel-args` because the pickled
+`.sel` kwargs use pandas `datetime64` values that won't `.sel(method="nearest")`
+against the cftime-Julian source index (the 3h fill-in is done separately anyway).
+
+## Plotting
+
+`scratch/plot_tc_tracks.py` draws tracks on a global cartopy map colored by peak
+10 m wind (genesis = dot): `python scratch/plot_tc_tracks.py <tracks.csv> <out.png>`.
+Maps rendered: `scratch/tc_2013/tracks_map.png` (85 tracks) and
+`scratch/tc_full/tracks_map.png` (853 tracks). NOTE for cartopy: `bbox_inches="tight"`
+collapses the GeoAxes when a colorbar is present — use `constrained_layout=True`
+and `fig.canvas.draw()` before `savefig` instead.
+
+## Known false positives
+
+A few tracks sit over land / high latitudes (e.g. a knot near the Caspian ~55°E/42°N,
+some extratropical transitions poleward of 50°). Inherent to the recipe at 1° coarse
+resolution — StitchNodes requires ≥10 steps within ±50° lat but lets tracks drift
+outside afterward. Tighten lat/duration filters or add a land/ocean mask if a cleaner
+set is needed for the comparison.
+
+## Everything lives in scratch/ (git-ignored)
+
+`scratch/tc_2013/`, `scratch/tc_full/`, and `scratch/plot_tc_tracks.py` are under the
+git-ignored `scratch/` dir, so they don't pollute the repo. Only the script fix and
+this handoff are tracked.
 
 ## Cleanup
 
