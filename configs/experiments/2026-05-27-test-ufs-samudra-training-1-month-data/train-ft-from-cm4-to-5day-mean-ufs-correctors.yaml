@@ -150,6 +150,7 @@ stepper:
             method: prescribed
           ocean_heat_content_correction:
             method: scaled_temperature
+            constant_unaccounted_heating: -4.35 # W/m**2, area-weighted global mean
       next_step_forcing_names:
       - DLWRFsfc
       - DSWRFsfc
