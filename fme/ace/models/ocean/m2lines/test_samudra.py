@@ -3,12 +3,31 @@ import os
 import pytest
 import torch
 
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.testing import validate_tensor
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
 from fme.ace.models.ocean.m2lines.samudra import Samudra
+
+
+def dummy_datasetinfo(height: int, width: int) -> DatasetInfo:
+    """Create a dummy DatasetInfo for testing."""
+    spatial_mask_provider = SpatialMaskProvider(
+        masks={
+            "mask_2d": torch.ones(height, width),
+            "mask_0": torch.ones(height, width),
+            "mask_1": torch.ones(height, width),
+            "mask_2": torch.ones(height, width),
+        }
+    )
+
+    return DatasetInfo(
+        img_shape=(height, width),
+        spatial_mask_provider=spatial_mask_provider,
+    )
 
 
 @pytest.mark.parametrize("norm", ["batch", "layer", "instance", None, "group"])
@@ -40,6 +59,46 @@ def test_samudra_normalization(norm):
         dilation=[1, 2],
         n_layers=[1, 1],
         norm=norm,
+    )
+
+    # Create dummy input
+    x = torch.randn(batch_size, input_channels, height, width)
+
+    # Forward pass
+    output = model(x)
+
+    # Check output shape
+    expected_shape = (batch_size, output_channels, height, width)
+    assert (
+        output.shape == expected_shape
+    ), f"Expected output shape {expected_shape}, but got {output.shape}"
+
+    # Check output values
+    assert not torch.isnan(output).any(), "Output contains NaN values"
+    assert not torch.isinf(output).any(), "Output contains infinite values"
+
+
+def test_samudra_partial_convolutions():
+    # Model parameters
+    input_channels = 4
+    output_channels = 3
+    batch_size = 2
+    height = 64
+    width = 64
+
+    dataset_info = dummy_datasetinfo(height, width)
+    in_names = ["hfds", "thetao_0", "thetao_1", "thetao_2"]
+
+    model = Samudra(
+        input_channels=input_channels,
+        output_channels=output_channels,
+        dataset_info=dataset_info,
+        in_names=in_names,
+        ch_width=[32, 64],
+        dilation=[1, 2],
+        n_layers=[1, 1],
+        norm="layer",
+        partial_convolutions=True,
     )
 
     # Create dummy input

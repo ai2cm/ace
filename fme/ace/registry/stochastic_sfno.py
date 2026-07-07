@@ -331,6 +331,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ):
         n_labels = len(dataset_info.all_labels)
         if self.label_embed_dim > 0:

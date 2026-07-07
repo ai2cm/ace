@@ -26,6 +26,7 @@ class MLPConfig(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,  # Not needed for MLP
+        in_names: list[str] | None = None,
     ) -> nn.Module:
         """Build the MLP network."""
         return _build_mlp(

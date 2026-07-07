@@ -26,6 +26,7 @@ class SamudraBuilder(ModuleConfig):
     norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     upscale_factor: int = 4
     checkpoint_strategy: Literal["all", "simple"] | None = None
+    partial_convolutions: bool = False
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
@@ -38,12 +39,15 @@ class SamudraBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ):
         if len(dataset_info.all_labels) > 0:
             raise ValueError("Samudra does not support labels")
         return Samudra(
             input_channels=n_in_channels,
             output_channels=n_out_channels,
+            dataset_info=dataset_info,
+            in_names=in_names,
             ch_width=self.ch_width,
             dilation=self.dilation,
             n_layers=self.n_layers,
@@ -52,6 +56,7 @@ class SamudraBuilder(ModuleConfig):
             norm_kwargs=self.norm_kwargs,
             upscale_factor=self.upscale_factor,
             checkpoint_strategy=self.checkpoint_strategy,
+            partial_convolutions=self.partial_convolutions,
         )
 
 
@@ -78,6 +83,7 @@ class FloeNetBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ):
         if not GRAPHCAST_AVAIL:
             raise ImportError("GraphCast dependencies (trimesh, rtree) not available.")
