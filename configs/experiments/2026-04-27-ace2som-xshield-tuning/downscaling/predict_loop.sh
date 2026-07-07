@@ -4,7 +4,7 @@
 set -e
 
 RANGE_START=1
-RANGE_END=4
+RANGE_END=1
 
 JOB_NAME_BASE="predict-ace2s-xshield-tc-tracks"
 #JOB_NAME="eval-global-trained-denoising-moe-events"

@@ -19,7 +19,9 @@ model:
   churn: 0.0
 data:
   coarse:
-    - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield/output_6hourly_predictions_ic0000.zarr
+    - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
+      file_pattern: output_6hourly_predictions_ic0000.zarr
+      engine: zarr
       subset:
         start: 0
         stop: 2
