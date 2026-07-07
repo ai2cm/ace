@@ -15,6 +15,7 @@ import subprocess
 
 from _version_select import add_version_arg, stem_matches_version
 from generate_eval_configs import (
+    EVAL_CHECKPOINT_NAME_SUFFIXES,
     EVAL_SUITE_CONFIG_PREFIX,
     TRAINING_RESULT_DATASETS,
     WANDB_PROJECT,
@@ -28,20 +29,31 @@ HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-eval.sh"
 WANDB_GROUP = "ace2-fm-eval-2026-06-26"
 
-CHECKPOINTS = [
-    ("training_checkpoints/best_ckpt.tar", "-besttrain"),
-    ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
-    ("training_checkpoints/ckpt.tar", "-lastepoch"),
+# Checkpoint file paths paired with the eval run-name suffixes (source of truth
+# in generate_eval_configs.py, kept in the same order as the checkpoints here).
+CHECKPOINT_PATHS = [
+    "training_checkpoints/best_ckpt.tar",
+    "training_checkpoints/best_inference_ckpt.tar",
+    "training_checkpoints/ckpt.tar",
 ]
+CHECKPOINTS = list(zip(CHECKPOINT_PATHS, EVAL_CHECKPOINT_NAME_SUFFIXES))
 
 
 def configs_for_version(version: str) -> list[str]:
-    return sorted(
-        path.name
-        for path in HERE.glob("*.yaml")
-        if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
-        and stem_matches_version(path.stem, version)
-    )
+    configs = []
+    for path in sorted(HERE.glob("*.yaml")):
+        if not path.name.startswith(EVAL_SUITE_CONFIG_PREFIX):
+            continue
+        if not stem_matches_version(path.stem, version):
+            continue
+        run_name = eval_suite_config_to_run_name(path.name)
+        if run_name not in TRAINING_RESULT_DATASETS:
+            # No training result dataset recorded for this run; skip rather
+            # than fail in config_to_jobs. Matches generate_eval_configs.py.
+            print(f"Skipped {path.name} (no dataset ID for {run_name!r})")
+            continue
+        configs.append(path.name)
+    return configs
 
 
 def validate_configs(config_filenames: list[str]) -> None:
