@@ -67,8 +67,7 @@ def _replace_string_values(value: Any, old: str, new: str) -> Any:
         return [_replace_string_values(item, old, new) for item in value]
     if isinstance(value, dict):
         return {
-            key: _replace_string_values(item, old, new)
-            for key, item in value.items()
+            key: _replace_string_values(item, old, new) for key, item in value.items()
         }
     return value
 
