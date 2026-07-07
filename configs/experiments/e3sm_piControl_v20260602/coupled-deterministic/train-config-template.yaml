@@ -232,6 +232,7 @@ stepper:
               upscale_factor: 2
               checkpoint_strategy: all
               zonally_periodic_upsample: true
-    # stepper added by job_runner/create_coupled_train_config.sh  atmosphere:
+    # stepper added by job_runner/create_coupled_train_config.sh
+  atmosphere:
     timedelta: 6h
     # stepper added by job_runner/create_coupled_train_config.sh
