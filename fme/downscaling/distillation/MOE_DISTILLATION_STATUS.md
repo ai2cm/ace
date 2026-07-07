@@ -311,10 +311,25 @@ bundle's `sampler_type` tag, so no new union member was needed.
   `01KTCHVDHY0SATWH9E0AW2PDS6` read-only for the repair reference.
 - **Eval:** `./run.sh all` — two `EvaluatorConfig`s (teacher bundle via beaker
   dataset, distilled bundle via weka), identical data/patch/`n_samples=4`, logged
-  to `andrep-downscaling`. Run `bundle` first and let it finish.
+  to `andrep-downscaling`.
 - **Verify before trusting the comparison:** teacher and students must share the
   same output vars (status says 4: u10/v10/PRMSL/PRATEsfc; `ARCHITECTURE.md` notes
   a 5-var T2m teacher variant — if the bundle is 5-var the fine merge needs T2m).
+
+**★ LAUNCHED 2026-07-07 (CHECK WHEN DONE) — wandb `andrep-downscaling`:**
+- Bundle built OK: beaker `01KWZCN4AFBMSZE13K9Y0BERPP` (repair passed: 376 Hi
+  tensors matched expert-1; wrote `distilled_moe_bundle.ckpt` to weka).
+- **Teacher eval:** beaker `01KWZD6WFN4TCSMMC48BTFMN8Q`
+  (`evaluate-moe-teacher-xshield-amip-100km-to-3km-conus`).
+- **Distilled eval:** beaker `01KWZD6YMZSD37XZHDMYB8RFC7`
+  (`evaluate-moe-distilled-xshield-amip-100km-to-3km-conus`).
+- **What to check:** (1) distilled vs teacher CRPS / spectra / tails per variable
+  (the teacher's first-ever eval baseline); (2) both evaluate the **same 4 vars**
+  (apples-to-apples — the 4-vs-5 check above); (3) the two **West Pacific** events
+  (`WPacific_hurricane_*`) didn't error on PRMSL (if `..._3km.zarr` lacks that
+  region) — the WA event + aggregate CONUS are safe regardless; (4) whether the
+  distilled 2-step cascade holds up vs the 18-step teacher (the real payoff), and
+  how much the coarse/synoptic scales (where Student-Hi contributes) differ.
 
 ---
 
