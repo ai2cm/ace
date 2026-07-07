@@ -262,8 +262,15 @@ as a refactor smell); the two sampling semantics are genuinely different objects
   `DenoisingExpertCheckpointConfig`s; `__post_init__` sorts experts *and*
   `steps_per_range` together by ascending `sigma_min`; `build()` →
   `DenoisingMoEStudentPredictor`.
-- **`DenoisingMoEStudentBundledConfig`** — loads a saved student bundle;
-  `build()` → `from_state` + `.eval()`.
+- **Loading a student bundle: reuse `DenoisingMoEBundledConfig`.** `build()`
+  dispatches on the persisted `sampler_type` tag — `"fastgen_cascade"` →
+  `DenoisingMoEStudentPredictor.from_state`, else the teacher
+  `DenoisingMoEPredictor.from_state` (backward-compatible; old teacher bundles
+  lack the key). This is a factory dispatch on a format tag, chosen over a
+  separate `DenoisingMoEStudentBundledConfig` because two bundle configs sharing
+  only `mixture_of_experts_path` are **ambiguous in the evaluator's dacite
+  `model:` union** (a student bundle would silently match the teacher config
+  first). One config, one union member, no ambiguity.
 
 Tests (`predictors/test_serial_denoising.py`, 8 new, all pass; reuse
 `_get_diffusion_model` + forward-pre-hooks to record dispatch σ): cascade routes
@@ -273,9 +280,17 @@ round-trip preserves `steps_per_range` + seeded generation; config sorts steps
 with ranges + bundle carries the `fastgen_cascade` marker; `predict_residual=True`
 output is full-field via `postprocess_generated`. Clean on ruff/ruff-format/mypy.
 
-**Not yet wired:** the YAML model-union entry for a student bundle (production
-config, spec 03 area) and the actual bundle-build/eval *run* against the teacher
-zarr — the predictor + configs are the reusable pieces those will call.
+**YAML-loadable (2026-07-07):** a student bundle loads from an evaluator/inference
+YAML via the existing `model: {mixture_of_experts_path: …}` union member —
+`DenoisingMoEBundledConfig.build()` now dispatches teacher vs student on the
+bundle's `sampler_type` tag, so no new union member was needed.
+
+**Still to do for the CONUS comparison eval:** (1) assemble a student bundle from
+the chosen Hi + Lo per-expert `.ckpt`s via `DenoisingMoEStudentConfig(...).save()`
+(training saves single-net checkpoints, not bundles); (2) two `EvaluatorConfig`s
+(distilled bundle + teacher bundle) on the same CONUS multivar dataset
+(100km-merge coarse + 25km fine), logged to `andrep-downscaling`; (3) launch via
+gantry (mirroring `configs/experiments/2026-05-20-distilled-model-eval/run.sh`).
 
 ---
 

@@ -12,7 +12,6 @@ from fme.downscaling.predictors.serial_denoising import (
     DenoisingMoEBundledConfig,
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
-    DenoisingMoEStudentBundledConfig,
     DenoisingMoEStudentConfig,
     DenoisingMoEStudentPredictor,
     _SigmaDispatchModule,
@@ -211,6 +210,9 @@ def test_save_and_load_roundtrip_preserves_predictor(tmp_path):
 
     loaded = DenoisingMoEBundledConfig(mixture_of_experts_path=str(ckpt)).build()
 
+    # A teacher bundle (no sampler_type tag) loads as the EDM predictor, not the
+    # student cascade — the backward-compatible side of the dispatch.
+    assert type(loaded) is DenoisingMoEPredictor
     assert loaded._sigma_ranges == predictor._sigma_ranges
     assert (
         loaded._num_diffusion_generation_steps
@@ -432,7 +434,10 @@ def test_student_predictor_save_load_roundtrip(tmp_path):
     ckpt = tmp_path / "student_moe.pt"
     predictor.save(str(ckpt))
 
-    loaded = DenoisingMoEStudentBundledConfig(mixture_of_experts_path=str(ckpt)).build()
+    # The single bundled config dispatches on the persisted sampler_type tag and
+    # returns a student cascade predictor for a fastgen_cascade bundle.
+    loaded = DenoisingMoEBundledConfig(mixture_of_experts_path=str(ckpt)).build()
+    assert isinstance(loaded, DenoisingMoEStudentPredictor)
 
     assert loaded._sigma_ranges == predictor._sigma_ranges
     assert loaded._steps_per_range == predictor._steps_per_range

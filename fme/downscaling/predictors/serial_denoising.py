@@ -340,11 +340,20 @@ class DenoisingMoEBundledConfig:
     weights and config plus the MoE-level sigma ranges and sampler parameters,
     so no original per-expert checkpoint paths are required.
 
+    Handles both teacher and distilled-student bundles: ``build`` dispatches on
+    the bundle's persisted ``sampler_type`` tag, returning a
+    ``DenoisingMoEStudentPredictor`` (fastgen predict-x0-renoise cascade) for a
+    student bundle and a ``DenoisingMoEPredictor`` (EDM Heun grid) otherwise.
+    A single config avoids a union-ambiguity between two bundle configs that
+    would share the same ``mixture_of_experts_path`` field.
+
     Parameters:
         mixture_of_experts_path: Path to a bundle written by
-            ``DenoisingMoEPredictor.save``. Named distinctly from
-            ``CheckpointModelConfig.checkpoint_path`` so the two configs are
-            unambiguous when used as alternatives in a YAML model union.
+            ``DenoisingMoEPredictor.save`` (teacher) or
+            ``DenoisingMoEStudentPredictor.save`` (distilled student). Named
+            distinctly from ``CheckpointModelConfig.checkpoint_path`` so the two
+            configs are unambiguous when used as alternatives in a YAML model
+            union.
     """
 
     mixture_of_experts_path: str
@@ -366,7 +375,19 @@ class DenoisingMoEBundledConfig:
         return self._state
 
     def build(self) -> "DenoisingMoEPredictor":
-        predictor = DenoisingMoEPredictor.from_state(self._bundle)
+        # Dispatch on the persisted format tag: student bundles carry
+        # ``sampler_type == "fastgen_cascade"`` and load a cascade predictor;
+        # teacher bundles (no tag) load the EDM predictor. Backward compatible
+        # with pre-existing teacher bundles that lack the key.
+        if (
+            self._bundle.get("sampler_type")
+            == DenoisingMoEStudentPredictor._SAMPLER_TYPE
+        ):
+            predictor: DenoisingMoEPredictor = DenoisingMoEStudentPredictor.from_state(
+                self._bundle
+            )
+        else:
+            predictor = DenoisingMoEPredictor.from_state(self._bundle)
         for expert in predictor._experts:
             expert.module.eval()
         return predictor
@@ -540,51 +561,3 @@ class DenoisingMoEStudentConfig:
     @property
     def data_requirements(self) -> DataRequirements:
         return self.denoising_expert_configs[0].checkpoint_config.data_requirements
-
-
-@dataclasses.dataclass
-class DenoisingMoEStudentBundledConfig:
-    """
-    Loads a :class:`DenoisingMoEStudentPredictor` from a bundle written by
-    ``DenoisingMoEStudentPredictor.save``. Sibling of
-    :class:`DenoisingMoEBundledConfig` for distilled-student bundles; the teacher
-    bundle config and format are left untouched.
-    """
-
-    mixture_of_experts_path: str
-
-    def __post_init__(self) -> None:
-        self._state_is_loaded = False
-        self._state: Mapping[str, Any] | None = None
-
-    @property
-    def _bundle(self) -> Mapping[str, Any]:
-        if not self._state_is_loaded:
-            self._state = torch.load(
-                self.mixture_of_experts_path,
-                map_location="cpu",
-                weights_only=False,
-            )
-            self._state_is_loaded = True
-        assert self._state is not None
-        return self._state
-
-    def build(self) -> DenoisingMoEStudentPredictor:
-        predictor = DenoisingMoEStudentPredictor.from_state(self._bundle)
-        for expert in predictor._experts:
-            expert.module.eval()
-        return predictor
-
-    @property
-    def data_requirements(self) -> DataRequirements:
-        expert_config = self._bundle["experts"][0]["config"]
-        renames = self._bundle.get("expert_renames") or [None]
-        rename = renames[0] or {}
-        in_names = [rename.get(n, n) for n in expert_config["in_names"]]
-        out_names = [rename.get(n, n) for n in expert_config["out_names"]]
-        return DataRequirements(
-            fine_names=out_names,
-            coarse_names=list(set(in_names).union(out_names)),
-            n_timesteps=1,
-            use_fine_topography=expert_config["use_fine_topography"],
-        )
