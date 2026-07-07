@@ -450,8 +450,6 @@ def main() -> None:
     # render every output channel (variable) as its own per-channel-normalized
     # panel — one row per sample, one column per variable.  Column labels come
     # from the teacher out_packer, populated below once the teacher loads.
-    from omegaconf import DictConfig
-
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -462,6 +460,7 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
+    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
     # Output-variable names for panel labels; filled once the teacher loads.
@@ -762,11 +761,23 @@ def main() -> None:
         best_student_tail_path = os.path.join(
             best_student_dir, "best_student_tail.ckpt"
         )
-        _teacher_diffusion_model: DiffusionModel = (
-            teacher_model._primary
-            if isinstance(teacher_model, DenoisingMoEPredictor)
-            else teacher_model
-        )
+        # The config baked into the saved student checkpoint must match the
+        # architecture the student was initialised from (see AceDiffusionTeacher:
+        # expert `expert_index`, or the last/high-noise expert when distilling the
+        # whole MoE into one net). Using ``_primary`` (always experts[0], the
+        # low-noise expert) wrote a 128-wide config over 256-wide expert-1 weights
+        # for the Student-Hi run, which then fails to reload.
+        if isinstance(teacher_model, DenoisingMoEPredictor):
+            student_expert_index = (
+                args.expert_index
+                if args.expert_index is not None
+                else len(teacher_model._experts) - 1
+            )
+            _teacher_diffusion_model: DiffusionModel = teacher_model._experts[
+                student_expert_index
+            ]
+        else:
+            _teacher_diffusion_model = teacher_model
         # hi_cascade validation cascades the trained Hi student through a frozen
         # Lo student; load it here (as its own DiffusionModel architecture) and
         # unwrap to the bare UNetDiffusionModule the sampler expects.
