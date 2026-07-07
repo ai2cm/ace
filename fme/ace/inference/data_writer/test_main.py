@@ -240,7 +240,7 @@ def test_step_diagnostics_writer_writes_one_file_per_named_dataset():
 
     with tempfile.TemporaryDirectory() as tmpdir:
 
-        def build_writer(name: str) -> RawDataWriter:
+        def writer_factory(name: str) -> RawDataWriter:
             path = os.path.join(tmpdir, "step_diagnostics")
             os.makedirs(path, exist_ok=True)
             return RawDataWriter(
@@ -253,7 +253,7 @@ def test_step_diagnostics_writer_writes_one_file_per_named_dataset():
                 dataset_metadata=DatasetMetadata(),
             )
 
-        writer = StepDiagnosticsWriter(build_writer)
+        writer = StepDiagnosticsWriter(writer_factory)
         writer.append_batch(
             {
                 "first": make_dataset(1.0),

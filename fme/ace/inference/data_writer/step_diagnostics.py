@@ -21,14 +21,14 @@ class StepDiagnosticsWriter:
     written as-is, already in physical units.
     """
 
-    def __init__(self, build_writer: Callable[[str], RawDataWriter | TimeCoarsen]):
+    def __init__(self, writer_factory: Callable[[str], RawDataWriter | TimeCoarsen]):
         """
         Args:
-            build_writer: Factory building the sub-writer for a named dataset
+            writer_factory: Factory building the sub-writer for a named dataset
                 (optionally wrapped for time coarsening), called once per name
                 on its first non-empty append.
         """
-        self._build_writer = build_writer
+        self._writer_factory = writer_factory
         self._writers: dict[str, RawDataWriter | TimeCoarsen] = {}
 
     def append_batch(self, datasets: Mapping[str, xr.Dataset]):
@@ -44,7 +44,7 @@ class StepDiagnosticsWriter:
             if len(dataset.data_vars) == 0:
                 continue
             if name not in self._writers:
-                self._writers[name] = self._build_writer(name)
+                self._writers[name] = self._writer_factory(name)
             data = {
                 str(var_name): torch.as_tensor(variable.values)
                 for var_name, variable in dataset.data_vars.items()

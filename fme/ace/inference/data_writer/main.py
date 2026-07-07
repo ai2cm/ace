@@ -170,7 +170,7 @@ class DataWriterConfig:
         if not self.save_step_diagnostics:
             return None
 
-        def build_writer(name: str) -> RawDataWriter | TimeCoarsen:
+        def writer_factory(name: str) -> RawDataWriter | TimeCoarsen:
             path = os.path.join(experiment_dir, STEP_DIAGNOSTICS_DIR)
             os.makedirs(path, exist_ok=True)
             writer: RawDataWriter | TimeCoarsen = RawDataWriter(
@@ -186,7 +186,7 @@ class DataWriterConfig:
                 writer = self.time_coarsen.build(writer)
             return writer
 
-        return StepDiagnosticsWriter(build_writer)
+        return StepDiagnosticsWriter(writer_factory)
 
     def build(
         self,

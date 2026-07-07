@@ -19,6 +19,8 @@ from fme.core.device import get_device
 from fme.core.tensors import repeat_interleave_batch_dim
 from fme.core.typing_ import TensorMapping
 
+# Dataset name for the corrector's per-step correction deltas; determines the
+# output netCDF filename, i.e. step_diagnostics/correction_deltas.nc.
 CORRECTION_DELTAS = "correction_deltas"
 
 
