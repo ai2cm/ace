@@ -224,16 +224,24 @@ def _check_exe(exe: str) -> None:
 
 
 def run_detect_nodes(
-    in_list: Path, out_path: Path, exe: str, lat_name: str, lon_name: str
-) -> None:
-    """Run DetectNodes to find candidate TC centers at each timestep."""
+    in_list: Path, out_base: Path, exe: str, lat_name: str, lon_name: str
+) -> Path:
+    """Run DetectNodes to find candidate TC centers at each timestep.
+
+    With ``--in_data_list`` (multiple input files) DetectNodes writes one
+    candidate file per input file, appending a zero-padded index to
+    ``--out`` (e.g. ``candidate_nodes.dat000000.dat``) rather than writing a
+    single ``candidate_nodes.dat``. This collects the per-chunk candidate
+    files into a list file (in input order) and returns its path, ready for
+    StitchNodes' ``--in_list``.
+    """
     _check_exe(exe)
     cmd = [
         exe,
         "--in_data_list",
         str(in_list),
         "--out",
-        str(out_path),
+        str(out_base),
         "--timefilter",
         "6hr",
         "--searchbymin",
@@ -252,14 +260,39 @@ def run_detect_nodes(
     logger.info("Running DetectNodes: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
+    # DetectNodes appends a zero-padded per-file index to out_base; sorted glob
+    # recovers the candidate files in input (time) order. Fall back to the bare
+    # out_base for the single-input case where no index is appended.
+    node_files = sorted(out_base.parent.glob(out_base.name + "[0-9]*"))
+    if not node_files and out_base.exists():
+        node_files = [out_base]
+    if not node_files:
+        raise FileNotFoundError(
+            f"DetectNodes produced no candidate files matching '{out_base}*'; "
+            "check the DetectNodes output above."
+        )
+    node_list_path = out_base.parent / "candidate_files.txt"
+    node_list_path.write_text("\n".join(str(p) for p in node_files) + "\n")
+    logger.info(
+        "DetectNodes wrote %d candidate file(s); list at %s",
+        len(node_files),
+        node_list_path,
+    )
+    return node_list_path
 
-def run_stitch_nodes(in_path: Path, out_path: Path, exe: str) -> None:
-    """Run StitchNodes to link candidate centers into tracks."""
+
+def run_stitch_nodes(in_list: Path, out_path: Path, exe: str) -> None:
+    """Run StitchNodes to link candidate centers into tracks.
+
+    ``in_list`` lists the per-chunk candidate files from DetectNodes;
+    StitchNodes reads them as one continuous time series via ``--in_list`` so
+    tracks may span chunk boundaries.
+    """
     _check_exe(exe)
     cmd = [
         exe,
-        "--in",
-        str(in_path),
+        "--in_list",
+        str(in_list),
         "--out",
         str(out_path),
         "--in_fmt",
@@ -495,14 +528,16 @@ def main() -> None:
         logger.info("--convert-only set; stopping after NetCDF conversion.")
         return
 
-    nodes_path = out_dir / "candidate_nodes.dat"
+    nodes_base = out_dir / "candidate_nodes.dat"
     tracks_path = out_dir / "tracks.dat"
     csv_path = out_dir / "tracks.csv"
 
-    run_detect_nodes(list_path, nodes_path, args.detect_exe, lat_name, lon_name)
+    node_list_path = run_detect_nodes(
+        list_path, nodes_base, args.detect_exe, lat_name, lon_name
+    )
     if args.cleanup:
         cleanup_netcdf_chunks(out_dir)
-    run_stitch_nodes(nodes_path, tracks_path, args.stitch_exe)
+    run_stitch_nodes(node_list_path, tracks_path, args.stitch_exe)
 
     df = parse_stitch_output(tracks_path)
     df.to_csv(csv_path, index=False)
