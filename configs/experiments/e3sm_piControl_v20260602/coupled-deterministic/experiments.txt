@@ -1,3 +1,5 @@
 
 ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KVBMGDWE3EHZGH0W8V5SRHEA|run_ICx1-105yr|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KVBMGDWE3EHZGH0W8V5SRHEA/ICx1-105yr||ai2/climate-titan|b200
 ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KVBMGDWE3EHZGH0W8V5SRHEA|run_ICx9-40yr|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KVBMGDWE3EHZGH0W8V5SRHEA/ICx9-40yr||ai2/climate-titan|b200
+
+ft-deterministic-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KWWYQ545FC8G3TXEAH8NHYQY|training|best_inference_ckpt|normal|--min-runtime 8h
