@@ -8,11 +8,58 @@ data (#1335), merged into the existing `time_mean_norm` / `mean_norm` metric gro
 evaluator and no-target inference aggregators. Metrics are uniform over all corrected variables
 (no per-variable category filtering).
 
+The wiring mirrors the `StepDiagnostics` container rather than its current contents: the host
+aggregators carry a generic dict of `StepDiagnosticsAggregator`s (one entry today — the
+correction-delta aggregator), so future `StepDiagnostics` fields get sibling aggregators
+instead of more host surgery. Granular sub-aggregators for specific container fields (just
+`delta`, for now) live behind that top-level aggregator and are invisible to the hosts.
+
 ---
 
-## `fme/ace/aggregator/inference/correction.py` (new)
+## `fme/ace/aggregator/inference/step_diagnostics.py` (new)
 
 ```python
+class StepDiagnosticsAggregator(Protocol):
+    """Anything that aggregates metrics from the StepDiagnostics carried on
+    prediction data. Hosts (the two inference aggregators) hold a dict of
+    these and fan out record/log/flush calls without knowing what any entry
+    measures."""
+
+    def record_batch(
+        self,
+        prediction: TensorMapping,
+        step_diagnostics: StepDiagnostics | None,
+        i_time_start: int,
+    ) -> None: ...
+    def summary_logs(self) -> dict[str, Any]: ...
+    def time_series_logs(self, step_slice: slice) -> dict[str, Any]: ...
+    def diagnostics(self) -> dict[str, xr.Dataset]: ...
+
+
+@dataclasses.dataclass
+class StepDiagnosticsMetricConfig:
+    """Granularity of StepDiagnostics-derived metrics (correction deltas
+    only, for now). Flat booleans; nest per-field configs if StepDiagnostics
+    grows more fields."""
+
+    correction_scalars: bool = True   # scalar metrics on by default
+    correction_maps: bool = False     # map images opt-in
+
+    def build(
+        self,
+        gridded_operations: GriddedOperations,
+        n_timesteps: int,
+        variable_metadata: Mapping[str, VariableMetadata] | None,
+        enable_time_series: bool,
+        normalize: Callable[[TensorMapping], TensorDict] | None,
+    ) -> dict[str, StepDiagnosticsAggregator]:
+        # {"correction": CorrectionDeltaAggregator(...)} — the key names the
+        # flush_diagnostics files. Empty dict when normalize is None (the
+        # correction metrics are normalized-space; callers that supply no
+        # normalizer keep current behavior) or when both flags are off.
+        ...
+
+
 def compute_correction_norm(
     prediction: TensorMapping,
     delta: TensorMapping,
@@ -22,21 +69,69 @@ def compute_correction_norm(
 
     Computed as normalize(prediction) - normalize(prediction - delta) —
     reconstructing the uncorrected output rather than normalizing the raw
-    delta, which would wrongly subtract the per-variable mean offset. Off-mask
-    cells stay NaN (NaN - NaN), consistent with the masked prediction.
+    delta, which would wrongly subtract the per-variable mean offset. (This
+    is algebraically the uncentered normalize delta/std — the means cancel —
+    so no center=False normalizer option is needed.) Off-mask cells stay NaN
+    (NaN - NaN), consistent with the masked prediction.
     Raises ValueError if a delta key is dropped by the normalizer (the
     StandardNormalizer silently filters to known names; a silently vanishing
     metric would be worse than a loud failure)."""
 
 
+class CorrectionDeltaAggregator:
+    """Top-level StepDiagnosticsAggregator for the correction delta: computes
+    the normalized correction once per batch and dispatches to the granular
+    sub-aggregators below, which the hosts never see.
+
+    Not a registered sub-aggregator of the hosts' one-name-per-aggregator
+    registry because (a) the metrics consume data.step_diagnostics, which
+    InferenceBatchData does not carry, and (b) the logs merge into the
+    existing time_mean_norm / mean_norm label groups, which the registry
+    cannot express."""
+
+    TIME_MEAN_LABEL = "time_mean_norm"
+    TIME_SERIES_LABEL = "mean_norm"
+
+    def __init__(
+        self,
+        normalize: Callable[[TensorMapping], TensorDict],
+        time_mean: CorrectionDeltaTimeMeanAggregator | None,
+        time_series: CorrectionDeltaMeanAggregator | None,
+    ): ...
+
+    def record_batch(
+        self,
+        prediction: TensorMapping,
+        step_diagnostics: StepDiagnostics | None,
+        i_time_start: int,
+    ) -> None:
+        # Silent no-op when step_diagnostics is None (no corrector ran, or
+        # coupled inference, which never attaches diagnostics).
+        # Raises ValueError if the delta's time dim does not match the
+        # prediction window's — the alignment is guaranteed by construction
+        # in Stepper.predict, but asserted here rather than trusted.
+        ...
+
+    def summary_logs(self) -> dict[str, Any]: ...          # time_mean under "time_mean_norm"
+    def time_series_logs(self, step_slice: slice) -> dict[str, Any]: ...  # under "mean_norm"
+    def diagnostics(self) -> dict[str, xr.Dataset]:
+        # {"time_mean_norm_correction": ..., "mean_norm_correction": ...} —
+        # extra entries for flush_diagnostics; suffixed names because the
+        # plain "time_mean_norm"/"mean_norm" diagnostics files belong to the
+        # existing aggregators.
+        ...
+
+
 class CorrectionDeltaTimeMeanAggregator:
-    """Time-mean maps and scalars of the normalized correction. Silent (empty
-    logs/dataset) until non-empty data is recorded."""
+    """Granular sub-aggregator: time-mean maps and scalars of the normalized
+    correction. Silent (empty logs/dataset) until non-empty data is recorded.
+    Map images are built only when enabled (correction_maps flag)."""
 
     def __init__(
         self,
         gridded_operations: GriddedOperations,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        record_maps: bool = False,
     ): ...
 
     def record_batch(self, correction_norm: TensorMapping) -> None: ...
@@ -45,21 +140,24 @@ class CorrectionDeltaTimeMeanAggregator:
         # correction_magnitude/{name}: area-weighted global mean of the
         #   time-mean |normalized correction| (mask-aware: reduction goes
         #   through ops.area_weighted_mean(..., name=name), so NaN off-mask
-        #   cells drop out of the weights)
-        # correction_magnitude/channel_mean: arithmetic mean of those scalars
-        #   over the corrected variables (mirrors time_mean_norm/rmse/channel_mean)
-        # correction_map/{name}: signed time-mean map image (diverging palette)
+        #   cells drop out of the weights). No channel_mean — its
+        #   interpretation shifts with whichever correctors are enabled.
+        # correction_map/{name}: signed time-mean map image (diverging
+        #   palette), normalized space; only when record_maps. Denormalized
+        #   per-cell deltas are the step-diagnostics writer's job.
         ...
 
     def get_dataset(self) -> xr.Dataset:
         # correction_map-{name}, dims ("lat", "lon") — signed time-mean map
+        # (only when record_maps)
         ...
 
 
 class CorrectionDeltaMeanAggregator:
-    """Per-forecast-step area-weighted series of the normalized correction,
-    mirroring the mean_norm MeanAggregator. Built only when time series are
-    enabled (inline training drops it via enable_time_series)."""
+    """Granular sub-aggregator: per-forecast-step area-weighted series of the
+    normalized correction, mirroring the mean_norm MeanAggregator. Built only
+    when time series are enabled (inline training drops it via
+    enable_time_series)."""
 
     def __init__(
         self,
@@ -83,58 +181,6 @@ class CorrectionDeltaMeanAggregator:
     def get_dataset(self) -> xr.Dataset:
         # weighted_correction_{magnitude,std}-{name} over forecast_step
         ...
-
-
-class CorrectionDeltaRecorder:
-    """Facade owned by each inference aggregator: reads the delta off the
-    batch's StepDiagnostics, computes the normalized correction once, and
-    dispatches to both sub-aggregators.
-
-    A facade rather than a registered sub-aggregator because (a) the metrics
-    consume data.step_diagnostics, which InferenceBatchData does not carry,
-    and (b) the logs merge into the existing time_mean_norm / mean_norm label
-    groups, which the one-name-per-aggregator registry cannot express."""
-
-    TIME_MEAN_LABEL = "time_mean_norm"
-    TIME_SERIES_LABEL = "mean_norm"
-
-    def __init__(
-        self,
-        normalize: Callable[[TensorMapping], TensorDict],
-        time_mean: CorrectionDeltaTimeMeanAggregator,
-        time_series: CorrectionDeltaMeanAggregator | None,
-    ): ...
-
-    def record(
-        self,
-        prediction: TensorMapping,
-        step_diagnostics: StepDiagnostics | None,
-        i_time_start: int,
-    ) -> None:
-        # Silent no-op when step_diagnostics is None (no corrector ran, or
-        # coupled inference, which never attaches diagnostics).
-        # Raises ValueError if the delta's time dim does not match the
-        # prediction window's — the alignment is guaranteed by construction
-        # in Stepper.predict, but asserted here rather than trusted.
-        ...
-
-    def summary_logs(self) -> dict[str, Any]: ...          # time_mean under "time_mean_norm"
-    def time_series_logs(self, step_slice: slice) -> dict[str, Any]: ...  # under "mean_norm"
-    def diagnostics(self) -> dict[str, Any]:
-        # {"time_mean_norm_correction": ..., "mean_norm_correction": ...} —
-        # extra entries for flush_diagnostics; suffixed names because the
-        # plain "time_mean_norm"/"mean_norm" diagnostics files belong to the
-        # existing aggregators.
-        ...
-
-
-def build_correction_delta_recorder(
-    gridded_operations: GriddedOperations,
-    n_timesteps: int,
-    variable_metadata: Mapping[str, VariableMetadata] | None,
-    enable_time_series: bool,
-    normalize: Callable[[TensorMapping], TensorDict],
-) -> CorrectionDeltaRecorder: ...
 ```
 
 ## `fme/ace/aggregator/inference/main.py` (modified)
@@ -142,18 +188,20 @@ def build_correction_delta_recorder(
 ```python
 def build_inference_evaluator_aggregator(
     ...,
-    log_correction_metrics: bool = True,  # NEW
+    step_diagnostics: StepDiagnosticsMetricConfig | None = None,  # NEW
 ) -> "InferenceEvaluatorAggregator":
-    # NEW: when enabled, builds a CorrectionDeltaRecorder from
+    # NEW: builds the step_diagnostics_aggregators dict via
+    # (step_diagnostics or StepDiagnosticsMetricConfig()).build(...) from
     # dataset_info.gridded_operations / variable_metadata, n_timesteps,
     # enable_time_series, and the existing normalize argument.
     ...
 
 
 class InferenceEvaluatorAggregatorConfig:
-    log_correction_metrics: bool = True  # NEW — also on the Legacy flag config
+    step_diagnostics: StepDiagnosticsMetricConfig = ...  # NEW — default-constructed;
+    # also on the Legacy flag config
 
-    def build(self, ...) -> "InferenceEvaluatorAggregator":  # CHANGED — forwards the flag
+    def build(self, ...) -> "InferenceEvaluatorAggregator":  # CHANGED — forwards the config
         ...
 
 
@@ -161,23 +209,24 @@ class InferenceEvaluatorAggregator:
     def __init__(
         self,
         ...,
-        correction: CorrectionDeltaRecorder | None = None,  # NEW
+        step_diagnostics_aggregators: dict[str, StepDiagnosticsAggregator] | None = None,  # NEW
     ): ...
 
     def record_batch(self, data: PairedData) -> InferenceLogs:
-        # CHANGED — self._correction.record(prediction=data.prediction,
-        #   step_diagnostics=data.step_diagnostics,
-        #   i_time_start=self._n_timesteps_seen) before slicing logs
+        # CHANGED — for each aggregator in the dict:
+        #   agg.record_batch(prediction=data.prediction,
+        #     step_diagnostics=data.step_diagnostics,
+        #     i_time_start=self._n_timesteps_seen) before slicing logs
         ...
 
-    def _get_logs(self): ...                    # CHANGED — merge correction.summary_logs()
+    def _get_logs(self): ...                    # CHANGED — merge each agg.summary_logs()
     def get_summary(self): ...                  # CHANGED — same merge (loss key untouched)
-    def _get_inference_logs_slice(self, ...): ...  # CHANGED — merge correction.time_series_logs(step_slice)
-    def flush_diagnostics(self, subdir=None): ...  # CHANGED — merge correction.diagnostics()
+    def _get_inference_logs_slice(self, ...): ...  # CHANGED — merge agg.time_series_logs(step_slice)
+    def flush_diagnostics(self, subdir=None): ...  # CHANGED — write each agg.diagnostics()
 
 
 class InferenceAggregatorConfig:
-    log_correction_metrics: bool = True  # NEW
+    step_diagnostics: StepDiagnosticsMetricConfig = ...  # NEW — default-constructed
 
     def build(
         self,
@@ -187,9 +236,9 @@ class InferenceAggregatorConfig:
         save_diagnostics: bool = True,
         normalize: Callable[[TensorMapping], TensorDict] | None = None,  # NEW
     ) -> "InferenceAggregator":
-        # The no-target aggregator has no normalizer today; the recorder is
-        # built only when the flag is on AND normalize is provided — callers
-        # that do not pass one keep current behavior (metrics silently skipped).
+        # The no-target aggregator has no normalizer today; the config's
+        # build returns an empty dict when normalize is None — callers that
+        # do not pass one keep current behavior (metrics silently skipped).
         ...
 
 
@@ -197,14 +246,15 @@ class InferenceAggregator:
     def __init__(
         self,
         ...,
-        correction: CorrectionDeltaRecorder | None = None,  # NEW
+        step_diagnostics_aggregators: dict[str, StepDiagnosticsAggregator] | None = None,  # NEW
     ):
-        # CHANGED — _log_time_series also true when the recorder carries a
-        # time-series aggregator (mean_norm has no other member here)
+        # CHANGED — _log_time_series also true when any step-diagnostics
+        # aggregator carries a time-series member (mean_norm has no other
+        # member here)
         ...
 
     # record_batch / _get_logs / get_summary / _get_inference_logs_slice /
-    # flush_diagnostics: CHANGED — same correction merges as the evaluator
+    # flush_diagnostics: CHANGED — same fan-out/merges as the evaluator
 ```
 
 ## `fme/ace/inference/inference.py` (modified)
@@ -219,7 +269,7 @@ class InferenceAggregator:
 
 ## Tests
 
-## `fme/ace/aggregator/inference/test_correction.py` (new)
+## `fme/ace/aggregator/inference/test_step_diagnostics.py` (new)
 
 ```python
 # Identity normalizer (lambda x: dict(x)) where hand-computable exactness matters.
@@ -233,8 +283,8 @@ def test_compute_correction_norm_raises_on_unknown_delta_key():
 
 def test_time_mean_aggregator_constant_offset():
     # GOAL: exact values — constant delta per variable yields
-    # correction_magnitude/{var} == |delta|, channel_mean == mean of those,
-    # and a constant signed correction_map.
+    # correction_magnitude/{var} == |delta| and (with record_maps) a constant
+    # signed correction_map.
 
 def test_time_mean_aggregator_masked_cells_do_not_poison_scalars():
     # GOAL: NaN off-mask delta cells + a mask-aware GriddedOperations yield
@@ -244,6 +294,10 @@ def test_time_mean_aggregator_null_masking_matches_unmasked_hand_computation():
     # GOAL: with NullSpatialMasking (no NaNs), values are identical to the
     # unmasked hand-computed case.
 
+def test_time_mean_aggregator_maps_off_by_default():
+    # GOAL: without record_maps, no correction_map logs and no map dataset
+    # variables; scalars unaffected.
+
 def test_mean_aggregator_constant_offset_series():
     # GOAL: per-step weighted_correction_magnitude == |delta| and
     # weighted_correction_std == 0 for a spatially constant correction;
@@ -251,22 +305,26 @@ def test_mean_aggregator_constant_offset_series():
 
 def test_aggregators_silent_without_data():
     # GOAL: empty logs and empty dataset before any recorded batch.
-    # PARAMETERIZE: both aggregator classes.
+    # PARAMETERIZE: both granular aggregator classes.
 
-def test_recorder_raises_on_time_dim_mismatch():
+def test_correction_delta_aggregator_raises_on_time_dim_mismatch():
     # GOAL: a delta whose time dim differs from the prediction window's raises.
+
+def test_metric_config_build_granularity():
+    # GOAL: StepDiagnosticsMetricConfig.build honors the flags — default
+    # (scalars on, maps off); both off or normalize=None -> empty dict.
 
 def test_evaluator_aggregator_logs_correction_metrics():
     # GOAL: integration — record_batch with a PairedData carrying a real
     # StepDiagnostics (constant-offset delta) logs
-    # time_mean_norm/correction_magnitude/{var,channel_mean},
+    # time_mean_norm/correction_magnitude/{var},
     # mean_norm/weighted_correction_{magnitude,std}/{var}; only corrected
     # variables appear; existing time_mean_norm/rmse metrics are unaffected;
     # flush_diagnostics writes the correction datasets.
 
 def test_evaluator_aggregator_silent_paths():
     # GOAL: no correction logs and no diagnostics files.
-    # PARAMETERIZE: log_correction_metrics=False; step_diagnostics=None.
+    # PARAMETERIZE: config with both flags off; step_diagnostics=None.
 
 def test_inline_training_drops_correction_series():
     # GOAL: enable_time_series=False keeps time_mean_norm correction metrics
@@ -280,6 +338,6 @@ def test_no_target_aggregator_skips_without_normalizer():
     # GOAL: build without normalize logs nothing correction-related
     # (backward compatibility for callers that do not pass one).
 
-def test_config_defaults_enable_correction_metrics():
-    # GOAL: both configs default log_correction_metrics=True.
+def test_config_defaults():
+    # GOAL: both configs default to scalars on, maps off.
 ```
