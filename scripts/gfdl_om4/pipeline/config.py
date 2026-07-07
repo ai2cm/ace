@@ -104,9 +104,12 @@ class WetmaskConfig:
     """Where the 3D ocean wetmask comes from.
 
     The wetmask is the NaN pattern of the reference variable's first
-    timestep. Every processed variable's valid-data footprint is asserted
-    against it, so a source whose footprint disagrees fails loudly instead
-    of being silently clipped or zero-filled.
+    timestep. Every processed variable is conformed to it (bottom slivers
+    that dry/re-wet with sea level are filled from the level above or
+    dropped; see run._conform_to_wetmask) and then asserted to match it
+    exactly, so the output NaN pattern equals the ``mask_k`` statics at
+    every timestep and a source whose footprint truly disagrees fails
+    loudly instead of being silently clipped or zero-filled.
 
     Attributes:
         store: URL of the zarr store holding the reference variable.

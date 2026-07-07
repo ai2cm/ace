@@ -17,10 +17,17 @@ Masking conventions of the output store:
   OCEAN_FRACTION_THRESHOLD are NaN.
 - Per-level binary masks ``mask_0..N`` (and ``mask_2d``, equal to
   ``mask_0``) mark the regridded wetmask footprint: 1 where a target cell
-  overlaps any ocean source area, else 0. The wetmask is taken at the
-  reference (first) timestep; instantaneous ocean coverage drifts from it
-  by a handful of sub-surface cells (see MAX_FOOTPRINT_DRIFT_FRACTION), so
-  a cell with ``mask_k == 1`` can occasionally be NaN at a given time.
+  overlaps any ocean source area, else 0. The NaN pattern of every
+  time-varying field equals the masks exactly at every timestep: training
+  assumes NaN exactly where ``mask_k == 0`` (a finite target at a masked
+  cell NaNs the loss; a NaN target at an unmasked cell NaNs metrics).
+  The source footprint drifts slightly from the reference-time wetmask
+  (z*-remapped bottom slivers dry/re-wet with sea level at a handful of
+  sub-surface cells), so each chunk is conformed to the wetmask before
+  regridding: values at cells wet at time t but outside the wetmask are
+  dropped, and cells inside the wetmask that are instantaneously dry are
+  filled from the level above (the water immediately overlying the
+  vacated sliver). See _conform_to_wetmask.
 - ``sea_surface_fraction`` is the regridded surface ocean fraction (0 over
   land, not NaN), usable to weight coastal cells.
 - Variables listed in a stream's ``full_cell_variables`` (e.g.
@@ -168,39 +175,25 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
 # Instantaneous ocean coverage may drift slightly from the reference-time
 # wetmask (cells with time-varying validity at sub-surface levels); observed
 # drift is ~0.01% of wet cells. Anything larger indicates an inconsistent
-# source (wrong grid, dropped mask) and fails the run.
+# source (wrong grid, dropped mask) and fails the run rather than being
+# silently conformed.
 MAX_FOOTPRINT_DRIFT_FRACTION = 0.001
 
 
-def _assert_footprint(da: xr.DataArray, footprint: xr.DataArray, context: str) -> None:
-    """Assert a variable's valid-data footprint exactly equals the chunk's
-    shared footprint.
+def _assert_footprint(da: xr.DataArray, wetmask: xr.DataArray, context: str) -> None:
+    """Assert a variable's valid-data footprint exactly equals the wetmask.
 
     Guards against a source variable whose land pattern disagrees with the
-    others', which the normalized regrid would otherwise silently average
-    as zeros.
+    wetmask's, which the normalized regrid would otherwise silently average
+    as zeros — and, downstream, guarantees the output NaN pattern equals
+    the ``mask_k`` statics at every timestep.
     """
-    valid, expected = xr.broadcast(da.notnull(), footprint)
+    valid, expected = xr.broadcast(da.notnull(), wetmask)
     mismatches = int((valid != expected).sum())
     if mismatches:
         raise AssertionError(
             f"{context}: valid-data footprint of {da.name!r} differs from the "
-            f"chunk footprint at {mismatches} cells"
-        )
-
-
-def _assert_footprint_drift(
-    footprint: xr.DataArray, wetmask: xr.DataArray, context: str
-) -> None:
-    """Assert the chunk's instantaneous footprint stays within
-    MAX_FOOTPRINT_DRIFT_FRACTION of the reference-time wetmask."""
-    drifted, expected = xr.broadcast(footprint, wetmask)
-    drift = int((drifted != expected).sum())
-    limit = MAX_FOOTPRINT_DRIFT_FRACTION * max(int(expected.sum()), 1)
-    if drift > limit:
-        raise AssertionError(
-            f"{context}: instantaneous footprint differs from the reference "
-            f"wetmask at {drift} cells (limit {limit:.0f})"
+            f"wetmask at {mismatches} cells"
         )
 
 
@@ -247,6 +240,98 @@ def _get_areacello(target_grid_name: str) -> xr.DataArray:
     return _AREACELLO_CACHE[target_grid_name]
 
 
+# One lazily-opened source dataset per store per worker process, for the
+# targeted level-above reads made by _conform_to_wetmask.
+_SOURCE_CACHE: dict[str, xr.Dataset] = {}
+
+
+def _get_source(store_url: str) -> xr.Dataset:
+    if store_url not in _SOURCE_CACHE:
+        _SOURCE_CACHE[store_url] = xr.open_zarr(
+            _make_zarr_store(store_url), chunks=None, decode_timedelta=False
+        )
+    return _SOURCE_CACHE[store_url]
+
+
+def _conform_to_wetmask(
+    ds: xr.Dataset,
+    stream: StreamConfig,
+    wetmask: xr.DataArray,
+    level_index: int | None,
+    context: str,
+) -> xr.Dataset:
+    """Force every tracer-grid variable's valid-data footprint to equal the
+    reference-time wetmask.
+
+    The sources' instantaneous ocean coverage differs from the wetmask at a
+    handful of sub-surface cells: the upstream z-level remap uses
+    instantaneous layer thicknesses, so a column whose total depth
+    (deptho + sea level) sits near a level interface has a bottom sliver
+    cell that dries and re-wets as sea level moves (~0.001% of wet cells
+    per timestep, verified over the piControl sample year). Training
+    requires the output NaN pattern to equal the static ``mask_k`` exactly,
+    so per chunk:
+
+    - cells valid at time t but outside the wetmask are dropped;
+    - cells inside the wetmask but instantaneously NaN are filled with the
+      value one level up at the same time and place — the water
+      immediately overlying the vacated sliver (every observed dry event
+      has a wet cell directly above), read from the source store.
+
+    The total conformed-cell count is bounded by
+    MAX_FOOTPRINT_DRIFT_FRACTION so a systematically inconsistent source
+    still fails loudly instead of being silently rewritten. Staggered
+    (C-grid) variables are not touched here; they conform to the wetmask
+    during center interpolation in _rotate_pairs.
+    """
+    limit = MAX_FOOTPRINT_DRIFT_FRACTION * max(int(wetmask.sum()), 1)
+    conformed = ds.copy()
+    for name in ds.data_vars:
+        da = ds[name]
+        if not set(wetmask.dims).issubset(set(da.dims)):
+            continue
+        valid, expected = xr.broadcast(da.notnull(), wetmask)
+        missing = int((expected & ~valid).sum())
+        dropped = int((valid & ~expected).sum())
+        if missing + dropped > limit * da.sizes.get(TIME_DIM, 1):
+            raise AssertionError(
+                f"{context}: footprint of {name!r} differs from the wetmask "
+                f"at {missing + dropped} cells (limit "
+                f"{limit * da.sizes.get(TIME_DIM, 1):.0f}); source is "
+                "inconsistent with the wetmask, refusing to conform"
+            )
+        if missing:
+            if level_index is None or level_index == 0:
+                raise AssertionError(
+                    f"{context}: {name!r} is NaN at {missing} wetmask cells "
+                    "and there is no level above to fill from"
+                )
+            source = _get_source(stream.store)[name]
+            if stream.dim_renaming:
+                source = source.rename(
+                    {k: v for k, v in stream.dim_renaming.items() if k in source.dims}
+                )
+            try:
+                # Chunk time labels are the source's raw labels (subsetting
+                # and striding preserve values); only the midpoint-shift
+                # toggle rewrites them, in which case this lookup fails.
+                above = (
+                    source.isel({LEVEL_DIM: level_index - 1}, drop=True)
+                    .sel({TIME_DIM: da[TIME_DIM].values})
+                    .load()
+                )
+            except KeyError:
+                raise AssertionError(
+                    f"{context}: cannot read the level above to fill "
+                    f"{missing} dry wetmask cells of {name!r}: chunk time "
+                    "labels not found in the source (is "
+                    "shift_timestamps_to_avg_interval_midpoint enabled?)"
+                )
+            da = da.fillna(above)
+        conformed[name] = da.where(wetmask).assign_attrs(da.attrs)
+    return conformed
+
+
 def _rotate_pairs(
     ds: xr.Dataset,
     stream: StreamConfig,
@@ -259,7 +344,7 @@ def _rotate_pairs(
     Ocean cells whose staggered neighbors are all invalid (some vector
     fields, e.g. surface stresses, carry a stricter staggered-point mask
     than the tracer wetmask at a small number of coastal cells) are set to
-    zero, so the pair keeps the chunk's shared valid-data footprint.
+    zero, so the pair keeps the reference wetmask footprint exactly.
     """
     pairs = [pair for pair in stream.rotated_pairs if pair[0] in ds.data_vars]
     if not pairs:
@@ -291,35 +376,26 @@ def _process_chunk(
     target_grid_name: str,
     level_index: int | None,
 ) -> xr.Dataset:
-    """Transform one in-memory chunk: rotate, check footprints, regrid, and
-    (for 3D chunks) split the level into suffixed 2D variables.
+    """Transform one in-memory chunk: conform to the wetmask, rotate, check
+    footprints, regrid, and (for 3D chunks) split the level into suffixed 2D
+    variables.
 
-    The regrid is normalized by the chunk's own instantaneous footprint
-    (the shared NaN pattern of its tracer-centered variables), not the
-    reference-time wetmask, because ocean coverage varies slightly in time;
-    every variable is asserted to share that footprint exactly, and the
-    footprint is asserted to stay close to the reference wetmask.
+    Every variable is conformed to the reference-time wetmask (see
+    _conform_to_wetmask), asserted to match it exactly, and the regrid is
+    normalized by it — so the output NaN pattern equals the ``mask_k``
+    statics at every timestep.
     """
     context = f"stream {stream.name!r}"
     if level_index is not None:
         context += f" level {level_index}"
 
-    tracer_names = [
-        name for name in ds.data_vars if set(wetmask.dims).issubset(set(ds[name].dims))
-    ]
-    if tracer_names:
-        footprint = ds[tracer_names[0]].notnull().reset_coords(drop=True)
-        footprint.attrs = {}
-    else:
-        footprint = wetmask
-
-    ds = _rotate_pairs(ds, stream, footprint, weights_url)
+    ds = _conform_to_wetmask(ds, stream, wetmask, level_index, context)
+    ds = _rotate_pairs(ds, stream, wetmask, weights_url)
     for name in ds.data_vars:
-        _assert_footprint(ds[name], footprint, context)
-    _assert_footprint_drift(footprint, wetmask, context)
+        _assert_footprint(ds[name], wetmask, context)
 
     regridder = get_regridder(weights_url, target_grid_name)
-    regridded, ocean_fraction = regrid_normalized(ds, regridder, footprint)
+    regridded, ocean_fraction = regrid_normalized(ds, regridder, wetmask)
 
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
