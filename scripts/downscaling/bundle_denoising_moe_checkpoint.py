@@ -3,17 +3,22 @@
 Bundle a mixture-of-experts denoising predictor into a single self-contained
 checkpoint.
 
-Reads a YAML describing a ``DenoisingMoEConfig`` (the list of expert
-checkpoints, sigma ranges, and sampler parameters), builds the
-``DenoisingMoEPredictor``, and saves it to one ``.pt`` file. That file can
+Reads a YAML describing a ``DenoisingMoEConfig`` (teacher: EDM Heun sampler) or a
+``DenoisingMoEStudentConfig`` (distilled students: fastgen predict-x0-renoise
+cascade), builds the predictor, and saves it to one ``.pt`` file. That file can
 then be loaded later via
-``DenoisingMoECheckpointConfig(mixture_of_experts_path=...)`` with no need to
-retain the original per-expert checkpoint paths or any rename mappings.
+``DenoisingMoEBundledConfig(mixture_of_experts_path=...)`` with no need to
+retain the original per-expert checkpoint paths or any rename mappings (the
+loader dispatches teacher vs student on the bundle's ``sampler_type`` tag).
+
+The config type is auto-detected from the YAML: a ``steps_per_range`` key selects
+the distilled-student config; ``num_diffusion_generation_steps`` selects the
+teacher config.
 
 Usage:
     python bundle_denoising_moe_checkpoint.py <moe_config.yaml> <output.pt>
 
-Example config (moe_config.yaml):
+Example teacher config:
     num_diffusion_generation_steps: 18
     churn: 0.0
     denoising_expert_configs:
@@ -26,7 +31,18 @@ Example config (moe_config.yaml):
         sigma_max: 80.0
         checkpoint_config:
           checkpoint_path: /path/to/high_noise_expert.ckpt
-          rename: {x: renamed_x}
+
+Example distilled-student config (per-segment steps; no churn):
+    steps_per_range: [2, 1]   # aligned with ascending-sigma order: 2-step Lo, 1-step Hi
+    denoising_expert_configs:
+      - sigma_min: 0.005
+        sigma_max: 200.0
+        checkpoint_config:
+          checkpoint_path: /path/to/student_lo.ckpt
+      - sigma_min: 200.0
+        sigma_max: 2000.0
+        checkpoint_config:
+          checkpoint_path: /path/to/student_hi.ckpt
 """
 
 import argparse
@@ -38,7 +54,7 @@ import yaml
 from fme.core.device import get_device
 from fme.downscaling.models import CheckpointModelConfig
 from fme.downscaling.modules.physicsnemo_unets_v2.group_norm import apex_available
-from fme.downscaling.predictors import DenoisingMoEConfig
+from fme.downscaling.predictors import DenoisingMoEConfig, DenoisingMoEStudentConfig
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,11 +100,18 @@ def _force_disable_amp_bf16(cfg: CheckpointModelConfig) -> bool | None:
 def main(config_path: str, output_path: str) -> None:
     with open(config_path) as f:
         raw = yaml.safe_load(f)
-    moe_config: DenoisingMoEConfig = dacite.from_dict(
-        data_class=DenoisingMoEConfig,
+    # Auto-detect teacher vs distilled-student config by its discriminating key.
+    config_class: type[DenoisingMoEConfig | DenoisingMoEStudentConfig]
+    if "steps_per_range" in raw:
+        config_class = DenoisingMoEStudentConfig
+    else:
+        config_class = DenoisingMoEConfig
+    moe_config: DenoisingMoEConfig | DenoisingMoEStudentConfig = dacite.from_dict(
+        data_class=config_class,
         data=raw,
         config=dacite.Config(strict=True),
     )
+    print(f"Building {config_class.__name__} from {config_path}")
 
     # apex's optimized GroupNorm isn't installable on macOS / CPU-only boxes;
     # bf16 autocast isn't supported on MPS. Build with both off where needed,

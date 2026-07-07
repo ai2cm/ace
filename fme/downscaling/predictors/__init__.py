@@ -4,11 +4,15 @@ from .serial_denoising import (
     DenoisingMoEBundledConfig,
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
+    DenoisingMoEStudentConfig,
+    DenoisingMoEStudentPredictor,
 )
 
 __all__ = [
     "DenoisingMoEBundledConfig",
     "DenoisingMoEConfig",
+    "DenoisingMoEStudentConfig",
+    "DenoisingMoEStudentPredictor",
     "DenoisingExpertCheckpointConfig",
     "DenoisingMoEPredictor",
     "PatchPredictionConfig",
