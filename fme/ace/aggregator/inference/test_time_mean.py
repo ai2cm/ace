@@ -42,6 +42,45 @@ def test_rmse_of_time_mean_all_channels():
     assert logs["time_mean_norm/rmse/channel_mean"] == 1.5
 
 
+def test_channel_mean_excludes_all_nan_target_channels():
+    """A variable whose target is entirely NaN (e.g. filled by
+    allow_missing_variables) has a NaN RMSE and is excluded from the channel
+    mean rather than poisoning it."""
+    torch.manual_seed(0)
+    area_weights = torch.ones(1, 1).to(get_device())
+    agg = TimeMeanEvaluatorAggregator(
+        LatLonOperations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="norm",
+    )
+    target_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()),
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
+        # "c" is missing from the data: entirely-NaN target.
+        "c": torch.full([2, 3, 4, 4], torch.nan, device=get_device()),
+    }
+    gen_data_norm = {
+        "a": torch.ones([2, 3, 4, 4], device=get_device()) * 2.0,
+        "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
+        "c": torch.ones([2, 3, 4, 4], device=get_device()),
+    }
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=gen_data_norm,
+            prediction_norm=gen_data_norm,
+            target=target_data_norm,
+            target_norm=target_data_norm,
+            time=make_dummy_time(2, 3),
+            i_time_start=0,
+        )
+    )
+    logs = agg.get_logs(label="time_mean_norm")
+    # "c" is still recorded per-variable as NaN...
+    assert np.isnan(logs["time_mean_norm/rmse/c"])
+    # ...but excluded from channel_mean: mean of "a" (1) and "b" (2).
+    assert logs["time_mean_norm/rmse/channel_mean"] == 1.5
+
+
 def test_custom_channel_mean_names():
     torch.manual_seed(0)
     area_weights = torch.ones(1, 1).to(get_device())

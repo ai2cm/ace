@@ -31,6 +31,7 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
@@ -1290,6 +1291,7 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    atmosphere_input_dropout: VariableMaskingConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1329,6 +1331,7 @@ def get_stepper_config(
                                 surface_temperature_name=sfc_temp_name_in_atmosphere_data,
                                 ocean_fraction_name=ocean_fraction_name,
                             ),
+                            input_dropout=atmosphere_input_dropout,
                         ),
                     ),
                 ),
@@ -1375,6 +1378,7 @@ def get_stepper_and_batch(
     atmosphere_builder: ModuleSelector | None = None,
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
+    atmosphere_input_dropout: VariableMaskingConfig | None = None,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)
@@ -1409,6 +1413,7 @@ def get_stepper_and_batch(
         # n_forward_times_atmosphere = 2 * n_forward_times_ocean
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
+        atmosphere_input_dropout=atmosphere_input_dropout,
     )
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=coupled_data.vertical_coord
@@ -1444,6 +1449,29 @@ def get_train_stepper_and_batch(
         )
     train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     return train_stepper, coupled_data, config, dataset_info
+
+
+def test_coupled_training_with_input_dropout_runs():
+    """input_dropout on a coupled component trains without error.
+
+    Each forward step samples its own mask in train mode, so coupled training
+    needs no special coordination; the batch must step through successfully.
+    """
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=2,
+        atmosphere_input_dropout=VariableMaskingConfig(default=UniformMaskingConfig(1)),
+    )
+    output = train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=NullOptimization(),
+    )
+    assert "surface_temperature" in output.atmosphere.gen_data
 
 
 @pytest.mark.parametrize(
@@ -2141,3 +2169,119 @@ def test_train_on_batch_stochastic_n_steps():
     # ocean: n_steps=1, so step 0 is optimized (out of 2 total)
     expected_calls = 2 + 1
     assert len(optimization.accumulate_loss.call_args_list) == expected_calls
+
+
+# ---------------------------------------------------------------------------
+# Single-component-per-batch optimization (optimize_single_component_per_batch)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "null_kwargs",
+    [
+        {"loss_weight": 0.0},
+        {"n_steps": 0},
+    ],
+)
+def test_optimize_single_component_rejects_static_null_realm(null_kwargs):
+    # With a statically-null realm the per-batch choice has no observable
+    # effect, so __post_init__ must reject the flag.
+    with pytest.raises(ValueError, match="optimize_single_component_per_batch"):
+        CoupledTrainStepperConfig(
+            n_coupled_steps=1,
+            ocean=ComponentTrainingConfig(
+                loss=StepLossConfig(type="MSE"), **null_kwargs
+            ),
+            atmosphere=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+            optimize_single_component_per_batch=True,
+        )
+
+
+def _single_component_stepper_and_batch(ocean_n_steps=None, atmos_n_steps=None):
+    """Build a flag-on CoupledTrainStepper + batch with both realms non-null."""
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=1,
+        ocean=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"), n_steps=ocean_n_steps
+        ),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"), n_steps=atmos_n_steps
+        ),
+        optimize_single_component_per_batch=True,
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=3,
+    )
+    return train_stepper, coupled_data
+
+
+def test_single_component_choice_remade_per_train_on_batch():
+    torch.manual_seed(0)
+    train_stepper, coupled_data = _single_component_stepper_and_batch()
+    selected = []
+    for _ in range(20):  # fixed seed; both realms appear under fair 50/50
+        stepped = train_stepper.train_on_batch(
+            data=coupled_data.data, optimization=NullOptimization()
+        )
+        sel = train_stepper._loss._selected_realm
+        selected.append(sel)
+        # (b) within a batch only the selected realm carries per-step loss
+        # metrics (training path), so the other realm contributes zero loss.
+        ocean_step_keys = [k for k in stepped.ocean.metrics if "_step_" in k]
+        atmos_step_keys = [k for k in stepped.atmosphere.metrics if "_step_" in k]
+        if sel == "ocean":
+            assert ocean_step_keys and not atmos_step_keys
+        else:
+            assert atmos_step_keys and not ocean_step_keys
+    # (a) the optimized realm varies across batches
+    assert set(selected) == {"ocean", "atmosphere"}
+
+
+def test_single_component_validation_loss_is_single_component_and_reproducible():
+    torch.manual_seed(0)
+    # One optimized step per realm so the accumulate_loss count maps cleanly to
+    # "single component" (1) vs "both components" (2).
+    train_stepper, coupled_data = _single_component_stepper_and_batch(
+        ocean_n_steps=1, atmos_n_steps=1
+    )
+    train_stepper.set_eval()
+    train_stepper.seed_eval(0)
+    optimization = Mock(wraps=NullOptimization())
+    stepped = train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=optimization,
+        evaluate_all_steps=True,
+    )
+    # (a) accumulated loss is single-component: only the selected realm's one
+    # optimized step accumulates (flag-off would accumulate both -> 2 calls).
+    assert len(optimization.accumulate_loss.call_args_list) == 1
+    assert train_stepper._loss._selected_realm in ("ocean", "atmosphere")
+    # ...yet per-step diagnostic metrics are produced for BOTH realms.
+    assert any("_step_" in k for k in stepped.ocean.metrics)
+    assert any("_step_" in k for k in stepped.atmosphere.metrics)
+
+    # (b) after seed_eval(0) the per-batch selection sequence is reproducible.
+    def _eval_sequence():
+        train_stepper.set_eval()
+        train_stepper.seed_eval(0)
+        seq = []
+        for _ in range(12):
+            train_stepper.train_on_batch(
+                data=coupled_data.data,
+                optimization=NullOptimization(),
+                evaluate_all_steps=True,
+            )
+            seq.append(train_stepper._loss._selected_realm)
+        return seq
+
+    first = _eval_sequence()
+    second = _eval_sequence()
+    assert first == second
+    assert set(first) == {"ocean", "atmosphere"}
