@@ -14,7 +14,6 @@ from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOpe
 from fme.core.typing_ import TensorMapping
 
 from .atmosphere import (
-    AtmosphereCorrector,
     AtmosphereCorrectorConfig,
     EnergyBudgetConfig,
     _adjust_gen_dry_air_to_target,
@@ -23,7 +22,6 @@ from .atmosphere import (
     _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
 )
-from .utils import force_positive
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -160,9 +158,11 @@ def test_adjust_gen_dry_air_to_target(size: tuple[int, ...], use_area: bool):
         area_weighted_mean=gridded_operations.area_weighted_mean,
         precision=torch.float64,
     )
-    new_data = {
-        k: torch.stack([v, fixed_out_data[k]], dim=1) for k, v in in_data.items()
-    }
+    # the helper returns only the modified surface pressure; merge it back onto
+    # the full input state to evaluate conservation.
+    assert set(fixed_out_data) == {"PRESsfc"}
+    merged_out = {**out_data, **fixed_out_data}
+    new_data = {k: torch.stack([v, merged_out[k]], dim=1) for k, v in in_data.items()}
     new_nonconservation = get_dry_air_nonconservation(
         new_data,
         vertical_coordinate=vertical_coordinate,
@@ -252,9 +252,10 @@ def test_force_conserve_moisture(
         timestep_seconds=TIMESTEP.total_seconds(),
         terms_to_modify=terms_to_modify,
     )
-    new_data = {
-        k: torch.stack([v, fixed_out_data[k]], dim=1) for k, v in in_data.items()
-    }
+    # the helper returns only the modified budget terms; merge them back onto
+    # the full output state to evaluate the budget residual.
+    merged_out = {**out_data, **fixed_out_data}
+    new_data = {k: torch.stack([v, merged_out[k]], dim=1) for k, v in in_data.items()}
     new_budget_residual = total_water_path_budget_residual(
         AtmosphereData(new_data, vertical_coordinate),
         timestep=TIMESTEP,
@@ -276,39 +277,22 @@ def test_force_conserve_moisture(
     np.testing.assert_almost_equal(new_dry_air, original_dry_air, decimal=6)
 
 
-def test_force_positive():
-    data = {
-        "foo": torch.tensor([[-1.0, 0.0], [0.0, 1.0], [1.0, 2.0]]),
-        "bar": torch.tensor([[-1.0, 0.0], [0.0, -3.0], [1.0, 2.0]]),
-    }
-    original_min = torch.min(data["foo"])
-    assert original_min < 0.0
-    fixed_data = force_positive(data, ["foo"])
-    new_min = torch.min(fixed_data["foo"])
-    # Ensure the minimum value of 'foo' is now 0
-    torch.testing.assert_close(new_min, torch.tensor(0.0))
-    # Ensure other variables are not modified
-    torch.testing.assert_close(fixed_data["bar"], data["bar"])
-
-
 def test_clip_frozen_precipitation():
     data = {
         "PRATEsfc": torch.tensor([[1.0, 2.0], [3.0, 0.0]]),
         "total_frozen_precipitation_rate": torch.tensor([[2.0, 1.0], [3.0, 0.5]]),
     }
     fixed_data = _clip_frozen_precipitation(data)
+    # only the modified field is returned, following the Correction contract.
+    assert set(fixed_data) == {"total_frozen_precipitation_rate"}
     # frozen precip is clipped to total precip where it exceeds it, and left
     # unchanged where it is already below total precip.
     torch.testing.assert_close(
         fixed_data["total_frozen_precipitation_rate"],
         torch.tensor([[1.0, 1.0], [3.0, 0.0]]),
     )
-    # total precip is unchanged
-    torch.testing.assert_close(fixed_data["PRATEsfc"], data["PRATEsfc"])
     # the resulting frozen precip never exceeds total precip
-    assert torch.all(
-        fixed_data["total_frozen_precipitation_rate"] <= fixed_data["PRATEsfc"]
-    )
+    assert torch.all(fixed_data["total_frozen_precipitation_rate"] <= data["PRATEsfc"])
 
 
 def test_clip_frozen_precipitation_corrector_integration():
@@ -317,16 +301,14 @@ def test_clip_frozen_precipitation_corrector_integration():
     config = AtmosphereCorrectorConfig(clip_frozen_precipitation=True)
     _, _, _, vertical_coord = _get_corrector_test_input(tensor_shape)
     ops = LatLonOperations(torch.ones(size=(tensor_shape[-2], 1)))
-    corrector = AtmosphereCorrector(
-        config, ops, vertical_coord, datetime.timedelta(seconds=3600)
-    )
+    corrector = config._build(ops, vertical_coord, datetime.timedelta(seconds=3600))
     gen_data = {
         "PRATEsfc": torch.rand(size=tensor_shape),
         "total_frozen_precipitation_rate": 2.0 * torch.rand(size=tensor_shape),
     }
     # sanity check that some frozen precip exceeds total precip before correction
     assert torch.any(gen_data["total_frozen_precipitation_rate"] > gen_data["PRATEsfc"])
-    corrected, _ = corrector({}, gen_data, {}, None)
+    corrected = corrector({}, gen_data, {}, None).corrected
     assert torch.all(
         corrected["total_frozen_precipitation_rate"] <= corrected["PRATEsfc"]
     )
@@ -358,8 +340,8 @@ def test_clip_frozen_precipitation_runs_before_energy_correction():
         clip_frozen_precipitation=True,
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature"),
     )
-    corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
-    corrected, _ = corrector(input_data, gen_data, forcing_data, None)
+    corrector = config._build(ops, vertical_coord, timestep)
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
 
     # the clip is applied
     assert torch.all(
@@ -454,22 +436,26 @@ def test__force_conserve_total_energy(negative_pressure: bool):
         unaccounted_heating=extra_heating,
     )
 
-    # ensure only temperature is modified
+    # only air temperature is modified; every other field is absent from the
+    # returned subset (not merely unchanged).
     for name in gen_data:
         if "air_temperature" in name:
             assert not torch.allclose(
                 corrected_gen_data[name], gen_data[name], rtol=1e-6
             )
         else:
-            torch.testing.assert_close(corrected_gen_data[name], gen_data[name])
+            assert name not in corrected_gen_data
 
     # ensure forcing variables are not in the corrected data
     for name in forcing_data:
         assert name not in corrected_gen_data
 
-    # ensure the corrected global mean MSE path is what we expect
+    # ensure the corrected global mean MSE path is what we expect; merge the
+    # modified temperatures back onto the full state to evaluate it.
     input = AtmosphereData(input_data, vertical_coord)
-    corrected_gen = AtmosphereData(corrected_gen_data | forcing_data, vertical_coord)
+    corrected_gen = AtmosphereData(
+        gen_data | corrected_gen_data | forcing_data, vertical_coord
+    )
     input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path)
     corrected_gen_gm_mse = ops.area_weighted_mean(corrected_gen.total_energy_ace2_path)
     predicted_mse_tendency = (
@@ -519,7 +505,9 @@ def test__force_conserve_energy_doesnt_clobber():
         vertical_coordinate=vertical_coord,
         timestep_seconds=timestep.total_seconds(),
     )
-    torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
+    # PRESsfc is not modified by the energy correction, so it is absent from the
+    # returned subset -- the forcing copy cannot leak into the output.
+    assert "PRESsfc" not in corrected_gen_data
 
 
 @pytest.mark.parametrize(
@@ -548,7 +536,7 @@ def test_corrector_integration(air_temperature_prefix):
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
+    corrector = config._build(ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data, None)
 
 
@@ -560,7 +548,7 @@ def _build_conserve_dry_air_corrector(tensor_shape):
         torch.ones(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    return AtmosphereCorrector(config, ops, vertical_coord, timestep), vertical_coord
+    return config._build(ops, vertical_coord, timestep), vertical_coord
 
 
 def _global_dry_air_mass(
@@ -585,7 +573,8 @@ def test_conserve_dry_air_seeds_from_ic_input():
     # Sanity: gen and ic differ (otherwise the test is trivial).
     assert not torch.allclose(ic_dry_air, gen_dry_air_before)
 
-    corrected, state = corrector(ic, gen, {}, None)
+    result = corrector(ic, gen, {}, None)
+    corrected, state = result.corrected, result.corrector_state
     assert state is not None
     assert state.global_dry_air_mass is not None
 
@@ -613,7 +602,7 @@ def test_conserve_dry_air_persists_across_calls():
 
     # First call seeds the reference from `ic`.
     _, gen2, _, _ = _get_corrector_test_input(tensor_shape)
-    _, state_after_1 = corrector(ic, gen2, {}, None)
+    state_after_1 = corrector(ic, gen2, {}, None).corrector_state
     ic_dry_air = _global_dry_air_mass(ic, vertical_coord)
 
     # Second call with a *different* input (simulating drift). The reference
@@ -621,7 +610,8 @@ def test_conserve_dry_air_persists_across_calls():
     drifted_input, gen3, _, _ = _get_corrector_test_input(tensor_shape)
     # Make the drifted input meaningfully different in dry-air mass.
     drifted_input = {**drifted_input, "PRESsfc": drifted_input["PRESsfc"] + 500.0}
-    corrected, state_after_2 = corrector(drifted_input, gen3, {}, state_after_1)
+    result = corrector(drifted_input, gen3, {}, state_after_1)
+    corrected, state_after_2 = result.corrected, result.corrector_state
 
     assert state_after_2 is not None
     assert state_after_2.global_dry_air_mass is not None
@@ -639,6 +629,115 @@ def test_conserve_dry_air_requires_vertical_coordinate():
     config = AtmosphereCorrectorConfig(conserve_dry_air=True)
     ops = LatLonOperations(torch.ones(size=(5, 1)).broadcast_to(size=(5, 5)))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = AtmosphereCorrector(config, ops, None, timestep)
+    corrector = config._build(ops, None, timestep)
     with pytest.raises(ValueError, match="vertical coordinate"):
         corrector({}, {}, {}, None)
+
+
+def _build_full_atmosphere_corrector(tensor_shape):
+    """Build an atmosphere corrector with every field-modifying option active,
+    along with matching input/gen/forcing data."""
+    config = AtmosphereCorrectorConfig(
+        conserve_dry_air=True,
+        zero_global_mean_moisture_advection=True,
+        moisture_budget_correction="advection_and_precipitation",
+        force_positive_names=["PRATEsfc"],
+        total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
+        clip_frozen_precipitation=True,
+    )
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    # frozen precip exceeds total precip so the clip has an effect.
+    gen_data["total_frozen_precipitation_rate"] = 1e-4 + 1e-4 * torch.rand(
+        size=tensor_shape
+    )
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = config._build(ops, vertical_coord, timestep)
+    return corrector, input_data, gen_data, forcing_data
+
+
+def test_atmosphere_corrector_config_fields_are_exercised():
+    # Staleness guard: the full-corrector builder above enables every
+    # field-modifying option. If a new corrector option is added to
+    # AtmosphereCorrectorConfig this fails, flagging that the builder and the
+    # delta/modified-return tests need to exercise it.
+    expected = {
+        "conserve_dry_air",
+        "zero_global_mean_moisture_advection",
+        "moisture_budget_correction",
+        "force_positive_names",
+        "total_energy_budget_correction",
+        "keep_gradient_through_clamps",
+        "clip_frozen_precipitation",
+        "corrector_disabled_epochs",  # inherited epoch-scheduling field
+    }
+    actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}
+    assert actual == expected, (
+        "AtmosphereCorrectorConfig fields changed; update "
+        "_build_full_atmosphere_corrector and the corrector delta tests to "
+        f"cover the new option(s): {actual ^ expected}"
+    )
+
+
+def test_atmosphere_corrector_delta_matches_modified_returns():
+    torch.manual_seed(0)
+    tensor_shape = (2, 5, 5)
+    corrector, input_data, gen_data, forcing_data = _build_full_atmosphere_corrector(
+        tensor_shape
+    )
+    result = corrector(input_data, gen_data, forcing_data, None)
+    # delta keys are exactly the corrector's modified names
+    assert set(result.diagnostics.delta) == set(result.modified_names)
+    # and each delta is exactly corrected - input gen_data
+    for name, delta in result.diagnostics.delta.items():
+        torch.testing.assert_close(delta, result.corrected[name] - gen_data[name])
+    # the modified set: surface pressure, advection tendency, precipitation, and
+    # every air temperature level (the fields written by the enabled options)
+    assert set(result.modified_names) == {
+        "PRESsfc",
+        "tendency_of_total_water_path_due_to_advection",
+        "PRATEsfc",
+        "total_frozen_precipitation_rate",
+        "air_temperature_0",
+        "air_temperature_1",
+    }
+
+
+def test_atmosphere_corrector_unmodified_fields_pass_through():
+    # The modified-set backstop: fields outside the corrector's responsibility
+    # are carried through unchanged and absent from the modified-name set.
+    torch.manual_seed(0)
+    tensor_shape = (2, 5, 5)
+    corrector, input_data, gen_data, forcing_data = _build_full_atmosphere_corrector(
+        tensor_shape
+    )
+    result = corrector(input_data, gen_data, forcing_data, None)
+    untouched = set(gen_data) - set(result.modified_names)
+    assert untouched  # at least one field is not corrected
+    for name in untouched:
+        torch.testing.assert_close(result.corrected[name], gen_data[name])
+
+
+def test_atmosphere_corrector_empty_delta_when_nothing_modified():
+    # A corrector with no field-modifying option emits an empty delta and an
+    # unchanged copy of gen_data.
+    torch.manual_seed(0)
+    tensor_shape = (2, 5, 5)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    ops = LatLonOperations(
+        torch.ones(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    corrector = AtmosphereCorrectorConfig()._build(
+        ops, vertical_coord, datetime.timedelta(seconds=3600)
+    )
+    result = corrector(input_data, gen_data, forcing_data, None)
+    assert dict(result.diagnostics.delta) == {}
+    assert set(result.modified_names) == set()
+    for name in gen_data:
+        torch.testing.assert_close(result.corrected[name], gen_data[name])

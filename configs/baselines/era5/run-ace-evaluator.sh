@@ -78,7 +78,12 @@ job_group="${base_name}-era5"
 #   "01KSVC6YS7C18SGYV4VPZYZ232"
 
 
-run_evaluator "ace-evaluator-config.yaml" \
-  "$base_name-era5-multi-step-ft-no-channel-weightings-32-noise-embed-dim-energy-and-frozen-precip-corrector-on-new-order-rs2" \
+# run_evaluator "ace-evaluator-config.yaml" \
+#   "$base_name-era5-multi-step-ft-no-channel-weightings-32-noise-embed-dim-energy-and-frozen-precip-corrector-on-new-order-rs2" \
+#   "$job_group" \
+#   "01KWD8DZVJFKYC5A9PNW8259GH"
+
+run_evaluator "ace-evaluator-config-10day.yaml" \
+  "$base_name-era5-multi-step-ft-no-channel-weightings-32-noise-embed-dim-energy-and-frozen-precip-corrector-on-new-order-rs2-10day-forecast" \
   "$job_group" \
   "01KWD8DZVJFKYC5A9PNW8259GH"
