@@ -51,7 +51,40 @@ data:
   batch_size: 16
   num_data_workers: 2
   strict_ensemble: false
-events: []
+# Events ported from ai2cm/andrep-downscaling/j3thqivd (hirov1 CONUS eval). Each
+# event subsets its own lat/lon region from the full dataset, independent of the
+# CONUS `data` extent above (so the West Pacific events are fine).
+events:
+- name: WA_AR_20230101
+  date: 2023-01-01T06:00
+  lat_extent:
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 16
+- name: WPacific_hurricane_20230425
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130.0
+    stop: 146.0
+  save_generated_samples: true
+  n_samples: 16
+- name: WPacific_hurricane_landfall_china_20230510
+  date: 2023-05-10T12:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 104
+    stop: 120
+  save_generated_samples: true
+  n_samples: 16
 logging:
   log_to_screen: true
   log_to_wandb: true
