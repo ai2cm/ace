@@ -1,9 +1,12 @@
 """Per-sample step diagnostics carried on prediction data.
 
 ``StepDiagnostics`` is an opaque container attached by ``Stepper.predict`` to
-the prediction ``BatchData``. Like ``StepperState``, its consumers move it
-between devices and broadcast it across ensemble members without inspecting
-its contents; data export goes through ``to_dataset``.
+the prediction ``BatchData``. Like ``StepperState``, the structure-preserving
+operations (device moves, ensemble broadcast, pin-memory) apply without
+inspecting its contents. Data consumers have two sanctioned read surfaces:
+``to_dataset`` for serialization (a self-describing, detached CPU export for
+the step-diagnostics writer), and the ``delta`` field directly for in-memory
+consumers that need the tensors on device (e.g. inference metrics).
 """
 
 import dataclasses
@@ -24,6 +27,9 @@ class StepDiagnostics:
             corrector-modified variable, shaped ``(sample, time, ...)`` and
             aligned with the prediction data's forward steps. May be empty;
             every operation is a safe no-op on an empty mapping.
+            The tensors carry the stepper's output masking (NaN off-mask) and
+            are the on-device read surface for in-memory consumers; use
+            ``to_dataset`` when exporting for writing.
     """
 
     delta: TensorMapping
