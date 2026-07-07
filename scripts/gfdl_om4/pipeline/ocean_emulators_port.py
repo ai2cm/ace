@@ -140,6 +140,6 @@ def regrid_normalized(
         out[name].attrs = da.attrs
     ocean_fraction.attrs = {
         "long_name": "fraction of target cell overlapping ocean source cells",
-        "units": "1",
+        "units": "0-1",
     }
     return out, ocean_fraction

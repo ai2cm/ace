@@ -13,6 +13,8 @@ import dataclasses
 import dacite
 import yaml
 
+from .postprocess import POSTPROCESS
+
 
 @dataclasses.dataclass
 class StreamConfig:
@@ -30,6 +32,25 @@ class StreamConfig:
         renaming: mapping of source names to output names, applied before
             level splitting (a renamed 3D variable yields renamed per-level
             outputs).
+        dim_renaming: mapping of source dimension names to the ocean-grid
+            names the shared regridding machinery expects (tracer ``xh``/
+            ``yh``, staggered ``xq``/``yq``). A dimension renamed to a
+            staggered name with one more point than its tracer counterpart
+            (symmetric staggering, both edges present) has its first point
+            dropped to match the right/north-edge convention.
+        time_subsample_stride: if set, keep every Nth timestep, aligned to
+            the ends of N-step blocks of the source store's raw time grid
+            (e.g. 20 subsamples 6-hourly data to 5-daily block ends). The
+            cross-stream time-alignment assertion then guarantees the
+            subsample lands exactly on the shared time coordinate.
+        full_cell_variables: variables additionally regridded with full-cell
+            semantics — NaN filled with 0 over the whole grid (land
+            included) and conservatively regridded without ocean-fraction
+            normalization — written under their source name, with NaN over
+            land applied after. Each must also have a ``renaming`` entry so
+            its wetmask-normalized twin doesn't collide.
+        postprocess: named post-regrid transforms to apply per chunk, in
+            order (see pipeline/postprocess.py).
     """
 
     name: str
@@ -37,6 +58,10 @@ class StreamConfig:
     variables: list[str]
     rotated_pairs: list[list[str]] = dataclasses.field(default_factory=list)
     renaming: dict[str, str] = dataclasses.field(default_factory=dict)
+    dim_renaming: dict[str, str] = dataclasses.field(default_factory=dict)
+    time_subsample_stride: int | None = None
+    full_cell_variables: list[str] = dataclasses.field(default_factory=list)
+    postprocess: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         for pair in self.rotated_pairs:
@@ -48,6 +73,30 @@ class StreamConfig:
                         f"rotated variable {name!r} not in stream {self.name!r} "
                         "variables"
                     )
+        if self.time_subsample_stride is not None and self.time_subsample_stride < 1:
+            raise ValueError(
+                f"time_subsample_stride must be >= 1; got "
+                f"{self.time_subsample_stride}"
+            )
+        for name in self.full_cell_variables:
+            if name not in self.variables:
+                raise ValueError(
+                    f"full-cell variable {name!r} not in stream {self.name!r} "
+                    "variables"
+                )
+            if name not in self.renaming:
+                raise ValueError(
+                    f"full-cell variable {name!r} needs a renaming entry in "
+                    f"stream {self.name!r}: its full-cell output keeps the "
+                    "source name, so the wetmask-normalized output must be "
+                    "renamed to avoid a collision"
+                )
+        for name in self.postprocess:
+            if name not in POSTPROCESS:
+                raise ValueError(
+                    f"unknown postprocess {name!r} in stream {self.name!r}; "
+                    f"available: {sorted(POSTPROCESS)}"
+                )
 
 
 @dataclasses.dataclass

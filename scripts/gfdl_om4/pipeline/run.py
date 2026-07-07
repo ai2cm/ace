@@ -23,6 +23,11 @@ Masking conventions of the output store:
   a cell with ``mask_k == 1`` can occasionally be NaN at a given time.
 - ``sea_surface_fraction`` is the regridded surface ocean fraction (0 over
   land, not NaN), usable to weight coastal cells.
+- Variables listed in a stream's ``full_cell_variables`` (e.g.
+  ``sea_ice_fraction``) are regridded with full-cell semantics — the value
+  is per total cell area, land counted as zero — with land-NaN applied
+  after; their wetmask-normalized (per-ocean-area) twins are written under
+  renamed outputs (e.g. ``ocean_sea_ice_fraction``).
 - Masks, ``idepth_*``, ``areacello``, and ``sea_surface_fraction`` are
   exempt from land-NaN by explicit list (see land_nan_exempt_names).
 """
@@ -46,6 +51,7 @@ from .ocean_emulators_port import (
     regrid_normalized,
     rotate_vectors,
 )
+from .postprocess import DERIVATION_ATTR, POSTPROCESS, ChunkContext, provenance_attrs
 from .weights import get_regridder, open_source_grid
 
 logger = logging.getLogger(__name__)
@@ -54,10 +60,8 @@ TIME_DIM = "time"
 LEVEL_DIM = "z_l"
 OUTPUT_DTYPE = np.float32
 
-# Provenance attribute names stamped on every output variable.
-SOURCE_STORE_ATTR = "source_store"
-SOURCE_VARIABLE_ATTR = "source_variable"
-DERIVATION_ATTR = "derivation"
+# Tracer-center dimension for each staggered (right/north-edge) dimension.
+STAGGERED_TO_TRACER_DIM = {"xq": "xh", "yq": "yh"}
 
 
 def land_nan_exempt_names(level_count: int) -> list[str]:
@@ -82,13 +86,6 @@ def _make_zarr_store(url: str, read_only: bool = True):
         return url
 
 
-def _provenance(store: str, variable: str, derivation: str | None = None) -> dict:
-    attrs = {SOURCE_STORE_ATTR: store, SOURCE_VARIABLE_ATTR: variable}
-    if derivation is not None:
-        attrs[DERIVATION_ATTR] = derivation
-    return attrs
-
-
 # ---------------------------------------------------------------------------
 # Source opening and load-bearing assertions
 # ---------------------------------------------------------------------------
@@ -106,6 +103,25 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
             f"{sorted(missing)}"
         )
     ds = ds[stream.variables]
+    if stream.dim_renaming:
+        ds = ds.rename(stream.dim_renaming)
+        for staggered, tracer in STAGGERED_TO_TRACER_DIM.items():
+            if (
+                staggered in ds.dims
+                and tracer in ds.dims
+                and ds.sizes[staggered] == ds.sizes[tracer] + 1
+            ):
+                # Symmetric staggering carries both edges; drop the first
+                # point to match the right/north-edge convention of the
+                # shared interpolation and rotation machinery.
+                ds = ds.isel({staggered: slice(1, None)})
+    if stream.time_subsample_stride is not None:
+        # Keep the last instant of each stride-length block, anchored to the
+        # source store's raw time grid (hence before any time-range subset),
+        # so block ends land on the shared snapshot instants; the
+        # cross-stream time-alignment assertion enforces the coincidence.
+        stride = stream.time_subsample_stride
+        ds = ds.isel({TIME_DIM: slice(stride - 1, None, stride)})
     if config.start_time is not None or config.end_time is not None:
         ds = ds.sel({TIME_DIM: slice(config.start_time, config.end_time)})
     if ds.sizes[TIME_DIM] == 0:
@@ -219,6 +235,18 @@ def _get_angle(weights_url: str) -> xr.DataArray:
     return _ANGLE_CACHE[weights_url]
 
 
+# One exact cell-area array per target grid per worker process.
+_AREACELLO_CACHE: dict[str, xr.DataArray] = {}
+
+
+def _get_areacello(target_grid_name: str) -> xr.DataArray:
+    if target_grid_name not in _AREACELLO_CACHE:
+        _AREACELLO_CACHE[target_grid_name] = make_target_grid(target_grid_name)[
+            "areacello"
+        ]
+    return _AREACELLO_CACHE[target_grid_name]
+
+
 def _rotate_pairs(
     ds: xr.Dataset,
     stream: StreamConfig,
@@ -226,7 +254,13 @@ def _rotate_pairs(
     weights_url: str,
 ) -> xr.Dataset:
     """Interpolate each configured C-grid vector pair to tracer centers and
-    rotate it to geographic components, preserving names and attrs."""
+    rotate it to geographic components, preserving names and attrs.
+
+    Ocean cells whose staggered neighbors are all invalid (some vector
+    fields, e.g. surface stresses, carry a stricter staggered-point mask
+    than the tracer wetmask at a small number of coastal cells) are set to
+    zero, so the pair keeps the chunk's shared valid-data footprint.
+    """
     pairs = [pair for pair in stream.rotated_pairs if pair[0] in ds.data_vars]
     if not pairs:
         return ds
@@ -235,10 +269,13 @@ def _rotate_pairs(
         u_attrs, v_attrs = dict(ds[u_name].attrs), dict(ds[v_name].attrs)
         u, v = interpolate_to_cell_centers(ds[u_name], ds[v_name], wetmask)
         u, v = rotate_vectors(u, v, angle)
+        u = u.fillna(0.0).where(wetmask)
+        v = v.fillna(0.0).where(wetmask)
         rotation_note = (
             "interpolated from C-grid points to tracer centers "
-            "(normalizing by valid ocean neighbors) and rotated from "
-            "grid-relative to geographic components"
+            "(normalizing by valid ocean neighbors; ocean cells with no "
+            "valid neighbor set to 0) and rotated from grid-relative to "
+            "geographic components"
         )
         ds = ds.drop_vars([u_name, v_name])
         ds[u_name] = u.assign_attrs(u_attrs, **{DERIVATION_ATTR: rotation_note})
@@ -282,7 +319,7 @@ def _process_chunk(
     _assert_footprint_drift(footprint, wetmask, context)
 
     regridder = get_regridder(weights_url, target_grid_name)
-    regridded, _ = regrid_normalized(ds, regridder, footprint)
+    regridded, ocean_fraction = regrid_normalized(ds, regridder, footprint)
 
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
@@ -294,9 +331,39 @@ def _process_chunk(
             derivation = f"{level_note}; {derivation}" if derivation else level_note
             da = da.squeeze(LEVEL_DIM, drop=True)
             out_name = f"{out_name}_{level_index}"
-        output[out_name] = da.astype(OUTPUT_DTYPE).assign_attrs(
-            _provenance(stream.store, name, derivation)
+        output[out_name] = da.assign_attrs(
+            provenance_attrs(stream.store, name, derivation)
         )
+
+    for name in stream.full_cell_variables:
+        if name not in ds.data_vars:
+            continue
+        full = regridder(ds[name].fillna(0.0), keep_attrs=True)
+        full = full.where(ocean_fraction > OCEAN_FRACTION_THRESHOLD)
+        output[name] = full.assign_attrs(
+            provenance_attrs(
+                stream.store,
+                name,
+                "NaN filled with 0 over the full grid (land included) and "
+                "conservatively regridded without ocean-fraction "
+                "normalization, giving the per-total-cell-area quantity; "
+                "NaN over land applied after",
+            )
+        )
+
+    if stream.postprocess:
+        chunk_context = ChunkContext(
+            ocean_fraction=ocean_fraction,
+            areacello=_get_areacello(target_grid_name),
+            store=stream.store,
+        )
+        for postprocess_name in stream.postprocess:
+            spec = POSTPROCESS[postprocess_name]
+            if all(v in output.data_vars for v in spec.requires):
+                output = spec.fn(output, chunk_context)
+
+    for name in output.data_vars:
+        output[name] = output[name].astype(OUTPUT_DTYPE)
     return output
 
 
@@ -369,7 +436,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
         statics[f"mask_{k}"] = mask.assign_attrs(
             long_name=f"ocean mask level-{k}",
             units="0 if land, 1 if ocean",
-            **_provenance(
+            **provenance_attrs(
                 config.wetmask.store,
                 config.wetmask.variable,
                 f"1 where the regridded level-{k} wetmask (NaN pattern of "
@@ -384,8 +451,8 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
         OUTPUT_DTYPE
     ).assign_attrs(
         long_name="fraction of cell area overlapping ocean source cells",
-        units="1",
-        **_provenance(
+        units="0-1",
+        **provenance_attrs(
             config.wetmask.store,
             config.wetmask.variable,
             "conservative regrid of the surface wetmask (NaN pattern of "
@@ -401,7 +468,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
             attrs={
                 "units": "meters",
                 "long_name": f"Depth at interface level-{k}",
-                **_provenance(
+                **provenance_attrs(
                     config.wetmask.store,
                     LEVEL_DIM,
                     "interface depths recovered from level-center depths by "
@@ -416,7 +483,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
         target_grid["areacello"]
         .astype(OUTPUT_DTYPE)
         .assign_attrs(
-            _provenance(
+            provenance_attrs(
                 "analytic",
                 "areacello",
                 f"exact {config.target_grid} Gaussian-quadrature cell areas "
@@ -441,7 +508,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
     regridded, _ = regrid_normalized(fields, regridder, surface_wetmask)
     for name, da in regridded.data_vars.items():
         statics[name] = da.astype(OUTPUT_DTYPE).assign_attrs(
-            _provenance(config.statics.store, name)
+            provenance_attrs(config.statics.store, name)
         )
 
     # Enforce the land-NaN convention on everything not explicitly exempt.
@@ -533,6 +600,9 @@ def _expected_output_names(
                 names.update(f"{out_name}_{k}" for k in range(ds.sizes[LEVEL_DIM]))
             else:
                 names.add(out_name)
+        names.update(stream.full_cell_variables)
+        for postprocess_name in stream.postprocess:
+            names.update(POSTPROCESS[postprocess_name].adds)
     return names
 
 

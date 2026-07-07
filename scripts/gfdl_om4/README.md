@@ -17,7 +17,14 @@ Contents:
   regridding, level splitting) into the output store. Every output variable
   carries `source_store`/`source_variable` (and, for derived variables,
   `derivation`) provenance attrs.
-- `pipeline/config.py`: YAML→dataclass configuration (dacite).
+- `pipeline/config.py`: YAML→dataclass configuration (dacite). Stream
+  options cover source-dim renaming (e.g. ice-model `xT/yT/xB/yB` onto the
+  ocean `xh/yh/xq/yq` conventions), time subsampling to the shared snapshot
+  instants, full-cell (per-total-cell-area) regridding for selected
+  variables, and named postprocess transforms.
+- `pipeline/postprocess.py`: named post-regrid transforms selectable per
+  stream — Kelvin `sst`, `hfds_total_area`, and the sea-ice conventions
+  (ice-velocity masking, thickness zeroing, `sea_ice_volume`).
 - `pipeline/grids.py`: analytic Gaussian target grids (`F90` = 1°, `F22.5` =
   4°) with exact quadrature-weight cell areas.
 - `pipeline/ocean_emulators_port.py`: utilities ported from the ai2cm fork of
