@@ -59,6 +59,9 @@ def test_compute_derived_quantities(dataset: str):
             "specific_total_water_1": torch.rand(2, 3, 4, 8),
             "PRATEsfc": torch.rand(2, 3, 4, 8),
             "LHTFLsfc": torch.rand(2, 3, 4, 8),
+            "SHTFLsfc": torch.rand(2, 3, 4, 8),
+            "DSWRFsfc": torch.rand(2, 3, 4, 8),
+            "USWRFsfc": torch.rand(2, 3, 4, 8),
             "tendency_of_total_water_path_due_to_advection": torch.rand(2, 3, 4, 8),
             "DSWRFtoa": torch.rand(2, 3, 4, 8),
             "USWRFtoa": torch.rand(2, 3, 4, 8),
@@ -74,6 +77,9 @@ def test_compute_derived_quantities(dataset: str):
             "specific_total_water_1": torch.rand(2, 3, 4, 8),
             "surface_precipitation_rate": torch.rand(2, 3, 4, 8),
             "LHFLX": torch.rand(2, 3, 4, 8),
+            "SHFLX": torch.rand(2, 3, 4, 8),
+            "FSDS": torch.rand(2, 3, 4, 8),
+            "surface_upward_shortwave_flux": torch.rand(2, 3, 4, 8),
             "tendency_of_total_water_path_due_to_advection": torch.rand(2, 3, 4, 8),
             "SOLIN": torch.rand(2, 3, 4, 8),
             "top_of_atmos_upward_shortwave_flux": torch.rand(2, 3, 4, 8),
@@ -104,14 +110,77 @@ def test_compute_derived_quantities(dataset: str):
         "surface_pressure_due_to_dry_air",
         "surface_pressure_due_to_dry_air_absolute_tendency",
         "net_energy_flux_toa_into_atmosphere",
+        "surface_evaporative_fraction",
+        "implied_surface_albedo",
     ):
         assert name in out_gen_data
         assert name in out_target_data
         assert out_gen_data[name].shape == (2, 3, 4, 8)
         assert out_target_data[name].shape == (2, 3, 4, 8)
 
+    # ratio diagnostics are clamped to their physical range [0, 1]
+    for name in ("surface_evaporative_fraction", "implied_surface_albedo"):
+        for data in (out_gen_data, out_target_data):
+            assert data[name].min() >= 0.0
+            assert data[name].max() <= 1.0
+
+
+def test_surface_evaporative_fraction():
+    from fme.core.derived_variables import surface_evaporative_fraction
+
+    # normal case: EF = LH / (LH + SH)
+    data = AtmosphereData(
+        {"LHTFLsfc": torch.tensor([30.0]), "SHTFLsfc": torch.tensor([10.0])}
+    )
+    torch.testing.assert_close(
+        surface_evaporative_fraction(data, TIMESTEP), torch.tensor([0.75])
+    )
+
+    # vanishing turbulent flux (LH + SH -> 0 with LH > 0): clamped up to 1
+    data = AtmosphereData(
+        {"LHTFLsfc": torch.tensor([5.0]), "SHTFLsfc": torch.tensor([-5.0])}
+    )
+    torch.testing.assert_close(
+        surface_evaporative_fraction(data, TIMESTEP), torch.tensor([1.0])
+    )
+
+    # net downward latent heat (LH < 0): clamped down to 0
+    data = AtmosphereData(
+        {"LHTFLsfc": torch.tensor([-5.0]), "SHTFLsfc": torch.tensor([20.0])}
+    )
+    torch.testing.assert_close(
+        surface_evaporative_fraction(data, TIMESTEP), torch.tensor([0.0])
+    )
+
+
+def test_implied_surface_albedo():
+    from fme.core.derived_variables import implied_surface_albedo
+
+    # normal case: ISA = USWRFsfc / DSWRFsfc
+    data = AtmosphereData(
+        {"USWRFsfc": torch.tensor([30.0]), "DSWRFsfc": torch.tensor([100.0])}
+    )
+    torch.testing.assert_close(
+        implied_surface_albedo(data, TIMESTEP), torch.tensor([0.3])
+    )
+
+    # nighttime (no downward shortwave, no upward shortwave): defined as 0
+    data = AtmosphereData(
+        {"USWRFsfc": torch.tensor([0.0]), "DSWRFsfc": torch.tensor([0.0])}
+    )
+    torch.testing.assert_close(
+        implied_surface_albedo(data, TIMESTEP), torch.tensor([0.0])
+    )
+
 
 def test_metadata_registry():
     metadata = get_derived_variable_metadata()
     assert metadata["total_water_path"].units == "kg/m**2"
     assert metadata["total_water_path"].long_name == "Total water path"
+    assert metadata["surface_evaporative_fraction"].units == ""
+    assert (
+        metadata["surface_evaporative_fraction"].long_name
+        == "Surface evaporative fraction"
+    )
+    assert metadata["implied_surface_albedo"].units == ""
+    assert metadata["implied_surface_albedo"].long_name == "Implied surface albedo"

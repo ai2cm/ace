@@ -264,6 +264,27 @@ class AtmosphereData:
         return self._get("latent_heat_flux")
 
     @property
+    def sensible_heat_flux(self) -> torch.Tensor:
+        """
+        Sensible heat flux in W m-2.
+        """
+        return self._get("sensible_heat_flux")
+
+    @property
+    def sfc_down_sw_radiative_flux(self) -> torch.Tensor:
+        """
+        Downward shortwave radiative flux at the surface in W m-2.
+        """
+        return self._get("sfc_down_sw_radiative_flux")
+
+    @property
+    def sfc_up_sw_radiative_flux(self) -> torch.Tensor:
+        """
+        Upward shortwave radiative flux at the surface in W m-2.
+        """
+        return self._get("sfc_up_sw_radiative_flux")
+
+    @property
     def evaporation_rate(self) -> torch.Tensor:
         """
         Evaporation rate in kg m-2 s-1.
