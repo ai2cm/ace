@@ -1,4 +1,4 @@
-# arg: --dataset 01KWW006XTJXVA45656N7KFAMX:/checkpoints
+# arg: --dataset 01KWWXRRV1TJH8GQTQWRA3DWEV:/checkpoints
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
