@@ -1,0 +1,321 @@
+# v2-era5-only recipe (shared-temperature global-mean removal + latent-global-
+# mean clip, residual prediction, 120 epochs, single-step EnsembleLoss) trained
+# on a SINGLE SHiELD AMIP member (ic_0001) instead of ERA5. Built from the
+# ACE2S-SHiELD+ v2arch config (SHiELD variable lists, corrector, ocean, and v2
+# builder) with the v2-era5-only recipe knobs spliced in and the training data
+# reduced to the historical AMIP member with an ERA5-style held-out-year split
+# (train 1979-2013 minus 1994; validate on 1994 + 2014). NO-CO2 arm: this is
+# the with-CO2 sibling (...-v2-shield-amip-only.yaml) with global_mean_co2
+# removed from in_names and next_step_forcing_names — the only delta. This
+# mirrors the ERA5 v2 no-CO2 precedent (with-CO2 znnaox7t -> no-CO2 im4ecamc,
+# same single CO2-removal delta).
+#
+# For the land-amplification +4K SST-response evaluation: this model is later
+# run through the +0/+4K constant-SST-perturbation harness and scored against a
+# direct GCM +4K SHiELD target.
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+checkpoint_every_n_batches: 5000
+validate_using_ema: true
+ema_checkpoint_save_epochs:
+  start: 5
+  step: 5
+max_epochs: 120
+ema:
+  decay: 0.999
+train_aggregator:
+  ensemble_metrics: true
+inference:
+  - name: insample_10year
+    weight: 1.0
+    epochs:
+      start: 1
+      step: 2
+    n_forward_steps: 3652
+    forward_steps_in_memory: 73
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '1995-01-01T00:00:00'
+          - '1995-01-02T00:00:00'
+          - '1995-01-03T00:00:00'
+          - '1995-01-04T00:00:00'
+          - '1995-01-05T00:00:00'
+          - '1995-01-06T00:00:00'
+          - '1995-01-07T00:00:00'
+          - '1995-01-08T00:00:00'
+      dataset:
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means:
+        - step: 5
+          target: denorm
+          name: day_5
+          variables: &inference_variables
+            - PRATEsfc
+            - TMP2m
+            - Q2m
+            - UGRD10m
+            - VGRD10m
+            - h500
+            - TMP850
+            - PRESsfc
+            - surface_temperature
+            - ULWRFsfc
+            - DLWRFsfc
+            - USWRFsfc
+            - DSWRFsfc
+            - ULWRFtoa
+            - USWRFtoa
+            - LHTFLsfc
+            - SHTFLsfc
+            - tendency_of_total_water_path_due_to_advection
+            - total_frozen_precipitation_rate
+            - air_temperature_0
+            - air_temperature_1
+            - air_temperature_3
+            - air_temperature_7
+            - specific_total_water_0
+            - specific_total_water_1
+            - specific_total_water_3
+            - specific_total_water_7
+            - eastward_wind_0
+            - eastward_wind_1
+            - eastward_wind_3
+            - eastward_wind_7
+            - northward_wind_0
+            - northward_wind_1
+            - northward_wind_3
+            - northward_wind_7
+            - total_water_path
+        - step: 5
+          target: norm
+          name: day_5_norm
+          variables: *inference_variables
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      histogram:
+        enabled: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 8
+  time_buffer_pool_size: 32
+  dataset:
+    strict: false
+    concat:
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+        subset:
+          start_time: '1979-01-01'
+          stop_time: '1993-12-31'
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
+        engine: zarr
+        subset:
+          start_time: '1995-01-01'
+          stop_time: '2013-12-31'
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 8
+    prefetch_factor: 2
+    time_buffer: 16
+    dataset:
+      strict: false
+      concat:
+        - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+          file_pattern: ic_0001.zarr
+          engine: zarr
+          subset:
+            start_time: '1994-01-01'
+            stop_time: '1994-12-31'
+        - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+          file_pattern: ic_0001.zarr
+          engine: zarr
+          subset:
+            start_time: '2014-01-01'
+            stop_time: '2014-12-31'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 1
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      residual_prediction: true
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 512
+          noise_embed_dim: 32
+          noise_type: isotropic
+          filter_type: linear
+          affine_norms: true
+          normalize_big_skip: true
+          filter_num_groups: 16
+          spectral_ratio: 0.125
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          clip_latent_global_means: true
+      normalization:
+        network:
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/combined/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/combined/scaling-full-field.nc
+        residual:
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/combined/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/combined/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+        interpolate: true
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        force_positive_names:
+          - specific_total_water_0
+          - specific_total_water_1
+          - specific_total_water_2
+          - specific_total_water_3
+          - specific_total_water_4
+          - specific_total_water_5
+          - specific_total_water_6
+          - specific_total_water_7
+          - Q2m
+          - PRATEsfc
+          - ULWRFsfc
+          - ULWRFtoa
+          - DLWRFsfc
+          - DSWRFsfc
+          - USWRFsfc
+          - USWRFtoa
+          - total_frozen_precipitation_rate
+      next_step_forcing_names:
+        - DSWRFtoa
+      in_names:
+        - land_fraction
+        - ocean_fraction
+        - sea_ice_fraction
+        - DSWRFtoa
+        - HGTsfc
+        - PRESsfc
+        - surface_temperature
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
+      out_names:
+        - PRESsfc
+        - surface_temperature
+        - TMP2m
+        - Q2m
+        - UGRD10m
+        - VGRD10m
+        - air_temperature_0
+        - air_temperature_1
+        - air_temperature_2
+        - air_temperature_3
+        - air_temperature_4
+        - air_temperature_5
+        - air_temperature_6
+        - air_temperature_7
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - eastward_wind_0
+        - eastward_wind_1
+        - eastward_wind_2
+        - eastward_wind_3
+        - eastward_wind_4
+        - eastward_wind_5
+        - eastward_wind_6
+        - eastward_wind_7
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+        - tendency_of_total_water_path_due_to_advection
+        - TMP850
+        - h500
+        - total_frozen_precipitation_rate
+      global_mean_removal:
+        kind: shared
+        append_as_input: true
