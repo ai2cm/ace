@@ -99,6 +99,26 @@ def _restrict_inference_to_era5(cfg: dict) -> None:
     ]
 
 
+def _clear_inference_epochs(cfg: dict) -> None:
+    """Run every inline-inference entry on every cooldown epoch.
+
+    The FM configs schedule inference with an ``epochs`` slice sized for the
+    ~150-epoch training run (e.g. ``{start: 10, step: 10}``). That slice indexes
+    into the epoch list ``[1..max_epochs]``, so on the 8-epoch cooldown it can
+    select no epochs at all (``[1..8][10::10]`` is empty), meaning inference
+    never runs and no inference metrics are logged. Drop the field so each entry
+    falls back to the default (every epoch), guaranteeing the same inference
+    metrics the base config logs are produced during the cooldown.
+    """
+    entries = cfg.get("inference")
+    if entries is None:
+        return
+    if not isinstance(entries, list):
+        entries = [entries]
+    for entry in entries:
+        entry.pop("epochs", None)
+
+
 def _fetch_wandb_run_names() -> set[str]:
     import wandb  # lazy import: only needed with --delete-if-in-wandb
 
@@ -188,6 +208,11 @@ def generate_cooldown_config(
     # Drop non-ERA5 inline-inference entries: the cooldown stepper uses the ERA5
     # vertical coordinate, so SHiELD-coordinate entries would be mismatched.
     _restrict_inference_to_era5(cfg)
+
+    # The base epochs schedule is sized for the full run; on the 8-epoch cooldown
+    # it may never fire. Run every inference entry on every cooldown epoch so the
+    # base config's inference metrics are logged.
+    _clear_inference_epochs(cfg)
 
     cfg["optimization"]["lr"] = lr
     cfg["optimization"]["scheduler"] = _build_scheduler(epochs)

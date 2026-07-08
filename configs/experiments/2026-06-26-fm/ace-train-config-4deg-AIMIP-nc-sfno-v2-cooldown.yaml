@@ -1,4 +1,4 @@
-# arg: --dataset 01KWWXRRV1TJH8GQTQWRA3DWEV:/checkpoints
+# arg: --dataset 01KWW006XTJXVA45656N7KFAMX:/checkpoints
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -16,9 +16,6 @@ train_aggregator:
 inference:
 - name: 10year
   weight: 0.0
-  epochs:
-    start: 1
-    step: 2
   n_forward_steps: 3652
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -98,9 +95,6 @@ inference:
       enabled: true
 - name: 10year_insample
   weight: 1.0
-  epochs:
-    start: 1
-    step: 2
   n_forward_steps: 3652
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -261,9 +255,6 @@ inference:
       enabled: false
 - name: long_46year
   weight: 0.0
-  epochs:
-    start: 4
-    step: 5
   n_forward_steps: 16794
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -308,9 +299,6 @@ inference:
       enabled: true
 - name: long_46year_constant_co2
   weight: 0.0
-  epochs:
-    start: 4
-    step: 5
   n_forward_steps: 16794
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -452,7 +440,7 @@ stepper_training:
       crps_weight: 0.9
       energy_score_weight: 0.1
   parameter_init:
-    weights_path: /checkpoints/training_checkpoints/best_inference_ckpt.tar
+    weights_path: /checkpoints/training_checkpoints/pre_cooldown_ckpt.tar
 stepper:
   step:
     type: single_module
