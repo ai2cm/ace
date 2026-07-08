@@ -149,10 +149,10 @@ class Samudra(torch.nn.Module):
                     Conv0(
                         a,
                         b,
-                        dilation=self.dilation[i],
-                        n_layers=self.n_layers[i],
+                        dilation=1,
+                        n_layers=1,
                         pad=self.pad,
-                        norm=self.norm,
+                        norm="layer",
                         norm_kwargs=self.norm_kwargs,
                         upscale_factor=self.upscale_factor,
                         checkpoint_strategy=self.checkpoint_strategy,

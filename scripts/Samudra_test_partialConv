@@ -2,7 +2,7 @@
 #SBATCH --job-name=Samudra_test_partialConv_seed711_2GPU
 #SBATCH --output=/scratch/cimes/wg4031/fme/train/Samudra_test_partialConv_seed711_2GPU/logs/slurm-%j.out
 #SBATCH --error=/scratch/cimes/wg4031/fme/train/Samudra_test_partialConv_seed711_2GPU/logs/slurm-%j.err
-#SBATCH --mem=250G
+#SBATCH --mem=180G
 #SBATCH --mail-user=wg4031@princeton.edu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=2
