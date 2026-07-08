@@ -303,6 +303,14 @@ stepper:
         - eastward_wind_5
         - eastward_wind_6
         - eastward_wind_7
+        - northward_wind_0
+        - northward_wind_1
+        - northward_wind_2
+        - northward_wind_3
+        - northward_wind_4
+        - northward_wind_5
+        - northward_wind_6
+        - northward_wind_7
         - LHTFLsfc
         - SHTFLsfc
         - PRATEsfc
