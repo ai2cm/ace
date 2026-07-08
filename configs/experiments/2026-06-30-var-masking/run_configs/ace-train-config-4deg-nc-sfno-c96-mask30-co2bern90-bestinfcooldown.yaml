@@ -15,9 +15,6 @@ train_aggregator:
 inference:
 - name: 7year_oosample_ensemble_varying_co2
   weight: 0.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 2534
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -113,9 +110,6 @@ inference:
       enabled: true
 - name: 7year_oosample_ensemble_constant_co2
   weight: 0.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 2534
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -138,9 +132,6 @@ inference:
   aggregator: *id002
 - name: 10year_insample_ensemble_varying_co2
   weight: 1.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -163,9 +154,6 @@ inference:
   aggregator: *id002
 - name: 10year_insample_ensemble_constant_co2
   weight: 1.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -188,9 +176,6 @@ inference:
   aggregator: *id002
 - name: weather_1994_ensemble_varying_co2
   weight: 0.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -249,9 +234,6 @@ inference:
       enabled: false
 - name: weather_1994_ensemble_constant_co2
   weight: 0.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
   n_ensemble_per_ic: 8
@@ -274,9 +256,6 @@ inference:
   aggregator: *id003
 - name: long_43year_ensemble_varying_co2
   weight: 0.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 15683
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1
@@ -321,9 +300,6 @@ inference:
       enabled: true
 - name: long_43year_constant_co2
   weight: 0.0
-  epochs:
-    start: 10
-    step: 10
   n_forward_steps: 15683
   forward_steps_in_memory: 73
   n_ensemble_per_ic: 1

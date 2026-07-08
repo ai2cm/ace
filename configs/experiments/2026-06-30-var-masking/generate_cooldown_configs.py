@@ -8,9 +8,8 @@ from the input-masking schedule.
 
 Two checkpoint variants are emitted per source config:
 
-  - ``-cooldown``:        loads ``training_checkpoints/pre_cooldown_ckpt.tar``
-                          (only exists if the training run set
-                          ``pre_cooldown_checkpoint_epoch``).
+  - ``-cooldown``:        loads ``training_checkpoints/ckpt.tar`` (the last
+                          training checkpoint, always written by training).
   - ``-bestinfcooldown``: loads ``training_checkpoints/best_inference_ckpt.tar``
                           (always written by training).
 
@@ -34,7 +33,7 @@ from generate_masking_configs import (
 )
 
 HERE = pathlib.Path(__file__).parent
-DEFAULT_CHECKPOINT_NAME = "training_checkpoints/pre_cooldown_ckpt.tar"
+DEFAULT_CHECKPOINT_NAME = "training_checkpoints/ckpt.tar"
 BEST_INFERENCE_CHECKPOINT_NAME = "training_checkpoints/best_inference_ckpt.tar"
 DEFAULT_EPOCHS = 8
 DEFAULT_LR = 0.0001
@@ -46,6 +45,21 @@ def source_config_to_run_name(config_filename: str) -> str:
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+
+
+def _clear_inference_epochs(cfg: dict) -> None:
+    """Run inference every cooldown epoch.
+
+    The base config schedules inference at ``epochs.start: 10`` (step 10), but a
+    cooldown only runs a handful of epochs, so that schedule never fires. Drop
+    the ``epochs`` key entirely; its default (empty ``Slice``) runs inference on
+    every epoch of the cooldown.
+    """
+    entries = cfg.get("inference", [])
+    if isinstance(entries, dict):
+        entries = [entries]
+    for entry in entries:
+        entry.pop("epochs", None)
 
 
 def _build_scheduler(epochs: int) -> dict:
@@ -151,6 +165,9 @@ def generate_cooldown_config(
     cfg["optimization"]["lr"] = lr
     cfg["optimization"]["scheduler"] = _build_scheduler(epochs)
     cfg["max_epochs"] = epochs
+
+    # Run inference every epoch of the shortened cooldown.
+    _clear_inference_epochs(cfg)
 
     _write_config(cfg, out_path, beaker_dataset_id, existing_only, wandb_run_names)
 
