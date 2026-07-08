@@ -365,7 +365,9 @@ def get_file_writer(**kwarg_updates):
         "lon": np.array([-30.0, -20.0, 0.0, 20.0, 30.0]),
     }
     raw_writer = MagicMock()
-    return FileWriter(config, raw_writer, full_coords=full_coords)
+    return FileWriter(
+        config._build_writer_params(), raw_writer, full_coords=full_coords
+    )
 
 
 def test_file_writer__subselect_data_limits_variables():

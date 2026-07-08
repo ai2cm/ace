@@ -171,8 +171,7 @@ def _get_test_yaml_files(
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     if nettype == "HEALPixUNet":
-        in_channels = len(in_variable_names)
-        conv_next_block = conv_next_block_config(in_channels=in_channels)
+        conv_next_block = conv_next_block_config()
         down_sampling_block = down_sampling_block_config()
         encoder = encoder_config(
             conv_next_block, down_sampling_block, n_channels=[16, 8, 4]
@@ -407,7 +406,7 @@ def _get_test_yaml_files(
                             ),
                         ),
                         ocean=OceanConfig(
-                            surface_temperature_name=in_variable_names[0],
+                            surface_temperature_name="surface_temperature",
                             ocean_fraction_name=mask_name,
                         ),
                         corrector=corrector_config,
