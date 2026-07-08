@@ -59,7 +59,7 @@ When amending a PR description, make sure it still reflects the change _from mai
 
 When making PRs, use the template that exists in the repo under .github/pull_request_template.md, if one exists.
 
-The PR description becomes the squash-and-merge commit message, so keep it self-contained and describe the final state of the change from main. Keep PR-process and agent-iteration content out of it: commit-by-commit narratives (stale after squash), "review response" notes, stacking/rebase instructions, and review attributions belong in PR comments, not the description. Prefer posting such context as a PR comment rather than folding it into the description.
+The PR description becomes the squash-and-merge commit message, so keep it self-contained and describe the final state of the change from main. PR-process information belongs in PR comments, not the description.
 
 ### Commit/PR process
 
