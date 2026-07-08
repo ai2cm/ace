@@ -120,7 +120,6 @@ stepper:
         moisture_budget_correction: advection_and_precipitation
         total_energy_budget_correction:
           method: constant_temperature
-        clip_frozen_precipitation: true
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1

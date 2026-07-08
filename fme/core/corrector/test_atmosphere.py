@@ -293,33 +293,64 @@ def test_clip_frozen_precipitation():
     )
     # the resulting frozen precip never exceeds total precip
     assert torch.all(fixed_data["total_frozen_precipitation_rate"] <= data["PRATEsfc"])
+    # when frozen precip is not predicted, the clip is a no-op
+    assert _clip_frozen_precipitation({"PRATEsfc": data["PRATEsfc"]}) == {}
 
 
-def test_clip_frozen_precipitation_corrector_integration():
+def test_moisture_budget_correction_clips_frozen_precipitation():
     torch.manual_seed(0)
     tensor_shape = (1, 5, 5)
-    config = AtmosphereCorrectorConfig(clip_frozen_precipitation=True)
-    _, _, _, vertical_coord = _get_corrector_test_input(tensor_shape)
-    ops = LatLonOperations(torch.ones(size=(tensor_shape[-2], 1)))
-    corrector = config._build(ops, vertical_coord, datetime.timedelta(seconds=3600))
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    # frozen precip exceeds total precip (PRATEsfc ~ 1e-5) before correction
     gen_data = {
-        "PRATEsfc": torch.rand(size=tensor_shape),
-        "total_frozen_precipitation_rate": 2.0 * torch.rand(size=tensor_shape),
+        **gen_data,
+        "total_frozen_precipitation_rate": 1e-4 + 1e-4 * torch.rand(size=tensor_shape),
     }
-    # sanity check that some frozen precip exceeds total precip before correction
     assert torch.any(gen_data["total_frozen_precipitation_rate"] > gen_data["PRATEsfc"])
-    corrected = corrector({}, gen_data, {}, None).corrected
+    config = AtmosphereCorrectorConfig(
+        zero_global_mean_moisture_advection=True,
+        moisture_budget_correction="advection_and_precipitation",
+    )
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    corrector = config._build(ops, vertical_coord, datetime.timedelta(seconds=3600))
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    # clipped against the corrected total precipitation rate
     assert torch.all(
         corrected["total_frozen_precipitation_rate"] <= corrected["PRATEsfc"]
     )
 
 
-def test_clip_frozen_precipitation_runs_before_energy_correction():
+def test_moisture_budget_correction_no_clip_without_frozen_precipitation():
+    # When frozen precip is not predicted, the moisture budget correction runs
+    # without touching (or requiring) it.
+    torch.manual_seed(0)
+    tensor_shape = (1, 5, 5)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    assert "total_frozen_precipitation_rate" not in gen_data
+    config = AtmosphereCorrectorConfig(
+        zero_global_mean_moisture_advection=True,
+        moisture_budget_correction="advection_and_precipitation",
+    )
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    corrector = config._build(ops, vertical_coord, datetime.timedelta(seconds=3600))
+    result = corrector(input_data, gen_data, forcing_data, None)
+    assert "total_frozen_precipitation_rate" not in result.modified_names
+
+
+def test_frozen_precipitation_clip_runs_before_energy_correction():
     """Energy conservation must hold with respect to the clipped frozen
     precipitation. Frozen precipitation contributes to the surface energy flux
-    via the latent heat of freezing, so the clip must run before the energy
-    budget correction; otherwise the enforced energy balance is broken by the
-    subsequent clip. This fails if the clip runs after the energy correction.
+    via the latent heat of freezing, so the clip (performed by the moisture
+    budget correction) must run before the energy budget correction; otherwise
+    the enforced energy balance is broken by the subsequent clip.
     """
     torch.manual_seed(0)
     tensor_shape = (1, 5, 5)
@@ -337,7 +368,8 @@ def test_clip_frozen_precipitation_runs_before_energy_correction():
         "total_frozen_precipitation_rate": 1e-4 + 1e-4 * torch.rand(size=tensor_shape),
     }
     config = AtmosphereCorrectorConfig(
-        clip_frozen_precipitation=True,
+        zero_global_mean_moisture_advection=True,
+        moisture_budget_correction="advection_and_precipitation",
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature"),
     )
     corrector = config._build(ops, vertical_coord, timestep)
@@ -643,12 +675,12 @@ def _build_full_atmosphere_corrector(tensor_shape):
         moisture_budget_correction="advection_and_precipitation",
         force_positive_names=["PRATEsfc"],
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
-        clip_frozen_precipitation=True,
     )
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
         tensor_shape
     )
-    # frozen precip exceeds total precip so the clip has an effect.
+    # frozen precip exceeds total precip so the moisture budget correction's
+    # frozen-precipitation clip has an effect.
     gen_data["total_frozen_precipitation_rate"] = 1e-4 + 1e-4 * torch.rand(
         size=tensor_shape
     )
@@ -672,7 +704,6 @@ def test_atmosphere_corrector_config_fields_are_exercised():
         "force_positive_names",
         "total_energy_budget_correction",
         "keep_gradient_through_clamps",
-        "clip_frozen_precipitation",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}
