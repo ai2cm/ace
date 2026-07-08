@@ -1,0 +1,213 @@
+experiment_dir: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield/downscaled_tc_tracks_15
+model:
+  denoising_expert_configs:
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_low_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 0.005
+      sigma_max: 200.0
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_high_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 200.0
+      sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+    - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
+      file_pattern: output_6hourly_predictions_ic0000.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 2
+  batch_size: 1
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 16
+  lon_extent:
+    start: 0
+    stop: 16
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
+events:
+- name: tc_014_20140308T12
+  n_samples: 1
+  date: 2014-03-08T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -15.462551
+    stop: -11.462551
+  lon_extent:
+    start: 149.5
+    stop: 153.5
+- name: tc_014_20140309T12
+  n_samples: 1
+  date: 2014-03-09T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 151.5
+    stop: 155.5
+- name: tc_014_20140309T18
+  n_samples: 1
+  date: 2014-03-09T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 152.5
+    stop: 156.5
+- name: tc_014_20140310T00
+  n_samples: 1
+  date: 2014-03-10T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 153.5
+    stop: 157.5
+- name: tc_014_20140310T06
+  n_samples: 1
+  date: 2014-03-10T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 154.5
+    stop: 158.5
+- name: tc_014_20140310T12
+  n_samples: 1
+  date: 2014-03-10T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 154.5
+    stop: 158.5
+- name: tc_014_20140310T18
+  n_samples: 1
+  date: 2014-03-10T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -13.4681
+    stop: -9.4681
+  lon_extent:
+    start: 155.5
+    stop: 159.5
+- name: tc_014_20140311T00
+  n_samples: 1
+  date: 2014-03-11T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -13.4681
+    stop: -9.4681
+  lon_extent:
+    start: 156.5
+    stop: 160.5
+- name: tc_014_20140311T06
+  n_samples: 1
+  date: 2014-03-11T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 156.5
+    stop: 160.5
+- name: tc_014_20140311T12
+  n_samples: 1
+  date: 2014-03-11T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 157.5
+    stop: 161.5
+- name: tc_014_20140311T18
+  n_samples: 1
+  date: 2014-03-11T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.465325
+    stop: -10.465325
+  lon_extent:
+    start: 157.5
+    stop: 161.5
+- name: tc_014_20140312T06
+  n_samples: 1
+  date: 2014-03-12T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -15.462551
+    stop: -11.462551
+  lon_extent:
+    start: 156.5
+    stop: 160.5
+- name: tc_014_20140312T18
+  n_samples: 1
+  date: 2014-03-12T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.459777000000003
+    stop: -12.459777
+  lon_extent:
+    start: 155.5
+    stop: 159.5
+- name: tc_014_20140313T12
+  n_samples: 1
+  date: 2014-03-13T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.457003
+    stop: -13.457003
+  lon_extent:
+    start: 152.5
+    stop: 156.5
+- name: tc_014_20140313T18
+  n_samples: 1
+  date: 2014-03-13T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.454229
+    stop: -14.454229000000002
+  lon_extent:
+    start: 151.5
+    stop: 155.5
+- name: tc_014_20140314T06
+  n_samples: 1
+  date: 2014-03-14T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.454229
+    stop: -14.454229000000002
+  lon_extent:
+    start: 149.5
+    stop: 153.5
+- name: tc_014_20140314T12
+  n_samples: 1
+  date: 2014-03-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.451454
+    stop: -15.451453999999998
+  lon_extent:
+    start: 148.5
+    stop: 152.5
