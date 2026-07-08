@@ -1,0 +1,74 @@
+# Coupled ERA5+UFS evaluator with the ATMOSPHERE PRESCRIBED from reanalysis.
+#
+# Goal: isolate how the Samudra ocean responds to the *correct* atmospheric
+# forcings. The atmosphere network still runs each inner step, but its
+# ocean-forcing outputs (radiative/turbulent fluxes, precip, surface stresses)
+# are overwritten with the ERA5 reference values before being time-averaged and
+# passed to the ocean. This turns the run into an atmosphere-forced ocean rollout
+# within the coupled harness, directly comparable to the fully-coupled evaluator
+# (evaluator-ft-coupled-era5-ufs.yaml), which uses the same settings minus the
+# override below.
+#
+# The prescribed names are the atmosphere-side output names that map to the
+# ocean's atmosphere-forced inputs (respecting atmosphere_output_rename:
+# eastward_surface_wind_stress <- eastward_surface_stress, etc.). They are all in
+# the atmosphere out_names and present in the ERA5 forcing dataset.
+experiment_dir: /results
+n_coupled_steps: 2170  # 30 years with 5-day ocean steps
+coupled_steps_in_memory: 10
+checkpoint_path: /ckpt.tar
+atmosphere_stepper_override:
+  prescribed_prognostic_names:
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - total_frozen_precipitation_rate
+    - eastward_surface_stress
+    - northward_surface_stress
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-ufs
+  entity: ai2cm
+loader:
+  num_data_workers: 4
+  dataset:
+    ocean:
+      data_path: /climate-default
+      file_pattern: 2026-06-03-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /climate-default
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+  start_indices:
+    times:
+    - '1994-01-03T12:00:00'
+aggregator:
+  log_zonal_mean_images: true
+  log_histograms: true
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+    # near-surface ocean variables
+    - sst
+    - ssu
+    - ssv
+    - zos
+    - so_0
+    - thetao_0
+    - uo_0
+    - vo_0
+    # sea ice variables
+    - ocean_sea_ice_fraction
+    - sea_ice_volume
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
