@@ -633,8 +633,9 @@ def step_with_adjustments(
             ``global_mean_removal.forward_transform``.
         stepper_state: Per-sample state carried across step calls. The
             corrector's slice (``stepper_state.corrector_state``) is passed to
-            the corrector and any updates are written back into a returned
-            ``StepperState``. Pass-through unchanged when no corrector is set.
+            the corrector and any updates are written back into the returned
+            ``StepperState``; the other fields (e.g. ``random_state``) pass
+            through unchanged. Pass-through unchanged when no corrector is set.
 
     Returns:
         A ``StepOutput`` carrying the denormalized data at the next time step,
@@ -674,7 +675,16 @@ def step_with_adjustments(
             delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
         )
         if result.corrector_state is not None:
-            stepper_state = StepperState(corrector_state=result.corrector_state)
+            # Preserve the incoming state's other fields (e.g. random_state)
+            # rather than rebuilding from scratch, so StepperState stays
+            # coherent across step calls.
+            stepper_state = (
+                StepperState(corrector_state=result.corrector_state)
+                if stepper_state is None
+                else dataclasses.replace(
+                    stepper_state, corrector_state=result.corrector_state
+                )
+            )
 
     # The post-corrector adjustments below run after the corrector and are
     # excluded from the diagnostics. Their written names must stay disjoint from

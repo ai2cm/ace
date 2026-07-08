@@ -1,15 +1,18 @@
 import abc
 import logging
 import re
-from collections.abc import Callable
 from typing import Any, TypeVar
 
 import torch
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMasking
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.spatial_masking import (
+    NullSpatialMasking,
+    SpatialMasking,
+    StaticSpatialMasking,
+)
+from fme.core.typing_ import TensorMapping
 
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
 
@@ -27,7 +30,7 @@ class SpatialMaskProviderABC(abc.ABC):
     def update(self: SelfType, other: SelfType) -> None: ...
 
     @abc.abstractmethod
-    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+    def build_output_spatial_masker(self) -> SpatialMasking: ...
 
     @abc.abstractmethod
     def localize(self: SelfType) -> SelfType:
@@ -54,7 +57,7 @@ class _NullSpatialMaskProvider(SpatialMaskProviderABC):
                 f"Attempted to update NullSpatialMaskProvider with non-null {other}"
             )
 
-    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]:
+    def build_output_spatial_masker(self) -> SpatialMasking:
         return NullSpatialMasking()
 
     def get_state(self) -> dict[str, Any]:
@@ -102,7 +105,7 @@ class SpatialMaskProvider(SpatialMaskProviderABC):
                     "to start with the string 'mask_'."
                 )
 
-    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]:
+    def build_output_spatial_masker(self) -> SpatialMasking:
         """
         Returns a StaticSpatialMasking object that fills in NaNs outside of mask
         valid points, i.e. where the mask value is 0.
