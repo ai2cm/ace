@@ -10,6 +10,7 @@ import xarray as xr
 import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
+from fme.ace.stepper import StepperOverrideConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
@@ -28,6 +29,7 @@ from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
     StandaloneComponentCheckpointsConfig,
     StandaloneComponentConfig,
+    load_stepper_config,
     main,
 )
 from fme.coupled.stepper import CoupledStepperConfig
@@ -37,7 +39,11 @@ DIR = pathlib.Path(__file__).parent
 
 
 def test_standalone_checkpoints_config_init_args():
-    ignore_args = ["parameter_init"]
+    ignore_args = [
+        "parameter_init",
+        "ocean_stepper_override",
+        "atmosphere_stepper_override",
+    ]
     stepper_config_init_args = set(
         inspect.signature(CoupledStepperConfig.__init__).parameters.keys()
     ).difference(ignore_args)
@@ -45,11 +51,53 @@ def test_standalone_checkpoints_config_init_args():
         inspect.signature(
             StandaloneComponentCheckpointsConfig.__init__
         ).parameters.keys()
-    )
+    ).difference(ignore_args)
     assert init_args == stepper_config_init_args, (
         "StandaloneComponentCheckpointsConfig should have the same init args as "
         "CoupledStepperConfig. Were new args added?"
     )
+
+
+def test_load_stepper_config_ocean_prescribed_override_updates_forcing_window(
+    tmp_path: pathlib.Path,
+):
+    """
+    Coupled ckpt without prescribed names + override refreshes ocean forcing window.
+    """
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_fraction", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    stepper_data_dir = tmp_path / "stepper_data"
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=2,
+        n_initial_conditions=1,
+        data_dir=stepper_data_dir,
+    )
+    ckpt = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_fraction",
+    )
+    assert isinstance(ckpt, str)
+
+    cfg_default = load_stepper_config(ckpt)
+    assert "thetao_18" not in cfg_default.ocean_forcing_window_names
+
+    override = StepperOverrideConfig(prescribed_prognostic_names=["thetao_18"])
+    cfg_override = load_stepper_config(ckpt, ocean_stepper_override=override)
+    assert "thetao_18" in cfg_override.ocean_forcing_window_names
+    ocean_reqs = cfg_override.get_forcing_window_data_requirements(1).ocean_requirements
+    assert "thetao_18" in ocean_reqs.names
 
 
 def save_coupled_stepper(
