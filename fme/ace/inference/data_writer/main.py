@@ -20,6 +20,7 @@ from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
+from .step_diagnostics import STEP_DIAGNOSTICS_LABEL, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
@@ -39,6 +40,10 @@ class DataWriterConfig:
             containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
+        save_step_diagnostics: Whether to enable writing of a netCDF file
+            containing per-step diagnostics of the prediction (currently the
+            corrector's per-step correction delta). No file content is
+            written when no corrector modified anything.
         names: Names of variables to save in the prediction and monthly
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
@@ -49,13 +54,20 @@ class DataWriterConfig:
 
     save_prediction_files: bool = True
     save_monthly_files: bool = True
+    save_step_diagnostics: bool = False
     names: Sequence[str] | None = None
     time_coarsen: TimeCoarsenConfig | None = None
     files: list[FileWriterConfig] | None = None
 
     def __post_init__(self):
         if (
-            not any([self.save_prediction_files, self.save_monthly_files])
+            not any(
+                [
+                    self.save_prediction_files,
+                    self.save_monthly_files,
+                    self.save_step_diagnostics,
+                ]
+            )
             and self.names is not None
         ):
             warnings.warn(
@@ -136,7 +148,37 @@ class DataWriterConfig:
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
+            step_diagnostics_writer=self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            ),
         )
+
+    def _build_step_diagnostics_writer(
+        self,
+        experiment_dir: str,
+        initial_condition_times: npt.NDArray[cftime.datetime],
+        variable_metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
+    ) -> StepDiagnosticsWriter | None:
+        if not self.save_step_diagnostics:
+            return None
+        writer: RawDataWriter | TimeCoarsen = RawDataWriter(
+            path=experiment_dir,
+            label=STEP_DIAGNOSTICS_LABEL,
+            initial_condition_times=initial_condition_times,
+            save_names=self.names,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
+        if self.time_coarsen is not None:
+            writer = self.time_coarsen.build(writer)
+        return StepDiagnosticsWriter(writer)
 
     def build(
         self,
@@ -195,6 +237,13 @@ class DataWriterConfig:
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
+            step_diagnostics_writer=self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            ),
         )
 
 
@@ -206,6 +255,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None,
     ):
         """
         Args:
@@ -215,8 +265,13 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
+            step_diagnostics_writer: Writer for per-step diagnostics of the
+                prediction, or None to not write them. Held separately from
+                the paired sub-writers: it consumes only the prediction's
+                diagnostics, not the target/prediction pair.
         """
         self._writers = writers
+        self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.coords = coords
         self.variable_metadata = variable_metadata
@@ -254,6 +309,13 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 prediction=dict(batch.prediction),
                 batch_time=batch.time,
             )
+        if (
+            self._step_diagnostics_writer is not None
+            and batch.step_diagnostics is not None
+        ):
+            self._step_diagnostics_writer.append_batch(
+                batch.step_diagnostics.to_dataset(batch.time)
+            )
 
     def flush(self):
         """
@@ -261,10 +323,14 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
             writer.finalize()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.finalize()
 
 
 def _write(
@@ -324,6 +390,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None,
     ):
         """
         Args:
@@ -335,8 +402,13 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
+            step_diagnostics_writer: Writer for per-step diagnostics of the
+                prediction, or None to not write them. Held separately from
+                the sub-writers: it consumes only the prediction's
+                diagnostics.
         """
         self._writers = writers
+        self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.variable_metadata = variable_metadata
         self.dataset_metadata = dataset_metadata
@@ -357,6 +429,13 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             labels=batch.labels,
         )
         self._append_batch(unpaired_batch)
+        if (
+            self._step_diagnostics_writer is not None
+            and batch.step_diagnostics is not None
+        ):
+            self._step_diagnostics_writer.append_batch(
+                batch.step_diagnostics.to_dataset(batch.time)
+            )
 
     def _append_batch(self, batch: BatchData):
         for writer in self._writers:
@@ -371,10 +450,14 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
             writer.finalize()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
         _write(

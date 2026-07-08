@@ -25,11 +25,7 @@ from fme.ace.stepper.parameter_init import (
     null_weights_and_history,
 )
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
-from fme.core.coordinates import (
-    NullPostProcessFn,
-    SerializableVerticalCoordinate,
-    VerticalCoordinate,
-)
+from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
@@ -49,7 +45,11 @@ from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.rand import use_generator
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
+from fme.core.spatial_masking import (
+    NullSpatialMasking,
+    SpatialMasking,
+    StaticSpatialMaskingConfig,
+)
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
@@ -622,17 +622,17 @@ class StepperConfig:
                 means=step.normalizer.means,
             )
         try:
-            output_process_func = (
+            output_masking: SpatialMasking = (
                 dataset_info.spatial_mask_provider.build_output_spatial_masker()
             )
         except MissingDatasetInfo:
-            output_process_func = NullPostProcessFn()
+            output_masking = NullSpatialMasking()
         return Stepper(
             config=self,
             step=step,
             dataset_info=dataset_info,
             input_process_func=input_masking,
-            output_process_func=output_process_func,
+            output_masking=output_masking,
             derive_func=derive_func,
             parameter_initializer=parameter_initializer,
             training_history=training_history,
@@ -813,7 +813,7 @@ class Stepper:
         step: StepABC,
         dataset_info: DatasetInfo,
         input_process_func: Callable[[TensorMapping], TensorDict],
-        output_process_func: Callable[[TensorMapping], TensorDict],
+        output_masking: SpatialMasking,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         parameter_initializer: ParameterInitializer,
         training_history: TrainingHistory | None = None,
@@ -823,8 +823,8 @@ class Stepper:
             config: The configuration.
             step: The step object.
             dataset_info: Information about dataset used for training.
-            output_process_func: Function to post-process the output of the step
-                function.
+            output_masking: Spatial masking applied to the step output and to
+                the corrector diagnostics carried alongside it.
             derive_func: Function to compute derived variables.
             input_process_func: Optional function for processing inputs and next-step
                 inputs before passing them to the step object, e.g., by masking
@@ -837,7 +837,7 @@ class Stepper:
         self._step_obj = step
         self._dataset_info = dataset_info
         self._derive_func = derive_func
-        self._output_process_func = output_process_func
+        self._output_masking = output_masking
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
@@ -1053,7 +1053,8 @@ class Stepper:
         Returns:
             A ``StepOutput`` carrying the denormalized data at the next time
             step, the per-sample state to thread into the next call (or
-            ``None``), and the corrector's per-variable correction diagnostics.
+            ``None``), and the corrector's per-variable correction diagnostics,
+            spatially masked consistently with the output.
         """
         args = args.apply_input_process_func(self._input_process_func)
         random_state = (
@@ -1062,9 +1063,11 @@ class Stepper:
         with use_generator(None if random_state is None else random_state.generator):
             result = self._step_obj.step(args=args, wrapper=wrapper)
         return StepOutput(
-            output=self._output_process_func(result.output),
+            output=self._output_masking(result.output),
             stepper_state=result.stepper_state,
-            corrector_diagnostics=result.corrector_diagnostics,
+            corrector_diagnostics=result.corrector_diagnostics.apply_output_masking(
+                self._output_masking
+            ),
         )
 
     def get_prediction_generator(
@@ -1237,6 +1240,11 @@ class Stepper:
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
         prognostic_state = data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        # Attach the stacked per-step diagnostics only at this final
+        # reconstruction, after the derived-variables prepend/remove dance:
+        # here the data and the series are both n_forward_steps long and
+        # time-aligned, so the diagnostics never pass through a time-changing
+        # BatchData method (which would raise).
         data = BatchData.new_on_device(
             data=data.data,
             time=data.time,
@@ -1244,6 +1252,7 @@ class Stepper:
             labels=data.labels,
             n_ensemble=data.n_ensemble,
             stepper_state=data.stepper_state,
+            step_diagnostics=StepOutput.stack_diagnostics(output_list),
         )
         return data, prognostic_state
 

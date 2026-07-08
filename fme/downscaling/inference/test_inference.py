@@ -45,6 +45,7 @@ def mock_model():
     model = MagicMock()
     model.coarse_shape = (16, 16)
     model.fine_shape = (32, 32)
+    model.with_rolled_lon.return_value = model
     return model
 
 
@@ -60,6 +61,14 @@ def mock_output_target():
     gridded_data.loader = []
     target.data = gridded_data
     return target
+
+
+def set_coarse_extent_coords(output, input_shape):
+    """Set the full-extent coarse coords _get_generation_model reads off output."""
+    output.data.coarse_extent_latlon_coords = LatLonCoordinates(
+        lat=torch.arange(input_shape[0], dtype=torch.float32),
+        lon=torch.arange(input_shape[1], dtype=torch.float32),
+    )
 
 
 def get_static_inputs(shape=(16, 16)):
@@ -101,10 +110,8 @@ def test_get_generation_model_exact_match(mock_model, mock_output_target):
         outputs=[mock_output_target],
     )
 
-    result = downscaler._get_generation_model(
-        input_shape=(16, 16),
-        output=mock_output_target,
-    )
+    set_coarse_extent_coords(mock_output_target, (16, 16))
+    result = downscaler._get_generation_model(output=mock_output_target)
 
     assert result is mock_model
 
@@ -124,11 +131,9 @@ def test_get_generation_model_raises_when_domain_too_small(
         outputs=[mock_output_target],
     )
 
+    set_coarse_extent_coords(mock_output_target, input_shape)
     with pytest.raises(ValueError):
-        downscaler._get_generation_model(
-            input_shape=input_shape,
-            output=mock_output_target,
-        )
+        downscaler._get_generation_model(output=mock_output_target)
 
 
 def test_get_generation_model_creates_patch_predictor_when_needed(
@@ -151,10 +156,8 @@ def test_get_generation_model_creates_patch_predictor_when_needed(
         outputs=[mock_output_target],
     )
 
-    model = downscaler._get_generation_model(
-        input_shape=(32, 32),
-        output=mock_output_target,
-    )
+    set_coarse_extent_coords(mock_output_target, (32, 32))
+    model = downscaler._get_generation_model(output=mock_output_target)
 
     assert isinstance(model, PatchPredictor)
     assert model.coarse_horizontal_overlap == 2
@@ -175,11 +178,9 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
         outputs=[mock_output_target],
     )
 
+    set_coarse_extent_coords(mock_output_target, (32, 32))
     with pytest.raises(ValueError):
-        downscaler._get_generation_model(
-            input_shape=(32, 32),
-            output=mock_output_target,
-        )
+        downscaler._get_generation_model(output=mock_output_target)
 
 
 def test_run_target_generation_skips_padding_items(
@@ -202,6 +203,10 @@ def test_run_target_generation_skips_padding_items(
     mock_work_item.batch.lat_interval = ClosedInterval(1.0, 8.0)
     mock_work_item.batch.lon_interval = ClosedInterval(1.0, 8.0)
     mock_output_target.data.get_generator.return_value = iter([mock_work_item])
+    mock_output_target.data.coarse_extent_latlon_coords = LatLonCoordinates(
+        lat=torch.arange(16, dtype=torch.float32),
+        lon=torch.arange(16, dtype=torch.float32),
+    )
 
     mock_model.downscale_factor = 2
     mock_model.static_inputs.coords.lat = torch.arange(0, 18).float()
