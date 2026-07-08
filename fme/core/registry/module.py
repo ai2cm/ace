@@ -203,6 +203,7 @@ class ModuleSelector:
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
+            in_names=in_names,
         )
         return Module(module, label_encoding)
 
