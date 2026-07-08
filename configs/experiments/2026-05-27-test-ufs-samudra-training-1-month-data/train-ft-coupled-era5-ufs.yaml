@@ -106,19 +106,18 @@ stepper_training:
   ocean:
     parameter_init:
       weights_path: /ocean_ckpt.tar
-    loss_contributions:
-      weight: 1.0
-      n_steps:
-        outcomes:
-        - steps: 0
-          probability: 0.1
-        - steps: 1
-          probability: 0.3
-        - steps: 2
-          probability: 0.3
-        - steps: 4
-          probability: 0.3
-      optimize_last_step_only: true
+    loss_weight: 1.0
+    n_steps:
+      outcomes:
+      - steps: 0
+        probability: 0.1
+      - steps: 1
+        probability: 0.3
+      - steps: 2
+        probability: 0.3
+      - steps: 4
+        probability: 0.3
+    optimize_last_step_only: true
     loss:
       type: EnsembleLoss
       kwargs:
@@ -127,23 +126,22 @@ stepper_training:
   atmosphere:
     parameter_init:
       weights_path: /atmos_ckpt.tar
-    loss_contributions:
-      weight: 1.0
-      n_steps:
-        outcomes:
-        - steps: 0
-          probability: 0.025
-        - steps: 1
-          probability: 0.29
-        - steps: 2
-          probability: 0.29
-        - steps: 4
-          probability: 0.29
-        - steps: 21
-          probability: 0.1
-        - steps: 41
-          probability: 0.05
-      optimize_last_step_only: true
+    loss_weight: 1.0
+    n_steps:
+      outcomes:
+      - steps: 0
+        probability: 0.025
+      - steps: 1
+        probability: 0.29
+      - steps: 2
+        probability: 0.29
+      - steps: 4
+        probability: 0.29
+      - steps: 21
+        probability: 0.1
+      - steps: 41
+        probability: 0.05
+    optimize_last_step_only: true
     loss:
       type: EnsembleLoss
       kwargs:
