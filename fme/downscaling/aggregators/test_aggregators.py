@@ -5,10 +5,12 @@ import wandb
 import xarray as xr
 
 from fme.core import get_device, metrics
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.data import BatchData, BatchedLatLonCoordinates, PairedBatchData
+from fme.downscaling.typing_ import FineResCoarseResPair
 
 from .. import metrics_and_maths
 from ..models import ModelOutputs
@@ -26,6 +28,7 @@ from .main import (
     _get_spectrum_metrics,
 )
 from .no_target import NoTargetAggregator, TimeSeriesAggregator
+from .sample import SampleAggregator
 from .shape_helpers import (
     _check_all_datasets_compatible_sample_dim,
     _check_batch_dims_for_recording,
@@ -447,6 +450,26 @@ def test_upsample_tensor():
 def test_get_complement_percentile_prefix(prefix, expected):
     result = _get_complement_percentile_prefix(prefix)
     assert result == expected
+
+
+def test_sample_aggregator_get_dataset_preserves_sample_dim_for_one_sample():
+    n_lat, n_lon = 4, 5
+    fine = LatLonCoordinates(
+        lat=torch.linspace(0.0, 1.0, n_lat),
+        lon=torch.linspace(0.0, 1.0, n_lon),
+    )
+    coarse = LatLonCoordinates(
+        lat=torch.linspace(0.0, 1.0, n_lat // 2),
+        lon=torch.linspace(0.0, 1.0, n_lon // 2),
+    )
+    aggregator = SampleAggregator(
+        coarse={"x": torch.zeros(1, n_lat // 2, n_lon // 2)},
+        latlon_coordinates=FineResCoarseResPair(fine=fine, coarse=coarse),
+    )
+    aggregator._gathered_samples = {"x": torch.randn(1, 1, n_lat, n_lon)}
+    ds = aggregator.get_dataset()
+    assert ds["x_predicted"].dims == ("sample", "lat", "lon")
+    assert ds["x_predicted"].sizes["sample"] == 1
 
 
 def test_get_channel_mean_scalar_metric_excludes_matching_maps():
