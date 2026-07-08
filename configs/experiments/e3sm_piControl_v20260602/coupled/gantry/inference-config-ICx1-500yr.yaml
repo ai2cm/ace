@@ -7,17 +7,19 @@ data_writer:
     save_prediction_files: false
     save_monthly_files: true
   atmosphere:
-    save_prediction_files: true
-    prediction_names:
-    - surface_precipitation_rate
-    - frozen_precipitation_rate
-    - FLUT
-    - Tat2m
-    - Uat10m
-    - Vat10m
-    time_coarsen:
-      coarsen_factor: 4
+    save_prediction_files: false
     save_monthly_files: true
+    files:
+    - label: daily
+      names:
+      - surface_precipitation_rate
+      - frozen_precipitation_rate
+      - FLUT
+      - Tat2m
+      - Uat10m
+      - Vat10m
+      time_coarsen:
+        coarsen_factor: 4
 logging:
   log_to_screen: true
   log_to_wandb: true
