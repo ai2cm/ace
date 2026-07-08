@@ -1,46 +1,40 @@
 import dataclasses
+from collections.abc import Sequence
+from typing import Literal
 
 import torch.nn as nn
 
 from fme.ace.models.healpix.healpix_decoder import UNetDecoderConfig
 from fme.ace.models.healpix.healpix_encoder import UNetEncoderConfig
-from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
+from fme.ace.models.healpix.healpix_unet import HEALPixUNet
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 
 
-@ModuleSelector.register("HEALPixRecUNet")
+@ModuleSelector.register("HEALPixUNet")
 @dataclasses.dataclass
-class HEALPixRecUNetBuilder(ModuleConfig):
+class HEALPixUNetBuilder(ModuleConfig):
     """
-    Configuration for the HEALPixRecUNet architecture used in DLWP.
+    Configuration for the HEALPix UNet (feed-forward encoder–decoder stack).
+
+    Time stepping, multi-step inputs, residual prediction, and rollout live in
+    the stepper, not in this module.
 
     Parameters:
-        presteps: Number of pre-steps, by default 1.
-        input_time_size: Input time dimension, by default 0.
-        output_time_size: Output time dimension, by default 0.
-        delta_time: Delta time interval, by default "6h".
-        reset_cycle: Reset cycle interval, by default "24h".
-        input_channels: Number of input channels, by default 8.
-        output_channels: Number of output channels, by default 8.
-        n_constants: Number of constant input channels, by default 2.
-        decoder_input_channels: Number of input channels for the decoder, by default 1.
-        enable_nhwc: Flag to enable NHWC data format, by default False.
-        enable_healpixpad: Flag to enable HEALPix padding, by default False.
+        encoder: UNet encoder configuration.
+        decoder: UNet decoder configuration.
+        enable_nhwc: Use NHWC tensor layout for child modules.
+        hpx_padding_mode: HEALPix padding backend (``"earth2grid"``,
+            ``"karlbauer"``, ``"isolatitude"``). Default ``"earth2grid"``.
+        nside: Face height/width per UNet level (shallowest to deepest). Required for
+            ``isolatitude`` padding.
     """
 
     encoder: UNetEncoderConfig
     decoder: UNetDecoderConfig
-    presteps: int = 1
-    input_time_size: int = 0
-    output_time_size: int = 0
-    delta_time: str = "6h"
-    reset_cycle: str = "24h"
-    n_constants: int = 2
-    decoder_input_channels: int = 1
-    prognostic_variables: int = 7
     enable_nhwc: bool = False
-    enable_healpixpad: bool = False
+    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
+    nside: Sequence[int] | None = None
 
     def build(
         self,
@@ -49,7 +43,7 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         dataset_info: DatasetInfo,
     ) -> nn.Module:
         """
-        Builds the HEALPixRecUNet model.
+        Build a HEALPixUNet model.
 
         Args:
             n_in_channels: Number of input channels.
@@ -57,24 +51,16 @@ class HEALPixRecUNetBuilder(ModuleConfig):
             dataset_info: Information about the dataset.
 
         Returns:
-            HEALPixRecUNet model.
+            HEALPixUNet model.
         """
         if len(dataset_info.all_labels) > 0:
-            raise ValueError("HEALPixRecUNet does not support labels")
-        # Construct the HEALPixRecUNet module here using the parameters
-        return HEALPixRecUNet(
+            raise ValueError("HEALPixUNet does not support labels")
+        return HEALPixUNet(
             encoder=self.encoder,
             decoder=self.decoder,
             input_channels=n_in_channels,
             output_channels=n_out_channels,
-            prognostic_variables=self.prognostic_variables,
-            n_constants=self.n_constants,
-            decoder_input_channels=self.decoder_input_channels,
-            input_time_size=self.input_time_size,
-            output_time_size=self.output_time_size,
-            delta_time=self.delta_time,
-            reset_cycle=self.reset_cycle,
-            presteps=self.presteps,
             enable_nhwc=self.enable_nhwc,
-            enable_healpixpad=self.enable_healpixpad,
+            hpx_padding_mode=self.hpx_padding_mode,
+            nside=self.nside,
         )

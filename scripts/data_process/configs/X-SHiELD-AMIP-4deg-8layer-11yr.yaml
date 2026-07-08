@@ -1,9 +1,9 @@
 runs:
-  2025-09-11-X-SHiELD-AMIP-4deg-8layer-11yr: gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_45_by_90/control
+  2026-07-01-X-SHiELD-AMIP-4deg-8layer-11yr: gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_45_by_90/control
 data_output_directory: gs://vcm-ml-intermediate
 stats:
-  output_directory: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-8layer-11yr-stats
-  beaker_dataset: 2025-09-11-X-SHiELD-AMIP-4deg-8layer-11yr-stats
+  output_directory: gs://vcm-ml-intermediate/2026-07-01-X-SHiELD-AMIP-4deg-8layer-11yr-stats
+  beaker_dataset: 2026-07-01-X-SHiELD-AMIP-4deg-8layer-11yr-stats
   start_date: "2014-01-01T06:00:00"  # Ignore first year as spin-up.
   end_date: "2024-01-01T00:00:00"  # Span exactly 10 years (note datetime string indexing is inclusive).
   data_type: FV3GFS
@@ -26,6 +26,8 @@ dataset_computation:
     air_temperature_at_two_meters: TMP2m
     eastward_wind_at_ten_meters: UGRD10m
     northward_wind_at_ten_meters: VGRD10m
+    eastward_surface_wind_stress: eastward_surface_stress
+    northward_surface_wind_stress: northward_surface_stress
   variable_sources:
     fluxes_2d.zarr:
       - PRATEsfc
@@ -41,6 +43,8 @@ dataset_computation:
       - GRAUPELsfc
       - ICEsfc
       - SNOWsfc
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
     column_integrated_dynamical_fields.zarr:
       - precipitable_water_path
       - PRESsfc
@@ -97,6 +101,8 @@ dataset_computation:
       - h500
       - h850
       - h1000
+    PRMSL.zarr:
+      - PRMSL
     static.zarr:
       - HGTsfc
     scalar.zarr:
@@ -109,6 +115,9 @@ time_coarsen:
   stats_output_directory: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset-stats
   snapshot_names:
     - PRESsfc
+    - PRMSL
+    - eastward_surface_stress
+    - northward_surface_stress
     - Q2m
     - RH200
     - RH500
@@ -194,3 +203,5 @@ time_coarsen:
     - HGTsfc
     - grid_xt
     - grid_yt
+  input_time_slice:  # ensures coarsened data starts on 2013-01-02T00:00:00
+    start: "2013-01-01T06:00:00"

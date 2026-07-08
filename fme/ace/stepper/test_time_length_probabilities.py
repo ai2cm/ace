@@ -85,3 +85,39 @@ def test_time_length_schedule_sorts_milestones():
     assert schedule.get_value(0) == 1
     assert schedule.get_value(2) == 2
     assert schedule.get_value(5) == 3
+
+
+def test_seed_rng_produces_deterministic_sequence():
+    sampler = TimeLengthProbabilities(
+        [TimeLengthProbability(10, 0.5), TimeLengthProbability(20, 0.5)]
+    )
+    sampler.seed_rng(42)
+    first_run = [sampler.sample() for _ in range(10)]
+    sampler.seed_rng(42)
+    second_run = [sampler.sample() for _ in range(10)]
+    assert first_run == second_run
+
+
+def test_seed_rng_different_seeds_differ():
+    sampler = TimeLengthProbabilities(
+        [TimeLengthProbability(10, 0.5), TimeLengthProbability(20, 0.5)]
+    )
+    sampler.seed_rng(0)
+    first_run = [sampler.sample() for _ in range(20)]
+    sampler.seed_rng(1)
+    second_run = [sampler.sample() for _ in range(20)]
+    assert first_run != second_run
+
+
+def test_separate_instances_have_independent_rngs():
+    outcomes = [TimeLengthProbability(10, 0.5), TimeLengthProbability(20, 0.5)]
+    train_sampler = TimeLengthProbabilities(outcomes)
+    eval_sampler = TimeLengthProbabilities(list(outcomes))
+    train_sampler.seed_rng(42)
+    eval_sampler.seed_rng(42)
+    first_5 = [train_sampler.sample() for _ in range(5)]
+    [eval_sampler.sample() for _ in range(10)]  # interleaved eval draws
+    next_5 = [train_sampler.sample() for _ in range(5)]
+    eval_sampler.seed_rng(42)
+    expected_10 = [eval_sampler.sample() for _ in range(10)]
+    assert first_5 + next_5 == expected_10

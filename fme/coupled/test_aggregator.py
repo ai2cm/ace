@@ -13,7 +13,7 @@ from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.coupled.aggregator import InferenceEvaluatorAggregator, _combine_logs
+from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig, _combine_logs
 from fme.coupled.data_loading.batch_data import CoupledPairedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
@@ -152,26 +152,27 @@ def test_inference_logs_labels_exist(tmpdir):
         ),
         n_ensemble=3,
     )
-    monthly_ds = xr.open_dataset(
-        monthly_reference_data.data_filename, decode_timedelta=False
-    )
+    time_mean_path = str(pathlib.Path(tmpdir) / "time_mean_reference.nc")
+    reference_time_means.to_netcdf(time_mean_path)
     coord = LatLonCoordinates(lon=torch.arange(nx), lat=torch.arange(ny))
     info = CoupledDatasetInfo(
         ocean=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
         atmosphere=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
     )
     output_dir = pathlib.Path(tmpdir) / "output"
-    agg = InferenceEvaluatorAggregator(
+    aggregator_config = InferenceEvaluatorAggregatorConfig(
+        log_video=True,
+        log_zonal_mean_images=True,
+        time_mean_reference_data=time_mean_path,
+        monthly_reference_data=str(monthly_reference_data.data_filename),
+    )
+    agg = aggregator_config.build(
         dataset_info=info,
         n_timesteps_ocean=n_time,
         n_timesteps_atmosphere=n_time,
         initial_time=initial_time,
         ocean_normalize=lambda x: dict(x),
         atmosphere_normalize=lambda x: dict(x),
-        log_video=True,
-        log_zonal_mean_images=True,
-        time_mean_reference_data=reference_time_means,
-        monthly_reference_data=monthly_ds,
         output_dir=str(output_dir),
     )
 
@@ -217,12 +218,15 @@ def test_inference_logs_labels_exist(tmpdir):
         assert "mean/weighted_bias/ocean_var" in log
         assert "mean/weighted_bias/atmos_var" in log
 
-    summary_logs = agg.get_summary_logs()
+    summary = agg.get_summary()
+    summary_logs = summary.logs
     expected_keys = [
         # ocean-specific keys
         "annual/ocean_var",
         "annual/r2/ocean_var_gen",
         "annual/r2/ocean_var_target",
+        "annual/rmse/ocean_var",
+        "annual/crps/ocean_var",
         "mean_step_20/weighted_rmse/ocean_var",
         "mean_step_20_norm/weighted_rmse/ocean_var",
         "mean_step_20_norm/weighted_rmse/ocean_channel_mean",
@@ -250,6 +254,8 @@ def test_inference_logs_labels_exist(tmpdir):
         "annual/atmos_var",
         "annual/r2/atmos_var_gen",
         "annual/r2/atmos_var_target",
+        "annual/rmse/atmos_var",
+        "annual/crps/atmos_var",
         "mean_step_20/weighted_rmse/atmos_var",
         "mean_step_20_norm/weighted_rmse/atmos_var",
         "mean_step_20_norm/weighted_rmse/atmosphere_channel_mean",
@@ -279,6 +285,7 @@ def test_inference_logs_labels_exist(tmpdir):
 
     # Check that all expected keys exist in the logs and no extra keys are present
     assert set(summary_logs) == set(expected_keys)
+    assert summary.loss == summary_logs["time_mean_norm/rmse/channel_mean"]
 
     agg.flush_diagnostics()
     ocean_directory = output_dir / "ocean"

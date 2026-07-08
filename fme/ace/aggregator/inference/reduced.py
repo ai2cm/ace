@@ -14,6 +14,9 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
+from .build_context import MetricBuildContext, maybe_filter
+from .data import InferenceBatchData, MetricBuildResult
+
 
 @dataclasses.dataclass
 class _SeriesData:
@@ -250,20 +253,19 @@ class MeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
         if self._target == "norm":
-            target_data = target_data_norm
-            gen_data = gen_data_norm
+            target_data = data.target_norm
+            gen_data = data.prediction_norm
+        else:
+            target_data = data.target
+            gen_data = data.prediction
         for metric in self._variable_metrics.values():
             metric.record(
                 target=target_data,
                 gen=gen_data,
-                i_time_start=i_time_start,
+                i_time_start=data.i_time_start,
             )
         self._n_batches += 1
 
@@ -317,7 +319,7 @@ class MeanAggregator:
                 datum.var_name, VariableMetadata("unknown_units", datum.var_name)
             )
             data_vars[datum.get_xarray_key()] = xr.DataArray(
-                datum.data, dims=["forecast_step"], attrs=metadata._asdict()
+                datum.data, dims=["forecast_step"], attrs=metadata.as_attrs()
             )
 
         if len(data_vars.values()) > 0:
@@ -442,13 +444,12 @@ class SingleTargetMeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        data: TensorMapping,
-        i_time_start: int = 0,
+        data: InferenceBatchData,
     ):
         for metric in self._variable_metrics.values():
             metric.record(
-                tensors=data,
-                i_time_start=i_time_start,
+                tensors=data.prediction,
+                i_time_start=data.i_time_start,
             )
         self._n_batches += 1
 
@@ -502,9 +503,36 @@ class SingleTargetMeanAggregator:
                 datum.var_name, VariableMetadata("unknown_units", datum.var_name)
             )
             data_vars[datum.get_xarray_key()] = xr.DataArray(
-                datum.data, dims=["forecast_step"], attrs=metadata._asdict()
+                datum.data, dims=["forecast_step"], attrs=metadata.as_attrs()
             )
 
         n_forecast_steps = len(next(iter(data_vars.values())))
         coords = {"forecast_step": np.arange(n_forecast_steps)}
         return xr.Dataset(data_vars=data_vars, coords=coords)
+
+
+@dataclasses.dataclass
+class MeanMetricConfig:
+    variables: list[str] | None = None
+    name: str | None = None
+    target: Literal["denorm", "norm"] = "denorm"
+    enabled: bool = True
+    strict: bool = False
+
+    def __post_init__(self):
+        if self.name is None:
+            self.name = "mean_norm" if self.target == "norm" else "mean"
+
+    def get_name(self) -> str:
+        return self.name  # type: ignore[return-value]
+
+    def build(self, ctx: MetricBuildContext) -> MetricBuildResult:
+        agg = MeanAggregator(
+            ctx.ops,
+            target=self.target,
+            n_timesteps=ctx.n_timesteps,
+            variable_metadata=ctx.variable_metadata,
+        )
+        return MetricBuildResult(
+            aggregator=maybe_filter(agg, self.variables), time_series=agg
+        )

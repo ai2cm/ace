@@ -24,6 +24,20 @@ except ImportError:
 
 
 @dataclasses.dataclass
+class TimeSlice:
+    """
+    Optional time slice to apply before coarsening.
+
+    Attributes:
+        start: Start time (ISO 8601 string, e.g. "2000-01-01T00:00:00"). Inclusive.
+        stop: Stop time (ISO 8601 string). Inclusive.
+    """
+
+    start: str | None = None
+    stop: str | None = None
+
+
+@dataclasses.dataclass
 class TimeCoarsenConfig:
     """
     Configuration for time coarsening of a dataset.
@@ -58,6 +72,7 @@ class TimeCoarsenConfig:
     sharding: dict[str, int] | None = dataclasses.field(
         default_factory=lambda: {"time": 360}
     )
+    input_time_slice: TimeSlice = dataclasses.field(default_factory=TimeSlice)
 
 
 @dataclasses.dataclass
@@ -96,6 +111,17 @@ def _set_attributes(
         f"Dataset coarsened by a factor of {config.factor} "
         "by scripts/data_process/time_coarsen.py."
     )
+    if (
+        config.input_time_slice.start is not None
+        or config.input_time_slice.stop is not None
+    ):
+        history_entry += (
+            f" Input was time-subsetted to start={config.input_time_slice.start!r}, "
+            f"stop={config.input_time_slice.stop!r} prior to coarsening. "
+            "The time bounds of the resulting dataset will likely differ slightly "
+            "from this slice. Input subsetting is typically used to facilitate "
+            "aligning the times of different coarsened datasets."
+        )
     if "history" in attributes:
         attributes["history"] = attributes["history"] + " " + history_entry
     else:
@@ -108,6 +134,13 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
 
     Works with both eager (numpy) and lazy (dask) arrays.
     """
+    if (
+        config.input_time_slice.start is not None
+        or config.input_time_slice.stop is not None
+    ):
+        ds = ds.sel(
+            time=slice(config.input_time_slice.start, config.input_time_slice.stop)
+        )
     constant_names = [
         name
         for name in ds.data_vars

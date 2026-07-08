@@ -3,7 +3,7 @@ import dataclasses
 import itertools
 import warnings
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import torch
@@ -90,6 +90,7 @@ class Optimization(OptimizationABC):
         get_checkpoint: Callable[
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
+        max_grad_norm: float | None = None,
     ):
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
@@ -108,6 +109,8 @@ class Optimization(OptimizationABC):
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
+        self._max_grad_norm = max_grad_norm
+        self._last_grad_norm: float | None = None
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return self._get_checkpoint(step)(module)
@@ -176,6 +179,18 @@ class Optimization(OptimizationABC):
         else:
             loss.backward()
 
+    def _clip_gradients(self):
+        self._last_grad_norm = None
+        if self._max_grad_norm is not None:
+            if self.gscaler is not None:
+                self.gscaler.unscale_(self.optimizer)
+            params = itertools.chain.from_iterable(
+                group["params"] for group in self.optimizer.param_groups
+            )
+            self._last_grad_norm = torch.nn.utils.clip_grad_norm_(
+                params, self._max_grad_norm
+            ).item()
+
     def _step_weights(self):
         if self.gscaler is not None:
             self.gscaler.step(self.optimizer)
@@ -185,6 +200,7 @@ class Optimization(OptimizationABC):
     def step_weights(self):
         if not self._use_gradient_accumulation:
             self._backward(self._accumulated_loss)
+        self._clip_gradients()
         self._step_weights()
         self.optimizer.zero_grad()
         if self.gscaler is not None:
@@ -194,6 +210,52 @@ class Optimization(OptimizationABC):
     def set_learning_rate(self, lr: float):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr
+
+    def load_optimizer_state_for_finetuning(self, state: dict):
+        """Load per-parameter optimizer running state and grad scaler state from a
+        checkpoint for fine-tuning.
+
+        Restores per-parameter optimizer state (e.g. Adam moment estimates) and,
+        if available, the grad scaler state. The freshly-built optimizer's
+        per-group hyperparameters (``lr``, ``weight_decay``, ``betas``, ``eps``,
+        ...) from the current finetune config are authoritative; any per-group
+        hyperparameters from the checkpoint (including optimizer-type-specific
+        flags like ``fused``/``amsgrad`` and scheduler-injected keys like
+        ``initial_lr``) are discarded. Scheduler state is not restored, so the
+        configured schedule starts from scratch.
+
+        Args:
+            state: The optimization state dict as saved by ``get_state()``,
+                containing at least ``"optimizer_state_dict"``.
+
+        Raises:
+            ValueError: If the checkpoint's parameter groups are not
+                structurally compatible with the freshly-built optimizer
+                (e.g. different group count or per-group parameter count).
+        """
+        fresh_hparams = [
+            {k: v for k, v in g.items() if k != "params"}
+            for g in self.optimizer.param_groups
+        ]
+        try:
+            self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        except ValueError as e:
+            raise ValueError(
+                "Failed to load optimizer state for fine-tuning: parameter "
+                "groups in the checkpoint are incompatible with the "
+                "freshly-built optimizer (e.g. group count or per-group "
+                "parameter count mismatch). This typically indicates the "
+                "model architecture or trainable-parameter set changed "
+                "between the source checkpoint and the current run. "
+                f"Underlying error: {e}"
+            ) from e
+        for group, hparams in zip(self.optimizer.param_groups, fresh_hparams):
+            for k in list(group.keys()):
+                if k != "params":
+                    del group[k]
+            group.update(hparams)
+        if self.gscaler is not None and state.get("gscaler_state_dict") is not None:
+            self.gscaler.load_state_dict(state["gscaler_state_dict"])
 
     def get_state(self):
         """
@@ -242,6 +304,20 @@ class OptimizationConfig:
             to accumulate gradients differently when this is enabled, such as by
             detaching the computational graph between steps. See the documentation of
             your stepper (e.g. Stepper) for more details.
+        max_grad_norm: Maximum norm for gradient clipping. If None, no gradient
+            clipping is applied. When set, gradients are clipped to this global
+            norm before each optimizer step. Compatible with automatic mixed
+            precision. When use_gradient_accumulation is enabled, clipping is
+            applied to the full N-step accumulated gradient (i.e. the gradient
+            the optimizer sees), not per accumulation sub-step.
+        resume_optimizer_ckpt_path: Optional path to a training checkpoint
+            (``ckpt.tar``) whose per-parameter optimizer running state (e.g.
+            Adam moment estimates) and grad scaler state should be loaded into
+            the freshly-built ``Optimization`` for fine-tuning. The current
+            config's per-group hyperparameters (``lr``, ``weight_decay``,
+            ``betas``, ...) and scheduler are kept; only the running state is
+            transferred. Intended for non-resuming jobs; preemption resume in
+            the Trainer overrides this state via ``Optimization.load_state``.
     """
 
     optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
@@ -252,9 +328,11 @@ class OptimizationConfig:
         default_factory=lambda: SchedulerConfig()
     )
     use_gradient_accumulation: bool = False
+    max_grad_norm: float | None = None
     checkpoint: CheckpointConfig = dataclasses.field(
         default_factory=lambda: CheckpointConfig()
     )
+    resume_optimizer_ckpt_path: str | None = None
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
@@ -263,9 +341,16 @@ class OptimizationConfig:
                 DeprecationWarning,
             )
 
+    @property
+    def has_lr_schedule(self) -> bool:
+        """Whether a learning rate scheduler is configured."""
+        if isinstance(self.scheduler, SequentialSchedulerConfig):
+            return True
+        return self.scheduler.type is not None
+
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
-        return Optimization(
+        optimization = Optimization(
             parameters=parameters,
             optimizer_type=self.optimizer_type,
             lr=self.lr,
@@ -275,7 +360,13 @@ class OptimizationConfig:
             kwargs=self.kwargs,
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
+            max_grad_norm=self.max_grad_norm,
         )
+        if self.resume_optimizer_ckpt_path is not None:
+            _load_finetune_optimization_state(
+                optimization, self.resume_optimizer_ckpt_path
+            )
+        return optimization
 
     def get_state(self) -> Mapping[str, Any]:
         return dataclasses.asdict(self)
@@ -283,6 +374,47 @@ class OptimizationConfig:
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OptimizationConfig":
         return cls(**state)
+
+
+NestedTensor: TypeAlias = (
+    "torch.Tensor | dict[str, NestedTensor] | list[NestedTensor] | tuple[NestedTensor]"
+)
+
+
+def _tensors_to_device(obj: NestedTensor, device: torch.device):
+    """Recursively move all tensors in a nested dict/list to *device*."""
+    if isinstance(obj, torch.Tensor):
+        return obj.to(device)
+    elif isinstance(obj, dict):
+        return {k: _tensors_to_device(v, device) for k, v in obj.items()}
+    elif isinstance(obj, list | tuple):
+        return type(obj)(_tensors_to_device(v, device) for v in obj)
+    return obj
+
+
+def _load_finetune_optimization_state(optimization: Optimization, checkpoint_path: str):
+    """Load optimizer (and optionally grad scaler) state for fine-tuning.
+
+    Only loads the optimizer state dict and grad scaler state from the
+    checkpoint. Scheduler state and training counters are not restored, so
+    the current config's schedule starts from scratch. All freshly-built
+    optimizer per-group hyperparameters (lr, weight_decay, betas, eps, ...)
+    are preserved from the current job's TrainConfig.
+
+    The checkpoint is loaded on CPU so that only the optimization state
+    (not model weights, EMA, etc.) is transferred to the training device.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if "optimization" not in checkpoint:
+        raise ValueError(
+            f"Checkpoint at {checkpoint_path} does not contain optimization "
+            "state. Only checkpoints saved with include_optimization=True "
+            "(i.e. ckpt.tar) support fine-tune optimization loading."
+        )
+    optim_state = checkpoint["optimization"]
+    del checkpoint
+    optim_state = _tensors_to_device(optim_state, get_device())
+    optimization.load_optimizer_state_for_finetuning(optim_state)
 
 
 class NullOptimization(OptimizationABC):

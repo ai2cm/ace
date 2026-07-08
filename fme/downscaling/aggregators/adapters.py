@@ -5,7 +5,10 @@ from typing import Any, Protocol
 import torch
 import xarray as xr
 
-from fme.core.histogram import ComparedDynamicHistograms, DynamicHistogramAggregator
+from fme.core.histogram import (
+    ComparedDynamicTailsHistograms,
+    DynamicHistogramAggregator,
+)
 from fme.core.typing_ import TensorMapping
 
 
@@ -47,7 +50,7 @@ class _HistogramsAdapter(abc.ABC):
 
 class DynamicHistogramsAdapter(_HistogramsAdapter):
     """
-    Adapter to use DynamicHistogramAggregator with the naming and prefix
+    Adapter to use DynamicTailsHistogramAggregator with the naming and prefix
     scheme used by downscaling aggregators.
 
     Args:
@@ -73,8 +76,10 @@ class DynamicHistogramsAdapter(_HistogramsAdapter):
         self._histograms.record_batch(prediction)
 
 
-class ComparedDynamicHistogramsAdapter(_HistogramsAdapter):
-    def __init__(self, histograms: ComparedDynamicHistograms, name: str = "") -> None:
+class ComparedDynamicTailsHistogramsAdapter(_HistogramsAdapter):
+    def __init__(
+        self, histograms: ComparedDynamicTailsHistograms, name: str = ""
+    ) -> None:
         super().__init__(histograms=histograms, name=name)
 
     @torch.no_grad()

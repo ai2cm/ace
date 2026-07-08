@@ -23,6 +23,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -328,6 +329,10 @@ class FCN3StepConfig(StepConfigABC):
     def load(self):
         self.normalization.load()
 
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
+
 
 class FCN3Step(StepABC):
     """
@@ -439,17 +444,7 @@ class FCN3Step(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
-
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
-
-        Returns:
-            The denormalized output data at the next time step.
-        """
+    ) -> StepOutput:
         if args.labels is not None:
             raise ValueError("Labels are not supported for FCN3")
 
@@ -485,19 +480,32 @@ class FCN3Step(StepABC):
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
+            stepper_state=args.stepper_state,
         )
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
+
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
 
     def get_state(self):
         """
         Returns:
             The state of the stepper.
         """
-        return {
+        state = {
             "module": self.module.state_dict(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -507,3 +515,4 @@ class FCN3Step(StepABC):
             state: The state to load.
         """
         self.module.load_state_dict(state["module"])
+        self._corrector.load_state(state.get("corrector", {}))

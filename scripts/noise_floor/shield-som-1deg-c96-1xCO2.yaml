@@ -1,14 +1,14 @@
 paths:
-  - gs://vcm-ml-intermediate/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0001.zarr/
-  - gs://vcm-ml-intermediate/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0002.zarr/
-  - gs://vcm-ml-intermediate/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0003.zarr/
-  - gs://vcm-ml-intermediate/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0004.zarr/
-  - gs://vcm-ml-intermediate/2024-07-09-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0005.zarr/
+  - gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0001.zarr/
+  - gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0002.zarr/
+  - gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0003.zarr/
+  - gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0004.zarr/
+  - gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0005.zarr/
 # Output starts on 2031-01-01T06:00:00; we therefore drop the first day from
 # the year to keep the diurnal cycle evenly sampled.
 start_date: "2031-01-02"
 end_date: "2040-12-31"
-stats_path: gs://vcm-ml-intermediate/2024-08-09-vertically-resolved-1deg-c96-shield-som-1xCO2-dataset-noise-floor/
+stats_path: gs://vcm-ml-intermediate/2026-04-23-vertically-resolved-1deg-c96-shield-som-1xCO2-dataset-noise-floor/
 years_per_ensemble: 10
 is_amip: false
 names:
@@ -56,6 +56,7 @@ names:
   - USWRFsfc
   - USWRFtoa
   - tendency_of_total_water_path_due_to_advection
+  - total_frozen_precipitation_rate
   - TMP850
   - h500
   - TMP2m

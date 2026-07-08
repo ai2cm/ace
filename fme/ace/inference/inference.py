@@ -30,16 +30,22 @@ from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
     load_stepper,
-    load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.cloud import makedirs
+from fme.core.cloud import (
+    exists,
+    is_local,
+    makedirs,
+    open_dataset_via_inter_filesystem_copy,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
+from fme.core.random_state import RandomState
 from fme.core.timing import GlobalTimer
 
 from .evaluator import resolve_variable_metadata
@@ -71,12 +77,17 @@ class InitialConditionConfig:
     start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
-        ds = xr.open_dataset(
-            self.path,
+        open_kwargs = dict(
             engine=self.engine,
             decode_times=CFDatetimeCoder(use_cftime=True),
             decode_timedelta=False,
         )
+        if self.engine == "zarr" or is_local(self.path):
+            ds = xr.open_dataset(self.path, **open_kwargs)
+        else:
+            # netCDF can't be read directly from remote stores (e.g. gs://);
+            # copy to a local temp first (covers cross-segment restart.nc ICs).
+            ds = open_dataset_via_inter_filesystem_copy(self.path, **open_kwargs)
         return self._subselect_initial_conditions(ds)
 
     def _subselect_initial_conditions(self, ds: xr.Dataset) -> xr.Dataset:
@@ -95,8 +106,8 @@ class InitialConditionConfig:
 def get_initial_condition(
     ds: xr.Dataset,
     prognostic_names: Sequence[str],
-    labels: list[str] | None,
-    n_ensemble: int,
+    labels: list[str] | None = None,
+    n_ensemble: int = 1,
 ) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
@@ -200,6 +211,10 @@ class InferenceConfig:
         n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
             stochastic model weather inference. n_ensemble_per_ic = 1 is default
             inference behavior.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a reproducible
+            noise sequence, independent of forward_steps_in_memory. Leave unset
+            (None) for the default non-reproducible behavior.
     """
 
     experiment_dir: str
@@ -219,20 +234,13 @@ class InferenceConfig:
     allow_incompatible_dataset: bool = False
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
+    seed: int | None = None
 
     def __post_init__(self):
-        if self.data_writer.time_coarsen is not None:
-            self.data_writer.time_coarsen.validate(
-                self.forward_steps_in_memory,
-                self.n_forward_steps,
-            )
-        if self.data_writer.files is not None:
-            for file_config in self.data_writer.files:
-                if file_config.time_coarsen is not None:
-                    file_config.time_coarsen.validate(
-                        self.forward_steps_in_memory,
-                        self.n_forward_steps,
-                    )
+        self.data_writer.validate_time_coarsen(
+            self.forward_steps_in_memory,
+            self.n_forward_steps,
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -246,7 +254,9 @@ class InferenceConfig:
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, self.stepper_override)
+        return load_stepper_config_with_override(
+            self.checkpoint_path, self.stepper_override
+        )
 
     def get_data_writer(
         self,
@@ -307,7 +317,6 @@ def run_inference_from_config(config: InferenceConfig):
             config.initial_condition.get_dataset(),
             stepper_config.prognostic_names,
             labels=config.labels,
-            n_ensemble=config.n_ensemble_per_ic,
         )
         stepper = config.load_stepper()
         stepper.set_eval()
@@ -321,6 +330,22 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        # Broadcast the initial condition across ensemble members only after the
+        # forcing loader is built, mirroring the evaluator path. The forcing then
+        # has one window per initial condition (n_ensemble=1) and predict_paired
+        # broadcasts it exactly once to match the ensemble-broadcast initial
+        # condition. Broadcasting before get_forcing_data would tile the forcing
+        # start times too, and predict_paired would broadcast the already-tiled
+        # forcing a second time (the standalone double-broadcast bug).
+        if config.n_ensemble_per_ic > 1:
+            ic = data.initial_condition.as_batch_data()
+            data._initial_condition = PrognosticState(
+                ic.broadcast_ensemble(config.n_ensemble_per_ic)
+            )
+        if config.seed is not None:
+            data._initial_condition = data.initial_condition.with_random_state(
+                RandomState.from_seed(config.seed)
+            )
 
         if not config.allow_incompatible_dataset:
             try:
@@ -399,6 +424,14 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         multiple folders, each corresponding to one of the segments and labeled by
         the segment number.
     """
+    if config.n_ensemble_per_ic > 1:
+        raise ValueError(
+            "Ensemble inference (n_ensemble_per_ic > 1) is not supported with "
+            "segmented inference. A segment's restart already carries the "
+            "broadcasted ensemble as its sample dimension, so later segments "
+            "cannot re-broadcast it consistently. Run with n_ensemble_per_ic=1, "
+            "or run a single non-segmented inference for ensemble runs."
+        )
     logging.info(
         f"Starting segmented inference with {segments} segments. "
         f"Saving to {config.experiment_dir}."
@@ -409,7 +442,7 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         segment_label = f"segment_{segment:04d}"
         segment_dir = os.path.join(config.experiment_dir, segment_label)
         restart_path = os.path.join(segment_dir, "restart.nc")
-        if os.path.exists(restart_path):
+        if exists(restart_path):
             logging.info(f"Skipping segment {segment} because it has already been run.")
         else:
             logging.info(f"Running segment {segment}.")

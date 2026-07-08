@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.rand import set_seed, use_cpu_randn
 from fme.core.testing.wandb import mock_wandb
 
 from .data_loading.test_data_loader import create_coupled_data_on_disk
@@ -18,7 +19,6 @@ seed: 0
 save_checkpoint: true
 save_per_epoch_diagnostics: {save_per_epoch_diagnostics}
 max_epochs: {max_epochs}
-n_coupled_steps: {n_coupled_steps}
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -37,18 +37,19 @@ train_loader:
       data_path: {atmosphere_data_path}
       subset:
           start_time: '1970-01-01'
-validation_loader:
-  batch_size: 2
-  num_data_workers: 0
-  dataset:
-    ocean:
-      data_path: {ocean_data_path}
-      subset:
-          start_time: '1970-01-01'
-    atmosphere:
-      data_path: {atmosphere_data_path}
-      subset:
-          start_time: '1970-01-01'
+validation:
+- loader:
+    batch_size: 2
+    num_data_workers: 0
+    dataset:
+      ocean:
+        data_path: {ocean_data_path}
+        subset:
+            start_time: '1970-01-01'
+      atmosphere:
+        data_path: {atmosphere_data_path}
+        subset:
+            start_time: '1970-01-01'
 inference:
   loader:
     dataset:
@@ -65,19 +66,20 @@ inference:
     log_zonal_mean_images: True
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 0.00001
   optimizer_type: Adam
 stepper_training:
+  n_coupled_steps: {n_coupled_steps}
   ocean:
     loss:
-      type: MSE
-    loss_contributions:
-      weight: {loss_ocean_weight}
+      type: {loss_type}
+      kwargs: {loss_kwargs}
+    loss_weight: {loss_ocean_weight}
   atmosphere:
     loss:
-      type: MSE
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
+      type: {loss_type}
+      kwargs: {loss_kwargs}
+    n_steps: {loss_atmos_n_steps}
 stepper:
   sst_name: {ocean_sfc_temp_name}
   ocean_fraction_prediction:
@@ -122,7 +124,7 @@ stepper:
         type: single_module
         config:
           builder:
-            type: SphericalFourierNeuralOperatorNet
+            type: {atmos_network_type}
             config:
               num_layers: 2
               embed_dim: 12
@@ -191,13 +193,25 @@ def _write_test_yaml_files(
     inference_n_coupled_steps: int = 6,
     coupled_steps_in_memory: int = 2,
     save_per_epoch_diagnostics: bool = True,
-    loss_atmos_n_steps: int = 1000,  # large number ~= inf
+    loss_atmos_n_steps: int = 3,
     loss_ocean_weight: float = 1.0,
+    crps_training: bool = False,
 ):
     exper_dir = tmp_path / "results"
     ocean_next_step_forcing_names = list(
         set(atmos_out_names).intersection(ocean_in_names)
     )
+
+    # Configure atmosphere network and loss based on crps_training
+    if crps_training:
+        atmos_network_type = "NoiseConditionedSFNO"
+        loss_type = "EnsembleLoss"
+        loss_kwargs = "{'crps_weight': 1.0, 'energy_score_weight': 0.0}"
+    else:
+        atmos_network_type = "SphericalFourierNeuralOperatorNet"
+        loss_type = "MSE"
+        loss_kwargs = "{}"
+
     train_config = _TRAIN_CONFIG_TEMPLATE.format(
         experiment_dir=exper_dir,
         max_epochs=max_epochs,
@@ -221,6 +235,9 @@ def _write_test_yaml_files(
         save_per_epoch_diagnostics=str(save_per_epoch_diagnostics).lower(),
         loss_atmos_n_steps=loss_atmos_n_steps,
         loss_ocean_weight=loss_ocean_weight,
+        atmos_network_type=atmos_network_type,
+        loss_type=loss_type,
+        loss_kwargs=loss_kwargs,
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
@@ -242,13 +259,17 @@ def _write_test_yaml_files(
 
 
 @pytest.mark.parametrize(
-    "loss_atmos_n_steps",
-    [3, 0],
+    "loss_atmos_n_steps, crps_training",
+    [
+        (2, False),
+        (0, False),
+        (3, True),  # CRPS training with EnsembleLoss
+    ],
 )
-def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool):
+@pytest.mark.medium_duration
+def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
     """Ensure that coupled training and standalone inference run without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+    set_seed(42 + loss_atmos_n_steps)
 
     data_dir = tmp_path / "coupled_data"
     data_dir.mkdir()
@@ -351,9 +372,10 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
         inference_n_coupled_steps=6,
         coupled_steps_in_memory=2,
         loss_atmos_n_steps=loss_atmos_n_steps,
+        crps_training=crps_training,
     )
 
-    with mock_wandb() as wandb:
+    with use_cpu_randn(), mock_wandb() as wandb:
         train_main(yaml_config=train_config_fname)
         train_logs = wandb.get_logs()
 
@@ -393,6 +415,11 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
     assert "val/mean/loss/ocean" in epoch_logs
     # atmos loss contributions
     assert "val/mean/loss/atmosphere" in epoch_logs
+    np.testing.assert_allclose(
+        epoch_logs["val/mean/loss"],
+        epoch_logs["val/mean/loss/atmosphere"] + epoch_logs["val/mean/loss/ocean"],
+        atol=1e-6,
+    )
     if loss_atmos_n_steps == 0:
         np.testing.assert_allclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
 
@@ -489,7 +516,7 @@ def test_train_and_inference(tmp_path, loss_atmos_n_steps, very_fast_only: bool)
     assert best_checkpoint_path.exists()
     assert best_inference_checkpoint_path.exists()
 
-    with mock_wandb() as wandb:
+    with use_cpu_randn(), mock_wandb() as wandb:
         inference_evaluator_main(yaml_config=inference_config_fname)
         inference_logs = wandb.get_logs()
 

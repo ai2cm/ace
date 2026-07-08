@@ -1,0 +1,451 @@
+r"""Extract a structured transcript from a Claude Code session file.
+
+Posts the rendered Markdown transcript as a collapsible comment on the
+current branch's pull request.  If a comment for the same session
+already exists, it is updated in place.
+
+Each entry represents one "turn" — starting when the user submits a
+message and ending when control returns to the user.
+
+Usage:
+    python scripts/claude_logs/extract_transcript.py <session_id>
+
+    Finds the session file under ~/.claude/projects/, extracts the
+    transcript, and posts (or updates) a collapsible PR comment.
+    Requires ``gh`` CLI authenticated and a PR open for the current
+    branch.
+
+Example:
+    python scripts/claude_logs/extract_transcript.py \
+        9c55f925-6cb6-48f1-813b-a63ec61d5191
+"""
+
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+def _extract_text(content):
+    """Extract text from a message content field."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _summarize_tool_use(block):
+    """Create a concise summary of a tool_use block."""
+    name = block.get("name", "unknown")
+    inp = block.get("input", {})
+    if name == "Bash":
+        cmd = inp.get("command", "")
+        desc = inp.get("description", "")
+        return {"tool": name, "description": desc, "command": cmd}
+    elif name == "Read":
+        return {"tool": name, "file": inp.get("file_path", "")}
+    elif name == "Write":
+        return {"tool": name, "file": inp.get("file_path", "")}
+    elif name == "Edit":
+        return {
+            "tool": name,
+            "file": inp.get("file_path", ""),
+            "replace_all": inp.get("replace_all", False),
+        }
+    elif name == "Grep":
+        return {"tool": name, "pattern": inp.get("pattern", "")}
+    elif name == "Glob":
+        return {"tool": name, "pattern": inp.get("pattern", "")}
+    elif name == "Agent":
+        return {
+            "tool": name,
+            "description": inp.get("description", ""),
+            "subagent_type": inp.get("subagent_type", ""),
+        }
+    else:
+        return {"tool": name, "input_keys": list(inp.keys())}
+
+
+def _extract_assistant_content(message):
+    """Extract text and tool summaries from an assistant message."""
+    content = message.get("content", [])
+    if isinstance(content, str):
+        content = [{"type": "text", "text": content}]
+    if not isinstance(content, list):
+        return None
+
+    text_parts = []
+    tools = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            t = block["text"].strip()
+            if t:
+                text_parts.append(t)
+        elif block.get("type") == "tool_use":
+            tools.append(_summarize_tool_use(block))
+
+    if not text_parts and not tools:
+        return None
+
+    result: dict = {}
+    if text_parts:
+        result["text"] = "\n\n".join(text_parts)
+    if tools:
+        result["tools"] = tools
+    return result
+
+
+def _is_human_turn_start(obj):
+    """True if this JSONL entry is a human-initiated message (new turn)."""
+    if obj.get("type") != "user":
+        return False
+    if obj.get("isMeta"):
+        return False
+    if "toolUseResult" in obj:
+        return False
+    return True
+
+
+def _is_meta_user_text(text):
+    """True if user text is a CLI command rather than a real message."""
+    return text.startswith("<command-name>") or text.startswith("<local-command")
+
+
+def _clean_meta_text_oneline(text):
+    """Strip XML tags and collapse to one line."""
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", text)).strip()
+
+
+def _get_session_start_timestamp(entries):
+    """Extract the start timestamp from session entries."""
+    for obj in entries:
+        ts = obj.get("timestamp", "")
+        if ts:
+            return ts
+    return ""
+
+
+def _format_timestamp_for_filename(ts):
+    """Convert ISO timestamp to a filename-safe string like 2026-03-26T1817."""
+    # 2026-03-26T18:17:47.242Z -> 2026-03-26T1817
+    m = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})", ts)
+    if m:
+        return f"{m.group(1)}T{m.group(2)}{m.group(3)}"
+    return "unknown"
+
+
+def find_session_file(session_id):
+    """Find the JSONL file for a session ID under ~/.claude/projects/."""
+    base = os.path.expanduser("~/.claude/projects")
+    pattern = os.path.join(base, "**", f"{session_id}.jsonl")
+    matches = glob.glob(pattern, recursive=True)
+    if not matches:
+        print(f"Error: no session file found for {session_id}", file=sys.stderr)
+        print(f"  Searched under {base}", file=sys.stderr)
+        sys.exit(1)
+    if len(matches) > 1:
+        print(f"Warning: multiple matches, using {matches[0]}", file=sys.stderr)
+    return matches[0]
+
+
+def parse_turns(entries):
+    """Parse session entries into a list of turn dicts."""
+    turns = []
+    current_turn = None
+
+    for obj in entries:
+        if _is_human_turn_start(obj):
+            if current_turn is not None:
+                turns.append(current_turn)
+
+            user_text = _extract_text(obj.get("message", {}).get("content", ""))
+            current_turn = {
+                "user": user_text,
+                "responses": [],
+            }
+
+        elif obj.get("type") == "assistant" and current_turn is not None:
+            content = _extract_assistant_content(obj.get("message", {}))
+            if content:
+                current_turn["responses"].append(content)
+
+    if current_turn is not None:
+        turns.append(current_turn)
+
+    return turns
+
+
+def _format_tool_md(tool):
+    """Format a single tool call as a one-line markdown string."""
+    name = tool["tool"]
+    if name == "Bash":
+        desc = tool.get("description", "")
+        cmd = tool.get("command", "").replace("\n", " ")
+        cmd = _escape_details_tags(cmd)
+        if len(cmd) > 120:
+            cmd = cmd[:120] + "..."
+        return f"**Bash** {desc}  \n`{cmd}`"
+    elif name in ("Read", "Write", "Edit"):
+        return f"**{name}** `{tool.get('file', '')}`"
+    elif name in ("Grep", "Glob"):
+        return f"**{name}** `{tool.get('pattern', '')}`"
+    elif name == "Agent":
+        sub = tool.get("subagent_type", "")
+        desc = tool.get("description", "")
+        return f"**Agent** ({sub}) {desc}"
+    else:
+        return f"**{name}**"
+
+
+def _escape_details_tags(text):
+    """Escape <details> and </details> HTML tags in free text.
+
+    The transcript is wrapped in an outer <details> block, so literal
+    occurrences of these tags in assistant responses would break the
+    nesting.  Replace them with HTML entities so they render visually
+    but don't act as real HTML.
+    """
+    text = re.sub(r"<details(?=[>\s/])", "&lt;details", text)
+    text = re.sub(r"</details\s*>", "&lt;/details&gt;", text)
+    text = re.sub(r"<summary(?=[>\s/])", "&lt;summary", text)
+    text = re.sub(r"</summary\s*>", "&lt;/summary&gt;", text)
+    return text
+
+
+def render_markdown(turns):
+    """Render turns as a GitHub-renderable Markdown string."""
+    lines = []
+
+    for i, turn in enumerate(turns):
+        user_text = turn["user"]
+        is_meta = _is_meta_user_text(user_text)
+
+        if is_meta:
+            cleaned = _clean_meta_text_oneline(user_text)
+            if not cleaned:
+                continue
+            lines.append(f"*`{cleaned}`*")
+            lines.append("")
+            continue
+
+        # User message as blockquote
+        lines.append("---")
+        lines.append("")
+        for uline in user_text.split("\n"):
+            lines.append(f"> {uline}")
+        lines.append("")
+
+        # Responses
+        tool_buffer: list[dict] = []
+
+        def flush_tools():
+            if not tool_buffer:
+                return
+            names = ", ".join(t["tool"] for t in tool_buffer)
+            lines.append(
+                f"<details><summary>"
+                f"{len(tool_buffer)} tool call"
+                f"{'s' if len(tool_buffer) > 1 else ''}"
+                f": {names}</summary>"
+            )
+            lines.append("")
+            for t in tool_buffer:
+                lines.append(f"- {_format_tool_md(t)}")
+            lines.append("")
+            lines.append("</details>")
+            lines.append("")
+            tool_buffer.clear()
+
+        for resp in turn["responses"]:
+            if "text" in resp:
+                flush_tools()
+                lines.append(_escape_details_tags(resp["text"]))
+                lines.append("")
+            if "tools" in resp:
+                tool_buffer.extend(resp["tools"])
+
+        flush_tools()
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# PR comment helpers (require ``gh`` CLI)
+# ---------------------------------------------------------------------------
+
+_COMMENT_MARKER = "<!-- claude-transcript: {} -->"
+
+
+def _check_gh():
+    """Ensure the ``gh`` CLI is available."""
+    if shutil.which("gh") is None:
+        print("Error: 'gh' CLI not found on PATH", file=sys.stderr)
+        sys.exit(1)
+
+
+def _get_pr_number():
+    """Return the PR number for the current branch, or exit with an error."""
+    result = subprocess.run(
+        ["gh", "pr", "view", "--json", "number", "-q", ".number"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(
+            "Error: no pull request found for the current branch.\n"
+            "Open a PR first, then re-run this script.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return result.stdout.strip()
+
+
+def _find_existing_comment(pr_number, marker):
+    """Find a PR comment containing *marker* and return its ID, or None."""
+    result = subprocess.run(
+        [
+            "gh",
+            "api",
+            f"repos/{{owner}}/{{repo}}/issues/{pr_number}/comments",
+            "--paginate",
+            "-q",
+            f'.[] | select(.body | contains("{marker}")) | .id',
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    # Take the first match.
+    return result.stdout.strip().splitlines()[0]
+
+
+def post_or_update_pr_comment(md_body, session_id, ts_str):
+    """Post a new PR comment or update an existing one for *session_id*."""
+    _check_gh()
+    pr_number = _get_pr_number()
+    id_prefix = session_id.split("-")[0]
+    marker = _COMMENT_MARKER.format(session_id)
+    summary = f"Claude Code transcript log — {ts_str}-{id_prefix}"
+
+    full_body = (
+        f"{marker}\n"
+        f"<details>\n"
+        f"<summary>{summary}</summary>\n\n"
+        f"{md_body}\n\n"
+        f"</details>"
+    )
+
+    comment_id = _find_existing_comment(pr_number, marker)
+
+    # Write body to a temp file to avoid shell argument length limits and
+    # special-character issues.
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as tmp:
+        tmp.write(full_body)
+        tmp_path = tmp.name
+
+    try:
+        if comment_id:
+            # Update existing comment via the API, piping the JSON payload
+            # through stdin (--input -) to avoid CLI arg limits.
+            payload = json.dumps({"body": full_body})
+            subprocess.run(
+                [
+                    "gh",
+                    "api",
+                    f"repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
+                    "--method",
+                    "PATCH",
+                    "--input",
+                    "-",
+                ],
+                input=payload,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print(f"Updated existing PR comment (id {comment_id}) on PR #{pr_number}")
+        else:
+            # Create new comment.
+            subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "comment",
+                    pr_number,
+                    "--body-file",
+                    tmp_path,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print(f"Created new PR comment on PR #{pr_number}")
+    finally:
+        os.unlink(tmp_path)
+
+
+def extract(session_id, *, dry_run=False):
+    input_path = find_session_file(session_id)
+
+    with open(input_path) as f:
+        entries = [json.loads(line) for line in f]
+
+    ts = _get_session_start_timestamp(entries)
+    ts_str = _format_timestamp_for_filename(ts)
+
+    turns = parse_turns(entries)
+    md_body = render_markdown(turns)
+
+    if dry_run:
+        id_prefix = session_id.split("-")[0]
+        marker = _COMMENT_MARKER.format(session_id)
+        summary = f"Claude Code transcript log — {ts_str}-{id_prefix}"
+        print(
+            f"{marker}\n"
+            f"<details>\n"
+            f"<summary>{summary}</summary>\n\n"
+            f"{md_body}\n\n"
+            f"</details>"
+        )
+    else:
+        post_or_update_pr_comment(md_body, session_id, ts_str)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(
+            f"Usage: {sys.argv[0]} [--dry-run] <session_id>\n"
+            f"\n"
+            f"Finds ~/.claude/projects/.../<session_id>.jsonl, extracts\n"
+            f"the transcript, and posts (or updates) a collapsible PR\n"
+            f"comment with the Markdown transcript.\n"
+            f"\n"
+            f"Options:\n"
+            f"  --dry-run  Print the comment body to stdout instead of\n"
+            f"             posting to GitHub.\n"
+            f"\n"
+            f"Requires the ``gh`` CLI and a PR open for the current\n"
+            f"branch (unless --dry-run is used)."
+        )
+        sys.exit(0 if "--help" in sys.argv else 1)
+
+    dry_run = "--dry-run" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    if len(args) != 1:
+        print("Error: expected exactly one session_id argument", file=sys.stderr)
+        sys.exit(1)
+    extract(args[0], dry_run=dry_run)

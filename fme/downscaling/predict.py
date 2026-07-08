@@ -23,7 +23,13 @@ from fme.downscaling.data import (
     enforce_lat_bounds,
 )
 from fme.downscaling.models import CheckpointModelConfig, DiffusionModel
-from fme.downscaling.predictors import PatchPredictionConfig, PatchPredictor
+from fme.downscaling.predictors import (
+    DenoisingMoEBundledConfig,
+    DenoisingMoEConfig,
+    DenoisingMoEPredictor,
+    PatchPredictionConfig,
+    PatchPredictor,
+)
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -84,7 +90,7 @@ class EventDownscaler:
         self,
         event_name: str,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | DenoisingMoEPredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -104,22 +110,24 @@ class EventDownscaler:
         self._max_sample_group = 8
         self.save_generated_samples = save_generated_samples
 
-    @property
-    def generation_model(self):
+    def _get_generation_model(self):
+        coarse_lon = self.data.coarse_extent_latlon_coords.lon
+        # No-op when coarse_lon does not cross the prime meridian.
+        base_model = self.model.with_rolled_lon(coarse_lon)
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
-                self.model,
+                base_model,
                 self.data.shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
-        else:
-            return self.model
+        return base_model
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")
+        generation_model = self._get_generation_model()
         batch = next(iter(self.data.get_generator()))
         coarse_coords = batch[0].latlon_coordinates
-        fine_coords = self.model.get_fine_coords_for_batch(batch)
+        fine_coords = generation_model.get_fine_coords_for_batch(batch)
         sample_agg = SampleAggregator(
             coarse=batch[0].data,
             latlon_coordinates=FineResCoarseResPair(
@@ -136,7 +144,7 @@ class EventDownscaler:
                 f"Generating samples {start_idx} to {end_idx} "
                 f"for event {self.event_name}"
             )
-            outputs = self.model.generate_on_batch_no_target(
+            outputs = generation_model.generate_on_batch_no_target(
                 batch, n_samples=end_idx - start_idx
             )
             sample_agg.record_batch(outputs)
@@ -160,7 +168,7 @@ class Downscaler:
     def __init__(
         self,
         data: GriddedData,
-        model: DiffusionModel,
+        model: DiffusionModel | DenoisingMoEPredictor,
         experiment_dir: str,
         n_samples: int,
         patch: PatchPredictionConfig = PatchPredictionConfig(
@@ -176,16 +184,17 @@ class Downscaler:
         self.dist = Distributed.get_instance()
         self.patch = patch
 
-    @property
-    def generation_model(self):
+    def _get_generation_model(self):
+        coarse_lon = self.data.coarse_extent_latlon_coords.lon
+        # No-op when coarse_lon does not cross the prime meridian.
+        base_model = self.model.with_rolled_lon(coarse_lon)
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
-                model=self.model,
-                coarse_yx_patch_extent=self.model.coarse_shape,
+                model=base_model,
+                coarse_yx_patch_extent=base_model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
-        else:
-            return self.model
+        return base_model
 
     @property
     def batch_generator(self):
@@ -207,17 +216,18 @@ class Downscaler:
             )
 
     def run(self):
+        generation_model = self._get_generation_model()
         aggregator: NoTargetAggregator | None = None
         for i, batch in enumerate(self.batch_generator):
             if aggregator is None:
-                fine_coords = self.model.get_fine_coords_for_batch(batch)
+                fine_coords = generation_model.get_fine_coords_for_batch(batch)
                 aggregator = NoTargetAggregator(
-                    downscale_factor=self.model.downscale_factor,
+                    downscale_factor=generation_model.downscale_factor,
                     latlon_coordinates=fine_coords,
                 )
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
-                prediction = self.generation_model.generate_on_batch_no_target(
+                prediction = generation_model.generate_on_batch_no_target(
                     batch=batch,
                     n_samples=self.n_samples,
                 )
@@ -237,7 +247,7 @@ class Downscaler:
 
 @dataclasses.dataclass
 class DownscalerConfig:
-    model: CheckpointModelConfig
+    model: DenoisingMoEConfig | DenoisingMoEBundledConfig | CheckpointModelConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig

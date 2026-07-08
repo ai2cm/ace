@@ -19,6 +19,8 @@ class AnkurLocalNetConfig:
     Replicates the diagnostic MLP architecture from Ankur's
     ColumnDiagnosticSphericalFourierNeuralOperatorNet.
 
+    Reference: https://arxiv.org/html/2602.16090v1
+
     Attributes:
         type: Discriminator tag for union deserialization.
         embed_dim: Dimension of the hidden layers.
@@ -32,7 +34,7 @@ class AnkurLocalNetConfig:
 
     type: Literal["ankurlocalnet"] = "ankurlocalnet"
     embed_dim: int = 256
-    use_disco_encoder: bool = False
+    use_disco_encoder: bool = True
     disco_kernel_size: int = 3
     pos_embed: bool = False
     activation_function: str = "gelu"
@@ -110,6 +112,8 @@ class AnkurLocalNet(nn.Module):
     A simple sequential network with 3 hidden layers, optionally using a
     DISCO convolution for the first layer and a learned positional embedding.
     This is a drop-in replacement for LocalNet with the same forward signature.
+
+    Reference: https://arxiv.org/html/2602.16090v1
 
     Args:
         params: Model configuration. See ``AnkurLocalNetConfig`` for details.

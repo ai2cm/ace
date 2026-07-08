@@ -10,6 +10,12 @@ OUTPUT_ZARR_NAME = 2025-09-09-aimip-era5-1deg-forcing-1978-2024.zarr
 LOCAL_OUTPUT_ZARR := $(LOCAL_DATA_DIR)/$(OUTPUT_ZARR_NAME)
 GCS_PATH_PROCESSED_FORCING ?= gs://vcm-ml-intermediate/$(OUTPUT_ZARR_NAME)
 ENVIRONMENT_NAME=regrid-aimip-forcing
+IC_OUTPUT_DIR := $(LOCAL_DATA_DIR)/aimip_ics
+GCS_IC_PATH ?= gs://vcm-ml-intermediate/2025-09-12-AIMIP-evaluation-ICs/
+ERA5_GCS_DATA ?= gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-1940-2022.zarr
+MODIFIED_FORCING_NAME = 2025-09-12-aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
+LOCAL_MODIFIED_FORCING := $(LOCAL_DATA_DIR)/$(MODIFIED_FORCING_NAME)
+GCS_PATH_MODIFIED_FORCING ?= gs://vcm-ml-intermediate/$(MODIFIED_FORCING_NAME)
 
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME)
@@ -47,8 +53,35 @@ upload_processed_aimip_forcing: $(LOCAL_OUTPUT_ZARR)
 process_aimip_forcing: upload_processed_aimip_forcing
 	@echo "Processed AIMIP forcing file uploaded to $(GCS_PATH_PROCESSED_FORCING)"
 
+$(IC_OUTPUT_DIR)/.done: data_dir
+	mkdir -p $(IC_OUTPUT_DIR)
+	python create_aimip_ic_datasets.py $(IC_OUTPUT_DIR) \
+	  --era5-gcs-data $(ERA5_GCS_DATA)
+	touch $(IC_OUTPUT_DIR)/.done
+
+upload_aimip_ics: $(IC_OUTPUT_DIR)/.done
+	gsutil -m cp $(IC_OUTPUT_DIR)/*.nc $(GCS_IC_PATH)
+
+create_aimip_ics: upload_aimip_ics
+	@echo "AIMIP IC datasets uploaded to $(GCS_IC_PATH)"
+
+$(LOCAL_MODIFIED_FORCING): data_dir
+	python prepend_first_timestep_forcing.py $(LOCAL_MODIFIED_FORCING) \
+	  --input-forcing-path $(GCS_PATH_PROCESSED_FORCING)
+
+upload_modified_forcing: $(LOCAL_MODIFIED_FORCING)
+	gsutil -m cp -r $(LOCAL_MODIFIED_FORCING) $(GCS_PATH_MODIFIED_FORCING)
+
+create_modified_forcing: upload_modified_forcing
+	@echo "Modified AIMIP forcing uploaded to $(GCS_PATH_MODIFIED_FORCING)"
+
+create_aimip_evaluation_datasets: create_aimip_ics create_modified_forcing
+	@echo "All AIMIP evaluation datasets created"
+
 clean:
 	rm -rf $(LOCAL_DATA_DIR)
 
 .PHONY: all clean upload_processed_aimip_forcing process_aimip_forcing \
-  create_aimip_forcing_file upload_aimip_forcing_file create_aimip_forcing
+  create_aimip_forcing_file upload_aimip_forcing_file create_aimip_forcing \
+  upload_aimip_ics create_aimip_ics upload_modified_forcing create_modified_forcing \
+  create_aimip_evaluation_datasets

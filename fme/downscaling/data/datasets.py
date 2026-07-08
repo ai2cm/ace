@@ -2,6 +2,7 @@
 
 import dataclasses
 import math
+import random
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Literal, Self, cast
 
@@ -25,8 +26,11 @@ from fme.downscaling.data.utils import (
     ClosedInterval,
     check_leading_dim,
     expand_and_fold_tensor,
+    find_roll_anchor_from_interval,
     get_offset,
     paired_shuffle,
+    roll_data_along_lon_dim,
+    roll_lon_coords,
     scale_tuple,
 )
 
@@ -120,29 +124,23 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             )
 
         self._orig_coords: LatLonCoordinates = properties.horizontal_coordinates
+        lon_start, _ = self.lon_interval.finite_values
 
-        if (self.lon_interval.stop != float("inf")) and (
-            torch.any(self._orig_coords.lon < self.lon_interval.stop - 360.0)
-        ):
-            lon_max = self._orig_coords.lon.max()
-            raise NotImplementedError(
-                f"lon wraparound not implemented, received lon_max {lon_max} but "
-                f"expected lon_max > {self.lon_interval.stop - 360.0}"
-            )
-        if (self.lon_interval.start != -float("inf")) and (
-            torch.any(self._orig_coords.lon > self.lon_interval.start + 360.0)
-        ):
-            lon_min = self._orig_coords.lon.min()
-            raise NotImplementedError(
-                f"lon wraparound not implemented, received lon_min {lon_min} but "
-                f"expected lon_min < {self.lon_interval.start + 360.0}"
-            )
+        # determine roll amount for each dataset get item operation
+        self._lon_roll_amount = find_roll_anchor_from_interval(
+            self._orig_coords.lon, self.lon_interval
+        )
+
+        # set coordinate metadata for the subsetted region
+        rolled_lon = roll_lon_coords(
+            self._orig_coords.lon, self._lon_roll_amount, lon_start
+        )
 
         self._lats_slice = self.lat_interval.slice_from(self._orig_coords.lat)
-        self._lons_slice = self.lon_interval.slice_from(self._orig_coords.lon)
+        self._lons_slice = self.lon_interval.slice_from(rolled_lon)
         self._latlon_coordinates = LatLonCoordinates(
             lat=self._orig_coords.lat[self._lats_slice],
-            lon=self._orig_coords.lon[self._lons_slice],
+            lon=rolled_lon[self._lons_slice],
         )
         self._area_weights = self._latlon_coordinates.area_weights
 
@@ -166,16 +164,19 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         return len(self.dataset)
 
     def __getitem__(self, key) -> DatasetItem:
-        batch, times, _, epoch = self.dataset[key]
+        batch, times, _, epoch, missing_names = self.dataset[key]
+        assert (
+            missing_names is None
+        ), "Variable masking is not supported in downscaling."
         batch = {
-            k: v[
+            k: roll_data_along_lon_dim(v, self._lon_roll_amount)[
                 ...,
                 self._lats_slice,
                 self._lons_slice,
             ]
             for k, v in batch.items()
         }
-        return batch, times, self._properties.all_labels, epoch
+        return batch, times, self._properties.all_labels, epoch, None
 
 
 class BatchItemDatasetAdapter(torch.utils.data.Dataset):
@@ -197,7 +198,10 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return len(self._dataset)
 
     def __getitem__(self, idx) -> BatchItem:
-        fields, time, _, epoch = self._dataset[idx]
+        fields, time, _, epoch, missing_names = self._dataset[idx]
+        assert (
+            missing_names is None
+        ), "Variable masking is not supported in downscaling."
         fields = {k: v.squeeze() for k, v in fields.items()}
         field_example = next(iter(fields.values()))
 
@@ -216,6 +220,10 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         if self._properties is None:
             raise ValueError("Properties not set for this dataset.")
         return self._properties.variable_metadata
+
+    @property
+    def latlon_coordinates(self) -> LatLonCoordinates:
+        return self._coordinates
 
 
 @dataclasses.dataclass
@@ -296,6 +304,7 @@ class GriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
+    coarse_extent_latlon_coords: LatLonCoordinates  # coarse subset coordinates
 
     @property
     def loader(self) -> DataLoader[BatchItem]:
@@ -337,7 +346,8 @@ class PairedGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    fine_coords: LatLonCoordinates
+    fine_coords: LatLonCoordinates  # full-domain fine coordinates
+    coarse_extent_latlon_coords: LatLonCoordinates  # coarse subset coordinates
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
@@ -356,6 +366,7 @@ class PairedGriddedData:
         drop_partial_patches: bool = True,
         random_offset: bool = False,
         shuffle: bool = False,
+        region_sampling: "RegionSamplingConfig | None" = None,
     ) -> Iterator["PairedBatchData"]:
         patched_generator = patched_batch_gen_from_paired_loader(
             self.loader,
@@ -366,6 +377,7 @@ class PairedGriddedData:
             drop_partial_patches=drop_partial_patches,
             random_offset=random_offset,
             shuffle=shuffle,
+            region_sampling=region_sampling,
         )
         return cast(
             Iterator[PairedBatchData],
@@ -641,6 +653,67 @@ class ContiguousDistributedSampler(DistributedSampler):
         return iter(indices[start:end])
 
 
+@dataclasses.dataclass
+class RegionSamplingConfig:
+    """
+    Configures weighted sampling of training patches whose center falls
+    within the specified lat/lon region.
+
+    The total number of patches yielded per batch remains the same as
+    without sampling a region. Patches are drawn with replacement from
+    a weighted distribution where patches inside the region have relative
+    weight ``weight`` and patches outside have weight 1.
+
+    Parameters:
+        lat_interval: Latitude range [start, stop] in degrees defining
+            the oversampled region. If None, all latitudes match.
+        lon_interval: Longitude range [start, stop] in degrees defining
+            the oversampled region. If None, all longitudes match.
+        weight: Relative sampling weight for patches inside the
+            region. Must be > 0. A value of 1 gives uniform sampling
+            (no oversampling).
+    """
+
+    lat_interval: ClosedInterval | None = None
+    lon_interval: ClosedInterval | None = None
+    weight: float = 1.0
+
+    def __post_init__(self):
+        if self.weight <= 0:
+            raise ValueError(f"weight must be > 0, got {self.weight}.")
+
+    def get_weight(self, lat: float, lon: float) -> float:
+        lat_match = self.lat_interval is None or lat in self.lat_interval
+        lon_match = self.lon_interval is None or lon in self.lon_interval
+        return self.weight if lat_match and lon_match else 1.0
+
+
+def _sample_indices_with_region_sampling(
+    coarse_patches: list[Patch],
+    coarse_lats: torch.Tensor,
+    coarse_lons: torch.Tensor,
+    config: RegionSamplingConfig,
+) -> list[int]:
+    """
+    Return a list of ``len(coarse_patches)`` patch indices sampled with
+    replacement from a weighted distribution.  Patches whose center
+    falls within the configured region receive weight
+    ``config.weight``; other patches receive weight 1.
+
+    ``coarse_lats`` and ``coarse_lons`` are 1-D tensors of the coarse
+    latitude and longitude coordinates that each patch's
+    ``input_slice`` indexes into.
+    """
+    weights: list[float] = []
+    for patch in coarse_patches:
+        center_lat = float(coarse_lats[patch.input_slice.y].mean().item())
+        center_lon = float(coarse_lons[patch.input_slice.x].mean().item())
+        weights.append(config.get_weight(center_lat, center_lon))
+    return random.choices(
+        range(len(coarse_patches)), weights=weights, k=len(coarse_patches)
+    )
+
+
 # downscale_factor=None means fine patches not needed here, but reusing
 # _get_paired_patches in both paired and no-target cases to share the
 # coincident offset logic.
@@ -717,6 +790,7 @@ def patched_batch_gen_from_paired_loader(
     drop_partial_patches: bool = True,
     random_offset: bool = False,
     shuffle: bool = False,
+    region_sampling: RegionSamplingConfig | None = None,
 ) -> Iterator[PairedBatchData]:
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
@@ -728,4 +802,15 @@ def patched_batch_gen_from_paired_loader(
             shuffle=shuffle,
             drop_partial_patches=drop_partial_patches,
         )
+        if region_sampling is not None:
+            assert fine_patches is not None  # for type checking
+            coarse_lats = batch.coarse.latlon_coordinates.lat[
+                0
+            ]  # dims are [batch, lat/lon]
+            coarse_lons = batch.coarse.latlon_coordinates.lon[0]
+            indices = _sample_indices_with_region_sampling(
+                coarse_patches, coarse_lats, coarse_lons, region_sampling
+            )
+            coarse_patches = [coarse_patches[i] for i in indices]
+            fine_patches = [fine_patches[i] for i in indices]
         yield from batch.generate_from_patches(coarse_patches, fine_patches)

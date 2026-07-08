@@ -94,6 +94,8 @@ dataset_computation:
       - h500
       - h850
       - h1000
+    PRMSL.zarr:
+      - PRMSL
     static.zarr:
       - HGTsfc
     scalar.zarr:

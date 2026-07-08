@@ -111,6 +111,7 @@ class UNetRegressionSong:
     encoder_type: str = "standard"
     decoder_type: str = "standard"
     resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    bottleneck_attention: bool = True
 
     def build(
         self,
@@ -136,6 +137,7 @@ class UNetRegressionSong:
             encoder_type=self.encoder_type,
             decoder_type=self.decoder_type,
             resample_filter=self.resample_filter,
+            bottleneck_attention=self.bottleneck_attention,
         )
         return UNetRegressionModule(
             unet,
