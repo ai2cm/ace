@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ft-coupled-era5-ufs-stochastic-5day-ocean"
+JOB_NAME="ft-coupled-era5-atmo-energy-corrector-ufs-stochastic-5day-ocean"
 JOB_GROUP="ufs-replay-ocean"
 CONFIG_FILENAME="train-ft-coupled-era5-ufs.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -13,7 +13,7 @@ N_GPUS=4
 OCEAN_STATS_DATA="troya/2026-06-04-ufs-replay-ocean-1deg-19level-5day-1994-2023-stats"
 ATMO_STATS_DATA="andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019"
 OCEAN_CKPT_DATASET="01KTA6CMTPNPYWD17JJ2E4XHMV"
-ATMO_CKPT_DATASET="01KSVC6YS7C18SGYV4VPZYZ232"
+ATMO_CKPT_DATASET="01KWD8DZVJFKYC5A9PNW8259GH"
 OCEAN_CKPT="best_inference_ckpt"
 ATMO_CKPT="best_inference_ckpt"
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script

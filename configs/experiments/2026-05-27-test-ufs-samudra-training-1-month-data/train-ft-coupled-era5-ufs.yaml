@@ -484,8 +484,8 @@ stepper:
             - USWRFsfc
             - USWRFtoa
             - total_frozen_precipitation_rate
-            # total_energy_budget_correction:
-            #   method: constant_temperature
+            total_energy_budget_correction:
+              method: constant_temperature
           next_step_forcing_names:
           - DSWRFtoa
           in_names:
