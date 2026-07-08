@@ -39,8 +39,17 @@ import xarray as xr  # noqa: E402
 _EVENT_FILE_RE = re.compile(r"(.+)_(\d{8}(?:T\d{2})?)\.nc$")
 
 WIND_SPEED = "wind_speed"
-U10 = "eastward_wind_at_ten_meters"
-V10 = "northward_wind_at_ten_meters"
+U10_CANDIDATES = ("eastward_wind_at_ten_meters", "UGRD10m")
+V10_CANDIDATES = ("northward_wind_at_ten_meters", "VGRD10m")
+
+
+def _resolve_var(ds: xr.Dataset, candidates: tuple[str, ...], suffix: str = "") -> str:
+    """Return the first ``candidates`` entry (plus ``suffix``) present in ``ds``."""
+    for name in candidates:
+        key = f"{name}{suffix}"
+        if key in ds:
+            return key
+    raise KeyError(f"None of {candidates} (suffix={suffix!r}) found in dataset")
 
 
 def parse_datestamp(stamp: str) -> datetime:
@@ -79,8 +88,10 @@ def load_patch(path: Path, variable: str, reduction: str, sample: int) -> xr.Dat
     """
     ds = xr.open_dataset(path)
     if variable == WIND_SPEED:
-        u = reduce_samples(ds[f"{U10}_predicted"], reduction, sample)
-        v = reduce_samples(ds[f"{V10}_predicted"], reduction, sample)
+        u_name = _resolve_var(ds, U10_CANDIDATES, "_predicted")
+        v_name = _resolve_var(ds, V10_CANDIDATES, "_predicted")
+        u = reduce_samples(ds[u_name], reduction, sample)
+        v = reduce_samples(ds[v_name], reduction, sample)
         patch = np.hypot(u, v)
     else:
         patch = reduce_samples(ds[f"{variable}_predicted"], reduction, sample)
@@ -105,7 +116,9 @@ def normalize_coarse_lon(coarse: xr.Dataset, target_lons: np.ndarray) -> xr.Data
 
 def select_coarse_var(coarse: xr.Dataset, variable: str) -> xr.DataArray:
     if variable == WIND_SPEED:
-        return np.hypot(coarse[U10], coarse[V10])
+        u_name = _resolve_var(coarse, U10_CANDIDATES)
+        v_name = _resolve_var(coarse, V10_CANDIDATES)
+        return np.hypot(coarse[u_name], coarse[v_name])
     return coarse[variable]
 
 
@@ -270,6 +283,17 @@ def render_event(
             zorder=3,
         )
         ax.coastlines(color="black", linewidth=0.4)
+        gl = ax.gridlines(
+            draw_labels=True,
+            linewidth=0.3,
+            color="gray",
+            alpha=0.5,
+            linestyle="--",
+        )
+        gl.top_labels = False
+        gl.right_labels = False
+        gl.xlabel_style = {"size": 7}
+        gl.ylabel_style = {"size": 7}
         ax.set_title(f"{event_name}  {when:%Y-%m-%d %H:%M}  ({variable})", fontsize=10)
         cbar = fig.colorbar(img, ax=ax, shrink=0.7)
         cbar.set_label(variable)
