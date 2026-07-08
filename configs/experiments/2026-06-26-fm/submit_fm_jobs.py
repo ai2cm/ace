@@ -26,7 +26,7 @@ WANDB_GROUP = "ace2-fm-2026-06-26"
 CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 
 
-def configs_for_version(version: str) -> list[str]:
+def configs_for_version(version: str | None) -> list[str]:
     # Training configs only: cooldown configs are submitted by
     # submit_cooldown_jobs.py, and eval suites use a different prefix.
     return sorted(

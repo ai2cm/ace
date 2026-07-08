@@ -25,7 +25,7 @@ WANDB_GROUP = "ace2-fm-cooldown-2026-06-26"
 CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 
 
-def configs_for_version(version: str) -> list[str]:
+def configs_for_version(version: str | None) -> list[str]:
     return sorted(
         path.name
         for path in HERE.glob("*cooldown.yaml")

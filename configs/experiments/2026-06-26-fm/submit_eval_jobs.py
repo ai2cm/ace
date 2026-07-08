@@ -39,7 +39,7 @@ CHECKPOINT_PATHS = [
 CHECKPOINTS = list(zip(CHECKPOINT_PATHS, EVAL_CHECKPOINT_NAME_SUFFIXES))
 
 
-def configs_for_version(version: str) -> list[str]:
+def configs_for_version(version: str | None) -> list[str]:
     configs = []
     for path in sorted(HERE.glob("*.yaml")):
         if not path.name.startswith(EVAL_SUITE_CONFIG_PREFIX):
