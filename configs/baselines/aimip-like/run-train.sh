@@ -280,3 +280,6 @@ run_training "train-4deg-daily-v2-era5-only-ftens-eval-n8.yaml" "train-4deg-dail
 
 # --- frozen eval, n_ensemble 16 (1 GPU) ---
 run_training "train-4deg-daily-v2-era5-only-ftens-eval-n16.yaml" "train-4deg-daily-v2-era5-only-ftens-eval-n16-rs0" 1
+
+# --- ftens16 RERUN (expandable_segments allocator fix after OOM at ep134) ---
+run_training "train-4deg-daily-v2-era5-only-ftens16-rerun.yaml" "train-4deg-daily-v2-era5-only-ftens16-rerun-rs0" 1
