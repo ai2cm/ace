@@ -28,6 +28,12 @@ data:
   batch_size: 1
   num_data_workers: 0
   strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 16
+  lon_extent:
+    start: 0
+    stop: 16
 logging:
   log_to_screen: true
   log_to_wandb: false
