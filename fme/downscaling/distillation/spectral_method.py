@@ -8,10 +8,12 @@ generator objective. The subclass is selected by pointing ``config.model_class``
 at it from the distillation entry point (``fastgen_train.py``); the loss module
 and its weight are attached after instantiation via :meth:`set_spectral_loss`.
 
-The spectral term matches the student's zonal power spectrum to the *teacher's*
-(``teacher_x0``). Both operands live in the same network-output space at the
-point they are compared, so the residual/denormalization bookkeeping that the
-full-field generation path needs does not apply here.
+The spectral term matches the student's zonal power spectrum to that of the
+teacher's clean EDM *sample* (``data["real"]``) -- NOT the teacher's x0
+*prediction* ``teacher_x0``, which is a conditional mean and hence too smooth.
+Both operands live in the same network-output space at the point they are
+compared, so the residual/denormalization bookkeeping that the full-field
+generation path needs does not apply here.
 
 See ``fme/downscaling/distillation/specs/11-spectral-matching-loss.md``.
 """
@@ -39,7 +41,8 @@ class AceFdistillModel(FdistillModel):
 
     Behaves identically to the parent until :meth:`set_spectral_loss` is called;
     thereafter the generator loss gains ``weight * spectral_loss(gen_data,
-    teacher_x0)``.
+    teacher_sample)`` where ``teacher_sample`` is the clean EDM target
+    ``data["real"]``.
     """
 
     def set_spectral_loss(
@@ -104,7 +107,15 @@ class AceFdistillModel(FdistillModel):
             gen_data, teacher_x0, fake_score_x0, additional_scale=h
         )
 
-        spectral_loss = spectral_loss_module(gen_data, teacher_x0)
+        # Spectral target is the teacher's clean EDM *sample* (data["real"]),
+        # NOT teacher_x0. teacher_x0 is the teacher's x0 *prediction*
+        # E[x0 | x_t] -- a conditional mean, which is smoother (less
+        # high-wavenumber power) than a sample, so matching its spectrum would
+        # push the student toward over-smoothing. The clean sample carries the
+        # correct ensemble high-k power. _prepare_training_data is deterministic
+        # (just returns data["real"]); augmentation already happened upstream.
+        real_data, _, _ = self._prepare_training_data(data)
+        spectral_loss = spectral_loss_module(gen_data, real_data)
         weighted_spectral_loss = spectral_weight * spectral_loss
         loss = (
             f_distill_loss

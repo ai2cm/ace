@@ -47,16 +47,22 @@ weight, and for DMD2 (where `gan_loss_weight_gen` may be 0) potentially remove i
    pointing `config.model_class` at it from `fastgen_train.py`. Scoped to
    **f-distill only** for v1 (the run being tuned); DMD2 is a trivial parallel
    subclass if needed later.
-2. **Target:** match the student spectrum to the **teacher** spectrum
-   (`teacher_x0`), not ground truth. Distillation-consistent (same target as
-   VSD), recovers exactly what few-step sampling loses, and cannot fight the
-   distribution-matching objective. Teacher spectrum is the ceiling for this
-   term — pushing past it (toward real 3km data) is deliberately out of scope
-   for v1.
+2. **Target:** match the student sample's spectrum to the teacher's clean EDM
+   **sample** (`data["real"]`), not ground truth. **Corrected 2026-07-07** — v1
+   wrongly used `teacher_x0` (the teacher's x0 *prediction* `E[x0|x_t]`, a
+   conditional mean), which is smoother than a sample and drove the student to
+   *over-smooth* (see Revision below). The clean sample is distillation-
+   consistent (it is the distillation target) and carries the correct ensemble
+   high-k power. Teacher spectrum is the ceiling; pushing past it (toward real
+   3km data) is out of scope for v1.
 3. **Transform + formulation:** zonal `rfft` power spectrum
    (`fme/downscaling/metrics_and_maths.py:223 compute_zonal_power_spectrum`),
-   band-weighted **L1 on log-power**. Cheap enough to run every step, reuses the
-   existing diagnostic op, and the band weighting is where the "smart weighting"
+   band-weighted **L1 on log-power**, computed **spectrum-then-average**: per-
+   sample power spectra are averaged over the batch *before* the log-L1, so the
+   term matches the *ensemble* power `E[|FFT|^2]` (preserving incoherent high-k
+   energy) and mirrors how the eval `spec_mae` aggregator computes spectra.
+   Cheap enough to run every step, reuses the existing diagnostic op, and the
+   band weighting is where the "smart weighting"
    lives — we can up-weight the degraded high-k tail.
 
 ## Verified mechanics (do not re-derive)
@@ -174,3 +180,37 @@ loss when `gen == teacher`, per-variable weighting selects the right channel.
 - **f-distill GAN coupling:** v1 keeps the GAN in f-distill (assert). Only
   revisit removing it if the DMD2 GAN-off arm shows the spectral term is
   sufficient on its own.
+
+## Revision — wrong target diagnosed and fixed (2026-07-07)
+
+**Symptom.** The first spectral arm (`W=1e-2`, wandb `s4abc6ba`) did not improve
+spectra and hurt distillation. Vs the baseline (`f7z93y0a`) over ~18k steps:
+`train/spectral_loss` fell 0.667→0.432 (so the term *was* responding), but
+`train/f_distill_loss` rose to ~0.22 (3× the baseline's ~0.066) and
+`val/spec_mae_PRATEsfc` stalled at ~0.96 while the baseline improved to ~0.65.
+Tails under-produced (`tail_99.99` ~0.83). So the weighting was not too weak —
+the loss was optimizing toward the wrong thing.
+
+**Root cause (two coupled errors).**
+1. **Wrong target.** v1 matched `gen_data` (a student *sample*) to `teacher_x0`,
+   the teacher's x0 *prediction* `E[x0 | x_t]` at a random perturbation σ. A
+   conditional mean is systematically **smoother** than a sample (less high-k
+   power), so matching its spectrum pushed the student to over-smooth — the
+   opposite of the goal — and fought VSD. VSD tolerates the same `teacher_x0`
+   only because it uses the *difference* `(fake_score − teacher)`, cancelling
+   the shared σ-dependent smoothing bias; the standalone spectral term inherits
+   it fully.
+2. **Wrong reduction order.** `spectrum(mean(fields))` (average fields, then
+   spectrum) cancels incoherent high-k energy; the correct estimate of ensemble
+   power is `mean(spectrum(fields))` (spectrum per sample, then average).
+
+**Fix.** (a) Target = the teacher's clean EDM **sample** `data["real"]` (a real
+sample with correct high-k power; already in the batch, no extra teacher
+forward; obtained via the deterministic `_prepare_training_data`). (b)
+`SpectralMatchingLoss.forward` now averages per-sample power spectra over the
+batch **before** the log-L1 (spectrum-then-average), matching `E[|FFT|^2]` and
+the eval `spec_mae` aggregator. Guarded by
+`test_uses_ensemble_power_not_field_mean`.
+
+Supersedes the "Field space is resolved" and "Per-sample vs batch spectra" notes
+above (they described the `teacher_x0`, per-sample design).

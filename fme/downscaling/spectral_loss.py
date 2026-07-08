@@ -121,8 +121,21 @@ class SpectralMatchingLoss(torch.nn.Module):
         return weights
 
     def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Spectrum-then-average: compute each sample's power spectrum, then
+        # average the spectra over the batch to estimate the *ensemble* power
+        # E[|FFT|^2]. This preserves the incoherent high-wavenumber energy that
+        # averaging the fields first (a conditional mean) would cancel, and it
+        # matches how the eval spec_mae aggregator computes spectra. Prediction
+        # and target are independent samples sharing conditioning, so the match
+        # is distributional (mean spectrum vs mean spectrum), not pointwise.
         power_pred = compute_zonal_power_spectrum(prediction)
         power_target = compute_zonal_power_spectrum(target).detach()
+
+        # Average over all leading (sample/batch) dims -> (C, K).
+        lead = tuple(range(power_pred.ndim - 2))
+        if lead:
+            power_pred = power_pred.mean(dim=lead)
+            power_target = power_target.mean(dim=lead)
 
         if self.log:
             diff = (
@@ -131,7 +144,7 @@ class SpectralMatchingLoss(torch.nn.Module):
         else:
             diff = (power_pred - power_target).abs()
 
-        # diff: (..., C, K)
+        # diff: (C, K)
         band_weights = self._band_weights(diff.shape[-1], diff.device, diff.dtype)
         var_weights = self.variable_weights.to(dtype=diff.dtype)
         weighted = diff * band_weights * var_weights

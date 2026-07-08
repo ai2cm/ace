@@ -77,6 +77,19 @@ def test_min_wavenumber_masks_low_wavenumbers():
     assert loss.item() == pytest.approx(0.0, abs=1e-6)
 
 
+def test_uses_ensemble_power_not_field_mean():
+    # Two samples with opposite-sign high-k content: their field-mean is ~0
+    # (smooth, no power), but each sample carries real power at wavenumber k.
+    # Spectrum-then-average (correct) sees the full ensemble power; field-mean-
+    # then-spectrum (the bug) would see ~0. Target is a zero field (no power),
+    # so a correct loss must be clearly > 0.
+    base = _sinusoid(4, 1.0)[:1]  # (1, 1, H, W)
+    pred = torch.cat([base, -base], dim=0)  # (2, 1, H, W); field-mean ~ 0
+    target = torch.zeros_like(pred)
+    loss = _loss(SpectralMatchingLossConfig(log=False))(pred, target)
+    assert loss.item() > 0.1
+
+
 def test_variable_weights_can_zero_a_channel():
     out_names = ["a", "b"]
     # channel a matches; channel b mismatches.
