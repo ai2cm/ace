@@ -11,7 +11,7 @@ inference:
   - name: long_46year_constant_co2
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 16794
     forward_steps_in_memory: 73
@@ -37,7 +37,7 @@ inference:
   - name: 10year
     weight: 1.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 3652
     forward_steps_in_memory: 73
@@ -134,7 +134,7 @@ inference:
   - name: weather_2024
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 5
     forward_steps_in_memory: 5
@@ -195,7 +195,7 @@ inference:
   - name: weather_1994
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 5
     forward_steps_in_memory: 5
@@ -256,7 +256,7 @@ inference:
   - name: long_46year
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 16794
     forward_steps_in_memory: 73
@@ -303,7 +303,7 @@ inference:
   - name: 7year_oosample_ensemble_varying_co2
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 2534
     forward_steps_in_memory: 73
@@ -350,7 +350,7 @@ inference:
   - name: 7year_oosample_ensemble_constant_co2
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 2534
     forward_steps_in_memory: 73
@@ -375,7 +375,7 @@ inference:
   - name: 10year_insample_ensemble_varying_co2
     weight: 1.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 3652
     forward_steps_in_memory: 73
@@ -398,9 +398,9 @@ inference:
       num_data_workers: 4
     aggregator: *agg_10year
   - name: 10year_insample_ensemble_constant_co2
-    weight: 1.0
+    weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 3652
     forward_steps_in_memory: 73
@@ -425,7 +425,7 @@ inference:
   - name: weather_1994_ensemble_varying_co2
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 5
     forward_steps_in_memory: 5
@@ -486,7 +486,7 @@ inference:
   - name: weather_1994_ensemble_constant_co2
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 5
     forward_steps_in_memory: 5
@@ -511,7 +511,7 @@ inference:
   - name: long_43year_ensemble_varying_co2
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 15683
     forward_steps_in_memory: 73
@@ -558,7 +558,7 @@ inference:
   - name: long_43year_constant_co2
     weight: 0.0
     epochs:
-      start: 10
+      start: 0
       step: 10
     n_forward_steps: 15683
     forward_steps_in_memory: 73

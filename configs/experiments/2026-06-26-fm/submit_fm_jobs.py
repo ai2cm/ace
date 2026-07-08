@@ -8,6 +8,7 @@ Usage:
                              [--beaker-workspace WORKSPACE]
                              [--beaker-cluster CLUSTER [CLUSTER ...]]
                              [--beaker-priority PRIORITY]
+                             [--skip-if-in-wandb]
 """
 
 import argparse
@@ -20,10 +21,15 @@ from _version_select import add_version_arg, stem_matches_version
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
+WANDB_ENTITY = "ai2cm"
 WANDB_PROJECT = "FM"
 WANDB_PREFIX = "ace2-fm-"
 WANDB_GROUP = "ace2-fm-2026-06-26"
-CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
+CONFIG_PREFIX = "ace-train-config-4deg-"
+# Dataset tag stripped from job names so that
+# ace-train-config-4deg-AIMIP-nc-sfno-v3.yaml -> ace2-fm-nc-sfno-v3. Configs
+# without a dataset tag (e.g. ...-nc-sfno-c96-v1) keep their full suffix.
+DATASET_TAG = "AIMIP-"
 
 
 def configs_for_version(version: str | None) -> list[str]:
@@ -44,9 +50,17 @@ def configs_for_version(version: str | None) -> list[str]:
 def config_to_job_name(config_filename: str) -> str:
     # ace-train-config-4deg-AIMIP-nc-sfno-fm-0.1-v1.yaml
     # → ace2-fm-nc-sfno-fm-0.1-v1
+    # ace-train-config-4deg-nc-sfno-c96-v1.yaml → ace2-fm-nc-sfno-c96-v1
     stem = pathlib.Path(config_filename).stem  # strip .yaml
-    suffix = stem.removeprefix(CONFIG_PREFIX)
+    suffix = stem.removeprefix(CONFIG_PREFIX).removeprefix(DATASET_TAG)
     return f"{WANDB_PREFIX}{suffix}"
+
+
+def wandb_run_names() -> set[str]:
+    import wandb  # lazy import: keeps the module importable without wandb
+
+    api = wandb.Api()
+    return {run.name for run in api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")}
 
 
 def main() -> None:
@@ -74,7 +88,17 @@ def main() -> None:
         default="urgent",
         help="Beaker job priority (default: urgent).",
     )
+    parser.add_argument(
+        "--skip-if-in-wandb",
+        action="store_true",
+        help=(
+            "Skip configs whose job name already exists as a run in the "
+            f"{WANDB_ENTITY}/{WANDB_PROJECT} wandb project."
+        ),
+    )
     args = parser.parse_args()
+
+    existing_runs = wandb_run_names() if args.skip_if_in_wandb else set()
 
     configs = configs_for_version(args.version)
     for config_filename in configs:
@@ -82,6 +106,9 @@ def main() -> None:
         if not config_path.exists():
             raise FileNotFoundError(f"{config_filename} not found")
         job_name = config_to_job_name(config_filename)
+        if job_name in existing_runs:
+            print(f"Skipping (already in wandb): {job_name}")
+            continue
         cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]
         print("Submitting:", " ".join(cmd))
         if not args.dry_run:
