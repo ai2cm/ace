@@ -16,6 +16,10 @@ _DERIVED_VARIABLE_REGISTRY: MutableMapping[
     str, tuple[DerivedVariableFunc, VariableMetadata]
 ] = {}
 
+# Small positive floor applied to flux ratio denominators to avoid division by
+# zero (e.g. downward shortwave flux at night, or vanishing turbulent fluxes).
+_FLUX_DENOMINATOR_EPS = 1e-6
+
 
 def get_derived_variable_metadata() -> dict[str, VariableMetadata]:
     return {
@@ -164,6 +168,37 @@ def implied_tendency_of_total_energy_ace2_path_due_to_advection(
 @register(VariableMetadata("m/s", "Windspeed at 10m above surface"))
 def windspeed_at_10m(data: AtmosphereData, timestep: datetime.timedelta):
     return data.windspeed_at_10m
+
+
+@register(VariableMetadata("", "Surface evaporative fraction"))
+def surface_evaporative_fraction(data: AtmosphereData, timestep: datetime.timedelta):
+    """Fraction of turbulent surface heat flux carried by latent heat.
+
+    Defined as LH / (LH + SH). The denominator is floored to a small positive
+    value and the result is clamped to the physical range [0, 1] so that
+    near-singular points (vanishing turbulent flux) do not produce NaN/inf or
+    dominate aggregated metrics.
+    """
+    latent_heat_flux = data.latent_heat_flux
+    turbulent_heat_flux = torch.clamp(
+        latent_heat_flux + data.sensible_heat_flux, min=_FLUX_DENOMINATOR_EPS
+    )
+    return torch.clamp(latent_heat_flux / turbulent_heat_flux, min=0.0, max=1.0)
+
+
+@register(VariableMetadata("", "Implied surface albedo"))
+def implied_surface_albedo(data: AtmosphereData, timestep: datetime.timedelta):
+    """Surface albedo implied by upward and downward shortwave fluxes.
+
+    Defined as USWRFsfc / DSWRFsfc. The denominator is floored to a small
+    positive value and the result is clamped to the physical range [0, 1] so
+    that nighttime points (zero downward shortwave) do not produce NaN/inf or
+    dominate aggregated metrics.
+    """
+    sfc_down_sw = torch.clamp(
+        data.sfc_down_sw_radiative_flux, min=_FLUX_DENOMINATOR_EPS
+    )
+    return torch.clamp(data.sfc_up_sw_radiative_flux / sfc_down_sw, min=0.0, max=1.0)
 
 
 def _compute_derived_variable(
