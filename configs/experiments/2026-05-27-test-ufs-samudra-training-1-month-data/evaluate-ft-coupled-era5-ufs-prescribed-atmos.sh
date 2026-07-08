@@ -18,7 +18,7 @@ python -m fme.coupled.validate_config --config_type evaluator "$CONFIG_PATH"
 gantry run \
     --name "$JOB_NAME" \
     --task-name "$JOB_NAME" \
-    --description "Coupled ERA5+UFS evaluator with atmosphere prescribed (forced Samudra ocean)" \
+    --description "Coupled ERA5+UFS evaluator with ERA5 atmosphere fluxes prescribed (forced Samudra ocean)" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/climate-titan \
     --priority normal \

@@ -839,9 +839,10 @@ def test_step_boundary_disjointness_passes_when_disjoint():
     assert "diagnostic_main" not in result.corrector_diagnostics.delta
 
 
-def test_step_boundary_disjointness_raises_on_overlap():
-    # corrector modifies diagnostic_main and the post-corrector prescription
-    # also writes diagnostic_main -> overlap must raise.
+def test_step_boundary_overlap_prescribes_and_drops_stale_delta():
+    # corrector modifies diagnostic_main and the post-corrector prescription also
+    # writes diagnostic_main -> the prescribed value wins and its now-stale delta
+    # is dropped so ``output - delta = network_output`` holds for reported deltas.
     selector = _single_module_corrector_prescribed_selector(
         force_positive_names=["diagnostic_main"],
         prescribed_prognostic_names=["diagnostic_main"],
@@ -850,14 +851,19 @@ def test_step_boundary_disjointness_raises_on_overlap():
     step = get_step(selector, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
     next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
-    with pytest.raises(ValueError, match="overlap"):
-        step.step(
-            args=StepArgs(
-                input=input_data,
-                next_step_input_data=next_step_input_data,
-                labels=None,
-            ),
-        )
+    prescribed_value = torch.full((2, *img_shape), 3.5, device=fme.get_device())
+    next_step_input_data["diagnostic_main"] = prescribed_value
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    # prescribed value wins over both the network output and the corrector
+    torch.testing.assert_close(result.output["diagnostic_main"], prescribed_value)
+    # the overwritten name's stale delta is dropped from the diagnostics
+    assert "diagnostic_main" not in result.corrector_diagnostics.delta
 
 
 def test_secondary_module_empty_names_raises():

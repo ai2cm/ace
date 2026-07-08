@@ -1,18 +1,18 @@
-# Coupled ERA5+UFS evaluator with the ATMOSPHERE PRESCRIBED from reanalysis.
+# Coupled ERA5+UFS evaluator with the ATMOSPHERE FLUXES PRESCRIBED from ERA5.
 #
-# Goal: isolate how the Samudra ocean responds to the *correct* atmospheric
-# forcings. The atmosphere network still runs each inner step, but its
-# ocean-forcing outputs (radiative/turbulent fluxes, precip, surface stresses)
-# are overwritten with the ERA5 reference values before being time-averaged and
-# passed to the ocean. This turns the run into an atmosphere-forced ocean rollout
-# within the coupled harness, directly comparable to the fully-coupled evaluator
-# (evaluator-ft-coupled-era5-ufs.yaml), which uses the same settings minus the
-# override below.
+# Goal: see how the Samudra ocean responds to the *correct* (ERA5) atmospheric
+# forcings. The ACE atmosphere still runs each inner step, but its ocean-forcing
+# outputs (radiative/turbulent fluxes, precip, surface stresses) are overwritten
+# with the ERA5 reference values from the atmosphere zarr before being
+# time-averaged and passed to the ocean. This drives Samudra with true ERA5
+# fluxes rather than the UFS-atmosphere fluxes baked into the ocean zarr.
 #
 # The prescribed names are the atmosphere-side output names that map to the
 # ocean's atmosphere-forced inputs (respecting atmosphere_output_rename:
-# eastward_surface_wind_stress <- eastward_surface_stress, etc.). They are all in
-# the atmosphere out_names and present in the ERA5 forcing dataset.
+# eastward_surface_wind_stress <- eastward_surface_stress, etc.). Several of these
+# (DLWRFsfc/DSWRFsfc/ULWRFsfc/USWRFsfc/PRATEsfc/total_frozen_precipitation_rate)
+# are also modified by the atmosphere corrector; the prescribed value wins and
+# the corrector's now-stale delta for those names is dropped from diagnostics.
 experiment_dir: /results
 n_coupled_steps: 2170  # 30 years with 5-day ocean steps
 coupled_steps_in_memory: 10

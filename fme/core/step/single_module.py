@@ -686,20 +686,6 @@ def step_with_adjustments(
                 )
             )
 
-    # The post-corrector adjustments below run after the corrector and are
-    # excluded from the diagnostics. Their written names must stay disjoint from
-    # the corrector's modified names, or ``delta = output - input_snapshot``
-    # would no longer be exact for an overlapping variable.
-    post_corrector_names: set[str] = set(prescribed_prognostic_names)
-    if ocean is not None:
-        post_corrector_names.add(ocean.surface_temperature_name)
-    overlap = post_corrector_names & set(diagnostics.delta)
-    if overlap:
-        raise ValueError(
-            "post-corrector adjustment names overlap the corrector's modified "
-            f"names: {sorted(overlap)}"
-        )
-
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -709,6 +695,28 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
+
+    # The ocean SST prescription and prescribed-prognostic overwrites above run
+    # after the corrector and replace its output for those names. The recorded
+    # ``delta = corrected - network_output`` would then no longer satisfy
+    # ``output - delta = network_output`` for an overwritten name, so drop those
+    # names from the diagnostics rather than report a stale delta. The remaining
+    # deltas still describe the final prediction exactly. This lets a variable be
+    # both corrected and prescribed (e.g. prescribing reference atmosphere fluxes
+    # that the corrector also touches when forcing a coupled ocean).
+    post_corrector_names: set[str] = set(prescribed_prognostic_names)
+    if ocean is not None:
+        post_corrector_names.add(ocean.surface_temperature_name)
+    overwritten = post_corrector_names & set(diagnostics.delta)
+    if overwritten:
+        diagnostics = CorrectorDiagnostics(
+            delta={
+                name: value
+                for name, value in diagnostics.delta.items()
+                if name not in overwritten
+            }
+        )
+
     return StepOutput(
         output=output,
         stepper_state=stepper_state,
