@@ -11,6 +11,8 @@ create_environment:
 	conda env create -f environment.yaml
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) pip install -r dataflow-requirements.txt
 
+generate_weights: generate_weights_one_degree generate_weights_four_degree
+
 generate_weights_one_degree:
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.weights \
 		--hgrid-url $(HGRID_URL) \
@@ -50,5 +52,5 @@ dataflow:
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
 		./run-dataflow.sh DataflowRunner $(CONFIG)
 
-.PHONY: create_environment generate_weights_one_degree generate_weights_four_degree \
-	test_run build_dataflow push_dataflow enter dataflow
+.PHONY: create_environment generate_weights generate_weights_one_degree \
+	generate_weights_four_degree test_run build_dataflow push_dataflow enter dataflow

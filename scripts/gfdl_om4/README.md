@@ -38,12 +38,17 @@ Contents:
 
 ## Setup
 
+One-time setup to prepare the conda environment and precompute regridding
+weights:
+
 ```
 make create_environment      # conda env gfdl-om4-ingestion
-make generate_weights_one_degree
+make generate_weights        # precompute all conservative regridding weights
 ```
 
 ## Running
+
+### Test runs
 
 A local DirectRunner subset run (a few timesteps, writes to a scratch
 store):
@@ -59,6 +64,8 @@ arguments:
 python -m pipeline.run --config configs/om4-picontrol-1deg.yaml \
     --num-timesteps 6 --output-path <url> --runner DirectRunner
 ```
+
+### Production runs
 
 A production run on Google Cloud Dataflow — build and push the worker
 image, then launch (the config's output path is used as-is):

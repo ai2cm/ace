@@ -61,10 +61,29 @@ def _download(url: str, local_path: str) -> None:
         dst.write(src.read())
 
 
-def generate_weights(hgrid_url: str, target_grid_name: str, output_url: str) -> None:
+def generate_weights(
+    hgrid_url: str, target_grid_name: str, output_url: str, overwrite: bool = False
+) -> None:
     """Compute conservative xESMF weights for the source grid described by
     the supergrid at ``hgrid_url`` onto the named Gaussian target grid, and
-    write the weight artifact under the ``output_url`` prefix."""
+    write the weight artifact under the ``output_url`` prefix.
+
+    Refuses to clobber an existing artifact unless ``overwrite`` is set:
+    published artifacts are treated as immutable, so a changed weight
+    computation belongs under a new version prefix."""
+    fs, _ = fsspec.url_to_fs(output_url)
+    existing = [
+        url
+        for filename in (SOURCE_GRID_FILENAME, WEIGHTS_FILENAME)
+        if fs.exists(url := f"{output_url.rstrip('/')}/{filename}")
+    ]
+    if existing and not overwrite:
+        raise FileExistsError(
+            f"Weight artifact already exists at {output_url} ({existing}). "
+            "Published artifacts are immutable: bump the version in the "
+            "output URL (e.g. WEIGHTS_VERSION in the Makefile), or pass "
+            "--overwrite if you really mean to replace it."
+        )
     logger.info(f"Reading supergrid from {hgrid_url}")
     with fsspec.open(hgrid_url) as f:
         hgrid = xr.open_dataset(f).load()
@@ -140,9 +159,15 @@ def main() -> None:
     parser.add_argument(
         "--output-url", required=True, help="GCS prefix for the weight artifact"
     )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing weight artifact at the output URL "
+        "(default: refuse; bump the artifact version instead)",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    generate_weights(args.hgrid_url, args.target_grid, args.output_url)
+    generate_weights(args.hgrid_url, args.target_grid, args.output_url, args.overwrite)
 
 
 if __name__ == "__main__":
