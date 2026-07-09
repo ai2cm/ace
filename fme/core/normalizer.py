@@ -2,6 +2,7 @@ import dataclasses
 import pathlib
 from collections.abc import Iterable, Mapping
 from copy import copy
+from typing import Protocol
 
 import fsspec
 import numpy as np
@@ -103,6 +104,17 @@ class NormalizationConfig:
             )
 
 
+class NormalizeFn(Protocol):
+    """
+    A callable that normalizes a mapping of tensors, with an option to skip
+    the mean subtraction (see :meth:`StandardNormalizer.normalize`).
+    """
+
+    def __call__(
+        self, tensors: TensorMapping, apply_mean: bool = True
+    ) -> TensorDict: ...
+
+
 class StandardNormalizer:
     """
     Responsible for normalizing tensors.
@@ -129,13 +141,24 @@ class StandardNormalizer:
     def fill_nans_on_denormalize(self):
         return self._fill_nans_on_denormalize
 
-    def normalize(self, tensors: TensorMapping) -> TensorDict:
+    def normalize(self, tensors: TensorMapping, apply_mean: bool = True) -> TensorDict:
+        """
+        Normalize the tensors.
+
+        Args:
+            tensors: Mapping from variable names to tensors; names without
+                normalization constants are dropped from the output.
+            apply_mean: If False, skip the mean subtraction and divide by the
+                standard deviation only, e.g. to normalize a difference of
+                fields without centering it.
+        """
         filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
         return _normalize(
             filtered_tensors,
             means=self.means,
             stds=self.stds,
             fill_nans=self._fill_nans_on_normalize,
+            apply_mean=apply_mean,
         )
 
     def denormalize(self, tensors: TensorMapping) -> TensorDict:
@@ -188,8 +211,12 @@ def _normalize(
     means: TensorDict,
     stds: TensorDict,
     fill_nans: bool,
+    apply_mean: bool = True,
 ) -> TensorDict:
-    normalized = {k: (t - means[k]) / stds[k] for k, t in tensors.items()}
+    if apply_mean:
+        normalized = {k: (t - means[k]) / stds[k] for k, t in tensors.items()}
+    else:
+        normalized = {k: t / stds[k] for k, t in tensors.items()}
     if fill_nans:
         for k, v in normalized.items():
             normalized[k] = torch.where(torch.isnan(v), torch.zeros_like(v), v)

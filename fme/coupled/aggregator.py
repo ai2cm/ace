@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import os
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import torch
 import xarray as xr
@@ -47,7 +47,7 @@ from fme.core.generics.aggregator import (
     InferenceLogs,
     InferenceSummary,
 )
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.normalizer import NormalizeFn
 from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
@@ -309,8 +309,8 @@ class InferenceEvaluatorAggregatorConfig:
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
         initial_time: xr.DataArray,
-        ocean_normalize: Callable[[TensorMapping], TensorDict],
-        atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        ocean_normalize: NormalizeFn,
+        atmosphere_normalize: NormalizeFn,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
