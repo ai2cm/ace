@@ -1,12 +1,15 @@
 """Generate SST-perturbation inference configs for the VarMaskingC96 checkpoints.
 
-Three free-running inference configs are written to ``run_configs/``, one per
-constant SST perturbation level (p0k / p2k / p4k). Each config mounts its
-checkpoint at ``/ckpt.tar`` (supplied per-run by submit_sst_jobs.py) and runs a
-prognostic forecast with the SST forcing shifted by a constant amplitude.
+Free-running inference configs are written to ``run_configs/``, one per
+(forcing dataset x constant SST perturbation level) combination. The two forcing
+datasets are the C96 SHIELD-AMIP datasets used in training (constant-CO2 and the
+varying-CO2 ensemble member ic_0001); the perturbation levels are p0k / p2k /
+p4k. Each config mounts its checkpoint at ``/ckpt.tar`` (supplied per-run by
+submit_sst_jobs.py) and runs a prognostic forecast with the SST forcing shifted
+by a constant amplitude.
 
 The configs are run-agnostic: the per-run checkpoint dataset is provided at
-submit time, so the same three configs are reused across every training run.
+submit time, so the same configs are reused across every training run.
 They are consumed by ``python -m fme.ace.inference`` (via run-ace-inference.sh),
 not by the evaluator suite.
 """
@@ -28,19 +31,33 @@ SST_PERTURBATIONS = {
     "p4k": 4.0,
 }
 
-# Free-running inference settings (shared by every perturbation level).
-N_FORWARD_STEPS = 1460
+# Forcing datasets (C96 SHIELD-AMIP, native to the checkpoints), keyed by
+# config/job suffix. ``data_path`` is the zarr directory; ``file_pattern`` is
+# the zarr name within it.
+DATASETS = {
+    "constant-co2": {
+        "data_path": "/climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-constant-co2-dataset",  # noqa: E501
+        "file_pattern": "AMIP-constant-CO2.zarr",
+    },
+    "varying-co2": {
+        "data_path": "/climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset",  # noqa: E501
+        "file_pattern": "ic_0001.zarr",
+    },
+}
+
+# Free-running inference settings (shared by every config).
+N_FORWARD_STEPS = 15683
 FORWARD_STEPS_IN_MEMORY = 40
-DATA_PATH = "/climate-default/"
-DATASET_FILENAME = "2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr"
 INITIAL_CONDITION_TIME = "1979-01-01T00:00:00"
 
 
-def sst_config_filename(level: str) -> str:
-    return f"{SST_CONFIG_PREFIX}{level}.yaml"
+def sst_config_filename(dataset: str, level: str) -> str:
+    return f"{SST_CONFIG_PREFIX}{dataset}-{level}.yaml"
 
 
-def _build_inference_config(amplitude: float) -> dict:
+def _build_inference_config(
+    data_path: str, file_pattern: str, amplitude: float
+) -> dict:
     return {
         "checkpoint_path": CHECKPOINT_PATH,
         "allow_incompatible_dataset": True,
@@ -52,14 +69,14 @@ def _build_inference_config(amplitude: float) -> dict:
             "save_prediction_files": False,
         },
         "initial_condition": {
-            "path": f"{DATA_PATH}{DATASET_FILENAME}",
+            "path": f"{data_path}/{file_pattern}",
             "engine": "zarr",
             "start_indices": {"times": [INITIAL_CONDITION_TIME]},
         },
         "forcing_loader": {
             "dataset": {
-                "data_path": DATA_PATH,
-                "file_pattern": DATASET_FILENAME,
+                "data_path": data_path,
+                "file_pattern": file_pattern,
                 "engine": "zarr",
             },
             "num_data_workers": 4,
@@ -78,14 +95,19 @@ def _build_inference_config(amplitude: float) -> dict:
 
 def generate_configs(existing_only: bool = False) -> None:
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
-    for level, amplitude in SST_PERTURBATIONS.items():
-        out_path = RUN_CONFIGS_DIR / sst_config_filename(level)
-        if existing_only and not out_path.exists():
-            print(f"Skipped {out_path.name}")
-            continue
-        cfg = _build_inference_config(amplitude)
-        out_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
-        print(f"Wrote {out_path.name}")
+    for dataset, spec in DATASETS.items():
+        for level, amplitude in SST_PERTURBATIONS.items():
+            out_path = RUN_CONFIGS_DIR / sst_config_filename(dataset, level)
+            if existing_only and not out_path.exists():
+                print(f"Skipped {out_path.name}")
+                continue
+            cfg = _build_inference_config(
+                spec["data_path"], spec["file_pattern"], amplitude
+            )
+            out_path.write_text(
+                yaml.dump(cfg, default_flow_style=False, sort_keys=False)
+            )
+            print(f"Wrote {out_path.name}")
 
 
 def main() -> None:
