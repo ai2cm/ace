@@ -5,6 +5,7 @@ from collections.abc import Callable, Sequence
 
 import torch
 
+from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.core.cli import ResumeResultsConfig
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
@@ -99,6 +100,8 @@ class InlineValidationConfig:
     """
     Parameters:
         loader: configuration for the data loader used during validation
+        aggregator: configuration of validation aggregator, applied to both the
+            ocean and atmosphere sub-aggregators.
         name: name used as wandb log prefix and output subdirectory. If None,
             defaults to "val" when there is a single validation config
             and "val_{i}" when there are multiple. Note: adding a second
@@ -109,6 +112,9 @@ class InlineValidationConfig:
     """
 
     loader: CoupledDataLoaderConfig
+    aggregator: OneStepAggregatorConfig = dataclasses.field(
+        default_factory=lambda: OneStepAggregatorConfig()
+    )
     name: str | None = None
     weight: float = 1.0
 
@@ -117,6 +123,25 @@ class InlineValidationConfig:
             raise ValueError(
                 f"InlineValidationConfig weight must be non-negative, got {self.weight}"
             )
+
+    def build_aggregator_factory(
+        self,
+        name: str,
+        dataset_info: CoupledDatasetInfo,
+        loss_scaling: CoupledTensorMapping,
+        save_per_epoch_diagnostics: bool,
+        output_dir: str,
+    ) -> Callable[[], OneStepAggregator]:
+        def factory():
+            return OneStepAggregator(
+                dataset_info=dataset_info,
+                loss_scaling=loss_scaling,
+                save_diagnostics=save_per_epoch_diagnostics,
+                output_dir=os.path.join(output_dir, name),
+                config=self.aggregator,
+            )
+
+        return factory
 
 
 @dataclasses.dataclass
@@ -211,22 +236,17 @@ def _get_validation_callback(
     save_per_epoch_diagnostics: bool,
     output_dir: str,
 ) -> ValidationCallback:
-    def make_factory(name: str) -> Callable[[], OneStepAggregator]:
-        def factory():
-            return OneStepAggregator(
-                dataset_info=dataset_info,
-                save_diagnostics=save_per_epoch_diagnostics,
-                output_dir=os.path.join(output_dir, name),
-                loss_scaling=loss_scaling,
-            )
-
-        return factory
-
     tasks: list[ValidationTask] = [
         ValidationTask(
             name=name,
             data=data,
-            aggregator_factory=make_factory(name),
+            aggregator_factory=entry_config.build_aggregator_factory(
+                name=name,
+                dataset_info=dataset_info,
+                loss_scaling=loss_scaling,
+                save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                output_dir=output_dir,
+            ),
             weight=entry_config.weight,
         )
         for entry_config, data, name in validation_entries
@@ -254,6 +274,7 @@ def _get_validate_stepper_callback(
                 save_diagnostics=False,
                 output_dir="",
                 loss_scaling=loss_scaling,
+                config=entry_config.aggregator,
             )
             run_validation_loop(
                 stepper=stepper,
