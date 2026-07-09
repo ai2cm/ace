@@ -214,3 +214,43 @@ the eval `spec_mae` aggregator. Guarded by
 
 Supersedes the "Field space is resolved" and "Per-sample vs batch spectra" notes
 above (they described the `teacher_x0`, per-sample design).
+
+## Results — PRATEsfc f-distill testbed (2026-07-09)
+
+All runs are single-variable PRATEsfc (`C_OUT=1`), f-distill, launched via
+`configs/experiments/2026-05-18-distillation-with-val/run.sh fdistill` on
+Beaker `ai2/climate-titan`, wandb `ai2cm/fastgen`. Metrics below are the last
+logged validation value with the mid-training minimum in parentheses.
+
+| Run | wandb | Config | `spec_mae` lo/mid/hi | `crps` | `tail_99.99` |
+|-----|-------|--------|---------------------|--------|--------------|
+| baseline | `f7z93y0a` | no spectral | 1.05 / 1.02 / 0.87 | 1.98e-5 | 3.16 |
+| spectral-fix | `i26sidsm` | W=1e-2, gan=1e-3 | 0.41 / 0.16 / 0.11 (0.014 / 0.012 / 0.0026) | 1.50e-5 | 1.98 (0.82) |
+
+**The corrected spectral loss is a large win.** `i26sidsm` (commit `e29f797`,
+the fixed target/reduction) beats the GAN-only baseline 5–20× on `spec_mae` and
+improves the *independent* metrics too (`crps` and `tail_99.99` — the baseline
+over-produces extremes ~3×). `train/f_distill_loss` stays ≈ baseline (0.089 vs
+0.066), so the spectral term is **not** fighting distillation. W=1e-2 is
+well-scaled: `spectral_loss_weighted` ≈ 4% of `f_distill_loss` and ~2.4× the
+`1e-3·gan` term.
+
+**Caveat — late-training drift persists.** Every metric's minimum is
+mid-training (~2–14k) and drifts up afterward (`spec_mae_hi` 0.0026→0.11;
+`tail_99.99` 0.82→1.98) — the GAN-instability / checkpoint-selection trap seen
+across the MoE runs. Spectral matching raises the floor enormously but does not
+cure late drift on its own; pick a mid-training checkpoint.
+
+**Reduce-GAN arm (in progress).** To test whether leaning off the GAN cuts the
+late drift, a post-fix run with `gan_weight` 1e-3→3e-4 (W=1e-2 unchanged) was
+launched 2026-07-09: wandb `6dotglmg`, Beaker `01KX4DRYQ0RSQEWRY5F6QBP9BY`,
+commit `e29f797`. Verified reaching the training loop (`gan_loss_weight_gen`
+0.0003, spectral W=0.01, iter 1 logged). *Note:* the earlier
+`prate-spectral-lowgan` run (`gpx5574t`) is **invalid** — it ran on the pre-fix
+buggy target (commit `ae3979b`) and crashed at step 3770; `6dotglmg` is the
+first valid reduce-GAN test.
+
+**Next:** compare `6dotglmg` vs `i26sidsm` vs baseline on actual zonal
+spectra / histogram plots; if reduced GAN tames the late tail-overshoot, port
+the tuned config to the multi-variable runs with per-variable `variable_weights`
+(rollout step 4).
