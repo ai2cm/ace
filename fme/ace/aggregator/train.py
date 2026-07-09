@@ -35,12 +35,17 @@ class TrainAggregatorConfig:
         ensemble_metrics: Whether to compute ensemble metrics (CRPS, SSR bias, and
             ensemble-mean RMSE) over the training batches. Disabled by default;
             requires the batch to carry an ensemble dimension.
+        enable_ssr_bias_l1: Whether to additionally compute the L1
+            (CRPS-consistent) spread-skill ratio bias (``ssr_bias_l1``) when
+            ensemble_metrics is enabled. Off by default, so existing runs'
+            logged keys are unchanged.
     """
 
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
     per_channel_loss: bool = True
     ensemble_metrics: bool = False
+    enable_ssr_bias_l1: bool = False
 
 
 class Aggregator(Protocol):
@@ -117,6 +122,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
             self._ensemble_aggregator = _EnsembleAggregator(
                 gridded_operations=operations,
                 log_mean_maps=False,
+                enable_ssr_bias_l1=config.enable_ssr_bias_l1,
             )
 
     @torch.no_grad()

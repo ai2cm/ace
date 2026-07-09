@@ -9,6 +9,13 @@ from fme.core.distributed import Distributed
 
 USE_CPU_RANDN = False
 
+# When set (via ``use_generator``), randn/randn_like draw from this generator
+# instead of the global torch RNG. The generator lives on the CPU; draws are
+# generated on the CPU and then moved to the requested device. This makes
+# stochastic draws reproducible and independent both of the compute device and
+# of unrelated global-RNG consumption elsewhere in the process.
+_ACTIVE_GENERATOR: torch.Generator | None = None
+
 
 def set_seed(seed: int):
     """
@@ -30,6 +37,14 @@ def set_seed(seed: int):
 
 
 def randn_like(x: torch.Tensor, **kwargs):
+    if _ACTIVE_GENERATOR is not None:
+        device = kwargs.pop("device", x.device)
+        dtype = kwargs.pop("dtype", x.dtype)
+        # torch.randn_like does not accept a generator, so draw with torch.randn
+        # using the tensor's shape on the (CPU) generator, then move to device.
+        return torch.randn(
+            x.shape, generator=_ACTIVE_GENERATOR, dtype=dtype, **kwargs
+        ).to(device)
     if USE_CPU_RANDN:
         device = kwargs.pop("device", x.device)
         return torch.randn_like(x, device="cpu", **kwargs).to(device)
@@ -38,6 +53,10 @@ def randn_like(x: torch.Tensor, **kwargs):
 
 
 def randn(shape: torch.Size, **kwargs) -> torch.Tensor:
+    if _ACTIVE_GENERATOR is not None:
+        device = kwargs.pop("device", None)
+        result = torch.randn(shape, generator=_ACTIVE_GENERATOR, **kwargs)
+        return result if device is None else result.to(device)
     if USE_CPU_RANDN:
         device = kwargs.pop("device", None)
         return torch.randn(shape, device="cpu", **kwargs).to(device)
@@ -58,6 +77,31 @@ def log_uniform_sample(
     return torch.exp(
         torch.empty(shape, dtype=dtype).uniform_(np.log(p_min), np.log(p_max))
     )
+
+
+@contextlib.contextmanager
+def use_generator(generator: torch.Generator | None):
+    """Route ``randn``/``randn_like`` draws through a specific CPU generator.
+
+    While active, random numbers are drawn on the CPU using ``generator`` and
+    then moved to the requested device, so draws are reproducible given the
+    generator's seed and independent of the device and of unrelated global-RNG
+    consumption. Nested use restores the previous generator on exit. A ``None``
+    generator is a no-op, preserving the default global-RNG behavior.
+
+    Args:
+        generator: The CPU generator to draw from, or None for a no-op.
+    """
+    global _ACTIVE_GENERATOR
+    if generator is None:
+        yield
+        return
+    old_generator = _ACTIVE_GENERATOR
+    _ACTIVE_GENERATOR = generator
+    try:
+        yield
+    finally:
+        _ACTIVE_GENERATOR = old_generator
 
 
 @contextlib.contextmanager

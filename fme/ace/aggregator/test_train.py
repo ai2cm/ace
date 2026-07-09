@@ -258,9 +258,92 @@ def test_aggregator_ensemble_metrics():
     assert "train/ensemble/crps/a" in logs
     assert "train/ensemble/ssr_bias/a" in logs
     assert "train/ensemble/ensemble_mean_rmse/a" in logs
+    # enable_ssr_bias_l1 defaults to False, so no ssr_bias_l1 key is logged.
+    assert not any("ssr_bias_l1" in key for key in logs)
     for key in logs:
         if key != "train/mean/loss":
             assert not np.isnan(float(logs[key])), f"{key} is NaN"
+
+
+def test_aggregator_ensemble_metrics_ssr_bias_l1():
+    """When ensemble_metrics=True and enable_ssr_bias_l1=True, logs include the
+    L1 (CRPS-consistent) ssr_bias_l1 key alongside the other ensemble metrics."""
+    batch_size = 10
+    n_ensemble = 2
+    n_time = 1
+    nx, ny = 2, 2
+    device = get_device()
+    gridded_operations = LatLonOperations(
+        area_weights=torch.ones(nx, ny, device=device)
+    )
+    config = TrainAggregatorConfig(
+        spherical_power_spectrum=False,
+        weighted_rmse=False,
+        ensemble_metrics=True,
+        enable_ssr_bias_l1=True,
+    )
+    agg = TrainAggregator(config=config, operations=gridded_operations)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=device)},
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": torch.tensor(1.0, device=device)},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+        ),
+    )
+    logs = agg.get_logs(label="train")
+    assert "train/ensemble/ssr_bias/a" in logs
+    assert "train/ensemble/ssr_bias_l1/a" in logs
+    # The train aggregator builds the ensemble aggregator with log_mean_maps=False,
+    # so no mean-of-map key is emitted.
+    assert not any("mean_map" in key for key in logs)
+    for key in logs:
+        if key != "train/mean/loss":
+            assert not np.isnan(float(logs[key])), f"{key} is NaN"
+
+
+def test_aggregator_ensemble_metrics_ssr_bias_l1_disabled_by_default():
+    """ssr_bias_l1 is absent when enable_ssr_bias_l1 is left at its default even
+    with ensemble_metrics=True."""
+    batch_size = 10
+    n_ensemble = 2
+    n_time = 1
+    nx, ny = 2, 2
+    device = get_device()
+    gridded_operations = LatLonOperations(
+        area_weights=torch.ones(nx, ny, device=device)
+    )
+    config = TrainAggregatorConfig(
+        spherical_power_spectrum=False,
+        weighted_rmse=False,
+        ensemble_metrics=True,
+    )
+    agg = TrainAggregator(config=config, operations=gridded_operations)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=device)},
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": torch.tensor(1.0, device=device)},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+        ),
+    )
+    logs = agg.get_logs(label="train")
+    assert "train/ensemble/ssr_bias/a" in logs
+    assert not any("ssr_bias_l1" in key for key in logs)
 
 
 def test_aggregator_ensemble_metrics_disabled_by_default():

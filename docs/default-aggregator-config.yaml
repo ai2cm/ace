@@ -34,6 +34,7 @@ aggregator:
     strict: false
     target: denorm
     channel_mean_names: null
+    enable_ssr_bias_l1: false
   power_spectrum:
     variables: null
     name: power_spectrum
@@ -100,5 +101,18 @@ aggregator:
     name: ipo_index
     enabled: true
     strict: false
+  trend:
+    variables: null
+    name: trend
+    enabled: false
+    strict: false
+  near_zero_fraction:
+    variables: []
+    eps: 0.0
+    per_variable_eps: {}
+    name: near_zero_fraction
+    include_maps: false
+    enabled: false
+    strict: true
   monthly_reference_data: null
   time_mean_reference_data: null
