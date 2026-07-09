@@ -8,22 +8,24 @@ data (#1335), merged into the existing `time_mean_norm` / `mean_norm` metric gro
 evaluator and no-target inference aggregators. Metrics are uniform over all corrected variables
 (no per-variable category filtering).
 
-The wiring mirrors the `StepDiagnostics` container rather than its current contents: the host
-aggregators carry a generic dict of `StepDiagnosticsAggregator`s (one entry today — the
-correction-delta aggregator), so future `StepDiagnostics` fields get sibling aggregators
-instead of more host surgery. Granular sub-aggregators for specific container fields (just
-`delta`, for now) live behind that top-level aggregator and are invisible to the hosts.
+The wiring mirrors the `StepDiagnostics` container rather than its current contents: each host
+aggregator carries a **single optional `StepDiagnosticsAggregator`** — a concrete wrapper
+that owns the dict of per-concern sub-aggregators (one entry today — the correction-delta
+aggregator) and fans record/log/flush calls out over it. Future `StepDiagnostics` fields get
+sibling entries inside the wrapper, not more host surgery, and the hosts never do
+combine-the-aggregators bookkeeping. Granular sub-aggregators for specific container fields
+(just `delta`, for now) live another level down and are equally invisible to the hosts.
 
 ---
 
 ## `fme/ace/aggregator/inference/step_diagnostics.py` (new)
 
 ```python
-class StepDiagnosticsAggregator(Protocol):
-    """Anything that aggregates metrics from the StepDiagnostics carried on
-    prediction data. Hosts (the two inference aggregators) hold a dict of
-    these and fan out record/log/flush calls without knowing what any entry
-    measures."""
+class StepDiagnosticsSubAggregator(Protocol):
+    """A per-concern aggregator of metrics from the StepDiagnostics carried
+    on prediction data. Entries in the StepDiagnosticsAggregator's dict
+    satisfy this; the wrapper delegates record/log/flush calls without
+    knowing what any entry measures."""
 
     def record_batch(
         self,
@@ -52,15 +54,25 @@ class StepDiagnosticsMetricConfig:
         variable_metadata: Mapping[str, VariableMetadata] | None,
         enable_time_series: bool,
         normalize: Callable[[TensorMapping], TensorDict] | None,
-    ) -> dict[str, StepDiagnosticsAggregator]:
-        # {"correction": CorrectionDeltaAggregator(...)} — the key names the
-        # flush_diagnostics files. Empty dict when normalize is None (the
+    ) -> StepDiagnosticsAggregator | None:
+        # StepDiagnosticsAggregator(
+        #     {"correction": CorrectionDeltaAggregator(...)}) — the key names
+        # the flush_diagnostics files. None when normalize is None (the
         # correction metrics are normalized-space; callers that supply no
         # normalizer keep current behavior) or when both flags are off.
         ...
 
 
-def compute_correction_norm(
+class StepDiagnosticsAggregator:
+    """The one aggregator the hosts see: wraps the dict of per-concern
+    sub-aggregators (one entry today) and fans record_batch / summary_logs /
+    time_series_logs / diagnostics out over it, merging the results. Owns
+    the combine-the-sub-aggregators logic so the hosts don't."""
+
+    def __init__(self, aggregators: dict[str, StepDiagnosticsSubAggregator]): ...
+
+
+def normalize_delta_without_mean(
     prediction: TensorMapping,
     delta: TensorMapping,
     normalize: Callable[[TensorMapping], TensorDict],
@@ -79,7 +91,7 @@ def compute_correction_norm(
 
 
 class CorrectionDeltaAggregator:
-    """Top-level StepDiagnosticsAggregator for the correction delta: computes
+    """StepDiagnosticsSubAggregator for the correction delta: computes
     the normalized correction once per batch and dispatches to the granular
     sub-aggregators below, which the hosts never see.
 
@@ -190,7 +202,7 @@ def build_inference_evaluator_aggregator(
     ...,
     step_diagnostics: StepDiagnosticsMetricConfig | None = None,  # NEW
 ) -> "InferenceEvaluatorAggregator":
-    # NEW: builds the step_diagnostics_aggregators dict via
+    # NEW: builds the single step_diagnostics_aggregator via
     # (step_diagnostics or StepDiagnosticsMetricConfig()).build(...) from
     # dataset_info.gridded_operations / variable_metadata, n_timesteps,
     # enable_time_series, and the existing normalize argument.
@@ -209,20 +221,20 @@ class InferenceEvaluatorAggregator:
     def __init__(
         self,
         ...,
-        step_diagnostics_aggregators: dict[str, StepDiagnosticsAggregator] | None = None,  # NEW
+        step_diagnostics_aggregator: StepDiagnosticsAggregator | None = None,  # NEW
     ): ...
 
     def record_batch(self, data: PairedData) -> InferenceLogs:
-        # CHANGED — for each aggregator in the dict:
+        # CHANGED — if the aggregator is set:
         #   agg.record_batch(prediction=data.prediction,
         #     step_diagnostics=data.step_diagnostics,
         #     i_time_start=self._n_timesteps_seen) before slicing logs
         ...
 
-    def _get_logs(self): ...                    # CHANGED — merge each agg.summary_logs()
+    def _get_logs(self): ...                    # CHANGED — merge agg.summary_logs()
     def get_summary(self): ...                  # CHANGED — same merge (loss key untouched)
     def _get_inference_logs_slice(self, ...): ...  # CHANGED — merge agg.time_series_logs(step_slice)
-    def flush_diagnostics(self, subdir=None): ...  # CHANGED — write each agg.diagnostics()
+    def flush_diagnostics(self, subdir=None): ...  # CHANGED — write agg.diagnostics()
 
 
 class InferenceAggregatorConfig:
@@ -237,8 +249,8 @@ class InferenceAggregatorConfig:
         normalize: Callable[[TensorMapping], TensorDict] | None = None,  # NEW
     ) -> "InferenceAggregator":
         # The no-target aggregator has no normalizer today; the config's
-        # build returns an empty dict when normalize is None — callers that
-        # do not pass one keep current behavior (metrics silently skipped).
+        # build returns None when normalize is None — callers that do not
+        # pass one keep current behavior (metrics silently skipped).
         ...
 
 
@@ -246,9 +258,9 @@ class InferenceAggregator:
     def __init__(
         self,
         ...,
-        step_diagnostics_aggregators: dict[str, StepDiagnosticsAggregator] | None = None,  # NEW
+        step_diagnostics_aggregator: StepDiagnosticsAggregator | None = None,  # NEW
     ):
-        # CHANGED — _log_time_series also true when any step-diagnostics
+        # CHANGED — _log_time_series also true when the step-diagnostics
         # aggregator carries a time-series member (mean_norm has no other
         # member here)
         ...
@@ -274,11 +286,11 @@ class InferenceAggregator:
 ```python
 # Identity normalizer (lambda x: dict(x)) where hand-computable exactness matters.
 
-def test_compute_correction_norm_uses_normalized_difference():
+def test_normalize_delta_without_mean_uses_normalized_difference():
     # GOAL: with a scaling normalizer, result equals
     # normalize(pred) - normalize(pred - delta), not normalize(delta).
 
-def test_compute_correction_norm_raises_on_unknown_delta_key():
+def test_normalize_delta_without_mean_raises_on_unknown_delta_key():
     # GOAL: a delta key the normalizer drops raises ValueError, not a silent skip.
 
 def test_time_mean_aggregator_constant_offset():
@@ -312,7 +324,7 @@ def test_correction_delta_aggregator_raises_on_time_dim_mismatch():
 
 def test_metric_config_build_granularity():
     # GOAL: StepDiagnosticsMetricConfig.build honors the flags — default
-    # (scalars on, maps off); both off or normalize=None -> empty dict.
+    # (scalars on, maps off); both off or normalize=None -> None.
 
 def test_evaluator_aggregator_logs_correction_metrics():
     # GOAL: integration — record_batch with a PairedData carrying a real
