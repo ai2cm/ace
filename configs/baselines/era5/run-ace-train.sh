@@ -7,7 +7,7 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -31,9 +31,10 @@ run_training() {
     --description 'Run ACE2S-ERA5 training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
+    --priority high \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/jupiter \
+    --cluster ai2/ceres \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -53,9 +54,21 @@ run_training() {
 
 base_name="ace2s"
 
-run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
+# run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
 
 # run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-rs0"
+
+# Daily ERA5 (4deg) pre-training experiments
+daily_group="era5-daily-spectral"
+
+run_training "ace-train-config-1-step-pretrain-daily.yaml" \
+  "$base_name-era5-daily-1-step-pre-training-rs0" "$daily_group"
+
+run_training "ace-train-config-1-step-pretrain-daily-spectral-ratio-0.125.yaml" \
+  "$base_name-era5-daily-spectral-ratio-0.125-1-step-pre-training-rs0" "$daily_group"
+
+run_training "ace-train-config-1-step-pretrain-daily-spectral-groups-16-ratio-0.125.yaml" \
+  "$base_name-era5-daily-spectral-groups-16-ratio-0.125-1-step-pre-training-rs0" "$daily_group"
