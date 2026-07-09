@@ -41,6 +41,16 @@
 #                (ACE_DISC_FEATURE_DEPTH; default 0 = bottleneck/coarsest). Raise
 #                to move the policed spectral band finer (candidate fix for the
 #                coarse-PRMSL GAN damage). Resolved (res, channels) print at launch.
+#   --spectral-weight: overall weight of the auxiliary spectral-matching loss
+#                (ACE_SPECTRAL_LOSS_WEIGHT; fdistill only). 0/unset = off, method
+#                unchanged. Matches the student's zonal power spectrum to the
+#                teacher's — a gentler way to restore high-k energy than the GAN.
+#   --spectral-band-gamma: high-wavenumber emphasis for the spectral loss
+#                (ACE_SPECTRAL_BAND_GAMMA; default 0 = match all wavenumbers
+#                equally). Larger concentrates on the small-scale tail.
+#   --spectral-min-wavenumber: exclude wavenumbers below this index from the
+#                spectral loss (ACE_SPECTRAL_MIN_WAVENUMBER; default 0 = all), so
+#                it does not spend budget on large scales f-distill already gets.
 
 set -e
 
@@ -55,6 +65,9 @@ GAN_R1=""
 GAN_WEIGHT=""
 LR_DECAY_STEPS=""
 DISC_FEATURE_DEPTH=""
+SPECTRAL_WEIGHT=""
+SPECTRAL_BAND_GAMMA=""
+SPECTRAL_MIN_WAVENUMBER=""
 FROZEN_LO_DATASET=""
 FROZEN_LO_PATH="best_student.ckpt"
 while [[ $# -gt 0 ]]; do
@@ -97,6 +110,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --disc-feature-depth)
             DISC_FEATURE_DEPTH="${2:?--disc-feature-depth requires a value}"
+            shift 2
+            ;;
+        --spectral-weight)
+            SPECTRAL_WEIGHT="${2:?--spectral-weight requires a value}"
+            shift 2
+            ;;
+        --spectral-band-gamma)
+            SPECTRAL_BAND_GAMMA="${2:?--spectral-band-gamma requires a value}"
+            shift 2
+            ;;
+        --spectral-min-wavenumber)
+            SPECTRAL_MIN_WAVENUMBER="${2:?--spectral-min-wavenumber requires a value}"
             shift 2
             ;;
         *)
@@ -240,6 +265,19 @@ fi
 # ACE_DISC_FEATURE_DEPTH): offset toward finer resolution from the bottleneck.
 if [[ -n "$DISC_FEATURE_DEPTH" ]]; then
     TEACHER_ENV_FLAGS+=(--env ACE_DISC_FEATURE_DEPTH=$DISC_FEATURE_DEPTH)
+fi
+
+# Optional spectral-matching auxiliary loss (fdistill only), read by
+# fastgen_train as ACE_SPECTRAL_LOSS_WEIGHT / ACE_SPECTRAL_BAND_GAMMA /
+# ACE_SPECTRAL_MIN_WAVENUMBER.  Weight 0/unset leaves the method unchanged.
+if [[ -n "$SPECTRAL_WEIGHT" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_SPECTRAL_LOSS_WEIGHT=$SPECTRAL_WEIGHT)
+fi
+if [[ -n "$SPECTRAL_BAND_GAMMA" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_SPECTRAL_BAND_GAMMA=$SPECTRAL_BAND_GAMMA)
+fi
+if [[ -n "$SPECTRAL_MIN_WAVENUMBER" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_SPECTRAL_MIN_WAVENUMBER=$SPECTRAL_MIN_WAVENUMBER)
 fi
 
 # Frozen Lo student for hi_cascade validation (expert 1): mount the dataset
