@@ -1913,6 +1913,50 @@ def load_stepper_config_with_override(
     return stepper._config
 
 
+def _apply_stepper_overrides(
+    target: "Stepper | StepperConfig",
+    override_config: StepperOverrideConfig,
+    replace_multi_call: Callable[[MultiCallConfig | None], None],
+) -> None:
+    """Dispatch ``StepperOverrideConfig`` fields onto a ``Stepper`` or a
+    ``StepperConfig``.
+
+    ``ocean``, ``derived_forcings`` and ``prescribed_prognostic_names`` are
+    applied through methods shared by both types. ``multi_call`` differs (a
+    ``StepperConfig`` cannot rebuild the step state on its own), so the caller
+    supplies ``replace_multi_call``; the branch order is preserved so behavior
+    matches the previous per-caller implementations.
+    """
+    if override_config.ocean != "keep":
+        logging.info(
+            "Overriding training ocean configuration with a new ocean configuration."
+        )
+        target.replace_ocean(override_config.ocean)
+
+    if override_config.multi_call != "keep":
+        logging.info(
+            "Overriding training multi_call configuration with a new "
+            "multi_call configuration."
+        )
+        replace_multi_call(override_config.multi_call)
+
+    if override_config.derived_forcings != "keep":
+        logging.info(
+            "Overriding training derived_forcings configuration with a new "
+            "derived_forcings configuration."
+        )
+        target.replace_derived_forcings(override_config.derived_forcings)
+
+    if override_config.prescribed_prognostic_names != "keep":
+        logging.info(
+            "Overriding prescribed_prognostic_names with %s.",
+            override_config.prescribed_prognostic_names,
+        )
+        target.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )
+
+
 def apply_stepper_override(
     stepper: Stepper, override_config: StepperOverrideConfig | None = None
 ) -> None:
@@ -1922,35 +1966,9 @@ def apply_stepper_override(
     """
     if override_config is None:
         override_config = StepperOverrideConfig()
-
-    if override_config.ocean != "keep":
-        logging.info(
-            "Overriding training ocean configuration with a new ocean configuration."
-        )
-        stepper.replace_ocean(override_config.ocean)
-
-    if override_config.multi_call != "keep":
-        logging.info(
-            "Overriding training multi_call configuration with a new "
-            "multi_call configuration."
-        )
-        stepper.replace_multi_call(override_config.multi_call)
-
-    if override_config.derived_forcings != "keep":
-        logging.info(
-            "Overriding training derived_forcings configuration with a new "
-            "derived_forcings configuration."
-        )
-        stepper.replace_derived_forcings(override_config.derived_forcings)
-
-    if override_config.prescribed_prognostic_names != "keep":
-        logging.info(
-            "Overriding prescribed_prognostic_names with %s.",
-            override_config.prescribed_prognostic_names,
-        )
-        stepper.replace_prescribed_prognostic_names(
-            override_config.prescribed_prognostic_names
-        )
+    _apply_stepper_overrides(
+        stepper, override_config, replace_multi_call=stepper.replace_multi_call
+    )
 
 
 def load_stepper(

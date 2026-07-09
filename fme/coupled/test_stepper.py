@@ -1207,6 +1207,7 @@ def get_stepper_config(
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
     ocean_prescribed_prognostic_names: list[str] | None = None,
+    atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
@@ -1230,6 +1231,7 @@ def get_stepper_config(
         ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
 
     ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
+    atmosphere_prescribed = list(atmosphere_prescribed_prognostic_names or [])
 
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
@@ -1242,6 +1244,7 @@ def get_stepper_config(
                             builder=atmosphere_builder,
                             in_names=atmosphere_in_names,
                             out_names=atmosphere_out_names,
+                            prescribed_prognostic_names=atmosphere_prescribed,
                             normalization=trivial_network_and_loss_normalization(
                                 atmos_norm_names
                             ),
@@ -1613,6 +1616,63 @@ def test_ocean_forcing_window_names_include_prescribed_prognostics():
     reqs = config.get_forcing_window_data_requirements(1)
     assert "thetao_18" in reqs.ocean_requirements.names
     assert "sst" in reqs.ocean_requirements.names
+
+
+def test_atmosphere_forcing_window_names_include_prescribed_prognostics():
+    "Prescribed atmosphere prognostics must appear in the atmosphere forcing window."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp", "a_prog"]
+    atmos_out_names = ["a_diag", "sfc_temp", "a_prog"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_prescribed_prognostic_names=["a_prog"],
+    )
+    assert set(config.atmosphere_forcing_window_names) == (
+        set(config.atmosphere_forcing_exogenous_names) | {"a_prog"}
+    )
+    reqs = config.get_forcing_window_data_requirements(1)
+    assert "a_prog" in reqs.atmosphere_requirements.names
+
+
+def test__get_atmosphere_forcings_includes_prescribed_prognostic_tensors():
+    torch.manual_seed(1)
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp", "a_prog"]
+    atmos_out_names = ["a_diag", "sfc_temp", "a_prog"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_prescribed_prognostic_names=["a_prog"],
+    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    n_atmos = coupler.n_inner_steps + 1
+    atmos_shape = (1, n_atmos, N_LAT, N_LON)
+    ocean_shape = (1, 1, N_LAT, N_LON)
+    atmos_data = {
+        "exog": torch.rand(*atmos_shape, device=fme.get_device()),
+        "ocean_frac": torch.rand(*atmos_shape, device=fme.get_device()),
+        "a_prog": torch.rand(*atmos_shape, device=fme.get_device()),
+    }
+    ocean_ic = {"sst": torch.rand(*ocean_shape, device=fme.get_device())}
+    new_atmos_forcings = coupler._get_atmosphere_forcings(atmos_data, ocean_ic)
+    torch.testing.assert_close(new_atmos_forcings["a_prog"], atmos_data["a_prog"])
 
 
 def test__get_ocean_forcings_includes_prescribed_prognostic_tensors():

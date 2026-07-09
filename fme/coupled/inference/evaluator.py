@@ -12,12 +12,13 @@ from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import (
     load_stepper_config_with_override as load_single_stepper_config,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import StepperConfig, _apply_stepper_overrides
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
+from fme.core.step.multi_call import MultiCallConfig
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
@@ -52,31 +53,17 @@ def apply_stepper_override_to_nested_stepper_config(
     """
     if override is None:
         return
-    if override.ocean != "keep":
-        logging.info(
-            "Overriding training ocean configuration with a new ocean configuration."
-        )
-        stepper_config.replace_ocean(override.ocean)
-    if override.multi_call != "keep":
+
+    def _reject_multi_call(multi_call: MultiCallConfig | None) -> None:
         raise ValueError(
             "StepperOverrideConfig.multi_call cannot be applied when loading "
             "CoupledStepperConfig without constructing a Stepper; use load_stepper "
             "with a full checkpoint instead."
         )
-    if override.derived_forcings != "keep":
-        logging.info(
-            "Overriding training derived_forcings configuration with a new "
-            "derived_forcings configuration."
-        )
-        stepper_config.replace_derived_forcings(override.derived_forcings)
-    if override.prescribed_prognostic_names != "keep":
-        logging.info(
-            "Overriding prescribed_prognostic_names with %s.",
-            override.prescribed_prognostic_names,
-        )
-        stepper_config.replace_prescribed_prognostic_names(
-            override.prescribed_prognostic_names
-        )
+
+    _apply_stepper_overrides(
+        stepper_config, override, replace_multi_call=_reject_multi_call
+    )
 
 
 def apply_coupled_stepper_config_inference_overrides(
@@ -216,19 +203,19 @@ def load_stepper_config(
 
 def load_stepper(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
-    atmosphere_stepper_override: StepperOverrideConfig | None = None,
     ocean_stepper_override: StepperOverrideConfig | None = None,
+    atmosphere_stepper_override: StepperOverrideConfig | None = None,
 ) -> CoupledStepper:
     """Load a coupled stepper.
 
     Args:
         checkpoint_path: The path to the serialized CoupledStepper checkpoint, or a
             StandaloneComponentCheckpointsConfig.
-        atmosphere_stepper_override: When loading a single coupled checkpoint, optional
-            overrides for the atmosphere Stepper (ignored for
-            StandaloneComponentCheckpointsConfig).
         ocean_stepper_override: When loading a single coupled checkpoint, optional
             overrides for the ocean Stepper (ignored for
+            StandaloneComponentCheckpointsConfig).
+        atmosphere_stepper_override: When loading a single coupled checkpoint, optional
+            overrides for the atmosphere Stepper (ignored for
             StandaloneComponentCheckpointsConfig).
 
     Returns:

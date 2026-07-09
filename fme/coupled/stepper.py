@@ -45,7 +45,6 @@ from fme.core.loss import StepLoss, StepLossConfig
 from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
-from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.output import StepOutput
 from fme.core.step.step import StepSelector
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
@@ -70,14 +69,12 @@ from fme.coupled.typing_ import CoupledNames, CoupledOptionalInt, CoupledTensorM
 def _get_prescribed_prognostic_names_from_step(
     step_selector: StepSelector,
 ) -> list[str]:
-    """Return prescribed_prognostic_names from the leaf single_module step config."""
-    cfg = step_selector._step_config_instance
-    if isinstance(cfg, MultiCallStepConfig):
-        return _get_prescribed_prognostic_names_from_step(cfg.wrapped_step)
-    prescribed = getattr(cfg, "prescribed_prognostic_names", None)
-    if prescribed is None:
-        return []
-    return list(prescribed)
+    """Return prescribed_prognostic_names from a component's step config.
+
+    Delegates to ``StepConfigABC.get_prescribed_prognostic_names``, which
+    recurses through wrapping step configs (e.g. multi-call).
+    """
+    return step_selector.get_prescribed_prognostic_names()
 
 
 @dataclasses.dataclass
