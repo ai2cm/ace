@@ -1,5 +1,12 @@
 # Multivariate MoE Distillation — Status & Handoff
 
+> **FROZEN (2026-07-09).** This is the historical record of the multivariate MoE
+> distillation effort. New experiments are tracked with the formalized workflow in
+> [`experiments/`](experiments/) — see [`experiments/WORKFLOW.md`](experiments/WORKFLOW.md)
+> and the run registry in [`experiments/LOG.md`](experiments/LOG.md). Kept for the
+> deep-dive diagnoses (residual-model bug, GAN-collapse analysis, discriminator-tap
+> A/B, per-expert pivot) referenced from the new log.
+
 Living notes for the multivariate MoE FastGen distillation effort on branch
 `experiment/fastgen-distill`. Pick up here from any clone.
 
