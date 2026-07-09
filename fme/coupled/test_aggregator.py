@@ -171,8 +171,8 @@ def test_inference_logs_labels_exist(tmpdir):
         n_timesteps_ocean=n_time,
         n_timesteps_atmosphere=n_time,
         initial_time=initial_time,
-        ocean_normalize=lambda x: dict(x),
-        atmosphere_normalize=lambda x: dict(x),
+        ocean_normalize=lambda x, apply_mean=True: dict(x),
+        atmosphere_normalize=lambda x, apply_mean=True: dict(x),
         output_dir=str(output_dir),
     )
 

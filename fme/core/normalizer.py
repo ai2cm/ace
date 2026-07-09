@@ -111,8 +111,12 @@ class NormalizeFn(Protocol):
     """
 
     def __call__(
-        self, tensors: TensorMapping, apply_mean: bool = True
-    ) -> TensorDict: ...
+        self, tensors: TensorMapping, /, apply_mean: bool = True
+    ) -> TensorDict:
+        # NOTE: ``tensors`` is positional-only so implementations may name their
+        # first parameter freely (e.g. test lambdas); a positional-or-keyword
+        # parameter would require every implementation to use the same name.
+        ...
 
 
 class StandardNormalizer:
