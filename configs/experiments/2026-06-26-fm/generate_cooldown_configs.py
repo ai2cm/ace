@@ -109,31 +109,6 @@ def _restrict_train_loader_for_cooldown(cfg: dict) -> None:
     cfg["train_loader"].pop("group_weights", None)
 
 
-def _restrict_inference_for_cooldown(cfg: dict, single_dataset: bool) -> None:
-    """Restrict inline-inference entries to the cooldown target's coordinate.
-
-    The cooldown stepper's vertical coordinate comes from its (restricted)
-    train_loader. For a multi-dataset FM run cooled onto ERA5, inference entries
-    on other datasets (e.g. SHiELD, a different hybrid sigma-pressure coordinate)
-    would run against a mismatched coordinate, so only ERA5 entries are kept.
-
-    A single-dataset run keeps its training coordinate unchanged, so all of its
-    inline-inference entries remain coordinate-consistent and are kept as-is.
-    """
-    if single_dataset:
-        return
-    entries = cfg.get("inference")
-    if entries is None:
-        return
-    if not isinstance(entries, list):
-        entries = [entries]
-    cfg["inference"] = [
-        entry
-        for entry in entries
-        if ERA5_MARKER in entry["loader"]["dataset"].get("file_pattern", "")
-    ]
-
-
 def _clear_inference_epochs(cfg: dict) -> None:
     """Run every inline-inference entry on every cooldown epoch.
 
@@ -255,13 +230,10 @@ def generate_cooldown_config(
 
     # Cool down onto the training target: the single training dataset for a
     # single-dataset run, or ERA5 for a multi-dataset FM mixture.
-    single_dataset = len(_train_dataset_identities(cfg)) <= 1
     _restrict_train_loader_for_cooldown(cfg)
 
-    # Drop inline-inference entries whose coordinate won't match the cooldown
-    # stepper. For a single-dataset run the coordinate is unchanged, so all
-    # entries are kept; a multi-dataset ERA5 cooldown keeps ERA5 entries only.
-    _restrict_inference_for_cooldown(cfg, single_dataset)
+    # Keep every inline-inference entry from the base config (both c96/SHiELD and
+    # ERA5) so the cooldown logs the same inference metrics as the full run.
 
     # The base epochs schedule is sized for the full run; on the 8-epoch cooldown
     # it may never fire. Run every inference entry on every cooldown epoch so the
