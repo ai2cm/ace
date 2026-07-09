@@ -127,6 +127,64 @@ def test_zarr_adapter_can_overwrite(tmpdir, writer_cls):
     adapter.append_batch(data, time)
 
 
+@pytest.mark.parametrize("calendar", ["julian", "proleptic_gregorian", "noleap"])
+def test_separate_ic_writer_preserves_time_calendar(tmpdir, calendar):
+    """A downstream reader must decode the written ``time`` to the source dates.
+
+    ``SeparateICZarrWriterAdapter`` encodes the time values with the source
+    calendar, so the stored ``calendar`` attribute must name that same calendar.
+    A mismatched label (e.g. ``"julian"`` for non-julian data) leaves the values
+    inconsistent with the label, so decoding shifts every timestamp by the leap
+    days accumulated between the 1970 encoding epoch and the data dates -- a shift
+    present even when the coordinate does not span a leap day (~12 days for 2020).
+    """
+    n_timesteps = 2
+    data = {"foo": torch.zeros((1, n_timesteps, 2, 2))}
+    timestep = datetime.timedelta(days=1)
+    initial_condition_times = get_initial_condition_times(
+        (2019, 12, 31, 0, 0, 0), calendar, n_initial_conditions=1
+    )
+    # Daily batch times so the timestep-derived lead times reproduce them exactly.
+    batch_time = xr.DataArray(
+        xr.date_range(
+            "2020-01-01",
+            freq="1D",
+            periods=n_timesteps,
+            calendar=calendar,
+            use_cftime=True,
+        ).values[None, :],
+        dims=("sample", "time"),
+    )
+    adapter = SeparateICZarrWriterAdapter(
+        path=str(tmpdir / "test.zarr"),
+        dims=("time", "lat", "lon"),
+        data_coords=ensure_numpy_coords(
+            {
+                "lat": xr.DataArray([0, 1], dims=["lat"]),
+                "lon": xr.DataArray([0, 1], dims=["lon"]),
+            }
+        ),
+        timestep=timestep,
+        n_timesteps=n_timesteps,
+        initial_condition_times=initial_condition_times,
+    )
+    adapter.append_batch(data, batch_time)
+    adapter.finalize()
+
+    output = str(tmpdir / "test_ic0000.zarr")
+    # A downstream reader uses xarray's default decoding, which honors the stored
+    # ``calendar`` attribute. The decoded calendar dates must match the source
+    # (compare day strings to ignore the cftime subclass and isolate the dates).
+    decoded = xr.open_zarr(output)
+    np.testing.assert_array_equal(
+        decoded.time.dt.strftime("%Y-%m-%d").values,
+        batch_time.isel(sample=0).dt.strftime("%Y-%m-%d").values,
+    )
+    # The stored attribute itself must also name the true calendar.
+    raw = xr.open_zarr(output, decode_times=False)
+    assert raw.time.attrs["calendar"] == calendar
+
+
 def test_zarr_adapter_single_timestep_data(
     tmpdir,
 ):

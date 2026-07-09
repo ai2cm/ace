@@ -12,6 +12,7 @@ from fme.ace.aggregator.inference.main import (
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
+from fme.ace.aggregator.inference.near_zero_fraction import NearZeroFractionMetricConfig
 from fme.ace.aggregator.inference.reduced import MeanMetricConfig
 from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
 from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
@@ -125,6 +126,12 @@ from fme.core.step import (
 )
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 from . import step
 from .inference.inference import get_initial_condition

@@ -1,5 +1,4 @@
 import contextlib
-import dataclasses
 import os
 import signal
 import unittest.mock
@@ -25,8 +24,8 @@ from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
     InferenceTask,
-    TrainConfigProtocol,
     Trainer,
+    TrainerParams,
     TrainOutputABC,
     TrainStepperABC,
     ValidationTask,
@@ -228,35 +227,6 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         pass
 
 
-@dataclasses.dataclass
-class Config:
-    experiment_dir: str = "test_experiment_dir"
-    checkpoint_dir: str = "test_checkpoint_dir"
-    output_dir: str = "test_output_dir"
-    max_epochs: int = 2
-    save_checkpoint: bool = True
-    validate_using_ema: bool = True
-    log_train_every_n_batches: int = 1
-    checkpoint_every_n_batches: int = 0
-    train_evaluation_batches: int = 2
-    inference_n_forward_steps: int = 1
-    checkpoint_save_epochs: Slice | None = None
-    ema_checkpoint_save_epochs: Slice | None = None
-    segment_epochs: int | None = None
-    evaluate_before_training: bool = False
-    save_best_inference_epoch_checkpoints: bool = False
-    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
-    lr_tuning: LRTuningConfig | None = None
-    pre_cooldown_checkpoint_epoch: int | None = None
-
-    def __post_init__(self):
-        start_epoch = 0 if self.evaluate_before_training else 1
-        self._inference_epochs = [i for i in range(start_epoch, self.max_epochs + 1)]
-
-
-_: TrainConfigProtocol = Config()
-
-
 class TrainAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, train_loss: float):
         self.train_loss = train_loss
@@ -364,7 +334,7 @@ def get_trainer(
     resume_optimizer_ckpt_path: str | None = None,
     resume_ema_ckpt_path: str | None = None,
     lr: float = 0.01,
-) -> tuple[TrainConfigProtocol, Trainer]:
+) -> tuple[TrainerParams, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
     if train_losses is None:
@@ -439,19 +409,21 @@ def get_trainer(
     def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
         return ema_config.build(modules)
 
-    config = Config(
+    config = TrainerParams(
         experiment_dir=tmp_path,
         checkpoint_dir=checkpoint_dir,
         checkpoint_save_epochs=checkpoint_save_epochs,
+        ema_checkpoint_save_epochs=None,
         checkpoint_every_n_batches=checkpoint_every_n_batches,
         segment_epochs=segment_epochs,
         max_epochs=max_epochs,
         validate_using_ema=validate_using_ema,
+        log_train_every_n_batches=1,
+        train_evaluation_batches=2,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         pre_cooldown_checkpoint_epoch=pre_cooldown_checkpoint_epoch,
         save_checkpoint=save_checkpoint,
-        ema=ema_config,
         lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
@@ -459,7 +431,8 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    inference_epochs = config._inference_epochs
+    start_epoch = 0 if evaluate_before_training else 1
+    inference_epochs = list(range(start_epoch, max_epochs + 1))
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
@@ -518,7 +491,7 @@ def get_trainer(
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
-        config=config,
+        params=config,
         aggregator_builder=aggregator_builder,
         validation_callback=validation_callback,
         end_of_batch_callback=unittest.mock.MagicMock(),
