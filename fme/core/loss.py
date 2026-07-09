@@ -514,12 +514,20 @@ class SpectralWhitening:
 
 @dataclasses.dataclass
 class SpectralWhiteningConfig:
-    """Configures per-sample spectral whitening of the energy score.
+    """Configures per-sample spectral whitening of the energy score (see
+    :class:`SpectralWhitening` for what the reweight does).
 
-    ``kind='none'`` (the default) disables it. ``exponent`` gamma in (0, 1] sets
-    the whitening strength (gamma=1 fully flattens the target spectrum; smaller
-    values whiten partially, taming the upweighting of noise-dominated
-    low-amplitude degrees). ``eps_frac`` floors the per-degree boost.
+    Args:
+        kind: ``'none'`` (the default) disables whitening; ``'per_sample'``
+            enables the per-sample reweight.
+        eps_frac: floor on the per-degree amplitude, as a fraction of the
+            per-sample mean degree-amplitude. It bounds the boost applied to
+            near-zero-power degrees (where ``1 / amp_l`` would blow up).
+        exponent: whitening strength gamma in (0, 1]; the per-degree weight is
+            ``(1 / amp_l) ** gamma``. gamma=1 fully flattens the target
+            spectrum; smaller gamma whitens partially, taming the upweighting of
+            noise-dominated low-amplitude degrees. Requires
+            ``kind='per_sample'``.
     """
 
     kind: Literal["none", "per_sample"] = "none"
@@ -576,7 +584,11 @@ class EnergyScoreLoss(torch.nn.Module):
     ):
         super().__init__()
         self.sht = sht
-        self._whitening = (whitening or SpectralWhiteningConfig()).build()
+        # build() returns None when whitening is disabled (kind='none'), in which
+        # case forward() skips the reweight entirely.
+        self._whitening: SpectralWhitening | None = (
+            whitening or SpectralWhiteningConfig()
+        ).build()
         self.scaling: float | None = None
         self.n_spectral: int | None = None
         self.mode_weights: torch.Tensor | None = None
