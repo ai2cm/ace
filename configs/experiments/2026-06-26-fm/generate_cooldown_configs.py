@@ -6,11 +6,14 @@ For each nc-sfno training config in this directory, produces a corresponding
 PolynomialLR cooldown with masking disabled (no input_dropout). This isolates
 the effect of the cooldown phase from the input-masking schedule.
 
-The cooldown also restricts the training data to ERA5 only: the FM configs
-train on a mix of datasets (SHiELD AMIP, random-CO2, SOM, and ERA5), so the
-cooldown "cools down" from that multi-dataset mixture onto ERA5 alone. The
-non-ERA5 members are dropped from the train_loader concat and the multi-group
-group_weights are removed.
+The cooldown also restricts the training data to a single target dataset. The
+FM configs train on a mix of datasets (SHiELD AMIP, random-CO2, SOM, and ERA5),
+so the cooldown "cools down" from that multi-dataset mixture onto ERA5 alone:
+the non-ERA5 members are dropped from the train_loader concat and the
+multi-group group_weights are removed. A run trained on a single dataset (e.g.
+a pure C96/SHiELD run) instead cools down onto that dataset, keeping all its
+members. A run trained on multiple datasets none of which is ERA5 has no
+unambiguous target and raises.
 """
 
 import argparse
@@ -55,38 +58,70 @@ def _build_scheduler(epochs: int) -> dict:
     }
 
 
-def _restrict_train_loader_to_era5(cfg: dict) -> None:
-    """Keep only ERA5 members in the train_loader concat.
+def _train_dataset_identities(cfg: dict) -> set[str]:
+    """Distinct training datasets in the train_loader concat, keyed by data_path.
 
-    The FM configs train on a mix of datasets; the cooldown runs on ERA5 alone.
-    Drops non-ERA5 concat entries and the now-invalid multi-group group_weights.
+    A dataset is split across multiple concat members by time subset (or by
+    ensemble member/file_pattern), so members are grouped by data_path: two
+    members sharing a data_path are one dataset. Used to distinguish a
+    single-dataset run (e.g. C96/SHiELD) from a multi-dataset FM mixture.
     """
     dataset = cfg["train_loader"]["dataset"]
     if "concat" not in dataset:
         raise ValueError(
-            "Expected train_loader.dataset.concat; cannot restrict to ERA5."
+            "Expected train_loader.dataset.concat; cannot determine "
+            "cooldown target dataset."
         )
-    era5_members = [
-        entry
-        for entry in dataset["concat"]
-        if ERA5_MARKER in entry.get("file_pattern", "")
-    ]
-    if not era5_members:
-        raise ValueError("No ERA5 members found in train_loader.dataset.concat.")
-    dataset["concat"] = era5_members
-    # group_weights partitions the (previously multi-dataset) concat; now stale.
+    return {entry.get("data_path", "") for entry in dataset["concat"]}
+
+
+def _restrict_train_loader_for_cooldown(cfg: dict) -> None:
+    """Restrict the train_loader concat to the cooldown target dataset.
+
+    Determines the cooldown target from the training datasets:
+
+    - Single dataset (all concat members share one data_path, e.g. a pure
+      C96/SHiELD run): cool down onto that dataset; keep all its members.
+    - Multiple datasets including ERA5 (the FM mixtures): cool down onto ERA5
+      alone; drop the non-ERA5 members.
+    - Multiple datasets without ERA5: the cooldown target is ambiguous, so
+      raise rather than guess.
+
+    In all cases the now-stale multi-group ``group_weights`` is dropped.
+    """
+    dataset = cfg["train_loader"]["dataset"]
+    identities = _train_dataset_identities(cfg)
+    if len(identities) > 1:
+        era5_members = [
+            entry
+            for entry in dataset["concat"]
+            if ERA5_MARKER in entry.get("file_pattern", "")
+        ]
+        if not era5_members:
+            raise ValueError(
+                "Cooldown target is ambiguous: train_loader mixes multiple "
+                f"datasets {sorted(identities)} but none is ERA5. Cannot infer "
+                "which dataset to cool down onto."
+            )
+        dataset["concat"] = era5_members
+    # Single-dataset runs keep all members; multi-dataset runs are now ERA5-only.
+    # Either way group_weights partitioned the original concat and is now stale.
     cfg["train_loader"].pop("group_weights", None)
 
 
-def _restrict_inference_to_era5(cfg: dict) -> None:
-    """Keep only ERA5 inline-inference entries in a cooldown config.
+def _restrict_inference_for_cooldown(cfg: dict, single_dataset: bool) -> None:
+    """Restrict inline-inference entries to the cooldown target's coordinate.
 
-    The cooldown stepper's vertical coordinate comes from its ERA5-only
-    train_loader. Inline-inference entries on other datasets (e.g. SHiELD, which
-    use a different hybrid sigma-pressure coordinate) would be run against a
-    mismatched coordinate, producing coordinate-inconsistent diagnostics. Drop
-    them so cooldown inline inference stays on the ERA5 coordinate.
+    The cooldown stepper's vertical coordinate comes from its (restricted)
+    train_loader. For a multi-dataset FM run cooled onto ERA5, inference entries
+    on other datasets (e.g. SHiELD, a different hybrid sigma-pressure coordinate)
+    would run against a mismatched coordinate, so only ERA5 entries are kept.
+
+    A single-dataset run keeps its training coordinate unchanged, so all of its
+    inline-inference entries remain coordinate-consistent and are kept as-is.
     """
+    if single_dataset:
+        return
     entries = cfg.get("inference")
     if entries is None:
         return
@@ -182,7 +217,23 @@ def generate_cooldown_config(
 
     beaker_dataset_id = None
     if source_map is not None:
-        beaker_dataset_id = source_map.get(source_config_to_run_name(source_path.name))
+        source_run_name = source_config_to_run_name(source_path.name)
+        beaker_dataset_id = source_map.get(source_run_name)
+        if beaker_dataset_id is None:
+            # No training result dataset recorded means the training run has not
+            # finished, so its cooldown checkpoint does not exist yet and the
+            # cooldown would fail. Skip, matching generate_eval_configs.py, and
+            # remove any stale config left from an earlier finished state.
+            if out_path.exists():
+                out_path.unlink()
+                print(
+                    f"Deleted {out_path.name} (no dataset ID for {source_run_name!r})"
+                )
+            else:
+                print(
+                    f"Skipped {out_path.name} (no dataset ID for {source_run_name!r})"
+                )
+            return
 
     with source_path.open() as f:
         cfg = yaml.safe_load(f)
@@ -202,12 +253,15 @@ def generate_cooldown_config(
     step_cfg = cfg["stepper"]["step"]["config"]
     step_cfg.pop("input_dropout", None)
 
-    # Cool down onto ERA5 only (training used a multi-dataset mixture).
-    _restrict_train_loader_to_era5(cfg)
+    # Cool down onto the training target: the single training dataset for a
+    # single-dataset run, or ERA5 for a multi-dataset FM mixture.
+    single_dataset = len(_train_dataset_identities(cfg)) <= 1
+    _restrict_train_loader_for_cooldown(cfg)
 
-    # Drop non-ERA5 inline-inference entries: the cooldown stepper uses the ERA5
-    # vertical coordinate, so SHiELD-coordinate entries would be mismatched.
-    _restrict_inference_to_era5(cfg)
+    # Drop inline-inference entries whose coordinate won't match the cooldown
+    # stepper. For a single-dataset run the coordinate is unchanged, so all
+    # entries are kept; a multi-dataset ERA5 cooldown keeps ERA5 entries only.
+    _restrict_inference_for_cooldown(cfg, single_dataset)
 
     # The base epochs schedule is sized for the full run; on the 8-epoch cooldown
     # it may never fire. Run every inference entry on every cooldown epoch so the

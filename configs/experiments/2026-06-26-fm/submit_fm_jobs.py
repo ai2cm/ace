@@ -28,7 +28,7 @@ WANDB_GROUP = "ace2-fm-2026-06-26"
 CONFIG_PREFIX = "ace-train-config-4deg-"
 # Dataset tag stripped from job names so that
 # ace-train-config-4deg-AIMIP-nc-sfno-v3.yaml -> ace2-fm-nc-sfno-v3. Configs
-# without a dataset tag (e.g. ...-nc-sfno-c96-v1) keep their full suffix.
+# without the tag keep their full suffix.
 DATASET_TAG = "AIMIP-"
 
 
@@ -50,7 +50,7 @@ def configs_for_version(version: str | None) -> list[str]:
 def config_to_job_name(config_filename: str) -> str:
     # ace-train-config-4deg-AIMIP-nc-sfno-fm-0.1-v1.yaml
     # → ace2-fm-nc-sfno-fm-0.1-v1
-    # ace-train-config-4deg-nc-sfno-c96-v1.yaml → ace2-fm-nc-sfno-c96-v1
+    # ace-train-config-4deg-AIMIP-nc-sfno-c96-v1.yaml → ace2-fm-nc-sfno-c96-v1
     stem = pathlib.Path(config_filename).stem  # strip .yaml
     suffix = stem.removeprefix(CONFIG_PREFIX).removeprefix(DATASET_TAG)
     return f"{WANDB_PREFIX}{suffix}"
