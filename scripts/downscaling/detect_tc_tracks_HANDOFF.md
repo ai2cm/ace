@@ -46,16 +46,41 @@ python scripts/downscaling/detect_tc_tracks.py \
   --stitch-exe ~/miniconda3/envs/tempest/bin/StitchNodes --no-write-sel-args
 ```
 
-**Validated** on a 2-month 25km subset (Aug–Oct 2013, 4 shard bundles, 6 workers):
-67 s wall, peak RSS ~4 GB, NetCDF deleted per bundle (bounded disk), exit 0 →
-150 tracks / 8368 points, SLP to 920 mb, wind to 52 m/s. The 150 includes many
-**extratropical** systems (lat up to 82, Southern Ocean) since SLP-only catches
-all closed lows — the 6h warm-core match is what filters to real TCs. Full 11yr
-25km SLP-only ≈ ~75 min at 6 workers (extrapolated). Note: needed `spawn` start
-method for the process pool (fork corrupts gcsfs' asyncio state → BrokenProcessPool).
+**Full 25km run done** (11yr, 252 shard bundles, 6 workers, ~16 min DetectNodes +
+StitchNodes, NetCDF deleted per bundle so disk bounded, `spawn` process pool since
+fork corrupts gcsfs' asyncio state): `scratch/tc25_full/tracks.csv` — **10,543
+tracks / 611,405 points**, SLP to 868 mb, wind to 76 m/s, lat ±88. That's the
+all-closed-lows set (extratropical storms, polar lows, equatorial + terrain-over-
+high-`HGTsfc` artifacts) — the rectification below filters it to real TCs.
 
-TODO: (1) match 3h SLP-only tracks to 6h warm-core tracks; (2) revisit StitchNodes
-threshold *count* — `wind,>=,10.0,10` = 30h at 3h vs 60h at 6h (shapes the 3h set).
+## Rectification against the coarse warm-core tracks (`rectify_tc_tracks.py`)
+
+`scripts/downscaling/rectify_tc_tracks.py` (pure pandas over the two track CSVs)
+keeps only genuine TCs by corroborating the fine SLP-only tracks against the coarse
+6h warm-core tracks (`scratch/tc_full/tracks.csv`, the TC truth). Per coarse track:
+anchor at each 6h step (fine center within `--anchor-radius`, default 1° GCD),
+fill in-between 3h steps (nearest fine center within `--window-radius`, default
+2.5°, of the time-interpolated coarse position), and bound to the coarse lifetime
+(end when the warm-core track ends). Emits a coarse track only if `--min-anchor-frac`
+(default 0.5) of its 6h steps anchored.
+
+```bash
+python scripts/downscaling/rectify_tc_tracks.py \
+  scratch/tc_full/tracks.csv scratch/tc25_full/tracks.csv scratch/tc25_rectified/
+```
+
+**25km result:** `scratch/tc25_rectified/rectified_tracks.csv` — **850/853** coarse
+TCs confirmed, 45,693 3h points (21,551 anchor + 24,142 in-between), lat bounded
+−50…60, mean match distance ~0.35°, mean 1.1 source fine-tracks/TC (identity
+coherent). Clean TC climatology (`rectified_map.png`). The 3 unconfirmed are early-
+2013 (25km store starts 2013-01-02). Residual: a small Caspian knot (~55°E/42°N) is
+a **coarse-side** false positive (in the 6h warm-core set), not from rectification —
+filter coarse-side (land + lat) for a fully clean set.
+
+TODO: (1) run detection+rectification on the 100km 3h store (same recipe/flags,
+`gs://vcm-ml-scratch/andrep/2025-07-25-X-SHiELD-AMIP-FME-3h.zarr/`); (2) derive
+cyclone characteristics from the 3h tracks; (3) revisit StitchNodes threshold *count*
+— `wind,>=,10.0,10` = 30h at 3h vs 60h at 6h (shapes the fine set).
 
 ## Environment / install (done)
 
