@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch
@@ -20,8 +20,9 @@ from fme.core.generics.aggregator import (
     InferenceSummary,
 )
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.normalizer import NormalizeFn
 from fme.core.tensors import unfold_ensemble_dim
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 from fme.core.wandb import Table, WandB
 
 from ..one_step.ensemble import EnsembleMetricConfig, SelectStepEnsembleAggregator
@@ -91,7 +92,7 @@ def build_inference_evaluator_aggregator(
     n_ic_steps: int,
     n_forward_steps: int,
     initial_time: xr.DataArray,
-    normalize: Callable[[TensorMapping], TensorDict],
+    normalize: NormalizeFn,
     monthly_reference_data: str | None = None,
     time_mean_reference_data: str | None = None,
     output_dir: str | None = None,
@@ -314,7 +315,7 @@ class InferenceEvaluatorAggregatorConfig:
         n_ic_steps: int,
         n_forward_steps: int,
         initial_time: xr.DataArray,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         output_dir: str | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
@@ -465,7 +466,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         n_ic_steps: int,
         n_forward_steps: int,
         initial_time: xr.DataArray,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         output_dir: str | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
@@ -513,7 +514,7 @@ class InferenceEvaluatorAggregator(
         time_series_aggregators: dict[str, TimeSeriesLogs],
         coords: Mapping[str, np.ndarray],
         n_ic_steps: int,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         n_ensemble_per_ic: int = 1,
