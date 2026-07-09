@@ -770,6 +770,31 @@ def test_step_returns_step_output_with_populated_detached_delta():
         assert not tensor.requires_grad  # detached at the step boundary
 
 
+def test_from_state_strips_deprecated_clip_frozen_precipitation():
+    # Checkpoints serialized before clip_frozen_precipitation was folded into the
+    # moisture corrector (always-on) carry a stale corrector key. from_state must
+    # drop it so those older checkpoints still load.
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+        ),
+        in_names=["forcing_shared", "forcing_rad"],
+        out_names=["diagnostic_main", "diagnostic_rad"],
+        normalization=normalization,
+        corrector=AtmosphereCorrectorConfig(conserve_dry_air=True),
+    )
+    state = dataclasses.asdict(config)
+    state["corrector"]["clip_frozen_precipitation"] = True
+    restored = SingleModuleStepConfig.from_state(state)
+    assert isinstance(restored.corrector, AtmosphereCorrectorConfig)
+    assert restored.corrector.conserve_dry_air is True
+    assert not hasattr(restored.corrector, "clip_frozen_precipitation")
+
+
 def test_step_empty_delta_when_no_corrector():
     selector = get_single_module_selector()
     img_shape = DEFAULT_IMG_SHAPE

@@ -233,6 +233,13 @@ class SingleModuleStepConfig(StepConfigABC):
         state_copy = state.copy()
         if "crps_training" in state_copy:
             del state_copy["crps_training"]
+        if "corrector" in state_copy:
+            # ``clip_frozen_precipitation`` was removed when frozen-precip
+            # clipping became always-on inside the moisture corrector. Drop the
+            # stale key so checkpoints serialized before that change still load.
+            corrector = dict(state_copy["corrector"])
+            corrector.pop("clip_frozen_precipitation", None)
+            state_copy["corrector"] = corrector
         return state_copy
 
     def get_step(
