@@ -18,7 +18,8 @@ ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early-cpl-epoch-38-periodic-upsa
 
 ft-ocn-upsample-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KW139G3B21Q1QKM68S3R8SJV|done|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KW139G3B21Q1QKM68S3R8SJV/ICx1-105yr||ai2/climate-titan|b200
 
-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15-cpl-epoch-12|rs0|01KWFTE7N2TRT2GECMXHXDMJD6|run_inf_ICx1-500yr|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWPN4DMJKRVY3MA570969PCW/ICx1-500yr|01KWPN4DMJKRVY3MA570969PCW|ai2/climate-titan|b200
+ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15-cpl-epoch-12|rs0|01KWFTE7N2TRT2GECMXHXDMJD6|done|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWPN4DMJKRVY3MA570969PCW/ICx1-500yr|01KWPN4DMJKRVY3MA570969PCW|ai2/climate-titan|b200
 
 ft-ocn-upsample-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KWHV1D15J0JNSJ89XJYZ0PM3|done|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWHV1D15J0JNSJ89XJYZ0PM3/ICx1-105yr||ai2/climate-titan|b200
 ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-epoch-12-cpl-epoch-11-periodic-upsample|rs0|01KVRTS2BA3EKFPKRDEQF7Z5FP|done|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KVRTS2BA3EKFPKRDEQF7Z5FP/epoch-11/ICx1-105yr-zonally-periodic-upsample|01KWJ9PMK2SYHKK39X8WP1JDM7|ai2/climate-titan|b200
+ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KWFTE7N2TRT2GECMXHXDMJD6|run_ICx1-105yr|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWFTE7N2TRT2GECMXHXDMJD6/ICx1-105yr||ai2/climate-titan|b200
