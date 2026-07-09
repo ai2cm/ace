@@ -323,11 +323,20 @@ run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16.yaml" \
   "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-rs0" 1 \
   "01KWZN0PF2QPPYF00KWT3J2FJW:/prior-results"
 
-# --- ftens16 EMA probe: same dataset, ema_ckpt_0150 (EMA/inference weights) ---
-# Diagnostic: the ckpt.tar reload above evaluates RAW weights (EMA never
-# accumulates with max_epochs=0), but the deployed/inference model and the
-# ensemble-size sweep's val ssr_bias use EMA. This should reproduce the sweep's
-# a3uqkhyz val ssr_bias (~-0.084) if EMA is the raw-vs-EMA discrepancy cause.
+# --- EMA-weights evals (ema_ckpt_NNNN): the ckpt.tar reloads above evaluate RAW
+# weights (EMA never accumulates with max_epochs=0), but the deployed/inference
+# model and the ensemble-size sweep's val ssr_bias use EMA. These three load the
+# matched-epoch EMA checkpoints at common N=16, so ftens2-ema vs ftens16-ema
+# isolates 2->16 training members on the deployed model; ftens16-ema reproduces
+# the sweep's a3uqkhyz val ssr_bias (~-0.084), confirming EMA is the cause.
 run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-ema.yaml" \
   "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-ema-rs0" 1 \
   "01KWZN0PF2QPPYF00KWT3J2FJW:/prior-results"
+
+run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-baseline-ema.yaml" \
+  "train-4deg-daily-v2-era5-only-ssrl1-eval-baseline-ema-rs0" 1 \
+  "01KVYC47QN4PM0MXD4FYPFVWV6:/prior-results"
+
+run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens2-ema.yaml" \
+  "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens2-ema-rs0" 1 \
+  "01KWZD5SRC95H55TG8BV55TASA:/prior-results"
