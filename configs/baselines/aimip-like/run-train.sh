@@ -114,6 +114,16 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  # Optional checkpoint mount (arg 4): "<beaker-result-ds>:/prior-results".
+  # The ssrl1-eval configs are checkpoint-agnostic (they reference
+  # /prior-results/... in the yaml) and set the mount HERE rather than via a
+  # yaml "# arg: --dataset" header, so the two configs stay byte-identical and
+  # differ only in which checkpoint this launcher mounts. Older configs that
+  # carry their own "# arg: --dataset ...:/prior-results" pass no arg 4.
+  local dataset_mount="${4:-}"
+  local dataset_args=()
+  [[ -n "$dataset_mount" ]] && dataset_args+=(--dataset "$dataset_mount")
+
   gantry run \
     --name "$job_name" \
     --description 'Run ACE training (AIMIP-like baseline)' \
@@ -137,6 +147,7 @@ run_training() {
     --system-python \
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
+    "${dataset_args[@]}" \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
   # --- END BASELINE-SPECIFIC --------------------------------------------------
 }
@@ -283,3 +294,23 @@ run_training "train-4deg-daily-v2-era5-only-ftens-eval-n16.yaml" "train-4deg-dai
 
 # --- ftens16 RERUN (expandable_segments allocator fix after OOM at ep134) ---
 run_training "train-4deg-daily-v2-era5-only-ftens16-rerun.yaml" "train-4deg-daily-v2-era5-only-ftens16-rerun-rs0" 1
+
+# =============================================================================
+# SSR-bias-L1 frozen eval (2026-07-09): show the CRPS-consistent L1 metric
+# (ssr_bias_l1) reproduces the L2 val/ensemble/ssr_bias 1-step miscalibration
+# signal. Two checkpoints, ONE checkpoint-agnostic config each (byte-identical;
+# they differ only in the --dataset checkpoint mounted here at /prior-results).
+# n_ensemble=16, n_forward_steps=1, evaluate_before_training + max_epochs 0 ->
+# one validation over the train_subset + val loaders, then exit. Both configs
+# log ssr_bias AND ssr_bias_l1 on each loader. Launch with:  ./run-train.sh ssrl1
+# =============================================================================
+
+# --- baseline v2 (oshj5u79) epoch-120 weights (result ds 01KVYC47QN4PM0MXD4FYPFVWV6) ---
+run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-baseline.yaml" \
+  "train-4deg-daily-v2-era5-only-ssrl1-eval-baseline-rs0" 1 \
+  "01KVYC47QN4PM0MXD4FYPFVWV6:/prior-results"
+
+# --- 16-member finetuned (a3uqkhyz) epoch-150 weights (result ds 01KWZN0PF2QPPYF00KWT3J2FJW) ---
+run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16.yaml" \
+  "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-rs0" 1 \
+  "01KWZN0PF2QPPYF00KWT3J2FJW:/prior-results"
