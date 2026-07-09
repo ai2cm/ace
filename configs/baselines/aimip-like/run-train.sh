@@ -310,6 +310,14 @@ run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-baseline.yaml" \
   "train-4deg-daily-v2-era5-only-ssrl1-eval-baseline-rs0" 1 \
   "01KVYC47QN4PM0MXD4FYPFVWV6:/prior-results"
 
+# --- 2-member finetuned (fautk4uz) epoch-150 weights (result ds 01KWZD5SRC95H55TG8BV55TASA) ---
+# Matched-epoch control for ftens16: same 120->150 fine-tune, constant LR 1e-4,
+# 2 members per training ensemble. Isolates ensemble size (2 vs 16) from the
+# extra 30 epochs the baseline-vs-ftens16 contrast otherwise confounds.
+run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens2.yaml" \
+  "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens2-rs0" 1 \
+  "01KWZD5SRC95H55TG8BV55TASA:/prior-results"
+
 # --- 16-member finetuned (a3uqkhyz) epoch-150 weights (result ds 01KWZN0PF2QPPYF00KWT3J2FJW) ---
 run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16.yaml" \
   "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-rs0" 1 \
