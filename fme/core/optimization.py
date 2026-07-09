@@ -11,7 +11,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
+from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -72,42 +72,45 @@ class CheckpointConfig:
             return NoCheckpoint()
 
 
+def _build_optimizer(
+    optimizer_type: Literal["Adam", "FusedAdam", "AdamW"],
+    parameters: Iterable[torch.nn.Parameter],
+    lr: float,
+    kwargs: Mapping[str, Any],
+) -> torch.optim.Optimizer:
+    if optimizer_type == "FusedAdam":
+        return torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
+    elif optimizer_type == "Adam":
+        return torch.optim.Adam(parameters, lr=lr, **kwargs)
+    elif optimizer_type == "AdamW":
+        return torch.optim.AdamW(parameters, lr=lr, **kwargs)
+    else:
+        raise ValueError(f"Unknown optimizer type: {optimizer_type}")
+
+
 class Optimization(OptimizationABC):
     def __init__(
         self,
-        parameters: Iterable[torch.nn.Parameter],
-        optimizer_type: Literal[
-            "Adam",
-            "FusedAdam",
-            "AdamW",
-        ],
-        lr: float,
-        max_epochs: int,
-        scheduler: SchedulerConfig | SequentialSchedulerConfig,
+        optimizer: torch.optim.Optimizer,
+        scheduler: LRScheduler,
         enable_automatic_mixed_precision: bool,
-        kwargs: Mapping[str, Any],
         use_gradient_accumulation: bool = False,
         get_checkpoint: Callable[
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
+        max_grad_norm: float | None = None,
     ):
-        if optimizer_type == "FusedAdam":
-            self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
-        elif optimizer_type == "Adam":
-            self.optimizer = torch.optim.Adam(parameters, lr=lr, **kwargs)
-        elif optimizer_type == "AdamW":
-            self.optimizer = torch.optim.AdamW(parameters, lr=lr, **kwargs)
-        else:
-            raise ValueError(f"Unknown optimizer type: {optimizer_type}")
-
+        self.optimizer = optimizer
         if enable_automatic_mixed_precision:
             self.gscaler: torch.amp.GradScaler | None = torch.amp.GradScaler("cuda")
         else:
             self.gscaler = None
-        self.scheduler = scheduler.build(self.optimizer, max_epochs)
+        self.scheduler = scheduler
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
+        self._max_grad_norm = max_grad_norm
+        self._last_grad_norm: float | None = None
 
     def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
         return self._get_checkpoint(step)(module)
@@ -176,6 +179,18 @@ class Optimization(OptimizationABC):
         else:
             loss.backward()
 
+    def _clip_gradients(self):
+        self._last_grad_norm = None
+        if self._max_grad_norm is not None:
+            if self.gscaler is not None:
+                self.gscaler.unscale_(self.optimizer)
+            params = itertools.chain.from_iterable(
+                group["params"] for group in self.optimizer.param_groups
+            )
+            self._last_grad_norm = torch.nn.utils.clip_grad_norm_(
+                params, self._max_grad_norm
+            ).item()
+
     def _step_weights(self):
         if self.gscaler is not None:
             self.gscaler.step(self.optimizer)
@@ -185,6 +200,7 @@ class Optimization(OptimizationABC):
     def step_weights(self):
         if not self._use_gradient_accumulation:
             self._backward(self._accumulated_loss)
+        self._clip_gradients()
         self._step_weights()
         self.optimizer.zero_grad()
         if self.gscaler is not None:
@@ -288,6 +304,12 @@ class OptimizationConfig:
             to accumulate gradients differently when this is enabled, such as by
             detaching the computational graph between steps. See the documentation of
             your stepper (e.g. Stepper) for more details.
+        max_grad_norm: Maximum norm for gradient clipping. If None, no gradient
+            clipping is applied. When set, gradients are clipped to this global
+            norm before each optimizer step. Compatible with automatic mixed
+            precision. When use_gradient_accumulation is enabled, clipping is
+            applied to the full N-step accumulated gradient (i.e. the gradient
+            the optimizer sees), not per accumulation sub-step.
         resume_optimizer_ckpt_path: Optional path to a training checkpoint
             (``ckpt.tar``) whose per-parameter optimizer running state (e.g.
             Adam moment estimates) and grad scaler state should be loaded into
@@ -306,6 +328,7 @@ class OptimizationConfig:
         default_factory=lambda: SchedulerConfig()
     )
     use_gradient_accumulation: bool = False
+    max_grad_norm: float | None = None
     checkpoint: CheckpointConfig = dataclasses.field(
         default_factory=lambda: CheckpointConfig()
     )
@@ -327,16 +350,17 @@ class OptimizationConfig:
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
+        optimizer = _build_optimizer(
+            self.optimizer_type, parameters, self.lr, self.kwargs
+        )
+        scheduler = self.scheduler.build(optimizer, max_epochs)
         optimization = Optimization(
-            parameters=parameters,
-            optimizer_type=self.optimizer_type,
-            lr=self.lr,
-            max_epochs=max_epochs,
-            scheduler=self.scheduler,
+            optimizer=optimizer,
+            scheduler=scheduler,
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
-            kwargs=self.kwargs,
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
+            max_grad_norm=self.max_grad_norm,
         )
         if self.resume_optimizer_ckpt_path is not None:
             _load_finetune_optimization_state(

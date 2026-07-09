@@ -1,5 +1,4 @@
 import contextlib
-import dataclasses
 import os
 import signal
 import unittest.mock
@@ -13,9 +12,10 @@ from fme.core.device import get_device
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
+    AggregatorSummary,
     InferenceAggregatorABC,
-    InferenceLog,
     InferenceLogs,
+    InferenceSummary,
 )
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
@@ -24,8 +24,8 @@ from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
     InferenceTask,
-    TrainConfigProtocol,
     Trainer,
+    TrainerParams,
     TrainOutputABC,
     TrainStepperABC,
     ValidationTask,
@@ -227,34 +227,6 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         pass
 
 
-@dataclasses.dataclass
-class Config:
-    experiment_dir: str = "test_experiment_dir"
-    checkpoint_dir: str = "test_checkpoint_dir"
-    output_dir: str = "test_output_dir"
-    max_epochs: int = 2
-    save_checkpoint: bool = True
-    validate_using_ema: bool = True
-    log_train_every_n_batches: int = 1
-    checkpoint_every_n_batches: int = 0
-    train_evaluation_batches: int = 2
-    inference_n_forward_steps: int = 1
-    checkpoint_save_epochs: Slice | None = None
-    ema_checkpoint_save_epochs: Slice | None = None
-    segment_epochs: int | None = None
-    evaluate_before_training: bool = False
-    save_best_inference_epoch_checkpoints: bool = False
-    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
-    lr_tuning: LRTuningConfig | None = None
-
-    def __post_init__(self):
-        start_epoch = 0 if self.evaluate_before_training else 1
-        self._inference_epochs = [i for i in range(start_epoch, self.max_epochs + 1)]
-
-
-_: TrainConfigProtocol = Config()
-
-
 class TrainAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, train_loss: float):
         self.train_loss = train_loss
@@ -262,8 +234,11 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput) -> None:
         pass
 
-    def get_logs(self, label: str) -> dict[str, Any]:
-        return {f"{label}/mean/loss": self.train_loss}
+    def get_summary(self, label: str) -> AggregatorSummary:
+        return AggregatorSummary(
+            logs={f"{label}/mean/loss": self.train_loss},
+            loss=self.train_loss,
+        )
 
     def flush_diagnostics(self, subdir: str | None) -> None:
         pass
@@ -276,8 +251,14 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput) -> None:
         pass
 
-    def get_logs(self, label: str) -> dict[str, Any]:
-        return {f"{label}/mean/loss": self.validation_loss}
+    def get_summary(self, label: str) -> AggregatorSummary:
+        return AggregatorSummary(
+            logs={f"{label}/mean/loss": self.validation_loss},
+            loss=self.validation_loss,
+        )
+
+    def get_logs(self, label: str) -> dict[str, float]:
+        return self.get_summary(label).logs
 
     def flush_diagnostics(self, subdir: str | None) -> None:
         pass
@@ -293,8 +274,11 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
     def record_initial_condition(self, initial_condition: PSType) -> InferenceLogs:
         return [{}]
 
-    def get_summary_logs(self) -> InferenceLog:
-        return {"time_mean_norm/rmse/channel_mean": self.inference_loss}
+    def get_summary(self) -> InferenceSummary:
+        return InferenceSummary(
+            logs={"time_mean_norm/rmse/channel_mean": self.inference_loss},
+            loss=self.inference_loss,
+        )
 
     def flush_diagnostics(self, subdir: str | None) -> None:
         pass
@@ -349,7 +333,7 @@ def get_trainer(
     resume_optimizer_ckpt_path: str | None = None,
     resume_ema_ckpt_path: str | None = None,
     lr: float = 0.01,
-) -> tuple[TrainConfigProtocol, Trainer]:
+) -> tuple[TrainerParams, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
     if train_losses is None:
@@ -424,18 +408,20 @@ def get_trainer(
     def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
         return ema_config.build(modules)
 
-    config = Config(
+    config = TrainerParams(
         experiment_dir=tmp_path,
         checkpoint_dir=checkpoint_dir,
         checkpoint_save_epochs=checkpoint_save_epochs,
+        ema_checkpoint_save_epochs=None,
         checkpoint_every_n_batches=checkpoint_every_n_batches,
         segment_epochs=segment_epochs,
         max_epochs=max_epochs,
         validate_using_ema=validate_using_ema,
+        log_train_every_n_batches=1,
+        train_evaluation_batches=2,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         save_checkpoint=save_checkpoint,
-        ema=ema_config,
         lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
@@ -443,7 +429,8 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    inference_epochs = config._inference_epochs
+    start_epoch = 0 if evaluate_before_training else 1
+    inference_epochs = list(range(start_epoch, max_epochs + 1))
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
@@ -451,19 +438,20 @@ def get_trainer(
             aggregator_builder.validation_losses[aggregator_builder._validation_calls]
         )
         aggregator_builder._validation_calls += 1
-        logs = run_validation(
+        summary = run_validation(
             train_stepper=stepper,
             validation_data=validation_data,
             aggregator=val_agg,
             diagnostics_subdir=f"epoch_{epoch:04d}",
             record_logs=lambda logs: None,
         )
-        return logs, logs["val/mean/loss"]
+        assert summary.loss is not None
+        return summary.logs, summary.loss
 
     def inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
         if epoch not in inference_epochs:
             return {}, None
-        logs = inference_one_epoch(
+        summary = inference_one_epoch(
             stepper=stepper,
             validation_context=contextlib.nullcontext,
             dataset=inference_data,
@@ -471,13 +459,13 @@ def get_trainer(
             label="inference",
             epoch=epoch,
         )
-        error = logs.get("inference/time_mean_norm/rmse/channel_mean")
-        return logs, error
+        return summary.logs, summary.loss
 
     validate_stepper_callback: ValidateStepper | None = None
     if lr_tuning is not None:
 
-        def _vs(trial_stepper, trial_ema):
+        def _vs(trial_stepper, trial_ema, epoch):
+            validation_data.set_epoch(epoch)
             val_agg = ValidationAggregator(
                 aggregator_builder.validation_losses[
                     aggregator_builder._validation_calls
@@ -491,8 +479,8 @@ def get_trainer(
                 ema=trial_ema,
                 validate_using_ema=config.validate_using_ema,
             )
-            logs = val_agg.get_logs(label="val")
-            return logs["val/mean/loss"]
+            summary = val_agg.get_summary(label="val")
+            return summary.loss
 
         validate_stepper_callback = _vs
 
@@ -501,7 +489,7 @@ def get_trainer(
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
-        config=config,
+        params=config,
         aggregator_builder=aggregator_builder,
         validation_callback=validation_callback,
         end_of_batch_callback=unittest.mock.MagicMock(),
@@ -1636,7 +1624,14 @@ class TestBuildValidationCallback:
 
     def test_single_entry_weighted_loss(self):
         tasks = [self._make_task("val", weight=2.0)]
-        logs, loss = self._call(tasks, [{"val/mean/loss": 0.5, "val/other": 1.0}])
+        logs, loss = self._call(
+            tasks,
+            [
+                AggregatorSummary(
+                    logs={"val/mean/loss": 0.5, "val/other": 1.0}, loss=0.5
+                )
+            ],
+        )
         assert loss == pytest.approx(2.0 * 0.5)
         assert logs == {"val/mean/loss": 0.5, "val/other": 1.0}
 
@@ -1648,8 +1643,8 @@ class TestBuildValidationCallback:
         logs, loss = self._call(
             tasks,
             [
-                {"a/mean/loss": 0.5},
-                {"b/mean/loss": 999.0},
+                AggregatorSummary(logs={"a/mean/loss": 0.5}, loss=0.5),
+                AggregatorSummary(logs={"b/mean/loss": 999.0}, loss=999.0),
             ],
         )
         assert loss == pytest.approx(0.5)
@@ -1663,18 +1658,27 @@ class TestBuildValidationCallback:
         ]
         _, loss = self._call(
             tasks,
-            [{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+            [
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.2),
+            ],
         )
         assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
 
-    def test_missing_metric_for_weighted_entry_raises(self):
+    def test_missing_loss_for_weighted_entry_raises(self):
         tasks = [self._make_task("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
-            self._call(tasks, [{"a/other_metric": 1.0}])
+        with pytest.raises(RuntimeError, match="did not produce a loss"):
+            self._call(
+                tasks,
+                [AggregatorSummary(logs={"a/other_metric": 1.0}, loss=None)],
+            )
 
-    def test_missing_metric_for_zero_weight_entry_is_skipped(self):
+    def test_missing_loss_for_zero_weight_entry_is_skipped(self):
         tasks = [self._make_task("a", weight=0.0)]
-        logs, loss = self._call(tasks, [{"a/other_metric": 1.0}])
+        logs, loss = self._call(
+            tasks,
+            [AggregatorSummary(logs={"a/other_metric": 1.0}, loss=None)],
+        )
         assert loss == 0.0
         assert "a/other_metric" in logs
 
@@ -1687,8 +1691,12 @@ class TestBuildValidationCallback:
             self._call(
                 tasks,
                 [
-                    {"shared/key": 0.1, "a/mean/loss": 0.5},
-                    {"shared/key": 0.2, "b/mean/loss": 0.6},
+                    AggregatorSummary(
+                        logs={"shared/key": 0.1, "a/mean/loss": 0.5}, loss=0.5
+                    ),
+                    AggregatorSummary(
+                        logs={"shared/key": 0.2, "b/mean/loss": 0.6}, loss=0.6
+                    ),
                 ],
             )
 
@@ -1696,7 +1704,10 @@ class TestBuildValidationCallback:
         tasks = [self._make_task("a"), self._make_task("b")]
         self._call(
             tasks,
-            [{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+            [
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.2),
+            ],
             epoch=7,
         )
         for task in tasks:
@@ -1711,7 +1722,10 @@ class TestBuildValidationCallback:
         stepper = unittest.mock.MagicMock()
         with unittest.mock.patch(
             "fme.core.generics.trainer.run_validation",
-            side_effect=[{"a/mean/loss": 0.1}, {"a/mean/loss": 0.2}],
+            side_effect=[
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"a/mean/loss": 0.2}, loss=0.2),
+            ],
         ):
             callback = build_validation_callback(tasks=[task], stepper=stepper)
             callback(epoch=1)
@@ -1780,11 +1794,22 @@ class TestBuildInferenceCallback:
         tasks = [self._make_task("inf", weight=2.0)]
         logs, error = self._call(
             tasks,
-            [{"inf/time_mean_norm/rmse/channel_mean": 0.5, "inf/other": 1.0}],
+            [
+                InferenceSummary(
+                    logs={
+                        "inf/time_mean_norm/rmse/channel_mean": 0.5,
+                        "inf/other": 1.0,
+                    },
+                    loss=0.5,
+                )
+            ],
             inference_epochs=[1],
         )
         assert error == pytest.approx(2.0 * 0.5)
-        assert logs == {"inf/time_mean_norm/rmse/channel_mean": 0.5, "inf/other": 1.0}
+        assert logs == {
+            "inf/time_mean_norm/rmse/channel_mean": 0.5,
+            "inf/other": 1.0,
+        }
 
     def test_multiple_weighted_entries_sum_weighted(self):
         tasks = [
@@ -1794,8 +1819,12 @@ class TestBuildInferenceCallback:
         _, error = self._call(
             tasks,
             [
-                {"a/time_mean_norm/rmse/channel_mean": 0.1},
-                {"b/time_mean_norm/rmse/channel_mean": 0.2},
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=0.1
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=0.2
+                ),
             ],
             inference_epochs=[1],
         )
@@ -1809,8 +1838,12 @@ class TestBuildInferenceCallback:
         logs, error = self._call(
             tasks,
             [
-                {"a/time_mean_norm/rmse/channel_mean": 0.5},
-                {"b/time_mean_norm/rmse/channel_mean": 999.0},
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 999.0}, loss=999.0
+                ),
             ],
             inference_epochs=[1],
         )
@@ -1826,8 +1859,12 @@ class TestBuildInferenceCallback:
         logs, error = self._call(
             tasks,
             [
-                {"a/time_mean_norm/rmse/channel_mean": 0.5},
-                {"b/time_mean_norm/rmse/channel_mean": 0.6},
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 0.6}, loss=0.6
+                ),
             ],
             inference_epochs=[1],
         )
@@ -1835,14 +1872,22 @@ class TestBuildInferenceCallback:
         assert "a/time_mean_norm/rmse/channel_mean" in logs
         assert "b/time_mean_norm/rmse/channel_mean" in logs
 
-    def test_missing_metric_for_weighted_entry_raises(self):
+    def test_missing_loss_for_weighted_entry_raises(self):
         tasks = [self._make_task("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce expected metric"):
-            self._call(tasks, [{"a/other_metric": 1.0}], inference_epochs=[1])
+        with pytest.raises(RuntimeError, match="did not produce a loss"):
+            self._call(
+                tasks,
+                [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
+                inference_epochs=[1],
+            )
 
-    def test_missing_metric_for_zero_weight_entry_is_skipped(self):
+    def test_missing_loss_for_zero_weight_entry_is_skipped(self):
         tasks = [self._make_task("a", weight=0.0)]
-        logs, error = self._call(tasks, [{"a/other_metric": 1.0}], inference_epochs=[1])
+        logs, error = self._call(
+            tasks,
+            [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
+            inference_epochs=[1],
+        )
         assert error is None
         assert "a/other_metric" in logs
 
@@ -1855,14 +1900,20 @@ class TestBuildInferenceCallback:
             self._call(
                 tasks,
                 [
-                    {
-                        "shared/key": 0.1,
-                        "a/time_mean_norm/rmse/channel_mean": 0.5,
-                    },
-                    {
-                        "shared/key": 0.2,
-                        "b/time_mean_norm/rmse/channel_mean": 0.6,
-                    },
+                    InferenceSummary(
+                        logs={
+                            "shared/key": 0.1,
+                            "a/time_mean_norm/rmse/channel_mean": 0.5,
+                        },
+                        loss=0.5,
+                    ),
+                    InferenceSummary(
+                        logs={
+                            "shared/key": 0.2,
+                            "b/time_mean_norm/rmse/channel_mean": 0.6,
+                        },
+                        loss=0.6,
+                    ),
                 ],
                 inference_epochs=[1],
             )
@@ -1874,7 +1925,11 @@ class TestBuildInferenceCallback:
         ]
         logs, error = self._call(
             tasks,
-            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                )
+            ],
             inference_epochs=[1, 2],
             epoch=1,
         )
@@ -1896,8 +1951,12 @@ class TestBuildInferenceCallback:
         with unittest.mock.patch(
             "fme.core.generics.trainer.inference_one_epoch",
             side_effect=[
-                {"a/time_mean_norm/rmse/channel_mean": 0.1},
-                {"a/time_mean_norm/rmse/channel_mean": 0.2},
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=0.1
+                ),
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.2}, loss=0.2
+                ),
             ],
         ):
             callback = build_inference_callback(

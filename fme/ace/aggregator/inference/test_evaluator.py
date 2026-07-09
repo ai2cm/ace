@@ -100,9 +100,14 @@ def regress_logs(
         assert set(raw_logs.keys()) == set(raw_logs_loaded.keys())
         for key, value in raw_logs.items():
             value = value.cpu() if isinstance(value, torch.Tensor) else value
-            torch.testing.assert_close(
-                value, raw_logs_loaded[key], rtol=1e-3, atol=1e-3
-            )
+            if isinstance(value, torch.Tensor) and value.dtype == torch.uint8:
+                # uint8 image tensors; allow ±2 to tolerate rendering differences
+                # across matplotlib versions (e.g. colormapping changes in 3.11).
+                torch.testing.assert_close(value, raw_logs_loaded[key], rtol=0, atol=2)
+            else:
+                torch.testing.assert_close(
+                    value, raw_logs_loaded[key], rtol=1e-3, atol=1e-3
+                )
 
 
 def test_logs_regression():
@@ -131,7 +136,7 @@ def test_logs_regression():
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
@@ -234,7 +239,7 @@ def test_inference_logs_labels_exist():
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     logs = agg.record_batch(
@@ -303,7 +308,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
         n_ic_steps=1,
         n_forward_steps=n_forward_steps,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     target_data = BatchData.new_on_device(
@@ -351,7 +356,7 @@ def test_flush_diagnostics(tmpdir):
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         output_dir=tmpdir,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -400,7 +405,7 @@ def test_agg_raises_without_output_dir():
             n_ic_steps=1,
             n_forward_steps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=True,
             output_dir=None,
         )
@@ -419,7 +424,7 @@ class TestAggregatorConfigMetrics:
                 n_ic_steps=1,
                 n_forward_steps=1,
                 initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
-                normalize=lambda x: dict(x),
+                normalize=lambda x, apply_mean=True: dict(x),
                 save_diagnostics=False,
             )
 
@@ -434,7 +439,7 @@ class TestAggregatorConfigMetrics:
             n_ic_steps=1,
             n_forward_steps=1,
             initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=False,
         )
 
@@ -453,7 +458,7 @@ class TestAggregatorConfigMetrics:
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
             initial_time=initial_time,
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=False,
         )
         logs = agg.record_batch(
@@ -487,7 +492,7 @@ class TestAggregatorConfigMetrics:
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
             initial_time=initial_time,
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=False,
         )
         logs = agg.record_batch(
@@ -524,7 +529,7 @@ class TestAggregatorConfigMetrics:
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
             initial_time=initial_time,
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=False,
             enable_time_series=False,
         )
@@ -556,7 +561,7 @@ class TestAggregatorConfigMetrics:
                 n_ic_steps=1,
                 n_forward_steps=1,
                 initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
-                normalize=lambda x: dict(x),
+                normalize=lambda x, apply_mean=True: dict(x),
                 save_diagnostics=True,
                 output_dir=None,
             )
@@ -599,7 +604,7 @@ def test_legacy_config_matches_typed_config():
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     legacy_agg = legacy_config.build(**build_kwargs)
@@ -682,7 +687,7 @@ def test_legacy_config_long_run_includes_annual_and_enso():
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     legacy_agg = legacy_config.build(**build_kwargs)
@@ -730,7 +735,7 @@ def test_hierarchical_defaults_build():
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     for expected in ["mean", "mean_norm", "power_spectrum", "zonal_mean", "time_mean"]:
@@ -754,7 +759,7 @@ def test_hierarchical_enable_histogram():
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     assert "histogram" in agg._aggregators
@@ -778,7 +783,7 @@ def test_hierarchical_disable_default():
         n_ic_steps=1,
         n_forward_steps=n_time - 1,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         save_diagnostics=False,
     )
     assert "zonal_mean" not in agg._aggregators
@@ -970,7 +975,7 @@ class TestRaiseOnUnsupported:
                 n_ic_steps=1,
                 n_forward_steps=5,
                 initial_time=initial_time,
-                normalize=lambda x: dict(x),
+                normalize=lambda x, apply_mean=True: dict(x),
                 save_diagnostics=False,
             )
 
@@ -986,7 +991,7 @@ class TestRaiseOnUnsupported:
             n_ic_steps=1,
             n_forward_steps=5,
             initial_time=initial_time,
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=False,
             raise_on_unsupported=False,
         )
@@ -1002,7 +1007,7 @@ class TestRaiseOnUnsupported:
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
             initial_time=initial_time,
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=False,
         )
         assert "mean" in agg._aggregators
@@ -1023,7 +1028,7 @@ class TestRaiseOnUnsupported:
                 n_ic_steps=1,
                 n_forward_steps=5,
                 initial_time=initial_time,
-                normalize=lambda x: dict(x),
+                normalize=lambda x, apply_mean=True: dict(x),
                 save_diagnostics=False,
                 raise_on_unsupported=False,
             )
@@ -1039,7 +1044,7 @@ class TestRaiseOnUnsupported:
             n_ic_steps=1,
             n_forward_steps=n_time - 1,
             initial_time=initial_time,
-            normalize=lambda x: dict(x),
+            normalize=lambda x, apply_mean=True: dict(x),
             save_diagnostics=False,
         )
         assert "enso_index" not in agg._aggregators

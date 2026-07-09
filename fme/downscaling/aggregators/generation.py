@@ -1,3 +1,4 @@
+import dataclasses
 import re
 from collections.abc import Collection, Mapping
 from typing import Any
@@ -416,22 +417,44 @@ class GenerationAggregator:
                 ds = ds.merge(agg.get_dataset())
         return ds
 
-    def get_checkpoint_selection_metrics(self) -> dict[str, float]:
-        """
-        Get the checkpoint selection metrics from the underlying aggregator.
-        """
-        metrics: dict[str, float] = {}
-        wandb_logs = self.get_wandb()
-        # Compute channel mean of all percentile*_frac_of_target
-        histogram_tail_metric = _get_channel_mean_scalar_metric(
-            wandb_logs,
+    def get_summary(self, prefix: str = "") -> "GenerationSummary":
+        logs = self.get_wandb(prefix)
+        return GenerationSummary(
+            logs=logs,
+            validation_loss=self.get_validation_loss(),
+            histogram_tail_metric=self.get_histogram_tail_metric(),
+        )
+
+    def get_validation_loss(self) -> float:
+        """Scalar to minimize for best-validation checkpoint selection."""
+        return _get_channel_mean_scalar_metric(
+            self.get_wandb(),
+            self._best_ckpt_selection_metric,
+        )
+
+    def get_histogram_tail_metric(self) -> float:
+        """Scalar to minimize for best-histogram-tail checkpoint selection."""
+        value = _get_channel_mean_scalar_metric(
+            self.get_wandb(),
             self._histogram_ckpt_selection_metric,
         )
         if "frac_of_target" in self._histogram_ckpt_selection_metric:
-            histogram_tail_metric = abs(1.0 - histogram_tail_metric)
-        metrics[self._histogram_ckpt_selection_metric] = histogram_tail_metric
-        metrics[self._best_ckpt_selection_metric] = _get_channel_mean_scalar_metric(
-            wandb_logs,
-            self._best_ckpt_selection_metric,
-        )
-        return metrics
+            # frac_of_target metrics are best at 1.0, not 0.0
+            value = abs(1.0 - value)
+        return value
+
+
+@dataclasses.dataclass
+class GenerationSummary:
+    """Summary returned by GenerationAggregator.
+
+    Attributes:
+        logs: Metrics dict suitable for wandb logging.
+        validation_loss: Scalar to minimize for best-validation checkpoint.
+        histogram_tail_metric: Scalar to minimize for best-histogram-tail
+            checkpoint.
+    """
+
+    logs: Mapping[str, Any]
+    validation_loss: float
+    histogram_tail_metric: float

@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch
@@ -17,10 +17,12 @@ from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLog,
     InferenceLogs,
+    InferenceSummary,
 )
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.normalizer import NormalizeFn
 from fme.core.tensors import unfold_ensemble_dim
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 from fme.core.wandb import Table, WandB
 
 from ..one_step.ensemble import EnsembleMetricConfig, SelectStepEnsembleAggregator
@@ -33,10 +35,12 @@ from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
+from .near_zero_fraction import NearZeroFractionMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
+from .trend import TrendMetricConfig
 from .utils import LatLonRegion
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
@@ -62,6 +66,8 @@ MetricConfig = (
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
+    | TrendMetricConfig
+    | NearZeroFractionMetricConfig
 )
 
 
@@ -86,7 +92,7 @@ def build_inference_evaluator_aggregator(
     n_ic_steps: int,
     n_forward_steps: int,
     initial_time: xr.DataArray,
-    normalize: Callable[[TensorMapping], TensorDict],
+    normalize: NormalizeFn,
     monthly_reference_data: str | None = None,
     time_mean_reference_data: str | None = None,
     output_dir: str | None = None,
@@ -198,6 +204,14 @@ class InferenceEvaluatorAggregatorConfig:
         enso_index: ENSO index metrics.
         enso_coefficient: ENSO regression coefficient metrics.
         ipo_index: Interdecadal Pacific Oscillation index metrics.
+        trend: Per-grid-cell linear trend (slope vs. time) map metrics.
+            Disabled by default.
+        near_zero_fraction: Area-weighted fraction of cells at or below a
+            small non-negative ``eps`` per variable, reported for prediction and
+            its difference from the target. Optionally (``include_maps``) also
+            logs side-by-side generated/target maps of the per-cell
+            at-or-below-``eps`` fraction and the error map. Disabled by
+            default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -246,6 +260,10 @@ class InferenceEvaluatorAggregatorConfig:
     ipo_index: IpoIndexMetricConfig = dataclasses.field(
         default_factory=IpoIndexMetricConfig
     )
+    trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
+    near_zero_fraction: NearZeroFractionMetricConfig = dataclasses.field(
+        default_factory=NearZeroFractionMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
 
@@ -286,6 +304,8 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_index,
             self.enso_coefficient,
             self.ipo_index,
+            self.trend,
+            self.near_zero_fraction,
         ]
         return [m for m in all_metrics if m.enabled]
 
@@ -295,7 +315,7 @@ class InferenceEvaluatorAggregatorConfig:
         n_ic_steps: int,
         n_forward_steps: int,
         initial_time: xr.DataArray,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         output_dir: str | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
@@ -446,7 +466,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         n_ic_steps: int,
         n_forward_steps: int,
         initial_time: xr.DataArray,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         output_dir: str | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
@@ -494,7 +514,7 @@ class InferenceEvaluatorAggregator(
         time_series_aggregators: dict[str, TimeSeriesLogs],
         coords: Mapping[str, np.ndarray],
         n_ic_steps: int,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         n_ensemble_per_ic: int = 1,
@@ -610,12 +630,16 @@ class InferenceEvaluatorAggregator(
         self._n_timesteps_seen = n_times
         return logs
 
-    def get_summary_logs(self) -> InferenceLog:
+    def get_summary(self) -> InferenceSummary:
         logs: InferenceLog = {}
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
-        return logs
+        loss = logs.get("time_mean_norm/rmse/channel_mean")
+        return InferenceSummary(logs=logs, loss=loss)
+
+    def get_summary_logs(self) -> InferenceLog:
+        return self.get_summary().logs
 
     @torch.no_grad()
     def _get_logs(self):
@@ -870,12 +894,15 @@ class InferenceAggregator(
         self._n_timesteps_seen = n_times
         return logs
 
-    def get_summary_logs(self) -> InferenceLog:
+    def get_summary(self) -> InferenceSummary:
         logs = {}
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
-        return logs
+        return InferenceSummary(logs=logs, loss=None)
+
+    def get_summary_logs(self) -> InferenceLog:
+        return self.get_summary().logs
 
     @torch.no_grad()
     def _get_logs(self):

@@ -20,6 +20,7 @@ from fme.downscaling.predictors.serial_denoising import (
 )
 from fme.downscaling.test_models import (
     _get_diffusion_model,
+    _make_global_fine_coords_and_static,
     make_fine_coords,
     make_paired_batch_data,
 )
@@ -521,3 +522,79 @@ def test_student_predictor_adds_residual_base():
     assert set(out) == {"x"}
     assert out["x"].shape == (1, 1, 16, 32)
     assert torch.isfinite(out["x"]).all()
+
+
+def test_denoising_moe_predictor_with_rolled_lon_rolls_all_experts():
+    """with_rolled_lon rolls every expert (keeping the shared-grid invariant)."""
+    coarse_shape = (8, 16)
+    fine_shape = (16, 32)
+    full_fine_coords, static_inputs = _make_global_fine_coords_and_static(fine_shape)
+
+    expert0 = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+    expert1 = _get_diffusion_model(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=full_fine_coords,
+        static_inputs=static_inputs,
+    )
+    predictor = DenoisingMoEPredictor(
+        experts=[expert0, expert1],
+        sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
+        num_diffusion_generation_steps=2,
+        churn=0.0,
+    )
+
+    coarse_lon = torch.tensor([-10.0, -5.0, 0.0, 5.0], dtype=torch.float32)
+    rolled = predictor.with_rolled_lon(coarse_lon)
+
+    # Every expert is a new (rolled) object; _primary stays _experts[0].
+    assert rolled._primary is rolled._experts[0]
+    for rolled_expert, original, source in zip(
+        rolled._experts, predictor._experts, [expert0, expert1]
+    ):
+        assert rolled_expert is not original
+        # Coords are rolled...
+        assert rolled_expert.full_fine_coords.lon[0].item() < 0
+        # ...but the raw network weights are still shared (fresh wrapper).
+        assert next(rolled_expert.module.parameters()) is next(
+            source.module.parameters()
+        )
+    # The sigma dispatcher is rebuilt from the rolled experts, consistent with
+    # _experts (not left pointing at any pre-roll module).
+    for entry, rolled_expert in zip(rolled._dispatch_module._entries, rolled._experts):
+        assert entry[2] is rolled_expert.module
+
+    # No-roll case returns self
+    non_neg_lon = torch.tensor([0.0, 5.0, 10.0, 15.0], dtype=torch.float32)
+    assert predictor.with_rolled_lon(non_neg_lon) is predictor
+
+
+def test_denoising_moe_predictor_rejects_mismatched_expert_grids():
+    """Experts on different grids are rejected at construction (shared-grid)."""
+
+    fine_coords_a, static_a = _make_global_fine_coords_and_static((16, 32))
+    fine_coords_b, static_b = _make_global_fine_coords_and_static((16, 16))
+    expert_a = _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=2,
+        full_fine_coords=fine_coords_a,
+        static_inputs=static_a,
+    )
+    expert_b = _get_diffusion_model(
+        coarse_shape=(8, 8),
+        downscale_factor=2,
+        full_fine_coords=fine_coords_b,
+        static_inputs=static_b,
+    )
+    with pytest.raises(ValueError, match="metadata"):
+        DenoisingMoEPredictor(
+            experts=[expert_a, expert_b],
+            sigma_ranges=[(0.0, 0.5), (0.5, 1.0)],
+            num_diffusion_generation_steps=2,
+            churn=0.0,
+        )

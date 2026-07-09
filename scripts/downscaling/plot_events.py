@@ -17,6 +17,7 @@ Requires:
 """
 
 import argparse
+import datetime
 import math
 import re
 import tempfile
@@ -29,6 +30,7 @@ import cftime
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+import yaml
 from cartopy.feature import ShapelyFeature
 from cartopy.io import shapereader
 from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
@@ -46,6 +48,7 @@ UNITS = {
     "eastward_wind_at_ten_meters": "m/s",
     "northward_wind_at_ten_meters": "m/s",
     "wind_speed": "m/s",
+    "air_temperature_at_two_meters": "K",
 }
 
 
@@ -127,18 +130,20 @@ def get_coarse_data(path: str | None, time_sel: slice | None = TIME_SEL) -> xr.D
         return xr.open_zarr(path)
     else:
         gcs_root = "gs://vcm-ml-raw-flexible-retention/2025-07-25-X-SHiELD-AMIP-FME/regridded-zarrs/gaussian_grid_180_by_360/control"
-        winds = xr.open_zarr(f"{gcs_root}/instantaneous_physics_fields.zarr").sel(
+        phys = xr.open_zarr(f"{gcs_root}/instantaneous_physics_fields.zarr").sel(
             time=time_sel
-        )[["eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"]]
+        )[
+            [
+                "eastward_wind_at_ten_meters",
+                "northward_wind_at_ten_meters",
+                "air_temperature_at_two_meters",
+            ]
+        ]
         prate = xr.open_zarr(f"{gcs_root}/fluxes_2d.zarr").sel(time=time_sel)[
             "PRATEsfc"
         ]
-        pres = xr.open_zarr(f"{gcs_root}/column_integrated_dynamical_fields.zarr").sel(
-            time=time_sel
-        )["PRESsfc"]
-        # in training, PRESsfc is used as input for outputting PRMSL
-        prmsl = pres.rename("PRMSL")
-        return xr.merge([winds, prate, pres, prmsl])
+        prmsl = xr.open_zarr(f"{gcs_root}/PRMSL.zarr").sel(time=time_sel)["PRMSL"]
+        return xr.merge([phys, prate, prmsl])
 
 
 def bbox(lat, lon, width=2.0):
@@ -183,13 +188,7 @@ def plot_event(ds, var_name, samples=None, sel=None, n_cols=5, **plot_kwargs):
     if len(samples) == 0:
         samples = [0]
 
-    if var_name == "PRMSL":
-        # fill PRMSL_coarse with nans
-        ds_["PRMSL_coarse"].values[:] = np.nan
-        # For colorbar range, use only target and predicted (coarse is hidden)
-        arr = ds_[["PRMSL_target", "PRMSL_predicted"]].to_array()
-    else:
-        arr = ds_.to_array()
+    arr = ds_.to_array()
 
     vals = arr.values
     if hasattr(vals, "compute"):
@@ -265,8 +264,25 @@ def filename_to_datetime(filename: str) -> cftime.DatetimeJulian:
         int(match.group(1)),
         int(match.group(2)),
         int(match.group(3)),
-        int(match.group(4) or 12),
+        int(match.group(4) or 0),
     )
+
+
+def load_event_dates(data_dir: str | Path) -> dict[str, cftime.DatetimeJulian]:
+    """Map event name (the .nc filename stem) to its date from the evaluator
+    config.yaml saved alongside the event files."""
+    config_path = Path(data_dir) / "config.yaml"
+    if not config_path.is_file():
+        return {}
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+    dates = {}
+    for event in config.get("events", []):
+        dt = datetime.datetime.fromisoformat(event["date"])
+        dates[event["name"]] = cftime.DatetimeJulian(
+            dt.year, dt.month, dt.day, dt.hour, dt.minute
+        )
+    return dates
 
 
 def add_wind_speed(ds: xr.Dataset) -> xr.Dataset:
@@ -314,12 +330,14 @@ def main():
     print(f"Fetching beaker dataset: {beaker_id}")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        fetch_beaker_dataset(beaker_id, temp_dir)
-
-        event_files = find_event_files(temp_dir)
+        # fetch_beaker_dataset may return a cache dir; temp_dir is empty on cache hit.
+        data_dir = fetch_beaker_dataset(beaker_id, temp_dir)
+        event_files = find_event_files(data_dir)
         if not event_files:
-            print(f"No event files found in dataset {beaker_id}")
+            print(f"No event files found in dataset {beaker_id} (searched {data_dir})")
             return
+
+        event_dates = load_event_dates(data_dir)
 
         print(f"Found {len(event_files)} event file(s)")
 
@@ -330,9 +348,13 @@ def main():
             print(f"Processing: {nc_file.name} -> {output_event_dir}")
 
             event = xr.open_dataset(nc_file)
-            event = merge_coarse(
-                event, coarse, datetime=filename_to_datetime(nc_file.name)
-            )
+            event_date = event_dates.get(nc_file.stem)
+            if event_date is None:
+                print(
+                    f"  {nc_file.stem} not in config.yaml; parsing date from filename"
+                )
+                event_date = filename_to_datetime(nc_file.name)
+            event = merge_coarse(event, coarse, datetime=event_date)
             event = add_wind_speed(event)
             variables = detect_variable_pairs(event)
             if args.variables is not None:

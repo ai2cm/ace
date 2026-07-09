@@ -19,9 +19,9 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -352,7 +352,7 @@ class SeparateRadiationStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         def network_calls(input_norm: TensorDict) -> TensorDict:
             radiation_input_tensor = self.radiation_in_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
@@ -399,15 +399,27 @@ class SeparateRadiationStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
+
     def get_state(self):
         """
         Returns:
             The state of the ML modules.
         """
-        return {
+        state = {
             "module": self.module.get_state(),
             "radiation_module": self.radiation_module.get_state(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -418,3 +430,4 @@ class SeparateRadiationStep(StepABC):
         """
         self.module.load_state(state["module"])
         self.radiation_module.load_state(state["radiation_module"])
+        self._corrector.load_state(state.get("corrector", {}))
