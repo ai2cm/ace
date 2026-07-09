@@ -3,7 +3,7 @@ seed: 0
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
+max_epochs: 40
 ema:
   decay: 0.999
 inference:
@@ -64,8 +64,8 @@ validation:
     prefetch_factor: 2
     dataset:
       data_path: /climate-default/
-    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
-    engine: zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
       subset:
         start_time: '1996-01-01'
         stop_time: '1997-12-31'
@@ -82,6 +82,8 @@ stepper_training:
   n_forward_steps: 1
   loss:
     type: EnsembleLoss
+    weights:
+      h500: 5.0
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
@@ -117,6 +119,8 @@ stepper:
       corrector:
         conserve_dry_air: true
         moisture_budget_correction: advection_and_precipitation
+        total_energy_budget_correction:
+          method: constant_temperature
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1
