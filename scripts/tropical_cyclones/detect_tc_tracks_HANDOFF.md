@@ -1,7 +1,7 @@
 # TC track detection — session handoff
 
-Working notes for running `scripts/downscaling/detect_tc_tracks.py` on the
-X-SHiELD 11-year zarr. Branch: `scripts/tempest-extreme-wrapper`.
+Working notes for running `scripts/tropical_cyclones/detect_tc_tracks.py` on the
+X-SHiELD 11-year zarr. Branch: `scripts/tempest-extreme-3h-tracks`.
 
 ## Goal
 
@@ -38,7 +38,7 @@ read→NetCDF→DetectNodes→**delete** per bundle, so peak disk ≈ `workers �
 (SLP-only recipe), `--timefilter 3hr`, `--keep-netcdf`. Example 25km run:
 
 ```bash
-python scripts/downscaling/detect_tc_tracks.py \
+python scripts/tropical_cyclones/detect_tc_tracks.py \
   gs://vcm-ml-scratch/andrep/2025-08-12-X-SHiELD-AMIP-downscaling-3h.zarr/ scratch/tc25/ \
   --no-warm-core --timefilter 3hr --chunk-size 128 --workers 6 \
   --u-var eastward_wind_at_ten_meters --v-var northward_wind_at_ten_meters \
@@ -55,7 +55,7 @@ high-`HGTsfc` artifacts) — the rectification below filters it to real TCs.
 
 ## Rectification against the coarse warm-core tracks (`rectify_tc_tracks.py`)
 
-`scripts/downscaling/rectify_tc_tracks.py` (pure pandas over the two track CSVs)
+`scripts/tropical_cyclones/rectify_tc_tracks.py` (pure pandas over the two track CSVs)
 keeps only genuine TCs by corroborating the fine SLP-only tracks against the coarse
 6h warm-core tracks (`scratch/tc_full/tracks.csv`, the TC truth). Per coarse track:
 anchor at each 6h step (fine center within `--anchor-radius`, default 1° GCD),
@@ -65,7 +65,7 @@ fill in-between 3h steps (nearest fine center within `--window-radius`, default
 (default 0.5) of its 6h steps anchored.
 
 ```bash
-python scripts/downscaling/rectify_tc_tracks.py \
+python scripts/tropical_cyclones/rectify_tc_tracks.py \
   scratch/tc_full/tracks.csv scratch/tc25_full/tracks.csv scratch/tc25_rectified/
 ```
 
@@ -110,7 +110,7 @@ the binary runs.
 
 ### Source-build fallback (repo's documented path — NOT used here)
 
-`make -C scripts/downscaling tc_deps` builds TempestExtremes from source via
+`make -C scripts/tropical_cyclones tc_deps` builds TempestExtremes from source via
 CMake into `~/.local/tempestextremes/bin` (matches the script's default exe
 path). On this machine `cmake` and the NetCDF/HDF5 dev headers were missing, so
 it needs, on Debian/Ubuntu with sudo:
@@ -153,7 +153,7 @@ DetectNodes; ~3 min wall time on this machine):
 
 ```bash
 conda activate fme && cd ~/repos/ace
-python scripts/downscaling/detect_tc_tracks.py \
+python scripts/tropical_cyclones/detect_tc_tracks.py \
   gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr.zarr/ scratch/tc_full/ \
   --detect-exe ~/miniconda3/envs/tempest/bin/DetectNodes \
   --stitch-exe ~/miniconda3/envs/tempest/bin/StitchNodes \
@@ -197,11 +197,15 @@ since" rejection. Verified: DetectNodes accepts it and timestamps are unshifted.
 Our earlier full runs were already correct (they used plain `to_netcdf`, which
 xarray wrote as julian "hours since", read correctly), so **no re-run needed**.
 
+We also **mirrored the wrapper's directory move**: the TC files now live in
+`scripts/tropical_cyclones/` (`detect_tc_tracks.py`, `rectify_tc_tracks.py`, this
+handoff, and the `Makefile`), matching the parent so a future real merge is cleaner.
+The non-TC downscaling scripts stay in `scripts/downscaling/`.
+
 Deliberately **not** brought in (superseded or separate): the wrapper's streaming +
 `--out_file_list` approach (our parallel bundling supersedes it, and `--out_file_list`
-writes nothing on this conda-forge build); the `scripts/downscaling` →
-`scripts/tropical_cyclones` dir move; and the event-downscaling / histogram / movie
-scripts. Revisit the dir move + event scripts if/when reconciling for a real merge.
+writes nothing on this conda-forge build); and the event-downscaling / histogram /
+movie scripts. Revisit the event scripts if/when reconciling for a real merge.
 
 ## Everything lives in scratch/ (git-ignored)
 

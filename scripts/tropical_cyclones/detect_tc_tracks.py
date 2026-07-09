@@ -31,7 +31,7 @@ downscaling outputs), pass ``--no-warm-core`` to run the SLP-only recipe
 
 TempestExtremes must be installed and on ``PATH``, or its binaries passed via
 ``--detect-exe``/``--stitch-exe``. Build it from source with
-``make -C scripts/downscaling tc_deps`` (see that target for dependencies).
+``make -C scripts/tropical_cyclones tc_deps`` (see that target for dependencies).
 
 Usage examples:
     # Basic run on a local zarr, writing intermediates + tracks to out/
@@ -84,7 +84,7 @@ IN_FMT = "lon,lat,slp,wind"
 
 _HPA_UNITS = {"hpa", "mb", "millibar", "millibars"}
 
-# Matches TC_INSTALL_PREFIX's default in scripts/downscaling/Makefile.
+# Matches TC_INSTALL_PREFIX's default in scripts/tropical_cyclones/Makefile.
 _TC_INSTALL_BIN = Path.home() / ".local" / "tempestextremes" / "bin"
 
 # (lat, lon) coordinate name pairs to try, in order, when --lat-name/--lon-name
@@ -259,7 +259,7 @@ def _check_exe(exe: str) -> None:
         raise FileNotFoundError(
             f"TempestExtremes executable {exe!r} not found on PATH. "
             "Build and install it from source with:\n"
-            "    make -C scripts/downscaling tc_deps\n"
+            "    make -C scripts/tropical_cyclones tc_deps\n"
             "then pass its location via --detect-exe/--stitch-exe, e.g.\n"
             "    --detect-exe ~/.local/tempestextremes/bin/DetectNodes\n"
             "    --stitch-exe ~/.local/tempestextremes/bin/StitchNodes"
@@ -666,13 +666,13 @@ def main() -> None:
         "--detect-exe",
         default=str(_TC_INSTALL_BIN / "DetectNodes"),
         help="Path to DetectNodes (default: install location of "
-        "`make -C scripts/downscaling tc_deps`).",
+        "`make -C scripts/tropical_cyclones tc_deps`).",
     )
     parser.add_argument(
         "--stitch-exe",
         default=str(_TC_INSTALL_BIN / "StitchNodes"),
         help="Path to StitchNodes (default: install location of "
-        "`make -C scripts/downscaling tc_deps`).",
+        "`make -C scripts/tropical_cyclones tc_deps`).",
     )
     parser.add_argument(
         "--workers",
