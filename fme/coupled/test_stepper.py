@@ -909,6 +909,8 @@ def test_get_train_window_data_requirements_name_partition(
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
 
+    assert requirements.atmosphere_target_requirements is not None
+    assert requirements.atmosphere_forcing_requirements is not None
     target_names = set(requirements.atmosphere_target_requirements.names)
     forcing_names = set(requirements.atmosphere_forcing_requirements.names)
 
@@ -939,6 +941,9 @@ def test_get_train_window_data_requirements_bounded_atmos_n_steps():
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
 
+    assert requirements.atmosphere_target_requirements is not None
+    assert requirements.atmosphere_forcing_requirements is not None
+    assert requirements.ocean_requirements is not None
     long_n = n_coupled_steps * stepper_config.n_inner_steps + 1
     assert (
         requirements.atmosphere_forcing_requirements.n_timesteps == long_n
@@ -966,6 +971,8 @@ def test_get_train_window_data_requirements_unbounded_falls_back_to_long():
 
     requirements = train_config.get_train_window_data_requirements(stepper_config)
 
+    assert requirements.atmosphere_target_requirements is not None
+    assert requirements.atmosphere_forcing_requirements is not None
     long_n = n_coupled_steps * stepper_config.n_inner_steps + 1
     assert requirements.atmosphere_target_requirements.n_timesteps == long_n
     assert requirements.atmosphere_forcing_requirements.n_timesteps == long_n
@@ -991,6 +998,7 @@ def test_get_train_window_data_requirements_zero_atmos_n_steps():
         ),
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
+    assert requirements.atmosphere_target_requirements is not None
     assert requirements.atmosphere_target_requirements.n_timesteps == 1
 
 
@@ -1120,6 +1128,7 @@ def test_get_train_window_data_requirements_with_sampler():
         ),
     )
     requirements = train_config.get_train_window_data_requirements(stepper_config)
+    assert requirements.atmosphere_target_requirements is not None
     assert requirements.atmosphere_target_requirements.n_timesteps == 7 + 1
 
 
@@ -1646,6 +1655,12 @@ def test_predict_paired():
 
     # first two predicted atmos surface_temperature replaced by the ocean
     # initial condition sea surface temperature
+    assert (
+        paired_data.atmosphere_data is not None
+        and paired_data.ocean_data is not None
+        and data.atmosphere_data is not None
+        and data.ocean_data is not None
+    )
     for i in range(2):
         mask = torch.round(
             torch.minimum(

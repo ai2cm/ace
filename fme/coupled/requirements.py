@@ -5,71 +5,120 @@ from fme.ace.requirements import DataRequirements, PrognosticStateDataRequiremen
 
 
 def _compute_n_steps_fast(
-    atmosphere_timestep: datetime.timedelta,
-    ocean_timestep: datetime.timedelta,
+    atmosphere_timestep: datetime.timedelta | None = None,
+    ocean_timestep: datetime.timedelta | None = None,
+    ice_timestep: datetime.timedelta | None = None,
 ) -> int:
-    """Compute and validate the number of atmosphere steps per ocean step."""
-    if atmosphere_timestep > ocean_timestep:
-        raise ValueError("Atmosphere timestep must be no larger than the ocean's.")
-    n_steps_fast = ocean_timestep / atmosphere_timestep
+    """Compute and validate the number of fast steps per slow step."""
+    if atmosphere_timestep is None:
+        assert ocean_timestep is not None and ice_timestep is not None
+        if ice_timestep > ocean_timestep:
+            raise ValueError("Ice timestep must be no larger than the ocean's.")
+        n_steps_fast = ocean_timestep / ice_timestep
+    elif ice_timestep is None:
+        assert atmosphere_timestep is not None and ocean_timestep is not None
+        if atmosphere_timestep > ocean_timestep:
+            raise ValueError("Atmosphere timestep must be no larger than the ocean's.")
+        n_steps_fast = ocean_timestep / atmosphere_timestep
+    elif ocean_timestep is None:
+        assert atmosphere_timestep is not None and ice_timestep is not None
+        if atmosphere_timestep > ice_timestep:
+            raise ValueError("Atmosphere timestep must be no larger than the ice's.")
+        n_steps_fast = ice_timestep / atmosphere_timestep
+    else:
+        assert atmosphere_timestep is not None and ocean_timestep is not None
+        if atmosphere_timestep > ocean_timestep:
+            raise ValueError("Atmosphere timestep must be no larger than the ocean's.")
+        n_steps_fast = ocean_timestep / atmosphere_timestep
+
     if n_steps_fast != int(n_steps_fast):
         raise ValueError(
-            f"Expected atmosphere timestep {atmosphere_timestep} to be a "
-            f"multiple of ocean timestep {ocean_timestep}."
+            f"Expected fast timestep to be a " f"multiple of slow timestep."
         )
     return int(n_steps_fast)
 
 
-def _validate_atmosphere_n_timesteps(
-    atmosphere_timestep: datetime.timedelta,
-    ocean_timestep: datetime.timedelta,
-    ocean_requirements: DataRequirements,
-    atmosphere_n_timesteps: int,
+def _validate_fast_n_timesteps(
+    atmosphere_timestep: datetime.timedelta | None = None,
+    ocean_timestep: datetime.timedelta | None = None,
+    ice_timestep: datetime.timedelta | None = None,
+    ocean_requirements: DataRequirements | None = None,
+    ice_requirements: DataRequirements | None = None,
+    fast_n_timesteps: int | None = None,
 ) -> None:
-    """Validate that the initial value of the atmosphere data requirements
-    n_timesteps_schedule matches the value derived from the ocean requirements
+    """Validate that the initial value of the fast data requirements
+    n_timesteps_schedule matches the value derived from the slow requirements
     and the timesteps.
 
     """
     n_steps_fast = _compute_n_steps_fast(
         atmosphere_timestep=atmosphere_timestep,
         ocean_timestep=ocean_timestep,
+        ice_timestep=ice_timestep,
     )
-    slow_n_steps = ocean_requirements.n_timesteps_schedule.get_value(0)
+    if ocean_timestep is not None:
+        assert ocean_requirements is not None
+        slow_n_steps = ocean_requirements.n_timesteps_schedule.get_value(0)
+        slow_dt = ocean_timestep
+    else:
+        assert ice_requirements is not None
+        assert ice_timestep is not None
+        slow_n_steps = ice_requirements.n_timesteps_schedule.get_value(0)
+        slow_dt = ice_timestep
     expected_n_steps = (slow_n_steps - 1) * n_steps_fast + 1
-    if atmosphere_n_timesteps != expected_n_steps:
+
+    if atmosphere_timestep is not None:
+        fast_dt = atmosphere_timestep
+    else:
+        assert ice_timestep is not None
+        fast_dt = ice_timestep
+
+    if fast_n_timesteps != expected_n_steps:
         raise ValueError(
-            f"Atmosphere dataset timestep is {atmosphere_timestep} and "
-            f"ocean dataset timestep is {ocean_timestep}, "
-            f"so we need {n_steps_fast} atmosphere steps for each of the "
-            f"{slow_n_steps - 1} ocean steps, giving {expected_n_steps} total "
+            f"Fast dataset timestep is {fast_dt} and "
+            f"slow dataset timestep is {slow_dt}, "
+            f"so we need {n_steps_fast} fast steps for each of the "
+            f"{slow_n_steps - 1} slow steps, giving {expected_n_steps} total "
             f"timepoints (including IC) per sample, but "
-            f"atmosphere dataset was configured to return "
-            f"{atmosphere_n_timesteps} steps."
+            f"fast dataset was configured to return "
+            f"{fast_n_timesteps} steps."
         )
 
 
 @dataclasses.dataclass
 class CoupledDataRequirements:
-    ocean_timestep: datetime.timedelta
-    ocean_requirements: DataRequirements
-    atmosphere_timestep: datetime.timedelta
-    atmosphere_requirements: DataRequirements
+    ocean_timestep: datetime.timedelta | None = None
+    ocean_requirements: DataRequirements | None = None
+    ice_timestep: datetime.timedelta | None = None
+    ice_requirements: DataRequirements | None = None
+    atmosphere_timestep: datetime.timedelta | None = None
+    atmosphere_requirements: DataRequirements | None = None
 
     def __post_init__(self):
         n_steps_fast = _compute_n_steps_fast(
             atmosphere_timestep=self.atmosphere_timestep,
             ocean_timestep=self.ocean_timestep,
+            ice_timestep=self.ice_timestep,
         )
-        atmosphere_n_timesteps = (
-            self.atmosphere_requirements.n_timesteps_schedule.get_value(0)
-        )
-        _validate_atmosphere_n_timesteps(
+
+        if self.atmosphere_timestep is None:
+            assert self.ice_requirements is not None
+            fast_n_timesteps = self.ice_requirements.n_timesteps_schedule.get_value(0)
+        else:
+            assert self.atmosphere_requirements is not None
+            fast_n_timesteps = (
+                self.atmosphere_requirements.n_timesteps_schedule.get_value(0)
+            )
+
+        _validate_fast_n_timesteps(
             atmosphere_timestep=self.atmosphere_timestep,
             ocean_timestep=self.ocean_timestep,
+            ice_timestep=self.ice_timestep,
             ocean_requirements=self.ocean_requirements,
-            atmosphere_n_timesteps=atmosphere_n_timesteps,
+            ice_requirements=self.ice_requirements,
+            fast_n_timesteps=fast_n_timesteps,
         )
+
         self._n_steps_fast = n_steps_fast
 
     @property
@@ -84,8 +133,9 @@ class CoupledPrognosticStateDataRequirements:
 
     """
 
-    ocean: PrognosticStateDataRequirements
-    atmosphere: PrognosticStateDataRequirements
+    ocean: PrognosticStateDataRequirements | None = None
+    atmosphere: PrognosticStateDataRequirements | None = None
+    ice: PrognosticStateDataRequirements | None = None
 
 
 @dataclasses.dataclass
@@ -113,48 +163,73 @@ class CoupledTrainDataRequirements:
             length).
     """
 
-    ocean_timestep: datetime.timedelta
-    ocean_requirements: DataRequirements
-    atmosphere_timestep: datetime.timedelta
-    atmosphere_target_requirements: DataRequirements
-    atmosphere_forcing_requirements: DataRequirements
+    ocean_timestep: datetime.timedelta | None = None
+    ocean_requirements: DataRequirements | None = None
+    atmosphere_timestep: datetime.timedelta | None = None
+    atmosphere_target_requirements: DataRequirements | None = None
+    atmosphere_forcing_requirements: DataRequirements | None = None
+    ice_timestep: datetime.timedelta | None = None
+    ice_requirements: DataRequirements | None = None
+    ice_target_requirements: DataRequirements | None = None
+    ice_forcing_requirements: DataRequirements | None = None
 
     def __post_init__(self):
         n_steps_fast = _compute_n_steps_fast(
             atmosphere_timestep=self.atmosphere_timestep,
             ocean_timestep=self.ocean_timestep,
+            ice_timestep=self.ice_timestep,
         )
 
-        # check that the atmosphere forcing window is consistent with the ocean window
-        atmosphere_forcing_n_timesteps = (
-            self.atmosphere_forcing_requirements.n_timesteps_schedule.get_value(0)
-        )
-        _validate_atmosphere_n_timesteps(
+        if self.atmosphere_timestep is None:
+            assert self.ice_forcing_requirements is not None
+            assert self.ice_target_requirements is not None
+            # check that the ice forcing window is consistent with the ocean window
+            forcing_n_timesteps = (
+                self.ice_forcing_requirements.n_timesteps_schedule.get_value(0)
+            )
+            # check that the ice target window is no longer than the forcing window
+            target_n_timesteps = (
+                self.ice_target_requirements.n_timesteps_schedule.get_value(0)
+            )
+            # check that the ice target and forcing variable names are disjoint
+            target_names = set(self.ice_target_requirements.names)
+            forcing_names = set(self.ice_forcing_requirements.names)
+        else:
+            assert self.atmosphere_forcing_requirements is not None
+            assert self.atmosphere_target_requirements is not None
+            # check that the atmos forcing window is consistent with the ocean window
+            forcing_n_timesteps = (
+                self.atmosphere_forcing_requirements.n_timesteps_schedule.get_value(0)
+            )
+            # check that the atmos target window is no longer than the forcing window
+            target_n_timesteps = (
+                self.atmosphere_target_requirements.n_timesteps_schedule.get_value(0)
+            )
+            # check that the atmos target and forcing variable names are disjoint
+            target_names = set(self.atmosphere_target_requirements.names)
+            forcing_names = set(self.atmosphere_forcing_requirements.names)
+
+        _validate_fast_n_timesteps(
             atmosphere_timestep=self.atmosphere_timestep,
             ocean_timestep=self.ocean_timestep,
+            ice_timestep=self.ice_timestep,
             ocean_requirements=self.ocean_requirements,
-            atmosphere_n_timesteps=atmosphere_forcing_n_timesteps,
+            ice_requirements=self.ice_requirements,
+            fast_n_timesteps=forcing_n_timesteps,
         )
 
-        # check that the atmosphere target window is no longer than the forcing window
-        atmosphere_target_n_timesteps = (
-            self.atmosphere_target_requirements.n_timesteps_schedule.get_value(0)
-        )
-        if atmosphere_target_n_timesteps > atmosphere_forcing_n_timesteps:
+        if target_n_timesteps > forcing_n_timesteps:
             raise ValueError(
-                f"Atmosphere target requirements n_timesteps "
-                f"({atmosphere_target_n_timesteps}) must be no larger than the "
-                f"atmosphere forcing requirements n_timesteps "
-                f"({atmosphere_forcing_n_timesteps})."
+                f"Fast target requirements n_timesteps "
+                f"({target_n_timesteps}) must be no larger than the "
+                f"fast forcing requirements n_timesteps "
+                f"({forcing_n_timesteps})."
             )
 
-        # check that the atmosphere target and forcing variable names are disjoint
-        target_names = set(self.atmosphere_target_requirements.names)
-        forcing_names = set(self.atmosphere_forcing_requirements.names)
         overlap = target_names.intersection(forcing_names)
         if overlap:
             raise ValueError(
-                "Atmosphere target and forcing variable names must be disjoint, "
+                "Fast target and forcing variable names must be disjoint, "
                 f"but the following names appear in both: {sorted(overlap)}."
             )
 

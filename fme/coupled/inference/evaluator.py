@@ -272,10 +272,14 @@ class _Deriver(CoupledDeriver):
         ocean_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         atmosphere_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
     ):
-        self._n_ic_timesteps_ocean = n_ic_timesteps_ocean
-        self._n_ic_timesteps_atmosphere = n_ic_timesteps_atmosphere
-        self._ocean_derive_func = ocean_derive_func
-        self._atmosphere_derive_func = atmosphere_derive_func
+        self._n_ic_timesteps = {
+            "ocean": n_ic_timesteps_ocean,
+            "atmosphere": n_ic_timesteps_atmosphere,
+        }
+        self._derive_funcs = {
+            "ocean": ocean_derive_func,
+            "atmosphere": atmosphere_derive_func,
+        }
 
     def get_forward_data(
         self,
@@ -286,14 +290,10 @@ class _Deriver(CoupledDeriver):
             timer = GlobalTimer.get_instance()
             with timer.context("compute_derived_variables"):
                 data = data.compute_derived_variables(
-                    ocean_derive_func=self._ocean_derive_func,
-                    atmosphere_derive_func=self._atmosphere_derive_func,
                     forcing_data=data,
+                    derive_funcs=self._derive_funcs,
                 )
-        return data.remove_initial_condition(
-            n_ic_timesteps_ocean=self._n_ic_timesteps_ocean,
-            n_ic_timesteps_atmosphere=self._n_ic_timesteps_atmosphere,
-        )
+        return data.remove_initial_condition(n_ic_timesteps=self._n_ic_timesteps)
 
 
 def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
@@ -339,6 +339,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))
+    assert batch.ocean_data is not None
     initial_time = batch.ocean_data.time.isel(time=0)
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)

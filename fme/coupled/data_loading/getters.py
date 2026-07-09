@@ -17,9 +17,12 @@ from fme.core.labels import LabelEncoding
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.concat import ConcatDataset
 from fme.coupled.data_loading.config import (
+    CoupledAtmosphereIceOceanDatasetConfig,
     CoupledConcatDatasetConfig,
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
+    CoupledIceAtmosphereDatasetConfig,
+    CoupledIceOceanDatasetConfig,
 )
 from fme.coupled.data_loading.data_typing import (
     CoupledDataset,
@@ -56,42 +59,59 @@ def _coupled_forkserver_worker_init_fn(worker_id: int) -> None:
 class CollateFn:
     def __init__(
         self,
-        ocean_horizontal_dims: list[str],
-        atmosphere_horizontal_dims: list[str],
-        ocean_label_encoding: LabelEncoding | None = None,
-        atmosphere_label_encoding: LabelEncoding | None = None,
+        component_horizontal_dims: dict[str, list[str]],
+        component_label_encodings: dict[str, LabelEncoding] | None = None,
     ):
-        self.ocean_horizontal_dims = ocean_horizontal_dims
-        self.atmosphere_horizontal_dims = atmosphere_horizontal_dims
-        self.ocean_label_encoding = ocean_label_encoding
-        self.atmosphere_label_encoding = atmosphere_label_encoding
+        self.component_horizontal_dims = component_horizontal_dims
+        self.component_label_encodings = component_label_encodings
 
     def __call__(self, samples: list[CoupledDatasetItem]) -> CoupledBatchData:
         return CoupledBatchData.collate_fn(
             samples,
-            ocean_horizontal_dims=self.ocean_horizontal_dims,
-            atmosphere_horizontal_dims=self.atmosphere_horizontal_dims,
-            ocean_label_encoding=self.ocean_label_encoding,
-            atmosphere_label_encoding=self.atmosphere_label_encoding,
+            component_horizontal_dims=self.component_horizontal_dims,
+            component_label_encodings=self.component_label_encodings,
         )
 
 
 def get_dataset(
-    config: CoupledDatasetConfig, requirements: CoupledDataRequirements
+    config: CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
+    requirements: CoupledDataRequirements,
 ) -> tuple[CoupledDataset, CoupledDatasetProperties]:
     ocean_reqs = requirements.ocean_requirements
+    ice_reqs = requirements.ice_requirements
     atmosphere_reqs = requirements.atmosphere_requirements
-    ocean: torch.utils.data.Dataset
-    atmosphere: torch.utils.data.Dataset
-    ocean, ocean_properties = config.ocean.build(
-        ocean_reqs.names, ocean_reqs.n_timesteps_schedule
+    ocean: torch.utils.data.Dataset | None = None
+    ice: torch.utils.data.Dataset | None = None
+    atmosphere: torch.utils.data.Dataset | None = None
+    ocean_properties = None
+    ice_properties = None
+    atmosphere_properties = None
+    if ocean_reqs is not None:
+        assert config.ocean is not None
+        ocean, ocean_properties = config.ocean.build(
+            ocean_reqs.names, ocean_reqs.n_timesteps_schedule
+        )
+    if ice_reqs is not None:
+        assert config.ice is not None
+        ice, ice_properties = config.ice.build(
+            ice_reqs.names, ice_reqs.n_timesteps_schedule
+        )
+    if atmosphere_reqs is not None:
+        assert config.atmosphere is not None
+        atmosphere, atmosphere_properties = config.atmosphere.build(
+            atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
+        )
+    properties = CoupledDatasetProperties(
+        ocean=ocean_properties,
+        ice=ice_properties,
+        atmosphere=atmosphere_properties,
     )
-    atmosphere, atmosphere_properties = config.atmosphere.build(
-        atmosphere_reqs.names, atmosphere_reqs.n_timesteps_schedule
-    )
-    properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
     dataset = CoupledDataset(
         ocean=ocean,
+        ice=ice,
         atmosphere=atmosphere,
         properties=properties,
         n_steps_fast=requirements.n_steps_fast,
@@ -100,9 +120,19 @@ def get_dataset(
 
 
 def _combine_datasets(
-    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    configs: CoupledConcatDatasetConfig
+    | CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     build_one: Callable[
-        [CoupledDatasetConfig], tuple[CoupledDataset, CoupledDatasetProperties]
+        [
+            CoupledDatasetConfig
+            | CoupledIceOceanDatasetConfig
+            | CoupledIceAtmosphereDatasetConfig
+            | CoupledAtmosphereIceOceanDatasetConfig
+        ],
+        tuple[CoupledDataset, CoupledDatasetProperties],
     ],
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
@@ -134,7 +164,11 @@ def _combine_datasets(
 
 
 def get_datasets(
-    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    configs: CoupledConcatDatasetConfig
+    | CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     requirements: CoupledDataRequirements,
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
@@ -179,28 +213,26 @@ def _build_gridded_data(
     else:
         kwargs = {"prefetch_factor": config.prefetch_factor}
 
-    if config.ocean_available_labels is not None:
-        ocean_label_encoding = LabelEncoding(
-            sorted(list(config.ocean_available_labels))
-        )
-    else:
-        ocean_label_encoding = None
-    if config.atmosphere_available_labels is not None:
-        atmosphere_label_encoding = LabelEncoding(
-            sorted(list(config.atmosphere_available_labels))
-        )
-    else:
-        atmosphere_label_encoding = None
+    available_labels: dict[str, set[str] | None] = {
+        "ocean": config.ocean_available_labels,
+        "ice": config.ice_available_labels,
+        "atmosphere": config.atmosphere_available_labels,
+    }
+    component_horizontal_dims: dict[str, list[str]] = {
+        name: list(props.horizontal_coordinates.dims)
+        for name, props in properties._components.items()
+    }
+    component_label_encodings: dict[str, LabelEncoding] = {
+        name: LabelEncoding(sorted(list(labels)))
+        for name, labels in available_labels.items()
+        if labels is not None
+    }
 
     dataloader = CoupledDataLoader(
         dataset,
         CollateFn(
-            ocean_horizontal_dims=list(properties.ocean.horizontal_coordinates.dims),
-            ocean_label_encoding=ocean_label_encoding,
-            atmosphere_label_encoding=atmosphere_label_encoding,
-            atmosphere_horizontal_dims=list(
-                properties.atmosphere.horizontal_coordinates.dims
-            ),
+            component_horizontal_dims=component_horizontal_dims,
+            component_label_encodings=component_label_encodings or None,
         ),
         batch_size=batch_size,
         num_workers=config.num_data_workers,
@@ -244,35 +276,68 @@ def get_gridded_data(
 
 
 def get_train_dataset(
-    config: CoupledDatasetConfig,
+    config: CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     requirements: CoupledTrainDataRequirements,
 ) -> tuple[CoupledDataset, CoupledDatasetProperties]:
     """Build a CoupledDataset for training, where the atmosphere is split
     into a short-horizon target dataset and a long-horizon forcing dataset
     that are merged via TimePaddedMergedDataset.
     """
-    ocean: torch.utils.data.Dataset
-    ocean, ocean_properties = config.ocean.build(
-        requirements.ocean_requirements.names,
-        requirements.ocean_requirements.n_timesteps_schedule,
+    ocean_properties = None
+    ocean: torch.utils.data.Dataset | None = None
+    if config.ocean is not None:
+        assert requirements.ocean_requirements is not None
+        ocean, ocean_properties = config.ocean.build(
+            requirements.ocean_requirements.names,
+            requirements.ocean_requirements.n_timesteps_schedule,
+        )
+    atmosphere_properties = None
+    atmosphere = None
+    if config.atmosphere is not None:
+        assert requirements.atmosphere_target_requirements is not None
+        assert requirements.atmosphere_forcing_requirements is not None
+        atmos_target, atmos_target_properties = config.atmosphere.build(
+            requirements.atmosphere_target_requirements.names,
+            requirements.atmosphere_target_requirements.n_timesteps_schedule,
+        )
+        atmos_forcing, atmos_forcing_properties = config.atmosphere.build(
+            requirements.atmosphere_forcing_requirements.names,
+            requirements.atmosphere_forcing_requirements.n_timesteps_schedule,
+        )
+        # canonical = the long (forcing) horizon, since it provides the time
+        # coordinate that downstream code uses
+        atmosphere = TimePaddedMergedDataset([atmos_forcing, atmos_target])
+        atmosphere_properties = atmos_forcing_properties.copy()
+        atmosphere_properties.update_merged_dataset(atmos_target_properties)
+    ice_properties = None
+    ice = None
+    if config.ice is not None:
+        assert requirements.ice_target_requirements is not None
+        assert requirements.ice_forcing_requirements is not None
+        ice_target, ice_target_properties = config.ice.build(
+            requirements.ice_target_requirements.names,
+            requirements.ice_target_requirements.n_timesteps_schedule,
+        )
+        ice_forcing, ice_forcing_properties = config.ice.build(
+            requirements.ice_forcing_requirements.names,
+            requirements.ice_forcing_requirements.n_timesteps_schedule,
+        )
+        # canonical = the long (forcing) horizon, since it provides the time
+        # coordinate that downstream code uses
+        ice = TimePaddedMergedDataset([ice_forcing, ice_target])
+        ice_properties = ice_forcing_properties.copy()
+        ice_properties.update_merged_dataset(ice_target_properties)
+
+    properties = CoupledDatasetProperties(
+        ocean=ocean_properties, ice=ice_properties, atmosphere=atmosphere_properties
     )
-    atmos_target, atmos_target_properties = config.atmosphere.build(
-        requirements.atmosphere_target_requirements.names,
-        requirements.atmosphere_target_requirements.n_timesteps_schedule,
-    )
-    atmos_forcing, atmos_forcing_properties = config.atmosphere.build(
-        requirements.atmosphere_forcing_requirements.names,
-        requirements.atmosphere_forcing_requirements.n_timesteps_schedule,
-    )
-    # canonical = the long (forcing) horizon, since it provides the time
-    # coordinate that downstream code uses
-    atmosphere = TimePaddedMergedDataset([atmos_forcing, atmos_target])
-    atmosphere_properties = atmos_forcing_properties.copy()
-    atmosphere_properties.update_merged_dataset(atmos_target_properties)
-    properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
     dataset = CoupledDataset(
         ocean=ocean,
         atmosphere=atmosphere,
+        ice=ice,
         properties=properties,
         n_steps_fast=requirements.n_steps_fast,
     )
@@ -280,7 +345,11 @@ def get_train_dataset(
 
 
 def get_train_datasets(
-    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    configs: CoupledConcatDatasetConfig
+    | CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     requirements: CoupledTrainDataRequirements,
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
@@ -318,6 +387,7 @@ def get_inference_data(
 ) -> InferenceGriddedData:
     initial_time = None
     if isinstance(initial_condition, CoupledPrognosticState):
+        assert initial_condition.ocean_data is not None
         initial_time = (
             initial_condition.ocean_data.as_batch_data().time
         )  # used only if no ocean forcing is specified
@@ -402,14 +472,25 @@ def get_forcing_data(
     Returns:
         A data loader for forcing data with coordinates and metadata.
     """
-    initial_time = initial_condition.ocean_data.as_batch_data().time
+    if config.ocean is not None:
+        assert initial_condition.ocean_data is not None
+        initial_time = initial_condition.ocean_data.as_batch_data().time
+    elif config.ice is not None:
+        assert initial_condition.ice_data is not None
+        initial_time = initial_condition.ice_data.as_batch_data().time
+    else:
+        # atmosphere-only forcing: use ocean IC time to align the atmosphere dataset
+        assert initial_condition.ocean_data is not None
+        initial_time = initial_condition.ocean_data.as_batch_data().time
     if initial_time.shape[1] != 1:
         raise NotImplementedError("code assumes initial time only has 1 timestep")
     if config.ocean is None:
+        assert window_requirements.ocean_timestep is not None
         available_times = _make_available_times_from_initial_time(
             initial_time, total_coupled_steps, window_requirements.ocean_timestep
         )
     else:
+        assert window_requirements.ocean_requirements is not None
         if isinstance(config.ocean.dataset, XarrayDataConfig):
             available_times = XarrayDataset(
                 config.ocean.dataset,

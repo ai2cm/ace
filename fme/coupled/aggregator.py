@@ -124,6 +124,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._loss_atmos = torch.tensor(0.0, device=get_device())
         self._n_batches = 0
         config = OneStepAggregatorConfig()
+        assert dataset_info.ocean is not None
+        assert dataset_info.atmosphere is not None
         self._aggregators = {
             "ocean": config.build(
                 dataset_info=dataset_info.ocean,
@@ -329,6 +331,8 @@ class InferenceEvaluatorAggregatorConfig:
         else:
             log_zonal_mean_images = self.log_zonal_mean_images
 
+        assert dataset_info.ocean is not None
+        assert dataset_info.atmosphere is not None
         ocean_metrics = self._build_metrics(
             include_nino34=True,
             n_timesteps=n_timesteps_ocean,
@@ -467,6 +471,12 @@ class InferenceEvaluatorAggregator(
 
     @torch.no_grad()
     def record_batch(self, data: CoupledPairedData) -> InferenceLogs:
+        assert (
+            data.ocean_data is not None
+            and data.atmosphere_data is not None
+            and self.ocean is not None
+            and self.atmosphere is not None
+        )
         if self._num_channels_ocean is None:
             self._num_channels_ocean = len(data.ocean_data.prediction)
         if self._num_channels_atmos is None:
@@ -487,6 +497,12 @@ class InferenceEvaluatorAggregator(
 
         May only be recorded once, before any calls to record_batch.
         """
+        assert (
+            self.ocean is not None
+            and self.atmosphere is not None
+            and initial_condition.ocean_data is not None
+            and initial_condition.atmosphere_data is not None
+        )
         ocean_logs = self.ocean.record_initial_condition(initial_condition.ocean_data)
         atmos_logs = self.atmosphere.record_initial_condition(
             initial_condition.atmosphere_data
@@ -568,6 +584,8 @@ class InferenceAggregatorConfig:
         n_timesteps_atmosphere: int,
         output_dir: str,
     ) -> "InferenceAggregator":
+        assert dataset_info.ocean is not None
+        assert dataset_info.atmosphere is not None
         ocean_ace_config = AceInferenceAggregatorConfig(
             time_mean_reference_data=self.ocean_time_mean_reference_data,
             log_global_mean_time_series=self.log_global_mean_time_series,
@@ -628,6 +646,12 @@ class InferenceAggregator(
 
     @torch.no_grad()
     def record_batch(self, data: CoupledPairedData) -> InferenceLogs:
+        assert (
+            data.ocean_data is not None
+            and data.atmosphere_data is not None
+            and self.ocean is not None
+            and self.atmosphere is not None
+        )
         ocean_logs = self.ocean.record_batch(data.ocean_data)
         atmos_logs = self.atmosphere.record_batch(data.atmosphere_data)
         n_times_ocean = data.ocean_data.time["time"].size
@@ -644,6 +668,12 @@ class InferenceAggregator(
 
         May only be recorded once, before any calls to record_batch.
         """
+        assert (
+            self.ocean is not None
+            and self.atmosphere is not None
+            and initial_condition.ocean_data is not None
+            and initial_condition.atmosphere_data is not None
+        )
         ocean_logs = self.ocean.record_initial_condition(initial_condition.ocean_data)
         atmos_logs = self.atmosphere.record_initial_condition(
             initial_condition.atmosphere_data
@@ -652,6 +682,8 @@ class InferenceAggregator(
         return _combine_logs(ocean_logs, atmos_logs, n_atmos_steps_per_ocean_step=1)
 
     def get_summary(self) -> InferenceSummary:
+        assert self.ocean is not None
+        assert self.atmosphere is not None
         ocean_summary = self.ocean.get_summary()
         atmos_summary = self.atmosphere.get_summary()
         duplicates = set(ocean_summary.logs.keys()) & set(atmos_summary.logs.keys())

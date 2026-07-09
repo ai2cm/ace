@@ -183,7 +183,9 @@ class InlineInferenceConfig:
     ) -> Callable[[], InferenceEvaluatorAggregator]:
         def factory():
             batch = next(iter(data.loader))
-            initial_times = batch.ocean_data.time.isel(time=0)
+            anchor_data = batch.ocean_data or batch.ice_data or batch.atmosphere_data
+            assert anchor_data is not None, "Batch has no component data"
+            initial_times = anchor_data.time.isel(time=0)
             n_timesteps_ocean = self.n_coupled_steps + stepper.ocean.n_ic_timesteps
             n_timesteps_atmosphere = (
                 self.n_coupled_steps * stepper.n_inner_steps

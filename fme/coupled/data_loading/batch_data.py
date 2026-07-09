@@ -1,10 +1,11 @@
-import dataclasses
 from collections.abc import Callable, Sequence
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import numpy as np
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.core.coordinates import NullDeriveFn
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.labels import LabelEncoding
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
@@ -20,81 +21,135 @@ class CoupledPrognosticState:
     evolving forward in time.
     """
 
-    def __init__(self, ocean_data: PrognosticState, atmosphere_data: PrognosticState):
-        self.ocean_data = ocean_data
-        self.atmosphere_data = atmosphere_data
+    def __init__(
+        self,
+        ocean_data: PrognosticState | None = None,
+        ice_data: PrognosticState | None = None,
+        atmosphere_data: PrognosticState | None = None,
+    ):
+        self._components: dict[str, PrognosticState] = {
+            name: val
+            for name, val in [
+                ("ocean", ocean_data),
+                ("ice", ice_data),
+                ("atmosphere", atmosphere_data),
+            ]
+            if val is not None
+        }
+
+    @property
+    def ocean_data(self) -> PrognosticState | None:
+        return self._components.get("ocean")
+
+    @property
+    def ice_data(self) -> PrognosticState | None:
+        return self._components.get("ice")
+
+    @property
+    def atmosphere_data(self) -> PrognosticState | None:
+        return self._components.get("atmosphere")
 
     def to_device(self) -> "CoupledPrognosticState":
-        return CoupledPrognosticState(
-            self.ocean_data.to_device(), self.atmosphere_data.to_device()
-        )
+        result = CoupledPrognosticState.__new__(CoupledPrognosticState)
+        result._components = {k: v.to_device() for k, v in self._components.items()}
+        return result
 
     def as_batch_data(self) -> "CoupledBatchData":
-        return CoupledBatchData(
-            self.ocean_data.as_batch_data(), self.atmosphere_data.as_batch_data()
-        )
+        result = CoupledBatchData.__new__(CoupledBatchData)
+        result._components = {k: v.as_batch_data() for k, v in self._components.items()}
+        return result
 
 
-@dataclasses.dataclass
 class CoupledBatchData:
-    ocean_data: BatchData
-    atmosphere_data: BatchData
+    def __init__(
+        self,
+        ocean_data: BatchData | None = None,
+        ice_data: BatchData | None = None,
+        atmosphere_data: BatchData | None = None,
+    ):
+        self._components: dict[str, BatchData] = {
+            name: val
+            for name, val in [
+                ("ocean", ocean_data),
+                ("ice", ice_data),
+                ("atmosphere", atmosphere_data),
+            ]
+            if val is not None
+        }
+
+    @property
+    def ocean_data(self) -> BatchData | None:
+        return self._components.get("ocean")
+
+    @property
+    def ice_data(self) -> BatchData | None:
+        return self._components.get("ice")
+
+    @property
+    def atmosphere_data(self) -> BatchData | None:
+        return self._components.get("atmosphere")
 
     def to_device(self) -> "CoupledBatchData":
-        return self.__class__(
-            ocean_data=self.ocean_data.to_device(),
-            atmosphere_data=self.atmosphere_data.to_device(),
-        )
+        result = CoupledBatchData.__new__(CoupledBatchData)
+        result._components = {k: v.to_device() for k, v in self._components.items()}
+        return result
 
     @classmethod
     def new_on_device(
         cls,
-        ocean_data: BatchData,
-        atmosphere_data: BatchData,
+        ocean_data: BatchData | None = None,
+        ice_data: BatchData | None = None,
+        atmosphere_data: BatchData | None = None,
     ) -> "CoupledBatchData":
-        ocean_batch = ocean_data.to_device()
-        atmos_batch = atmosphere_data.to_device()
-        return CoupledBatchData(ocean_data=ocean_batch, atmosphere_data=atmos_batch)
+        src = cls(
+            ocean_data=ocean_data,
+            ice_data=ice_data,
+            atmosphere_data=atmosphere_data,
+        )
+        return src.to_device()
 
     @classmethod
     def new_on_cpu(
         cls,
-        ocean_data: BatchData,
-        atmosphere_data: BatchData,
+        ocean_data: BatchData | None = None,
+        ice_data: BatchData | None = None,
+        atmosphere_data: BatchData | None = None,
     ) -> "CoupledBatchData":
-        ocean_batch = ocean_data.to_cpu()
-        atmos_batch = atmosphere_data.to_cpu()
-        return CoupledBatchData(ocean_data=ocean_batch, atmosphere_data=atmos_batch)
+        tmp = cls(
+            ocean_data=ocean_data,
+            ice_data=ice_data,
+            atmosphere_data=atmosphere_data,
+        )
+        result = cls.__new__(cls)
+        result._components = {k: v.to_cpu() for k, v in tmp._components.items()}
+        return result
 
     @classmethod
     def collate_fn(
         cls,
         samples: Sequence[CoupledDatasetItem],
-        ocean_horizontal_dims: list[str],
-        atmosphere_horizontal_dims: list[str],
+        component_horizontal_dims: dict[str, list[str]],
         sample_dim_name: str = "sample",
-        ocean_label_encoding: LabelEncoding | None = None,
-        atmosphere_label_encoding: LabelEncoding | None = None,
+        component_label_encodings: dict[str, LabelEncoding] | None = None,
     ) -> "CoupledBatchData":
         """
-        Collate function for use with PyTorch DataLoader. Separates out ocean
-        and atmosphere sample tuples and constructs BatchData instances for
-        each of the two components.
-
+        Collate function for use with PyTorch DataLoader. Assembles per-component
+        BatchData from a sequence of CoupledDatasetItems.
         """
-        ocean_data = BatchData.from_sample_tuples(
-            [x.ocean for x in samples],
-            horizontal_dims=ocean_horizontal_dims,
-            sample_dim_name=sample_dim_name,
-            label_encoding=ocean_label_encoding,
-        )
-        atmosphere_data = BatchData.from_sample_tuples(
-            [x.atmosphere for x in samples],
-            horizontal_dims=atmosphere_horizontal_dims,
-            sample_dim_name=sample_dim_name,
-            label_encoding=atmosphere_label_encoding,
-        )
-        return CoupledBatchData.new_on_cpu(ocean_data, atmosphere_data)
+        if component_label_encodings is None:
+            component_label_encodings = {}
+        component_data: dict[str, BatchData] = {
+            name: BatchData.from_sample_tuples(
+                [cast(DatasetItem, getattr(sample, name)) for sample in samples],
+                horizontal_dims=horizontal_dims,
+                sample_dim_name=sample_dim_name,
+                label_encoding=component_label_encodings.get(name),
+            )
+            for name, horizontal_dims in component_horizontal_dims.items()
+        }
+        result = cls.__new__(cls)
+        result._components = {k: v.to_cpu() for k, v in component_data.items()}
+        return result
 
     def get_start(
         self: SelfType,
@@ -103,67 +158,93 @@ class CoupledBatchData:
         """
         Get the initial condition state.
         """
-        return CoupledPrognosticState(
-            ocean_data=self.ocean_data.get_start(
-                requirements.ocean.names,
-                requirements.ocean.n_timesteps,
-            ),
-            atmosphere_data=self.atmosphere_data.get_start(
-                requirements.atmosphere.names,
-                requirements.atmosphere.n_timesteps,
-            ),
-        )
+        ic_components: dict[str, PrognosticState] = {}
+        for name, data in self._components.items():
+            req = getattr(requirements, name)
+            assert req is not None
+            ic_components[name] = data.get_start(req.names, req.n_timesteps)
+        result = CoupledPrognosticState.__new__(CoupledPrognosticState)
+        result._components = ic_components
+        return result
 
     def prepend(self: SelfType, initial_condition: CoupledPrognosticState) -> SelfType:
-        return self.__class__(
-            ocean_data=self.ocean_data.prepend(initial_condition.ocean_data),
-            atmosphere_data=self.atmosphere_data.prepend(
-                initial_condition.atmosphere_data
-            ),
-        )
+        result = self.__class__.__new__(self.__class__)
+        result._components = {
+            name: data.prepend(ic)
+            for name, data in self._components.items()
+            for ic in [initial_condition._components.get(name)]
+            if ic is not None
+        }
+        return result
 
     def remove_initial_condition(
         self: SelfType,
-        n_ic_timesteps_ocean: int,
-        n_ic_timesteps_atmosphere: int,
+        n_ic_timesteps: dict[str, int],
     ) -> SelfType:
-        return self.__class__(
-            ocean_data=self.ocean_data.remove_initial_condition(n_ic_timesteps_ocean),
-            atmosphere_data=self.atmosphere_data.remove_initial_condition(
-                n_ic_timesteps_atmosphere
-            ),
-        )
+        result = self.__class__.__new__(self.__class__)
+        result._components = {
+            name: data.remove_initial_condition(n_ic_timesteps[name])
+            for name, data in self._components.items()
+        }
+        return result
 
     def compute_derived_variables(
         self: SelfType,
-        ocean_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
-        atmosphere_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         forcing_data: SelfType,
+        derive_funcs: dict[str, Callable[[TensorMapping, TensorMapping], TensorDict]],
     ) -> SelfType:
-        return self.__class__(
-            ocean_data=self.ocean_data.compute_derived_variables(
-                ocean_derive_func, forcing_data.ocean_data
-            ),
-            atmosphere_data=self.atmosphere_data.compute_derived_variables(
-                atmosphere_derive_func, forcing_data.atmosphere_data
-            ),
-        )
+        result_components: dict[str, BatchData] = {}
+        for name, data in self._components.items():
+            fn = derive_funcs.get(name)
+            if fn is None or isinstance(fn, NullDeriveFn):
+                result_components[name] = data
+            else:
+                forcing = forcing_data._components.get(name)
+                assert forcing is not None
+                result_components[name] = data.compute_derived_variables(fn, forcing)
+        result = self.__class__.__new__(self.__class__)
+        result._components = result_components
+        return result
 
     def pin_memory(self: SelfType) -> SelfType:
-        self.ocean_data = self.ocean_data.pin_memory()
-        self.atmosphere_data = self.atmosphere_data.pin_memory()
-        return self
+        result = self.__class__.__new__(self.__class__)
+        result._components = {k: v.pin_memory() for k, v in self._components.items()}
+        return result
 
 
-@dataclasses.dataclass
 class CoupledPairedData:
     """
     A container for the data and time coordinates of a batch, with paired
     prediction and target data.
     """
 
-    ocean_data: PairedData
-    atmosphere_data: PairedData
+    def __init__(
+        self,
+        ocean_data: PairedData | None = None,
+        ice_data: PairedData | None = None,
+        atmosphere_data: PairedData | None = None,
+    ):
+        self._components: dict[str, PairedData] = {
+            name: val
+            for name, val in [
+                ("ocean", ocean_data),
+                ("ice", ice_data),
+                ("atmosphere", atmosphere_data),
+            ]
+            if val is not None
+        }
+
+    @property
+    def ocean_data(self) -> PairedData | None:
+        return self._components.get("ocean")
+
+    @property
+    def ice_data(self) -> PairedData | None:
+        return self._components.get("ice")
+
+    @property
+    def atmosphere_data(self) -> PairedData | None:
+        return self._components.get("atmosphere")
 
     @classmethod
     def from_coupled_batch_data(
@@ -171,30 +252,20 @@ class CoupledPairedData:
         prediction: CoupledBatchData,
         reference: CoupledBatchData,
     ) -> "CoupledPairedData":
-        if not np.all(
-            prediction.ocean_data.time.values == reference.ocean_data.time.values
-        ):
-            raise ValueError(
-                "Prediction and target ocean time coordinate must be the same."
+        paired: dict[str, PairedData] = {}
+        for name, pred_data in prediction._components.items():
+            ref_data = reference._components.get(name)
+            assert ref_data is not None
+            if not np.all(pred_data.time.values == ref_data.time.values):
+                raise ValueError(
+                    f"Prediction and target {name} time coordinate must be the same."
+                )
+            paired[name] = PairedData(
+                prediction=pred_data.data,
+                reference=ref_data.data,
+                time=pred_data.time,
+                labels=pred_data.labels,
             )
-        if not np.all(
-            prediction.atmosphere_data.time.values
-            == reference.atmosphere_data.time.values
-        ):
-            raise ValueError(
-                "Prediction and target atmosphere time coordinate must be the same."
-            )
-        return CoupledPairedData(
-            ocean_data=PairedData(
-                prediction=prediction.ocean_data.data,
-                reference=reference.ocean_data.data,
-                time=prediction.ocean_data.time,
-                labels=prediction.ocean_data.labels,
-            ),
-            atmosphere_data=PairedData(
-                prediction=prediction.atmosphere_data.data,
-                reference=reference.atmosphere_data.data,
-                time=prediction.atmosphere_data.time,
-                labels=prediction.atmosphere_data.labels,
-            ),
-        )
+        result = cls.__new__(cls)
+        result._components = paired
+        return result

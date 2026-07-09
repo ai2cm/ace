@@ -15,53 +15,86 @@ class MissingCoupledDatasetInfo(ValueError):
 class CoupledDatasetInfo:
     def __init__(
         self,
-        ocean: DatasetInfo,
-        atmosphere: DatasetInfo,
+        ocean: DatasetInfo | None = None,
+        ice: DatasetInfo | None = None,
+        atmosphere: DatasetInfo | None = None,
     ):
-        self.ocean = ocean
-        self.atmosphere = atmosphere
+        self._components: dict[str, DatasetInfo] = {
+            name: val
+            for name, val in [
+                ("ocean", ocean),
+                ("ice", ice),
+                ("atmosphere", atmosphere),
+            ]
+            if val is not None
+        }
 
     @property
-    def ocean_spatial_mask_provider(self) -> HasGetSpatialMask:
-        try:
-            return self.ocean.spatial_mask_provider
-        except MissingDatasetInfo as err:
-            raise MissingCoupledDatasetInfo("ocean_spatial_mask_provider") from err
+    def ocean(self) -> DatasetInfo | None:
+        return self._components.get("ocean")
 
-    def __eq__(self, other):
+    @property
+    def ice(self) -> DatasetInfo | None:
+        return self._components.get("ice")
+
+    @property
+    def atmosphere(self) -> DatasetInfo | None:
+        return self._components.get("atmosphere")
+
+    def _get_spatial_mask_provider(self, name: str) -> HasGetSpatialMask | None:
+        info = self._components.get(name)
+        if info is None:
+            return None
+        try:
+            return info.spatial_mask_provider
+        except MissingDatasetInfo as err:
+            raise MissingCoupledDatasetInfo(f"{name}_spatial_mask_provider") from err
+
+    @property
+    def ocean_spatial_mask_provider(self) -> HasGetSpatialMask | None:
+        return self._get_spatial_mask_provider("ocean")
+
+    @property
+    def ice_spatial_mask_provider(self) -> HasGetSpatialMask | None:
+        return self._get_spatial_mask_provider("ice")
+
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, CoupledDatasetInfo):
             return False
-        return self.ocean == other.ocean and self.atmosphere == other.atmosphere
+        return self._components == other._components
 
-    def get_state(self) -> dict[Literal["ocean", "atmosphere"], dict[str, Any]]:
+    def get_state(self) -> dict[Literal["ocean", "ice", "atmosphere"], dict[str, Any]]:
         return {
-            "ocean": self.ocean.get_state(),
-            "atmosphere": self.atmosphere.get_state(),
+            name: info.get_state()  # type: ignore[misc]
+            for name, info in self._components.items()
         }
 
     @property
     def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
         return CoupledHorizontalCoordinates(
-            ocean=self.ocean.horizontal_coordinates,
-            atmosphere=self.atmosphere.horizontal_coordinates,
+            **{
+                name: info.horizontal_coordinates
+                for name, info in self._components.items()
+            }
         )
 
     @classmethod
     def from_state(
-        cls, state: dict[Literal["ocean", "atmosphere"], dict[str, Any]]
+        cls, state: dict[Literal["ocean", "ice", "atmosphere"], dict[str, Any]]
     ) -> "CoupledDatasetInfo":
+        parsed = {name: DatasetInfo.from_state(s) for name, s in state.items()}
         return cls(
-            ocean=DatasetInfo.from_state(state["ocean"]),
-            atmosphere=DatasetInfo.from_state(state["atmosphere"]),
+            ocean=parsed.get("ocean"),
+            ice=parsed.get("ice"),
+            atmosphere=parsed.get("atmosphere"),
         )
 
     def update_variable_metadata(
         self, variable_metadata: dict[str, Any]
     ) -> "CoupledDatasetInfo":
-        """
-        Update the variable metadata for both ocean and atmosphere datasets.
-        """
         return CoupledDatasetInfo(
-            ocean=self.ocean.update_variable_metadata(variable_metadata),
-            atmosphere=self.atmosphere.update_variable_metadata(variable_metadata),
+            **{
+                name: info.update_variable_metadata(variable_metadata)
+                for name, info in self._components.items()
+            }
         )

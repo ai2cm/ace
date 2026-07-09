@@ -26,7 +26,7 @@ from fme.coupled.data_loading.dataloader import CoupledDataLoader
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
 
-CoupledImageShapes = namedtuple("CoupledImageShapes", ("ocean", "atmosphere"))
+CoupledImageShapes = namedtuple("CoupledImageShapes", ("ocean", "ice", "atmosphere"))
 
 
 class GriddedData(GriddedDataABC[CoupledBatchData]):
@@ -48,8 +48,6 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         """
         self._loader = loader
         self._properties = properties.to_device()
-        self._ocean = self._properties.ocean
-        self._atmosphere = self._properties.atmosphere
         self._sampler = sampler
         self._batch_size: int | None = None
 
@@ -79,20 +77,16 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     @property
     def dataset_info(self) -> CoupledDatasetInfo:
         return CoupledDatasetInfo(
-            ocean=DatasetInfo(
-                horizontal_coordinates=self._ocean.horizontal_coordinates,
-                vertical_coordinate=self._ocean.vertical_coordinate,
-                spatial_mask_provider=self._ocean.spatial_mask_provider,
-                timestep=self._ocean.timestep,
-                variable_metadata=self._properties.variable_metadata,
-            ),
-            atmosphere=DatasetInfo(
-                horizontal_coordinates=self._atmosphere.horizontal_coordinates,
-                vertical_coordinate=self._atmosphere.vertical_coordinate,
-                spatial_mask_provider=self._atmosphere.spatial_mask_provider,
-                timestep=self._atmosphere.timestep,
-                variable_metadata=self._properties.variable_metadata,
-            ),
+            **{
+                name: DatasetInfo(
+                    horizontal_coordinates=props.horizontal_coordinates,
+                    vertical_coordinate=props.vertical_coordinate,
+                    spatial_mask_provider=props.spatial_mask_provider,
+                    timestep=props.timestep,
+                    variable_metadata=self._properties.variable_metadata,
+                )
+                for name, props in self._properties._components.items()
+            }
         )
 
     @property
@@ -109,12 +103,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def coords(self) -> CoupledCoords:
-        return CoupledCoords(
-            ocean_vertical=self._ocean.vertical_coordinate.coords,
-            atmosphere_vertical=self._atmosphere.vertical_coordinate.coords,
-            ocean_horizontal=dict(self._ocean.horizontal_coordinates.coords),
-            atmosphere_horizontal=dict(self._atmosphere.horizontal_coordinates.coords),
-        )
+        return self._properties.coords
 
     @property
     def n_samples(self) -> int:
@@ -127,9 +116,12 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     @property
     def batch_size(self) -> int:
         if self._batch_size is None:
-            example_data = next(iter(self.loader)).ocean_data.data
-            example_tensor = next(iter(example_data.values()))
-            self._batch_size = example_tensor.shape[0]
+            _batch = next(iter(self.loader))
+            for component_data in _batch._components.values():
+                example_tensor = next(iter(component_data.data.values()))
+                self._batch_size = example_tensor.shape[0]
+                break
+        assert self._batch_size is not None
         return self._batch_size
 
     def set_epoch(self, epoch: int):
@@ -180,19 +172,32 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
             self._initial_condition = initial_condition.to_device()
 
     @property
-    def atmosphere_properties(self) -> DatasetProperties:
+    def atmosphere_properties(self) -> DatasetProperties | None:
         return self._properties.atmosphere
 
     @property
-    def ocean_properties(self) -> DatasetProperties:
+    def ice_properties(self) -> DatasetProperties | None:
+        return self._properties.ice
+
+    @property
+    def ocean_properties(self) -> DatasetProperties | None:
         return self._properties.ocean
 
     @property
     def n_initial_conditions(self) -> int:
+        # check "slow" components: ocean always slowest
         if self._n_initial_conditions is None:
-            example_data = self.initial_condition.as_batch_data().ocean_data.data
-            example_tensor = next(iter(example_data.values()))
-            self._n_initial_conditions = example_tensor.shape[0]
+            for name in ("ocean", "ice"):
+                if name in self.initial_condition._components:
+                    batch_data = self.initial_condition.as_batch_data()._components[
+                        name
+                    ]
+                    example_data = batch_data.data
+                    example_tensor = next(iter(example_data.values()))
+                    self._n_initial_conditions = example_tensor.shape[0]
+                    break
+            else:
+                raise ValueError("Could not find ocean or ice components.")
         return self._n_initial_conditions
 
     @property
@@ -208,30 +213,33 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
 
     @property
     def dataset_info(self) -> CoupledDatasetInfo:
-        ocean = DatasetInfo(
-            horizontal_coordinates=self._properties.ocean.horizontal_coordinates,
-            vertical_coordinate=self._properties.ocean.vertical_coordinate,
-            spatial_mask_provider=self._properties.ocean.spatial_mask_provider,
-            timestep=self.ocean_timestep,
+        return CoupledDatasetInfo(
+            **{
+                name: DatasetInfo(
+                    horizontal_coordinates=props.horizontal_coordinates,
+                    vertical_coordinate=props.vertical_coordinate,
+                    spatial_mask_provider=props.spatial_mask_provider,
+                    timestep=props.timestep,
+                    variable_metadata=self._properties.variable_metadata,
+                )
+                for name, props in self._properties._components.items()
+            }
         )
-        atmosphere = DatasetInfo(
-            horizontal_coordinates=self._properties.atmosphere.horizontal_coordinates,
-            vertical_coordinate=self._properties.atmosphere.vertical_coordinate,
-            spatial_mask_provider=self._properties.atmosphere.spatial_mask_provider,
-            timestep=self.atmosphere_timestep,
-        )
-        return CoupledDatasetInfo(ocean=ocean, atmosphere=atmosphere)
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
-    def ocean_timestep(self) -> datetime.timedelta:
+    def ocean_timestep(self) -> datetime.timedelta | None:
         return self._properties.ocean_timestep
 
     @property
-    def atmosphere_timestep(self) -> datetime.timedelta:
+    def ice_timestep(self) -> datetime.timedelta | None:
+        return self._properties.ice_timestep
+
+    @property
+    def atmosphere_timestep(self) -> datetime.timedelta | None:
         return self._properties.atmosphere_timestep
 
     @property
@@ -252,13 +260,28 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
 
     @property
     def initial_time(self) -> xr.DataArray:
-        atmosphere_data = self.initial_condition.as_batch_data().atmosphere_data
-        ocean_data = self.initial_condition.as_batch_data().ocean_data
-        atmosphere_initial_time = atmosphere_data.time.isel(time=0)
-        ocean_initial_time = ocean_data.time.isel(time=0)
-        np.testing.assert_array_equal(
-            atmosphere_initial_time,
-            ocean_initial_time,
-            err_msg="Atmosphere and ocean initial times must be the same",
-        )
-        return atmosphere_initial_time
+        """
+        Return the first initial-condition time, validating that every active
+        coupled component has the same initial time.
+        """
+        batch_data = self.initial_condition.as_batch_data()
+        initial_times: dict[str, xr.DataArray] = {
+            name: component_data.time.isel(time=0)
+            for name, component_data in batch_data._components.items()
+        }
+        if not initial_times:
+            raise ValueError("No initial-condition components were provided.")
+
+        reference_name, reference_time = next(iter(initial_times.items()))
+        for name, initial_time in initial_times.items():
+            if name == reference_name:
+                continue
+            np.testing.assert_array_equal(
+                initial_time,
+                reference_time,
+                err_msg=(
+                    f"{name.capitalize()} and {reference_name} initial times "
+                    "must be the same"
+                ),
+            )
+        return reference_time
