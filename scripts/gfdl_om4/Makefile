@@ -37,6 +37,7 @@ test_run:
 
 build_dataflow:
 	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
+	docker run --rm --entrypoint python $(IMAGE_NAME) -c "import pipeline.run, xesmf"
 
 push_dataflow: build_dataflow
 	docker push $(IMAGE_NAME)
