@@ -322,3 +322,12 @@ run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens2.yaml" \
 run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16.yaml" \
   "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-rs0" 1 \
   "01KWZN0PF2QPPYF00KWT3J2FJW:/prior-results"
+
+# --- ftens16 EMA probe: same dataset, ema_ckpt_0150 (EMA/inference weights) ---
+# Diagnostic: the ckpt.tar reload above evaluates RAW weights (EMA never
+# accumulates with max_epochs=0), but the deployed/inference model and the
+# ensemble-size sweep's val ssr_bias use EMA. This should reproduce the sweep's
+# a3uqkhyz val ssr_bias (~-0.084) if EMA is the raw-vs-EMA discrepancy cause.
+run_training "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-ema.yaml" \
+  "train-4deg-daily-v2-era5-only-ssrl1-eval-ftens16-ema-rs0" 1 \
+  "01KWZN0PF2QPPYF00KWT3J2FJW:/prior-results"
