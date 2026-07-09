@@ -34,6 +34,7 @@ aggregator:
     strict: false
     target: denorm
     channel_mean_names: null
+    enable_ssr_bias_l1: false
   power_spectrum:
     variables: null
     name: power_spectrum
