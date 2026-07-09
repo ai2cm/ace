@@ -182,6 +182,27 @@ resolution — StitchNodes requires ≥10 steps within ±50° lat but lets track
 outside afterward. Tighten lat/duration filters or add a land/ocean mask if a cleaner
 set is needed for the comparison.
 
+## Parent-branch reconciliation (`scripts/tempest-extreme-wrapper`)
+
+We diverged from the wrapper at `15447600a`; it has since gained a time-encoding
+bug fix, a dir move, and separate event-downscaling scripts. Our parallel rewrite
+conflicts textually with the wrapper's streaming/`--out_file_list` version, so
+rather than merge we **ported the one correctness-relevant change**: the
+time-encoding fix (`_normalize_time_for_tempest` + `_te_time_encoding`, from
+wrapper commits `47e84378b`/`704d666a6`). Julian-calendar zarrs on a
+"seconds since" axis make TempestExtremes shift every node's date ~11 days;
+relabeling julian→proleptic_gregorian (wall-clock preserved) + forcing
+seconds-since int64 encoding fixes that and also avoids the datetime64→"nanoseconds
+since" rejection. Verified: DetectNodes accepts it and timestamps are unshifted.
+Our earlier full runs were already correct (they used plain `to_netcdf`, which
+xarray wrote as julian "hours since", read correctly), so **no re-run needed**.
+
+Deliberately **not** brought in (superseded or separate): the wrapper's streaming +
+`--out_file_list` approach (our parallel bundling supersedes it, and `--out_file_list`
+writes nothing on this conda-forge build); the `scripts/downscaling` →
+`scripts/tropical_cyclones` dir move; and the event-downscaling / histogram / movie
+scripts. Revisit the dir move + event scripts if/when reconciling for a real merge.
+
 ## Everything lives in scratch/ (git-ignored)
 
 `scratch/tc_2013/`, `scratch/tc_full/`, and `scratch/plot_tc_tracks.py` are under the

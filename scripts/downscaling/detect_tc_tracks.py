@@ -185,6 +185,70 @@ def build_te_dataset(
     return out
 
 
+# Calendars TempestExtremes' Time parser reads without shifting the date.
+_TE_READABLE_CALENDARS = frozenset({"standard", "gregorian", "proleptic_gregorian"})
+
+
+def _normalize_time_for_tempest(ds: xr.Dataset) -> xr.Dataset:
+    """Relabel a non-standard-calendar time axis so TempestExtremes reads it right.
+
+    TempestExtremes mis-reads a non-standard calendar (notably ``julian``, which
+    ACE output zarrs carry) on a "seconds since ..." axis and stamps every
+    detected node with a date offset from the true model time (~11 days for
+    julian in the 2010s). That silently shifts every point in tracks.csv, so a
+    downscaling box built from it lands on the wrong model timestep. Relabel the
+    time coordinate onto the proleptic Gregorian calendar, preserving the
+    wall-clock (year/month/day/hour/...) values, before writing the inputs.
+
+    No-op for a datetime64 axis or one already on a TempestExtremes-readable
+    calendar.
+    """
+    time_index = ds.indexes["time"]
+    calendar = getattr(time_index, "calendar", None)
+    if calendar is None or calendar in _TE_READABLE_CALENDARS:
+        return ds
+    gregorian = pd.DatetimeIndex(
+        [
+            pd.Timestamp(
+                year=t.year,
+                month=t.month,
+                day=t.day,
+                hour=t.hour,
+                minute=t.minute,
+                second=t.second,
+            )
+            for t in time_index
+        ]
+    )
+    logger.info(
+        "Relabeling %r-calendar time axis onto proleptic_gregorian for "
+        "TempestExtremes (wall-clock preserved)",
+        calendar,
+    )
+    return ds.assign_coords(time=gregorian)
+
+
+def _te_time_encoding(ds: xr.Dataset) -> dict:
+    """CF time units/calendar that TempestExtremes will actually accept.
+
+    TempestExtremes' Time::FromCFCompliantUnitsOffsetInt only recognizes
+    "days|hours|minutes|seconds since ..." unit prefixes (TimeObj.cpp); left to
+    its own defaults, xarray can encode datetime64[ns] data as "nanoseconds
+    since ...", which TempestExtremes rejects with 'Unknown "time::units"
+    format'. Forcing seconds-since-epoch avoids that. The calendar is taken from
+    the (already normalized, see _normalize_time_for_tempest) time axis and
+    constrained to one TempestExtremes reads correctly.
+    """
+    calendar = ds["time"].encoding.get("calendar", "proleptic_gregorian")
+    if calendar not in _TE_READABLE_CALENDARS:
+        calendar = "proleptic_gregorian"
+    return {
+        "units": "seconds since 1970-01-01 00:00:00",
+        "calendar": calendar,
+        "dtype": "int64",
+    }
+
+
 def _check_exe(exe: str) -> None:
     """Raise a helpful error if a TempestExtremes binary is not on PATH.
 
@@ -307,7 +371,8 @@ def _process_bundle(spec: BundleSpec) -> tuple[int, str]:
                 warm_core=spec.warm_core,
             )
             sub = te.isel(time=slice(spec.start, spec.start + spec.size)).load()
-            sub.to_netcdf(nc_path)
+            sub = _normalize_time_for_tempest(sub)
+            sub.to_netcdf(nc_path, encoding={"time": _te_time_encoding(sub)})
         _detect_on_file(
             nc_path,
             cand_path,
