@@ -53,7 +53,7 @@ class StepDiagnosticsMetricConfig:
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata] | None,
         enable_time_series: bool,
-        normalize: Callable[[TensorMapping], TensorDict] | None,
+        normalize: NormalizeFn | None,
     ) -> StepDiagnosticsAggregator | None:
         # StepDiagnosticsAggregator(
         #     {"correction": CorrectionDeltaAggregator(...)}) — the key names
@@ -72,28 +72,17 @@ class StepDiagnosticsAggregator:
     def __init__(self, aggregators: dict[str, StepDiagnosticsSubAggregator]): ...
 
 
-def normalize_delta_without_mean(
-    prediction: TensorMapping,
-    delta: TensorMapping,
-    normalize: Callable[[TensorMapping], TensorDict],
-) -> TensorDict:
-    """The normalized correction, over the delta's keys.
-
-    Computed as normalize(prediction) - normalize(prediction - delta) —
-    reconstructing the uncorrected output rather than normalizing the raw
-    delta, which would wrongly subtract the per-variable mean offset. (This
-    is algebraically the uncentered normalize delta/std — the means cancel —
-    so no center=False normalizer option is needed.) Off-mask cells stay NaN
-    (NaN - NaN), consistent with the masked prediction.
-    Raises ValueError if a delta key is dropped by the normalizer (the
-    StandardNormalizer silently filters to known names; a silently vanishing
-    metric would be worse than a loud failure)."""
-
-
 class CorrectionDeltaAggregator:
     """StepDiagnosticsSubAggregator for the correction delta: computes
-    the normalized correction once per batch and dispatches to the granular
-    sub-aggregators below, which the hosts never see.
+    the normalized correction once per batch as
+    normalize(delta, apply_mean=False) — i.e. delta / std (#1353) — and
+    dispatches to the granular sub-aggregators below, which the hosts never
+    see. The mean subtraction must be skipped because the delta is a
+    difference quantity: centering would wrongly subtract the per-variable
+    mean offset. Off-mask cells stay NaN, consistent with the masked
+    prediction. Raises ValueError if a delta key is dropped by the
+    normalizer (the StandardNormalizer silently filters to known names; a
+    silently vanishing metric would be worse than a loud failure).
 
     Not a registered sub-aggregator of the hosts' one-name-per-aggregator
     registry because (a) the metrics consume data.step_diagnostics, which
@@ -106,7 +95,7 @@ class CorrectionDeltaAggregator:
 
     def __init__(
         self,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         time_mean: CorrectionDeltaTimeMeanAggregator | None,
         time_series: CorrectionDeltaMeanAggregator | None,
     ): ...
@@ -246,7 +235,7 @@ class InferenceAggregatorConfig:
         n_timesteps: int,
         output_dir: str | None = None,
         save_diagnostics: bool = True,
-        normalize: Callable[[TensorMapping], TensorDict] | None = None,  # NEW
+        normalize: NormalizeFn | None = None,  # NEW
     ) -> "InferenceAggregator":
         # The no-target aggregator has no normalizer today; the config's
         # build returns None when normalize is None — callers that do not
@@ -284,13 +273,14 @@ class InferenceAggregator:
 ## `fme/ace/aggregator/inference/test_step_diagnostics.py` (new)
 
 ```python
-# Identity normalizer (lambda x: dict(x)) where hand-computable exactness matters.
+# Identity normalizer (a NormalizeFn ignoring apply_mean) where
+# hand-computable exactness matters.
 
-def test_normalize_delta_without_mean_uses_normalized_difference():
-    # GOAL: with a scaling normalizer, result equals
-    # normalize(pred) - normalize(pred - delta), not normalize(delta).
+def test_correction_delta_aggregator_normalizes_without_mean():
+    # GOAL: with a StandardNormalizer (nonzero means), recorded values equal
+    # delta / std — the mean offset does not leak in.
 
-def test_normalize_delta_without_mean_raises_on_unknown_delta_key():
+def test_correction_delta_aggregator_raises_on_unknown_delta_key():
     # GOAL: a delta key the normalizer drops raises ValueError, not a silent skip.
 
 def test_time_mean_aggregator_constant_offset():
