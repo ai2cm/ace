@@ -489,6 +489,7 @@ class EnergyScoreLoss(torch.nn.Module):
         sht: Callable[[torch.Tensor], torch.Tensor],
         spectral_whitening: Literal["none", "per_sample"] = "none",
         whitening_eps_frac: float = 0.02,
+        whitening_exponent: float = 1.0,
     ):
         super().__init__()
         if spectral_whitening not in ("none", "per_sample"):
@@ -500,9 +501,18 @@ class EnergyScoreLoss(torch.nn.Module):
             raise ValueError(
                 f"whitening_eps_frac must be positive, got {whitening_eps_frac}"
             )
+        if not 0.0 < whitening_exponent <= 1.0:
+            raise ValueError(
+                f"whitening_exponent must be in (0, 1], got {whitening_exponent}"
+            )
+        if spectral_whitening == "none" and whitening_exponent != 1.0:
+            raise ValueError(
+                "whitening_exponent requires spectral_whitening='per_sample'"
+            )
         self.sht = sht
         self.spectral_whitening = spectral_whitening
         self.whitening_eps_frac = whitening_eps_frac
+        self.whitening_exponent = whitening_exponent
         self.scaling: float | None = None
         self.n_spectral: int | None = None
         self.mode_weights: torch.Tensor | None = None
@@ -518,6 +528,10 @@ class EnergyScoreLoss(torch.nn.Module):
         power per mode) yields a uniform factor (no-op). The unnormalized weight
         is ``1 / amp_l``, floored at ``whitening_eps_frac`` of the per-sample mean
         degree-amplitude to bound the boost where the target has near-zero power.
+        ``whitening_exponent`` gamma < 1 applies partial whitening
+        (``(1/amp_l)**gamma``), interpolating between no reweighting at 0 and full
+        flattening at 1; it tames the upweighting of noise-dominated low-amplitude
+        degrees (e.g. high-l residual-prediction targets).
         The factor is then rescaled per (sample, channel) so the amplitude-
         weighted total weight matches the unwhitened weighting, leaving the
         overall energy-score magnitude (and the meaning of ``energy_score_weight``)
@@ -540,6 +554,8 @@ class EnergyScoreLoss(torch.nn.Module):
         amp_l = torch.sqrt(meanpow_l)  # (B, 1, [C], L)
         mean_amp = amp_l.mean(dim=-1, keepdim=True)
         f = 1.0 / torch.clamp(amp_l, min=self.whitening_eps_frac * mean_amp)
+        if self.whitening_exponent != 1.0:
+            f = f**self.whitening_exponent
         f_m = f.unsqueeze(-1)  # (B, 1, [C], L, 1), broadcast over m
         # Magnitude preservation: the per-mode energy score scales ~ |y_hat|, so
         # rescale so sum_lm w * |y_hat| is unchanged by the reweight.
@@ -659,6 +675,7 @@ class EnsembleLoss(torch.nn.Module):
         almost_fair_crps_alpha: float = 1.0,
         energy_score_whitening: Literal["none", "per_sample"] = "none",
         energy_score_whitening_eps_frac: float = 0.02,
+        energy_score_whitening_exponent: float = 1.0,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -690,6 +707,7 @@ class EnsembleLoss(torch.nn.Module):
             sht=sht,
             spectral_whitening=energy_score_whitening,
             whitening_eps_frac=energy_score_whitening_eps_frac,
+            whitening_exponent=energy_score_whitening_exponent,
         )
 
         self.crps_weight = crps_weight

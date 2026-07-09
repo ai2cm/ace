@@ -847,7 +847,7 @@ class TestLossOutputScale:
 
 def test_energy_score_invalid_whitening_raises():
     with pytest.raises(NotImplementedError):
-        EnergyScoreLoss(sht=lambda z: z, spectral_whitening="bogus")
+        EnergyScoreLoss(sht=lambda z: z, spectral_whitening="bogus")  # type: ignore[arg-type]
 
 
 def test_energy_score_whitening_disabled_matches_default():
@@ -912,6 +912,57 @@ def test_energy_score_whitening_preserves_amplitude_weighted_mass():
     mass_base = (w * amp_mode).sum(dim=(-2, -1))
     mass_white = (w * amp_mode * factor).sum(dim=(-2, -1))
     torch.testing.assert_close(mass_white, mass_base, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize("exponent", [0.0, -0.5, 1.5])
+def test_energy_score_whitening_exponent_out_of_range_raises(exponent):
+    with pytest.raises(ValueError):
+        EnergyScoreLoss(
+            sht=lambda z: z,
+            spectral_whitening="per_sample",
+            whitening_exponent=exponent,
+        )
+
+
+def test_energy_score_whitening_exponent_requires_per_sample():
+    """A non-unit exponent with whitening off is a config error, not a silent no-op."""
+    with pytest.raises(ValueError):
+        EnergyScoreLoss(sht=lambda z: z, whitening_exponent=0.5)
+
+
+def test_energy_score_whitening_exponent_partial_interpolates():
+    """gamma=0.5 gives a smaller small-scale boost than full whitening (gamma=1),
+    while staying above the no-whitening uniform factor and magnitude-preserving."""
+    DEVICE = get_device()
+    n_l = n_m = 16
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).unsqueeze(-1)
+    y_hat = (amp * valid).to(torch.cfloat)[None, None]  # (1, 1, L, M)
+    full = (
+        EnergyScoreLoss(sht=lambda z: z, spectral_whitening="per_sample")
+        ._spectral_whitening_factor(y_hat)
+        .reshape(-1)
+    )
+    partial = (
+        EnergyScoreLoss(
+            sht=lambda z: z,
+            spectral_whitening="per_sample",
+            whitening_exponent=0.5,
+        )
+        ._spectral_whitening_factor(y_hat)
+        .reshape(-1)
+    )
+    # still boosts small scales, but less aggressively than full whitening
+    assert partial[-1] > partial[0]
+    assert 1.0 < partial[-1] / partial[0] < full[-1] / full[0]
+    # magnitude preservation holds for the partial exponent too
+    redundancy = 2.0 * torch.ones(n_l, n_m, device=DEVICE)
+    redundancy[:, 0] = 1.0
+    w = redundancy * valid
+    amp_mode = y_hat.squeeze(1).squeeze(0).abs()  # (L, M)
+    mass_base = (w * amp_mode).sum()
+    mass_partial = (w * amp_mode * partial.unsqueeze(-1)).sum()
+    torch.testing.assert_close(mass_partial, mass_base, rtol=1e-4, atol=1e-5)
 
 
 def test_ensemble_loss_with_whitening_builds_and_runs():
