@@ -16,7 +16,7 @@ from fme.ace.stepper.parameter_init import (
     ParameterClassification,
     ParameterInitializationConfig,
 )
-from fme.ace.stepper.single_module import load_weights_and_history
+from fme.ace.stepper.single_module import TrainStepperConfig, load_weights_and_history
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -89,6 +89,92 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         stepper.modules[0].state_dict(),
         allow_larger=False,
     )
+
+
+def _get_stepper_config() -> StepperConfig:
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={"num_layers": 2, "embed_dim": 3},
+                    ),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"x": np.random.randn(1).item()},
+                            stds={"x": np.random.randn(1).item()},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def _dataset_info_with_coordinate(
+    vertical_coordinate: HybridSigmaPressureCoordinate,
+    img_shape=(16, 32),
+) -> DatasetInfo:
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(img_shape[0], device=get_device()),
+            lon=torch.zeros(img_shape[1], device=get_device()),
+        ),
+        vertical_coordinate=vertical_coordinate,
+        timestep=TIMESTEP,
+    )
+
+
+@pytest.mark.parametrize("override", [True, False])
+def test_override_vertical_coordinate_from_weights(tmpdir, override):
+    """The training stepper adopts the checkpoint's vertical coordinate when the
+    override flag is set, and keeps the training dataset's coordinate otherwise."""
+    coordinate_a = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7).float(), bk=torch.arange(7).float()
+    )
+    coordinate_b = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7).float() + 100.0, bk=torch.arange(7).float() + 1.0
+    )
+    stepper_config = _get_stepper_config()
+    # save a checkpoint carrying coordinate A
+    checkpoint_stepper = stepper_config.get_stepper(
+        dataset_info=_dataset_info_with_coordinate(coordinate_a)
+    )
+    weights_path = str(tmpdir / "weights.ckpt")
+    torch.save({"stepper": checkpoint_stepper.get_state()}, weights_path)
+
+    # build a training stepper over a dataset carrying a different coordinate B
+    train_stepper_config = TrainStepperConfig(
+        parameter_init=ParameterInitializationConfig(
+            weights_path=weights_path,
+            override_vertical_coordinate_from_weights=override,
+        ),
+    )
+    dataset_info = _dataset_info_with_coordinate(coordinate_b)
+    train_stepper = train_stepper_config.get_train_stepper(stepper_config, dataset_info)
+
+    result = train_stepper._stepper.training_dataset_info.vertical_coordinate
+    expected = coordinate_a if override else coordinate_b
+    assert result == expected
+    # weights are loaded regardless of the flag
+    assert len(train_stepper.modules) == 1
+    assert_same_state(
+        train_stepper.modules[0].state_dict(),
+        checkpoint_stepper.modules[0].state_dict(),
+        allow_larger=False,
+    )
+
+
+def test_override_vertical_coordinate_requires_weights_path():
+    with pytest.raises(ValueError, match="weights_path"):
+        ParameterInitializationConfig(
+            override_vertical_coordinate_from_weights=True,
+            weights_path=None,
+        )
 
 
 def assert_same_state(

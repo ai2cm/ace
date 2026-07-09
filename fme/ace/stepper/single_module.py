@@ -85,6 +85,18 @@ def load_weights_and_history(path: str | None) -> StepperWeightsAndHistory:
     return return_weights, stepper.training_history
 
 
+def load_vertical_coordinate(path: str) -> VerticalCoordinate:
+    """
+    Load only the vertical coordinate from a Stepper checkpoint.
+
+    Loads the checkpoint the same way load_stepper does but avoids building a
+    full Stepper, returning just the serialized vertical coordinate (handling
+    the legacy sigma_coordinates / dataset_info fallbacks).
+    """
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    return get_serialized_stepper_vertical_coordinate(checkpoint["stepper"])
+
+
 @dataclasses.dataclass
 class SingleModuleStepperConfig:
     """
@@ -1506,6 +1518,9 @@ class TrainStepperConfig:
         stepper_config: StepperConfig,
         dataset_info: DatasetInfo,
         load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+        load_vertical_coordinate_fn: Callable[
+            [str], VerticalCoordinate
+        ] = load_vertical_coordinate,
     ) -> "TrainStepper":
         """
         Build a TrainStepper from this configuration and a StepperConfig.
@@ -1521,6 +1536,9 @@ class TrainStepperConfig:
             load_weights_and_history_fn: Function for loading weights and
                 history. Default implementation loads a Trainer checkpoint
                 containing a Stepper.
+            load_vertical_coordinate_fn: Function for loading the vertical
+                coordinate from a checkpoint, used when
+                parameter_init.override_vertical_coordinate_from_weights is set.
 
         Returns:
             A TrainStepper wrapping the built stepper with training
@@ -1529,6 +1547,14 @@ class TrainStepperConfig:
         parameter_initializer = self._get_parameter_initializer(
             load_weights_and_history_fn
         )
+        if self.parameter_init.override_vertical_coordinate_from_weights:
+            # weights_path is guaranteed non-None by ParameterInitializationConfig
+            # validation when this flag is set.
+            assert self.parameter_init.weights_path is not None
+            vertical_coordinate = load_vertical_coordinate_fn(
+                self.parameter_init.weights_path
+            )
+            dataset_info = dataset_info.update_vertical_coordinate(vertical_coordinate)
         stepper = stepper_config.get_stepper(
             dataset_info=dataset_info,
             parameter_initializer=parameter_initializer,

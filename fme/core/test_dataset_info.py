@@ -430,6 +430,31 @@ def test_masked_gridded_ops():
     assert dataset_info.gridded_operations == expected_gridded_ops
 
 
+def test_update_vertical_coordinate_replaces_only_coordinate():
+    coords = LatLonCoordinates(lat=torch.arange(-4, 4), lon=torch.arange(16))
+    original_vc = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7).float(), bk=torch.arange(7).float()
+    )
+    new_vc = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7).float() + 100.0, bk=torch.arange(7).float() + 1.0
+    )
+    variable_metadata = {"x": VariableMetadata(units="m", long_name="x")}
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=coords,
+        vertical_coordinate=original_vc,
+        variable_metadata=variable_metadata,
+        timestep=datetime.timedelta(hours=6),
+    )
+    updated = dataset_info.update_vertical_coordinate(new_vc)
+    assert updated.vertical_coordinate == new_vc
+    # all other fields preserved
+    assert updated.horizontal_coordinates == coords
+    assert updated.variable_metadata == variable_metadata
+    assert updated.timestep == dataset_info.timestep
+    # original is unchanged
+    assert dataset_info.vertical_coordinate == original_vc
+
+
 def _make_hybrid_sigma_pressure_coordinate():
     return HybridSigmaPressureCoordinate(ak=torch.arange(10), bk=torch.arange(10))
 

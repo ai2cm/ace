@@ -117,6 +117,10 @@ class ParameterInitializationConfig:
             close to zero
         exclude_parameters: deprecated, kept for backwards compatibility
         frozen_parameters: deprecated, kept for backwards compatibility
+        override_vertical_coordinate_from_weights: if True, build the training
+            stepper with the vertical coordinate loaded from weights_path's
+            checkpoint instead of the one derived from the training dataset.
+            Requires weights_path to be set. Default False.
     """
 
     weights_path: str | None = None
@@ -125,8 +129,14 @@ class ParameterInitializationConfig:
     beta: float = 0.0
     exclude_parameters: list[str] | None = None
     frozen_parameters: FrozenParameterConfig | None = None
+    override_vertical_coordinate_from_weights: bool = False
 
     def __post_init__(self):
+        if self.override_vertical_coordinate_from_weights and self.weights_path is None:
+            raise ValueError(
+                "override_vertical_coordinate_from_weights requires weights_path "
+                "to be set"
+            )
         if self.exclude_parameters is not None or self.frozen_parameters is not None:
             if len(self.parameters) > 0:
                 raise ValueError(
