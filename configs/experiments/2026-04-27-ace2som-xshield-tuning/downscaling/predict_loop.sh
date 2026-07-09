@@ -3,7 +3,7 @@
 
 set -e
 
-RANGE_START=15
+RANGE_START=8
 RANGE_END=15
 
 JOB_NAME_BASE="predict-ace2s-xshield-tc-tracks"
@@ -37,20 +37,23 @@ wandb_group=""
 #--not-preemptible \
 
 for i in $(seq "$RANGE_START" "$RANGE_END"); do
-    #CONFIG_PATH="$CONFIG_DIR/tc_tracks_predict_${i}.yaml"
-    CONFIG_PATH="$CONFIG_DIR/test_tc_track.yaml"
+    CONFIG_PATH="$CONFIG_DIR/tc_tracks_predict_${i}.yaml"
+    #CONFIG_PATH="$CONFIG_DIR/test_tc_track.yaml"
     if [[ ! -f "$CONFIG_PATH" ]]; then
         echo "Config not found: $CONFIG_PATH" >&2
         exit 1
     fi
-    #JOB_NAME="${JOB_NAME_BASE}-${i}"
-    JOB_NAME="predict-ace2s-xshield-tc-tracks-test"
+    JOB_NAME="${JOB_NAME_BASE}-${i}"
+    #JOB_NAME="predict-ace2s-xshield-tc-tracks-test"
     gantry run \
         --name $JOB_NAME \
         --description 'Run 100km to 3km evaluation on ACE2S-SHiELD' \
-        --workspace ai2/climate-titan \
-        --priority urgent \
+        --workspace ai2/ace \
+        --priority high \
         --cluster ai2/titan \
+        --cluster ai2/jupiter \
+        --cluster ai2/ceres \
+        --not-preemptible \
         --beaker-image $IMAGE \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
