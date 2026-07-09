@@ -14,6 +14,13 @@ multi-group group_weights are removed. A run trained on a single dataset (e.g.
 a pure C96/SHiELD run) instead cools down onto that dataset, keeping all its
 members. A run trained on multiple datasets none of which is ERA5 has no
 unambiguous target and raises.
+
+To avoid confounding the cooldown with a vertical-coordinate change, the
+cooldown retains the checkpoint's vertical coordinate
+(parameter_init.override_vertical_coordinate_from_weights) rather than
+re-deriving it from the restricted train_loader. For the multi-dataset FM
+mixture this keeps the base-training (c96/SHiELD) coordinate; for a
+single-dataset run it is a no-op.
 """
 
 import argparse
@@ -221,7 +228,12 @@ def generate_cooldown_config(
     if "stepper_training" not in cfg:
         cfg["stepper_training"] = {}
     cfg["stepper_training"]["parameter_init"] = {
-        "weights_path": f"/checkpoints/{checkpoint_name}"
+        "weights_path": f"/checkpoints/{checkpoint_name}",
+        # Keep the checkpoint's vertical coordinate instead of re-deriving it
+        # from the restricted (ERA5-only) train_loader, so the coordinate stays
+        # consistent from base training through cooldown and inline inference.
+        # A no-op for single-dataset runs (checkpoint coord == data coord).
+        "override_vertical_coordinate_from_weights": True,
     }
 
     # No masking during the cooldown.

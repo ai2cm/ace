@@ -635,6 +635,7 @@ stepper_training:
       energy_score_weight: 0.1
   parameter_init:
     weights_path: /checkpoints/training_checkpoints/best_inference_ckpt.tar
+    override_vertical_coordinate_from_weights: true
 stepper:
   step:
     type: single_module
