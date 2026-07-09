@@ -1249,19 +1249,23 @@ class CoupledStepper:
         gen_data = self._process_prediction_generator_list(output_list, forcing)
         assert self.ocean is not None
         assert self.atmosphere is not None
+        funcs = {
+            "ocean": self.ocean.derive_func,
+            "atmosphere": self.atmosphere.derive_func,
+        }
+        n_ic_timesteps = {
+            "ocean": self.ocean.n_ic_timesteps,
+            "atmosphere": self.atmosphere.n_ic_timesteps,
+        }
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
                 gen_data = (
                     gen_data.prepend(initial_condition)
                     .compute_derived_variables(
-                        ocean_derive_func=self.ocean.derive_func,
-                        atmosphere_derive_func=self.atmosphere.derive_func,
+                        derive_funcs=funcs,
                         forcing_data=forcing,
                     )
-                    .remove_initial_condition(
-                        n_ic_timesteps_ocean=self.ocean.n_ic_timesteps,
-                        n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
-                    )
+                    .remove_initial_condition(n_ic_timesteps=n_ic_timesteps)
                 )
         return gen_data
 

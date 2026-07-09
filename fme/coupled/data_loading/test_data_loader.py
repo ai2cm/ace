@@ -32,7 +32,6 @@ from fme.core.dataset.xarray import (
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
-from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.data_typing import (
     CoupledDatasetItem,
     CoupledHorizontalCoordinates,
@@ -42,9 +41,10 @@ from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import (
+    CoupledAtmosphereIceOceanDatasetConfig,
     CoupledConcatDatasetConfig,
     CoupledDataLoaderConfig,
-    CoupledDatasetConfig,
+    build_coupled_dataset_config,
 )
 from .getters import get_forcing_data, get_gridded_data
 from .inference import (
@@ -237,7 +237,7 @@ class MockCoupledData:
         )
 
     @property
-    def dataset_config(self) -> CoupledDatasetConfig:
+    def dataset_config(self):
         ocean_dir = None
         ice_dir = None
         atmos_dir = None
@@ -247,7 +247,7 @@ class MockCoupledData:
             ice_dir = XarrayDataConfig(str(self.ice.data_dir))
         if self.atmosphere is not None:
             atmos_dir = XarrayDataConfig(str(self.atmosphere.data_dir))
-        return CoupledDatasetConfig(
+        return build_coupled_dataset_config(
             ocean=ocean_dir,
             ice=ice_dir,
             atmosphere=atmos_dir,
@@ -258,7 +258,7 @@ class MockCoupledData:
         ocean_kwargs: dict[str, Any] | None = None,
         ice_kwargs: dict[str, Any] | None = None,
         atmos_kwargs: dict[str, Any] | None = None,
-    ) -> CoupledDatasetConfig:
+    ):
         ocean_dir = None
         ice_dir = None
         atmos_dir = None
@@ -283,7 +283,7 @@ class MockCoupledData:
                 str(self.atmosphere.data_dir),
                 **atmos_kwargs,
             )
-        return CoupledDatasetConfig(
+        return build_coupled_dataset_config(
             ocean=ocean_dir,
             ice=ice_dir,
             atmosphere=atmos_dir,
@@ -824,7 +824,7 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
         assert ice_ic is not None
         assert atmos_ic is not None
         coupled_configs.append(
-            CoupledDatasetConfig(
+            CoupledAtmosphereIceOceanDatasetConfig(
                 ocean=XarrayDataConfig(
                     data_path=ocean_ic.data_dir,
                 ),
@@ -938,7 +938,7 @@ def test_zarr_engine_used_true():
     config = CoupledDataLoaderConfig(
         dataset=CoupledConcatDatasetConfig(
             concat=[
-                CoupledDatasetConfig(
+                CoupledAtmosphereIceOceanDatasetConfig(
                     ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
                     ice=XarrayDataConfig(
                         data_path="ice", file_pattern="data.zarr", engine="zarr"
@@ -947,7 +947,7 @@ def test_zarr_engine_used_true():
                         data_path="atmos", file_pattern="data.zarr", engine="zarr"
                     ),
                 ),
-                CoupledDatasetConfig(
+                CoupledAtmosphereIceOceanDatasetConfig(
                     ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
                     ice=XarrayDataConfig(data_path="ice", engine="netcdf4"),
                     atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
@@ -961,7 +961,7 @@ def test_zarr_engine_used_true():
 
 def test_zarr_engine_used_false():
     config = CoupledDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledAtmosphereIceOceanDatasetConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
             ice=XarrayDataConfig(data_path="ice", engine="netcdf4"),
             atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
@@ -973,7 +973,7 @@ def test_zarr_engine_used_false():
 
 def test_zarr_engine_used_true_inference():
     config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetWithOptionalOceanConfig(
+        dataset=CoupledAtmosphereIceOceanDatasetConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
             ice=XarrayDataConfig(
                 data_path="ice", file_pattern="data.zarr", engine="zarr"
@@ -989,7 +989,7 @@ def test_zarr_engine_used_true_inference():
 
 def test_zarr_engine_used_false_inference():
     config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetWithOptionalOceanConfig(
+        dataset=CoupledAtmosphereIceOceanDatasetConfig(
             ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
             ice=XarrayDataConfig(data_path="ice", engine="netcdf4"),
             atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
@@ -1081,7 +1081,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     # test CoupledDataLoaderConfig
     config = CoupledDataLoaderConfig(
-        dataset=CoupledDatasetConfig(
+        dataset=CoupledAtmosphereIceOceanDatasetConfig(
             ocean=ocean_config,
             ice=ice_config,
             atmosphere=atmos_config,
@@ -1109,7 +1109,7 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     # test InferenceDataLoaderConfig
     inference_config = InferenceDataLoaderConfig(
-        dataset=CoupledDatasetWithOptionalOceanConfig(
+        dataset=CoupledAtmosphereIceOceanDatasetConfig(
             ocean=ocean_config,
             ice=ice_config,
             atmosphere=atmos_config,

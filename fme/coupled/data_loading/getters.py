@@ -17,9 +17,12 @@ from fme.core.labels import LabelEncoding
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.concat import ConcatDataset
 from fme.coupled.data_loading.config import (
+    CoupledAtmosphereIceOceanDatasetConfig,
     CoupledConcatDatasetConfig,
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
+    CoupledIceAtmosphereDatasetConfig,
+    CoupledIceOceanDatasetConfig,
 )
 from fme.coupled.data_loading.data_typing import (
     CoupledDataset,
@@ -56,34 +59,26 @@ def _coupled_forkserver_worker_init_fn(worker_id: int) -> None:
 class CollateFn:
     def __init__(
         self,
-        ocean_horizontal_dims: list[str] | None = None,
-        ice_horizontal_dims: list[str] | None = None,
-        atmosphere_horizontal_dims: list[str] | None = None,
-        ocean_label_encoding: LabelEncoding | None = None,
-        ice_label_encoding: LabelEncoding | None = None,
-        atmosphere_label_encoding: LabelEncoding | None = None,
+        component_horizontal_dims: dict[str, list[str]],
+        component_label_encodings: dict[str, LabelEncoding] | None = None,
     ):
-        self.ocean_horizontal_dims = ocean_horizontal_dims
-        self.ice_horizontal_dims = ice_horizontal_dims
-        self.atmosphere_horizontal_dims = atmosphere_horizontal_dims
-        self.ocean_label_encoding = ocean_label_encoding
-        self.ice_label_encoding = ice_label_encoding
-        self.atmosphere_label_encoding = atmosphere_label_encoding
+        self.component_horizontal_dims = component_horizontal_dims
+        self.component_label_encodings = component_label_encodings
 
     def __call__(self, samples: list[CoupledDatasetItem]) -> CoupledBatchData:
         return CoupledBatchData.collate_fn(
             samples,
-            ocean_horizontal_dims=self.ocean_horizontal_dims,
-            ice_horizontal_dims=self.ice_horizontal_dims,
-            atmosphere_horizontal_dims=self.atmosphere_horizontal_dims,
-            ocean_label_encoding=self.ocean_label_encoding,
-            ice_label_encoding=self.ice_label_encoding,
-            atmosphere_label_encoding=self.atmosphere_label_encoding,
+            component_horizontal_dims=self.component_horizontal_dims,
+            component_label_encodings=self.component_label_encodings,
         )
 
 
 def get_dataset(
-    config: CoupledDatasetConfig, requirements: CoupledDataRequirements
+    config: CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
+    requirements: CoupledDataRequirements,
 ) -> tuple[CoupledDataset, CoupledDatasetProperties]:
     ocean_reqs = requirements.ocean_requirements
     ice_reqs = requirements.ice_requirements
@@ -125,9 +120,19 @@ def get_dataset(
 
 
 def _combine_datasets(
-    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    configs: CoupledConcatDatasetConfig
+    | CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     build_one: Callable[
-        [CoupledDatasetConfig], tuple[CoupledDataset, CoupledDatasetProperties]
+        [
+            CoupledDatasetConfig
+            | CoupledIceOceanDatasetConfig
+            | CoupledIceAtmosphereDatasetConfig
+            | CoupledAtmosphereIceOceanDatasetConfig
+        ],
+        tuple[CoupledDataset, CoupledDatasetProperties],
     ],
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
@@ -159,7 +164,11 @@ def _combine_datasets(
 
 
 def get_datasets(
-    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    configs: CoupledConcatDatasetConfig
+    | CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     requirements: CoupledDataRequirements,
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
@@ -204,40 +213,26 @@ def _build_gridded_data(
     else:
         kwargs = {"prefetch_factor": config.prefetch_factor}
 
-    ocean_label_encoding = None
-    ocean_horiz_dim = None
-    if config.ocean_available_labels is not None:
-        ocean_label_encoding = LabelEncoding(
-            sorted(list(config.ocean_available_labels))
-        )
-    if properties.ocean is not None:
-        ocean_horiz_dim = list(properties.ocean.horizontal_coordinates.dims)
-
-    ice_label_encoding = None
-    ice_horiz_dim = None
-    if config.ice_available_labels is not None:
-        ice_label_encoding = LabelEncoding(sorted(list(config.ice_available_labels)))
-    if properties.ice is not None:
-        ice_horiz_dim = list(properties.ice.horizontal_coordinates.dims)
-
-    atmosphere_label_encoding = None
-    atmosphere_horiz_dim = None
-    if config.atmosphere_available_labels is not None:
-        atmosphere_label_encoding = LabelEncoding(
-            sorted(list(config.atmosphere_available_labels))
-        )
-    if properties.atmosphere is not None:
-        atmosphere_horiz_dim = list(properties.atmosphere.horizontal_coordinates.dims)
+    available_labels: dict[str, set[str] | None] = {
+        "ocean": config.ocean_available_labels,
+        "ice": config.ice_available_labels,
+        "atmosphere": config.atmosphere_available_labels,
+    }
+    component_horizontal_dims: dict[str, list[str]] = {
+        name: list(props.horizontal_coordinates.dims)
+        for name, props in properties._components.items()
+    }
+    component_label_encodings: dict[str, LabelEncoding] = {
+        name: LabelEncoding(sorted(list(labels)))
+        for name, labels in available_labels.items()
+        if labels is not None
+    }
 
     dataloader = CoupledDataLoader(
         dataset,
         CollateFn(
-            ocean_horizontal_dims=ocean_horiz_dim,
-            ocean_label_encoding=ocean_label_encoding,
-            ice_label_encoding=ice_label_encoding,
-            ice_horizontal_dims=ice_horiz_dim,
-            atmosphere_label_encoding=atmosphere_label_encoding,
-            atmosphere_horizontal_dims=atmosphere_horiz_dim,
+            component_horizontal_dims=component_horizontal_dims,
+            component_label_encodings=component_label_encodings or None,
         ),
         batch_size=batch_size,
         num_workers=config.num_data_workers,
@@ -281,7 +276,10 @@ def get_gridded_data(
 
 
 def get_train_dataset(
-    config: CoupledDatasetConfig,
+    config: CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     requirements: CoupledTrainDataRequirements,
 ) -> tuple[CoupledDataset, CoupledDatasetProperties]:
     """Build a CoupledDataset for training, where the atmosphere is split
@@ -347,7 +345,11 @@ def get_train_dataset(
 
 
 def get_train_datasets(
-    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    configs: CoupledConcatDatasetConfig
+    | CoupledDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledAtmosphereIceOceanDatasetConfig,
     requirements: CoupledTrainDataRequirements,
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:

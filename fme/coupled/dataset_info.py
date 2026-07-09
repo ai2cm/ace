@@ -19,134 +19,82 @@ class CoupledDatasetInfo:
         ice: DatasetInfo | None = None,
         atmosphere: DatasetInfo | None = None,
     ):
-        self.ocean = ocean
-        self.ice = ice
-        self.atmosphere = atmosphere
+        self._components: dict[str, DatasetInfo] = {
+            name: val
+            for name, val in [
+                ("ocean", ocean),
+                ("ice", ice),
+                ("atmosphere", atmosphere),
+            ]
+            if val is not None
+        }
+
+    @property
+    def ocean(self) -> DatasetInfo | None:
+        return self._components.get("ocean")
+
+    @property
+    def ice(self) -> DatasetInfo | None:
+        return self._components.get("ice")
+
+    @property
+    def atmosphere(self) -> DatasetInfo | None:
+        return self._components.get("atmosphere")
+
+    def _get_spatial_mask_provider(self, name: str) -> HasGetSpatialMask | None:
+        info = self._components.get(name)
+        if info is None:
+            return None
+        try:
+            return info.spatial_mask_provider
+        except MissingDatasetInfo as err:
+            raise MissingCoupledDatasetInfo(f"{name}_spatial_mask_provider") from err
 
     @property
     def ocean_spatial_mask_provider(self) -> HasGetSpatialMask | None:
-        if self.ocean is not None:
-            try:
-                return self.ocean.spatial_mask_provider
-            except MissingDatasetInfo as err:
-                raise MissingCoupledDatasetInfo("ocean_spatial_mask_provider") from err
-        else:
-            return None
+        return self._get_spatial_mask_provider("ocean")
 
     @property
     def ice_spatial_mask_provider(self) -> HasGetSpatialMask | None:
-        if self.ice is not None:
-            try:
-                return self.ice.spatial_mask_provider
-            except MissingDatasetInfo as err:
-                raise MissingCoupledDatasetInfo("ice_spatial_mask_provider") from err
-        else:
-            return None
+        return self._get_spatial_mask_provider("ice")
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, CoupledDatasetInfo):
             return False
-        ocean_check = self.ocean == other.ocean
-        ice_check = self.ice == other.ice
-        atmos_check = self.atmosphere == other.atmosphere
-        return ocean_check and ice_check and atmos_check
+        return self._components == other._components
 
     def get_state(self) -> dict[Literal["ocean", "ice", "atmosphere"], dict[str, Any]]:
-        if self.atmosphere is None:
-            assert self.ocean is not None
-            assert self.ice is not None
-            ds: dict[Literal["ocean", "ice", "atmosphere"], dict[str, Any]] = {
-                "ocean": self.ocean.get_state(),
-                "ice": self.ice.get_state(),
-            }
-        elif self.ice is None:
-            assert self.ocean is not None
-            ds = {
-                "ocean": self.ocean.get_state(),
-                "atmosphere": self.atmosphere.get_state(),
-            }
-        elif self.ocean is None:
-            assert self.ice is not None
-            ds = {
-                "ice": self.ice.get_state(),
-                "atmosphere": self.atmosphere.get_state(),
-            }
-        else:
-            assert self.ocean is not None
-            assert self.ice is not None
-            ds = {
-                "ocean": self.ocean.get_state(),
-                "ice": self.ice.get_state(),
-                "atmosphere": self.atmosphere.get_state(),
-            }
-        return ds
+        return {
+            name: info.get_state()  # type: ignore[misc]
+            for name, info in self._components.items()
+        }
 
     @property
     def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
-        if self.atmosphere is None:
-            assert self.ocean is not None
-            assert self.ice is not None
-            return CoupledHorizontalCoordinates(
-                ocean=self.ocean.horizontal_coordinates,
-                ice=self.ice.horizontal_coordinates,
-            )
-        elif self.ice is None:
-            assert self.ocean is not None
-            return CoupledHorizontalCoordinates(
-                ocean=self.ocean.horizontal_coordinates,
-                atmosphere=self.atmosphere.horizontal_coordinates,
-            )
-        elif self.ocean is None:
-            assert self.ice is not None
-            return CoupledHorizontalCoordinates(
-                ice=self.ice.horizontal_coordinates,
-                atmosphere=self.atmosphere.horizontal_coordinates,
-            )
-        else:
-            assert self.ocean is not None
-            assert self.ice is not None
-            return CoupledHorizontalCoordinates(
-                ocean=self.ocean.horizontal_coordinates,
-                ice=self.ice.horizontal_coordinates,
-                atmosphere=self.atmosphere.horizontal_coordinates,
-            )
+        return CoupledHorizontalCoordinates(
+            **{
+                name: info.horizontal_coordinates
+                for name, info in self._components.items()
+            }
+        )
 
     @classmethod
     def from_state(
         cls, state: dict[Literal["ocean", "ice", "atmosphere"], dict[str, Any]]
     ) -> "CoupledDatasetInfo":
-        ocean_state = None
-        ice_state = None
-        atmosphere_state = None
-        if "ocean" in state:
-            ocean_state = DatasetInfo.from_state(state["ocean"])
-        if "ice" in state:
-            ice_state = DatasetInfo.from_state(state["ice"])
-        if "atmosphere" in state:
-            atmosphere_state = DatasetInfo.from_state(state["atmosphere"])
+        parsed = {name: DatasetInfo.from_state(s) for name, s in state.items()}
         return cls(
-            ocean=ocean_state,
-            ice=ice_state,
-            atmosphere=atmosphere_state,
+            ocean=parsed.get("ocean"),
+            ice=parsed.get("ice"),
+            atmosphere=parsed.get("atmosphere"),
         )
 
     def update_variable_metadata(
         self, variable_metadata: dict[str, Any]
     ) -> "CoupledDatasetInfo":
-        """
-        Update the variable metadata for ocean, ice, and atmosphere datasets.
-        """
-        ocean_metadata = None
-        if self.ocean is not None:
-            ocean_metadata = self.ocean.update_variable_metadata(variable_metadata)
-        ice_metadata = None
-        if self.ice is not None:
-            ice_metadata = self.ice.update_variable_metadata(variable_metadata)
-        atmos_metadata = None
-        if self.atmosphere is not None:
-            atmos_metadata = self.atmosphere.update_variable_metadata(variable_metadata)
         return CoupledDatasetInfo(
-            ocean=ocean_metadata,
-            ice=ice_metadata,
-            atmosphere=atmos_metadata,
+            **{
+                name: info.update_variable_metadata(variable_metadata)
+                for name, info in self._components.items()
+            }
         )

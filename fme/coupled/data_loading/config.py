@@ -12,19 +12,25 @@ class CoupledDatasetConfig:
     """
     Parameters:
         ocean: Configuration for the ocean dataset.
-        ice: Configuration for the ocean dataset.
         atmosphere: Configuration for the atmosphere dataset.
     """
 
-    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
-    ice: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
-    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
 
     @property
     def data_configs(
         self,
-    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig | None]:
-        return [self.ocean, self.ice, self.atmosphere]
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return [self.ocean, self.atmosphere]
+
+    @property
+    def ice(self) -> None:
+        return None
+
+    @property
+    def anchor_component_name(self) -> str:
+        return "ocean"
 
     @property
     def coupled_configs(self) -> Sequence["CoupledDatasetConfig"]:
@@ -32,23 +38,166 @@ class CoupledDatasetConfig:
 
 
 @dataclasses.dataclass
-class CoupledDatasetWithOptionalOceanConfig:
+class CoupledIceAtmosphereDatasetConfig:
     """
+    Configuration for a coupled dataset with atmosphere and ice components only
+    (no ocean).
+
     Parameters:
-        ocean: Optional configuration for the ocean dataset.
-        ice: Optional configuration for the ice dataset.
-        atmosphere: Optional Configuration for the atmosphere dataset.
+        ice: Configuration for the ice dataset.
+        atmosphere: Configuration for the atmosphere dataset.
     """
 
-    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
-    ice: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
+    ice: XarrayDataConfig | MergeNoConcatDatasetConfig
+
+    @property
+    def data_configs(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return [self.atmosphere, self.ice]
+
+    @property
+    def ocean(self) -> None:
+        return None
+
+    @property
+    def anchor_component_name(self) -> str:
+        return "ice"
+
+    @property
+    def coupled_configs(self) -> Sequence["CoupledIceAtmosphereDatasetConfig"]:
+        return [self]
+
+
+@dataclasses.dataclass
+class CoupledIceOceanDatasetConfig:
+    """
+    Configuration for a coupled dataset with ocean and ice components only
+    (no atmosphere).
+
+    Parameters:
+        ocean: Configuration for the ocean dataset.
+        ice: Configuration for the ice dataset.
+    """
+
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig
+    ice: XarrayDataConfig | MergeNoConcatDatasetConfig
+
+    @property
+    def data_configs(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return [self.ocean, self.ice]
+
+    @property
+    def atmosphere(self) -> None:
+        return None
+
+    @property
+    def anchor_component_name(self) -> str:
+        return "ocean"
+
+    @property
+    def coupled_configs(self) -> Sequence["CoupledIceOceanDatasetConfig"]:
+        return [self]
+
+
+@dataclasses.dataclass
+class CoupledAtmosphereIceOceanDatasetConfig:
+    """
+    Parameters:
+        ocean: Configuration for the ocean dataset.
+        ice: Configuration for the ice dataset.
+        atmosphere: Configuration for the atmosphere dataset.
+    """
+
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig
+    ice: XarrayDataConfig | MergeNoConcatDatasetConfig
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
+
+    @property
+    def data_configs(
+        self,
+    ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
+        return [self.ocean, self.ice, self.atmosphere]
+
+    @property
+    def anchor_component_name(self) -> str:
+        return "ocean"
+
+    @property
+    def coupled_configs(self) -> Sequence["CoupledAtmosphereIceOceanDatasetConfig"]:
+        return [self]
+
+
+@dataclasses.dataclass
+class CoupledDatasetWithOptionalOceanConfig:
+    """
+    Config where atmosphere is always present; ocean and ice are optional.
+    Ocean is always the anchor: if ocean is None, a dummy will be built
+    from the dataset_info during inference.
+
+    Parameters:
+        atmosphere: Configuration for the atmosphere dataset.
+        ocean: Optional configuration for the ocean dataset.
+        ice: Optional configuration for the ice dataset.
+    """
+
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig
     ocean: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
+    ice: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None
 
     @property
     def data_configs(
         self,
     ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig | None]:
         return [self.ocean, self.ice, self.atmosphere]
+
+    @property
+    def anchor_component_name(self) -> str:
+        # Ocean is always the anchor; when ocean is None a dummy is created
+        # from dataset_info during inference.
+        return "ocean"
+
+
+def build_coupled_dataset_config(
+    atmosphere: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None,
+    ice: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None,
+    ocean: XarrayDataConfig | MergeNoConcatDatasetConfig | None = None,
+) -> (
+    CoupledAtmosphereIceOceanDatasetConfig
+    | CoupledDatasetConfig
+    | CoupledIceAtmosphereDatasetConfig
+    | CoupledIceOceanDatasetConfig
+    | CoupledDatasetWithOptionalOceanConfig
+):
+    """
+    Returns the appropriate coupled dataset config for the combination of
+    components provided.  At least one component must be non-None.
+
+    Coupling priorities (for inference anchor selection):
+        ocean > ice > atmosphere
+    """
+    if atmosphere is not None and ice is not None and ocean is not None:
+        return CoupledAtmosphereIceOceanDatasetConfig(
+            ocean=ocean, ice=ice, atmosphere=atmosphere
+        )
+    if atmosphere is not None and ocean is not None:
+        return CoupledDatasetConfig(ocean=ocean, atmosphere=atmosphere)
+    if atmosphere is not None and ice is not None:
+        # ocean is not provided; use CoupledDatasetWithOptionalOceanConfig so that
+        # a dummy ocean (driven by dataset_info) is created as the anchor during
+        # inference, preserving the ocean-driven batch schedule.
+        return CoupledDatasetWithOptionalOceanConfig(
+            atmosphere=atmosphere, ice=ice, ocean=None
+        )
+    if ocean is not None and ice is not None:
+        return CoupledIceOceanDatasetConfig(ocean=ocean, ice=ice)
+    if atmosphere is not None:
+        # atmosphere only: ocean/ice anchor will be provided as a dummy
+        return CoupledDatasetWithOptionalOceanConfig(atmosphere=atmosphere, ocean=None)
+    raise ValueError("At least one of atmosphere, ice, or ocean must be provided.")
 
 
 @dataclasses.dataclass
@@ -59,23 +208,23 @@ class CoupledConcatDatasetConfig:
             to be loaded. This sequence of datasets will be concatenated.
     """
 
-    concat: Sequence[CoupledDatasetConfig]
+    concat: Sequence[
+        CoupledDatasetConfig
+        | CoupledIceOceanDatasetConfig
+        | CoupledIceAtmosphereDatasetConfig
+        | CoupledAtmosphereIceOceanDatasetConfig
+    ]
 
     @property
-    def coupled_configs(self) -> Sequence[CoupledDatasetConfig]:
+    def coupled_configs(
+        self,
+    ) -> Sequence[
+        CoupledDatasetConfig
+        | CoupledIceOceanDatasetConfig
+        | CoupledIceAtmosphereDatasetConfig
+        | CoupledAtmosphereIceOceanDatasetConfig
+    ]:
         return self.concat
-
-    @property
-    def atmosphere(self) -> XarrayDataConfig | MergeNoConcatDatasetConfig | None:
-        return self.concat[0].atmosphere if self.concat else None
-
-    @property
-    def ice(self) -> XarrayDataConfig | MergeNoConcatDatasetConfig | None:
-        return self.concat[0].ice if self.concat else None
-
-    @property
-    def ocean(self) -> XarrayDataConfig | MergeNoConcatDatasetConfig | None:
-        return self.concat[0].ocean if self.concat else None
 
 
 @dataclasses.dataclass
@@ -93,7 +242,13 @@ class CoupledDataLoaderConfig:
 
     """
 
-    dataset: CoupledConcatDatasetConfig | CoupledDatasetConfig
+    dataset: (
+        CoupledConcatDatasetConfig
+        | CoupledDatasetConfig
+        | CoupledIceOceanDatasetConfig
+        | CoupledIceAtmosphereDatasetConfig
+        | CoupledAtmosphereIceOceanDatasetConfig
+    )
     batch_size: int
     num_data_workers: int = 1
     prefetch_factor: int | None = None
@@ -118,8 +273,6 @@ class CoupledDataLoaderConfig:
         """
         Return the labels that are available in the atmosphere dataset.
         """
-        if self.dataset.atmosphere is None:
-            return None
         return accumulate_labels(
             [
                 ds.atmosphere.available_labels
@@ -133,8 +286,6 @@ class CoupledDataLoaderConfig:
         """
         Return the labels that are available in the ice dataset.
         """
-        if self.dataset.ice is None:
-            return None
         return accumulate_labels(
             [
                 ds.ice.available_labels
@@ -148,8 +299,6 @@ class CoupledDataLoaderConfig:
         """
         Return the labels that are available in the ocean dataset.
         """
-        if self.dataset.ocean is None:
-            return None
         return accumulate_labels(
             [
                 ds.ocean.available_labels

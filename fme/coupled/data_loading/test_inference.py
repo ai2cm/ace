@@ -1,5 +1,5 @@
 import datetime
-from typing import Any, cast
+from typing import Any
 
 import cftime
 import numpy as np
@@ -15,7 +15,6 @@ from fme.ace.data_loading.inference import (
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
-from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.getters import get_forcing_data
 from fme.coupled.data_loading.inference import (
     CoupledForcingDataLoaderConfig,
@@ -64,7 +63,7 @@ def _setup(
         ),
     )
     config = InferenceDataLoaderConfig(
-        dataset=cast(CoupledDatasetWithOptionalOceanConfig, dataset_config),
+        dataset=dataset_config,
         start_indices=start_indices,
     )
     dataset = InferenceDataset(
@@ -273,9 +272,9 @@ def test_validate_inference_length_atmos(
     )
 
     _N_STEPS = 2
-    _MSG = "atmosphere/ice dataset has an insufficient number of timepoints"
+    _MSG = r"(atmosphere|ice) dataset has an insufficient number of timepoints"
 
-    with pytest.raises(ValueError, match=rf".*{_MSG}.*"):
+    with pytest.raises(ValueError, match=_MSG):
         _ = _setup(
             mock_data,
             total_coupled_steps=_N_STEPS,
