@@ -59,3 +59,18 @@ arguments:
 python -m pipeline.run --config configs/om4-picontrol-1deg.yaml \
     --num-timesteps 6 --output-path <url> --runner DirectRunner
 ```
+
+A production run on Google Cloud Dataflow — build and push the worker
+image, then launch (the config's output path is used as-is):
+
+```
+make push_dataflow
+make dataflow                # or CONFIG=configs/<other>.yaml make dataflow
+```
+
+`make dataflow` invokes `run-dataflow.sh`, which supplies the Dataflow
+resource flags (project, region, temp location, worker shape, container
+image). Unlike the era5 pipeline, the pipeline code here is a package, so
+the worker image copies `pipeline/` in and puts it on `PYTHONPATH` rather
+than relying on `--save_main_session`. Workers authenticate to GCS with
+the project service account; no S3/OSN credentials are involved.

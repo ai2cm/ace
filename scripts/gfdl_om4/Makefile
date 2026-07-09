@@ -1,5 +1,8 @@
 LOCAL_ENVIRONMENT ?= gfdl-om4-ingestion
 
+VERSION ?= 2026-07-09-gfdl-om4-xrbeam-pipeline
+IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/gfdl-om4-ingest-dataflow:$(VERSION)
+
 HGRID_URL ?= gs://vcm-ml-scratch/jamesd/2024-11-11-static-data/ocean_hgrid.nc
 WEIGHTS_VERSION ?= v1
 WEIGHTS_URL_ROOT ?= gs://vcm-ml-scratch/jamesd/gfdl-om4-regridding-weights/$(WEIGHTS_VERSION)
@@ -32,4 +35,19 @@ test_run:
 		--runner DirectRunner \
 		--job_server_timeout 3600
 
-.PHONY: create_environment generate_weights_one_degree generate_weights_four_degree test_run
+build_dataflow:
+	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
+
+push_dataflow: build_dataflow
+	docker push $(IMAGE_NAME)
+
+enter:
+	docker run --rm -v $$(pwd):/gfdl_om4 -w /gfdl_om4 --entrypoint "/bin/bash" -it $(IMAGE_NAME)
+
+dataflow:
+	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		./run-dataflow.sh DataflowRunner $(CONFIG)
+
+.PHONY: create_environment generate_weights_one_degree generate_weights_four_degree \
+	test_run build_dataflow push_dataflow enter dataflow
