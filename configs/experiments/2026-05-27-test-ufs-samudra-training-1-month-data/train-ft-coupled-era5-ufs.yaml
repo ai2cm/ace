@@ -12,7 +12,7 @@ ema:
   decay: 0.999
 max_epochs: 25
 inference:
-  n_coupled_steps: 730 #10 years with 5 day steps
+  n_coupled_steps: 1460 #20 years with 5 day steps
   coupled_steps_in_memory: 2
   loader:
     num_data_workers: 4
@@ -27,10 +27,10 @@ inference:
         engine: zarr
     start_indices:
       times:
-      - '2010-01-04T12:00:00'
-      - '2010-02-03T12:00:00'
-      - '2010-03-05T12:00:00'
-      - '2010-04-04T12:00:00'
+       - '1994-01-03T12:00:00'
+       - '1995-01-03T12:00:00'
+       - '1996-01-03T12:00:00'
+       - '1997-01-02T12:00:00'
   aggregator:
     log_zonal_mean_images: true
     log_histograms: true
