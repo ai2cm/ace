@@ -20,6 +20,7 @@ from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
+from .step_diagnostics import STEP_DIAGNOSTICS_LABEL, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
@@ -39,6 +40,10 @@ class DataWriterConfig:
             containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
+        save_step_diagnostics: Whether to enable writing of a netCDF file
+            containing per-step diagnostics of the prediction (currently the
+            corrector's per-step correction delta). No file content is
+            written when no corrector modified anything.
         names: Names of variables to save in the prediction and monthly
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
@@ -49,13 +54,20 @@ class DataWriterConfig:
 
     save_prediction_files: bool = True
     save_monthly_files: bool = True
+    save_step_diagnostics: bool = False
     names: Sequence[str] | None = None
     time_coarsen: TimeCoarsenConfig | None = None
     files: list[FileWriterConfig] | None = None
 
     def __post_init__(self):
         if (
-            not any([self.save_prediction_files, self.save_monthly_files])
+            not any(
+                [
+                    self.save_prediction_files,
+                    self.save_monthly_files,
+                    self.save_step_diagnostics,
+                ]
+            )
             and self.names is not None
         ):
             warnings.warn(
@@ -75,6 +87,13 @@ class DataWriterConfig:
             filenames.extend(file.filenames)
         return filenames
 
+    def validate_time_coarsen(self, forward_steps_in_memory: int, n_forward_steps: int):
+        """Validate time coarsening (top-level and per-file) against the schedule."""
+        if self.time_coarsen is not None:
+            self.time_coarsen.validate(forward_steps_in_memory, n_forward_steps)
+        for file_config in self.files or []:
+            file_config.validate_time_coarsen(forward_steps_in_memory, n_forward_steps)
+
     def build_paired(
         self,
         experiment_dir: str,
@@ -85,20 +104,81 @@ class DataWriterConfig:
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
     ) -> "PairedDataWriter":
+        writers: list[PairedSubwriter] = []
+        if self.save_prediction_files:
+            raw_writer: PairedSubwriter = PairedRawDataWriter(
+                path=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                save_names=self.names,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            )
+            if self.time_coarsen is not None:
+                raw_writer = self.time_coarsen.build_paired(raw_writer)
+            writers.append(raw_writer)
+        if self.save_monthly_files:
+            writers.append(
+                PairedMonthlyDataWriter(
+                    path=experiment_dir,
+                    initial_condition_times=initial_condition_times,
+                    n_timesteps=n_timesteps,
+                    timestep=timestep,
+                    save_names=self.names,
+                    variable_metadata=variable_metadata,
+                    coords=coords,
+                    dataset_metadata=dataset_metadata,
+                )
+            )
+        for writer_config in self.files or []:
+            writers.append(
+                writer_config.build_paired(
+                    experiment_dir=experiment_dir,
+                    initial_condition_times=initial_condition_times,
+                    n_timesteps=n_timesteps,
+                    timestep=timestep,
+                    variable_metadata=variable_metadata,
+                    coords=coords,
+                    dataset_metadata=dataset_metadata,
+                )
+            )
         return PairedDataWriter(
+            writers=writers,
             path=experiment_dir,
-            initial_condition_times=initial_condition_times,
-            n_timesteps=n_timesteps,
-            timestep=timestep,
             variable_metadata=variable_metadata,
             coords=coords,
-            enable_prediction_netcdfs=self.save_prediction_files,
-            enable_monthly_netcdfs=self.save_monthly_files,
-            save_names=self.names,
-            time_coarsen=self.time_coarsen,
             dataset_metadata=dataset_metadata,
-            files=self.files,
+            step_diagnostics_writer=self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            ),
         )
+
+    def _build_step_diagnostics_writer(
+        self,
+        experiment_dir: str,
+        initial_condition_times: npt.NDArray[cftime.datetime],
+        variable_metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
+    ) -> StepDiagnosticsWriter | None:
+        if not self.save_step_diagnostics:
+            return None
+        writer: RawDataWriter | TimeCoarsen = RawDataWriter(
+            path=experiment_dir,
+            label=STEP_DIAGNOSTICS_LABEL,
+            initial_condition_times=initial_condition_times,
+            save_names=self.names,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+        )
+        if self.time_coarsen is not None:
+            writer = self.time_coarsen.build(writer)
+        return StepDiagnosticsWriter(writer)
 
     def build(
         self,
@@ -110,100 +190,39 @@ class DataWriterConfig:
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
-        return DataWriter(
-            path=experiment_dir,
-            initial_condition_times=initial_condition_times,
-            n_timesteps=n_timesteps,
-            variable_metadata=variable_metadata,
-            coords=coords,
-            timestep=timestep,
-            enable_prediction_netcdfs=self.save_prediction_files,
-            enable_monthly_netcdfs=self.save_monthly_files,
-            save_names=self.names,
-            time_coarsen=self.time_coarsen,
-            dataset_metadata=dataset_metadata,
-            files=self.files,
-        )
-
-
-class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
-    def __init__(
-        self,
-        path: str,
-        initial_condition_times: npt.NDArray[cftime.datetime],
-        n_timesteps: int,
-        variable_metadata: Mapping[str, VariableMetadata],
-        coords: Mapping[str, np.ndarray],
-        timestep: datetime.timedelta,
-        enable_prediction_netcdfs: bool,
-        enable_monthly_netcdfs: bool,
-        save_names: Sequence[str] | None,
-        dataset_metadata: DatasetMetadata,
-        time_coarsen: TimeCoarsenConfig | None = None,
-        files: list[FileWriterConfig] | None = None,
-    ):
-        """
-        Args:
-            path: Path to write netCDF file(s).
-            initial_condition_times: 1D array of initial condition times
-                (start time for each inference run).
-            n_timesteps: Number of timesteps to write to the file.
-            variable_metadata: Metadata for each variable to be written to the file.
-            coords: Coordinate data to be written to the file.
-            timestep: Timestep of the model.
-            enable_prediction_netcdfs: Whether to enable writing of netCDF files
-                containing the predictions and target values.
-            enable_monthly_netcdfs: Whether to enable writing of netCDF files
-                containing the monthly predictions and target values.
-            save_names: Names of variables to save in the prediction
-                and monthly netCDF files.
-            dataset_metadata: Metadata for the dataset.
-            time_coarsen: Configuration for time coarsening of written outputs.
-            files: Configurations for individual data writers.
-
-        """
-        self._writers: list[PairedSubwriter] = []
-        self.path = path
-        self.coords = coords
-        self.variable_metadata = variable_metadata
-        self.dataset_metadata = dataset_metadata
-
-        def _time_coarsen_builder(data_writer: PairedSubwriter) -> PairedSubwriter:
-            if time_coarsen is not None:
-                return time_coarsen.build_paired(data_writer)
-            return data_writer
-
-        if enable_prediction_netcdfs:
-            self._writers.append(
-                _time_coarsen_builder(
-                    PairedRawDataWriter(
-                        path=path,
+        writers: list[Subwriter] = []
+        # TODO: handle writing HEALPix data
+        # https://github.com/ai2cm/full-model/issues/1089
+        if "face" not in coords:
+            if self.save_prediction_files:
+                raw_writer: Subwriter = RawDataWriter(
+                    path=experiment_dir,
+                    label="autoregressive_predictions",
+                    initial_condition_times=initial_condition_times,
+                    save_names=self.names,
+                    variable_metadata=variable_metadata,
+                    coords=coords,
+                    dataset_metadata=dataset_metadata,
+                )
+                if self.time_coarsen is not None:
+                    raw_writer = self.time_coarsen.build(raw_writer)
+                writers.append(raw_writer)
+            if self.save_monthly_files:
+                writers.append(
+                    MonthlyDataWriter(
+                        path=experiment_dir,
+                        label="monthly_mean_predictions",
                         initial_condition_times=initial_condition_times,
-                        save_names=save_names,
+                        save_names=self.names,
                         variable_metadata=variable_metadata,
                         coords=coords,
                         dataset_metadata=dataset_metadata,
                     )
                 )
-            )
-        if enable_monthly_netcdfs:
-            self._writers.append(
-                PairedMonthlyDataWriter(
-                    path=path,
-                    initial_condition_times=initial_condition_times,
-                    n_timesteps=n_timesteps,
-                    timestep=timestep,
-                    save_names=save_names,
-                    variable_metadata=variable_metadata,
-                    coords=coords,
-                    dataset_metadata=dataset_metadata,
-                )
-            )
-        if files is not None:
-            for writer_config in files:
-                self._writers.append(
-                    writer_config.build_paired(
-                        experiment_dir=path,
+            for writer_config in self.files or []:
+                writers.append(
+                    writer_config.build(
+                        experiment_dir=experiment_dir,
                         initial_condition_times=initial_condition_times,
                         n_timesteps=n_timesteps,
                         timestep=timestep,
@@ -212,6 +231,51 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                         dataset_metadata=dataset_metadata,
                     )
                 )
+        return DataWriter(
+            writers=writers,
+            path=experiment_dir,
+            variable_metadata=variable_metadata,
+            coords=coords,
+            dataset_metadata=dataset_metadata,
+            step_diagnostics_writer=self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            ),
+        )
+
+
+class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
+    def __init__(
+        self,
+        writers: list[PairedSubwriter],
+        path: str,
+        variable_metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None,
+    ):
+        """
+        Args:
+            writers: The sub-writers to dispatch each batch to, already built by
+                `DataWriterConfig.build_paired`.
+            path: Path to write single-snapshot netCDF file(s) via `write`.
+            variable_metadata: Metadata for each variable to be written to the file.
+            coords: Coordinate data to be written to the file.
+            dataset_metadata: Metadata for the dataset.
+            step_diagnostics_writer: Writer for per-step diagnostics of the
+                prediction, or None to not write them. Held separately from
+                the paired sub-writers: it consumes only the prediction's
+                diagnostics, not the target/prediction pair.
+        """
+        self._writers = writers
+        self._step_diagnostics_writer = step_diagnostics_writer
+        self.path = path
+        self.coords = coords
+        self.variable_metadata = variable_metadata
+        self.dataset_metadata = dataset_metadata
 
     def write(self, data: PrognosticState, filename: str):
         """Eagerly write data to a single netCDF file.
@@ -245,6 +309,13 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 prediction=dict(batch.prediction),
                 batch_time=batch.time,
             )
+        if (
+            self._step_diagnostics_writer is not None
+            and batch.step_diagnostics is not None
+        ):
+            self._step_diagnostics_writer.append_batch(
+                batch.step_diagnostics.to_dataset(batch.time)
+            )
 
     def flush(self):
         """
@@ -252,10 +323,14 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
             writer.finalize()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.finalize()
 
 
 def _write(
@@ -310,90 +385,30 @@ def _write(
 class DataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
+        writers: list[Subwriter],
         path: str,
-        initial_condition_times: npt.NDArray[cftime.datetime],
-        n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
-        timestep: datetime.timedelta,
-        enable_prediction_netcdfs: bool,
-        enable_monthly_netcdfs: bool,
-        save_names: Sequence[str] | None,
         dataset_metadata: DatasetMetadata,
-        time_coarsen: TimeCoarsenConfig | None = None,
-        files: list[FileWriterConfig] | None = None,
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None,
     ):
         """
         Args:
-            path: Directory within which to write netCDF file(s).
-            initial_condition_times: 1D array of initial condition times
-                (start time for each inference run).
-            n_timesteps: Number of timesteps to write to the file.
+            writers: The sub-writers to dispatch each batch to, already built by
+                `DataWriterConfig.build`. Empty for HEALPix (`face`)
+                coordinates, which are not yet supported.
+            path: Directory within which to write single-snapshot netCDF file(s)
+                via `write`.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
-            timestep: Timestep of the model.
-            enable_prediction_netcdfs: Whether to enable writing of netCDF files
-                containing the predictions and target values.
-            enable_monthly_netcdfs: Whether to enable writing of netCDF files
-            save_names: Names of variables to save in the prediction
-                and monthly netCDF files.
             dataset_metadata: Metadata for the dataset.
-            time_coarsen: Configuration for time coarsening of raw outputs.
-            files: Configurations for individual data writers.
+            step_diagnostics_writer: Writer for per-step diagnostics of the
+                prediction, or None to not write them. Held separately from
+                the sub-writers: it consumes only the prediction's
+                diagnostics.
         """
-        self._writers: list[Subwriter] = []
-        if "face" in coords:
-            # TODO: handle writing HEALPix data
-            # https://github.com/ai2cm/full-model/issues/1089
-            return
-
-        def _time_coarsen_builder(data_writer: Subwriter) -> Subwriter:
-            if time_coarsen is not None:
-                return time_coarsen.build(data_writer)
-            return data_writer
-
-        if enable_prediction_netcdfs:
-            self._writers.append(
-                _time_coarsen_builder(
-                    RawDataWriter(
-                        path=path,
-                        label="autoregressive_predictions",
-                        initial_condition_times=initial_condition_times,
-                        save_names=save_names,
-                        variable_metadata=variable_metadata,
-                        coords=coords,
-                        dataset_metadata=dataset_metadata,
-                    )
-                )
-            )
-
-        if enable_monthly_netcdfs:
-            self._writers.append(
-                MonthlyDataWriter(
-                    path=path,
-                    label="monthly_mean_predictions",
-                    initial_condition_times=initial_condition_times,
-                    save_names=save_names,
-                    variable_metadata=variable_metadata,
-                    coords=coords,
-                    dataset_metadata=dataset_metadata,
-                )
-            )
-
-        if files is not None:
-            for writer_config in files:
-                self._writers.append(
-                    writer_config.build(
-                        experiment_dir=path,
-                        initial_condition_times=initial_condition_times,
-                        n_timesteps=n_timesteps,
-                        timestep=timestep,
-                        variable_metadata=variable_metadata,
-                        coords=coords,
-                        dataset_metadata=dataset_metadata,
-                    )
-                )
-
+        self._writers = writers
+        self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.variable_metadata = variable_metadata
         self.dataset_metadata = dataset_metadata
@@ -414,6 +429,13 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             labels=batch.labels,
         )
         self._append_batch(unpaired_batch)
+        if (
+            self._step_diagnostics_writer is not None
+            and batch.step_diagnostics is not None
+        ):
+            self._step_diagnostics_writer.append_batch(
+                batch.step_diagnostics.to_dataset(batch.time)
+            )
 
     def _append_batch(self, batch: BatchData):
         for writer in self._writers:
@@ -428,10 +450,14 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
             writer.finalize()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
         _write(

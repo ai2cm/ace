@@ -46,6 +46,28 @@ class MockModuleBuilder(ModuleConfig):
         }
 
 
+@ModuleSelector.register("mock_with_default")
+@dataclasses.dataclass
+class MockModuleBuilderWithDefault(ModuleConfig):
+    param_shapes: list[tuple[int, ...]]
+    pad: str = "reflect"
+
+    def build(self, n_in_channels, n_out_channels, dataset_info):
+        return MockModule(self.param_shapes)
+
+
+def test_module_selector_config_includes_defaults():
+    """ModuleSelector.config should be normalized to include the default
+    values of the built ModuleConfig, so that defaults are captured when the
+    config is serialized (e.g. logged to wandb). See issue #596.
+    """
+    selector = ModuleSelector(
+        type="mock_with_default", config={"param_shapes": [(1, 2, 3)]}
+    )
+    serialized_config = dataclasses.asdict(selector)["config"]
+    assert serialized_config["pad"] == "reflect"
+
+
 def test_register():
     """Make sure that the registry is working as expected."""
     selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
@@ -157,6 +179,7 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
             "affine_norms": True,
             "spectral_transform": "sht",
             "label_embed_dim": 3,
+            "clip_latent_global_means": True,
         },
     )
     module = selector.build(
