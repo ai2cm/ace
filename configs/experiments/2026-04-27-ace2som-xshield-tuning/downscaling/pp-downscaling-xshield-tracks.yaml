@@ -19,8 +19,8 @@ model:
   churn: 0.0
 data:
   coarse:
-    - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
-      file_pattern: output_6hourly_predictions_ic0000.zarr
+    - data_path:  /climate-default
+      file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
       engine: zarr
       subset:
         start: 0

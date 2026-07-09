@@ -1,7 +1,7 @@
-experiment_dir: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
+experiment_dir: /climate-default/home/annak/2026-07-09-ace2s-shieldplus-tuned-xshield-best-val-ckpt
 n_forward_steps: 14600
 forward_steps_in_memory: 20
-checkpoint_path: /weights/training_checkpoints/best_inference_ckpt.tar
+checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
 logging:
   project: ace2som-xshield-tuning
 initial_condition:

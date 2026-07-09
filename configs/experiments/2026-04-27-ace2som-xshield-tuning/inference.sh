@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace2s-shieldplus-tuned-xshield-inference"
+JOB_NAME="ace2s-shieldplus-tuned-xshield-inference-best-val-ckpt"
 JOB_GROUP=""
 EXISTING_RESULTS_DATASET="01KWMYV98Q79G2FNY3CE95N2NG"  # this contains the checkpoint to use for inference
 CONFIG_FILENAME="inference-0k.yaml"
