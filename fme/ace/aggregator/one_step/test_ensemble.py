@@ -6,6 +6,7 @@ import torch
 from fme.ace.aggregator.one_step.ensemble import (
     CRPSMetric,
     EnsembleMeanRMSEMetric,
+    SSRBiasL1Metric,
     SSRBiasMetric,
     _EnsembleAggregator,
 )
@@ -200,6 +201,148 @@ def test_aggregator_ssr_bias_prescribed_cells_do_not_pull_scalar_to_negative_one
         scalar,
         expected,
     )
+
+
+def test_ssr_bias_l1_metric_gives_correct_shape():
+    torch.manual_seed(0)
+    metric = SSRBiasL1Metric()
+    n_batch, n_sample, n_time, n_y, n_x = 10, 3, 3, 4, 5
+    target = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    gen = get_tensor((n_batch, n_sample, n_time, n_y, n_x))
+    metric.record(target=target, gen=gen)
+    got = metric.get()
+    assert isinstance(got, torch.Tensor)
+    assert got.shape == (n_y, n_x)
+
+
+@pytest.mark.parametrize("n_sample", [2, 5, 10])
+def test_ssr_bias_l1_metric_calibrated_is_zero(n_sample):
+    """A calibrated ensemble (members and target from the same distribution)
+    has E|X - X'| = E|X - y|, so ssr_bias_l1 -> 0."""
+    torch.manual_seed(0)
+    metric = SSRBiasL1Metric()
+    n_batch, n_time, n_y, n_x = 5000, 3, 4, 5
+    target = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    gen = get_tensor((n_batch, n_sample, n_time, n_y, n_x))
+    metric.record(target=target, gen=gen)
+    got = metric.get()
+    assert got.shape == (n_y, n_x)
+    torch.testing.assert_close(got.mean(), torch.tensor(0.0), atol=1e-2, rtol=0.0)
+
+
+@pytest.mark.parametrize("n_sample", [2, 5, 10])
+def test_ssr_bias_l1_metric_underdispersed_is_negative(n_sample):
+    """Members clustered far more tightly than they are from the target:
+    spread_L1 << skill_L1, so ssr_bias_l1 < 0."""
+    torch.manual_seed(0)
+    metric = SSRBiasL1Metric()
+    n_batch, n_time, n_y, n_x = 5000, 3, 4, 5
+    target = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    gen = get_tensor((n_batch, n_sample, n_time, n_y, n_x)) * 0.1
+    metric.record(target=target, gen=gen)
+    got = metric.get()
+    assert torch.isfinite(got).all()
+    assert (got < 0).all(), f"ssr_bias_l1 not under-dispersed: {got}"
+
+
+def test_ssr_bias_l1_metric_forms_ratio_at_end_not_per_batch():
+    """The spread and skill numerators/denominators accumulate across batches
+    and the ratio forms once in get() -- distinct from averaging per-batch
+    ratios. Two single-cell batches with known spread/skill make the two
+    orderings numerically distinguishable."""
+    metric = SSRBiasL1Metric()
+
+    def _cell(members, obs):
+        gen = torch.tensor(members, dtype=torch.float32).reshape(1, -1, 1, 1, 1)
+        target = torch.tensor([[[[[float(obs)]]]]])
+        return target, gen
+
+    # batch 1: members {0, 2}, obs 5 -> spread=|0-2|=2, skill=(5+3)/2=4
+    metric.record(*_cell([0.0, 2.0], 5.0))
+    # batch 2: members {0, 10}, obs 0 -> spread=|0-10|=10, skill=(0+10)/2=5
+    metric.record(*_cell([0.0, 10.0], 0.0))
+    got = float(metric.get().reshape(()))
+    # ratio of the summed terms: (2+10)/(4+5) - 1, NOT the mean of per-batch
+    # ratios 0.5 * ((2/4 - 1) + (10/5 - 1)) = 0.25.
+    expected = (2.0 + 10.0) / (4.0 + 5.0) - 1.0
+    assert math.isclose(got, expected, rel_tol=1e-6, abs_tol=1e-6), got
+    assert not math.isclose(got, 0.25, rel_tol=1e-6, abs_tol=1e-6)
+
+
+def test_ssr_bias_l1_prescribed_cell_is_zero_but_zero_spread_with_error_negative():
+    """A prescribed cell (members identical and equal to the target) is a 0/0
+    and reports 0; a zero-spread cell with nonzero error still gives -1."""
+    torch.manual_seed(0)
+    metric = SSRBiasL1Metric()
+    n_batch, n_sample, n_time, n_y, n_x = 10, 3, 1, 2, 2
+    target = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    # zero spread everywhere: every ensemble member identical
+    single_pred = get_tensor((n_batch, 1, n_time, n_y, n_x))
+    gen = single_pred.expand(n_batch, n_sample, n_time, n_y, n_x).clone()
+    # left column: members also equal the target -> zero skill too (prescribed)
+    gen[..., 0] = target[..., 0]
+    metric.record(target=target, gen=gen)
+    got = metric.get()
+    torch.testing.assert_close(
+        got[..., 0], torch.zeros_like(got[..., 0]), atol=1e-6, rtol=0.0
+    )
+    torch.testing.assert_close(
+        got[..., 1], torch.full_like(got[..., 1], -1.0), atol=1e-6, rtol=0.0
+    )
+
+
+def test_aggregator_ssr_bias_l1_disabled_by_default():
+    """With enable_ssr_bias_l1 unset, no ssr_bias_l1 keys appear in the logs or
+    dataset, and the other families are unchanged."""
+    torch.manual_seed(0)
+    area_weights = torch.ones([4, 4], device=get_device())
+    agg = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=True,
+        target="norm",
+    )
+    names = ["a", "b"]
+    target = _make_ensemble_batch(names)
+    gen = _make_ensemble_batch(names)
+    agg.record_batch(
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    logs = agg.get_logs(label="metrics")
+    assert not any("ssr_bias_l1" in key for key in logs)
+    dataset = agg.get_dataset()
+    assert not any("ssr_bias_l1" in str(key) for key in dataset.data_vars)
+    # the L2 family is still present
+    assert "metrics/ssr_bias/a" in logs
+
+
+def test_aggregator_ssr_bias_l1_enabled_emits_all_shapes():
+    """When enabled, ssr_bias_l1 emits per-variable, mean_map, and (for
+    target='norm') channel_mean entries, matching the other families."""
+    torch.manual_seed(0)
+    area_weights = torch.ones([4, 4], device=get_device())
+    agg = _EnsembleAggregator(
+        gridded_operations=LatLonOperations(area_weights),
+        log_mean_maps=True,
+        target="norm",
+        enable_ssr_bias_l1=True,
+    )
+    names = ["a", "b"]
+    target = _make_ensemble_batch(names)
+    gen = _make_ensemble_batch(names)
+    agg.record_batch(
+        target_data=target,
+        gen_data=gen,
+        target_data_norm=target,
+        gen_data_norm=gen,
+    )
+    logs = agg.get_logs(label="metrics")
+    for name in names:
+        assert f"metrics/ssr_bias_l1/{name}" in logs
+        assert f"metrics/ssr_bias_l1/mean_map/{name}" in logs
+    assert "metrics/ssr_bias_l1/channel_mean" in logs
 
 
 @pytest.mark.parametrize("n_sample", [2, 10])

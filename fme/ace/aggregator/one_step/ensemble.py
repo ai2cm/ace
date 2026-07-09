@@ -36,6 +36,7 @@ def get_one_step_ensemble_aggregator(
     target: Literal["norm", "denorm"] = "denorm",
     channel_mean_names: Sequence[str] | None = None,
     report_variables: Sequence[str] | None = None,
+    enable_ssr_bias_l1: bool = False,
 ) -> "SelectStepEnsembleAggregator":
     return SelectStepEnsembleAggregator(
         aggregator=_EnsembleAggregator(
@@ -45,6 +46,7 @@ def get_one_step_ensemble_aggregator(
             target=target,
             channel_mean_names=channel_mean_names,
             report_variables=report_variables,
+            enable_ssr_bias_l1=enable_ssr_bias_l1,
         ),
         i_target_time=target_time,
     )
@@ -173,6 +175,75 @@ class SSRBiasMetric(ReducedMetric):
         return torch.where(prescribed, torch.zeros_like(spread), ssr_bias)
 
 
+class SSRBiasL1Metric(ReducedMetric):
+    """
+    Computes the L1 (CRPS-consistent) spread-skill ratio bias.
+
+    The bias is ``spread_L1 / skill_L1 - 1`` (target 0 at calibration, same
+    convention as the L2 :class:`SSRBiasMetric`). The two terms are the two
+    CRPS terms:
+
+    - ``spread_L1`` is the *fair* mean pairwise absolute difference,
+      ``1/(N(N-1)) * sum_{i!=j} |x_i - x_j|``. The ``i!=j`` normalization plays
+      the role that unbiased variance plays for the L2 spread.
+    - ``skill_L1`` is the *member* MAE, ``mean_i |x_i - y|`` (member-vs-obs, not
+      ensemble-mean-vs-obs). It is the CRPS skill term and needs no finite-N
+      correction: ``E|X - y|`` is already unbiased, so nothing is subtracted
+      from it (there is no L2-style ``- var/N`` analog for L1).
+
+    At calibration ``E|X - X'| = E|X - y|`` so the ratio -> 1 and the bias -> 0.
+    """
+
+    def __init__(self):
+        self._total_spread = None
+        self._total_skill = None
+        self._n_batches = 0
+
+    def record(self, target: torch.Tensor, gen: torch.Tensor):
+        num_ensemble = gen.shape[1]
+        # fair mean pairwise absolute difference over the ensemble dimension:
+        # sum over i, j of |x_i - x_j| (the i == j terms are 0, so this equals
+        # the i != j sum) divided by N(N-1), then averaged over batch and time.
+        pairwise = (gen.unsqueeze(2) - gen.unsqueeze(1)).abs().sum(dim=(1, 2))
+        spread = (pairwise / (num_ensemble * (num_ensemble - 1))).mean(dim=(0, 1))
+        # member MAE: |x_i - y| averaged over members, batch and time.
+        skill = (gen - target).abs().mean(dim=(0, 1, 2))
+        self._add_spread(spread)
+        self._add_skill(skill)
+        self._n_batches += 1
+
+    def _add_spread(self, spread: torch.Tensor):
+        if self._total_spread is None:
+            self._total_spread = torch.zeros_like(spread)
+        self._total_spread += spread
+
+    def _add_skill(self, skill: torch.Tensor):
+        if self._total_skill is None:
+            self._total_skill = torch.zeros_like(skill)
+        self._total_skill += skill
+
+    def get(self) -> torch.Tensor:
+        if self._total_spread is None or self._total_skill is None:
+            raise ValueError("No batches have been recorded.")
+        spread = self._total_spread
+        skill = self._total_skill
+        # Zero skill with nonzero spread is undefined; use -1 by convention
+        # (also the limit of spread / skill - 1 as spread -> 0 at nonzero skill).
+        ssr_bias = torch.where(
+            skill > 0, spread / skill - 1, torch.full_like(spread, -1.0)
+        )
+        # Prescribed cells (every member equals the target, e.g. SST over ocean)
+        # are a genuine 0/0: zero spread and zero error. Report 0 (perfectly
+        # calibrated) rather than the -1 floor, which would otherwise dominate
+        # the global mean of a mostly-prescribed field. Both terms are exactly 0
+        # there (identical members give |x_i - x_j| = 0 and |x_i - y| = 0), but
+        # test skill against a small fraction of the field's largest value to
+        # match the L2 metric's tolerance to rounding residue.
+        skill_floor = _PRESCRIBED_MSE_RTOL * skill.max()
+        prescribed = (self._total_spread == 0) & (self._total_skill <= skill_floor)
+        return torch.where(prescribed, torch.zeros_like(spread), ssr_bias)
+
+
 class _EnsembleAggregator:
     """
     Aggregator for ensemble-based metrics.
@@ -186,6 +257,7 @@ class _EnsembleAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         channel_mean_names: Sequence[str] | None = None,
         report_variables: Sequence[str] | None = None,
+        enable_ssr_bias_l1: bool = False,
     ):
         """
         Args:
@@ -206,6 +278,9 @@ class _EnsembleAggregator:
                 variables will appear in logs and datasets. Aggregate entries
                 like ``channel_mean`` are always included. All variables are
                 still used for channel-mean computation.
+            enable_ssr_bias_l1: Whether to additionally compute the L1
+                (CRPS-consistent) spread-skill ratio bias (``ssr_bias_l1``).
+                Off by default, so existing runs' logged keys are unchanged.
         """
         self._gridded_operations = gridded_operations
         self._n_batches = 0
@@ -213,8 +288,9 @@ class _EnsembleAggregator:
         self._dist = Distributed.get_instance()
         self._log_mean_maps = log_mean_maps
         self._metadata = metadata
-        self._diverging_metrics = {"ssr_bias"}
+        self._diverging_metrics = {"ssr_bias", "ssr_bias_l1"}
         self._target = target
+        self._enable_ssr_bias_l1 = enable_ssr_bias_l1
         self._channel_mean_names = channel_mean_names
         self._report_variables = (
             frozenset(report_variables) if report_variables is not None else None
@@ -231,12 +307,16 @@ class _EnsembleAggregator:
                 "ssr_bias": {},
                 "ensemble_mean_rmse": {},
             }
+            if self._enable_ssr_bias_l1:
+                self._variable_metrics["ssr_bias_l1"] = {}
             for key in gen_data:
                 self._variable_metrics["crps"][key] = CRPSMetric()
                 self._variable_metrics["ssr_bias"][key] = SSRBiasMetric()
                 self._variable_metrics["ensemble_mean_rmse"][key] = (
                     EnsembleMeanRMSEMetric()
                 )
+                if self._enable_ssr_bias_l1:
+                    self._variable_metrics["ssr_bias_l1"][key] = SSRBiasL1Metric()
         return self._variable_metrics
 
     @torch.no_grad()
@@ -464,6 +544,9 @@ class EnsembleMetricConfig:
             via the build context, and finally to all variables present in
             the data when that is also None. Names not present in the data
             raise KeyError. Ignored when ``target="denorm"``.
+        enable_ssr_bias_l1: Whether to additionally compute the L1
+            (CRPS-consistent) spread-skill ratio bias (``ssr_bias_l1``). Off by
+            default, so existing runs' logged keys are unchanged.
     """
 
     step: int = 20
@@ -473,6 +556,7 @@ class EnsembleMetricConfig:
     strict: bool = False
     target: Literal["norm", "denorm"] = "denorm"
     channel_mean_names: list[str] | None = None
+    enable_ssr_bias_l1: bool = False
 
     def __post_init__(self):
         if self.name is None:
@@ -501,6 +585,7 @@ class EnsembleMetricConfig:
                     if is_norm
                     else None
                 ),
+                enable_ssr_bias_l1=self.enable_ssr_bias_l1,
             )
         )
 
@@ -527,6 +612,9 @@ class OneStepEnsembleMetricConfig:
             via the build context, and finally to all variables present in
             the data when that is also None. Names not present in the data
             raise KeyError. Ignored when ``target="denorm"``.
+        enable_ssr_bias_l1: Whether to additionally compute the L1
+            (CRPS-consistent) spread-skill ratio bias (``ssr_bias_l1``). Off by
+            default, so existing runs' logged keys are unchanged.
     """
 
     name: str | None = None
@@ -535,6 +623,7 @@ class OneStepEnsembleMetricConfig:
     strict: bool = False
     target: Literal["norm", "denorm"] = "denorm"
     channel_mean_names: list[str] | None = None
+    enable_ssr_bias_l1: bool = False
 
     def __post_init__(self):
         if self.name is None:
@@ -557,5 +646,6 @@ class OneStepEnsembleMetricConfig:
                     if is_norm
                     else None
                 ),
+                enable_ssr_bias_l1=self.enable_ssr_bias_l1,
             )
         )
