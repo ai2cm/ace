@@ -8,11 +8,10 @@ throughout (via ``WANDB_SUFFIX``). Two config groups are written to
      10, 30, crossed with co2 bernoulli masking (co2default off / co2bern90 drop
      ``global_mean_co2`` w.p. 0.9). 4 x 2 = 8 configs.
 
-  B. mask-all probability gate: the ``default`` uniform scheme masks *all*
-     variables (``max_masked_vars`` = N, the input-channel count, which caps at
-     the pool size so every fired draw drops the whole pool) and is gated by a
-     ``probability`` that it fires on any given batch. Probabilities 1.00, 0.80,
-     0.50, 0.20 crossed with the same co2 axis. 4 x 2 = 8 configs.
+  B. probability gate: the ``default`` uniform scheme masks up to ``MASK_ALL``
+     (40) variables and is gated by a ``probability`` that it fires on any given
+     batch. Probabilities 1.00, 0.80, 0.50, 0.20 crossed with the same co2 axis.
+     4 x 2 = 8 configs.
 
 global_mean_co2 is already an input channel in the base configs
 (in_names + next_step_forcing_names).
@@ -36,7 +35,8 @@ CO2_FIELD = "global_mean_co2"
 MASK_LEVELS = [0, 5, 10, 30]  # uniform default max_masked_vars
 CO2_OPTIONS = {"co2default": None, "co2bern90": 0.9}
 
-# Group B factor: probability the mask-all uniform scheme fires on a batch.
+# Group B: uniform 0-MASK_ALL masking gated by a per-batch firing probability.
+MASK_ALL = 40
 MASK_PROBABILITIES = [1.00, 0.80, 0.50, 0.20]
 
 HERE = pathlib.Path(__file__).parent
@@ -136,9 +136,6 @@ def generate_configs(fetch_wandb: bool = False) -> None:
     for model in BASE_MODELS:
         base_config = BASELINE_CONFIGS_DIR / f"{model.stem}.yaml"
         base = yaml.safe_load(base_config.read_text())
-        in_names = list(base["stepper"]["step"]["config"]["in_names"])
-        # N caps max_masked_vars at the pool size, so a fired draw masks all vars.
-        mask_all = len(in_names)
 
         wandb_run_names: set[str] | None = None
         if fetch_wandb:
@@ -153,13 +150,13 @@ def generate_configs(fetch_wandb: bool = False) -> None:
                 name = f"{model.stem}-mask{mask_level}-{co2_name}"
                 _write_config(base, dropout, name, model.project, wandb_run_names)
 
-        # Group B: mask-all uniform scheme, probability-gated, x co2.
+        # Group B: uniform 0-MASK_ALL scheme, probability-gated, x co2.
         for co2_name, co2_rate in CO2_OPTIONS.items():
             for probability in MASK_PROBABILITIES:
                 dropout = _build_input_dropout(
-                    mask_all, co2_rate, probability=probability
+                    MASK_ALL, co2_rate, probability=probability
                 )
-                name = f"{model.stem}-mask{mask_all}-{co2_name}-mask{probability:.2f}"
+                name = f"{model.stem}-mask{MASK_ALL}-{co2_name}-mask{probability:.2f}"
                 _write_config(base, dropout, name, model.project, wandb_run_names)
 
 
