@@ -117,6 +117,26 @@ def test_reduce_max_selects_largest_rank():
 
 
 @pytest.mark.parallel
+def test_broadcast_spatial_uses_spatial_root():
+    """broadcast_spatial overwrites spatial co-ranks with the spatial root.
+
+    Each rank fills a tensor with its global rank.  After broadcast every rank
+    in a spatial group must hold the value of that group's root (spatial index
+    0), while data-parallel groups keep distinct values.  For a row-major
+    (data, h, w) mesh the spatial-group root global rank is
+    ``data_parallel_rank * spatial_size``.  With no spatial parallelism
+    (``spatial_size == 1``) this reduces to the rank's own value (identity).
+    """
+    dist = Distributed.get_instance()
+    n_dp = dist.total_data_parallel_ranks
+    spatial_size = dist.world_size // n_dp
+    t = torch.full((2, 3), float(dist.rank), device=get_device())
+    result = dist.broadcast_spatial(t)
+    expected_val = float(dist.data_parallel_rank * spatial_size)
+    torch.testing.assert_close(result, torch.full_like(result, expected_val))
+
+
+@pytest.mark.parallel
 def test_gather_produces_correct_count():
     """Root should receive one tensor per global rank; others get None."""
     dist = Distributed.get_instance()

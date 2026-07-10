@@ -251,6 +251,10 @@ era5_1deg_stats_beaker_dataset:
 era5_1deg_16layer_stats_beaker_dataset:
 	./compute_stats.sh --config configs/era5-1deg-16layer-1940-2022.yaml
 
+.PHONY: era5_2deg_stats_beaker_dataset
+era5_2deg_stats_beaker_dataset:
+	./compute_stats.sh --config configs/era5-2deg-8layer-1940-2025.yaml
+
 .PHONY: compute_cm4_trial_run_atmosphere_dataset
 compute_cm4_trial_run_atmosphere_dataset:
 	python -u compute_dataset.py \
@@ -264,11 +268,11 @@ compute_cm4_trial_run_atmosphere_stats:
 
 .PHONY: cm4_picontrol_atmosphere_8layer_200yr
 cm4_picontrol_atmosphere_8layer_200yr:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)deg-8layer-200yr.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)-8layer-200yr.yaml
 
 .PHONY: cm4_1pctCO2_atmosphere_8layer_140yr
 cm4_1pctCO2_atmosphere_8layer_140yr:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)deg-8layer-140yr.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)-8layer-140yr.yaml
 
 .PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
 cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
@@ -354,7 +358,7 @@ e3smv3_piControl_100yr_coupled:
 
 .PHONY: cm4_like_am4_random_co2_ensemble_atmosphere
 cm4_like_am4_random_co2_ensemble_atmosphere:
-	./compute_dataset.sh --dataset --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)-8layer.yaml
 
 .PHONY:
 cm4_like_am4_random_co2_ensemble_coupled:
@@ -362,4 +366,12 @@ cm4_like_am4_random_co2_ensemble_coupled:
 
 .PHONY: shield_amip_constant_co2_c96_dataset
 shield_amip_constant_co2_c96_dataset:
-	./compute_dataset.sh --config configs/shield-amip-constant-co2-c96-1deg-8layer.yaml
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-amip-constant-co2-c96-$(RESOLUTION)-$(LAYERS).yaml
+
+.PHONY: shield_amip_p2k_c96_dataset
+shield_amip_p2k_c96_dataset:
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-amip-p2k-c96-$(RESOLUTION)-$(LAYERS).yaml
+
+.PHONY: shield_amip_p4k_c96_dataset
+shield_amip_p4k_c96_dataset:
+	./compute_dataset.sh --dataset --stats --time-coarsen --config configs/shield-amip-p4k-c96-$(RESOLUTION)-$(LAYERS).yaml
