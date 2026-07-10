@@ -19,6 +19,7 @@ inference:
       dataset:
         data_path: /climate-default
         file_pattern: 2026-06-29-ufs-replay-ocean-1deg-19level-5day-1994-2023.zarr
+        engine: zarr
       num_data_workers: 4
     aggregator:
       histogram:
