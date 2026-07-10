@@ -587,7 +587,6 @@ class InferenceEvaluatorAggregator(
             raise ValueError("No target values in data")
         if self._step_diagnostics_aggregator is not None:
             self._step_diagnostics_aggregator.record_batch(
-                prediction=data.prediction,
                 step_diagnostics=data.step_diagnostics,
                 i_time_start=self._n_timesteps_seen,
             )
@@ -946,7 +945,6 @@ class InferenceAggregator(
             raise ValueError("data is empty")
         if self._step_diagnostics_aggregator is not None:
             self._step_diagnostics_aggregator.record_batch(
-                prediction=data.prediction,
                 step_diagnostics=data.step_diagnostics,
                 i_time_start=self._n_timesteps_seen,
             )

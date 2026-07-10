@@ -85,7 +85,6 @@ def test_correction_delta_aggregator_normalizes_without_mean():
     agg = build_delta_aggregator(normalize=normalizer.normalize)
     delta = {"a": constant_tensor(8.0)}
     agg.record_batch(
-        prediction=delta,
         step_diagnostics=StepDiagnostics(delta=delta),
         i_time_start=0,
     )
@@ -102,19 +101,6 @@ def test_correction_delta_aggregator_raises_on_unknown_delta_key():
     delta = {"b": constant_tensor(1.0)}
     with pytest.raises(ValueError, match="b"):
         agg.record_batch(
-            prediction=delta,
-            step_diagnostics=StepDiagnostics(delta=delta),
-            i_time_start=0,
-        )
-
-
-def test_correction_delta_aggregator_raises_on_time_dim_mismatch():
-    agg = build_delta_aggregator()
-    prediction = {"a": constant_tensor(1.0, n_time=3)}
-    delta = {"a": constant_tensor(1.0, n_time=2)}
-    with pytest.raises(ValueError, match="time-aligned"):
-        agg.record_batch(
-            prediction=prediction,
             step_diagnostics=StepDiagnostics(delta=delta),
             i_time_start=0,
         )

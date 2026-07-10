@@ -37,7 +37,6 @@ class StepDiagnosticsSubAggregator(Protocol):
 
     def record_batch(
         self,
-        prediction: TensorMapping,
         step_diagnostics: StepDiagnostics | None,
         i_time_start: int,
     ) -> None: ...
@@ -66,12 +65,11 @@ class StepDiagnosticsAggregator:
 
     def record_batch(
         self,
-        prediction: TensorMapping,
         step_diagnostics: StepDiagnostics | None,
         i_time_start: int,
     ) -> None:
         for aggregator in self._aggregators.values():
-            aggregator.record_batch(prediction, step_diagnostics, i_time_start)
+            aggregator.record_batch(step_diagnostics, i_time_start)
 
     def summary_logs(self) -> dict[str, Any]:
         logs: dict[str, Any] = {}
@@ -210,27 +208,16 @@ class CorrectionDeltaAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        prediction: TensorMapping,
         step_diagnostics: StepDiagnostics | None,
         i_time_start: int,
     ) -> None:
         if step_diagnostics is None:
             # no corrector ran, or the prediction pipeline does not attach
-            # diagnostics (e.g. coupled inference)
+            # diagnostics
             return
         delta = step_diagnostics.delta
         if not delta:
             return
-        time_dim = 1
-        n_times = next(iter(prediction.values())).shape[time_dim]
-        for name, tensor in delta.items():
-            if tensor.shape[time_dim] != n_times:
-                raise ValueError(
-                    "The step diagnostics delta must be time-aligned with the "
-                    f"prediction data, but delta '{name}' has "
-                    f"{tensor.shape[time_dim]} timesteps while the prediction "
-                    f"has {n_times}."
-                )
         correction_norm = self._normalize(delta, apply_mean=False)
         missing = set(delta) - set(correction_norm)
         if missing:
