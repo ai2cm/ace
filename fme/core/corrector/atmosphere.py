@@ -124,7 +124,14 @@ class ZeroGlobalMeanMoistureAdvection:
 
 @dataclasses.dataclass
 class MoistureBudgetCorrection:
-    """Correction that closes the moisture budget via the configured terms."""
+    """Correction that closes the moisture budget via the configured terms.
+
+    After closing the moisture budget, the frozen precipitation rate
+    (``total_frozen_precipitation_rate``) is clipped to the -- possibly corrected
+    -- total precipitation rate when frozen precipitation is predicted, since
+    frozen precipitation is a component of total precipitation and cannot exceed
+    it.
+    """
 
     area_weighted_mean: AreaWeightedMean
     vertical_coordinate: HasAtmosphereVerticalIntegral | None
@@ -161,7 +168,11 @@ class MoistureBudgetCorrection:
             timestep_seconds=self.timestep_seconds,
             terms_to_modify=self.terms_to_modify,
         )
-        return corrected, corrector_state
+        # Clip frozen precipitation against the (possibly corrected) total
+        # precipitation rate. Done here, after the budget correction, so the
+        # ceiling is the final precipitation rate.
+        frozen_clip = _clip_frozen_precipitation({**gen_data, **corrected})
+        return {**corrected, **frozen_clip}, corrector_state
 
 
 @dataclasses.dataclass
@@ -285,6 +296,14 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
               advective tendency as the budget residual,
               ensuring column budget closure.
 
+            Whenever this correction is enabled and the frozen precipitation rate
+            (``total_frozen_precipitation_rate``) is predicted, it is additionally
+            clipped to be less than or equal to the -- possibly corrected -- total
+            precipitation rate (``PRATEsfc``) in each grid cell, since frozen
+            precipitation is a component of total precipitation. This clip runs
+            before any ``total_energy_budget_correction``, since frozen
+            precipitation contributes to the surface energy flux via the latent
+            heat of freezing.
         force_positive_names: Names of fields that should be forced to be greater
             than or equal to zero. This is useful for fields like precipitation.
         total_energy_budget_correction: If not None, force the generated data to
@@ -460,6 +479,31 @@ def _force_zero_global_mean_moisture_advection(
     gen.set_tendency_of_total_water_path_due_to_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
+    )
+    return gen.modified_data
+
+
+def _clip_frozen_precipitation(gen_data: TensorMapping) -> TensorDict:
+    """
+    Clip the frozen precipitation rate to be at most the total precipitation rate.
+
+    Frozen precipitation is a component of total precipitation, so its rate cannot
+    physically exceed the total precipitation rate. This clips
+    ``total_frozen_precipitation_rate`` to ``min(total_frozen_precipitation_rate,
+    PRATEsfc)`` in each grid cell.
+
+    If the frozen precipitation rate is not among the generated fields (i.e. it is
+    not predicted), this is a no-op and returns an empty mapping.
+
+    Args:
+        gen_data: The generated data, which must contain the total precipitation
+            rate when the frozen precipitation rate is predicted.
+    """
+    if "total_frozen_precipitation_rate" not in gen_data:
+        return {}
+    gen = AtmosphereData(gen_data)
+    gen.set_frozen_precipitation_rate(
+        torch.minimum(gen.frozen_precipitation_rate, gen.precipitation_rate)
     )
     return gen.modified_data
 
