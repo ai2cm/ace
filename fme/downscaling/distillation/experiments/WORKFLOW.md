@@ -9,6 +9,12 @@ report-out**. The central log is [`LOG.md`](LOG.md); per-run reports live in
 > [`../MOE_DISTILLATION_STATUS.md`](../MOE_DISTILLATION_STATUS.md). New work is
 > tracked here.
 
+> **Environment — always prefix with `conda run -n fme`.** Every `beaker`,
+> `gantry`, and `python -m fme...` invocation in this workflow must run inside the
+> `fme` conda environment (`conda run -n fme <cmd>`). This includes the bare
+> `beaker experiment logs <ULID>` commands shown below, not just the `run.sh` and
+> `check_runs` examples that already spell it out.
+
 > **Agent note — capture recurring operations.** If an assistant finds itself
 > repeating a step of this workflow that isn't already captured under
 > `experiments/` (i.e. not in this file, `LOG.md`, `reports/`, `templates/`, or
@@ -59,7 +65,7 @@ conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.s
   grep 'View run at'`).
 - **Verify it reached the training loop** before walking away:
   ```
-  beaker experiment logs <ULID> | grep -iE "input_shape|Spectral matching|gan_loss_weight_gen|iter 1|error|traceback"
+  conda run -n fme beaker experiment logs <ULID> | grep -iE "input_shape|Spectral matching|gan_loss_weight_gen|iter 1|error|traceback"
   ```
   Expect `input_shape ... C_out=N`, any enabled-loss lines, and an `iteration 1`
   log with no traceback.
