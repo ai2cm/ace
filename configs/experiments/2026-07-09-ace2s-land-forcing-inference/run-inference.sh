@@ -1,16 +1,17 @@
 #!/bin/bash
 # One launcher for all ACE2S land-forcing short-lead evaluation runs.
 # Each run is a single-GPU `fme.ace.evaluator` job that rolls the model 40 steps (~10 days) from
-# ~300 ICs, computes near-surface skill vs the target, and writes paired prediction+target fields
-# to a GCS zarr. Two dataset configs (era5.yaml, cm4.yaml) are reused across checkpoints; the
-# checkpoint is mounted at /ckpt.tar and the per-run experiment_dir is set via --override.
+# 100 ICs, computes near-surface skill vs the target, and writes paired prediction+target fields to
+# a GCS zarr. Two dataset configs (era5.yaml, cm4.yaml) are reused across checkpoints, each split
+# into 3 interleaved 100-IC chunks (300 total/checkpoint); checkpoint mounted at /ckpt.tar,
+# per-run experiment_dir + IC `first` set via --override.
 #
 # Usage:
-#   ./run-inference.sh                 # submit every run
+#   ./run-inference.sh                 # submit every run (6 checkpoints x 3 chunks = 18 jobs)
 #   ./run-inference.sh era5            # only runs whose config/job name matches this substring
-#   ./run-inference.sh snow            # e.g. just the two snow treatments
-# Recommended: run one pilot (small n_initial_conditions / n_forward_steps to a scratch path)
-# first, confirm the GCS zarr has the derived + component vars, then submit the rest.
+#   ./run-inference.sh -c0             # e.g. only chunk 0 across all checkpoints
+# Recommended: submit one chunk of one checkpoint first, confirm the GCS zarr has the derived +
+# component vars and GPU memory sits ~68%, then submit the rest.
 
 set -e
 
@@ -44,43 +45,58 @@ CM4_SOIL=01KX1RVPA4YQYZK9NK76ZEPWMJ
 # from); the pretrain jobs' best_inference_ckpt.tar is selected on a 7300-step rollout, i.e. the
 # confounded long-rollout regime, so it is not used here. Controls default to best_inference_ckpt
 # (their as-deployed checkpoint).
+# Each checkpoint is run as 3 interleaved IC chunks of 100 ICs (memory-safe on the B200; 300
+# total). The chunks tile each dataset's holdout at the dense stride baked into the config's
+# `interval`; chunk c just shifts `first` by one stride. ERA5 dense stride 60 steps (15 days) ->
+# firsts 84738/84798/84858; CM4 192 steps (48 days) -> 233600/233792/233984. Outputs go to
+# <job>-c{0,1,2}; concatenate the 3 zarrs per checkpoint on the sample axis downstream.
 submit() {
     local config="$1" ckpt="$2" job="$3" ckpt_file="${4:-training_checkpoints/best_ckpt.tar}"
-    if [ -n "$SELECT" ] && [[ "$config" != *"$SELECT"* ]] && [[ "$job" != *"$SELECT"* ]]; then
-        return 0
-    fi
     if [ -z "$ckpt" ]; then
         echo "SKIP $job: checkpoint ID not set" >&2
         return 0
     fi
     local config_path="${CONFIG_DIR}/${config}"
+    local firsts
+    case "$config" in
+        era5.yaml) firsts=(84738 84798 84858) ;;
+        cm4.yaml)  firsts=(233600 233792 233984) ;;
+        *) echo "unknown config $config" >&2; return 1 ;;
+    esac
     python -m fme.ace.validate_config --config_type evaluator "$config_path"
-    gantry run \
-        --name "$job" \
-        --task-name "$job" \
-        --description "ACE2S land-forcing eval: ${job}" \
-        --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-        --workspace ai2/ace \
-        --priority high \
-        --preemptible \
-        --cluster ai2/titan \
-        --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-        --env WANDB_USERNAME="$WANDB_USERNAME" \
-        --env WANDB_NAME="$job" \
-        --env WANDB_JOB_TYPE=inference \
-        --env WANDB_RUN_GROUP="$JOB_GROUP" \
-        --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-        --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
-        --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset "$ckpt:${ckpt_file}:/ckpt.tar" \
-        --gpus 1 \
-        --shared-memory 400GiB \
-        --weka climate-default:/climate-default \
-        --budget ai2/atec-climate \
-        --system-python \
-        --install "pip install --no-deps ." \
-        -- python -I -m fme.ace.evaluator "$config_path" \
-             --override "experiment_dir=${GCS_PREFIX}/${job}"
+    local c
+    for c in 0 1 2; do
+        local cjob="${job}-c${c}"
+        if [ -n "$SELECT" ] && [[ "$config" != *"$SELECT"* ]] && [[ "$cjob" != *"$SELECT"* ]]; then
+            continue
+        fi
+        gantry run \
+            --name "$cjob" \
+            --task-name "$cjob" \
+            --description "ACE2S land-forcing eval: ${cjob}" \
+            --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
+            --workspace ai2/ace \
+            --priority high \
+            --preemptible \
+            --cluster ai2/titan \
+            --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+            --env WANDB_USERNAME="$WANDB_USERNAME" \
+            --env WANDB_NAME="$cjob" \
+            --env WANDB_JOB_TYPE=inference \
+            --env WANDB_RUN_GROUP="$JOB_GROUP" \
+            --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+            --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+            --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+            --dataset "$ckpt:${ckpt_file}:/ckpt.tar" \
+            --gpus 1 \
+            --shared-memory 400GiB \
+            --weka climate-default:/climate-default \
+            --budget ai2/atec-climate \
+            --system-python \
+            --install "pip install --no-deps ." \
+            -- python -I -m fme.ace.evaluator "$config_path" \
+                 --override "experiment_dir=${GCS_PREFIX}/${cjob}" "loader.start_indices.first=${firsts[$c]}"
+    done
 }
 
 cd "$REPO_ROOT"  # so the config paths resolve regardless of where this is run from
