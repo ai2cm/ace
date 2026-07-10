@@ -64,6 +64,7 @@ submit() {
         --priority high \
         --preemptible \
         --cluster ai2/titan \
+        --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
         --env WANDB_USERNAME="$WANDB_USERNAME" \
         --env WANDB_NAME="$job" \
         --env WANDB_JOB_TYPE=inference \

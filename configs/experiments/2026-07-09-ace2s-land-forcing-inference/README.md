@@ -10,7 +10,7 @@ treatment checkpoints come from `exp/ace2s-land-forcing-training`
 
 ## Design
 
-Each run rolls the model 40 steps from ~300 ICs, computes skill vs the target (RMSE/bias vs lead
+Each run rolls the model 40 steps from 150 ICs, computes skill vs the target (RMSE/bias vs lead
 time, logged to W&B), and writes paired **prediction + target** fields to one GCS zarr per run.
 Both prediction and target flow through the same derived-variable computation, so
 `surface_evaporative_fraction` and `implied_surface_albedo` are skill-scored on both sides.
@@ -83,17 +83,26 @@ treatment and control checkpoints**, so the IC window is out-of-sample for every
 
 - **IC selection**: explicit datestrings (`start_indices.times`), generated from the datasets'
   verified time axes (read from the GCS mirrors: ERA5 record `1940-01-01T12:00`→`2025-12-31T18:00`,
-  125646 steps; CM4 noleap `0151-01-01T06:00`→`0351-01-01T00:00`, 292000 steps). 300 ICs each:
-  ERA5 every 15 days from `1998-01-01T00:00` (last `2010-04-13`, before the 2011 train block); CM4
-  every 48 days from `0311-01-01T06:00` (last `0350-04-28`). Spacing > the 40-step window (no
+  125646 steps; CM4 noleap `0151-01-01T06:00`→`0351-01-01T00:00`, 292000 steps). 150 ICs each:
+  ERA5 every 31 days from `1998-01-01T00:00` (last `2010-08-25`, before the 2011 train block); CM4
+  every 97 days from `0311-01-01T06:00` (last `0350-08-07`; 97 does not divide 365, so no seasonal
+  aliasing). Spacing > the 40-step window (no
   overlap) and non-commensurate with the annual cycle, so ICs precess through the seasons
   (≈24–27 ICs/month). Regenerate via the `xr.open_zarr(...).time` + fixed-stride recipe if the
   count/window changes.
-- **GPU memory lever**: peak ≈ `n_initial_conditions × forward_steps_in_memory`. Runs on titan
-  B200s (192 GB). `forward_steps_in_memory: 1` → 300 in-flight IC-steps; `= 2` (600) OOMed the
-  B200 because the evaluator holds prediction *and* target (~2× the land-feedback `inference`
-  footprint at the same IC-steps). If a job still OOMs, reduce `n_initial_conditions`.
-- **Shared memory (`/dev/shm`)**: the IC load batches all 300 samples at once (~15 GiB) and the
+- **GPU memory lever**: peak GPU memory scales with the IC batch `n_initial_conditions`
+  (× `forward_steps_in_memory`, held at 1). Runs on titan B200s (~178 GiB usable). Calibration
+  from the land-feedback `fme.ace.inference` runs (W&B "GPU Memory Allocated"): ERA5 96×2 = 192
+  IC-steps ≈ 100% → a ceiling of ~190 IC-steps. (CM4 read ~70% at 156 IC-steps, but there's no
+  a priori reason for a dataset difference — same architecture/resolution — so that gap is treated
+  as reporting noise and both datasets use the same ceiling.) The evaluator holds
+  prediction + target + normalized copies per window, but that's a few GB on top of the
+  model-forward activations that dominate, so it is ≈ the inference footprint, not 2×. 300 ICs
+  OOMed. `n_initial_conditions: 150` (~80% of the ~190 ceiling) leaves margin for that small
+  overhead + reporting jitter without wasting the GPU; confirm against the W&B peak on the first
+  successful run and adjust if warranted. `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+  (launcher) reduces fragmentation.
+- **Shared memory (`/dev/shm`)**: the IC load batches all ICs at once (~8 GiB at 150) and the
   DataLoader workers double-buffer it, so the launcher requests `--shared-memory 400GiB` (the
   land-feedback recipe's 50 GiB is too small at 300 ICs and caused worker bus errors). Kept to
   `num_data_workers: 4` to bound the concurrent worker footprint, which also eases co-location when
@@ -105,7 +114,7 @@ treatment and control checkpoints**, so the IC window is out-of-sample for every
   while controls use `best_inference_ckpt.tar` (best long-rollout inference). Strictly matching
   would require the controls' own 1-step-pretrain `best_ckpt.tar`; that's deliberately not pursued
   here as the effect on short-lead skill is expected to be minor.
-- **ERA5 holdout is small** (1998–2010 + 2020, ~14 yr); 300 ICs across 1998–2010 are fairly dense.
+- **ERA5 holdout is small** (1998–2010 + 2020, ~14 yr); 150 ICs across 1998–2010 are fairly dense.
 - **Code dependency**: the `surface_evaporative_fraction` / `implied_surface_albedo` derived
   variables come from commit `c97b4bcc6` (branch `feature/surface-ef-isa-derived-variables`),
   cherry-picked onto this branch. Drop the cherry-pick once it lands on main.
