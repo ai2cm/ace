@@ -73,7 +73,7 @@ submit() {
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset "$ckpt:${ckpt_file}:/ckpt.tar" \
         --gpus 1 \
-        --shared-memory 50GiB \
+        --shared-memory 400GiB \
         --weka climate-default:/climate-default \
         --budget ai2/atec-climate \
         --system-python \

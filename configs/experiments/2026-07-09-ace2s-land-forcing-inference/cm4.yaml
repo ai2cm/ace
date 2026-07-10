@@ -322,7 +322,7 @@ loader:
       - '0350-01-22T06:00:00'
       - '0350-03-11T06:00:00'
       - '0350-04-28T06:00:00'
-  num_data_workers: 8
+  num_data_workers: 4
 data_writer:
   save_prediction_files: false
   save_monthly_files: false

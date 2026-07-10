@@ -89,8 +89,13 @@ treatment and control checkpoints**, so the IC window is out-of-sample for every
   overlap) and non-commensurate with the annual cycle, so ICs precess through the seasons
   (≈24–27 ICs/month). Regenerate via the `xr.open_zarr(...).time` + fixed-stride recipe if the
   count/window changes.
-- **Memory lever**: peak ≈ `n_initial_conditions × forward_steps_in_memory` (300 × 2 = 600
-  in-flight IC-steps). If a job OOMs, drop `forward_steps_in_memory` to 1 or reduce ICs.
+- **GPU memory lever**: peak ≈ `n_initial_conditions × forward_steps_in_memory` (300 × 2 = 600
+  in-flight IC-steps). If a job OOMs on the GPU, drop `forward_steps_in_memory` to 1 or reduce ICs.
+- **Shared memory (`/dev/shm`)**: the IC load batches all 300 samples at once (~15 GiB) and the
+  DataLoader workers double-buffer it, so the launcher requests `--shared-memory 400GiB` (the
+  land-feedback recipe's 50 GiB is too small at 300 ICs and caused worker bus errors). Kept to
+  `num_data_workers: 4` to bound the concurrent worker footprint, which also eases co-location when
+  several single-GPU jobs share a node. If shm errors persist, lower `num_data_workers` further.
 - **Recipe caveat**: treatments are 1-step pretrain models while the controls are the deployed
   multi-step-finetuned checkpoints, so a skill delta blends the land-forcing effect with the
   training-recipe difference. A 1-step control would isolate land forcing if one is available.
