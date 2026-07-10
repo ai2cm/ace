@@ -1,0 +1,116 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 20
+inference:
+  - name: inference
+    weight: 1.0
+    n_forward_steps: 880
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0425-01-03T12:00:00'
+        - '0436-01-03T12:00:00'
+        - '0447-01-03T12:00:00'
+        - '0458-01-03T12:00:00'
+        - '0469-01-03T12:00:00'
+        - '0480-01-03T12:00:00'
+        - '0491-01-03T12:00:00'
+        - '0502-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+          engine: zarr
+      num_data_workers: 2
+  - name: 12yr_test
+    weight: 0.0
+    epochs:
+      start: 0
+      step: 5
+    n_forward_steps: 880
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+        - '0515-01-03T12:00:00'
+        - '0515-06-02T12:00:00'
+        - '0515-11-04T12:00:00'
+        - '0516-04-03T12:00:00'
+        - '0516-09-05T12:00:00'
+        - '0517-02-02T12:00:00'
+        - '0517-07-02T12:00:00'
+        - '0518-01-03T12:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+          engine: zarr
+      num_data_workers: 2
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ocean-emulator-e3sm
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 2
+  prefetch_factor: 1
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03'
+        stop_time: '0515-01-01'
+    - data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+      engine: zarr
+      subset:
+        start_time: '0425-01-03'
+        stop_time: '0515-01-01'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 2
+    prefetch_factor: 1
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-03'
+          stop_time: '0520-01-01'
+      - data_path: /climate-default
+        file_pattern: 2026-06-02-E3SMv3-piControl-ocean-105yr-5D-average.zarr
+        engine: zarr
+        subset:
+          start_time: '0515-01-03'
+          stop_time: '0520-01-01'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_forward_steps: 8
+  parameter_init:
+    weights_path: /ckpt.tar
+  loss:
+    type: MSE

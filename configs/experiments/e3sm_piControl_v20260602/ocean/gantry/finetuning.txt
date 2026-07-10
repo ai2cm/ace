@@ -1,0 +1,3 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+BK-v20260602-Samudra-piControl-105yr-upsample-fix-nfw-8|rs1|ocean-emulator-e3sm|r7md74qg|best_inference_ckpt|train|high|h100|4|500GiB|3||stepper_training.n_forward_steps=8 max_epochs=20 seed=0
+BK-v20260602-Samudra-piControl-105yr-upsample-fix-nfw-8|rs0|ocean-emulator-e3sm|zcudmyj8|best_inference_ckpt|train|high|h100|4|500GiB|3||stepper_training.n_forward_steps=8 max_epochs=20 seed=0
