@@ -74,6 +74,51 @@ def test_samudra_norm_kwargs():
             assert not module.track_running_stats
 
 
+@pytest.mark.parametrize("n_vector_outputs", [1, 12])
+def test_samudra_vector_readout_head(n_vector_outputs):
+    torch.manual_seed(0)
+    input_channels = 4
+    output_channels = 20
+    batch_size = 2
+    height, width = 16, 32
+    model = Samudra(
+        input_channels=input_channels,
+        output_channels=output_channels,
+        ch_width=[8, 16],
+        dilation=[1, 2],
+        n_layers=[1, 1],
+        norm="instance",
+        n_vector_outputs=n_vector_outputs,
+    )
+    x = torch.randn(batch_size, input_channels, height, width)
+    out = model(x)
+
+    assert out.shape == (batch_size, output_channels, height, width)
+    assert not torch.isnan(out).any()
+
+    # The last n_vector_outputs channels come from the MLP readout and are
+    # broadcast across space, so they are spatially homogeneous by construction.
+    vector_channels = out[:, output_channels - n_vector_outputs :]
+    spatial_std = vector_channels.reshape(batch_size, n_vector_outputs, -1).std(dim=-1)
+    torch.testing.assert_close(
+        spatial_std, torch.zeros_like(spatial_std), atol=1e-5, rtol=0
+    )
+    # Any pixel recovers the same per-sample vector value.
+    torch.testing.assert_close(vector_channels[..., 0, 0], vector_channels[..., -1, -1])
+
+
+def test_samudra_vector_readout_requires_field_outputs():
+    with pytest.raises(ValueError):
+        Samudra(
+            input_channels=4,
+            output_channels=3,
+            ch_width=[8, 16],
+            dilation=[1, 2],
+            n_layers=[1, 1],
+            n_vector_outputs=3,  # must be < output_channels
+        )
+
+
 def test_samudra_output_is_unchanged():
     torch.manual_seed(0)
     input_channels = 2

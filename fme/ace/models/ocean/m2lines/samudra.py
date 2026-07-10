@@ -33,6 +33,19 @@ class Samudra(torch.nn.Module):
         Normalization to use in the network, by default "instance"
         Options are "batch", "layer", "instance", or None
         "layer" normalization normalizes over only the channel dimensions
+    n_vector_outputs : int, optional
+        Number of output channels produced by an MLP readout head instead of the
+        final convolution, by default 0 (disabled). When > 0, the last
+        ``n_vector_outputs`` of the ``output_channels`` are predicted as a
+        per-sample vector by globally average-pooling the penultimate feature map
+        and passing it through an MLP, then broadcasting each scalar across the
+        spatial grid. This guarantees those outputs are spatially homogeneous by
+        construction (useful for scalar targets such as a Nino3.4 index vector).
+        The remaining ``output_channels - n_vector_outputs`` are produced by the
+        usual final convolution and are ordered first.
+    vector_hidden_dim : int, optional
+        Hidden dimension of the readout MLP; defaults to the penultimate feature
+        width. Ignored when ``n_vector_outputs == 0``.
 
     Example:
     --------
@@ -63,11 +76,23 @@ class Samudra(torch.nn.Module):
         norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
         checkpoint_strategy: Literal["all", "simple"] | None = None,
+        n_vector_outputs: int = 0,
+        vector_hidden_dim: int | None = None,
     ):
         super().__init__()
 
+        if n_vector_outputs < 0:
+            raise ValueError("n_vector_outputs must be non-negative")
+        if n_vector_outputs >= output_channels:
+            raise ValueError(
+                "n_vector_outputs must be smaller than output_channels "
+                f"(got n_vector_outputs={n_vector_outputs}, "
+                f"output_channels={output_channels})"
+            )
+
         self.input_channels = input_channels
         self.output_channels = output_channels
+        self.n_vector_outputs = n_vector_outputs
         self.hist = 0  # Fixed
         self.ch_width = ch_width
         self.dilation = dilation
@@ -144,17 +169,34 @@ class Samudra(torch.nn.Module):
                 checkpoint_strategy=self.checkpoint_strategy,
             )
         )
-        layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
+        # The final convolution produces only the spatial (field) outputs; any
+        # vector-readout outputs are produced by the MLP head below and appended.
+        n_field_outputs = self.output_channels - self.n_vector_outputs
+        layers.append(torch.nn.Conv2d(b, n_field_outputs, self.last_kernel_size))
 
         self.layers = nn.ModuleList(layers)
         self.num_steps = int(len(ch_width_with_input) - 1)
 
+        # MLP readout head: globally pool the penultimate feature map (``b``
+        # channels feed the final convolution) and map to a per-sample vector.
+        if self.n_vector_outputs > 0:
+            hidden_dim = vector_hidden_dim if vector_hidden_dim is not None else b
+            self.vector_readout: nn.Module = nn.Sequential(
+                nn.Linear(b, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, self.n_vector_outputs),
+            )
+
     def forward(self, fts):
         temp: list[torch.Tensor] = []
         count = 0
+        penultimate: torch.Tensor | None = None
         for layer in self.layers:
             crop = fts.shape[2:]
             if isinstance(layer, nn.Conv2d):
+                # Capture the feature map feeding the final convolution; the MLP
+                # readout head reads it (before padding) to produce the vector.
+                penultimate = fts
                 fts = torch.nn.functional.pad(
                     fts, (self.N_pad, self.N_pad, 0, 0), mode=self.pad
                 )
@@ -182,4 +224,15 @@ class Samudra(torch.nn.Module):
                     fts = nn.functional.pad(fts, pads_tb, mode="constant")
                     fts += temp[int(2 * self.num_steps - count - 1)]
                     count += 1
+        if self.n_vector_outputs > 0:
+            assert penultimate is not None  # a final Conv2d always runs
+            # Global average pool over the spatial dims -> (batch, channels).
+            pooled = penultimate.mean(dim=(-2, -1))
+            vector = self.vector_readout(pooled)  # (batch, n_vector_outputs)
+            # Broadcast each scalar across the spatial grid so the output stays
+            # a standard (batch, channel, lat, lon) tensor; these channels are
+            # spatially homogeneous by construction.
+            height, width = fts.shape[-2], fts.shape[-1]
+            vector_field = vector[..., None, None].expand(-1, -1, height, width)
+            fts = torch.cat([fts, vector_field], dim=1)
         return fts
