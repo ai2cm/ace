@@ -2,9 +2,11 @@
 
 set -e
 
-JOB_NAME="ace2s-shieldplus-tuned-xshield-inference-best-val-ckpt"
+JOB_NAME="ace2s-era5-1step-tuned-xshield-inference-best-inf-ckpt"
 JOB_GROUP=""
-EXISTING_RESULTS_DATASET="01KWMYV98Q79G2FNY3CE95N2NG"  # this contains the checkpoint to use for inference
+#EXISTING_RESULTS_DATASET="01KWMYV98Q79G2FNY3CE95N2NG"  # tuned from SHiELD+
+EXISTING_RESULTS_DATASET="01KWJRMVFPTCZFJEMAY9WVXNN7"  #  tuned from 1 step ERA5
+
 CONFIG_FILENAME="inference-0k.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -24,11 +26,12 @@ cd $REPO_ROOT && gantry run \
     --task-name $JOB_NAME \
     --description 'Run ACE2S evaluator' \
     --beaker-image $IMAGE \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/downscaling \
+    --priority high \
     --not-preemptible \
     --cluster ai2/titan \
     --cluster ai2/jupiter \
+    --cluster ai2/ceres \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
@@ -36,7 +39,7 @@ cd $REPO_ROOT && gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:/weights \
+    --dataset $EXISTING_RESULTS_DATASET:weights/training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --dataset $STATS_DATASET:/statsdata \
     --gpus 1 \
     --shared-memory 50GiB \
