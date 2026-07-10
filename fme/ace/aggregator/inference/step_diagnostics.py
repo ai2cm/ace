@@ -16,7 +16,13 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
-from .reduced import AreaWeightedSingleTargetReducedMetric, _SeriesData, data_to_table
+from .reduced import (
+    AreaWeightedSingleTargetReducedMetric,
+    _SeriesData,
+    data_to_table,
+    get_series_data,
+    series_data_to_dataset,
+)
 
 
 class StepDiagnosticsSubAggregator(Protocol):
@@ -402,21 +408,7 @@ class CorrectionDeltaMeanAggregator:
         self._n_batches += 1
 
     def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
-        data: list[_SeriesData] = []
-        for metric_name, metric in self._variable_metrics.items():
-            metric_results = metric.get()
-            for var_name in sorted(metric_results.keys()):
-                arr = metric_results[var_name].detach()
-                if step_slice is not None:
-                    arr = arr[step_slice]
-                data.append(
-                    _SeriesData(
-                        metric_name=metric_name,
-                        var_name=var_name,
-                        data=self._dist.reduce_mean(arr).cpu().numpy(),
-                    )
-                )
-        return data
+        return get_series_data(self._variable_metrics, self._dist, step_slice)
 
     @torch.no_grad()
     def get_logs(self, label: str, step_slice: slice | None = None) -> dict[str, Any]:
@@ -438,14 +430,4 @@ class CorrectionDeltaMeanAggregator:
     def get_dataset(self) -> xr.Dataset:
         if self._n_batches == 0:
             return xr.Dataset()
-        data_vars = {}
-        for datum in self._get_series_data():
-            metadata = self._variable_metadata.get(
-                datum.var_name, VariableMetadata("unknown_units", datum.var_name)
-            )
-            data_vars[datum.get_xarray_key()] = xr.DataArray(
-                datum.data, dims=["forecast_step"], attrs=metadata.as_attrs()
-            )
-        n_forecast_steps = len(next(iter(data_vars.values())))
-        coords = {"forecast_step": np.arange(n_forecast_steps)}
-        return xr.Dataset(data_vars=data_vars, coords=coords)
+        return series_data_to_dataset(self._get_series_data(), self._variable_metadata)
