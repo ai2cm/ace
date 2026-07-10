@@ -103,6 +103,18 @@ def discover_variables(keys: Iterable[str]) -> list[str]:
     return sorted(found)
 
 
+def present_keys(requested: Iterable[str], available: Iterable[str]) -> list[str]:
+    """Intersect ``requested`` with ``available``, preserving requested order.
+
+    ``wandb``'s ``run.history(keys=...)`` returns an EMPTY frame if *any* requested
+    key was never logged by the run, so a single stale key (e.g. a loss term added
+    after the run) silently blanks every metric.  Filtering to the keys actually
+    present (the run's summary keys) before querying avoids that.
+    """
+    available_set = set(available)
+    return [k for k in requested if k in available_set]
+
+
 def discover_tail_percentiles(keys: Iterable[str]) -> list[str]:
     """Return the tail percentiles present (e.g. ``["99.99", "99.9999"]``)."""
     pat = re.compile(r"val/tail_([\d.]+)_")
@@ -272,9 +284,10 @@ def compare_runs(project: str, run_ids: list[str], keys: list[str]) -> None:
             f"{r.name}\n  {rid} | {r.state} | step {r.summary.get('_step')} "
             f"| runtime {runtime_min} min"
         )
-        hist = r.history(keys=keys, samples=4000, pandas=True)
+        run_keys = present_keys(keys, r.summary.keys())
+        hist = r.history(keys=run_keys, samples=4000, pandas=True) if run_keys else None
         for key in keys:
-            if key in hist.columns:
+            if hist is not None and key in hist.columns:
                 summ = series_summary(hist[key].dropna().tolist())
                 if summ:
                     print(f"  {key:42s} {fmt_fbl(summ)}  n={summ['n']}")
@@ -295,7 +308,14 @@ def _run_metadata(run) -> dict:
 
 
 def _history_lists(run, keys: list[str]) -> dict[str, list[float]]:
-    """Return {key: [non-nan values in step order]} for the requested keys."""
+    """Return {key: [non-nan values in step order]} for the requested keys.
+
+    Only keys the run actually logged are queried — see ``present_keys`` for why a
+    stale key would otherwise blank the whole history frame.
+    """
+    keys = present_keys(keys, run.summary.keys())
+    if not keys:
+        return {}
     hist = run.history(keys=keys, samples=100000, pandas=True)
     out: dict[str, list[float]] = {}
     for key in keys:

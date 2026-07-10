@@ -81,7 +81,13 @@ When there is enough history (or the run finishes/crashes):
    ```
    This pulls the three indicator families (training behavior + GAN health + loss
    domination; tails per variable; spectrum hi/mid/lo per variable), applies the
-   heuristics, and fills everything except the **Verdict**.
+   heuristics, and fills everything except the **Verdict**. The Artifacts table now
+   includes the run's git commit as a GitHub link (auto-pulled from wandb metadata).
+   > **`--beaker` for an old run whose experiment ULID you've lost:** if you only
+   > have a checkpoint *dataset* ULID (e.g. from a bundle config), resolve it to the
+   > experiment with `beaker dataset get <dataset-ULID> --format json` →
+   > `.sourceExecution` (a job ULID) → `beaker job get <job-ULID> --format json` →
+   > `.execution.experiment`.
 2. **Write the Verdict**: win / flat / degrade vs baseline, and the recommended
    checkpoint — pick a **mid-training** checkpoint if `best@frac` is well before the
    end (the checkpoint-selection trap: `best_student.ckpt` by CRPS is often

@@ -11,6 +11,7 @@ from fme.downscaling.distillation.check_runs import (
     discover_variables,
     fmt_fbl,
     loss_domination_rows,
+    present_keys,
     registry_row,
     series_summary,
 )
@@ -45,6 +46,23 @@ def test_discover_variables_eval_keys():
 def test_discover_tail_percentiles():
     keys = ["val/tail_99.99_PRATEsfc", "val/tail_99.9999_PRATEsfc", "val/crps_mean"]
     assert discover_tail_percentiles(keys) == ["99.99", "99.9999"]
+
+
+def test_present_keys_filters_and_preserves_order():
+    # A run that predates spectral loss lacks those train keys; requesting them
+    # must not drop the keys the run does have (wandb blanks the whole frame
+    # otherwise). Order follows the requested list, not availability.
+    requested = [
+        "train/f_distill_loss",
+        "train/spectral_loss",  # never logged by this run
+        "val/crps_mean",
+    ]
+    available = {"val/crps_mean", "train/f_distill_loss", "train/gan_loss_gen"}
+    assert present_keys(requested, available) == [
+        "train/f_distill_loss",
+        "val/crps_mean",
+    ]
+    assert present_keys(["a", "b"], set()) == []
 
 
 def test_series_summary_min_objective():
