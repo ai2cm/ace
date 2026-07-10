@@ -154,6 +154,31 @@ def test_time_mean_aggregator_null_masking_matches_unmasked_hand_computation():
     assert logs["correction_magnitude/a"] == pytest.approx(expected, rel=1e-5)
 
 
+def test_time_mean_aggregator_two_window_accumulation():
+    agg = CorrectionDeltaTimeMeanAggregator(get_ops(), record_maps=True)
+    agg.record_batch({"a": constant_tensor(1.0, n_time=3)})
+    agg.record_batch({"a": constant_tensor(-4.0, n_time=2)})
+    logs = agg.get_logs(label="")
+    # time mean over 5 accumulated steps: (3 * |1| + 2 * |-4|) / 5
+    assert logs["correction_magnitude/a"] == pytest.approx((3 * 1.0 + 2 * 4.0) / 5)
+    ds = agg.get_dataset()
+    np.testing.assert_allclose(ds["correction_map-a"].values, (3 * 1.0 + 2 * -4.0) / 5)
+
+
+def test_time_mean_aggregator_raises_on_changed_variable_set():
+    agg = CorrectionDeltaTimeMeanAggregator(get_ops())
+    agg.record_batch({"a": constant_tensor(1.0)})
+    with pytest.raises(ValueError, match="variable set must be constant"):
+        agg.record_batch({"b": constant_tensor(1.0)})
+
+
+def test_time_mean_aggregator_raises_on_changed_sample_count():
+    agg = CorrectionDeltaTimeMeanAggregator(get_ops())
+    agg.record_batch({"a": constant_tensor(1.0, n_sample=2)})
+    with pytest.raises(ValueError, match="sample count must be constant"):
+        agg.record_batch({"a": constant_tensor(1.0, n_sample=3)})
+
+
 def test_time_mean_aggregator_maps_off_by_default():
     agg = CorrectionDeltaTimeMeanAggregator(get_ops())
     agg.record_batch({"a": constant_tensor(1.0)})
@@ -230,6 +255,17 @@ def test_metric_config_build_granularity():
         is None
     )
     assert build(StepDiagnosticsMetricConfig(), normalize=None) is None
+    with pytest.raises(ValueError, match="without a normalizer"):
+        build(StepDiagnosticsMetricConfig(correction_maps=True), normalize=None)
+    assert (
+        build(
+            StepDiagnosticsMetricConfig(
+                correction_scalars=False, correction_maps=False
+            ),
+            normalize=None,
+        )
+        is None
+    )
 
 
 def build_evaluator_aggregator(

@@ -18,7 +18,7 @@ from fme.core.wandb import Image
 from ..plotting import plot_paneled_data
 from .reduced import (
     AreaWeightedSingleTargetReducedMetric,
-    _SeriesData,
+    SeriesData,
     data_to_table,
     get_series_data,
     series_data_to_dataset,
@@ -124,12 +124,23 @@ class StepDiagnosticsMetricConfig:
     ) -> StepDiagnosticsAggregator | None:
         """Build the aggregator, or return None when nothing is enabled or
         no normalizer is available (the correction metrics are
-        normalized-space, so callers that supply no normalizer keep their
-        current behavior).
+        normalized-space, so callers that supply no normalizer and keep the
+        default configuration keep their current behavior). Raises ValueError
+        when the configuration was explicitly changed from the defaults but
+        no normalizer is supplied, rather than silently dropping an explicit
+        opt-in.
         """
-        if normalize is None:
-            return None
         if not (self.correction_scalars or self.correction_maps):
+            return None
+        if normalize is None:
+            if self != StepDiagnosticsMetricConfig():
+                raise ValueError(
+                    "step_diagnostics metrics were explicitly configured, but "
+                    "the aggregator was built without a normalizer, which the "
+                    "normalized-space correction metrics require. Supply a "
+                    "normalizer or leave the step_diagnostics configuration "
+                    "at its defaults."
+                )
             return None
         time_mean = CorrectionDeltaTimeMeanAggregator(
             gridded_operations=gridded_operations,
@@ -286,9 +297,29 @@ class CorrectionDeltaTimeMeanAggregator:
 
     @torch.no_grad()
     def record_batch(self, correction_norm: TensorMapping) -> None:
+        """Accumulate one time window. The time-mean arithmetic assumes each
+        call carries the same sample count and the same variable set (the
+        inference loop's contiguous-windows contract); violations raise
+        rather than silently biasing the means.
+        """
         if not correction_norm:
             return
         sample_dim, time_dim = 0, 1
+        first = next(iter(correction_norm.values()))
+        if self._signed_sum:
+            if set(correction_norm) != set(self._signed_sum):
+                raise ValueError(
+                    "The correction delta variable set must be constant "
+                    f"across batches; previously recorded "
+                    f"{sorted(self._signed_sum)}, got "
+                    f"{sorted(correction_norm)}."
+                )
+            if first.size(sample_dim) != self._n_samples:
+                raise ValueError(
+                    "The correction delta sample count must be constant "
+                    f"across batches; previously recorded {self._n_samples}, "
+                    f"got {first.size(sample_dim)}."
+                )
         for name, tensor in correction_norm.items():
             signed = tensor.sum(dim=time_dim).sum(dim=sample_dim)
             magnitude = tensor.abs().sum(dim=time_dim).sum(dim=sample_dim)
@@ -298,7 +329,6 @@ class CorrectionDeltaTimeMeanAggregator:
             else:
                 self._signed_sum[name] = signed
                 self._magnitude_sum[name] = magnitude
-        first = next(iter(correction_norm.values()))
         self._n_samples = first.size(sample_dim)
         self._n_timesteps += first.size(time_dim)
 
@@ -407,7 +437,7 @@ class CorrectionDeltaMeanAggregator:
             metric.record(tensors=correction_norm, i_time_start=i_time_start)
         self._n_batches += 1
 
-    def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
+    def _get_series_data(self, step_slice: slice | None = None) -> list[SeriesData]:
         return get_series_data(self._variable_metrics, self._dist, step_slice)
 
     @torch.no_grad()

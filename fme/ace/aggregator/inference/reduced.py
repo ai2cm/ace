@@ -19,7 +19,7 @@ from .data import InferenceBatchData, MetricBuildResult
 
 
 @dataclasses.dataclass
-class _SeriesData:
+class SeriesData:
     metric_name: str
     var_name: str
     data: np.ndarray
@@ -35,9 +35,9 @@ def get_series_data(
     variable_metrics: Mapping[str, "MeanMetric | SingleTargetMeanMetric"],
     dist: Distributed,
     step_slice: slice | None = None,
-) -> list[_SeriesData]:
+) -> list[SeriesData]:
     """Converts stored variable_metrics to a list."""
-    data: list[_SeriesData] = []
+    data: list[SeriesData] = []
     for name, metric in variable_metrics.items():
         metric_results = metric.get()  # TensorDict: {var_name: metric_series}
         sorted_keys = sorted(list(metric_results.keys()))
@@ -45,7 +45,7 @@ def get_series_data(
             arr = metric_results[key].detach()
             if step_slice is not None:
                 arr = arr[step_slice]
-            datum = _SeriesData(
+            datum = SeriesData(
                 metric_name=name,
                 var_name=key,
                 data=dist.reduce_mean(arr).cpu().numpy(),
@@ -55,7 +55,7 @@ def get_series_data(
 
 
 def series_data_to_dataset(
-    series_data: list[_SeriesData],
+    series_data: list[SeriesData],
     variable_metadata: Mapping[str, VariableMetadata],
 ) -> xr.Dataset:
     """Converts a list of series data to a dataset over forecast_step."""
@@ -315,7 +315,7 @@ class MeanAggregator:
             )
         self._n_batches += 1
 
-    def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
+    def _get_series_data(self, step_slice: slice | None = None) -> list[SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
@@ -470,7 +470,7 @@ class SingleTargetMeanAggregator:
             )
         self._n_batches += 1
 
-    def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
+    def _get_series_data(self, step_slice: slice | None = None) -> list[SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")

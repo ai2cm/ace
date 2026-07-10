@@ -793,7 +793,9 @@ class InferenceAggregatorConfig:
             diagnostics carried on prediction data (the corrector's
             correction deltas); such metrics are logged only when a corrector
             modifies data, and require a normalizer to be supplied at build
-            time.
+            time. Building with a non-default configuration but no normalizer
+            raises an error; with the default configuration the metrics are
+            silently skipped.
     """
 
     time_mean_reference_data: str | None = None
