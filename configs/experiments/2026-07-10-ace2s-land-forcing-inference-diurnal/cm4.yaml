@@ -1,0 +1,55 @@
+# ACE2S land-forcing short-lead evaluation — CM4-piControl (uncoupled atmosphere-only).
+# Checkpoint-agnostic (see era5.yaml). Serves the CM4 control (rs0/rs1) and the cm4-snow /
+# cm4-soil treatments. cm4-soil's input_masking is carried in the checkpoint, not set here.
+experiment_dir: gs://vcm-ml-intermediate/2026-07-10-ace2s-land-forcing-inference-diurnal/PLACEHOLDER
+n_forward_steps: 40           # 6-hourly => ~10 days; short-lead only (land forcing leaks future)
+forward_steps_in_memory: 1    # GPU mem ~ n_initial_conditions on a 178GiB B200; 100 ICs ~= 66%
+                              # (150 hit 99% CM4 / OOMed ERA5; memory flat over the rollout). See README.
+checkpoint_path: /ckpt.tar
+n_ensemble_per_ic: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace
+loader:
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
+  start_indices:
+    # 100 ICs/job, integer indices into the noleap time axis (index 0 = 0151-01-01T06:00). This is
+    # chunk 0 of 3 interleaved chunks that together tile the 0311-0351 holdout (out-of-sample: CM4
+    # train <=0306, val 0306-0311 — same split as the control checkpoints).
+    # DIURNAL SAMPLING: interval 579 steps is NOT a multiple of 4, so the IC init hour rotates
+    # through 00/06/12/18 UTC (75 ICs each across the 300) — the first predicted step is then
+    # sampled at all local solar times, removing the fixed-UTC terminator/low-sun bias in albedo &
+    # SW fluxes and making ERA5/CM4 comparable. run-inference.sh overrides `first` per chunk
+    # (233600 / 233793 / 233986, dense stride 193 steps) and writes each to <job>-c{0,1,2}; 579
+    # steps (~144.75 days, not commensurate with 365) precesses through the seasons; chunk-2 last IC
+    # 0350-07-12 stays within the holdout.
+    n_initial_conditions: 100
+    first: 233600
+    interval: 579
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+    - label: landforcing
+      save_reference: true        # writes both _prediction and _target for every name below
+      format:
+        name: zarr
+      names:
+        - surface_temperature
+        - air_temperature_7
+        - TMP2m
+        - PRATEsfc
+        - total_frozen_precipitation_rate
+        - surface_evaporative_fraction
+        - implied_surface_albedo
+        # raw flux components of the derived vars, for independent reconstruction / QC:
+        - LHTFLsfc            # LHTFLsfc + SHTFLsfc -> surface_evaporative_fraction
+        - SHTFLsfc
+        - USWRFsfc            # USWRFsfc / DSWRFsfc -> implied_surface_albedo
+        - DSWRFsfc
