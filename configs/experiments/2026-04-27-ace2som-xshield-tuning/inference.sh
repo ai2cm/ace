@@ -39,7 +39,7 @@ cd $REPO_ROOT && gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:weights/training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --dataset $STATS_DATASET:/statsdata \
     --gpus 1 \
     --shared-memory 50GiB \
