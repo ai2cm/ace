@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-tmp2m-prate"
-CONFIG_FILENAME="train-tmp2m-prate.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-tmp2m-oversample-tropics-12x-low-sigma"
+CONFIG_FILENAME="train-prmsl-low-sigma-oversample-tropics.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

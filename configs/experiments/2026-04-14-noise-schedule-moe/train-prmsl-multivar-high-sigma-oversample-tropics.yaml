@@ -1,7 +1,7 @@
 log_loss_vs_noise: true
 tropical_oversampling:
   lat_threshold: 30.0
-  multiplier: 8
+  multiplier: 12
 static_inputs:
   HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
   land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
@@ -50,9 +50,9 @@ model:
   churn: 0.0
   training_noise_distribution:
     p_min: 200
-    p_max: 2000.0
+    p_max: 1000.0
   predict_residual: true
-  sigma_max: 2000.0
+  sigma_max: 1000.0
   sigma_min: 200
   use_fine_topography: true
 optimization:
