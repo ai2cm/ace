@@ -194,12 +194,8 @@ def test_run_target_generation_skips_padding_items(
     mock_work_item.is_padding = True
     mock_work_item.batch.horizontal_shape = (16, 16)
     # Coarse coords are interior so fine can have buffer on each side.
-    mock_work_item.batch.latlon_coordinates.lat = (
-        torch.arange(1, 9).float().unsqueeze(0)
-    )
-    mock_work_item.batch.latlon_coordinates.lon = (
-        torch.arange(1, 9).float().unsqueeze(0)
-    )
+    mock_work_item.batch.latlon_coordinates.lat = torch.arange(1, 9).float()
+    mock_work_item.batch.latlon_coordinates.lon = torch.arange(1, 9).float()
     mock_work_item.batch.lat_interval = ClosedInterval(1.0, 8.0)
     mock_work_item.batch.lon_interval = ClosedInterval(1.0, 8.0)
     mock_output_target.data.get_generator.return_value = iter([mock_work_item])
