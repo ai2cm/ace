@@ -255,6 +255,9 @@ class CorrectionDeltaAggregator:
         return datasets
 
 
+_: type[StepDiagnosticsSubAggregator] = CorrectionDeltaAggregator
+
+
 class CorrectionDeltaTimeMeanAggregator:
     """Granular sub-aggregator: time-mean maps and scalars of the normalized
     correction. Silent (empty logs and dataset) until non-empty data is
