@@ -20,10 +20,10 @@ keeping `band_gamma=0` so **mid and high are weighted equally**. Expectation: mi
 | | |
 |---|---|
 | Experiment name | `ace-downscaling-distillation-fdistill-with-val-prate-spectral-midhi` |
-| wandb run | `TBD` |
-| Beaker experiment | `TBD` |
+| wandb run | `xgcaf2rt` — https://wandb.ai/ai2cm/fastgen/runs/xgcaf2rt |
+| Beaker experiment | `01KX6T1BM73VETZF53TWBHSEFE` — https://beaker.org/ex/01KX6T1BM73VETZF53TWBHSEFE |
 | Commit | `e7679c0a9` — https://github.com/ai2cm/ace/commit/e7679c0a9583bc42ee07d7eacf8e8db619c120d0 |
-| State / last step | `TBD` |
+| State / last step | `running` (reached iteration 1; `min_wavenumber=85` confirmed in logs) |
 
 ## Config
 
