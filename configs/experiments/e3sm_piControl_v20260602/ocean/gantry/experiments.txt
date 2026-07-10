@@ -13,3 +13,5 @@ BK-coupled-stochastic-v20260602-Samudra-piControl-105yr-fine-tune-nfw-8|rs0|01KV
 BK-v20260602-Samudra-piControl-105yr-upsample-fix|rs0|01KWWR1AKAGH0QCNBDZ9YF9F54|training|best_inference_ckpt|normal|--min-runtime 8h
 
 BK-v20260602-Samudra-piControl-105yr-upsample-fix|rs1|01KWWR1JK6C5EY1GHVAQP53G1G|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260602-Samudra-piControl-105yr-upsample-fix-nfw-8|rs1|01KX6GQ8E1Q96AJFD2KGW1MV6X|training|best_inference_ckpt|normal|--min-runtime 8h
