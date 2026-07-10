@@ -235,6 +235,3 @@ stepper:
       - TMP850
       - h500
       - total_frozen_precipitation_rate
-      - PRMSL
-      - eastward_surface_stress
-      - northward_surface_stress
