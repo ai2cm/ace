@@ -46,13 +46,26 @@ class UniformMaskingGenerator(MaskingGenerator):
 
     ``k`` is drawn uniformly from ``[0, min(max_masked_vars, n)]`` where ``n``
     is the pool size, so a draw may drop nothing.
+
+    Gated by ``probability``: with probability ``1 - probability`` the scheme
+    fires no draw and drops nothing on a step. When ``probability == 1.0`` the
+    gate is short-circuited so no gate draw is taken, keeping the RNG stream
+    identical to configs that predate this field.
     """
 
-    def __init__(self, names: list[str], max_masked_vars: int):
+    def __init__(
+        self, names: list[str], max_masked_vars: int, probability: float = 1.0
+    ):
         self._names = list(names)
         self._max_masked_vars = max_masked_vars
+        self._probability = probability
 
     def sample(self, generator: torch.Generator) -> list[str]:
+        if (
+            self._probability < 1.0
+            and torch.rand(1, generator=generator).item() >= self._probability
+        ):
+            return []
         n = len(self._names)
         max_n = min(self._max_masked_vars, n)
         k = int(torch.randint(0, max_n + 1, (1,), generator=generator).item())
@@ -68,7 +81,9 @@ class BernoulliMaskingConfig:
 
     Parameters:
         rate: Bernoulli masking rate in ``[0, 1]``; the marginal probability
-            the pool is dropped on any step.
+            the pool is dropped on any step. (No ``probability`` gate is offered
+            here: it would be redundant, since gating a Bernoulli pool at
+            ``probability`` is identical to scaling ``rate`` by ``probability``.)
     """
 
     rate: float
@@ -89,9 +104,13 @@ class UniformMaskingConfig:
         max_masked_vars: Maximum number of masked channels. The count is
             sampled uniformly from ``[0, min(max_masked_vars, n)]`` where ``n``
             is the pool size, so a draw may mask no variables.
+        probability: Probability in ``[0, 1]`` that this masking scheme fires on
+            any step. When it does not fire, nothing is dropped. Defaults to
+            ``1.0`` (always fires).
     """
 
     max_masked_vars: int
+    probability: float = 1.0
 
     def __post_init__(self):
         # bool is a subclass of int, so reject it explicitly to avoid a
@@ -105,9 +124,13 @@ class UniformMaskingConfig:
                 "max_masked_vars must be a non-negative int, got "
                 f"{self.max_masked_vars!r}"
             )
+        # bool is a subclass of int, so reject it explicitly to avoid a
+        # silently-coerced True/False being treated as a probability.
+        if isinstance(self.probability, bool) or not 0.0 <= self.probability <= 1.0:
+            raise ValueError(f"probability must be in [0, 1], got {self.probability!r}")
 
     def build(self, names: list[str]) -> UniformMaskingGenerator:
-        return UniformMaskingGenerator(names, self.max_masked_vars)
+        return UniformMaskingGenerator(names, self.max_masked_vars, self.probability)
 
 
 # Disjoint required fields (`rate` vs `max_masked_vars`) let dacite discriminate

@@ -35,6 +35,18 @@ def test_group_rate_validation():
         BernoulliMaskingConfig(rate=1.1)
 
 
+def test_probability_validation():
+    with pytest.raises(ValueError, match="probability must be in"):
+        UniformMaskingConfig(max_masked_vars=1, probability=-0.1)
+    with pytest.raises(ValueError, match="probability must be in"):
+        UniformMaskingConfig(max_masked_vars=1, probability=1.1)
+    # bool is a subclass of int; reject it rather than coerce to 0.0/1.0.
+    with pytest.raises(ValueError, match="probability must be in"):
+        UniformMaskingConfig(max_masked_vars=1, probability=True)
+    with pytest.raises(ValueError, match="probability must be in"):
+        UniformMaskingConfig(max_masked_vars=1, probability=False)
+
+
 def test_empty_group_validation():
     with pytest.raises(ValueError, match="non-empty"):
         _group([], 0.5)
@@ -266,6 +278,104 @@ def test_masks_are_reproducible_for_fixed_seed_and_rank(monkeypatch):
         ]
 
     assert _sample_sequence() == _sample_sequence()
+
+
+def _sequence(config: VariableMaskingConfig, n: int, trials: int):
+    masking = _build(config, n)
+    return [
+        tuple(bool(x) for x in masking.sample_mask(DEVICE)[0].tolist())
+        for _ in range(trials)
+    ]
+
+
+def test_probability_one_matches_omitted():
+    """probability=1.0 short-circuits the gate, leaving the RNG stream intact.
+
+    An explicit probability=1.0 must replay exactly the same sequence as a config
+    that omits the field, proving no gate draw is taken at 1.0 (so pre-field
+    regression baselines are unchanged).
+    """
+    omitted = VariableMaskingConfig(default=UniformMaskingConfig(max_masked_vars=3))
+    explicit = VariableMaskingConfig(
+        default=UniformMaskingConfig(max_masked_vars=3, probability=1.0)
+    )
+    assert _sequence(omitted, 5, 64) == _sequence(explicit, 5, 64)
+
+
+def test_probability_zero_never_drops():
+    """probability=0.0 gates every step, so nothing is ever dropped."""
+    masking = _build(
+        VariableMaskingConfig(
+            default=UniformMaskingConfig(max_masked_vars=5, probability=0.0)
+        ),
+        5,
+    )
+    for _ in range(64):
+        assert masking.sample_mask(DEVICE).all()
+
+
+def test_probability_gates_uniform_marginal():
+    """No-drop frequency matches ``(1 - p) + p / (n + 1)`` for a gated uniform.
+
+    With ``max_masked_vars == n`` a fired scheme draws ``k`` uniform in
+    ``[0, n]``, so it drops nothing with probability ``1 / (n + 1)``. Folding in
+    the gate gives an overall no-drop frequency of ``(1 - p) + p / (n + 1)``.
+    """
+    n = 4
+    probability = 0.5
+    masking = _build(
+        VariableMaskingConfig(
+            default=UniformMaskingConfig(max_masked_vars=n, probability=probability)
+        ),
+        n,
+    )
+    trials = 4000
+    nodrop = sum(
+        int(bool(masking.sample_mask(DEVICE).all().item())) for _ in range(trials)
+    )
+    freq = nodrop / trials
+    expected = (1 - probability) + probability / (n + 1)
+    assert abs(freq - expected) < 0.05, f"expected ~{expected}, got {freq}"
+
+
+def test_uniform_probability_raises_nodrop_fraction():
+    """Gating a uniform scheme increases the fraction of no-drop steps."""
+    n = 6
+    trials = 4000
+
+    def _nodrop_fraction(probability: float) -> float:
+        masking = _build(
+            VariableMaskingConfig(
+                default=UniformMaskingConfig(max_masked_vars=n, probability=probability)
+            ),
+            n,
+        )
+        nodrop = sum(
+            int(bool(masking.sample_mask(DEVICE).all().item())) for _ in range(trials)
+        )
+        return nodrop / trials
+
+    assert _nodrop_fraction(0.5) > _nodrop_fraction(1.0)
+
+
+def test_probability_gates_override_group():
+    """probability threads through override_groups, not just the default pool."""
+    masking = _build(
+        VariableMaskingConfig(
+            default=UniformMaskingConfig(max_masked_vars=0),
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["var_0", "var_1"],
+                    masking=UniformMaskingConfig(max_masked_vars=2, probability=0.0),
+                )
+            ],
+        ),
+        3,
+    )
+    # default masks nothing (max=0) and the group is gated off, so no channel
+    # is ever dropped.
+    for _ in range(64):
+        assert masking.sample_mask(DEVICE).all()
 
 
 def test_multiple_groups_fire_independently():
