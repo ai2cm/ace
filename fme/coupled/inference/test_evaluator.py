@@ -361,6 +361,26 @@ def test_evaluator_n_coupled_steps_divisible_by_coupled_steps_in_memory():
         )
 
 
+def test_evaluator_rejects_top_level_override_with_standalone_checkpoint():
+    from unittest.mock import MagicMock
+
+    standalone = StandaloneComponentCheckpointsConfig(
+        ocean=StandaloneComponentConfig(timedelta="2D", path="ocean.pt"),
+        atmosphere=StandaloneComponentConfig(timedelta="1D", path="atmos.pt"),
+    )
+    with pytest.raises(ValueError, match="single coupled checkpoint"):
+        InferenceEvaluatorConfig(
+            experiment_dir="test",
+            n_coupled_steps=2,
+            checkpoint_path=standalone,
+            logging=MagicMock(),
+            loader=MagicMock(),
+            ocean_stepper_override=StepperOverrideConfig(
+                prescribed_prognostic_names=["thetao_18"]
+            ),
+        )
+
+
 @pytest.mark.parametrize(
     "n_coupled_steps,coupled_steps_in_memory,n_initial_conditions,"
     "save_standalone_component_checkpoints,use_prediction_data",

@@ -250,6 +250,28 @@ def _validate_coupled_steps_config(n_coupled_steps: int, coupled_steps_in_memory
         raise ValueError("n_coupled_steps must be divisible by coupled_steps_in_memory")
 
 
+def _validate_stepper_overrides(
+    checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
+    ocean_stepper_override: StepperOverrideConfig | None,
+    atmosphere_stepper_override: StepperOverrideConfig | None,
+) -> None:
+    """Reject top-level stepper overrides for standalone component checkpoints.
+
+    The top-level ``ocean_stepper_override`` / ``atmosphere_stepper_override`` only
+    apply when loading a single coupled checkpoint. A
+    ``StandaloneComponentCheckpointsConfig`` carries its own per-component overrides,
+    so top-level ones would be silently ignored; raise instead.
+    """
+    if isinstance(checkpoint_path, StandaloneComponentCheckpointsConfig) and (
+        ocean_stepper_override is not None or atmosphere_stepper_override is not None
+    ):
+        raise ValueError(
+            "ocean_stepper_override / atmosphere_stepper_override are only "
+            "supported when loading a single coupled checkpoint. Set overrides on "
+            "the StandaloneComponentCheckpointsConfig components instead."
+        )
+
+
 @dataclasses.dataclass
 class InferenceEvaluatorConfig:
     """
@@ -298,6 +320,11 @@ class InferenceEvaluatorConfig:
         _validate_coupled_steps_config(
             self.n_coupled_steps, self.coupled_steps_in_memory
         )
+        _validate_stepper_overrides(
+            self.checkpoint_path,
+            self.ocean_stepper_override,
+            self.atmosphere_stepper_override,
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -308,8 +335,8 @@ class InferenceEvaluatorConfig:
     def load_stepper(self) -> CoupledStepper:
         return load_stepper(
             self.checkpoint_path,
-            atmosphere_stepper_override=self.atmosphere_stepper_override,
             ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
         )
 
     def load_stepper_config(self) -> CoupledStepperConfig:

@@ -10,18 +10,27 @@ import yaml
 from fme.ace.data_loading.inference import InferenceInitialConditionIndices
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.inference import ForcingDataLoaderConfig
+from fme.ace.stepper import StepperOverrideConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.data_loading.test_data_loader import create_coupled_data_on_disk
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
+from fme.coupled.inference.evaluator import (
+    StandaloneComponentCheckpointsConfig,
+    StandaloneComponentConfig,
+    load_stepper_config,
+)
 from fme.coupled.inference.inference import (
     ComponentInitialConditionConfig,
     CoupledInitialConditionConfig,
     InferenceConfig,
     main,
 )
-from fme.coupled.inference.test_evaluator import save_coupled_stepper
+from fme.coupled.inference.test_evaluator import (
+    _create_dataset_info_for_stepper,
+    save_coupled_stepper,
+)
 from fme.coupled.test_stepper import CoupledDatasetInfoBuilder
 
 
@@ -147,6 +156,76 @@ def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
             forcing_loader=MagicMock(),
             coupled_steps_in_memory=2,
         )
+
+
+def test_inference_rejects_top_level_override_with_standalone_checkpoint():
+    from unittest.mock import MagicMock
+
+    standalone = StandaloneComponentCheckpointsConfig(
+        ocean=StandaloneComponentConfig(timedelta="2D", path="ocean.pt"),
+        atmosphere=StandaloneComponentConfig(timedelta="1D", path="atmos.pt"),
+    )
+    with pytest.raises(ValueError, match="single coupled checkpoint"):
+        InferenceConfig(
+            experiment_dir="test",
+            n_coupled_steps=2,
+            checkpoint_path=standalone,
+            logging=MagicMock(),
+            initial_condition=MagicMock(),
+            forcing_loader=MagicMock(),
+            atmosphere_stepper_override=StepperOverrideConfig(
+                prescribed_prognostic_names=["a_prog"]
+            ),
+        )
+
+
+def test_inference_config_threads_ocean_override_to_forcing_window(
+    tmp_path: pathlib.Path,
+):
+    """InferenceConfig routes an ocean override into the loaded stepper config so
+    prescribed prognostics appear in the ocean forcing window.
+    """
+    from unittest.mock import MagicMock
+
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_fraction", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=2,
+        n_initial_conditions=1,
+        data_dir=tmp_path / "stepper_data",
+    )
+    ckpt = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_fraction",
+    )
+    assert isinstance(ckpt, str)
+
+    config = InferenceConfig(
+        experiment_dir=str(tmp_path),
+        n_coupled_steps=2,
+        checkpoint_path=ckpt,
+        logging=MagicMock(),
+        initial_condition=MagicMock(),
+        forcing_loader=MagicMock(),
+        ocean_stepper_override=StepperOverrideConfig(
+            prescribed_prognostic_names=["thetao_18"]
+        ),
+    )
+    assert "thetao_18" not in load_stepper_config(ckpt).ocean_forcing_window_names
+    stepper_config = config.load_stepper_config()
+    assert "thetao_18" in stepper_config.ocean_forcing_window_names
 
 
 @pytest.mark.parametrize(
