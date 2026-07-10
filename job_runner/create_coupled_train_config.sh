@@ -44,5 +44,13 @@ SIC_NAME=$SIC_NAME yq -i '.stepper.ocean_fraction_prediction.sea_ice_fraction_na
 # update atmos stepper config, preserving template values on conflict
 yq -i '.stepper.atmosphere.stepper *=n load("atmos-config.yaml").stepper' $CONFIG_PATH
 
+# use the atmosphere pretraining loss (incl. per-variable weights) for coupled training
+ATMOS_LOSS=$(yq '.stepper_training.loss' ./atmos-config.yaml)
+if [[ "$ATMOS_LOSS" == "null" ]]; then
+    echo "Failed to extract stepper_training.loss from the atmosphere config"
+    exit 1
+fi
+yq -i '.stepper_training.atmosphere.loss = load("atmos-config.yaml").stepper_training.loss' $CONFIG_PATH
+
 # cleanup
 rm ./atmos-config.yaml ./ocean-config.yaml
