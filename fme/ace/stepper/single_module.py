@@ -744,6 +744,9 @@ class StepperConfig:
         """
         self.step.replace_prescribed_prognostic_names(names)
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self.step.get_prescribed_prognostic_names()
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -990,6 +993,9 @@ class Stepper:
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
+
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self._config.get_prescribed_prognostic_names()
 
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """

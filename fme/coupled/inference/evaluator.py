@@ -71,19 +71,19 @@ def apply_coupled_stepper_config_inference_overrides(
     ocean_override: StepperOverrideConfig | None,
     atmosphere_override: StepperOverrideConfig | None,
 ) -> None:
-    """Mutate ``coupled_config`` in place for inference overrides, then refresh
-    cached forcing-window name lists.
+    """Mutate ``coupled_config`` in place for inference overrides.
+
+    Forcing-window names are computed on demand from the (now mutated) component
+    step configs, so no explicit refresh is needed.
     """
     if ocean_override is not None:
         apply_stepper_override_to_nested_stepper_config(
             coupled_config.ocean.stepper, ocean_override
         )
-        coupled_config.refresh_ocean_forcing_window_names()
     if atmosphere_override is not None:
         apply_stepper_override_to_nested_stepper_config(
             coupled_config.atmosphere.stepper, atmosphere_override
         )
-        coupled_config.refresh_atmosphere_forcing_window_names()
 
 
 @dataclasses.dataclass
@@ -233,15 +233,13 @@ def load_stepper(
         return checkpoint_path.load_stepper()
 
     stepper = load_coupled_stepper(checkpoint_path)
+    # Overrides mutate each component Stepper's config, which the CoupledStepper
+    # aliases as its nested CoupledStepperConfig component config, so forcing
+    # windows (computed on demand) reflect the overrides automatically.
     if atmosphere_stepper_override is not None:
         apply_stepper_override(stepper.atmosphere, atmosphere_stepper_override)
     if ocean_stepper_override is not None:
         apply_stepper_override(stepper.ocean, ocean_stepper_override)
-    # Overrides mutate shared StepperConfig; refresh cached forcing-window
-    # name lists on CoupledStepperConfig
-    # (see sync_coupled_stepper_runtime_stepper_configs).
-    stepper._config.refresh_ocean_forcing_window_names()
-    stepper._config.refresh_atmosphere_forcing_window_names()
     return stepper
 
 
