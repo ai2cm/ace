@@ -193,9 +193,16 @@ wrapper commits `47e84378b`/`704d666a6`). Julian-calendar zarrs on a
 "seconds since" axis make TempestExtremes shift every node's date ~11 days;
 relabeling julian→proleptic_gregorian (wall-clock preserved) + forcing
 seconds-since int64 encoding fixes that and also avoids the datetime64→"nanoseconds
-since" rejection. Verified: DetectNodes accepts it and timestamps are unshifted.
-Our earlier full runs were already correct (they used plain `to_netcdf`, which
-xarray wrote as julian "hours since", read correctly), so **no re-run needed**.
+since" rejection.
+
+**CORRECTION (this was initially misjudged):** our pre-fix full runs were NOT
+correct — a head-to-head test showed plain `to_netcdf` on the julian axis makes
+TempestExtremes stamp every node **+2 days** off (input julian 05-22 → stamped
+05-24). The earlier "offset-0 looked correct" spot check was fooled by
+multi-day-persistent Southern-Ocean storms. The old coarse/25km/100km runs were
+all shifted +2 days; they rectified against *each other* fine (all shifted
+equally) but their absolute times were wrong. **All detections were re-run with
+the fix** (verified: new stamps match the input julian dates), then re-rectified.
 
 We also **mirrored the wrapper's directory move**: the TC files now live in
 `scripts/tropical_cyclones/` (`detect_tc_tracks.py`, `rectify_tc_tracks.py`, this
@@ -206,6 +213,30 @@ Deliberately **not** brought in (superseded or separate): the wrapper's streamin
 `--out_file_list` approach (our parallel bundling supersedes it, and `--out_file_list`
 writes nothing on this conda-forge build); and the event-downscaling / histogram /
 movie scripts. Revisit the event scripts if/when reconciling for a real merge.
+
+## Land/terrain filter + per-bundle retry (this session)
+
+SLP-only detection (and even the warm-core coarse run) picks up spurious lows over
+land — most visibly a knot of summer **monsoon/heat lows over SW Asia**
+(Pakistan/Afghanistan/Iran, lon 62–70°E, lat 29–38°N, `HGTsfc` 577–1225 m). A plain
+land/sea mask would be too aggressive (it'd drop real landfalling TCs over Australia,
+which sit at ≤205 m); **surface elevation** cleanly separates them. New flags
+`--topo-var HGTsfc --max-topo 500` add the elevation field to the TE input and reject
+candidates above 500 m via DetectNodes `--thresholdcmd "TOPO,<=,500,0"`. `HGTsfc`
+exists in the coarse 1° and 100 km stores but **not** the 25 km store — irrelevant,
+since we only filter the **coarse** detection and rectification propagates the removal
+to the fine sets. Also added `_BUNDLE_ATTEMPTS=3` retry in `_process_bundle` so one
+transient (e.g. a GCS blip, which killed a 252-bundle run once) doesn't abort the pool.
+
+**Canonical (filtered, time-fixed) outputs — use these:**
+- coarse warm-core, `HGTsfc≤500`: `scratch/tc_coarse_filt/tracks.csv` (838 TCs; was 853).
+- 25 km rectified: `scratch/tc25_rectified_filt/rectified_tracks.csv` (836/838, 98% match).
+- 100 km rectified: `scratch/tc100_rectified_filt/rectified_tracks.csv` (838/838, 99% match).
+- 25 km↔100 km stay consistent to ~0.4° (re-verify after these reruns if needed).
+
+Coarse re-run: add `--topo-var HGTsfc --max-topo 500` (warm-core defaults, no wind-var
+overrides needed for the 1° store). The older non-`_filt` scratch dirs are the shifted
+pre-fix runs — superseded.
 
 ## Everything lives in scratch/ (git-ignored)
 

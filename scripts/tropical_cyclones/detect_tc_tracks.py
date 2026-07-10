@@ -59,6 +59,7 @@ import multiprocessing
 import pickle
 import shutil
 import subprocess
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,6 +82,11 @@ STITCH_MAXGAP = "24h"  # maximum time gap within a track
 # Track must have wind >= 10 m/s for >= 10 steps and stay within +/- 50 lat.
 STITCH_THRESHOLD = "wind,>=,10.0,10;lat,<=,50.0,10;lat,>=,-50.0,10"
 IN_FMT = "lon,lat,slp,wind"
+
+# Per-bundle retry budget: how many times to retry a bundle's
+# read->NetCDF->DetectNodes before giving up, so one transient (e.g. a GCS
+# read blip) doesn't abort the whole parallel run.
+_BUNDLE_ATTEMPTS = 3
 
 _HPA_UNITS = {"hpa", "mb", "millibar", "millibars"}
 
@@ -131,6 +137,7 @@ def build_te_dataset(
     v_var: str,
     sample: int,
     warm_core: bool = True,
+    topo_var: str | None = None,
 ) -> xr.Dataset:
     """Assemble the TempestExtremes input fields from an ACE dataset.
 
@@ -140,6 +147,10 @@ def build_te_dataset(
     DetectNodes command. Pass ``warm_core=False`` for datasets without an
     upper-tropospheric temperature field (e.g. the 3h downscaling outputs),
     which run the SLP-only recipe and so do not need ``t3_var``.
+
+    When ``topo_var`` is given, the (typically time-invariant) surface-elevation
+    field is added as ``TOPO`` (broadcast over time) so DetectNodes can reject
+    candidates over high terrain via a ``--thresholdcmd`` -- see ``--max-topo``.
     """
     if "sample" in ds.dims:
         logger.info("Selecting sample=%d of %d", sample, ds.sizes["sample"])
@@ -176,6 +187,15 @@ def build_te_dataset(
     data = {"PSL": psl, "U10": ds[u_var], "V10": ds[v_var]}
     if warm_core:
         data["T3"] = ds[t3_var]
+    if topo_var is not None:
+        if topo_var not in ds:
+            raise KeyError(
+                f"{topo_var!r} not found in dataset; available: {list(ds.data_vars)}"
+            )
+        topo = ds[topo_var]
+        if "time" not in topo.dims:
+            topo = topo.broadcast_like(psl)  # static field -> per-timestep
+        data["TOPO"] = topo
     out = xr.Dataset(data)
     out["PSL"].attrs["units"] = "Pa"
     out["U10"].attrs["units"] = "m/s"
@@ -288,6 +308,8 @@ class BundleSpec:
     u_var: str
     v_var: str
     warm_core: bool
+    topo_var: str | None
+    max_topo: float | None
     lat_name: str
     lon_name: str
     timefilter: str
@@ -306,12 +328,16 @@ def _detect_on_file(
     warm_core: bool,
     timefilter: str,
     logdir: Path,
+    max_topo: float | None = None,
 ) -> None:
     """Run DetectNodes on a single NetCDF bundle, writing one candidate file.
 
     The closed-contour command includes the T3 warm-core term only when
     ``warm_core`` is set; otherwise it is the SLP-only recipe used for datasets
-    without upper-tropospheric temperature.
+    without upper-tropospheric temperature. When ``max_topo`` is given, a
+    ``--thresholdcmd`` rejects candidates whose surface elevation (the ``TOPO``
+    field, see build_te_dataset) exceeds it -- dropping spurious lows over high
+    terrain (monsoon/heat lows) while keeping low-lying landfalling TCs.
     """
     _check_exe(exe)
     contour = f"{PSL_CONTOUR};{T3_CONTOUR}" if warm_core else PSL_CONTOUR
@@ -338,6 +364,8 @@ def _detect_on_file(
         "--logdir",
         str(logdir),
     ]
+    if max_topo is not None:
+        cmd += ["--thresholdcmd", f"TOPO,<=,{max_topo},0"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(
@@ -349,44 +377,65 @@ def _detect_on_file(
 def _process_bundle(spec: BundleSpec) -> tuple[int, str]:
     """Read one time-bundle, write NetCDF, run DetectNodes, delete NetCDF.
 
-    Returns ``(start, candidate_path)``. The NetCDF intermediate is removed in
-    a ``finally`` (unless ``keep_netcdf``) so a failure cannot orphan it, and
-    peak disk stays bounded to roughly ``workers x bundle_size``.
+    Returns ``(start, candidate_path)``. The NetCDF intermediate is deleted
+    (unless ``keep_netcdf``) on both success and failure so nothing is orphaned
+    and peak disk stays bounded to roughly ``workers x bundle_size``. The whole
+    read->write->detect is retried up to ``_BUNDLE_ATTEMPTS`` times so a single
+    transient (e.g. a GCS read blip) doesn't abort the entire parallel run.
     """
     nc_path = Path(spec.nc_dir) / f"te_input_{spec.start:06d}.nc"
     cand_path = Path(spec.nodes_dir) / f"cand_{spec.start:06d}.dat"
-    try:
-        if not (spec.keep_netcdf and nc_path.exists()):
-            ds = xr.open_zarr(spec.zarr)
-            if spec.time_start is not None or spec.time_end is not None:
-                ds = ds.sel(time=slice(spec.time_start, spec.time_end))
-            te = build_te_dataset(
-                ds,
-                psl_var=spec.psl_var,
-                psfc_var=spec.psfc_var,
-                t3_var=spec.t3_var,
-                u_var=spec.u_var,
-                v_var=spec.v_var,
-                sample=spec.sample,
-                warm_core=spec.warm_core,
+    last_exc: Exception | None = None
+    for attempt in range(_BUNDLE_ATTEMPTS):
+        try:
+            if not (spec.keep_netcdf and nc_path.exists()):
+                ds = xr.open_zarr(spec.zarr)
+                if spec.time_start is not None or spec.time_end is not None:
+                    ds = ds.sel(time=slice(spec.time_start, spec.time_end))
+                te = build_te_dataset(
+                    ds,
+                    psl_var=spec.psl_var,
+                    psfc_var=spec.psfc_var,
+                    t3_var=spec.t3_var,
+                    u_var=spec.u_var,
+                    v_var=spec.v_var,
+                    sample=spec.sample,
+                    warm_core=spec.warm_core,
+                    topo_var=spec.topo_var,
+                )
+                sub = te.isel(time=slice(spec.start, spec.start + spec.size)).load()
+                sub = _normalize_time_for_tempest(sub)
+                sub.to_netcdf(nc_path, encoding={"time": _te_time_encoding(sub)})
+            _detect_on_file(
+                nc_path,
+                cand_path,
+                spec.detect_exe,
+                spec.lat_name,
+                spec.lon_name,
+                spec.warm_core,
+                spec.timefilter,
+                Path(spec.nodes_dir),
+                max_topo=spec.max_topo,
             )
-            sub = te.isel(time=slice(spec.start, spec.start + spec.size)).load()
-            sub = _normalize_time_for_tempest(sub)
-            sub.to_netcdf(nc_path, encoding={"time": _te_time_encoding(sub)})
-        _detect_on_file(
-            nc_path,
-            cand_path,
-            spec.detect_exe,
-            spec.lat_name,
-            spec.lon_name,
-            spec.warm_core,
-            spec.timefilter,
-            Path(spec.nodes_dir),
-        )
-        return spec.start, str(cand_path)
-    finally:
-        if not spec.keep_netcdf and nc_path.exists():
-            nc_path.unlink()
+            if not spec.keep_netcdf and nc_path.exists():
+                nc_path.unlink()
+            return spec.start, str(cand_path)
+        except Exception as exc:
+            last_exc = exc
+            if not spec.keep_netcdf and nc_path.exists():
+                nc_path.unlink()  # drop any partial NetCDF before retrying
+            if attempt + 1 < _BUNDLE_ATTEMPTS:
+                logger.warning(
+                    "bundle %06d attempt %d/%d failed (%s); retrying",
+                    spec.start,
+                    attempt + 1,
+                    _BUNDLE_ATTEMPTS,
+                    exc,
+                )
+                time.sleep(2 * (attempt + 1))
+    raise RuntimeError(
+        f"bundle {spec.start} failed after {_BUNDLE_ATTEMPTS} attempts: {last_exc}"
+    ) from last_exc
 
 
 def run_bundled_detection(
@@ -405,6 +454,8 @@ def run_bundled_detection(
     u_var: str,
     v_var: str,
     warm_core: bool,
+    topo_var: str | None,
+    max_topo: float | None,
     lat_name: str,
     lon_name: str,
     timefilter: str,
@@ -439,6 +490,8 @@ def run_bundled_detection(
             u_var=u_var,
             v_var=v_var,
             warm_core=warm_core,
+            topo_var=topo_var,
+            max_topo=max_topo,
             lat_name=lat_name,
             lon_name=lon_name,
             timefilter=timefilter,
@@ -652,6 +705,21 @@ def main() -> None:
     parser.add_argument("--u-var", default="UGRD10m", help="10m eastward wind var.")
     parser.add_argument("--v-var", default="VGRD10m", help="10m northward wind var.")
     parser.add_argument(
+        "--topo-var",
+        default=None,
+        help="Surface-elevation var (e.g. HGTsfc) to include as a land/terrain "
+        "mask. Enables --max-topo. Static 2D fields are broadcast over time.",
+    )
+    parser.add_argument(
+        "--max-topo",
+        type=float,
+        default=None,
+        help="Reject candidates whose --topo-var surface elevation (m) exceeds "
+        "this, dropping spurious lows over high terrain (monsoon/heat lows) "
+        "while keeping low-lying landfalling TCs. Requires --topo-var (e.g. "
+        "--topo-var HGTsfc --max-topo 500).",
+    )
+    parser.add_argument(
         "--lat-name",
         default=None,
         help="Latitude coord name. If not set, auto-detected from known "
@@ -714,6 +782,8 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    if args.max_topo is not None and args.topo_var is None:
+        parser.error("--max-topo requires --topo-var (e.g. --topo-var HGTsfc)")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -747,6 +817,8 @@ def main() -> None:
         u_var=args.u_var,
         v_var=args.v_var,
         warm_core=args.warm_core,
+        topo_var=args.topo_var,
+        max_topo=args.max_topo,
         lat_name=lat_name,
         lon_name=lon_name,
         timefilter=args.timefilter,
