@@ -35,12 +35,16 @@ ERA5_CONTROL=01KSVC6YS7C18SGYV4VPZYZ232
 CM4_CONTROL_RS0=01KTYXNSJX90Y5E2CQ6SV8K37D
 # CM4_CONTROL_RS1=01KTWGH2VEZ4DNXXF1H5FTJK1S   # optional second control seed
 
-# Control PRETRAIN checkpoints (best_ckpt.tar) — the no-forcing 1-step pretrains the deployed
-# controls were finetuned from. These are the *fair* baseline for the 1-step-pretrain treatments:
-# same recipe + same checkpoint-selection criterion, WITHOUT the multi-step-finetune confound that
-# the deployed controls carry. (ERA5 rs2 ran to ep~40 vs treatments' ep 6-14 — a residual epoch gap,
-# mostly-converged; CM4 rs0 ran to ep 11, closely matching the CM4 treatments' ep 9-10.)
-ERA5_CONTROL_PT=01KW0ZEJ8MHAZSV3NY4A82RSAX
+# Control PRETRAIN checkpoints (best_ckpt.tar) — the exact no-forcing 1-step pretrains the deployed
+# controls were multi-step-finetuned FROM (traced via each deployed control's finetune-job /weights
+# warmstart mount). This is the *fair* baseline for the 1-step-pretrain treatments: same lineage +
+# same checkpoint-selection criterion, WITHOUT the multi-step-finetune confound the deployed
+# controls carry.
+#   ERA5: warmstart of ace2s-era5-multi-step-fine-tuning-no-var-weighting-rs0 (deployed control
+#         01KSVC...). Residual epoch gap vs treatments (ep 6-14) — mostly-converged.
+#   CM4:  warmstart of ace2s-cm4-picontrol-multi-step-finetuning-rs0 (deployed control 01KTYX...);
+#         ran to ep 11, closely matching the CM4 treatments' ep 9-10.
+ERA5_CONTROL_PT=01KSJKJKXRHA2Q0QCW91B1P8EG
 CM4_CONTROL_PT=01KTPTS6C23P8SWB9RBFWB09BE
 
 # Treatments: the *1-step pretrain* land-forcing checkpoints (NOT the multi-step finetuned ones —
