@@ -617,10 +617,6 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 10
-        override_groups:
-        - variables:
-          - global_mean_co2
-          masking:
-            rate: 0.9
+          max_masked_vars: 44
+          probability: 1.0
       include_channel_mask_inputs: true
