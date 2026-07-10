@@ -2,9 +2,9 @@
 
 set -e
 
-JOB_NAME="ufs-5d-samudra-fted-from-cm4-1pct-ocean-correctors-turned-on-during-ufs-ft-accounted-heating"
+JOB_NAME="ufs-5d-samudra-fted-from-cm4-1pct-new-dataset"
 JOB_GROUP="ufs-replay-ocean"
-CONFIG_FILENAME="train-ft-from-cm4-to-5day-mean-ufs-correctors.yaml"
+CONFIG_FILENAME="train-ft-from-cm4-to-5day-mean-ufs.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
