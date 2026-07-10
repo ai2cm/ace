@@ -12,10 +12,10 @@ _What is being compared and why (e.g. first apples-to-apples eval of the distill
 
 ## Artifacts
 
-| role | wandb run | Beaker experiment | checkpoint / bundle |
-|---|---|---|---|
-| Teacher | `<id>` — <url> | `<ULID>` | |
-| Distilled | `<id>` — <url> | `<ULID>` | |
+| role | wandb run | commit | Beaker experiment | checkpoint / bundle |
+|---|---|---|---|---|
+| Teacher | `<id>` — <url> | `<short-sha>` — https://github.com/ai2cm/ace/commit/<full-sha> | `<ULID>` | |
+| Distilled | `<id>` — <url> | `<short-sha>` — https://github.com/ai2cm/ace/commit/<full-sha> | `<ULID>` | |
 
 ## CRPS  (`metrics/crps/<VAR>` — lower better)
 

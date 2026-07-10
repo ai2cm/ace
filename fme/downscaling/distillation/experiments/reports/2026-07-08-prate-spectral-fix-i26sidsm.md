@@ -11,7 +11,7 @@ without fighting distillation?_
 | Experiment name | `ace-downscaling-distillation-fdistill-with-val-prate-spectral-fix` |
 | wandb run | `i26sidsm` — https://wandb.ai/ai2cm/fastgen/runs/i26sidsm |
 | Beaker experiment | `01KX00N9SE3ZVQFHQJ54XS0TAP` — https://beaker.org/ex/01KX00N9SE3ZVQFHQJ54XS0TAP |
-| Commit | `e29f797` |
+| Commit | `e29f797` — https://github.com/ai2cm/ace/commit/e29f797 |
 | State / last step | `crashed` @ `27820` |
 
 ## Config

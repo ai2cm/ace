@@ -10,7 +10,7 @@ arms are measured against._
 | Experiment name | `ace-downscaling-distillation-fdistill-with-val-prate-baseline` |
 | wandb run | `f7z93y0a` — https://wandb.ai/ai2cm/fastgen/runs/f7z93y0a |
 | Beaker experiment | `01KWX5CVJQ2BP53VH95WKPVPED` — https://beaker.org/ex/01KWX5CVJQ2BP53VH95WKPVPED |
-| Commit | `26868ca` |
+| Commit | `26868ca` — https://github.com/ai2cm/ace/commit/26868ca |
 | State / last step | `crashed` @ `29510` |
 
 ## Config

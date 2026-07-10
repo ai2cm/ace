@@ -17,7 +17,7 @@ _One-line hypothesis: what this run is testing and against which baseline._
 | Experiment name | `ace-downscaling-distillation-...` |
 | wandb run | `<id>` — https://wandb.ai/<entity>/<project>/runs/<id> |
 | Beaker experiment | `<ULID>` — https://beaker.org/ex/<ULID> |
-| Commit | `<sha>` (branch `<branch>`) |
+| Commit | `<short-sha>` — https://github.com/ai2cm/ace/commit/<full-sha> |
 | State / last step | `running|finished|crashed` @ `<step>` |
 
 ## Config

@@ -9,6 +9,15 @@ report-out**. The central log is [`LOG.md`](LOG.md); per-run reports live in
 > [`../MOE_DISTILLATION_STATUS.md`](../MOE_DISTILLATION_STATUS.md). New work is
 > tracked here.
 
+> **Agent note — capture recurring operations.** If an assistant finds itself
+> repeating a step of this workflow that isn't already captured under
+> `experiments/` (i.e. not in this file, `LOG.md`, `reports/`, `templates/`, or
+> `../specs/`) — a manual fetch, a fix-up applied to every generated report, a
+> command variant run each time, an environment/auth quirk worked around — fold it
+> back into the durable artifacts so it survives across sessions: a new step or note
+> here, a change to `check_runs.py`, an update to a template, or a spec. Nothing that
+> gets done more than once should live only in an assistant's transcript.
+
 ---
 
 ## Phase 1 · Implementation

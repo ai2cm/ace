@@ -6,10 +6,10 @@ first eval baseline too._
 
 ## Artifacts
 
-| role | wandb run |
-|---|---|
-| Teacher | `1r1p6djp` — https://wandb.ai/ai2cm/andrep-downscaling/runs/1r1p6djp |
-| Distilled | `rmoodemk` — https://wandb.ai/ai2cm/andrep-downscaling/runs/rmoodemk |
+| role | wandb run | commit |
+|---|---|---|
+| Teacher | `1r1p6djp` — https://wandb.ai/ai2cm/andrep-downscaling/runs/1r1p6djp | `de3e00c` — https://github.com/ai2cm/ace/commit/de3e00ce2bf8215114a818faae11700afd8005f9 |
+| Distilled | `rmoodemk` — https://wandb.ai/ai2cm/andrep-downscaling/runs/rmoodemk | `de3e00c` — https://github.com/ai2cm/ace/commit/de3e00ce2bf8215114a818faae11700afd8005f9 |
 
 ## CRPS  (`metrics/crps/<VAR>` — lower better)
 

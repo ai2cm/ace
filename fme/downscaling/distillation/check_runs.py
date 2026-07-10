@@ -42,6 +42,10 @@ import wandb
 
 DEFAULT_PROJECT = "ai2cm/fastgen"
 
+# GitHub repo the runs are launched from — used to turn a wandb-recorded commit
+# sha into a browsable link in the generated reports / registry rows.
+GITHUB_REPO = "ai2cm/ace"
+
 # GAN binary-cross-entropy reference points: a discriminator at chance sits at
 # ln2 (generator) / 2*ln2 (discriminator).  Used to detect a GAN that never
 # engaged vs one that collapsed.
@@ -222,13 +226,22 @@ def loss_domination_rows(
 
 
 def registry_row(fields: dict) -> str:
-    """Format a LOG.md run-registry table row from a field dict."""
+    """Format a LOG.md run-registry table row from a field dict.
+
+    When ``commit_url`` is present the commit renders as a markdown link so the
+    LOG.md registry, like the per-run reports, points straight at GitHub.
+    """
+    commit = fields.get("commit", "?")
+    commit_url = fields.get("commit_url")
+    commit_cell = (
+        f"[`{commit}`]({commit_url})" if commit_url and commit != "?" else f"`{commit}`"
+    )
     cols = [
         f"`{fields.get('wandb', '?')}`",
         fields.get("date", "?"),
         fields.get("name", "?"),
         f"`{fields.get('beaker', '—')}`",
-        f"`{fields.get('commit', '?')}`",
+        commit_cell,
         fields.get("knobs", "?"),
         fields.get("state", "?"),
         fields.get("verdict", "⏳"),
@@ -293,6 +306,23 @@ def _history_lists(run, keys: list[str]) -> dict[str, list[float]]:
 
 def _short_commit(commit: str) -> str:
     return commit[:7] if commit and commit != "?" else "?"
+
+
+def _github_commit_url(commit: str) -> str | None:
+    """GitHub URL for a full commit sha, or None if the commit is unknown."""
+    if not commit or commit == "?":
+        return None
+    return f"https://github.com/{GITHUB_REPO}/commit/{commit}"
+
+
+def _commit_cell(commit: str) -> str:
+    """Render a commit as a short sha followed by its GitHub URL for report tables.
+
+    Falls back to the bare short sha when the commit is unknown.
+    """
+    short = f"`{_short_commit(commit)}`"
+    url = _github_commit_url(commit)
+    return f"{short} — {url}" if url else short
 
 
 def _suffix_from_name(name: str) -> str:
@@ -382,7 +412,7 @@ def build_run_report(project: str, rid: str, beaker: str, gan_weight: float) -> 
     L.append(f"| wandb run | `{rid}` — {run.url} |")
     bk = f"`{beaker}` — https://beaker.org/ex/{beaker}" if beaker else "`TODO`"
     L.append(f"| Beaker experiment | {bk} |")
-    L.append(f"| Commit | `{_short_commit(meta['commit'])}` |")
+    L.append(f"| Commit | {_commit_cell(meta['commit'])} |")
     L.append(f"| State / last step | `{run.state}` @ `{run.summary.get('_step')}` |")
     L.append("")
     L.append("## Config")
@@ -499,6 +529,8 @@ def compare_eval(project: str, teacher: str, distilled: str) -> str:
     api = wandb.Api()
     t = api.run(f"{project}/{teacher}")
     d = api.run(f"{project}/{distilled}")
+    t_commit = _run_metadata(t)["commit"]
+    d_commit = _run_metadata(d)["commit"]
     variables = discover_variables(list(t.summary.keys()))
     # eval percentile keys look like histogram/prediction_frac_of_target/<p>th-...
     pat = re.compile(r"histogram/prediction_frac_of_target/([\d.]+)th-percentile/")
@@ -518,10 +550,10 @@ def compare_eval(project: str, teacher: str, distilled: str) -> str:
     L.append("")
     L.append("## Artifacts")
     L.append("")
-    L.append("| role | wandb run |")
-    L.append("|---|---|")
-    L.append(f"| Teacher | `{teacher}` — {t.url} |")
-    L.append(f"| Distilled | `{distilled}` — {d.url} |")
+    L.append("| role | wandb run | commit |")
+    L.append("|---|---|---|")
+    L.append(f"| Teacher | `{teacher}` — {t.url} | {_commit_cell(t_commit)} |")
+    L.append(f"| Distilled | `{distilled}` — {d.url} | {_commit_cell(d_commit)} |")
     L.append("")
     L.append("## CRPS  (`metrics/crps/<VAR>` — lower better)")
     L.append("")
@@ -575,6 +607,7 @@ def do_registry_row(project: str, rid: str, beaker: str) -> None:
                 "name": run.name,
                 "beaker": beaker or "—",
                 "commit": _short_commit(meta["commit"]),
+                "commit_url": _github_commit_url(meta["commit"]),
                 "knobs": _method_from_args(meta["args"]),
                 "state": f"{run.state}@{run.summary.get('_step')}",
                 "verdict": "⏳",

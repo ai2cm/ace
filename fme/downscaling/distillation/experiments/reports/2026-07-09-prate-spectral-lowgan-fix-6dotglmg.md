@@ -14,7 +14,7 @@ the spectral gains? (The pre-fix `gpx5574t` low-GAN run was invalid.)_
 | Experiment name | `ace-downscaling-distillation-fdistill-with-val-prate-spectral-lowgan-fix` |
 | wandb run | `6dotglmg` — https://wandb.ai/ai2cm/fastgen/runs/6dotglmg |
 | Beaker experiment | `01KX4DRYQ0RSQEWRY5F6QBP9BY` — https://beaker.org/ex/01KX4DRYQ0RSQEWRY5F6QBP9BY |
-| Commit | `e29f797` |
+| Commit | `e29f797` — https://github.com/ai2cm/ace/commit/e29f797 |
 | State / last step | `running` @ `650` |
 
 ## Config

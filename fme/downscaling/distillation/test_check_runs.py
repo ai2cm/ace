@@ -3,6 +3,8 @@
 """Unit tests for the pure helpers in check_runs.py (no wandb access)."""
 
 from fme.downscaling.distillation.check_runs import (
+    _commit_cell,
+    _github_commit_url,
     assess_gan_health,
     assess_trajectory,
     discover_tail_percentiles,
@@ -143,4 +145,30 @@ def test_registry_row_formatting():
         }
     )
     assert row.startswith("| `abc123` | 2026-07-09 | run-name | `01ABC` |")
+    assert "| `e29f797` |" in row  # plain sha when no commit_url given
     assert row.endswith("| ⏳ | — |")
+
+
+def test_registry_row_links_commit_when_url_given():
+    row = registry_row(
+        {
+            "wandb": "abc123",
+            "commit": "e29f797",
+            "commit_url": "https://github.com/ai2cm/ace/commit/e29f797abc",
+        }
+    )
+    assert "| [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797abc) |" in row
+
+
+def test_github_commit_url_and_cell():
+    assert _github_commit_url("?") is None
+    assert _github_commit_url("") is None
+    assert (
+        _github_commit_url("e29f797abc123")
+        == "https://github.com/ai2cm/ace/commit/e29f797abc123"
+    )
+    # cell shows the short sha but links the full sha
+    assert _commit_cell("e29f797abc123") == (
+        "`e29f797` — https://github.com/ai2cm/ace/commit/e29f797abc123"
+    )
+    assert _commit_cell("?") == "`?`"
