@@ -3,7 +3,8 @@
 # cm4-soil treatments. cm4-soil's input_masking is carried in the checkpoint, not set here.
 experiment_dir: gs://vcm-ml-intermediate/2026-07-09-ace2s-land-forcing-inference/PLACEHOLDER
 n_forward_steps: 40           # 6-hourly => ~10 days; short-lead only (land forcing leaks future)
-forward_steps_in_memory: 2    # memory ~ n_initial_conditions x this; 300 x 2 = 600 in-flight IC-steps
+forward_steps_in_memory: 1    # GPU mem ~ n_initial_conditions x this; 300 x 1 = 300 in-flight IC-steps
+                              # (300 x 2 = 600 OOMed the 192GB B200 -- the evaluator holds pred+target)
 checkpoint_path: /ckpt.tar
 n_ensemble_per_ic: 1
 logging:

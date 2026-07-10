@@ -89,8 +89,10 @@ treatment and control checkpoints**, so the IC window is out-of-sample for every
   overlap) and non-commensurate with the annual cycle, so ICs precess through the seasons
   (≈24–27 ICs/month). Regenerate via the `xr.open_zarr(...).time` + fixed-stride recipe if the
   count/window changes.
-- **GPU memory lever**: peak ≈ `n_initial_conditions × forward_steps_in_memory` (300 × 2 = 600
-  in-flight IC-steps). If a job OOMs on the GPU, drop `forward_steps_in_memory` to 1 or reduce ICs.
+- **GPU memory lever**: peak ≈ `n_initial_conditions × forward_steps_in_memory`. Runs on titan
+  B200s (192 GB). `forward_steps_in_memory: 1` → 300 in-flight IC-steps; `= 2` (600) OOMed the
+  B200 because the evaluator holds prediction *and* target (~2× the land-feedback `inference`
+  footprint at the same IC-steps). If a job still OOMs, reduce `n_initial_conditions`.
 - **Shared memory (`/dev/shm`)**: the IC load batches all 300 samples at once (~15 GiB) and the
   DataLoader workers double-buffer it, so the launcher requests `--shared-memory 400GiB` (the
   land-feedback recipe's 50 GiB is too small at 300 ICs and caused worker bus errors). Kept to
