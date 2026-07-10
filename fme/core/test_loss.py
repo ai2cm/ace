@@ -869,12 +869,12 @@ def test_energy_score_whitening_disabled_matches_default():
     target = torch.randn(8, 1, 3, n_lat, n_lon, device=DEVICE)
     sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
     default = _components_total(EnergyScoreLoss(sht=sht)(pred, target))
-    explicit = _components_total(
-        EnergyScoreLoss(sht=sht, whitening=SpectralWhiteningConfig(kind="none"))(
-            pred, target
-        )
+    disabled = _components_total(
+        EnergyScoreLoss(
+            sht=sht, whitening=SpectralWhiteningConfig(kind="none").build()
+        )(pred, target)
     )
-    torch.testing.assert_close(default, explicit)
+    torch.testing.assert_close(default, disabled)
 
 
 def _valid_mask(n_l, n_m, device):
@@ -929,10 +929,20 @@ def test_spectral_whitening_config_exponent_out_of_range_raises(exponent):
         SpectralWhiteningConfig(kind="per_sample", exponent=exponent)
 
 
-def test_spectral_whitening_config_exponent_requires_per_sample():
-    """A non-unit exponent with whitening off is a config error, not a silent no-op."""
+@pytest.mark.parametrize("field", ["exponent", "eps_frac"])
+def test_spectral_whitening_config_knob_requires_per_sample(field):
+    """Setting a whitening knob with whitening off is a config error, not a
+    silent no-op -- symmetric across exponent and eps_frac."""
     with pytest.raises(ValueError):
-        SpectralWhiteningConfig(kind="none", exponent=0.5)
+        SpectralWhiteningConfig(kind="none", **{field: 0.5})
+
+
+def test_spectral_whitening_config_per_sample_defaults_to_stable_knee():
+    """Enabling whitening without knobs resolves to the validated defaults
+    (gamma=0.5, eps_frac=0.02), not to unstable full whitening."""
+    config = SpectralWhiteningConfig(kind="per_sample")
+    assert config.exponent == 0.5
+    assert config.eps_frac == 0.02
 
 
 def test_spectral_whitening_exponent_partial_interpolates():

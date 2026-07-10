@@ -481,9 +481,13 @@ class SpectralWhitening:
         self.exponent = exponent
 
     def factor(self, y_hat: torch.Tensor) -> torch.Tensor:
-        yt = y_hat.detach()
+        # The target carries a singleton ensemble dim (B, 1, [C], L, M); drop it
+        # up front so the per-(sample, [channel], degree) factor aligns with the
+        # energy score, whose ensemble dim get_energy_score has already reduced.
+        yt = y_hat.detach()[:, 0]  # (B, [C], L, M)
+        amp_mode = yt.abs()  # (B, [C], L, M)
+        real_dtype = amp_mode.dtype
         n_l, n_m = yt.shape[-2], yt.shape[-1]
-        real_dtype = yt.abs().dtype
         l_idx = torch.arange(n_l, device=yt.device).unsqueeze(-1)  # (L, 1)
         m_idx = torch.arange(n_m, device=yt.device).unsqueeze(0)  # (1, M)
         valid = (m_idx <= l_idx).to(real_dtype)  # (L, M); zero where m > l
@@ -492,24 +496,32 @@ class SpectralWhitening:
         redundancy[:, 0] = 1.0
         w = redundancy * valid  # (L, M)
         tiny = torch.finfo(real_dtype).tiny
-        amp_mode = yt.abs()  # (B, 1, [C], L, M)
         # per-mode mean power at degree l (over valid m) -> per-mode RMS amplitude
         meanpow_l = (amp_mode**2 * w).sum(dim=-1) / w.sum(dim=-1).clamp_min(tiny)
-        amp_l = torch.sqrt(meanpow_l)  # (B, 1, [C], L)
+        amp_l = torch.sqrt(meanpow_l)  # (B, [C], L)
         mean_amp = amp_l.mean(dim=-1, keepdim=True)
         f = 1.0 / torch.clamp(amp_l, min=self.eps_frac * mean_amp)
         if self.exponent != 1.0:
             f = f**self.exponent
-        f_m = f.unsqueeze(-1)  # (B, 1, [C], L, 1), broadcast over m
+        f_m = f.unsqueeze(-1)  # (B, [C], L, 1), broadcast over m
         # Magnitude preservation: the per-mode energy score scales ~ |y_hat|, so
         # rescale so sum_lm w * |y_hat| is unchanged by the reweight.
         num = (w * amp_mode).sum(dim=(-2, -1), keepdim=True)
         den = (w * f_m * amp_mode).sum(dim=(-2, -1), keepdim=True)
         alpha = num / (den + tiny)
-        factor = alpha * f_m  # (B, 1, [C], L, 1)
-        if factor.shape[1] == 1:
-            factor = factor.squeeze(1)  # drop singleton ensemble dim -> (B, [C], L, 1)
-        return factor
+        return alpha * f_m  # (B, [C], L, 1)
+
+
+#: Default whitening strength when ``kind='per_sample'`` and ``exponent`` is
+#: unset. A two-seed gamma in {0, 0.2, 0.5, 0.8} sweep selected 0.5 as the
+#: stable knee: it captures most of the small-scale spectral gain while staying
+#: rollout-stable, whereas full whitening (gamma=1) over-upweights
+#: noise-dominated low-amplitude high-l degrees and destabilizes residual
+#: rollouts. See the whitening-gamma-selection report linked from PR #1303.
+_DEFAULT_WHITENING_EXPONENT = 0.5
+#: Default per-degree amplitude floor (fraction of the per-sample mean degree
+#: amplitude) when ``kind='per_sample'`` and ``eps_frac`` is unset.
+_DEFAULT_WHITENING_EPS_FRAC = 0.02
 
 
 @dataclasses.dataclass
@@ -523,16 +535,20 @@ class SpectralWhiteningConfig:
         eps_frac: floor on the per-degree amplitude, as a fraction of the
             per-sample mean degree-amplitude. It bounds the boost applied to
             near-zero-power degrees (where ``1 / amp_l`` would blow up).
+            Unset (``None``) defaults to ``0.02`` when whitening is enabled.
+            Requires ``kind='per_sample'``.
         exponent: whitening strength gamma in (0, 1]; the per-degree weight is
             ``(1 / amp_l) ** gamma``. gamma=1 fully flattens the target
             spectrum; smaller gamma whitens partially, taming the upweighting of
-            noise-dominated low-amplitude degrees. Requires
-            ``kind='per_sample'``.
+            noise-dominated low-amplitude degrees. Unset (``None``) defaults to
+            ``0.5`` when whitening is enabled -- the validated stable knee; full
+            whitening (gamma=1) destabilizes residual rollouts, so it is opt-in
+            rather than the default. Requires ``kind='per_sample'``.
     """
 
     kind: Literal["none", "per_sample"] = "none"
-    eps_frac: float = 0.02
-    exponent: float = 1.0
+    eps_frac: float | None = None
+    exponent: float | None = None
 
     def __post_init__(self):
         if self.kind not in ("none", "per_sample"):
@@ -540,16 +556,29 @@ class SpectralWhiteningConfig:
                 f"spectral whitening kind={self.kind!r} not supported; "
                 "use 'none' or 'per_sample'."
             )
+        if self.kind == "none":
+            if self.eps_frac is not None or self.exponent is not None:
+                raise ValueError(
+                    "eps_frac and exponent require kind='per_sample'; "
+                    "got kind='none'."
+                )
+            return
+        # kind='per_sample': resolve unset fields to their validated defaults,
+        # then validate. Storing the resolved values keeps build() total and the
+        # config introspectable.
+        if self.eps_frac is None:
+            self.eps_frac = _DEFAULT_WHITENING_EPS_FRAC
+        if self.exponent is None:
+            self.exponent = _DEFAULT_WHITENING_EXPONENT
         if self.eps_frac <= 0:
             raise ValueError(f"eps_frac must be positive, got {self.eps_frac}")
         if not 0.0 < self.exponent <= 1.0:
             raise ValueError(f"exponent must be in (0, 1], got {self.exponent}")
-        if self.kind == "none" and self.exponent != 1.0:
-            raise ValueError("exponent requires kind='per_sample'")
 
     def build(self) -> SpectralWhitening | None:
         if self.kind == "none":
             return None
+        assert self.eps_frac is not None and self.exponent is not None
         return SpectralWhitening(eps_frac=self.eps_frac, exponent=self.exponent)
 
 
@@ -580,15 +609,12 @@ class EnergyScoreLoss(torch.nn.Module):
     def __init__(
         self,
         sht: Callable[[torch.Tensor], torch.Tensor],
-        whitening: SpectralWhiteningConfig | None = None,
+        whitening: SpectralWhitening | None = None,
     ):
         super().__init__()
         self.sht = sht
-        # build() returns None when whitening is disabled (kind='none'), in which
-        # case forward() skips the reweight entirely.
-        self._whitening: SpectralWhitening | None = (
-            whitening or SpectralWhiteningConfig()
-        ).build()
+        # None (whitening disabled) makes forward() skip the reweight entirely.
+        self._whitening = whitening
         self.scaling: float | None = None
         self.n_spectral: int | None = None
         self.mode_weights: torch.Tensor | None = None
@@ -699,7 +725,7 @@ class EnsembleLoss(torch.nn.Module):
         finite_difference_crps_weight: float = 0.0,
         finite_difference_crps_levels: int = 1,
         almost_fair_crps_alpha: float = 1.0,
-        energy_score_whitening: SpectralWhiteningConfig | None = None,
+        energy_score_whitening: SpectralWhitening | None = None,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -822,10 +848,14 @@ class LossConfig:
             crps_weight = kwargs.pop("crps_weight", 1.0)
             energy_score_weight = kwargs.pop("energy_score_weight", 0.0)
             # kwargs is opaque (Mapping[str, Any]), so dacite does not descend
-            # into it; build the nested whitening config from its dict here.
-            whitening = kwargs.pop("energy_score_whitening", None)
-            if isinstance(whitening, Mapping):
-                whitening = SpectralWhiteningConfig(**whitening)
+            # into it; build the nested whitening config from its dict here, then
+            # pass the built operator (or None) down to EnsembleLoss.
+            whitening_config = kwargs.pop("energy_score_whitening", None)
+            if isinstance(whitening_config, Mapping):
+                whitening_config = SpectralWhiteningConfig(**whitening_config)
+            whitening = (
+                whitening_config.build() if whitening_config is not None else None
+            )
             main_loss = EnsembleLoss(
                 sht=gridded_operations.get_real_sht(),
                 crps_weight=crps_weight,
