@@ -116,12 +116,33 @@ grid-to-grid RMSE.
 - Track SLP minima can be extreme in this model data (e.g. track 519 ~868 hPa);
   the "most mature" selection just takes the lowest-SLP point per track.
 
-### Not yet done / next
+### Next task: scalable multi-time ingest + lifetime/aggregate stats
 
-- The demo ensemble is synthetic (kernel smoothing) -- swap for a real
-  downscaling-model ensemble by replacing `make_synthetic_ensemble`.
-- Consider a multi-storm / multi-time aggregation of the scorecard once real
-  ensembles exist; current summary is member-mean per storm.
+Build a parallelizable ingest/analysis pipeline (new script, e.g.
+`tc_radial_ingest.py`, reusing `tc_radial_metrics.py`) that scales the demo from
+a few snapshots to full storm lifetimes:
+
+- **Single-time, region-select ingest.** Load **one timestep at a time** and
+  select only the storm-centered region (the 16 deg patch), so peak memory is
+  bounded. Make the region size / read footprint **tunable** (`--patch-halfwidth-deg`,
+  and consider reading only the needed lat/lon slab) so it never runs out of
+  memory regardless of grid size. NB: the 3h zarr's whole-globe-per-timestep
+  chunking means the *read* still fetches a global chunk — memory is bounded by
+  processing one time at a time and discarding, not by the read.
+- **Parallelize over times.** Fan out the per-time patch-read + profile/metric
+  computation across workers (mirror `detect_tc_tracks.py`'s spawn-process pool;
+  fork corrupts gcsfs asyncio state). Each task handles one (track, time) point.
+- **Run over multiple times / whole tracks.** Iterate every 3h point of each
+  selected storm's lifetime (not just the peak), and across selected storms.
+- **Save per-time error stats over the lifetime.** Persist the radial profiles
+  and scorecard/CRPS/RMSE **per (storm, time)** so error evolution along the
+  track is available (extend the NetCDF with a `time`/along-track dimension).
+- **Reduced/aggregate measures.** Also compute reduced statistics: aggregated
+  **over each whole storm's lifetime** (per-storm summary), and **over selections
+  or all storms** (e.g. mean/quantile radial CRPS(r), scorecard distributions).
+  Keep both the full per-time record and the reductions in the output.
+- Swap the synthetic ensemble (`make_synthetic_ensemble`) for a real
+  downscaling-model ensemble; the metrics API is already ensemble-native.
 
 ## Notes for later / handoff
 
