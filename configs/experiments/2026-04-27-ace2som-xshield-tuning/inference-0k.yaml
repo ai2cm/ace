@@ -1,4 +1,4 @@
-experiment_dir: /climate-default/home/annak/2026-07-09-ace2s-era5-1step-tuned-xshield-best-inf-ckpt
+experiment_dir: /climate-default/home/annak/2026-07-09-ace2s-era5-1step-tuned-xshield-best-val-ckpt
 n_forward_steps: 14600
 forward_steps_in_memory: 20
 checkpoint_path: /ckpt.tar
