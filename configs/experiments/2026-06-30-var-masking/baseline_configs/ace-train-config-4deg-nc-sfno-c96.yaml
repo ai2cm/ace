@@ -397,7 +397,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: ace
+  project: VarMaskingC96
   entity: ai2cm
 train_loader:
   batch_size: 8
@@ -464,7 +464,7 @@ stepper:
   step:
     type: single_module
     config:
-      residual_prediction: true
+      residual_prediction: false
       builder:
         type: NoiseConditionedSFNO
         config:

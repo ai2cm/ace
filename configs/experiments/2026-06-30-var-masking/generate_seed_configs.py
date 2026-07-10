@@ -1,8 +1,10 @@
-"""Generate seed-replicate training configs from the c96 nc-sfno base config.
+"""Generate seed-replicate training configs from the nc-sfno base configs.
 
 For a chosen subset of the var-masking sweep this writes ``n_seeds`` copies of
 each config (default 5), differing only in the top-level ``seed`` field, so the
 same masking scheme can be trained multiple times to estimate run-to-run spread.
+Configs are generated for both base models (c96 and era5); versioning is ``-v2``
+throughout (inherited from ``WANDB_SUFFIX``).
 
 Configs are written into ``run_configs/`` (only ``*-seed*.yaml`` files are
 cleared first, leaving the other experiments' configs untouched). The masking
@@ -14,7 +16,7 @@ subset, each crossed with the co2 axis (co2default off / co2bern90 drops
   - mask40: uniform 0-40 masking (``max_masked_vars`` = 40) gated by a 25%
             ``probability`` of firing on any given batch.
 
-With the default 5 seeds this is 3 x 2 x 5 = 30 configs.
+With the default 5 seeds this is 2 models x 3 x 2 x 5 = 60 configs.
 """
 
 import argparse
@@ -23,14 +25,14 @@ from typing import NamedTuple
 
 import yaml
 from generate_masking_configs import (
-    BASE_CONFIG,
+    BASE_MODELS,
+    BASELINE_CONFIGS_DIR,
     CO2_OPTIONS,
     RUN_CONFIGS_DIR,
-    STEM,
     WANDB_ENTITY,
-    WANDB_PROJECT,
     _apply_settings,
     _build_input_dropout,
+    _fetch_wandb_run_names,
     config_name_to_run_name,
 )
 
@@ -52,19 +54,12 @@ SEED_GROUPS = [
 ]
 
 
-def _fetch_wandb_run_names() -> set[str]:
-    import wandb  # lazy import: only needed with --delete-if-in-wandb
-
-    api = wandb.Api()
-    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
-    return {run.name for run in runs}
-
-
 def _write_config(
     base: dict,
     dropout: dict,
     seed: int,
     name: str,
+    project: str,
     wandb_run_names: set[str] | None = None,
 ) -> None:
     out_path = RUN_CONFIGS_DIR / f"{name}.yaml"
@@ -76,7 +71,7 @@ def _write_config(
             print(f"Skipped {out_path.name} (run exists in wandb)")
         return
     cfg = copy.deepcopy(base)
-    _apply_settings(cfg, dropout)
+    _apply_settings(cfg, dropout, project)
     cfg["seed"] = seed
     out_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
     print(f"Wrote {out_path.name}")
@@ -84,32 +79,42 @@ def _write_config(
 
 def generate_configs(
     n_seeds: int = DEFAULT_N_SEEDS,
-    wandb_run_names: set[str] | None = None,
+    fetch_wandb: bool = False,
 ) -> None:
-    base = yaml.safe_load(BASE_CONFIG.read_text())
-    in_names = list(base["stepper"]["step"]["config"]["in_names"])
-    # N caps max_masked_vars at the pool size, so a fired draw masks all vars.
-    mask_all = len(in_names)
-
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
     for yaml_path in RUN_CONFIGS_DIR.glob("*-seed*.yaml"):
         yaml_path.unlink()
         print(f"Removed {yaml_path.name}")
 
-    for group in SEED_GROUPS:
-        mask_level = mask_all if group.mask_all else group.mask_level
-        assert mask_level is not None
-        probability = group.probability
-        for co2_name, co2_rate in CO2_OPTIONS.items():
-            dropout = _build_input_dropout(
-                mask_level, co2_rate, probability=probability
-            )
-            base_name = f"{STEM}-{group.label}-{co2_name}"
-            if probability is not None:
-                base_name = f"{base_name}-nomask{probability:.2f}"
-            for seed in range(n_seeds):
-                name = f"{base_name}-seed{seed}"
-                _write_config(base, dropout, seed, name, wandb_run_names)
+    for model in BASE_MODELS:
+        base_config = BASELINE_CONFIGS_DIR / f"{model.stem}.yaml"
+        base = yaml.safe_load(base_config.read_text())
+        in_names = list(base["stepper"]["step"]["config"]["in_names"])
+        # N caps max_masked_vars at the pool size, so a fired draw masks all vars.
+        mask_all = len(in_names)
+
+        wandb_run_names: set[str] | None = None
+        if fetch_wandb:
+            print(f"Fetching run names from {WANDB_ENTITY}/{model.project}...")
+            wandb_run_names = _fetch_wandb_run_names(model.project)
+            print(f"Found {len(wandb_run_names)} existing runs.")
+
+        for group in SEED_GROUPS:
+            mask_level = mask_all if group.mask_all else group.mask_level
+            assert mask_level is not None
+            probability = group.probability
+            for co2_name, co2_rate in CO2_OPTIONS.items():
+                dropout = _build_input_dropout(
+                    mask_level, co2_rate, probability=probability
+                )
+                base_name = f"{model.stem}-{group.label}-{co2_name}"
+                if probability is not None:
+                    base_name = f"{base_name}-mask{probability:.2f}"
+                for seed in range(n_seeds):
+                    name = f"{base_name}-seed{seed}"
+                    _write_config(
+                        base, dropout, seed, name, model.project, wandb_run_names
+                    )
 
 
 def main() -> None:
@@ -124,19 +129,13 @@ def main() -> None:
         "--delete-if-in-wandb",
         action="store_true",
         help=(
-            f"Skip (and delete any existing) configs whose run name already "
-            f"exists in {WANDB_ENTITY}/{WANDB_PROJECT}."
+            "Skip (and delete any existing) configs whose run name already "
+            "exists in the model's wandb project."
         ),
     )
     args = parser.parse_args()
 
-    wandb_run_names: set[str] | None = None
-    if args.delete_if_in_wandb:
-        print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
-        wandb_run_names = _fetch_wandb_run_names()
-        print(f"Found {len(wandb_run_names)} existing runs.")
-
-    generate_configs(args.n_seeds, wandb_run_names)
+    generate_configs(args.n_seeds, fetch_wandb=args.delete_if_in_wandb)
 
 
 if __name__ == "__main__":
