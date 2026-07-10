@@ -2,44 +2,23 @@ seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
-pre_cooldown_checkpoint_epoch: 142
 validate_using_ema: true
+ema_checkpoint_save_epochs:
+  start: 5
+  step: 5
 max_epochs: 150
+pre_cooldown_checkpoint_epoch: 142
 ema:
   decay: 0.999
+train_aggregator:
+  ensemble_metrics: true
 inference:
-  - name: long_46year_constant_co2
+  - name: 7year_oosample_ensemble_varying_co2
     weight: 0.0
     epochs:
       start: 0
       step: 10
-    n_forward_steps: 16794
-    forward_steps_in_memory: 73
-    n_ensemble_per_ic: 1
-    loader:
-      start_indices:
-        times:
-          - '1979-01-01T00:00:00'
-          - '1979-01-02T00:00:00'
-          - '1979-01-03T00:00:00'
-          - '1979-01-04T00:00:00'
-          - '1979-01-05T00:00:00'
-          - '1979-01-06T00:00:00'
-          - '1979-01-07T00:00:00'
-          - '1979-01-08T00:00:00'
-      dataset:
-        data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-        engine: zarr
-      num_data_workers: 4
-      persistence_names:
-        - global_mean_co2
-  - name: 10year
-    weight: 1.0
-    epochs:
-      start: 0
-      step: 10
-    n_forward_steps: 3652
+    n_forward_steps: 2534
     forward_steps_in_memory: 73
     n_ensemble_per_ic: 1
     loader:
@@ -54,11 +33,11 @@ inference:
           - '2015-01-07T00:00:00'
           - '2015-01-08T00:00:00'
       dataset:
-        data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
         engine: zarr
       num_data_workers: 4
-    aggregator:
+    aggregator: &agg_10year
       step_means:
         - step: 5
           target: denorm
@@ -114,222 +93,7 @@ inference:
             - northward_wind_5
             - northward_wind_6
             - northward_wind_7
-        - step: 5
-          target: norm
-          name: day_5_norm
-          variables: *inference_variables
-      ensembles: []
-      mean_denorm:
-        enabled: false
-        target: denorm
-      mean_norm:
-        enabled: false
-        target: norm
-      enso_index:
-        enabled: false
-      enso_coefficient:
-        enabled: false
-      histogram:
-        enabled: true
-  - name: weather_2024
-    weight: 0.0
-    epochs:
-      start: 0
-      step: 10
-    n_forward_steps: 5
-    forward_steps_in_memory: 5
-    n_ensemble_per_ic: 8
-    loader:
-      start_indices:
-        times:
-          - '2024-06-01T00:00:00'
-          - '2024-06-02T00:00:00'
-          - '2024-06-03T00:00:00'
-          - '2024-06-04T00:00:00'
-          - '2024-06-05T00:00:00'
-          - '2024-06-06T00:00:00'
-          - '2024-06-07T00:00:00'
-          - '2024-06-08T00:00:00'
-      dataset:
-        data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-        engine: zarr
-      num_data_workers: 4
-    aggregator:
-      step_means:
-        - step: 5
-          target: denorm
-          name: day_5
-          variables: *inference_variables
-        - step: 5
-          target: norm
-          name: day_5_norm
-          variables: *inference_variables
-      ensembles:
-        - step: 5
-          name: day_5_ensemble
-      mean_denorm:
-        enabled: false
-        target: denorm
-      mean_norm:
-        enabled: false
-        target: norm
-      power_spectrum:
-        enabled: false
-      zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        enabled: false
-        target: denorm
-      time_mean_norm:
-        enabled: false
-        target: norm
-      annual:
-        enabled: false
-      enso_index:
-        enabled: false
-      enso_coefficient:
-        enabled: false
-      ipo_index:
-        enabled: false
-  - name: weather_1994
-    weight: 0.0
-    epochs:
-      start: 0
-      step: 10
-    n_forward_steps: 5
-    forward_steps_in_memory: 5
-    n_ensemble_per_ic: 8
-    loader:
-      start_indices:
-        times:
-          - '1994-06-01T00:00:00'
-          - '1994-06-02T00:00:00'
-          - '1994-06-03T00:00:00'
-          - '1994-06-04T00:00:00'
-          - '1994-06-05T00:00:00'
-          - '1994-06-06T00:00:00'
-          - '1994-06-07T00:00:00'
-          - '1994-06-08T00:00:00'
-      dataset:
-        data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-        engine: zarr
-      num_data_workers: 4
-    aggregator:
-      step_means:
-        - step: 5
-          target: denorm
-          name: day_5
-          variables: *inference_variables
-        - step: 5
-          target: norm
-          name: day_5_norm
-          variables: *inference_variables
-      ensembles:
-        - step: 5
-          name: day_5_ensemble
-      mean_denorm:
-        enabled: false
-        target: denorm
-      mean_norm:
-        enabled: false
-        target: norm
-      power_spectrum:
-        enabled: false
-      zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        enabled: false
-        target: denorm
-      time_mean_norm:
-        enabled: false
-        target: norm
-      annual:
-        enabled: false
-      enso_index:
-        enabled: false
-      enso_coefficient:
-        enabled: false
-      ipo_index:
-        enabled: false
-  - name: long_46year
-    weight: 0.0
-    epochs:
-      start: 0
-      step: 10
-    n_forward_steps: 16794
-    forward_steps_in_memory: 73
-    n_ensemble_per_ic: 1
-    loader:
-      start_indices:
-        times:
-          - '1979-01-01T00:00:00'
-          - '1979-01-02T00:00:00'
-          - '1979-01-03T00:00:00'
-          - '1979-01-04T00:00:00'
-          - '1979-01-05T00:00:00'
-          - '1979-01-06T00:00:00'
-          - '1979-01-07T00:00:00'
-          - '1979-01-08T00:00:00'
-      dataset:
-        data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-        engine: zarr
-      num_data_workers: 4
-    aggregator:
-      step_means: []
-      ensembles: []
-      mean_denorm:
-        enabled: false
-        target: denorm
-      mean_norm:
-        enabled: false
-        target: norm
-      zonal_mean:
-        enabled: false
-      time_mean_denorm:
-        target: denorm
-        variables: *inference_variables
-      time_mean_norm:
-        target: norm
-        variables: *inference_variables
-      annual:
-        variables: *inference_variables
-      power_spectrum:
-        variables: *inference_variables
-      histogram:
-        enabled: true
-  - name: 7year_oosample_ensemble_varying_co2
-    weight: 0.0
-    epochs:
-      start: 0
-      step: 10
-    n_forward_steps: 2534
-    forward_steps_in_memory: 73
-    n_ensemble_per_ic: 1
-    loader:
-      start_indices:
-        times:
-          - '2015-01-01T00:00:00'
-          - '2015-01-02T00:00:00'
-          - '2015-01-03T00:00:00'
-          - '2015-01-04T00:00:00'
-          - '2015-01-05T00:00:00'
-          - '2015-01-06T00:00:00'
-          - '2015-01-07T00:00:00'
-          - '2015-01-08T00:00:00'
-      dataset:
-        data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
-        file_pattern: ic_0001.zarr
-        engine: zarr
-      num_data_workers: 4
-    aggregator: &agg_10year
-      step_means:
-        - step: 5
-          target: denorm
-          name: day_5
-          variables: *inference_variables
+            - total_water_path
         - step: 5
           target: norm
           name: day_5_norm
@@ -594,79 +358,18 @@ train_loader:
   time_buffer_pool_size: 32
   dataset:
     strict: false
+    # SHiELD has no production-stream stitches, so the training range is
+    # contiguous. The only split is to hold out the 1994 validation year;
+    # overall span (1979-2013, val 1994/2014) matches the era5 baseline.
     concat:
-      # SHiELD AMIP ensemble
       - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
         file_pattern: ic_0001.zarr
         engine: zarr
         subset:
           start_time: '1979-01-01'
-          stop_time: '2008-12-31'
-      # SHiELD ramped-climSST random-CO2 ensemble
-      - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
-        file_pattern: ramped-sst-1xCO2-random-perturbation.zarr
-        engine: zarr
-        subset:
-          start_time: '2020-01-01'
-          stop_time: '2025-01-01'
-      - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
-        file_pattern: ramped-sst-1xCO2-random-perturbation-ic_0002.zarr
-        engine: zarr
-        subset:
-          start_time: '2020-01-01'
-          stop_time: '2025-01-01'
-      - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
-        file_pattern: ramped-sst-2xCO2-random-perturbation.zarr
-        engine: zarr
-        subset:
-          start_time: '2020-01-01'
-          stop_time: '2025-01-01'
-      - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
-        file_pattern: ramped-sst-2xCO2-random-perturbation-ic_0002.zarr
-        engine: zarr
-        subset:
-          start_time: '2020-01-01'
-          stop_time: '2025-01-01'
-      - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
-        file_pattern: ramped-sst-4xCO2-random-perturbation.zarr
-        engine: zarr
-        subset:
-          start_time: '2020-01-01'
-          stop_time: '2025-01-01'
-      - data_path: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily
-        file_pattern: ramped-sst-4xCO2-random-perturbation-ic_0002.zarr
-        engine: zarr
-        subset:
-          start_time: '2020-01-01'
-          stop_time: '2025-01-01'
-      # SHiELD slab-ocean-model (SOM) ensemble
-      - data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
-        file_pattern: 1xCO2-ic_0001.zarr
-        engine: zarr
-        subset:
-          start_time: '2031-01-02'
-          stop_time: '2041-01-01'
-      - data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
-        file_pattern: 2xCO2-ic_0001.zarr
-        engine: zarr
-        subset:
-          start_time: '2031-01-02'
-          stop_time: '2041-01-01'
-      - data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
-        file_pattern: 4xCO2-ic_0001.zarr
-        engine: zarr
-        subset:
-          start_time: '2031-01-02'
-          stop_time: '2041-01-01'
-      # ERA5 (1994 + 2014 held out for validation)
-      - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-        engine: zarr
-        subset:
-          start_time: '1940-01-03'
           stop_time: '1993-12-31'
-      - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+        file_pattern: ic_0001.zarr
         engine: zarr
         subset:
           start_time: '1995-01-01'
@@ -674,20 +377,20 @@ train_loader:
 validation:
   loader:
     batch_size: 32
-    num_data_workers: 8
+    num_data_workers: 4
     prefetch_factor: 2
     time_buffer: 16
     dataset:
       strict: false
       concat:
-        - data_path: /climate-default
-          file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+          file_pattern: ic_0001.zarr
           engine: zarr
           subset:
             start_time: '1994-01-01'
             stop_time: '1994-12-31'
-        - data_path: /climate-default
-          file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+          file_pattern: ic_0001.zarr
           engine: zarr
           subset:
             start_time: '2014-01-01'
@@ -742,11 +445,11 @@ stepper:
           clip_latent_global_means: true
       normalization:
         network:
-          global_means_path: /climate-default/alexeyy/pooled_stats_0/centering.nc
-          global_stds_path: /climate-default/alexeyy/pooled_stats_0/scaling-full-field.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/alexeyy/pooled_stats_0/centering.nc
-          global_stds_path: /climate-default/alexeyy/pooled_stats_0/scaling-residual.nc
+          global_means_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/centering.nc
+          global_stds_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset-stats/ic_0001/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
@@ -779,6 +482,7 @@ stepper:
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
+      - global_mean_co2
       - PRESsfc
       - surface_temperature
       - TMP2m
@@ -817,7 +521,6 @@ stepper:
       - northward_wind_5
       - northward_wind_6
       - northward_wind_7
-      - global_mean_co2
       out_names:
       - PRESsfc
       - surface_temperature
@@ -872,12 +575,3 @@ stepper:
       global_mean_removal:
         kind: shared
         append_as_input: true
-      input_dropout:
-        default:
-          max_masked_vars: 10
-        override_groups:
-        - variables:
-          - HGTsfc
-          masking:
-            rate: 0.8
-      include_channel_mask_inputs: true
