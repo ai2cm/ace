@@ -1,14 +1,14 @@
-"""Submit SST-perturbation inference jobs for the VarMaskingC96 checkpoints.
+"""Submit SST-perturbation inference jobs for the VarMaskingC96/ERA5 checkpoints.
 
 For each training run in wandb_to_beaker_map.json, submits one free-running
-inference job per (forcing dataset x SST perturbation level) combination. Each
-job mounts that run's best_inference_ckpt.tar at /ckpt.tar and runs the matching
+inference job per SST perturbation level, against the run's own model's
+native varying-CO2 forcing dataset (see generate_sst_configs.py). Each job
+mounts that run's best_inference_ckpt.tar at /ckpt.tar and runs the matching
 config from run_configs/ (produced by generate_sst_configs.py) via
 run-ace-inference.sh.
 
 Usage:
     python submit_sst_jobs.py [--dry-run] [--run RUN [RUN ...]]
-                              [--dataset {constant-co2,ensemble} ...]
                               [--perturbation {p0k,p2k,p4k} ...]
                               [--beaker-workspace WORKSPACE]
                               [--beaker-cluster CLUSTER [CLUSTER ...]]
@@ -22,9 +22,9 @@ import subprocess
 import sys
 
 from generate_eval_configs import TRAINING_RESULT_DATASETS
-from generate_masking_configs import WANDB_PROJECT
+from generate_masking_configs import CONFIG_PREFIX, WANDB_PREFIX
 from generate_sst_configs import (
-    DATASETS,
+    MODELS,
     RUN_CONFIGS_DIR,
     SST_PERTURBATIONS,
     sst_config_filename,
@@ -37,10 +37,19 @@ WANDB_GROUP = "ace2-var-masking-sst-perts-2026-07-08"
 CHECKPOINT_PATH = "training_checkpoints/best_inference_ckpt.tar"
 
 
-def validate_configs(datasets: list[str], levels: list[str]) -> None:
-    for dataset in datasets:
+def _model_for_run(run_name: str) -> str:
+    suffix = run_name.removeprefix(WANDB_PREFIX)
+    for model_key, base_model in MODELS.items():
+        stem_suffix = base_model.stem.removeprefix(CONFIG_PREFIX)
+        if suffix == stem_suffix or suffix.startswith(f"{stem_suffix}-"):
+            return model_key
+    raise ValueError(f"cannot determine model for run {run_name!r}")
+
+
+def validate_configs(models: list[str], levels: list[str]) -> None:
+    for model in models:
         for level in levels:
-            config_path = RUN_CONFIGS_DIR / sst_config_filename(dataset, level)
+            config_path = RUN_CONFIGS_DIR / sst_config_filename(model, level)
             subprocess.run(
                 [
                     sys.executable,
@@ -69,13 +78,6 @@ def main() -> None:
         help="Restrict to these training run names (default: all runs in the map).",
     )
     parser.add_argument(
-        "--dataset",
-        nargs="+",
-        default=None,
-        choices=list(DATASETS),
-        help="Restrict to these forcing datasets (default: all).",
-    )
-    parser.add_argument(
         "--perturbation",
         nargs="+",
         default=None,
@@ -101,7 +103,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    datasets = args.dataset or list(DATASETS)
     levels = args.perturbation or list(SST_PERTURBATIONS)
     run_names = args.run or sorted(TRAINING_RESULT_DATASETS)
 
@@ -112,42 +113,46 @@ def main() -> None:
             f"available: {sorted(TRAINING_RESULT_DATASETS)}"
         )
 
-    for dataset in datasets:
+    run_models = {run_name: _model_for_run(run_name) for run_name in run_names}
+    models_needed = sorted(set(run_models.values()))
+
+    for model in models_needed:
         for level in levels:
-            config_path = RUN_CONFIGS_DIR / sst_config_filename(dataset, level)
+            config_path = RUN_CONFIGS_DIR / sst_config_filename(model, level)
             if not config_path.exists():
                 raise FileNotFoundError(
                     f"{config_path.name} not found — run generate_sst_configs.py first"
                 )
 
     if not args.dry_run:
-        validate_configs(datasets, levels)
+        validate_configs(models_needed, levels)
 
     for run_name in run_names:
         source_dataset_id = TRAINING_RESULT_DATASETS[run_name]
-        for dataset in datasets:
-            for level in levels:
-                config_filename = sst_config_filename(dataset, level)
-                job_name = f"{run_name}-{dataset}-{level}"
-                cmd = [
-                    str(RUN_SCRIPT),
-                    config_filename,
-                    job_name,
-                    WANDB_GROUP,
-                    source_dataset_id,
-                    CHECKPOINT_PATH,
-                ]
-                print("Submitting:", " ".join(cmd))
-                if not args.dry_run:
-                    env = {
-                        **os.environ,
-                        "WANDB_PROJECT": WANDB_PROJECT,
-                        "BEAKER_WORKSPACE": args.beaker_workspace,
-                        "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
-                        "BEAKER_PRIORITY": args.beaker_priority,
-                        "SKIP_VALIDATE": "1",
-                    }
-                    subprocess.run(cmd, check=True, cwd=HERE, env=env)
+        model = run_models[run_name]
+        project = MODELS[model].project
+        for level in levels:
+            config_filename = sst_config_filename(model, level)
+            job_name = f"{run_name}-{level}"
+            cmd = [
+                str(RUN_SCRIPT),
+                config_filename,
+                job_name,
+                WANDB_GROUP,
+                source_dataset_id,
+                CHECKPOINT_PATH,
+            ]
+            print("Submitting:", " ".join(cmd))
+            if not args.dry_run:
+                env = {
+                    **os.environ,
+                    "WANDB_PROJECT": project,
+                    "BEAKER_WORKSPACE": args.beaker_workspace,
+                    "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
+                    "BEAKER_PRIORITY": args.beaker_priority,
+                    "SKIP_VALIDATE": "1",
+                }
+                subprocess.run(cmd, check=True, cwd=HERE, env=env)
 
 
 if __name__ == "__main__":
