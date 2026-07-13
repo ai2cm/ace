@@ -19,13 +19,16 @@ from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.ocean import OceanConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
     PerChannelGlobalMeanRemovalConfig,
     SharedGlobalMeanRemovalConfig,
+    extra_channel_source_field,
 )
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStep, MultiCallStepConfig
+from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
 from fme.core.step.secondary_module import SecondaryModuleStepConfig
 from fme.core.step.single_module import (
@@ -36,7 +39,13 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 from .radiation import SeparateRadiationStepConfig
 
@@ -514,7 +523,7 @@ def test_label_conditioned_step():
     )
     input_data = dist.scatter_spatial(input_data, DEFAULT_IMG_SHAPE)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, DEFAULT_IMG_SHAPE)
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
@@ -523,7 +532,7 @@ def test_label_conditioned_step():
             ),
         ),
         wrapper=lambda x: x,
-    )
+    ).output
     h_sl, w_sl = dist.get_local_slices(DEFAULT_IMG_SHAPE)
     local_h = DEFAULT_IMG_SHAPE[0] if h_sl == slice(None) else h_sl.stop - h_sl.start
     local_w = DEFAULT_IMG_SHAPE[1] if w_sl == slice(None) else w_sl.stop - w_sl.start
@@ -730,15 +739,241 @@ def test_step_with_prescribed_prognostic_overwrites_output():
         (n_samples,) + img_shape, 42.0, device=fme.get_device()
     )
     next_step_input_data["diagnostic_main"] = prescribed_value
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
         ),
         wrapper=lambda x: x,
-    )
+    ).output
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
+
+
+def test_step_returns_step_output_with_populated_detached_delta():
+    selector = get_single_module_with_atmosphere_corrector_selector()
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    assert isinstance(result, StepOutput)
+    delta = result.corrector_diagnostics.delta
+    assert delta  # the atmosphere corrector modifies fields
+    for name, tensor in delta.items():
+        assert name in result.output
+        assert not tensor.requires_grad  # detached at the step boundary
+
+
+def test_step_empty_delta_when_no_corrector():
+    selector = get_single_module_selector()
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    assert isinstance(result, StepOutput)
+    assert dict(result.corrector_diagnostics.delta) == {}
+
+
+def _single_module_corrector_prescribed_selector(
+    force_positive_names: list[str],
+    prescribed_prognostic_names: list[str],
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(
+                    force_positive_names=force_positive_names
+                ),
+                prescribed_prognostic_names=prescribed_prognostic_names,
+            ),
+        ),
+    )
+
+
+def test_step_boundary_disjointness_passes_when_disjoint():
+    # corrector modifies diagnostic_rad; the post-corrector prescription
+    # overwrites diagnostic_main -> disjoint, so the step succeeds.
+    selector = _single_module_corrector_prescribed_selector(
+        force_positive_names=["diagnostic_rad"],
+        prescribed_prognostic_names=["diagnostic_main"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    next_step_input_data["diagnostic_main"] = torch.zeros(
+        2, *img_shape, device=fme.get_device()
+    )
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    assert "diagnostic_rad" in result.corrector_diagnostics.delta
+    assert "diagnostic_main" not in result.corrector_diagnostics.delta
+
+
+def test_step_prescribed_prognostic_shadows_corrector_modified_name():
+    # corrector modifies diagnostic_main and the post-corrector prescription
+    # also writes diagnostic_main. Prescribing a corrector-modified variable is
+    # a supported, silent operation: the step runs, the prescribed value wins in
+    # the output, and diagnostic_main is dropped from the reported delta (its
+    # corrector delta no longer describes the overwritten output).
+    selector = _single_module_corrector_prescribed_selector(
+        force_positive_names=["diagnostic_main"],
+        prescribed_prognostic_names=["diagnostic_main"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    prescribed_value = torch.full((2, *img_shape), 42.0, device=fme.get_device())
+    next_step_input_data["diagnostic_main"] = prescribed_value
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    torch.testing.assert_close(result.output["diagnostic_main"], prescribed_value)
+    assert "diagnostic_main" not in result.corrector_diagnostics.delta
+
+
+def _single_module_ocean_corrector_selector(
+    force_positive_names: list[str],
+    prescribed_prognostic_names: list[str] | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=["surface_temperature", "ocean_fraction"],
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=["surface_temperature", "ocean_fraction"],
+                out_names=["surface_temperature"],
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(
+                    force_positive_names=force_positive_names
+                ),
+                ocean=OceanConfig(
+                    surface_temperature_name="surface_temperature",
+                    ocean_fraction_name="ocean_fraction",
+                ),
+                prescribed_prognostic_names=prescribed_prognostic_names or [],
+            ),
+        ),
+    )
+
+
+def test_step_boundary_disjointness_raises_on_ocean_overlap():
+    # corrector modifies surface_temperature and the ocean prescription also
+    # writes surface_temperature -> the ocean overlap remains a hard error.
+    selector = _single_module_ocean_corrector_selector(
+        force_positive_names=["surface_temperature"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    with pytest.raises(ValueError, match="overlap"):
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_input_data,
+                labels=None,
+            ),
+        )
+
+
+def test_step_ocean_overlap_raises_even_when_name_also_prescribed():
+    # A name that is both the ocean surface_temperature_name and a prescribed
+    # prognostic still triggers the ocean overlap guard when the corrector
+    # modifies it. The prescribed exemption does not suppress the ocean raise:
+    # the guard runs against the full corrector delta before the delta filter.
+    # No correction currently touches surface_temperature, so this locks the
+    # guard down for whoever adds one.
+    selector = _single_module_ocean_corrector_selector(
+        force_positive_names=["surface_temperature"],
+        prescribed_prognostic_names=["surface_temperature"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    with pytest.raises(ValueError, match="overlap"):
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_input_data,
+                labels=None,
+            ),
+        )
+
+
+def test_multi_step_prescribed_corrected_collision_stacks_diagnostics():
+    # A prescribed name that the corrector also modifies is dropped from the
+    # delta on every step, so the surviving delta keys stay identical across
+    # steps and StepDiagnostics stacking does not fail.
+    selector = _single_module_corrector_prescribed_selector(
+        force_positive_names=["diagnostic_main", "diagnostic_rad"],
+        prescribed_prognostic_names=["diagnostic_main"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    outputs = []
+    stepper_state = None
+    for _ in range(3):
+        input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+        next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+        result = step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_input_data,
+                labels=None,
+                stepper_state=stepper_state,
+            ),
+        )
+        stepper_state = result.stepper_state
+        outputs.append(result)
+    for result in outputs:
+        assert "diagnostic_main" not in result.corrector_diagnostics.delta
+        assert "diagnostic_rad" in result.corrector_diagnostics.delta
+    stacked = StepOutput.stack_diagnostics(outputs)
+    assert stacked is not None
+    assert set(stacked.delta) == {"diagnostic_rad"}
 
 
 def test_secondary_module_empty_names_raises():
@@ -890,11 +1125,11 @@ def test_secondary_module_full_field_and_residual():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples=2
     )
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
-    )
+    ).output
     assert "prog" in output
     assert "diag" in output
     assert output["prog"].shape == (2, *img_shape)
@@ -945,8 +1180,8 @@ def test_secondary_module_state_round_trip():
     args = StepArgs(
         input=input_data, next_step_input_data=next_step_input_data, labels=None
     )
-    out1, _ = step1.step(args=args)
-    out2, _ = step2.step(args=args)
+    out1 = step1.step(args=args).output
+    out2 = step2.step(args=args).output
     for name in out1:
         torch.testing.assert_close(out1[name], out2[name])
 
@@ -987,11 +1222,11 @@ def test_secondary_module_residual_on_input_only_with_residual_prediction():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples=2
     )
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=None
         ),
-    )
+    ).output
     assert output["prog_a"].shape == (2, *img_shape)
     assert output["prog_b"].shape == (2, *img_shape)
 
@@ -1062,22 +1297,22 @@ def test_step_with_data_mask():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output_no_mask, _ = step.step(
+    output_no_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
             data_mask=None,
         ),
-    )
-    output_with_mask, _ = step.step(
+    ).output
+    output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
             data_mask=data_mask,
         ),
-    )
+    ).output
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_with_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
@@ -1174,22 +1409,22 @@ def test_step_with_include_channel_mask_inputs():
             [True, True, False, False], device=fme.get_device()
         ),
     }
-    output_no_mask, _ = step.step(
+    output_no_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
             data_mask=None,
         ),
-    )
-    output_with_mask, _ = step.step(
+    ).output
+    output_with_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
             data_mask=data_mask,
         ),
-    )
+    ).output
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_with_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_with_mask[name][:2], output_no_mask[name][:2])
@@ -1226,26 +1461,26 @@ def test_step_with_include_channel_mask_inputs_no_data_mask():
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, img_shape, n_samples
     )
-    output_no_mask, _ = step.step(
+    output_no_mask = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
             data_mask=None,
         ),
-    )
+    ).output
     all_unmasked = {
         name: torch.ones(n_samples, dtype=torch.bool, device=fme.get_device())
         for name in step.input_names
     }
-    output_all_unmasked, _ = step.step(
+    output_all_unmasked = step.step(
         args=StepArgs(
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
             data_mask=all_unmasked,
         ),
-    )
+    ).output
     for name in ["diagnostic_main", "diagnostic_rad"]:
         assert output_no_mask[name].shape == (n_samples, *img_shape)
         torch.testing.assert_close(output_no_mask[name], output_all_unmasked[name])
@@ -1305,9 +1540,9 @@ def test_step_shared_global_mean_removal():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1330,9 +1565,9 @@ def test_step_shared_global_mean_removal_with_extra_channels():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1345,9 +1580,9 @@ def test_step_per_channel_global_mean_removal():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1365,9 +1600,9 @@ def test_step_per_channel_global_mean_removal_with_extra_channels():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in step.output_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1392,12 +1627,12 @@ def _assert_global_mean_removal_affects_output(removal, in_names, out_names, mea
     next_step = get_tensor_dict(
         step_baseline.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    baseline_output, _ = step_baseline.step(
+    baseline_output = step_baseline.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
-    removal_output, _ = step_with_removal.step(
+    ).output
+    removal_output = step_with_removal.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     differs = any(
         not torch.allclose(baseline_output[name], removal_output[name])
         for name in out_names
@@ -1484,9 +1719,9 @@ def test_step_per_channel_global_mean_removal_with_channel_masks():
     next_step = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
     )
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(input=input_data, next_step_input_data=next_step, labels=None),
-    )
+    ).output
     for name in out_names:
         assert output[name].shape == (n_samples, *DEFAULT_IMG_SHAPE)
 
@@ -1520,6 +1755,397 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
                 data_mask=data_mask,
             ),
         )
+
+
+def _make_single_module_step(
+    input_dropout: VariableMaskingConfig | None,
+    include_channel_mask_inputs: bool = False,
+) -> SingleModuleStep:
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names + out_names))
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                include_channel_mask_inputs=include_channel_mask_inputs,
+                input_dropout=input_dropout,
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def _make_gmr_input_dropout_step(
+    input_dropout: VariableMaskingConfig, include_channel_mask_inputs: bool
+):
+    in_names = ["forcing_shared", "forcing_rad"]
+    out_names = ["diagnostic_main", "diagnostic_rad"]
+    all_names = list(set(in_names + out_names))
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in all_names},
+            stds={name: 1.0 for name in all_names},
+        ),
+    )
+    config = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                global_mean_removal=PerChannelGlobalMeanRemovalConfig(
+                    field_names=in_names, append_as_input=True
+                ),
+                include_channel_mask_inputs=include_channel_mask_inputs,
+                input_dropout=input_dropout,
+            )
+        ),
+    )
+    step = get_step(config, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    return step
+
+
+def _presence_mask(step: SingleModuleStep, present: bool) -> TensorDict:
+    """An input_dropout mask (broadcast over batch) that keeps or drops all."""
+    value = torch.full((1,), present, dtype=torch.bool, device=fme.get_device())
+    return {name: value.clone() for name in step.in_packer.names}
+
+
+def _inject_input_dropout_mask(
+    step: SingleModuleStep, mask: TensorMapping | None
+) -> None:
+    """Force the mask drawn by the next ``step`` call.
+
+    The Step samples its own mask internally on every forward step; tests
+    override ``_draw_input_dropout_mask`` with a deterministic mask (or None
+    for no dropout) so the application path is exercised without relying on
+    the random sampler.
+    """
+    step._draw_input_dropout_mask = lambda: mask  # type: ignore[method-assign]
+
+
+def test_input_dropout_unknown_group_variable_raises_at_build():
+    """A typo'd group variable fails loudly when the Step is built."""
+    bad = VariableMaskingConfig(
+        override_groups=[
+            MaskingGroupConfig(
+                variables=["typo"], masking=BernoulliMaskingConfig(rate=0.5)
+            )
+        ]
+    )
+    with pytest.raises(ValueError, match="not in packed input channels"):
+        _make_single_module_step(bad)
+
+
+def test_input_dropout_group_variable_accepts_gmr_extra_sentinel():
+    """A group may target a GMR extra sentinel; build must not reject it."""
+    from fme.core.step.global_mean_removal import _extra_channel_name
+
+    sentinel = _extra_channel_name("forcing_shared")
+    config = VariableMaskingConfig(
+        override_groups=[
+            MaskingGroupConfig(
+                variables=[sentinel], masking=BernoulliMaskingConfig(rate=0.5)
+            )
+        ]
+    )
+    _make_gmr_input_dropout_step(config, include_channel_mask_inputs=False)
+
+
+def test_input_dropout_mask_zeros_inputs():
+    """A supplied input_dropout_mask deterministically zeros masked inputs.
+
+    A full-drop mask must change outputs versus no mask; an all-present mask
+    must reproduce the no-mask output exactly.
+    """
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1))
+    )
+    step.module.torch_module.eval()  # module determinism; late dropout still applies
+    n_samples = 4
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+
+    def _run(mask):
+        _inject_input_dropout_mask(step, mask)
+        return step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+            )
+        ).output
+
+    out_none = _run(None)
+    out_full_drop = _run(_presence_mask(step, present=False))
+    out_all_present = _run(_presence_mask(step, present=True))
+    assert any(
+        not torch.allclose(out_full_drop[name], out_none[name])
+        for name in step.out_names
+    ), "full-drop mask should change outputs"
+    for name in step.out_names:
+        torch.testing.assert_close(out_all_present[name], out_none[name])
+
+
+def test_input_dropout_mask_indicator_reflects_combined_presence():
+    """With include_channel_mask_inputs, the indicator equals real & synthetic.
+
+    Inspect the indicator half of the packed network input: a channel dropped
+    by input_dropout_mask must have indicator 0 and a zeroed data channel; an
+    undropped channel must have indicator 1.
+    """
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        include_channel_mask_inputs=True,
+    )
+    step.module.torch_module.eval()
+    n_samples = 2
+    in_names = step.in_packer.names
+    n_channels = len(in_names)
+    # Drop the first channel only (mask broadcast over batch).
+    dropout_mask = {
+        name: torch.full((1,), i != 0, dtype=torch.bool, device=fme.get_device())
+        for i, name in enumerate(in_names)
+    }
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    try:
+        _inject_input_dropout_mask(step, dropout_mask)
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+            )
+        )
+    finally:
+        handle.remove()
+
+    packed = captured[0]
+    data_half = packed[:, :n_channels]
+    indicator_half = packed[:, n_channels:]
+    assert (indicator_half[:, 0] == 0.0).all()
+    assert (data_half[:, 0] == 0.0).all()
+    assert (indicator_half[:, 1:] == 1.0).all()
+
+
+def test_input_dropout_mask_and_combine_with_data_mask():
+    """AND-combine: data_mask=0 wins even when dropout leaves the channel present.
+
+    Guards against fallback-priority resurrecting a genuinely-missing variable.
+    """
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        include_channel_mask_inputs=True,
+    )
+    step.module.torch_module.eval()
+    n_samples = 2
+    in_names = step.in_packer.names
+    n_channels = len(in_names)
+    # Channel 0 is genuinely missing (data_mask=0) but not synthetically dropped.
+    data_mask = {
+        in_names[0]: torch.zeros(n_samples, dtype=torch.bool, device=fme.get_device()),
+    }
+    dropout_mask = _presence_mask(step, present=True)
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    try:
+        _inject_input_dropout_mask(step, dropout_mask)
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+                data_mask=data_mask,
+            )
+        )
+    finally:
+        handle.remove()
+
+    packed = captured[0]
+    # combined present = real(0) & synthetic(1) = 0 -> indicator 0, input zeroed
+    assert (packed[:, n_channels] == 0.0).all()  # indicator for channel 0
+    assert (packed[:, 0] == 0.0).all()  # data channel 0 zeroed
+
+
+def test_input_dropout_mask_gmr_extras_independently_maskable():
+    """GMR extra channels are dropped independently; the indicator agrees."""
+    step = _make_gmr_input_dropout_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1)),
+        include_channel_mask_inputs=True,
+    )
+    step.module.torch_module.eval()
+    names = step.in_packer.names
+    assert len(names) == 4  # 2 named + 2 GMR extras
+    n_channels = len(names)
+    gmr_index = next(
+        i
+        for i, name in enumerate(names)
+        if extra_channel_source_field(name) is not None
+    )
+    n_samples = 2
+    dropout_mask = {
+        name: torch.full(
+            (1,), i != gmr_index, dtype=torch.bool, device=fme.get_device()
+        )
+        for i, name in enumerate(names)
+    }
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    try:
+        _inject_input_dropout_mask(step, dropout_mask)
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+            )
+        )
+    finally:
+        handle.remove()
+
+    packed = captured[0]
+    data_half = packed[:, :n_channels]
+    indicator_half = packed[:, n_channels:]
+    assert (data_half[:, gmr_index] == 0.0).all()
+    assert (indicator_half[:, gmr_index] == 0.0).all()
+    other = [i for i in range(n_channels) if i != gmr_index]
+    assert (indicator_half[:, other] == 1.0).all()
+
+
+def test_draw_input_dropout_mask_shape_and_dtype():
+    # rate-1 drops every channel, so emitted keys are exactly the packed input channels.
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0))
+    )
+    step.module.torch_module.train()
+    mask = step._draw_input_dropout_mask()
+    assert mask is not None
+    # keyed by dropped channels, one [1] bool tensor each; present channels omitted.
+    assert set(mask.keys()) == set(step.in_packer.names)
+    for name in step.in_packer.names:
+        assert mask[name].shape == (1,)
+        assert mask[name].dtype == torch.bool
+        assert not bool(mask[name].item())  # emitted channels are dropped
+
+
+def test_draw_input_dropout_mask_omits_present_channels():
+    # rate-0 default drops nothing, so no channels are emitted.
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=0.0))
+    )
+    step.module.torch_module.train()
+    mask = step._draw_input_dropout_mask()
+    assert mask == {}
+
+
+def test_draw_input_dropout_mask_none_when_unset():
+    step = _make_single_module_step(None)
+    step.module.torch_module.train()
+    assert step._draw_input_dropout_mask() is None
+
+
+def test_draw_input_dropout_mask_none_in_eval_mode():
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1))
+    )
+    step.module.torch_module.eval()
+    # configured, but eval mode disables dropout sampling
+    assert step._draw_input_dropout_mask() is None
+
+
+def test_draw_input_dropout_mask_includes_gmr_extras():
+    # rate-1 default drops every channel so GMR extra sentinels appear too.
+    step = _make_gmr_input_dropout_step(
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0)),
+        include_channel_mask_inputs=False,
+    )
+    step.module.torch_module.train()
+    mask = step._draw_input_dropout_mask()
+    assert mask is not None
+    # GMR extra sentinel channels are independently maskable
+    assert set(mask.keys()) == set(step.in_packer.names)
+    assert len(step.in_packer.names) == 4
+
+
+def test_input_dropout_mask_not_passed_to_global_mean_removal():
+    """Synthetic dropout is applied late (after GMR); GMR sees only data_mask."""
+    step = _make_gmr_input_dropout_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(2)),
+        include_channel_mask_inputs=False,
+    )
+    step.module.torch_module.eval()  # disable any in-step sampling
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    dropout_mask = _presence_mask(step, present=False)
+    _inject_input_dropout_mask(step, dropout_mask)
+    out_with_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+        )
+    ).output
+    _inject_input_dropout_mask(step, None)
+    out_without_mask = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step,
+            labels=None,
+        )
+    ).output
+    # Step runs without GMR raising on a "missing" reference field; GMR never sees mask.
+    assert set(out_with_mask) == set(out_without_mask)
 
 
 def test_step_train_eval_toggle_propagates_to_modules():

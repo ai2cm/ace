@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import torch
@@ -20,8 +20,9 @@ from fme.core.generics.aggregator import (
     InferenceSummary,
 )
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.normalizer import NormalizeFn
 from fme.core.tensors import unfold_ensemble_dim
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 from fme.core.wandb import Table, WandB
 
 from ..one_step.ensemble import EnsembleMetricConfig, SelectStepEnsembleAggregator
@@ -34,10 +35,13 @@ from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
 from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import MIN_YEARS_FOR_FILTERED_TPI, IpoIndexMetricConfig
+from .near_zero_fraction import NearZeroFractionMetricConfig
 from .reduced import MeanMetricConfig, SingleTargetMeanAggregator
 from .seasonal import SeasonalMetricConfig
 from .spectrum import PowerSpectrumMetricConfig, SphericalPowerSpectrumAggregator
+from .step_diagnostics import StepDiagnosticsAggregator, StepDiagnosticsMetricConfig
 from .time_mean import TimeMeanAggregator, TimeMeanMetricConfig
+from .trend import TrendMetricConfig
 from .utils import LatLonRegion
 from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
@@ -63,6 +67,8 @@ MetricConfig = (
     | EnsoCoefficientMetricConfig
     | EnsembleMetricConfig
     | IpoIndexMetricConfig
+    | TrendMetricConfig
+    | NearZeroFractionMetricConfig
 )
 
 
@@ -87,7 +93,7 @@ def build_inference_evaluator_aggregator(
     n_ic_steps: int,
     n_forward_steps: int,
     initial_time: xr.DataArray,
-    normalize: Callable[[TensorMapping], TensorDict],
+    normalize: NormalizeFn,
     monthly_reference_data: str | None = None,
     time_mean_reference_data: str | None = None,
     output_dir: str | None = None,
@@ -96,6 +102,7 @@ def build_inference_evaluator_aggregator(
     n_ensemble_per_ic: int = 1,
     enable_time_series: bool = True,
     raise_on_unsupported: bool = True,
+    step_diagnostics: StepDiagnosticsMetricConfig | None = None,
 ) -> "InferenceEvaluatorAggregator":
     _validate_no_duplicate_names(metrics)
     if save_diagnostics and output_dir is None:
@@ -152,6 +159,16 @@ def build_inference_evaluator_aggregator(
         if result.ensemble is not None:
             ensemble_aggregators[name] = result.ensemble
 
+    step_diagnostics_aggregator = (
+        step_diagnostics or StepDiagnosticsMetricConfig()
+    ).build(
+        gridded_operations=dataset_info.gridded_operations,
+        n_timesteps=n_timesteps,
+        variable_metadata=dataset_info.variable_metadata,
+        enable_time_series=enable_time_series,
+        normalize=normalize,
+    )
+
     return InferenceEvaluatorAggregator(
         aggregators=aggregators,
         time_series_aggregators=time_series_aggregators,
@@ -162,6 +179,7 @@ def build_inference_evaluator_aggregator(
         output_dir=output_dir,
         n_ensemble_per_ic=n_ensemble_per_ic,
         ensemble_aggregators=ensemble_aggregators,
+        step_diagnostics_aggregator=step_diagnostics_aggregator,
     )
 
 
@@ -199,8 +217,20 @@ class InferenceEvaluatorAggregatorConfig:
         enso_index: ENSO index metrics.
         enso_coefficient: ENSO regression coefficient metrics.
         ipo_index: Interdecadal Pacific Oscillation index metrics.
+        trend: Per-grid-cell linear trend (slope vs. time) map metrics.
+            Disabled by default.
+        near_zero_fraction: Area-weighted fraction of cells at or below a
+            small non-negative ``eps`` per variable, reported for prediction and
+            its difference from the target. Optionally (``include_maps``) also
+            logs side-by-side generated/target maps of the per-cell
+            at-or-below-``eps`` fraction and the error map. Disabled by
+            default.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
+        step_diagnostics: Granularity of metrics computed from the step
+            diagnostics carried on prediction data (the corrector's
+            correction deltas); such metrics are logged only when a corrector
+            modifies data.
     """
 
     mean_denorm: MeanMetricConfig = dataclasses.field(
@@ -247,8 +277,15 @@ class InferenceEvaluatorAggregatorConfig:
     ipo_index: IpoIndexMetricConfig = dataclasses.field(
         default_factory=IpoIndexMetricConfig
     )
+    trend: TrendMetricConfig = dataclasses.field(default_factory=TrendMetricConfig)
+    near_zero_fraction: NearZeroFractionMetricConfig = dataclasses.field(
+        default_factory=NearZeroFractionMetricConfig
+    )
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
+        default_factory=StepDiagnosticsMetricConfig
+    )
 
     def __post_init__(self):
         if self.mean_denorm.target != "denorm":
@@ -287,6 +324,8 @@ class InferenceEvaluatorAggregatorConfig:
             self.enso_index,
             self.enso_coefficient,
             self.ipo_index,
+            self.trend,
+            self.near_zero_fraction,
         ]
         return [m for m in all_metrics if m.enabled]
 
@@ -296,7 +335,7 @@ class InferenceEvaluatorAggregatorConfig:
         n_ic_steps: int,
         n_forward_steps: int,
         initial_time: xr.DataArray,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         output_dir: str | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
@@ -318,6 +357,7 @@ class InferenceEvaluatorAggregatorConfig:
             n_ensemble_per_ic=n_ensemble_per_ic,
             enable_time_series=enable_time_series,
             raise_on_unsupported=False,
+            step_diagnostics=self.step_diagnostics,
         )
 
 
@@ -381,6 +421,9 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
     log_ipo_index: bool = True
     log_step_means: list[StepMeanEntry] = dataclasses.field(
         default_factory=lambda: [StepMeanEntry(step=20)]
+    )
+    step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
+        default_factory=StepDiagnosticsMetricConfig
     )
 
     def _get_metrics(
@@ -447,7 +490,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
         n_ic_steps: int,
         n_forward_steps: int,
         initial_time: xr.DataArray,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         output_dir: str | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
@@ -476,6 +519,7 @@ class LegacyFlagInferenceEvaluatorAggregatorConfig:
             save_diagnostics=save_diagnostics,
             n_ensemble_per_ic=n_ensemble_per_ic,
             enable_time_series=enable_time_series,
+            step_diagnostics=self.step_diagnostics,
         )
 
 
@@ -495,11 +539,12 @@ class InferenceEvaluatorAggregator(
         time_series_aggregators: dict[str, TimeSeriesLogs],
         coords: Mapping[str, np.ndarray],
         n_ic_steps: int,
-        normalize: Callable[[TensorMapping], TensorDict],
+        normalize: NormalizeFn,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         n_ensemble_per_ic: int = 1,
         ensemble_aggregators: dict[str, SelectStepEnsembleAggregator] | None = None,
+        step_diagnostics_aggregator: StepDiagnosticsAggregator | None = None,
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
@@ -520,7 +565,11 @@ class InferenceEvaluatorAggregator(
         self._normalize = normalize
         self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
-        self._log_time_series = len(time_series_aggregators) > 0
+        self._step_diagnostics_aggregator = step_diagnostics_aggregator
+        self._log_time_series = len(time_series_aggregators) > 0 or (
+            step_diagnostics_aggregator is not None
+            and step_diagnostics_aggregator.log_time_series
+        )
         self._n_timesteps_seen = 0
 
     @property
@@ -536,6 +585,11 @@ class InferenceEvaluatorAggregator(
             raise ValueError("No prediction values in data")
         if len(data.target) == 0:
             raise ValueError("No target values in data")
+        if self._step_diagnostics_aggregator is not None:
+            self._step_diagnostics_aggregator.record_batch(
+                step_diagnostics=data.step_diagnostics,
+                i_time_start=self._n_timesteps_seen,
+            )
         target_data = data.target
         batch = InferenceBatchData(
             prediction=data.prediction,
@@ -616,6 +670,8 @@ class InferenceEvaluatorAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
+        if self._step_diagnostics_aggregator is not None:
+            logs.update(self._step_diagnostics_aggregator.summary_logs())
         loss = logs.get("time_mean_norm/rmse/channel_mean")
         return InferenceSummary(logs=logs, loss=loss)
 
@@ -631,6 +687,8 @@ class InferenceEvaluatorAggregator(
         if self.n_ensemble_per_ic > 1:
             for name, ensemble_aggregator in self._ensemble_aggregators.items():
                 logs.update(ensemble_aggregator.get_logs(label=name))
+        if self._step_diagnostics_aggregator is not None:
+            logs.update(self._step_diagnostics_aggregator.summary_logs())
         return logs
 
     @torch.no_grad()
@@ -648,14 +706,20 @@ class InferenceEvaluatorAggregator(
         logs = {}
         for name, aggregator in self._time_series_aggregators.items():
             logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        if self._step_diagnostics_aggregator is not None:
+            logs.update(self._step_diagnostics_aggregator.time_series_logs(step_slice))
         return to_inference_logs(logs)
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
         if self._save_diagnostics:
-            reduced_diagnostics = get_reduced_diagnostics(
-                sub_aggregators=self._aggregators,
-                coords=self._coords,
+            reduced_diagnostics = _with_step_diagnostics(
+                get_reduced_diagnostics(
+                    sub_aggregators=self._aggregators,
+                    coords=self._coords,
+                ),
+                self._step_diagnostics_aggregator,
+                self._coords,
             )
             if self._output_dir is not None:
                 write_reduced_diagnostics(
@@ -665,6 +729,23 @@ class InferenceEvaluatorAggregator(
                 )
             else:
                 raise ValueError("Output directory not set.")
+
+
+def _with_step_diagnostics(
+    reduced_diagnostics: Mapping[str, xr.Dataset],
+    step_diagnostics_aggregator: StepDiagnosticsAggregator | None,
+    coords: Mapping[str, np.ndarray],
+) -> Mapping[str, xr.Dataset]:
+    """Merge the step-diagnostics aggregator's datasets (if any) into the
+    reduced diagnostics, assigning coordinates present in each dataset.
+    """
+    if step_diagnostics_aggregator is None:
+        return reduced_diagnostics
+    merged = dict(reduced_diagnostics)
+    for name, ds in step_diagnostics_aggregator.diagnostics().items():
+        ds_coords = {k: v for k, v in coords.items() if k in ds.dims}
+        merged[name] = ds.assign_coords(ds_coords)
+    return merged
 
 
 def to_inference_logs(
@@ -707,10 +788,20 @@ class InferenceAggregatorConfig:
     Parameters:
         time_mean_reference_data: Path to reference time means to compare against.
         log_global_mean_time_series: Whether to log global mean time series metrics.
+        step_diagnostics: Granularity of metrics computed from the step
+            diagnostics carried on prediction data (the corrector's
+            correction deltas); such metrics are logged only when a corrector
+            modifies data, and require a normalizer to be supplied at build
+            time. Building with a non-default configuration but no normalizer
+            raises an error; with the default configuration the metrics are
+            silently skipped.
     """
 
     time_mean_reference_data: str | None = None
     log_global_mean_time_series: bool = True
+    step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
+        default_factory=StepDiagnosticsMetricConfig
+    )
 
     def build(
         self,
@@ -718,6 +809,7 @@ class InferenceAggregatorConfig:
         n_timesteps: int,
         output_dir: str | None = None,
         save_diagnostics: bool = True,
+        normalize: NormalizeFn | None = None,
     ) -> "InferenceAggregator":
         if self.time_mean_reference_data is not None:
             time_means = xr.open_dataset(
@@ -778,12 +870,21 @@ class InferenceAggregatorConfig:
                 regional_mean=gridded_operations.regional_area_weighted_mean,
             )
 
+        step_diagnostics_aggregator = self.step_diagnostics.build(
+            gridded_operations=gridded_operations,
+            n_timesteps=n_timesteps,
+            variable_metadata=dataset_info.variable_metadata,
+            enable_time_series=True,
+            normalize=normalize,
+        )
+
         return InferenceAggregator(
             aggregators=aggregators,
             time_series_aggregators=time_series_aggregators,
             coords=horizontal_coordinates.coords,
             save_diagnostics=save_diagnostics,
             output_dir=output_dir,
+            step_diagnostics_aggregator=step_diagnostics_aggregator,
         )
 
 
@@ -807,6 +908,7 @@ class InferenceAggregator(
         coords: Mapping[str, np.ndarray],
         save_diagnostics: bool = True,
         output_dir: str | None = None,
+        step_diagnostics_aggregator: StepDiagnosticsAggregator | None = None,
     ):
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
@@ -820,7 +922,11 @@ class InferenceAggregator(
         self._coords = coords
         self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
-        self._log_time_series = len(time_series_aggregators) > 0
+        self._step_diagnostics_aggregator = step_diagnostics_aggregator
+        self._log_time_series = len(time_series_aggregators) > 0 or (
+            step_diagnostics_aggregator is not None
+            and step_diagnostics_aggregator.log_time_series
+        )
         self._n_timesteps_seen = 0
 
     @property
@@ -837,6 +943,11 @@ class InferenceAggregator(
         """
         if len(data.prediction) == 0:
             raise ValueError("data is empty")
+        if self._step_diagnostics_aggregator is not None:
+            self._step_diagnostics_aggregator.record_batch(
+                step_diagnostics=data.step_diagnostics,
+                i_time_start=self._n_timesteps_seen,
+            )
         batch = InferenceBatchData(
             prediction=data.prediction,
             time=data.time,
@@ -880,6 +991,8 @@ class InferenceAggregator(
         for name, aggregator in self._summary_aggregators.items():
             logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
+        if self._step_diagnostics_aggregator is not None:
+            logs.update(self._step_diagnostics_aggregator.summary_logs())
         return InferenceSummary(logs=logs, loss=None)
 
     def get_summary_logs(self) -> InferenceLog:
@@ -891,6 +1004,8 @@ class InferenceAggregator(
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
+        if self._step_diagnostics_aggregator is not None:
+            logs.update(self._step_diagnostics_aggregator.summary_logs())
         return logs
 
     @torch.no_grad()
@@ -916,14 +1031,20 @@ class InferenceAggregator(
         logs = {}
         for name, aggregator in self._time_series_aggregators.items():
             logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        if self._step_diagnostics_aggregator is not None:
+            logs.update(self._step_diagnostics_aggregator.time_series_logs(step_slice))
         return to_inference_logs(logs)
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
         if self._save_diagnostics:
-            reduced_diagnostics = get_reduced_diagnostics(
-                sub_aggregators=self._aggregators,
-                coords=self._coords,
+            reduced_diagnostics = _with_step_diagnostics(
+                get_reduced_diagnostics(
+                    sub_aggregators=self._aggregators,
+                    coords=self._coords,
+                ),
+                self._step_diagnostics_aggregator,
+                self._coords,
             )
             if self._output_dir is not None:
                 write_reduced_diagnostics(

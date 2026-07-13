@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from typing import Literal
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -103,6 +104,7 @@ def _build_coupled_loss(
     atmos_optimize_last_step_only=False,
     ocean_n_steps_limit=10,
     atmos_n_steps_limit=10,
+    optimize_single_component_per_batch=False,
 ) -> CoupledStepperTrainLoss:
     ocean_schedule = ComponentLossSchedule(
         n_steps=ocean_n_steps,
@@ -121,6 +123,7 @@ def _build_coupled_loss(
         atmosphere_loss=atmosphere_loss,
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
+        optimize_single_component_per_batch=optimize_single_component_per_batch,
     )
 
 
@@ -478,7 +481,7 @@ def test_coupled_stepper_train_loss_sample_n_steps_delegates():
         ocean_schedule=ocean_schedule,
         atmosphere_schedule=atmos_schedule,
     )
-    coupled_loss.sample_n_steps()
+    coupled_loss._sample_n_steps()
     ocean_schedule.sample_n_steps.assert_called_once()
     atmos_schedule.sample_n_steps.assert_called_once()
 
@@ -676,3 +679,160 @@ def test_null_loss_contributions(steps_thru_atmos_7, ocean_kwargs):
             torch.testing.assert_close(loss, torch.tensor(5.25))
         elif prediction.realm == "ocean":
             assert loss is None
+
+
+# ---------------------------------------------------------------------------
+# Single-component-per-batch optimization (optimize_single_component_per_batch)
+# ---------------------------------------------------------------------------
+
+
+def _single_component_loss(optimize_single_component_per_batch=True, **kwargs):
+    """Build a coupled loss with both realms non-null (n_steps=2 each by
+    default) and the single-component flag on, for selection tests."""
+    ocean_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(2.0))
+    atmos_loss_obj = _mock_step_loss(lambda *_, **__: torch.tensor(1.0))
+    kwargs.setdefault("ocean_n_steps", 2)
+    kwargs.setdefault("atmos_n_steps", 2)
+    return _build_coupled_loss(
+        ocean_loss=ocean_loss_obj,
+        atmosphere_loss=atmos_loss_obj,
+        optimize_single_component_per_batch=optimize_single_component_per_batch,
+        **kwargs,
+    )
+
+
+def _optimized_realms(loss_obj, n_steps_each=2):
+    """Realms with at least one optimized step under the current selection."""
+    return {
+        realm
+        for realm in ("ocean", "atmosphere")
+        for step in range(n_steps_each)
+        if loss_obj.step_is_optimized(realm, step)
+    }
+
+
+def test_single_component_exactly_one_realm_optimized():
+    loss_obj = _single_component_loss()
+    loss_obj._component_optimization_choice()
+    # Exactly one realm is eligible after the choice; the other is gated off
+    # for every step in its window.
+    assert _optimized_realms(loss_obj) == {loss_obj._selected_realm}
+    assert loss_obj._selected_realm in ("ocean", "atmosphere")
+
+
+def test_single_component_selection_varies_across_choices():
+    loss_obj = _single_component_loss()
+    selected = set()
+    for _ in range(50):  # ~1e-15 prob of missing a realm under fair 50/50
+        loss_obj._component_optimization_choice()
+        selected.add(loss_obj._selected_realm)
+    assert selected == {"ocean", "atmosphere"}
+
+
+def test_single_component_deterministic_for_fixed_seed():
+    # Two losses built under the same (distributed) seed lazily initialize the
+    # train choice RNG identically, so their selection sequences match.
+    loss_a = _single_component_loss()
+    loss_b = _single_component_loss()
+    seq_a, seq_b = [], []
+    for _ in range(30):
+        loss_a._component_optimization_choice()
+        loss_b._component_optimization_choice()
+        seq_a.append(loss_a._selected_realm)
+        seq_b.append(loss_b._selected_realm)
+    assert seq_a == seq_b
+    # Sanity: the sequence is not trivially constant.
+    assert set(seq_a) == {"ocean", "atmosphere"}
+
+
+def test_single_component_null_realm_never_selected():
+    # Ocean is null only for this batch (sampled n_steps==0 via a sampler that
+    # is not statically null at the schedule level), so atmosphere is always
+    # selected.
+    zero_sampler = TimeLengthProbabilities(
+        outcomes=[TimeLengthProbability(steps=0, probability=1.0)]
+    )
+    loss_obj = _single_component_loss(ocean_n_steps=zero_sampler, atmos_n_steps=2)
+    for _ in range(20):
+        # sample_from_rng samples the window before choosing the realm, so the
+        # realm that is empty this batch (ocean) is never selected.
+        loss_obj.sample_from_rng()
+        assert loss_obj._selected_realm == "atmosphere"
+        assert _optimized_realms(loss_obj) == {"atmosphere"}
+
+
+def test_single_component_flag_off_matches_today(steps_thru_atmos_7):
+    # Regression guard: flag off reproduces test_coupled_stepper_train_loss.
+    loss_obj = _single_component_loss(optimize_single_component_per_batch=False)
+    # The (no-op) choice must not change behavior when the flag is off.
+    loss_obj._component_optimization_choice()
+    metrics = {}
+    for prediction, target_data in steps_thru_atmos_7:
+        metrics[f"{prediction.realm}_{prediction.step}"] = loss_obj(
+            prediction, target_data
+        )
+    expected_metrics = {
+        "atmosphere_0": torch.tensor(1.0),
+        "atmosphere_1": torch.tensor(1.0),
+        "ocean_0": torch.tensor(2.0),
+        "atmosphere_2": None,
+        "atmosphere_3": None,
+        "ocean_1": torch.tensor(2.0),
+        "atmosphere_4": None,
+        "atmosphere_5": None,
+        "ocean_2": None,
+        "atmosphere_6": None,
+        "atmosphere_7": None,
+    }
+    assert_tensor_dicts_close(metrics, expected_metrics)
+
+
+def test_single_component_active_in_eval():
+    # In eval the selection STILL gates step_is_optimized to one realm (so the
+    # accumulated/validation loss is single-component), but compute_loss stays
+    # ungated, preserving per-step diagnostics for the non-selected realm.
+    loss_obj = _single_component_loss()
+    loss_obj.set_eval()
+    loss_obj.seed_rng(0)
+    loss_obj._component_optimization_choice()
+    selected = loss_obj._selected_realm
+    other: Literal["ocean", "atmosphere"] = (
+        "ocean" if selected == "atmosphere" else "atmosphere"
+    )
+    # accumulated-loss path is restricted to the selected realm
+    assert loss_obj.step_is_optimized(selected, 0)
+    assert not loss_obj.step_is_optimized(other, 0)
+    # diagnostic path (compute_loss) still reports the non-selected realm
+    other_pred = ComponentEnsembleStepPrediction(
+        realm=other,
+        data=EnsembleTensorDict({"x": torch.zeros(1, 1, 1, 1)}),
+        step=0,
+    )
+    diag = loss_obj.compute_loss(other_pred, {"x": torch.zeros(1, 1, 1, 1)})
+    expected = 2.0 if other == "ocean" else 1.0
+    torch.testing.assert_close(diag, torch.tensor(expected))
+    # and the gated training-loss path returns None for the non-selected realm
+    assert loss_obj(other_pred, {"x": torch.zeros(1, 1, 1, 1)}) is None
+
+
+def test_single_component_eval_reproducible_after_seed_eval():
+    loss_obj = _single_component_loss()
+    loss_obj.set_eval()
+
+    def _draw_sequence():
+        loss_obj.seed_rng(0)
+        seq = []
+        for _ in range(30):
+            loss_obj._component_optimization_choice()
+            seq.append(loss_obj._selected_realm)
+        return seq
+
+    first = _draw_sequence()
+    # Advance the (free-running) train RNG to prove eval is independent of it.
+    loss_obj.set_train()
+    for _ in range(7):
+        loss_obj._component_optimization_choice()
+    loss_obj.set_eval()
+    second = _draw_sequence()
+    assert first == second
+    assert set(first) == {"ocean", "atmosphere"}

@@ -216,6 +216,10 @@ class TorchDistributed(DistributedBackend):
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor
 
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        # No-op: data-parallel mode, no spatial communication needed.
+        return tensor
+
     def weighted_mean(
         self,
         data: torch.Tensor,
