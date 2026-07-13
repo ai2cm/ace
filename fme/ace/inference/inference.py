@@ -420,6 +420,7 @@ def run_inference_from_config(config: InferenceConfig):
             dataset_info=dataset_info,
             n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
             output_dir=config.experiment_dir,
+            normalize=stepper.normalizer.normalize,
         )
 
         writer = config.get_data_writer(

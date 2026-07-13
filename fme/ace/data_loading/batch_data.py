@@ -17,6 +17,7 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.random_state import RandomState
+from fme.core.step.step_diagnostics import StepDiagnostics
 from fme.core.stepper_state import StepperState
 from fme.core.tensors import repeat_interleave_batch_dim, unfold_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
@@ -214,6 +215,12 @@ class BatchData:
             (today only the corrector). ``None`` when no state has been
             seeded; the data loader never sets this — it is populated only
             by ``Stepper.predict`` to thread state across prediction windows.
+        step_diagnostics: Opaque per-sample diagnostics series aligned with
+            the prediction data's time axis (today the corrector's per-step
+            correction delta). ``None`` when no corrector modified anything;
+            populated only by ``Stepper.predict``, after time-windowing is
+            finished. Time-touching methods on this class raise rather than
+            silently misalign it.
     """
 
     data: TensorMapping
@@ -226,6 +233,7 @@ class BatchData:
     n_ensemble: int = 1
     data_mask: TensorMapping | None = None
     stepper_state: StepperState | None = None
+    step_diagnostics: StepDiagnostics | None = None
 
     @classmethod
     def new_for_testing(
@@ -334,10 +342,26 @@ class BatchData:
                 if self.stepper_state is not None
                 else None
             ),
+            step_diagnostics=(
+                self.step_diagnostics.to_device()
+                if self.step_diagnostics is not None
+                else None
+            ),
         )
+
+    def _raise_if_step_diagnostics(self, method_name: str):
+        if self.step_diagnostics is not None:
+            raise ValueError(
+                f"BatchData.{method_name} does not support a batch carrying "
+                "step_diagnostics: the diagnostics series is aligned with this "
+                "batch's time axis and would be silently misaligned or "
+                "invalidated by this operation. step_diagnostics is attached "
+                "only by Stepper.predict, after time-windowing is finished."
+            )
 
     def scatter_spatial(self, global_img_shape: tuple[int, int]) -> "BatchData":
         """Slice data tensors to the local spatial chunk."""
+        self._raise_if_step_diagnostics("scatter_spatial")
         dist = Distributed.get_instance()
         return self.__class__(
             data=dist.scatter_spatial(dict(self.data), global_img_shape),
@@ -366,6 +390,11 @@ class BatchData:
             stepper_state=(
                 self.stepper_state.to_cpu() if self.stepper_state is not None else None
             ),
+            step_diagnostics=(
+                self.step_diagnostics.to_cpu()
+                if self.step_diagnostics is not None
+                else None
+            ),
         )
 
     @classmethod
@@ -387,6 +416,7 @@ class BatchData:
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        step_diagnostics: StepDiagnostics | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         if labels is not None:
@@ -409,6 +439,7 @@ class BatchData:
             n_ensemble=n_ensemble,
             data_mask=data_mask,
             stepper_state=stepper_state,
+            step_diagnostics=step_diagnostics,
             **kwargs,
         )
 
@@ -423,6 +454,7 @@ class BatchData:
         n_ensemble: int = 1,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        step_diagnostics: StepDiagnostics | None = None,
     ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
@@ -445,6 +477,7 @@ class BatchData:
             n_ensemble=n_ensemble,
             data_mask=data_mask,
             stepper_state=stepper_state,
+            step_diagnostics=step_diagnostics,
             **kwargs,
         )
 
@@ -520,6 +553,8 @@ class BatchData:
         not serialized: ``horizontal_dims`` is recovered from the variable dims
         on load, and ``n_ensemble`` is intentionally left to be re-derived (the
         sample dimension already carries any broadcast ensemble).
+        ``step_diagnostics`` is diagnostic output (written by its own writer),
+        not prognostic restart state, so it is dropped here rather than embedded.
         """
         data_arrays: dict[str, xr.DataArray] = {}
         for name, tensor in self.data.items():
@@ -690,6 +725,13 @@ class BatchData:
                     f"stepper_state leading dim {ss_n} does not match the number "
                     f"of samples in time ({self.time.shape[0]})."
                 )
+        if self.step_diagnostics is not None:
+            sd_n = self.step_diagnostics.sample_dim_size()
+            if sd_n is not None and sd_n != self.time.shape[0]:
+                raise ValueError(
+                    f"step_diagnostics leading dim {sd_n} does not match the "
+                    f"number of samples in time ({self.time.shape[0]})."
+                )
 
     @classmethod
     def from_sample_tuples(
@@ -747,6 +789,7 @@ class BatchData:
                 dictionary of derived variables.
             forcing_data: The forcing data to compute derived variables from.
         """
+        self._raise_if_step_diagnostics("compute_derived_variables")
         if not np.all(forcing_data.time.values == self.time.values):
             raise ValueError(
                 "Forcing data must have the same time coordinate as the batch data."
@@ -767,6 +810,7 @@ class BatchData:
         """
         Remove the initial condition timesteps from the data.
         """
+        self._raise_if_step_diagnostics("remove_initial_condition")
         if n_ic_timesteps == 0:
             raise RuntimeError("No initial condition timesteps to remove.")
         return self.__class__(
@@ -784,6 +828,7 @@ class BatchData:
         """
         Subset the data to only include the given names.
         """
+        self._raise_if_step_diagnostics("subset_names")
         if self.data_mask is not None:
             data_mask = {k: v for k, v in self.data_mask.items() if k in names}
         else:
@@ -805,6 +850,7 @@ class BatchData:
         """
         Get the initial condition state.
         """
+        self._raise_if_step_diagnostics("get_start")
         return PrognosticState(
             self.subset_names(prognostic_names).select_time_slice(
                 slice(0, n_ic_timesteps)
@@ -817,6 +863,7 @@ class BatchData:
         """
         Get the final state which can be used as a new initial condition.
         """
+        self._raise_if_step_diagnostics("get_end")
         return PrognosticState(
             self.subset_names(prognostic_names).select_time_slice(
                 slice(-n_ic_timesteps, None)
@@ -827,6 +874,7 @@ class BatchData:
         """
         Select a window of data from the batch.
         """
+        self._raise_if_step_diagnostics("select_time_slice")
         return self.__class__(
             {k: v[:, time_slice] for k, v in self.data.items()},
             time=self.time[:, time_slice],
@@ -842,6 +890,7 @@ class BatchData:
         """
         Prepend the initial condition to the data.
         """
+        self._raise_if_step_diagnostics("prepend")
         initial_batch_data = initial_condition.as_batch_data()
         filled_data = {**initial_batch_data.data}
         example_tensor = list(initial_batch_data.data.values())[0]
@@ -913,6 +962,11 @@ class BatchData:
                 if self.stepper_state is not None
                 else None
             ),
+            step_diagnostics=(
+                self.step_diagnostics.broadcast_ensemble(n_ensemble)
+                if self.step_diagnostics is not None
+                else None
+            ),
         )
 
     def pin_memory(self: SelfType) -> SelfType:
@@ -931,6 +985,8 @@ class BatchData:
             }
         if self.stepper_state is not None:
             self.stepper_state.pin_memory()
+        if self.step_diagnostics is not None:
+            self.step_diagnostics.pin_memory()
         return self
 
 
@@ -938,6 +994,16 @@ class BatchData:
 class PairedData:
     """A container for the data and time coordinate of a batch, with paired
     prediction and target data.
+
+    Parameters:
+        prediction: Predicted data for each variable.
+        reference: Reference data for each variable.
+        time: The time coordinate shared by prediction and reference.
+        labels: Labels for each sample in the batch.
+        n_ensemble: The number of ensemble members represented in the batch.
+        step_diagnostics: Opaque per-sample diagnostics series carried from
+            the prediction data (today the corrector's per-step correction
+            delta). ``None`` when no corrector modified anything.
     """
 
     prediction: TensorMapping
@@ -945,6 +1011,7 @@ class PairedData:
     time: xr.DataArray
     labels: BatchLabels | None = None
     n_ensemble: int = 1
+    step_diagnostics: StepDiagnostics | None = None
 
     @property
     def forcing(self) -> TensorMapping:
@@ -986,6 +1053,11 @@ class PairedData:
             time=time,
             labels=labels,
             n_ensemble=n_ensemble,
+            step_diagnostics=(
+                self.step_diagnostics.broadcast_ensemble(n_ensemble)
+                if self.step_diagnostics is not None
+                else None
+            ),
         )
 
     def as_ensemble_tensor_dicts(
@@ -1020,6 +1092,7 @@ class PairedData:
             labels=prediction.labels,
             time=prediction.time,
             n_ensemble=prediction.n_ensemble,
+            step_diagnostics=prediction.step_diagnostics,
         )
 
     @classmethod
@@ -1030,6 +1103,7 @@ class PairedData:
         time: xr.DataArray,
         labels: BatchLabels | None = None,
         n_ensemble: int = 1,
+        step_diagnostics: StepDiagnostics | None = None,
     ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
@@ -1040,6 +1114,7 @@ class PairedData:
             labels=labels,
             time=time,
             n_ensemble=n_ensemble,
+            step_diagnostics=step_diagnostics,
         )
 
     @classmethod
@@ -1050,6 +1125,7 @@ class PairedData:
         time: xr.DataArray,
         labels: BatchLabels | None = None,
         n_ensemble: int = 1,
+        step_diagnostics: StepDiagnostics | None = None,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
         _check_device(reference, torch.device("cpu"))
@@ -1059,4 +1135,5 @@ class PairedData:
             labels=labels,
             time=time,
             n_ensemble=n_ensemble,
+            step_diagnostics=step_diagnostics,
         )

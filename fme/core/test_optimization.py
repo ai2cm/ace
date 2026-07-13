@@ -47,15 +47,13 @@ def test_optimization_reload(
         scheduler_config = SchedulerConfig()
     else:
         raise NotImplementedError()
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type=optimizer_type,
         lr=lr,
-        max_epochs=max_epochs,
         scheduler=scheduler_config,
         enable_automatic_mixed_precision=enable_amp,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=max_epochs)
     # train the model
     optimization.set_mode(nn.ModuleList([model]))
     model_intermediate_state = None
@@ -76,15 +74,13 @@ def test_optimization_reload(
     # reload the model weights
     model.load_state_dict(model_intermediate_state)
     # reload the state
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type=optimizer_type,
         lr=lr,
-        max_epochs=max_epochs,
         scheduler=scheduler_config,
         enable_automatic_mixed_precision=enable_amp,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=max_epochs)
     optimization.load_state(yaml.load(intermediate_state, Loader=yaml.CLoader))
     # train the model again
     optimization.set_mode(nn.ModuleList([model]))
@@ -162,15 +158,13 @@ def test_adam_optimization_accumulates_loss():
     input = torch.randn(100, 1).to(fme.get_device())
     output = model(input)
     loss = output.sum()
-    optimizer = Optimization(
-        parameters=model.parameters(),
+    optimizer = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=10)
     optimizer.accumulate_loss(loss)
     optimizer.accumulate_loss(loss)
     assert optimizer.get_accumulated_loss() == loss * 2
@@ -183,16 +177,14 @@ def test_detach_if_using_gradient_accumulation(use_gradient_accumulation: bool):
     model = nn.Linear(1, 1).to(fme.get_device())
     a = torch.randn(10, 1).to(fme.get_device())
     data = {"a": model(a)}
-    optimizer = Optimization(
-        parameters=model.parameters(),
+    optimizer = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         use_gradient_accumulation=use_gradient_accumulation,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=10)
     data = optimizer.detach_if_using_gradient_accumulation(data)
     assert data["a"].requires_grad == (not use_gradient_accumulation)
 
@@ -206,16 +198,14 @@ def test_change_identical_with_or_without_gradient_accumulation():
                 "bias": torch.zeros(1).to(fme.get_device()),
             }
         )
-        optimizer = Optimization(
-            parameters=model.parameters(),
+        optimizer = OptimizationConfig(
             optimizer_type="Adam",
             lr=0.001,
-            max_epochs=10,
             scheduler=SchedulerConfig(),
             enable_automatic_mixed_precision=False,
             use_gradient_accumulation=use_gradient_accumulation,
             kwargs={},
-        )
+        ).build(nn.ModuleList([model]), max_epochs=10)
         a = torch.ones(10, 1).to(fme.get_device())
         loss = model(a).sum()
         optimizer.accumulate_loss(loss)
@@ -280,15 +270,13 @@ def test_sequential_scheduler_trapezoid():
 
     # Create model and optimizer to test the scheduler
     model = nn.Linear(1, 1).to(fme.get_device())
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.01,  # base learning rate
-        max_epochs=max_epochs,
         scheduler=sequential_scheduler,
         enable_automatic_mixed_precision=False,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=max_epochs)
 
     learning_rates = []
     x = torch.randn(10, 1).to(fme.get_device())
@@ -366,15 +354,13 @@ def test_sequential_scheduler_reload():
     model = nn.Linear(1, 1).to(fme.get_device())
     x = torch.randn(100, 1).to(fme.get_device())
 
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=max_epochs,
         scheduler=sequential_scheduler,
         enable_automatic_mixed_precision=False,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=max_epochs)
 
     # Train with checkpoint
     optimization.set_mode(nn.ModuleList([model]))
@@ -393,15 +379,13 @@ def test_sequential_scheduler_reload():
     model = nn.Linear(1, 1).to(fme.get_device())
     model.load_state_dict(model_intermediate_state)
 
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=max_epochs,
         scheduler=sequential_scheduler,
         enable_automatic_mixed_precision=False,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=max_epochs)
     optimization.load_state(yaml.load(intermediate_state, Loader=yaml.CLoader))
 
     # Continue training
@@ -419,24 +403,22 @@ def test_sequential_scheduler_reload():
 
 
 def _build_optimization(
-    parameters, lr=0.001, optimizer_type="Adam", max_epochs=10, max_grad_norm=None
+    modules, lr=0.001, optimizer_type="Adam", max_epochs=10, max_grad_norm=None
 ) -> Optimization:
     """Helper to construct an Optimization with common test defaults."""
-    return Optimization(
-        parameters=parameters,
+    return OptimizationConfig(
         optimizer_type=optimizer_type,
         lr=lr,
-        max_epochs=max_epochs,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={},
         max_grad_norm=max_grad_norm,
-    )
+    ).build(modules, max_epochs=max_epochs)
 
 
 def test_set_learning_rate():
     model = nn.Linear(1, 1).to(fme.get_device())
-    optimization = _build_optimization(model.parameters())
+    optimization = _build_optimization(nn.ModuleList([model]))
     assert optimization.learning_rate == 0.001
     optimization.set_learning_rate(0.01)
     assert optimization.learning_rate == 0.01
@@ -459,7 +441,7 @@ def test_load_state_into_different_parameters():
     model = nn.Linear(2, 2).to(fme.get_device())
     x = torch.randn(10, 2).to(fme.get_device())
 
-    optimization = _build_optimization(model.parameters())
+    optimization = _build_optimization(nn.ModuleList([model]))
 
     # Train a few steps to build up momentum state
     for _ in range(3):
@@ -471,7 +453,7 @@ def test_load_state_into_different_parameters():
 
     # Create a new model with the same structure but different parameter objects
     model2 = copy.deepcopy(model)
-    optimization2 = _build_optimization(model2.parameters())
+    optimization2 = _build_optimization(nn.ModuleList([model2]))
     optimization2.load_state(saved_state)
 
     # Train both for one more step on identical data and verify identical results
@@ -499,7 +481,7 @@ def test_load_state_then_set_learning_rate():
     model = nn.Linear(2, 2).to(fme.get_device())
     x = torch.randn(10, 2).to(fme.get_device())
 
-    optimization = _build_optimization(model.parameters())
+    optimization = _build_optimization(nn.ModuleList([model]))
 
     # Train a few steps
     for _ in range(3):
@@ -511,7 +493,7 @@ def test_load_state_then_set_learning_rate():
 
     # Build a new optimization, load state, then override LR
     model2 = copy.deepcopy(model)
-    optimization2 = _build_optimization(model2.parameters())
+    optimization2 = _build_optimization(nn.ModuleList([model2]))
     optimization2.load_state(saved_state)
     optimization2.set_learning_rate(0.0005)
 
@@ -547,15 +529,13 @@ def test_load_optimizer_state_for_finetuning():
     x = torch.randn(10, 2).to(fme.get_device())
 
     source_kwargs = {"weight_decay": 0.1, "betas": (0.85, 0.995)}
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs=source_kwargs,
-    )
+    ).build(nn.ModuleList([model]), max_epochs=10)
     assert optimization.optimizer.state_dict()["state"] == {}
 
     for _ in range(3):
@@ -572,15 +552,13 @@ def test_load_optimizer_state_for_finetuning():
     new_lr = 0.01
     new_weight_decay = 0.05
     new_betas = (0.9, 0.999)
-    optimization2 = Optimization(
-        parameters=model2.parameters(),
+    optimization2 = OptimizationConfig(
         optimizer_type="Adam",
         lr=new_lr,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={"weight_decay": new_weight_decay, "betas": new_betas},
-    )
+    ).build(nn.ModuleList([model2]), max_epochs=10)
     fresh_scheduler_state = optimization2.scheduler.state_dict()
 
     optimization2.load_optimizer_state_for_finetuning(saved_state)
@@ -607,11 +585,11 @@ def test_load_optimizer_state_for_finetuning_param_group_mismatch():
     freshly-built optimizer (e.g. different number of parameters)."""
     torch.manual_seed(0)
     source_model = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2)).to(fme.get_device())
-    source = _build_optimization(source_model.parameters())
+    source = _build_optimization(nn.ModuleList([source_model]))
     saved_state = source.get_state()
 
     target_model = nn.Linear(2, 2).to(fme.get_device())
-    target = _build_optimization(target_model.parameters())
+    target = _build_optimization(nn.ModuleList([target_model]))
 
     with pytest.raises(ValueError, match="incompatible"):
         target.load_optimizer_state_for_finetuning(saved_state)
@@ -625,15 +603,13 @@ def test_load_optimizer_state_for_finetuning_does_not_leak_hparams():
     authoritative."""
     torch.manual_seed(0)
     source_model = nn.Linear(2, 2).to(fme.get_device())
-    source = Optimization(
-        parameters=source_model.parameters(),
+    source = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={"amsgrad": True},
-    )
+    ).build(nn.ModuleList([source_model]), max_epochs=10)
     saved_state = source.get_state()
     # Simulate a stray key from the source side that the target should not
     # adopt (e.g. an optimizer-type-specific flag, or a scheduler-injected
@@ -642,15 +618,13 @@ def test_load_optimizer_state_for_finetuning_does_not_leak_hparams():
         group["bogus_source_only_flag"] = True
 
     target_model = nn.Linear(2, 2).to(fme.get_device())
-    target = Optimization(
-        parameters=target_model.parameters(),
+    target = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=False,
         kwargs={"amsgrad": False},
-    )
+    ).build(nn.ModuleList([target_model]), max_epochs=10)
 
     target.load_optimizer_state_for_finetuning(saved_state)
 
@@ -667,15 +641,13 @@ def test_load_optimizer_state_for_finetuning_with_gscaler():
     model = nn.Linear(2, 2).to(fme.get_device())
     x = torch.randn(10, 2).to(fme.get_device())
 
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=True,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=10)
 
     for _ in range(3):
         with optimization.autocast():
@@ -687,15 +659,13 @@ def test_load_optimizer_state_for_finetuning_with_gscaler():
     assert saved_state["gscaler_state_dict"] != {}
 
     model2 = copy.deepcopy(model)
-    optimization2 = Optimization(
-        parameters=model2.parameters(),
+    optimization2 = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.01,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=True,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model2]), max_epochs=10)
 
     optimization2.load_optimizer_state_for_finetuning(saved_state)
 
@@ -786,15 +756,13 @@ def test_scheduler_step_timing():
         type="StepLR", kwargs={"step_size": 2, "gamma": 0.5}, step_each_iteration=True
     )
 
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.1,
-        max_epochs=5,
         scheduler=per_iteration_scheduler,
         enable_automatic_mixed_precision=False,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=5)
 
     # Initial LR
     initial_lr = optimization.learning_rate
@@ -824,15 +792,13 @@ def test_scheduler_step_timing():
         type="StepLR", kwargs={"step_size": 1, "gamma": 0.5}, step_each_iteration=False
     )
 
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.1,
-        max_epochs=5,
         scheduler=per_epoch_scheduler,
         enable_automatic_mixed_precision=False,
         kwargs={},
-    )
+    ).build(nn.ModuleList([model]), max_epochs=5)
 
     initial_lr = optimization.learning_rate
 
@@ -856,7 +822,9 @@ def test_gradient_clipping(max_grad_norm, expect_clipped):
     """step_weights clips the global gradient norm to max_grad_norm when set."""
     torch.manual_seed(0)
     model = nn.Linear(10, 1).to(fme.get_device())
-    optimization = _build_optimization(model.parameters(), max_grad_norm=max_grad_norm)
+    optimization = _build_optimization(
+        nn.ModuleList([model]), max_grad_norm=max_grad_norm
+    )
 
     x = torch.ones(1, 10).to(fme.get_device()) * 1e4  # large input → large gradients
     optimization.accumulate_loss(model(x).sum())
@@ -875,16 +843,14 @@ def test_gradient_clipping_with_amp():
     """_clip_gradients unscales via gscaler before clipping when AMP is active."""
     torch.manual_seed(0)
     model = nn.Linear(10, 1).to("cuda")
-    optimization = Optimization(
-        parameters=model.parameters(),
+    optimization = OptimizationConfig(
         optimizer_type="Adam",
         lr=0.001,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
         enable_automatic_mixed_precision=True,
         kwargs={},
         max_grad_norm=0.01,
-    )
+    ).build(nn.ModuleList([model]), max_epochs=10)
 
     with optimization.autocast():
         x = torch.ones(1, 10, device="cuda") * 1e4
