@@ -1,0 +1,33 @@
+# Evaluator run for the 4deg/daily ACE2S-SHiELD+ paper-arm checkpoint (wandb
+# f3fhd6hn), AMIP historical case, restricted to the paper's 2012-2020 test
+# window, to produce time_mean_diagnostics.nc (gen_map / target_map / bias_map)
+# for the report's Fig 2c-f bias-map side-by-side against the paper's 1-degree
+# AMIP maps. Reference dataset supplies both the prescribed SST/CO2 forcing and
+# the SHiELD target; bias_map = gen - target. Single IC (ic_0001), 3287 daily
+# forward steps: 2012-01-01 -> 2020-12-31.
+experiment_dir: /results
+n_forward_steps: 3287
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '2012-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0001.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  zonal_mean:
+    enabled: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

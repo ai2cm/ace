@@ -1,0 +1,41 @@
+# Evaluator run for the 4deg/daily ACE2S-SHiELD+ paper-arm checkpoint (wandb
+# f3fhd6hn), SOM 1xCO2 equilibrium case, to produce time_mean_diagnostics.nc
+# (gen_map / target_map / bias_map) for the report's equilibrium bias-map
+# side-by-side against the paper's 1-degree SOM maps at matching CO2. CO2 is
+# held at 1x by the dataset itself (1xCO2-ic_0003.zarr carries the constant
+# global_mean_co2 the training inline inference used). 8 staggered starts x
+# 1825 daily steps (5-year equilibrium mean), matching the training config's
+# som_1xco2_5year case.
+experiment_dir: /results
+n_forward_steps: 1825
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '2032-07-01T00:00:00'
+      - '2033-01-01T00:00:00'
+      - '2033-07-01T00:00:00'
+      - '2034-01-01T00:00:00'
+      - '2034-07-01T00:00:00'
+      - '2035-01-01T00:00:00'
+      - '2035-07-01T00:00:00'
+      - '2036-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+    file_pattern: 1xCO2-ic_0003.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  zonal_mean:
+    enabled: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
