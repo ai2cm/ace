@@ -35,6 +35,8 @@ Every launched run gets a row. `verdict`: ✅ win · ➖ flat · ❌ degrade · 
 | distilled | teacher | date | region/period | commit | beaker (distilled / teacher) | verdict | report |
 |---|---|---|---|---|---|---|---|
 | `rmoodemk` | `1r1p6djp` | 2026-07-08 | CONUS 2023, 100km→3km X-SHiELD | [`de3e00c`](https://github.com/ai2cm/ace/commit/de3e00ce2bf8215114a818faae11700afd8005f9) | `01KWZD6YMZSD37XZHDMYB8RFC7` / `01KWZD6WFN4TCSMMC48BTFMN8Q` | see report | [report](reports/2026-07-08-moe-eval-distilled-vs-teacher.md) |
+| `x2nyzmzh` (spectral) | `flzvb6tp` (baseline) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.46→0.13 (−71%), CRPS −3.5%, tails ~ideal | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
+| `l6vv7yx0` (spectral) | `fg9byv9y` (baseline) | 2026-07-13 | maritime continent, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.60→0.13 (−78%), CRPS −2.6%, tails closer to 1 | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
 
 ### MoE per-expert base models (bundled into `rmoodemk`)
 
@@ -108,6 +110,14 @@ _Reverse-chronological; one line per finding, linking the run report._
   flips by which selector you read. Motivates a spectral-aware early-stop/selection
   criterion (new planned item). See
   [report](reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md).
+- **2026-07-13** — ✅ **Held-out eval confirms the spectral loss is a real, generalizing
+  win.** On X-SHiELD AMIP control (out-of-sample vs the training val period), 100km→3km,
+  the spectral student beats the GAN-only baseline on **power-spectrum bias 3.5–4.5×**
+  (CONUS 0.46→0.13, maritime continent 0.60→0.13) with CRPS ~3% better and tails
+  near-ideal — no regression, both regions, both bundling `best_student_tail.ckpt` (fair).
+  Confirms the training-val `i26sidsm` result transfers out-of-sample; de-risks porting
+  the loss to the MoE runs. See
+  [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md).
 - **2026-07-13** — ➖ **Reduce-GAN arm `6dotglmg` (gan=3e-4) reported: inconclusive.**
   Marginally better spectrum + tails than `i26sidsm` at matched steps (tail 1.10 vs 1.17
   @14k), no downside — but it **crashed@14k, before the late-drift regime** (baseline
