@@ -1,6 +1,7 @@
 import dataclasses
 import os
 import pathlib
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -141,8 +142,6 @@ def _setup(
 
 
 def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
-    from unittest.mock import MagicMock
-
     with pytest.raises(
         ValueError,
         match="n_coupled_steps must be divisible by coupled_steps_in_memory",
@@ -159,8 +158,6 @@ def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
 
 
 def test_inference_rejects_top_level_override_with_standalone_checkpoint():
-    from unittest.mock import MagicMock
-
     standalone = StandaloneComponentCheckpointsConfig(
         ocean=StandaloneComponentConfig(timedelta="2D", path="ocean.pt"),
         atmosphere=StandaloneComponentConfig(timedelta="1D", path="atmos.pt"),
@@ -185,8 +182,6 @@ def test_inference_config_threads_ocean_override_to_forcing_window(
     """InferenceConfig routes an ocean override into the loaded stepper config so
     prescribed prognostics appear in the ocean forcing window.
     """
-    from unittest.mock import MagicMock
-
     ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
     ocean_out_names = ["sst", "thetao_18"]
     atmos_in_names = ["exog", "ocean_fraction", "sfc_temp"]

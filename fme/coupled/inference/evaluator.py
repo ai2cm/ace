@@ -12,13 +12,12 @@ from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import (
     load_stepper_config_with_override as load_single_stepper_config,
 )
-from fme.ace.stepper.single_module import StepperConfig, _apply_stepper_overrides
+from fme.ace.stepper.single_module import apply_stepper_override_to_stepper_config
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
-from fme.core.step.multi_call import MultiCallConfig
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
@@ -42,28 +41,33 @@ from fme.coupled.stepper import (
 )
 
 
-def apply_stepper_override_to_nested_stepper_config(
-    stepper_config: StepperConfig, override: StepperOverrideConfig | None
+def _validate_coupled_component_override(
+    override: StepperOverrideConfig | None,
 ) -> None:
-    """Apply optional overrides to a ``StepperConfig`` (not a loaded ``Stepper``).
+    """Restrict coupled inference overrides to ``prescribed_prognostic_names``.
 
-    Used when building ``CoupledStepperConfig`` from a serialized coupled checkpoint
-    so that forcing-window requirements match inference-time overrides (e.g.
-    ``prescribed_prognostic_names``) before any data is loaded.
+    ``CoupledStepperConfig`` caches cross-component forcing-name sets and
+    validates component compatibility at construction. Only
+    ``prescribed_prognostic_names`` is recomputed on demand; an ``ocean``,
+    ``multi_call`` or ``derived_forcings`` override applied afterward would leave
+    those caches stale, so reject them rather than silently use stale values.
     """
     if override is None:
         return
-
-    def _reject_multi_call(multi_call: MultiCallConfig | None) -> None:
-        raise ValueError(
-            "StepperOverrideConfig.multi_call cannot be applied when loading "
-            "CoupledStepperConfig without constructing a Stepper; use load_stepper "
-            "with a full checkpoint instead."
+    unsupported = [
+        name
+        for name, value in (
+            ("ocean", override.ocean),
+            ("multi_call", override.multi_call),
+            ("derived_forcings", override.derived_forcings),
         )
-
-    _apply_stepper_overrides(
-        stepper_config, override, replace_multi_call=_reject_multi_call
-    )
+        if value != "keep"
+    ]
+    if unsupported:
+        raise ValueError(
+            "Coupled inference overrides only support prescribed_prognostic_names, "
+            f"but got unsupported override(s): {sorted(unsupported)}."
+        )
 
 
 def apply_coupled_stepper_config_inference_overrides(
@@ -76,12 +80,14 @@ def apply_coupled_stepper_config_inference_overrides(
     Forcing-window names are computed on demand from the (now mutated) component
     step configs, so no explicit refresh is needed.
     """
+    _validate_coupled_component_override(ocean_override)
+    _validate_coupled_component_override(atmosphere_override)
     if ocean_override is not None:
-        apply_stepper_override_to_nested_stepper_config(
+        apply_stepper_override_to_stepper_config(
             coupled_config.ocean.stepper, ocean_override
         )
     if atmosphere_override is not None:
-        apply_stepper_override_to_nested_stepper_config(
+        apply_stepper_override_to_stepper_config(
             coupled_config.atmosphere.stepper, atmosphere_override
         )
 
@@ -233,6 +239,8 @@ def load_stepper(
         return checkpoint_path.load_stepper()
 
     stepper = load_coupled_stepper(checkpoint_path)
+    _validate_coupled_component_override(ocean_stepper_override)
+    _validate_coupled_component_override(atmosphere_stepper_override)
     # Overrides mutate each component Stepper's config, which the CoupledStepper
     # aliases as its nested CoupledStepperConfig component config, so forcing
     # windows (computed on demand) reflect the overrides automatically.

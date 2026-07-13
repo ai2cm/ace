@@ -850,9 +850,6 @@ class CoupledStepper:
         # Alias each component's nested StepperConfig to the loaded Stepper's
         # own config so forcing-window names (computed from CoupledStepperConfig)
         # reflect any inference-time overrides applied to the component steppers.
-        # For the get_stepper build path these already refer to the same object;
-        # after from_state they differ, so this alias unifies both paths and
-        # replaces the previous post-hoc config-sync helper.
         config.ocean.stepper = ocean.config
         config.atmosphere.stepper = atmosphere.config
         self._dataset_info = dataset_info
@@ -1045,6 +1042,16 @@ class CoupledStepper:
         forcings_from_ocean = self._forcings_from_ocean_with_ocean_fraction(
             forcings_from_ocean, forcing_data
         )
+        # A prescribed atmosphere prognostic read from atmos_data would be
+        # silently overwritten by an ocean-supplied field of the same name in
+        # the update below; fail loudly instead.
+        prescribed = self._config.atmosphere.stepper.get_prescribed_prognostic_names()
+        clobbered = sorted(set(prescribed) & set(forcings_from_ocean))
+        if clobbered:
+            raise ValueError(
+                "Atmosphere prescribed_prognostic_names overlap ocean-supplied "
+                f"forcings and would be overwritten: {clobbered}."
+            )
         # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
         return forcing_data
