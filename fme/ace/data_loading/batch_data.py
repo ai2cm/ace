@@ -1,5 +1,4 @@
 import dataclasses
-import json
 import logging
 import warnings
 from collections.abc import Callable, Collection, Iterable, Sequence
@@ -34,53 +33,20 @@ SelfType = TypeVar("SelfType", bound="BatchData")
 _RESERVED_PREFIX = "_fme_state__"
 _SCHEMA_ATTR = "_fme_schema_version"
 _SCHEMA_VERSION = 1
-_DTYPE_ATTR = "_fme_dtype"
 _SAMPLE_DIM = "sample"
 _TIME_DIM = "time"
 
 _STEPPER_PREFIX = f"{_RESERVED_PREFIX}stepper__"
 _LABELS_VALUES_VAR = f"{_RESERVED_PREFIX}labels_values"
-_LABELS_NAMES_ATTR = f"{_RESERVED_PREFIX}labels_names"
 _LABEL_INDEX_DIM = f"{_RESERVED_PREFIX}label_index"
 _DATA_MASK_PREFIX = f"{_RESERVED_PREFIX}data_mask__"
 
-# netCDF4 has no native bool; bool tensors are stored as uint8 and cast back to
-# their recorded dtype on read.
-_DTYPE_BY_NAME: dict[str, torch.dtype] = {
-    str(dtype): dtype
-    for dtype in (
-        torch.bool,
-        torch.uint8,
-        torch.int8,
-        torch.int16,
-        torch.int32,
-        torch.int64,
-        torch.float16,
-        torch.float32,
-        torch.float64,
-    )
-}
-
-
-def _to_storage_array(tensor: torch.Tensor) -> tuple[np.ndarray, str]:
-    """Return a netCDF-storable array plus the original torch dtype name.
-
-    Bool is stored as uint8 (netCDF4 has no bool); the recorded dtype lets
-    ``from_xarray_dataset`` restore the exact original dtype.
-    """
-    cpu = tensor.detach().cpu()
-    dtype_name = str(cpu.dtype)
-    if cpu.dtype == torch.bool:
-        return cpu.to(torch.uint8).numpy(), dtype_name
-    return cpu.numpy(), dtype_name
-
 
 def _restore_tensor(da: xr.DataArray) -> torch.Tensor:
-    tensor = torch.as_tensor(np.asarray(da.values))
-    dtype_name = da.attrs.get(_DTYPE_ATTR)
-    if dtype_name is not None:
-        tensor = tensor.to(_DTYPE_BY_NAME[str(dtype_name)])
-    return tensor
+    # xarray/netCDF preserve the reserved variables' dtypes natively (bool is
+    # round-tripped through xarray's own bool<->int8 encoding, uint8 through
+    # ubyte), so the tensor comes back at its stored dtype without extra work.
+    return torch.as_tensor(np.asarray(da.values))
 
 
 def _reserved_var_dims(var_name: str, ndim: int, per_sample: bool) -> list[str]:
@@ -555,33 +521,24 @@ class BatchData:
         on load, and ``n_ensemble`` is intentionally left to be re-derived (the
         sample dimension already carries any broadcast ensemble).
         """
-        if self.time.sizes[_TIME_DIM] == 1:
-            time_dim = self.dims.index(_TIME_DIM)
-            dims_to_write = self.dims[:time_dim] + self.dims[time_dim + 1 :]
-
-            def present(x: torch.Tensor) -> torch.Tensor:
-                return x.squeeze(dim=time_dim)
-
-            time_array = self.time.isel(time=0)
-        else:
-            dims_to_write = self.dims
-
-            def present(x: torch.Tensor) -> torch.Tensor:
-                return x
-
-            time_array = self.time
-
         data_arrays: dict[str, xr.DataArray] = {}
         for name, tensor in self.data.items():
             data_arrays[name] = xr.DataArray(
-                present(tensor).detach().cpu().numpy(), dims=dims_to_write
+                tensor.detach().cpu().numpy(), dims=self.dims
             )
-        data_arrays[_TIME_DIM] = time_array
+        data_arrays[_TIME_DIM] = self.time
 
         extra_arrays, attrs = self._encode_reserved_state()
         data_arrays.update(extra_arrays)
         ds = xr.Dataset(data_arrays)
         ds.attrs.update(attrs)
+        # A single-timestep batch (the restart presentation) drops its length-1
+        # time dimension; the reserved variables carry no time dim and are
+        # untouched. ``time`` stays a data variable (xarray promotes a variable
+        # named after a dimension to a coordinate) so the plain data+time file
+        # matches what was written before this feature.
+        if ds.sizes[_TIME_DIM] == 1:
+            ds = ds.squeeze(_TIME_DIM).reset_coords(_TIME_DIM)
         return ds
 
     @classmethod
@@ -596,12 +553,10 @@ class BatchData:
         reader in ``get_initial_condition``). ``horizontal_dims`` is recovered
         from the prognostic variables' dims.
         """
-        time_da = ds[_TIME_DIM]
-        squeezed = list(time_da.dims) == [_SAMPLE_DIM]
+        time = ds[_TIME_DIM]
+        squeezed = list(time.dims) == [_SAMPLE_DIM]
         if squeezed:
-            time = xr.DataArray(time_da.values[:, None], dims=[_SAMPLE_DIM, _TIME_DIM])
-        else:
-            time = xr.DataArray(time_da.values, dims=[_SAMPLE_DIM, _TIME_DIM])
+            time = time.expand_dims(dim=_TIME_DIM, axis=1)
 
         data: dict[str, torch.Tensor] = {}
         horizontal_dims: list[str] | None = None
@@ -649,29 +604,27 @@ class BatchData:
             per_sample_keys = self.stepper_state.per_sample_state_keys()
             for key, tensor in state_dict.items():
                 var_name = f"{_STEPPER_PREFIX}{key}"
-                array, dtype_name = _to_storage_array(tensor)
+                array = tensor.detach().cpu().numpy()
                 data_arrays[var_name] = xr.DataArray(
                     array,
                     dims=_reserved_var_dims(
                         var_name, array.ndim, per_sample=key in per_sample_keys
                     ),
-                    attrs={_DTYPE_ATTR: dtype_name},
                 )
 
         if self.labels is not None:
-            array, dtype_name = _to_storage_array(self.labels.tensor)
+            # The label names ride along as the label-index dimension coordinate
+            # so a human reading the restart file sees which label each column is.
             data_arrays[_LABELS_VALUES_VAR] = xr.DataArray(
-                array,
+                self.labels.tensor.detach().cpu().numpy(),
                 dims=[_SAMPLE_DIM, _LABEL_INDEX_DIM],
-                attrs={_DTYPE_ATTR: dtype_name},
+                coords={_LABEL_INDEX_DIM: list(self.labels.names)},
             )
-            attrs[_LABELS_NAMES_ATTR] = json.dumps(list(self.labels.names))
 
         if self.data_mask is not None:
             for name, mask in self.data_mask.items():
-                array, dtype_name = _to_storage_array(mask)
                 data_arrays[f"{_DATA_MASK_PREFIX}{name}"] = xr.DataArray(
-                    array, dims=[_SAMPLE_DIM], attrs={_DTYPE_ATTR: dtype_name}
+                    mask.detach().cpu().numpy(), dims=[_SAMPLE_DIM]
                 )
 
         if data_arrays:
@@ -696,10 +649,8 @@ class BatchData:
         stepper_state = StepperState.from_state_dict(state_dict) if state_dict else None
         labels: BatchLabels | None = None
         if _LABELS_VALUES_VAR in ds:
-            names = json.loads(ds.attrs[_LABELS_NAMES_ATTR])
-            labels = BatchLabels(
-                _restore_tensor(ds[_LABELS_VALUES_VAR]), names=list(names)
-            )
+            names = [str(n) for n in ds[_LABELS_VALUES_VAR][_LABEL_INDEX_DIM].values]
+            labels = BatchLabels(_restore_tensor(ds[_LABELS_VALUES_VAR]), names=names)
         return stepper_state, labels, (data_mask or None)
 
     def __post_init__(self):

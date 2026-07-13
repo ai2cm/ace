@@ -487,13 +487,29 @@ def test_get_initial_condition(n_ensemble):
 
 
 def test_get_initial_condition_raises_bad_variable_shape():
+    # A variable with no spatial dims (only the sample dim) is rejected: the
+    # contract is (n_samples, [spatial dims]).
+    time_da = xr.DataArray([0, 5], dims=["sample"])
+    prognostic_da = xr.DataArray(np.random.rand(2), dims=["sample"])
+    data = xr.Dataset({"prog": prognostic_da, "time": time_da})
+    with pytest.raises(ValueError, match="spatial dims"):
+        get_initial_condition(data, InitialConditionRequirements(["prog"]))
+
+
+def test_get_initial_condition_healpix_spatial_dims():
+    # A HEALPix IC (face/height/width) flows through the lenient path: the
+    # horizontal dims are taken from the variable, not assumed to be lat/lon.
     time_da = xr.DataArray([0, 5], dims=["sample"])
     prognostic_da = xr.DataArray(
-        np.random.rand(2, 8, 16, 32), dims=["sample", "layer", "lat", "lon"]
+        np.random.rand(2, 12, 8, 8), dims=["sample", "face", "height", "width"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    with pytest.raises(ValueError):
-        get_initial_condition(data, InitialConditionRequirements(["prog"]))
+    initial_condition = get_initial_condition(
+        data, InitialConditionRequirements(["prog"])
+    )
+    batch_data = initial_condition.as_batch_data()
+    assert batch_data.horizontal_dims == ["face", "height", "width"]
+    assert batch_data.data["prog"].shape == (2, 1, 12, 8, 8)
 
 
 def test_get_initial_condition_raises_missing_time():

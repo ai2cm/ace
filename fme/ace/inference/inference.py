@@ -128,8 +128,8 @@ def get_initial_condition(
     Args:
         ds: Dataset containing initial condition data. Must include the required
             prognostic names as variables, and they must each have shape
-            (n_samples, n_lat, n_lon). Dataset must also include a 'time'
-            variable with length n_samples.
+            (n_samples, [spatial dims]) - lat/lon or HEALPix face/height/width.
+            Dataset must also include a 'time' variable with length n_samples.
         requirements: What the run requires of the initial condition: the
             prognostic names to extract, labels to provide to the stepper for
             every initial condition (for an embedded-state restart they are
@@ -170,13 +170,19 @@ def _initial_condition_from_variables(
     broadcasts the ensemble.
     """
     initial_condition = {}
+    horizontal_dims: list[str] | None = None
     for name in requirements.prognostic_names:
-        if len(ds[name].shape) != 3:
+        if len(ds[name].shape) < 2:
             raise ValueError(
-                f"Initial condition variables {name} must have shape "
-                f"(n_samples, n_lat, n_lon). Got shape {ds[name].shape}."
+                f"Initial condition variable {name} must have shape "
+                f"(n_samples, [spatial dims]). Got shape {ds[name].shape}."
             )
         n_samples = ds[name].shape[0]
+        # The horizontal dims are whatever the variable carries after the leading
+        # sample dim, so lat/lon and HEALPix (face/height/width) both flow through
+        # unchanged rather than being assumed to be lat/lon.
+        if horizontal_dims is None:
+            horizontal_dims = [str(d) for d in ds[name].dims[1:]]
         initial_condition[name] = torch.tensor(ds[name].values).unsqueeze(dim=1)
     if "time" not in ds:
         raise ValueError("Initial condition dataset must have a 'time' variable.")
@@ -202,7 +208,7 @@ def _initial_condition_from_variables(
     batch_data = BatchData.new_on_cpu(
         data=initial_condition,
         time=initial_times,
-        horizontal_dims=["lat", "lon"],
+        horizontal_dims=horizontal_dims,
         labels=batch_labels,
     )
     batch_data = batch_data.broadcast_ensemble(n_ensemble=requirements.n_ensemble)
