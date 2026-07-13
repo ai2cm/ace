@@ -62,7 +62,7 @@ class PrescribedSurfaceTemperature(SurfaceTemperature):
 
 
 @dataclasses.dataclass(frozen=True)
-class SlabSurfaceTemperature(SurfaceTemperature):
+class SlabOceanSurfaceTemperature(SurfaceTemperature):
     """Next-step surface temperature from a slab ocean mixed-layer tendency."""
 
     surface_temperature_name: str
@@ -135,7 +135,7 @@ class OceanConfig:
                 self.surface_temperature_name
             )
         else:
-            surface_temperature = SlabSurfaceTemperature(
+            surface_temperature = SlabOceanSurfaceTemperature(
                 surface_temperature_name=self.surface_temperature_name,
                 q_flux_name=self.slab.q_flux_name,
                 mixed_layer_depth_name=self.slab.mixed_layer_depth_name,
