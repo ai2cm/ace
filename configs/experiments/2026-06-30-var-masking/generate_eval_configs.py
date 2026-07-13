@@ -10,6 +10,7 @@ training and cooldown configs), where run-ace-eval.sh reads them.
 
 import argparse
 import copy
+import functools
 import json
 import pathlib
 
@@ -19,8 +20,8 @@ from generate_masking_configs import (
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PREFIX,
-    WANDB_PROJECT,
     WANDB_SUFFIX,
+    config_to_project,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -129,12 +130,24 @@ def _build_eval_suite_config(
     }
 
 
-def _fetch_wandb_run_names() -> set[str]:
-    import wandb  # lazy import: only needed with --delete-if-in-wandb
+@functools.cache
+def _fetch_wandb_run_states(project: str) -> dict[str, str]:
+    import wandb  # lazy import: only needed when wandb lookups are required
 
+    print(f"Fetching run names from {WANDB_ENTITY}/{project}...")
     api = wandb.Api()
-    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
-    return {run.name for run in runs}
+    runs = api.runs(f"{WANDB_ENTITY}/{project}")
+    states = {run.name: run.state for run in runs}
+    print(f"Found {len(states)} existing runs.")
+    return states
+
+
+def _fetch_wandb_run_names(project: str) -> set[str]:
+    return {
+        name
+        for name, state in _fetch_wandb_run_states(project).items()
+        if state == "finished"
+    }
 
 
 def _write_config(
@@ -143,9 +156,11 @@ def _write_config(
     source_run_name: str,
     source_dataset_id: str,
     existing_only: bool,
-    wandb_run_names: set[str] | None = None,
+    project: str,
+    delete_if_in_wandb: bool = False,
 ) -> None:
-    if wandb_run_names is not None:
+    if delete_if_in_wandb:
+        wandb_run_names = _fetch_wandb_run_names(project)
         base_run_name = eval_suite_config_to_run_name(out_path.name)
         expected_runs = {
             f"{base_run_name}{suffix}" for suffix in CHECKPOINT_RUN_SUFFIXES
@@ -176,14 +191,24 @@ def generate_eval_config(
     inference_names: list[str] | None,
     checkpoint_path: str,
     existing_only: bool,
-    wandb_run_names: set[str] | None = None,
+    delete_if_in_wandb: bool = False,
 ) -> None:
     source_run_name = source_config_to_run_name(source_path.name)
+    project = config_to_project(source_path.name)
     source_dataset_id = source_map.get(source_run_name)
     if source_dataset_id is None:
-        raise KeyError(
-            f"No training result dataset ID configured for run {source_run_name!r}"
+        run_state = _fetch_wandb_run_states(project).get(source_run_name)
+        if run_state == "finished":
+            raise KeyError(
+                f"Run {source_run_name!r} is finished in wandb but has no "
+                "training result dataset ID configured; refresh "
+                "wandb_to_beaker_map.json"
+            )
+        print(
+            f"Skipped {source_path.name} (run {source_run_name!r} not "
+            f"finished in wandb: state={run_state!r})"
         )
+        return
 
     with source_path.open() as f:
         train_cfg = yaml.safe_load(f)
@@ -200,7 +225,8 @@ def generate_eval_config(
         source_run_name,
         source_dataset_id,
         existing_only,
-        wandb_run_names,
+        project,
+        delete_if_in_wandb,
     )
 
 
@@ -236,19 +262,13 @@ def main() -> None:
         action="store_true",
         help=(
             f"Delete evaluator configs whose run name already exists in "
-            f"{WANDB_ENTITY}/{WANDB_PROJECT}."
+            f"the run's wandb project (entity {WANDB_ENTITY})."
         ),
     )
     args = parser.parse_args()
 
     with open(args.source_map) as f:
         source_map: dict[str, str] = json.load(f)
-
-    wandb_run_names: set[str] | None = None
-    if args.delete_if_in_wandb:
-        print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
-        wandb_run_names = _fetch_wandb_run_names()
-        print(f"Found {len(wandb_run_names)} existing runs.")
 
     source_configs = sorted(
         p
@@ -266,7 +286,7 @@ def main() -> None:
             inference_names=args.inference_name,
             checkpoint_path=args.checkpoint_path,
             existing_only=args.existing_only,
-            wandb_run_names=wandb_run_names,
+            delete_if_in_wandb=args.delete_if_in_wandb,
         )
 
 
