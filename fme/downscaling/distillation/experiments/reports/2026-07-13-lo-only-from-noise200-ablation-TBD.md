@@ -87,11 +87,11 @@ andrep-downscaling`.
 | | |
 |---|---|
 | Job | `evaluate-moe-lo-only-from-noise200-xshield-amip-100km-to-3km-conus` |
-| wandb run | `TBD` — project `andrep-downscaling` (appears once the eval inits) |
+| wandb run | `p337gcg9` — https://wandb.ai/ai2cm/andrep-downscaling/runs/p337gcg9 |
 | Beaker experiment | `01KXEYCC9HAZ7F1G85E3KRPKFD` — https://beaker.org/ex/01KXEYCC9HAZ7F1G85E3KRPKFD |
 | Commit | `af4d134` — https://github.com/ai2cm/ace/commit/af4d134 |
 | Launcher | `configs/experiments/2026-07-07-distilled-moe-eval/run-lo-only.sh` (CONUS only) |
-| State | `starting` (submitted 2026-07-13) |
+| State | `running` (checkpoint loaded cleanly under `sigma_max=200` + `/lo` mount; eval logs metrics at completion) |
 
 ## Result  <!-- filled after the eval run -->
 
