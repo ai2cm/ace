@@ -62,65 +62,36 @@ class UNetDecoderConfig:
         Returns:
             UNet Decoder model.
         """
-        return UNetDecoder(
-            conv_block=self.conv_block,
-            up_sampling_block=self.up_sampling_block,
-            output_layer=self.output_layer,
-            n_channels=self.n_channels,
-            n_layers=self.n_layers,
-            output_channels=output_channels,
-            dilations=self.dilations,
-            ctx=ctx,
-        )
-
-
-class UNetDecoder(nn.Module):
-    """Generic UNetDecoder that can be applied to arbitrary meshes."""
-
-    def __init__(
-        self,
-        conv_block: ConvBlockConfig,
-        up_sampling_block: UpsamplingBlockConfig,
-        output_layer: ConvBlockConfig,
-        n_channels: Sequence = (64, 32, 16),
-        n_layers: Sequence = (1, 2, 2),
-        output_channels: int = 1,
-        dilations: Optional[list] = None,
-        ctx: HEALPixBuildContext | None = None,
-    ):
-        """
-        Initialize the UNetDecoder.
-
-        Args:
-            conv_block: Configuration for the convolutional block.
-            up_sampling_block: Configuration for the upsampling block.
-            output_layer: Configuration for the output layer.
-            n_channels: Sequence specifying the number of channels in each decoder layer.
-            n_layers: Sequence specifying the number of layers in each block.
-            output_channels: Number of output channels.
-            dilations: List of dilations to use for the convolutional blocks.
-            ctx: Shared HEALPix runtime settings for all child modules.
-        """
-        super().__init__()
-        build_ctx = ctx or HEALPixBuildContext()
-        self.channel_dim = 1
-
-        if dilations is None:
-            dilations = [1 for _ in range(len(n_channels))]
-
-        nside_levels = build_ctx.nside_levels
-        if nside_levels is not None and len(nside_levels) != len(n_channels):
+        nside_levels = ctx.nside_levels
+        if nside_levels is not None and len(nside_levels) != len(self.n_channels):
             raise ValueError(
                 f"nside length must match decoder levels; got {len(nside_levels)} "
-                f"vs {len(n_channels)}"
+                f"vs {len(self.n_channels)}"
             )
+        return self._build(output_channels, ctx=ctx)
 
-        conv_tpl = conv_block
-        up_tpl = up_sampling_block
-        up_factor = up_tpl.stride
+    def _build(
+        self,
+        output_channels: int,
+        *,
+        ctx: HEALPixBuildContext,
+    ) -> "UNetDecoder":
+        """Construct the ordered per-level decoder modules plus output layer.
+
+        Builds a per-level ``{upsamp, conv}`` module dict (threading channel
+        counts and validating the nside upsample ratios) and the output layer,
+        then passes the built modules to :class:`UNetDecoder`.
+        """
+        dilations = self.dilations
+        if dilations is None:
+            dilations = [1 for _ in range(len(self.n_channels))]
+
+        nside_levels = ctx.nside_levels
+        up_factor = self.up_sampling_block.stride
+        n_channels = self.n_channels
         n_levels = len(n_channels)
 
-        self.decoder = []
+        decoder: List[nn.Module] = []
         for n, curr_channel in enumerate(n_channels):
             up_sample_module = None
             level_nside = (
@@ -136,10 +107,10 @@ class UNetDecoder(nn.Module):
                             f"must equal nside[{n_levels - n}] * upsample factor "
                             f"({up_factor}), but nside[{n_levels - n}]={before}"
                         )
-                up_sample_module = up_tpl.build(
+                up_sample_module = self.up_sampling_block.build(
                     in_channels=curr_channel,
                     out_channels=curr_channel,
-                    ctx=build_ctx.layer(
+                    ctx=ctx.layer(
                         n_levels - n,
                         nside_after=level_nside,
                     ),
@@ -149,16 +120,16 @@ class UNetDecoder(nn.Module):
                 n_channels[n + 1] if n < len(n_channels) - 1 else n_channels[-1]
             )
 
-            conv_module = conv_tpl.build(
+            conv_module = self.conv_block.build(
                 in_channels=curr_channel * 2 if n > 0 else curr_channel,
                 out_channels=next_channel,
                 latent_channels=curr_channel,
                 dilation=dilations[n],
-                n_layers=n_layers[n],
-                ctx=build_ctx.layer(n_levels - 1 - n),
+                n_layers=self.n_layers[n],
+                ctx=ctx.layer(n_levels - 1 - n),
             )
 
-            self.decoder.append(
+            decoder.append(
                 nn.ModuleDict(
                     {
                         "upsamp": up_sample_module,
@@ -167,14 +138,39 @@ class UNetDecoder(nn.Module):
                 )
             )
 
-        self.decoder = nn.ModuleList(self.decoder)
-
-        self.output_layer = output_layer.build(
+        output_layer = self.output_layer.build(
             in_channels=curr_channel,
             out_channels=output_channels,
             dilation=dilations[-1],
-            ctx=build_ctx.layer(0),
+            ctx=ctx.layer(0),
         )
+
+        return UNetDecoder(
+            decoder=nn.ModuleList(decoder),
+            output_layer=output_layer,
+        )
+
+
+class UNetDecoder(nn.Module):
+    """Generic UNetDecoder that can be applied to arbitrary meshes."""
+
+    def __init__(
+        self,
+        decoder: nn.ModuleList,
+        output_layer: nn.Module,
+    ):
+        """
+        Initialize the UNetDecoder.
+
+        Args:
+            decoder: Ordered per-level ``{upsamp, conv}`` module dicts built by
+                :meth:`UNetDecoderConfig._build`.
+            output_layer: Final output-projection module.
+        """
+        super().__init__()
+        self.channel_dim = 1
+        self.decoder = decoder
+        self.output_layer = output_layer
 
     def forward(self, inputs: Sequence[torch.Tensor]) -> torch.Tensor:
         """

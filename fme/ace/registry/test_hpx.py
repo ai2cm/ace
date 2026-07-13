@@ -18,6 +18,7 @@ from fme.ace.models.healpix.healpix_blocks import (
     DealiasedDownsample,
     DealiasedDownsampleBlockConfig,
     DownsamplingBlockConfig,
+    HEALPixBuildContext,
     HEALPixLayerBuildContext,
     MaxPoolDownsamplingBlockConfig,
     MultiSymmetricConvNeXtBlockConfig,
@@ -40,7 +41,11 @@ from fme.ace.models.healpix.healpix_paddings import (
     make_hpx_padding_layer,
 )
 from fme.ace.models.healpix.healpix_unet import HEALPixUNet
-from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
+from fme.ace.registry.hpx import (
+    HEALPixUNetBuilder,
+    UNetDecoderConfig,
+    UNetEncoderConfig,
+)
 from fme.ace.stepper import StepperConfig
 from fme.core.coordinates import HEALPixCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
@@ -173,6 +178,23 @@ def _hpx_unet_configs(
     return enc, dec
 
 
+def _build_hpx_unet(
+    encoder,
+    decoder,
+    input_channels,
+    output_channels,
+    hpx_padding_mode="karlbauer",
+    nside=None,
+):
+    """Build a HEALPixUNet through its builder (the real config-build path)."""
+    return HEALPixUNetBuilder(
+        encoder=encoder,
+        decoder=decoder,
+        hpx_padding_mode=hpx_padding_mode,
+        nside=nside,
+    )._build(input_channels=input_channels, output_channels=output_channels)
+
+
 def _test_data():
     # create dummy data
     def generate_test_data(batch_size=8, time_dim=1, channels=7, img_size=16):
@@ -267,22 +289,28 @@ def test_UNetEncoder_initialize():
     conv_block_config = ConvNeXtBlockConfig()
     down_sampling_block_config = MaxPoolDownsamplingBlockConfig(pooling=2)
 
-    encoder = UNetEncoder(
-        conv_block=conv_block_config,
-        down_sampling_block=down_sampling_block_config,
-        n_channels=n_channels,
-        input_channels=channels,
-    ).to(device)
+    encoder = (
+        UNetEncoderConfig(
+            conv_block=conv_block_config,
+            down_sampling_block=down_sampling_block_config,
+            n_channels=list(n_channels),
+        )
+        .build(input_channels=channels, ctx=HEALPixBuildContext())
+        .to(device)
+    )
     assert isinstance(encoder, UNetEncoder)
 
     # with dilations
-    encoder = UNetEncoder(
-        conv_block=conv_block_config,
-        down_sampling_block=down_sampling_block_config,
-        n_channels=n_channels,
-        input_channels=channels,
-        dilations=[1, 1, 1],
-    ).to(device)
+    encoder = (
+        UNetEncoderConfig(
+            conv_block=conv_block_config,
+            down_sampling_block=down_sampling_block_config,
+            n_channels=list(n_channels),
+            dilations=[1, 1, 1],
+        )
+        .build(input_channels=channels, ctx=HEALPixBuildContext())
+        .to(device)
+    )
     assert isinstance(encoder, UNetEncoder)
 
 
@@ -297,12 +325,15 @@ def test_UNetEncoder_forward():
     # block configs used by encoder
     conv_block_config = ConvNeXtBlockConfig()
     down_sampling_block_config = MaxPoolDownsamplingBlockConfig(pooling=2)
-    encoder = UNetEncoder(
-        conv_block=conv_block_config,
-        down_sampling_block=down_sampling_block_config,
-        n_channels=n_channels,
-        input_channels=channels,
-    ).to(device)
+    encoder = (
+        UNetEncoderConfig(
+            conv_block=conv_block_config,
+            down_sampling_block=down_sampling_block_config,
+            n_channels=list(n_channels),
+        )
+        .build(input_channels=channels, ctx=HEALPixBuildContext())
+        .to(device)
+    )
 
     tensor_size = [b_size, channels, hw_size, hw_size]
     invar = torch.rand(tensor_size).to(device)
@@ -329,22 +360,30 @@ def test_UNetDecoder_initilization():
         kernel_size=1,
     )
 
-    decoder = UNetDecoder(
-        conv_block=conv_block_config,
-        up_sampling_block=up_sampling_block_config,
-        output_layer=output_layer_config,
-        n_channels=n_channels,
-    ).to(device)
+    decoder = (
+        UNetDecoderConfig(
+            conv_block=conv_block_config,
+            up_sampling_block=up_sampling_block_config,
+            output_layer=output_layer_config,
+            n_channels=list(n_channels),
+        )
+        .build(output_channels=1, ctx=HEALPixBuildContext())
+        .to(device)
+    )
 
     assert isinstance(decoder, UNetDecoder)
 
-    decoder = UNetDecoder(
-        conv_block=conv_block_config,
-        up_sampling_block=up_sampling_block_config,
-        output_layer=output_layer_config,
-        n_channels=n_channels,
-        dilations=[1, 1, 1],
-    ).to(device)
+    decoder = (
+        UNetDecoderConfig(
+            conv_block=conv_block_config,
+            up_sampling_block=up_sampling_block_config,
+            output_layer=output_layer_config,
+            n_channels=list(n_channels),
+            dilations=[1, 1, 1],
+        )
+        .build(output_channels=1, ctx=HEALPixBuildContext())
+        .to(device)
+    )
     assert isinstance(decoder, UNetDecoder)
 
 
@@ -363,12 +402,16 @@ def test_UNetDecoder_forward():
         kernel_size=1,
         n_layers=1,
     )
-    decoder = UNetDecoder(
-        conv_block=conv_block_config,
-        up_sampling_block=up_sampling_block_config,
-        output_layer=output_layer_config,
-        n_channels=n_channels,
-    ).to(device)
+    decoder = (
+        UNetDecoderConfig(
+            conv_block=conv_block_config,
+            up_sampling_block=up_sampling_block_config,
+            output_layer=output_layer_config,
+            n_channels=list(n_channels),
+        )
+        .build(output_channels=out_channels, ctx=HEALPixBuildContext())
+        .to(device)
+    )
 
     output_2_size = torch.Size([b_size, out_channels, hw_size, hw_size])
 
@@ -386,13 +429,17 @@ def test_UNetDecoder_forward():
     outvar_repeat = decoder(invars)
     assert compare_output(outvar, outvar_repeat)
 
-    decoder = UNetDecoder(
-        conv_block=conv_block_config,
-        up_sampling_block=up_sampling_block_config,
-        output_layer=output_layer_config,
-        n_channels=n_channels,
-        dilations=[1, 1, 1],
-    ).to(device)
+    decoder = (
+        UNetDecoderConfig(
+            conv_block=conv_block_config,
+            up_sampling_block=up_sampling_block_config,
+            output_layer=output_layer_config,
+            n_channels=list(n_channels),
+            dilations=[1, 1, 1],
+        )
+        .build(output_channels=out_channels, ctx=HEALPixBuildContext())
+        .to(device)
+    )
 
     outvar = decoder(invars)
     assert outvar.shape == output_2_size
@@ -957,7 +1004,7 @@ def test_healpix_unet_dealias_smoothed():
     # Channel count matches prior stacked layout:
     # 2*(3+1) prognostic+decoder + 1 constant
     in_ch = 9
-    m = HEALPixUNet(
+    m = _build_hpx_unet(
         encoder=enc,
         decoder=dec,
         input_channels=in_ch,
@@ -1056,7 +1103,7 @@ def test_healpix_unet_isolatitude_nside_sequence():
         n_layers=[1, 1, 1],
         dilations=[1, 1, 1],
     )
-    model = HEALPixUNet(
+    model = _build_hpx_unet(
         encoder=encoder,
         decoder=decoder,
         input_channels=5,
@@ -1102,7 +1149,7 @@ def test_HEALPixUNet_initialize():
     enc, dec = _hpx_unet_configs(img=img, output_channels=out_channels)
     device = get_device()
 
-    model = HEALPixUNet(
+    model = _build_hpx_unet(
         encoder=enc,
         decoder=dec,
         input_channels=in_channels,
@@ -1123,7 +1170,7 @@ def test_HEALPixUNet_forward_shape():
     enc, dec = _hpx_unet_configs(img=img, output_channels=out_channels)
     device = get_device()
 
-    model = HEALPixUNet(
+    model = _build_hpx_unet(
         encoder=enc,
         decoder=dec,
         input_channels=in_channels,
@@ -1145,7 +1192,7 @@ def test_HEALPixUNet_input_channel_validation():
     enc, dec = _hpx_unet_configs(img=img, output_channels=out_channels)
     device = get_device()
 
-    model = HEALPixUNet(
+    model = _build_hpx_unet(
         encoder=enc,
         decoder=dec,
         input_channels=in_channels,
@@ -1176,7 +1223,7 @@ def test_HEALPixUNet_forward_padding_mode(mode):
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HEALPixUNet(
+    model = _build_hpx_unet(
         encoder=enc,
         decoder=dec,
         input_channels=in_channels,
