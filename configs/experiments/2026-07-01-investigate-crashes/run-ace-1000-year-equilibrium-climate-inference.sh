@@ -63,7 +63,7 @@ for seed in {2..2}; do
                 --name $job_name \
                 --description 'Run inference with ACE' \
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-                --workspace ai2/ace \
+                --workspace ai2/climate-titan \
                 --priority urgent \
                 --preemptible \
                 --cluster ai2/titan \
