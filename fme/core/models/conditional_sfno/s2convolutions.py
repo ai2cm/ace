@@ -240,6 +240,22 @@ class SpectralConvS2(nn.Module):
                 f"and out_channels={out_channels}."
             )
         if self._reduced_global_mean:
+            # The grid-space global-mean swap reads per-latitude quadrature
+            # weights from the transforms' ``weights`` buffer, which is only the
+            # full-grid, m=0 quadrature on a single spatial rank. Under spatial
+            # parallelism the buffer's latitude axis stays global (so it does
+            # not match the lat-sharded grid input) and its leading axis is the
+            # local-m partition (so ``[0, 0]`` is not the m=0 row off rank 0);
+            # the swap would then crash under H-parallelism and silently compute
+            # the wrong global mean under W-parallelism. The spectral_ratio == 1
+            # path preserves the global mean correctly under spatial parallelism
+            # via the l=0 coefficient on the l_start == 0 rank; matching that
+            # here is left as follow-up.
+            dist.require_no_spatial_parallelism(
+                "preserve_global_mean with spectral_ratio < 1 does not support "
+                "spatial parallelism; the grid-space global-mean swap needs the "
+                "single-rank, full-grid m=0 quadrature weights."
+            )
             # Latitude quadrature weights for the input (forward) grid and the
             # output (inverse) grid, uniform over longitude. inverse_transform
             # is an InverseRealSHT and carries no forward quadrature, so build a
@@ -429,8 +445,10 @@ class SpectralConvS2(nn.Module):
         ``source``'s. Because the inverse SHT of an l=0-only field is a constant
         equal to that weighted mean, this is exactly equivalent to copying the
         l=0 coefficient, but is done in the full-channel grid space rather than
-        inside the reduced-channel spectral bottleneck. Autograd-safe;
-        ``Distributed.weighted_mean`` reduces across spatial-parallel ranks.
+        inside the reduced-channel spectral bottleneck. Autograd-safe. Only
+        reached on a single spatial rank (see the spatial-parallelism guard in
+        ``__init__``); ``Distributed.weighted_mean`` then reduces over that one
+        rank.
         """
         dist = Distributed.get_instance()
         source_mean = dist.weighted_mean(

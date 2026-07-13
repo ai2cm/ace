@@ -7,6 +7,7 @@ from torch import nn
 from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.distributed.distributed import SpatialParallelismNotImplemented
 from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
@@ -482,6 +483,24 @@ def test_sfnonet_spectral_ratio_preserve_global_mean_end_to_end():
         assert not torch.all(spectral_conv.weight.grad == 0)
         assert spectral_conv.pre_proj.weight.grad is not None
         assert spectral_conv.post_proj.weight.grad is not None
+
+
+@pytest.mark.parallel
+def test_spectral_ratio_preserve_global_mean_rejects_spatial_parallelism():
+    """The grid-space global-mean swap reads the transform's ``weights`` buffer,
+    which is only the full-grid m=0 quadrature on a single spatial rank. Under
+    spatial parallelism it would crash (H) or silently return the wrong mean
+    (W), so construction must reject it. The spectral_ratio == 1 path preserves
+    the mean correctly under spatial parallelism and must still build."""
+    dist = Distributed.get_instance()
+    nlat, nlon, embed_dim = 16, 32, 8
+    conv_kwargs = dict(preserve_global_mean=True)
+    if dist.world_size == dist.total_data_parallel_ranks:
+        pytest.skip("no spatial parallelism in this configuration")
+    with pytest.raises(SpatialParallelismNotImplemented):
+        _make_spectral_conv(nlat, nlon, embed_dim, spectral_ratio=0.5, **conv_kwargs)
+    # spectral_ratio == 1 remains supported under spatial parallelism.
+    _make_spectral_conv(nlat, nlon, embed_dim, spectral_ratio=1.0, **conv_kwargs)
 
 
 def test_filter_preserves_global_mean_allows_grad():
