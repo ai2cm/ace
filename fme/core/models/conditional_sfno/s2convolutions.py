@@ -449,13 +449,24 @@ class SpectralConvS2(nn.Module):
         reached on a single spatial rank (see the spatial-parallelism guard in
         ``__init__``); ``Distributed.weighted_mean`` then reduces over that one
         rank.
+
+        All operands are aligned to ``output.device`` before combining. The
+        transforms these buffers come from can be built on different devices
+        (``get_real_sht`` moves to ``get_device``, the internally-built
+        ``out_transform`` does not), and ``source`` is the pre-transform input,
+        which may sit on the host while the transformed ``output`` is on device.
+        The moves are no-ops once the whole module and its inputs share a device.
         """
         dist = Distributed.get_instance()
+        device = output.device
         source_mean = dist.weighted_mean(
-            source, self._gm_lat_weights_in, dim=(-2, -1), keepdim=True
+            source.to(device),
+            self._gm_lat_weights_in.to(device),
+            dim=(-2, -1),
+            keepdim=True,
         )
         output_mean = dist.weighted_mean(
-            output, self._gm_lat_weights_out, dim=(-2, -1), keepdim=True
+            output, self._gm_lat_weights_out.to(device), dim=(-2, -1), keepdim=True
         )
         return output + (source_mean - output_mean)
 
