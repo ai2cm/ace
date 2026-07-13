@@ -435,6 +435,12 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
+        orography_override: If set, `HGTsfc` is sourced from this dataset
+            instead of from `self`. Used to evaluate a checkpoint with a
+            different static orography field than it trained on (e.g.
+            swapping between the era5 and c96 grids). Only the `HGTsfc`
+            variable is read from the override dataset; all other requested
+            variables continue to come from `self`.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -466,6 +472,7 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] | None = None
+    orography_override: "XarrayDataConfig | None" = None
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -509,6 +516,14 @@ class XarrayDataConfig(DatasetConfigABC):
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
+        if (
+            self.orography_override is not None
+            and self.orography_override.orography_override is not None
+        ):
+            raise ValueError(
+                "orography_override cannot itself have orography_override set "
+                "(nested overrides are not supported)."
+            )
 
     @property
     def zarr_engine_used(self) -> bool:
@@ -622,6 +637,14 @@ class XarrayDataset(DatasetABC):
         self._infer_timestep = config.infer_timestep
         self._local_epoch: int = -1
         self._global_epoch = torch.tensor(-1)
+
+        self._orography_override_tensor: torch.Tensor | None = None
+        if config.orography_override is not None and "HGTsfc" in self._names:
+            override_dataset = XarrayDataset(
+                config.orography_override, ["HGTsfc"], n_timesteps
+            )
+            tensors, *_ = override_dataset[0]
+            self._orography_override_tensor = tensors["HGTsfc"][0]
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
@@ -941,6 +964,13 @@ class XarrayDataset(DatasetABC):
             ds = ds.isel(**self.isel)
             shape = [total_steps] + self._shape_excluding_time_after_selection
             for name in self._time_invariant_names:
+                if name == "HGTsfc" and self._orography_override_tensor is not None:
+                    tensors[name] = (
+                        self._orography_override_tensor.unsqueeze(0)
+                        .expand(total_steps, *self._orography_override_tensor.shape)
+                        .clone()
+                    )
+                    continue
                 variable = ds[name].variable
                 if self.fill_nans is not None:
                     variable = variable.fillna(self.fill_nans.value)

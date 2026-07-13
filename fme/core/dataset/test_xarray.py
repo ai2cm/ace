@@ -1273,3 +1273,99 @@ def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
             IntSchedule.from_constant(2),
             allow_missing_variables=False,
         )
+
+
+def _write_orography_store(
+    tmp_path_factory, dirname, hgtsfc_value, hgtsfc_shape=(4, 8), n_time=5
+):
+    """Writes a single netcdf file with a time-invariant HGTsfc field (no
+    time dimension, matching real orography stores) and a time-dependent
+    PRESsfc field, for testing XarrayDataConfig.orography_override."""
+    tmpdir = tmp_path_factory.mktemp(dirname)
+    times = xr.date_range(
+        "2003-01-01", periods=n_time, freq="6h", calendar="standard", use_cftime=True
+    )
+    lat, lon = hgtsfc_shape
+    data_vars = {
+        "HGTsfc": xr.DataArray(
+            np.full((lat, lon), hgtsfc_value, dtype=np.float32), dims=("lat", "lon")
+        ),
+        "PRESsfc": xr.DataArray(
+            np.random.randn(n_time, lat, lon).astype(np.float32),
+            dims=("time", "lat", "lon"),
+        ),
+    }
+    coords = {
+        "time": xr.DataArray(times, dims=("time",)),
+        "lat": xr.DataArray(np.arange(lat, dtype=np.float32), dims=("lat",)),
+        "lon": xr.DataArray(np.arange(lon, dtype=np.float32), dims=("lon",)),
+    }
+    ds = xr.Dataset(data_vars=data_vars, coords=coords)
+    ds.to_netcdf(tmpdir / "data.nc", unlimited_dims=["time"], format="NETCDF4")
+    return tmpdir
+
+
+def test_orography_override_hgtsfc(tmp_path_factory):
+    tmpdir_a = _write_orography_store(tmp_path_factory, "orog_a", hgtsfc_value=1.0)
+    tmpdir_b = _write_orography_store(tmp_path_factory, "orog_b", hgtsfc_value=2.0)
+    config_b = XarrayDataConfig(data_path=tmpdir_b, file_pattern="*.nc")
+    config_a = XarrayDataConfig(
+        data_path=tmpdir_a, file_pattern="*.nc", orography_override=config_b
+    )
+    dataset = xarray_dataset_constructor(config_a, ["HGTsfc", "PRESsfc"], 3)
+
+    # sample starting at a non-zero offset, to confirm the override applies
+    # across every timestep of the requested window, not just the first
+    data, *_ = dataset[1]
+    assert torch.equal(data["HGTsfc"], torch.full((3, 4, 8), 2.0))
+
+    with xr.open_dataset(
+        tmpdir_a / "data.nc", decode_times=False, decode_timedelta=False
+    ) as ds_a:
+        expected_pressfc = torch.as_tensor(ds_a["PRESsfc"].values[1:4])
+    assert torch.equal(data["PRESsfc"], expected_pressfc)
+
+
+def test_orography_override_none_is_unchanged(tmp_path_factory):
+    tmpdir_a = _write_orography_store(
+        tmp_path_factory, "orog_no_override", hgtsfc_value=1.0
+    )
+    config_a = XarrayDataConfig(data_path=tmpdir_a, file_pattern="*.nc")
+    dataset = xarray_dataset_constructor(config_a, ["HGTsfc", "PRESsfc"], 3)
+    data, *_ = dataset[0]
+    assert torch.equal(data["HGTsfc"], torch.full((3, 4, 8), 1.0))
+
+
+def test_orography_override_nested_raises():
+    inner = XarrayDataConfig(data_path="unused", file_pattern="*.nc")
+    middle = XarrayDataConfig(
+        data_path="unused", file_pattern="*.nc", orography_override=inner
+    )
+    with pytest.raises(ValueError, match="orography_override"):
+        XarrayDataConfig(
+            data_path="unused", file_pattern="*.nc", orography_override=middle
+        )
+
+
+def test_orography_override_mismatched_shape_fails_loudly(tmp_path_factory):
+    tmpdir_a = _write_orography_store(
+        tmp_path_factory, "orog_mismatch_a", hgtsfc_value=1.0, hgtsfc_shape=(4, 8)
+    )
+    tmpdir_b = _write_orography_store(
+        tmp_path_factory, "orog_mismatch_b", hgtsfc_value=2.0, hgtsfc_shape=(6, 10)
+    )
+    config_b = XarrayDataConfig(data_path=tmpdir_b, file_pattern="*.nc")
+    config_a = XarrayDataConfig(
+        data_path=tmpdir_a, file_pattern="*.nc", orography_override=config_b
+    )
+    dataset = xarray_dataset_constructor(config_a, ["HGTsfc", "PRESsfc"], 3)
+    data, *_ = dataset[0]
+    assert data["HGTsfc"].shape[-2:] == (6, 10)
+    assert data["PRESsfc"].shape[-2:] == (4, 8)
+
+    # nothing in XarrayDataset validates cross-variable spatial consistency;
+    # a mismatched override grid should fail loudly downstream (e.g. here,
+    # when stacking spatially-resolved fields) rather than silently
+    # broadcasting mismatched data
+    with pytest.raises(RuntimeError):
+        torch.stack([data["HGTsfc"], data["PRESsfc"]])

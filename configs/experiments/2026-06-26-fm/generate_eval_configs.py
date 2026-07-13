@@ -150,10 +150,12 @@ def _write_config(
     source_dataset_id: str,
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
+    eval_run_name_base: str | None = None,
 ) -> None:
     if wandb_run_names is not None:
+        eval_run_name_base = eval_run_name_base or source_run_name
         eval_run_names = [
-            f"{source_run_name}{suffix}" for suffix in EVAL_CHECKPOINT_NAME_SUFFIXES
+            f"{eval_run_name_base}{suffix}" for suffix in EVAL_CHECKPOINT_NAME_SUFFIXES
         ]
         if all(name in wandb_run_names for name in eval_run_names):
             if out_path.exists():
@@ -209,6 +211,19 @@ def generate_eval_config(
     )
 
 
+def discover_source_configs(version: str | None) -> list[pathlib.Path]:
+    return sorted(
+        p
+        for p in HERE.glob("*.yaml")
+        if p.name.startswith(CONFIG_PREFIX)
+        and "nc-sfno" in p.name
+        and stem_matches_version(p.stem, version)
+        and not p.name.endswith("-finetune.yaml")
+        and not p.name.endswith("-cooldown.yaml")
+        and not p.name.endswith("-bestinfcooldown.yaml")
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_version_arg(parser)
@@ -256,16 +271,7 @@ def main() -> None:
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
 
-    source_configs = sorted(
-        p
-        for p in HERE.glob("*.yaml")
-        if p.name.startswith(CONFIG_PREFIX)
-        and "nc-sfno" in p.name
-        and stem_matches_version(p.stem, args.version)
-        and not p.name.endswith("-finetune.yaml")
-        and not p.name.endswith("-cooldown.yaml")
-        and not p.name.endswith("-bestinfcooldown.yaml")
-    )
+    source_configs = discover_source_configs(args.version)
 
     for source_path in source_configs:
         generate_eval_config(
