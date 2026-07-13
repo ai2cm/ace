@@ -20,6 +20,8 @@ class BilinearUpsample(torch.nn.Module):
 class ZonallyPeriodicBilinearUpsample(torch.nn.Module):
     """Bilinear upsampling that enforces periodicity along the longitude axis.
 
+    Adapted from the ``ZonallyPeriodicBilinearUpsample`` in m2lines/Samudra
+    (https://github.com/m2lines/Samudra/blob/ab554631973ced3c567c1ef65ef2f84c222458d7/src/samudra/models/modules/blocks.py)
     A plain bilinear ``Upsample`` interpolates the longitude (width) boundary
     against a replicated edge column, which leaves a discontinuity at the lon=0
     seam. Here we pad one column on each longitude edge with the wrapped
