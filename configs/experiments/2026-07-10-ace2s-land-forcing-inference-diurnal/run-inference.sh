@@ -52,9 +52,12 @@ CM4_CONTROL_PT=01KTPTS6C23P8SWB9RBFWB09BE
 # 1-step-pretrain beaker dataset IDs before submitting the treatment runs.
 # Most-recent *committed* result dataset per pretrain experiment (best_ckpt.tar lives under
 # training_checkpoints/). Result-dataset IDs are ULIDs, so they sort in retry order.
-ERA5_SNOW=01KX47AYFXZR5GBP5236ZQ2H8G   # newest retry (captures the final epoch); confirm it has
-                                       # committed before launching (prior committed: 01KX1S6C2G5E4856CSV70QN544).
-ERA5_SOIL=01KWZDSCZ69NPBR39H1JS946RF
+# ERA5 treatments RETRAINED: resumed to ~ep28/33 (best_ckpt.tar), closing the pretrain-maturity gap
+# vs the ep81 control-pretrain. Originals (ep6/14) are preserved on GCS as
+# lf-eval-era5-{snow,soil}-diurnal (datasets 01KX47AYFXZR5GBP5236ZQ2H8G / 01KWZDSCZ69NPBR39H1JS946RF);
+# the -retrained runs below use these newer checkpoints and write to distinct -retrained job dirs.
+ERA5_SNOW_RETRAINED=01KX6ZGMN1MTE0E45C3969AJNG
+ERA5_SOIL_RETRAINED=01KX6ZGTHA4R9H9JB3EAN7STP2
 CM4_SNOW=01KX017K0Z48ZW91769NF7MQXH
 CM4_SOIL=01KX1RVPA4YQYZK9NK76ZEPWMJ
 
@@ -124,8 +127,8 @@ cd "$REPO_ROOT"  # so the config paths resolve regardless of where this is run f
 # Treatments (1-step pretrain) use the default best_ckpt.tar; controls use their as-deployed
 # best_inference_ckpt.tar.
 submit era5.yaml "$ERA5_CONTROL"    lf-eval-era5-control-diurnal     training_checkpoints/best_inference_ckpt.tar
-submit era5.yaml "$ERA5_SNOW"       lf-eval-era5-snow-diurnal
-submit era5.yaml "$ERA5_SOIL"       lf-eval-era5-soil-diurnal
+submit era5.yaml "$ERA5_SNOW_RETRAINED" lf-eval-era5-snow-retrained-diurnal
+submit era5.yaml "$ERA5_SOIL_RETRAINED" lf-eval-era5-soil-retrained-diurnal
 submit cm4.yaml  "$CM4_CONTROL_RS0" lf-eval-cm4-control-rs0-diurnal  training_checkpoints/best_inference_ckpt.tar
 submit cm4.yaml  "$CM4_SNOW"        lf-eval-cm4-snow-diurnal
 submit cm4.yaml  "$CM4_SOIL"        lf-eval-cm4-soil-diurnal
