@@ -63,17 +63,28 @@ def _rename_normalizer(
     return StandardNormalizer(means=new_means, stds=new_stds)
 
 
-def _build_variable_loss_weight_tensor(
-    weights: dict[str, float], out_names: list[str]
+def _build_per_channel_tensor(
+    weights: dict[str, float],
+    out_names: list[str],
+    default: float,
+    field_name: str,
 ) -> torch.Tensor:
     for name in weights:
         if name not in out_names:
             raise ValueError(
-                f"Name {name} in loss_weights.output_channels is not in out_names"
+                f"Name {name} in loss_weights.{field_name} is not in out_names"
             )
-    values = [weights.get(name, 1.0) for name in out_names]
+    values = [weights.get(name, default) for name in out_names]
     return torch.tensor(values, dtype=torch.float32, device=get_device()).reshape(
         1, len(out_names), 1, 1
+    )
+
+
+def _build_variable_loss_weight_tensor(
+    weights: dict[str, float], out_names: list[str]
+) -> torch.Tensor:
+    return _build_per_channel_tensor(
+        weights, out_names, default=1.0, field_name="output_channels"
     )
 
 
@@ -91,10 +102,19 @@ class LossWeightsConfig:
             Use values less than 1.0 to reduce relative weighting of low-noise steps.
             We find that 0.75 improves performance for winds and sea level pressure,
             which are dominated by low-noise samples in the default EDM weighting.
+            Acts as the default exponent for channels not listed in
+            noise_weight_exponent_channels.
+        noise_weight_exponent_channels: Per-variable overrides for the noise-level
+            loss weight exponent. Keys are variable names from out_names; variables
+            not listed use noise_weight_exponent. This allows applying a different
+            noise-level weighting to each output channel.
     """
 
     output_channels: dict[str, float] = dataclasses.field(default_factory=dict)
     noise_weight_exponent: float = 1.0
+    noise_weight_exponent_channels: dict[str, float] = dataclasses.field(
+        default_factory=dict
+    )
 
 
 @dataclasses.dataclass
@@ -407,6 +427,12 @@ class DiffusionModel:
         self._loss_weight_tensor = _build_variable_loss_weight_tensor(
             config.loss_weights.output_channels, self.out_names
         )
+        self._noise_weight_exponent_tensor = _build_per_channel_tensor(
+            config.loss_weights.noise_weight_exponent_channels,
+            self.out_names,
+            default=config.loss_weights.noise_weight_exponent,
+            field_name="noise_weight_exponent_channels",
+        )
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -526,7 +552,7 @@ class DiffusionModel:
             targets_norm,
             self.config.noise_distribution,
             self.sigma_data,
-            loss_weight_exponent=self.config.loss_weights.noise_weight_exponent,
+            loss_weight_exponent=self._noise_weight_exponent_tensor,
         )
 
         denoised_norm = self.module(

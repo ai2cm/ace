@@ -60,7 +60,7 @@ def condition_with_noise_for_training(
     targets_norm: torch.Tensor,
     noise_distribution: NoiseDistribution,
     sigma_data: float,
-    loss_weight_exponent: float = 1.0,
+    loss_weight_exponent: float | torch.Tensor = 1.0,
 ) -> ConditionedTarget:
     """
     Condition the targets with noise for training.
@@ -74,6 +74,9 @@ def condition_with_noise_for_training(
             ``(sigma^2 + sigma_data^2) / (sigma * sigma_data)^2``. The default
             of 1.0 gives the standard EDM weighting (~1/sigma^2 for small
             sigma). Use 0.5 for ~1/sigma weighting (square root of EDM weight).
+            May be a per-channel tensor of shape ``(1, channels, 1, 1)`` to
+            apply a different exponent to each output channel, in which case the
+            returned ``weight`` is broadcast to ``(batch, channels, 1, 1)``.
 
     Returns:
         The conditioned targets and the loss weighting.

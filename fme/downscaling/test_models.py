@@ -22,6 +22,7 @@ from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
     PairedNormalizationConfig,
+    _build_per_channel_tensor,
     _build_variable_loss_weight_tensor,
     _repeat_batch_by_samples,
     _separate_interleaved_samples,
@@ -889,3 +890,23 @@ def test__build_variable_loss_weight_tensor():
     assert torch.allclose(weighted_loss[:, 0], loss[:, 0] * 0.5)
     assert torch.allclose(weighted_loss[:, 1], loss[:, 1])
     assert torch.allclose(weighted_loss[:, 2], loss[:, 2] * 2.0)
+
+
+def test__build_per_channel_tensor_uses_default_for_unlisted():
+    weights = {"x": 0.5, "z": 0.75}
+    out_names = ["x", "y", "z"]
+    result = _build_per_channel_tensor(
+        weights, out_names, default=1.0, field_name="noise_weight_exponent_channels"
+    )
+    assert result.shape == (1, len(out_names), 1, 1)
+    assert result.flatten().tolist() == [0.5, 1.0, 0.75]
+
+
+def test__build_per_channel_tensor_raises_on_unknown_name():
+    with pytest.raises(ValueError, match="noise_weight_exponent_channels"):
+        _build_per_channel_tensor(
+            {"missing": 0.5},
+            ["x", "y"],
+            default=1.0,
+            field_name="noise_weight_exponent_channels",
+        )
