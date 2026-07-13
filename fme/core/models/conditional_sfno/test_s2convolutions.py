@@ -213,8 +213,31 @@ def test_spectral_ratio_validation():
     # 8 * 0.25 -> 2 spectral channels, not divisible by num_groups=4
     with pytest.raises(ValueError, match="num_groups"):
         _make_conv(embed_dim, spectral_ratio=0.25, num_groups=4)
-    with pytest.raises(NotImplementedError, match="preserve_global_mean"):
-        _make_conv(embed_dim, spectral_ratio=0.5, preserve_global_mean=True)
+
+
+def test_preserve_global_mean_with_spectral_ratio_preserves_l0():
+    # spectral_ratio < 1 with preserve_global_mean is supported: the input's
+    # per-channel l=0 coefficient is restored in full-channel grid space after
+    # post_proj, so it round-trips through the reduced-channel bottleneck.
+    embed_dim = 8
+    n_lat, n_lon = 16, 32
+    torch.manual_seed(0)
+    conv = _make_conv(
+        embed_dim, n_lat, n_lon, spectral_ratio=0.5, preserve_global_mean=True
+    )
+    assert conv.spectral_channels == embed_dim // 2
+    x = torch.randn(2, embed_dim, n_lat, n_lon)
+    with torch.no_grad():
+        output, _ = conv(x)
+    sht = LatLonOperations(
+        area_weights=torch.ones(n_lat, n_lon), grid="legendre-gauss"
+    ).get_real_sht()
+    torch.testing.assert_close(
+        sht(output.float())[:, :, 0, :],
+        sht(x.float())[:, :, 0, :],
+        atol=1e-5,
+        rtol=1e-5,
+    )
 
 
 def test_spectral_conv_s2_lora():

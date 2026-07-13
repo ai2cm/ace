@@ -60,7 +60,11 @@ def validate_spectral_ratio(
         channels_name: name of ``channels`` to use in error messages.
         num_groups_name: name of ``num_groups`` to use in error messages.
         filter_type: if given, ``spectral_ratio < 1`` requires ``"linear"``.
-        preserves_global_mean: if True, ``spectral_ratio < 1`` is rejected.
+        preserves_global_mean: accepted for API symmetry with the callers but
+            no longer gates ``spectral_ratio``. Preserving the global mean with
+            ``spectral_ratio < 1`` is supported: ``SpectralConvS2`` restores the
+            input's l=0 coefficient in the full-channel grid space, outside the
+            reduced-channel bottleneck (see ``SpectralConvS2.forward``).
         global_mean_arg_name: name of the global-mean flag for error messages.
         local_blocks: if True, ``spectral_ratio < 1`` is rejected.
 
@@ -75,15 +79,6 @@ def validate_spectral_ratio(
             raise NotImplementedError(
                 "spectral_ratio < 1 is only supported for filter_type='linear', "
                 f"got filter_type='{filter_type}'."
-            )
-        if preserves_global_mean:
-            # The l=0 mode is sandwiched between the pre/post channel
-            # projections, so the original C-channel global mean is not
-            # recoverable from the spectral_channels-wide bottleneck.
-            raise NotImplementedError(
-                f"{global_mean_arg_name} is not supported with spectral_ratio < 1, "
-                "since the l=0 mode is sandwiched between the pre/post channel "
-                "projections."
             )
         if local_blocks:
             raise NotImplementedError(
@@ -102,6 +97,25 @@ def validate_spectral_ratio(
                 f"divisible by {num_groups_name}={num_groups}."
             )
     return spectral_channels
+
+
+def _latitude_quadrature_weights(transform) -> torch.Tensor:
+    """Per-latitude quadrature weights of a transform's l=0, m=0 basis.
+
+    For a torch-harmonics ``RealSHT`` the ``(m=0, l=0)`` row of the precomputed
+    ``weights`` buffer is exactly the latitude quadrature that forms the global
+    mean coefficient: ``sht(f)[..., 0, 0] == sqrt(4*pi) * <f>`` where ``<f>`` is
+    the mean of ``f`` over the sphere weighted by these values (uniform over
+    longitude). Returning them lets us reproduce the l=0 coefficient as a cheap
+    grid-space weighted mean instead of a full spherical harmonic transform.
+
+    For a transform without such weights (e.g. the periodic ``RealFFT2``), the
+    l=0 mode is the unweighted mean, so uniform weights are returned.
+    """
+    weights = getattr(transform, "weights", None)
+    if weights is not None:
+        return weights[0, 0, :].detach().clone().float()
+    return torch.ones(transform.nlat)
 
 
 @torch.jit.script
@@ -213,6 +227,40 @@ class SpectralConvS2(nn.Module):
         self._l_slice = l_slice
         self._preserve_global_mean = preserve_global_mean
         self._has_global_mean = l_start == 0
+        # When spectral_ratio < 1 the l=0 mode lives in the reduced-channel
+        # bottleneck, so it cannot be preserved channel-for-channel in the
+        # spectral domain. Instead the input's per-channel global mean is
+        # restored in full-channel grid space after post_proj (see forward).
+        self._reduced_global_mean = preserve_global_mean and spectral_ratio < 1.0
+        if self._reduced_global_mean and in_channels != out_channels:
+            raise NotImplementedError(
+                "preserve_global_mean with spectral_ratio < 1 requires "
+                "in_channels == out_channels so the l=0 coefficient can be "
+                f"swapped channel-for-channel, got in_channels={in_channels} "
+                f"and out_channels={out_channels}."
+            )
+        if self._reduced_global_mean:
+            # Latitude quadrature weights for the input (forward) grid and the
+            # output (inverse) grid, uniform over longitude. inverse_transform
+            # is an InverseRealSHT and carries no forward quadrature, so build a
+            # matching RealSHT to read the output grid's weights.
+            out_transform = dist.get_sht(
+                inverse_transform.nlat,
+                inverse_transform.nlon,
+                lmax=inverse_transform.lmax,
+                mmax=inverse_transform.mmax,
+                grid=inverse_transform.grid,
+            )
+            self.register_buffer(
+                "_gm_lat_weights_in",
+                _latitude_quadrature_weights(forward_transform).reshape(1, 1, -1, 1),
+                persistent=False,
+            )
+            self.register_buffer(
+                "_gm_lat_weights_out",
+                _latitude_quadrature_weights(out_transform).reshape(1, 1, -1, 1),
+                persistent=False,
+            )
 
         # When spectral_ratio < 1, the SHT and per-mode complex weight operate
         # on a reduced spectral_channels = round(in_channels * spectral_ratio)
@@ -371,10 +419,35 @@ class SpectralConvS2(nn.Module):
         if weight.shape == ungrouped_shape:
             state_dict[key] = weight.view(1, *ungrouped_shape)
 
+    def _swap_global_mean(
+        self, output: torch.Tensor, source: torch.Tensor
+    ) -> torch.Tensor:
+        """Set ``output``'s per-channel l=0 (global-mean) coefficient to ``source``'s.
+
+        Adds a spatially-constant, per-channel shift so that, under the
+        transform's spherical quadrature, ``output``'s area-weighted mean equals
+        ``source``'s. Because the inverse SHT of an l=0-only field is a constant
+        equal to that weighted mean, this is exactly equivalent to copying the
+        l=0 coefficient, but is done in the full-channel grid space rather than
+        inside the reduced-channel spectral bottleneck. Autograd-safe;
+        ``Distributed.weighted_mean`` reduces across spatial-parallel ranks.
+        """
+        dist = Distributed.get_instance()
+        source_mean = dist.weighted_mean(
+            source, self._gm_lat_weights_in, dim=(-2, -1), keepdim=True
+        )
+        output_mean = dist.weighted_mean(
+            output, self._gm_lat_weights_out, dim=(-2, -1), keepdim=True
+        )
+        return output + (source_mean - output_mean)
+
     def forward(self, x, timer: Timer = NullTimer()):  # pragma: no cover
         dtype = x.dtype
         residual = x
         x = x.float()
+        # Full-channel input in grid space, kept for the reduced-bottleneck
+        # global-mean swap below (before any pre_proj down-projection).
+        global_mean_source = x if self._reduced_global_mean else None
 
         with torch.amp.autocast("cuda", enabled=False):
             if self.pre_proj is not None:
@@ -413,7 +486,11 @@ class SpectralConvS2(nn.Module):
                 weight_local,
             )
             xp = xp + self.lora_scaling * lora_update
-            if self._preserve_global_mean and self._has_global_mean:
+            if (
+                self._preserve_global_mean
+                and not self._reduced_global_mean
+                and self._has_global_mean
+            ):
                 xp = torch.cat([x[..., :1, :], xp[..., 1:, :]], dim=-2)
             xp = xp.reshape(B, self.spectral_channels, H, W)
             x = xp.contiguous()
@@ -424,6 +501,9 @@ class SpectralConvS2(nn.Module):
             if self.post_proj is not None:
                 with timer.child("post_proj"):
                     x = self.post_proj(x)
+            if global_mean_source is not None:
+                with timer.child("preserve_global_mean"):
+                    x = self._swap_global_mean(x, global_mean_source)
 
         if hasattr(self, "bias"):
             with timer.child("add_bias"):
