@@ -85,6 +85,17 @@ point at the standardized reports.
   Durable pipeline change → write a numbered spec under `../specs/` first. **Would also
   make every future arm's baseline comparison honest** (all runs stop/select at their
   own spectral optimum instead of an arbitrary flat-CRPS argmin).
+- **★ PLANNED — Lo-only (from-noise@200) ablation: is Student-Hi worth keeping?** The
+  deferred MoE decision (`MOE_DISTILLATION_STATUS.md:117–119, 254`): evaluate a
+  **single-model Student-Lo** checkpoint (expert 0, `best_student_tail.ckpt`) with its
+  noise schedule capped at **σ=200** (sample from fresh noise@200), on the *same*
+  held-out eval as the combined `[Hi→Lo]` bundle `rmoodemk`
+  ([eval report](reports/2026-07-08-moe-eval-distilled-vs-teacher.md)). If Lo-only ≈ the
+  bundle (esp. coarse/PRMSL/low-k), **drop Hi** — fewer params + one fewer NFE. Strong
+  prior that Hi's marginal budget is tiny (σ=200 washout; Hi is coarse-only by
+  construction). Config: `configs/experiments/2026-07-07-distilled-moe-eval/config-lo-only.yaml`
+  (single-model, `sigma_max=200`, 2-step Lo). Write-up:
+  [report](reports/2026-07-13-lo-only-from-noise200-ablation-TBD.md).
 - **Next (experiments):** port the tuned spectral config (flat all-band, `i26sidsm`) to
   the multi-variable MoE runs with per-variable `variable_weights` (up-weight the
   worst-spectrum variables). If the mid band still lags, the remaining lever is a

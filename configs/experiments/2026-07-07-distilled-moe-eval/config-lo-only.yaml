@@ -1,0 +1,110 @@
+# Lo-only (from-noise@200) ABLATION eval — does Student-Hi add any utility?
+#
+# Identical data / patch / n_samples / events / logging to config-distilled.yaml
+# and config-teacher.yaml (so all three are directly comparable) — ONLY the model
+# section differs. Here the model is the SINGLE-MODEL Student-Lo checkpoint alone
+# (expert 0, no MoE bundle, no Hi, no dispatch), with its noise schedule capped at
+# sigma_max=200 so it samples from fresh noise@200 straight to x0.
+#
+# Hypothesis: at sigma=200 the noise dominates the clean part ~200x, so which
+# upstream produced the sigma=200 state washes out. If so, Lo-from-noise@200 ~=
+# the full 2-step [Hi->Lo] bundle (config-distilled.yaml, wandb rmoodemk), meaning
+# Student-Hi + its NFE add no utility and can be dropped. See the write-up:
+# fme/downscaling/distillation/experiments/reports/2026-07-13-lo-only-from-noise200-ablation-TBD.md
+# and MOE_DISTILLATION_STATUS.md (2026-07-07 Student-Hi result + loss-mechanics trace).
+#
+# Launch: reuse run.sh's eval path with the Lo student_checkpoints dataset mounted
+# at /lo (beaker 01KWJAFM694MAE55M2JMZSE89M, …-baseline-fixed-moe-teacher-expert0,
+# subpath fastgen/<exp>/student_checkpoints — the SAME Lo ckpt bundled into rmoodemk).
+experiment_dir: /results
+n_samples: 4
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  # Single-model Student-Lo (fastgen student, sampler_type="fastgen") loaded via
+  # CheckpointModelConfig. model_updates forces the inference noise schedule to
+  # start at sigma=200 (the segment boundary) and keeps the 2-step Lo cadence that
+  # the bundle used (steps_per_range=[2,1] -> Lo=2), for an apples-to-apples
+  # comparison of the SAME Lo behavior with vs without Hi in front of it.
+  checkpoint_path: /lo/best_student_tail.ckpt
+  model_updates:
+    sigma_min: 0.005
+    sigma_max: 200.0
+    num_diffusion_generation_steps: 2
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-12-31T23:59:59'
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: false
+events:
+- name: WA_AR_20230101
+  date: 2023-01-01T06:00
+  lat_extent:
+    start: 36
+    stop: 52
+  lon_extent:
+    start: 228
+    stop: 244
+  save_generated_samples: true
+  n_samples: 16
+- name: WPacific_hurricane_20230425
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130.0
+    stop: 146.0
+  save_generated_samples: true
+  n_samples: 16
+- name: WPacific_hurricane_landfall_china_20230510
+  date: 2023-05-10T12:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 104
+    stop: 120
+  save_generated_samples: true
+  n_samples: 16
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
