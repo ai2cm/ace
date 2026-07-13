@@ -13,7 +13,7 @@ model:
     - checkpoint_config:
         checkpoint_path: /checkpoints_high_sigma/best.ckpt
       sigma_min: 200.0
-      sigma_max: 2000.0
+      sigma_max: 1000.0
   num_diffusion_generation_steps: 18
   churn: 0.0
 data:

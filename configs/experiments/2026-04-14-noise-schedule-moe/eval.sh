@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="eval-tmp2m-prate-events"
-#JOB_NAME="eval-global-trained-denoising-moe-events"
+#JOB_NAME="eval-tmp2m-prate-events"
+JOB_NAME="eval-global-trained-denoising-moe-oversample-tropics-16x-events"
 
-CONFIG_FILENAME="eval-tmp2m-prate-events.yaml"
+CONFIG_FILENAME="eval-coarse-prmsl-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,9 +21,9 @@ NGPU=2
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRPP269PFM7G9EY8BWZ3AW04
-EXISTING_RESULTS_DATASET_LOW_SIGMA=01KTCYVZBJJJ7C8K81C0VG0ZNB
-EXISTING_RESULTS_DATASET=01KTMJ8V4RRRVYGBJKEJA9Y0VM
+EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KX703AB0D0BRPHY6S0W88V72
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KX6FGS2FQWTCH08X15C7EH1R
+#EXISTING_RESULTS_DATASET=01KTMJ8V4RRRVYGBJKEJA9Y0VM
 wandb_group=""
 
 #--not-preemptible \
@@ -47,8 +47,8 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
-    --weka climate-default:/climate-default \
+    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \    --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
