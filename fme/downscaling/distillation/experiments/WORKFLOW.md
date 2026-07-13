@@ -88,13 +88,30 @@ When there is enough history (or the run finishes/crashes):
    > experiment with `beaker dataset get <dataset-ULID> --format json` →
    > `.sourceExecution` (a job ULID) → `beaker job get <job-ULID> --format json` →
    > `.execution.experiment`.
-2. **Write the Verdict**: win / flat / degrade vs baseline, and the recommended
+2. **Fill §4 · Training-trajectory analysis (vs baseline).** Beyond the endpoint, ask
+   how the knob moved the *trajectory* — the generator only fills the single-run
+   metric sections, so this cross-run analysis is written by hand:
+   - **Convergence speed:** step (and % of run) at which each run first reaches within
+     ~10% of its own best-sustained `spec_mae_mean` / `crps_mean`. Faster-to-target =
+     the knob aids optimization. Flag any metric that converges in the first validation
+     (e.g. `crps_mean` — then it carries no convergence *or* early-stop signal).
+   - **Constrained vs less-constrained metrics:** split val metrics by whether the loss
+     *directly* constrains them, and check whether the change improved the
+     **less-constrained** ones — the stronger generalization signal. Less-constrained =
+     tails (never in the loss) + any spectral band *excluded* from the loss (e.g. lo
+     `[0,min_wavenumber)` when `min_wavenumber>0`). State which bands the knob moved
+     between categories, so an endpoint "gain" that is only a budget reallocation (a
+     constrained band improving while a newly-unconstrained band degrades by the same
+     amount) is not mistaken for a real improvement.
+   - **Always step-controlled:** compare at matched steps or best-sustained
+     rolling-median, never a raw single-point min (per-step val metrics spike 5–10×).
+3. **Write the Verdict**: win / flat / degrade vs baseline, and the recommended
    checkpoint — pick a **mid-training** checkpoint if `best@frac` is well before the
    end (the checkpoint-selection trap: `best_student.ckpt` by CRPS is often
    spectrally worse than a mid-training one).
-3. **Update `LOG.md`**: set the registry row's verdict + best-ckpt, and add a
+4. **Update `LOG.md`**: set the registry row's verdict + best-ckpt, and add a
    one-line bullet to the Outcomes log linking the report.
-4. If a later run invalidates an earlier finding, **prepend a ⚠️ caveat** to the
+5. If a later run invalidates an earlier finding, **prepend a ⚠️ caveat** to the
    superseded report/row and link forward — do not silently rewrite history.
 
 ### Eval-bundle comparisons

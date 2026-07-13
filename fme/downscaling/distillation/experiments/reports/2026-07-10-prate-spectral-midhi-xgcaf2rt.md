@@ -110,6 +110,40 @@ same frac for both runs:
 
 **Essentially tied** (mean 0.044 vs 0.043), midhi marginally better on mid+hi.
 
+## 4 · Training trajectory vs baseline `i26sidsm`
+
+How `min_wavenumber=85` changed the *trajectory*, not just the endpoint (all
+step-controlled; rolling-median):
+
+**Convergence speed — unchanged.** First step within 10% of each run's best-sustained
+value:
+
+| metric | midhi | base | read |
+|---|---|---|---|
+| `spec_mae_mean` | step 2600 (5%) | step 2340 (8%) | same absolute step — no faster/slower convergence |
+| `crps_mean` | step 130 (1st val) | step 130 (1st val) | converges instantly for both → **carries no convergence or stopping signal** (reinforces the spec-13 need) |
+
+**Constrained vs less-constrained — the change only *redistributed* loss budget.**
+`min_wavenumber=85` moves the lo band `[0,85)` **out** of the spectral loss, so lo
+joins the tails as a less-constrained (held-out-ish) metric. At each run's
+best-sustained spectrum:
+
+| category | metric | midhi | base | |
+|---|---|---|---|---|
+| **constrained** (in loss) | mid `[85,170)` | **0.023** | 0.038 | midhi better — where the budget went |
+| | hi `[170,257)` | **0.065** | 0.074 | midhi marginally better |
+| **less-constrained** (not in loss) | lo `[0,85)` | 0.029 | **0.022** | midhi **worse** — the band it stopped constraining |
+| | tail_99.99 | 1.086 | 1.096 | tied (never in loss for either) |
+| | tail_99.9999 | 1.059 | 1.070 | tied |
+
+**Read:** the marginal mid+hi gain is *not* better generalization — it is bought by
+re-labeling the lo band as unconstrained, and lo degrades by almost exactly the
+offsetting amount (net `spec_mae_mean` unchanged). The change improves nothing on the
+genuinely held-out metrics (tails flat), does not converge faster, and does not reach a
+better constrained-metric floor beyond the budget shift. This is the trajectory-level
+confirmation of the ➖ neutral endpoint verdict: a budget reallocation within the
+spectrum, not a real improvement to the optimization or the model's extremes.
+
 ## Verdict
 
 - **Outcome vs baseline `i26sidsm`:** ➖ **roughly neutral / inconclusive** (NOT the

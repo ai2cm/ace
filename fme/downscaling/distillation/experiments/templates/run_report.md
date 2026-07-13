@@ -69,6 +69,29 @@ checkpoint-selection trap — note if the minimum is mid-training.
 
 Problematic variable/band: _..._ · PSD figures: `val/power_spectrum/<VAR>` in wandb.
 
+## 4 · Training trajectory vs baseline  <!-- HUMAN: fill this in -->
+
+How the knob changed the *trajectory*, not just the endpoint. Compare vs the baseline
+run at **step-controlled** quantities (matched step, or best-sustained rolling-median —
+never a raw single-point min; per-step val metrics spike 5–10×).
+
+- **Convergence speed:** step (and % of run) at which each run first reaches within
+  ~10% of its own best-sustained `spec_mae_mean` / `crps_mean`. Faster to target = the
+  knob helps optimization; slower = it fights it. (Note if a metric like `crps_mean`
+  converges in the first validation — then it carries no convergence signal and no
+  stopping signal.)
+- **Constrained vs less-constrained metrics.** Split validation metrics by whether the
+  training loss *directly* constrains them, and ask whether the change improved the
+  **less-constrained** ones — the stronger generalization signal (improving a metric you
+  didn't optimize beats improving the one you did):
+  - _Constrained:_ whatever the loss targets — e.g. the spectral bands inside
+    `[min_wavenumber, nw)`, distribution match (CRPS-adjacent), GAN realism.
+  - _Less-constrained (held-out-ish):_ tail extremes (never in the loss), and spectral
+    bands **excluded** from the loss (e.g. lo `[0,min_wavenumber)` when `min_wavenumber>0`).
+  - State explicitly which bands the knob moved between the two categories, and whether
+    the endpoint gain (if any) came from genuinely better performance or just from
+    re-labeling a band as unconstrained.
+
 ## Verdict  <!-- HUMAN: fill this in -->
 
 - **Outcome vs baseline:** win / flat / degrade — _why_.
