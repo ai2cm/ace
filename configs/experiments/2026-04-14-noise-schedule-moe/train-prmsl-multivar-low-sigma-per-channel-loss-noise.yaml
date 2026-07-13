@@ -14,18 +14,20 @@ model:
       eastward_wind_at_ten_meters: 0.75
       northward_wind_at_ten_meters: 0.75
       PRMSL: 1.25
-      TMP2m: 1.25
+      air_temperature_at_two_meters: 1.25
   use_amp_bf16: true
   out_names:
   - eastward_wind_at_ten_meters
   - northward_wind_at_ten_meters
   - PRMSL
   - PRATEsfc
+  - air_temperature_at_two_meters
   in_names:
   - PRATEsfc
   - eastward_wind_at_ten_meters
   - northward_wind_at_ten_meters
   - PRMSL
+  - air_temperature_at_two_meters
   loss:
     type: MSE
   module:
