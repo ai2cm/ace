@@ -11,8 +11,8 @@ model:
   loss_weights:
     noise_weight_exponent: 1.0          # default for unlisted channels
     noise_weight_exponent_channels:
-      UGRD10m: 0.75
-      VGRD10m: 0.75
+      eastward_wind_at_ten_meters: 0.75
+      northward_wind_at_ten_meters: 0.75
       PRMSL: 1.25
       TMP2m: 1.25
   use_amp_bf16: true
