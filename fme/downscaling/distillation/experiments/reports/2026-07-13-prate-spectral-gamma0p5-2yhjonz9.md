@@ -20,10 +20,10 @@ point of a `band_gamma ∈ {0, 0.5, 1}` ramp (0 = `i26sidsm`; ~2 ≈ `xgcaf2rt`)
 | | |
 |---|---|
 | Experiment name | `ace-downscaling-distillation-fdistill-with-val-prate-spectral-gamma0p5` |
-| wandb run | `TBD` — https://wandb.ai/ai2cm/fastgen/runs/TBD (appears once training inits) |
+| wandb run | `2yhjonz9` — https://wandb.ai/ai2cm/fastgen/runs/2yhjonz9 |
 | Beaker experiment | `01KXEN0NJ81G7R1SF1F4ZFZV2R` — https://beaker.org/ex/01KXEN0NJ81G7R1SF1F4ZFZV2R |
 | Commit | `06aee7f9c` — https://github.com/ai2cm/ace/commit/06aee7f9c |
-| State / last step | `starting` (submitted 2026-07-13, image pulling) |
+| State / last step | `running` (verified: iteration 1 reached; logs confirm `Spectral matching loss enabled: weight=0.01 band_gamma=0.5 min_wavenumber=0`) |
 
 ## Config
 

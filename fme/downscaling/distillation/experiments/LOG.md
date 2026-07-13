@@ -25,8 +25,8 @@ Every launched run gets a row. `verdict`: ✅ win · ➖ flat · ❌ degrade · 
 | `i26sidsm` | 2026-07-08 | …-prate-spectral-fix | `01KX00N9SE3ZVQFHQJ54XS0TAP` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, gan=1e-3 | crashed@27820 | ✅ win (mid-train ckpt) | [report](reports/2026-07-08-prate-spectral-fix-i26sidsm.md) |
 | `6dotglmg` | 2026-07-09 | …-prate-spectral-lowgan-fix | `01KX4DRYQ0RSQEWRY5F6QBP9BY` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, **gan=3e-4** | crashed@14040 | ➖ inconclusive (mild tail gain; crashed before late-drift regime) | [report](reports/2026-07-09-prate-spectral-lowgan-fix-6dotglmg.md) |
 | `xgcaf2rt` | 2026-07-10 | …-prate-spectral-midhi | `01KX6T1BM73VETZF53TWBHSEFE` | [`e7679c0`](https://github.com/ai2cm/ace/commit/e7679c0a9583bc42ee07d7eacf8e8db619c120d0) | fdistill, spectral W=1e-2, **min_wavenumber=85** (drop lo third, flat mid+hi) | canceled@52k | ➖ neutral (tied at best-sustained spectrum; `best_student.ckpt`@2730) | [report](reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md) |
-| `TBD` | 2026-07-13 | …-prate-spectral-gamma0p5 | `01KXEN0NJ81G7R1SF1F4ZFZV2R` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=0.5** (gentle hi tilt; lo≈0.61× hi≈1.37×) | starting | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma0p5-TBD.md) |
-| `TBD` | 2026-07-13 | …-prate-spectral-gamma1 | `01KXEN0PH05655AQD3FWJRSCXQ` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=1** (linear hi tilt; lo≈0.33× hi≈1.7×) | starting | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma1-TBD.md) |
+| `2yhjonz9` | 2026-07-13 | …-prate-spectral-gamma0p5 | `01KXEN0NJ81G7R1SF1F4ZFZV2R` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=0.5** (gentle hi tilt; lo≈0.61× hi≈1.37×) | running | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma0p5-2yhjonz9.md) |
+| `34rg7wii` | 2026-07-13 | …-prate-spectral-gamma1 | `01KXEN0PH05655AQD3FWJRSCXQ` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=1** (linear hi tilt; lo≈0.33× hi≈1.7×) | running | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma1-34rg7wii.md) |
 | `s4abc6ba` | 2026-07-07 | …-prate-spectral | — | [`ae3979b`](https://github.com/ai2cm/ace/commit/ae3979b) | fdistill, spectral W=1e-2 (**pre-fix target**) | stopped | ⚠️ invalid (wrong target) | — |
 | `gpx5574t` | 2026-07-07 | …-prate-spectral-lowgan | `01KWYPADNHC7SK58FMA981XTQV` | [`ae3979b`](https://github.com/ai2cm/ace/commit/ae3979b) | fdistill, spectral+gan=3e-4 (**pre-fix target**) | crashed@3770 | ⚠️ invalid (wrong target) | — |
 
@@ -57,6 +57,13 @@ point at the standardized reports.
   regime** it was meant to test (drift at 14k identical to baseline). Needs a **longer
   re-run** (≥28k, with checkpointing) to actually test the drift hypothesis — ideally
   after spec 13 early-stop. See report.
+- **⏳ `band_gamma` sweep (running, launched 2026-07-13)** — `2yhjonz9` (gamma=0.5) +
+  `34rg7wii` (gamma=1), f-distill PRATEsfc, W=1e-2 / gan=1e-3 / min_wavenumber=0, only
+  `band_gamma` varies. Both verified at iteration 1 with the right band_gamma. Fills the
+  gentle-tilt regime between the flat win `i26sidsm` (gamma=0) and the low-suppression
+  `xgcaf2rt` (~gamma=2). Report when they have history; watch `spec_mae_hi` (should
+  improve) vs `spec_mae_lo` (the cost) and the PSD tail for overshoot. Compare at
+  best-sustained / matched steps.
 - ~~**`xgcaf2rt` (mid+high band arm)**~~ — ➖ **done, neutral** (checked & canceled
   2026-07-13): the `min_wavenumber=85` cut is tied with flat-band `i26sidsm` at the
   best-sustained spectrum (marginally better mid+hi, within noise). See report +

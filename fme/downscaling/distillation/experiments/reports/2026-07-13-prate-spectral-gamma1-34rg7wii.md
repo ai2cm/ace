@@ -19,10 +19,10 @@ than `gamma0p5`, at the cost of some lo. Paired with `gamma0p5` this yields a
 | | |
 |---|---|
 | Experiment name | `ace-downscaling-distillation-fdistill-with-val-prate-spectral-gamma1` |
-| wandb run | `TBD` — https://wandb.ai/ai2cm/fastgen/runs/TBD (appears once training inits) |
+| wandb run | `34rg7wii` — https://wandb.ai/ai2cm/fastgen/runs/34rg7wii |
 | Beaker experiment | `01KXEN0PH05655AQD3FWJRSCXQ` — https://beaker.org/ex/01KXEN0PH05655AQD3FWJRSCXQ |
 | Commit | `06aee7f9c` — https://github.com/ai2cm/ace/commit/06aee7f9c |
-| State / last step | `starting` (submitted 2026-07-13, image pulling) |
+| State / last step | `running` (verified: iteration 1 reached; logs confirm `Spectral matching loss enabled: weight=0.01 band_gamma=1.0 min_wavenumber=0`) |
 
 ## Config
 
