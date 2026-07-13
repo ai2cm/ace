@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 
@@ -116,8 +117,16 @@ def test_enso_coefficient_aggregator_values(scaling):
         assert np.isclose(index_values.mean().item(), 0.0)
     target_data["a"] *= scaling
     gen_data["a"] *= scaling
-    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
-    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=sample_time,
+        i_time_start=0,
+    )
+    enso_agg.record_batch(batch)
+    enso_agg.record_batch(batch)
     coefficients = enso_agg._get_coefficients()
     target_coefficients, gen_coefficients = coefficients
     assert target_coefficients is not None
@@ -167,7 +176,15 @@ def test_enso_index_inference_overlap(shift):
             timestep=datetime.timedelta(hours=6),
             gridded_operations=LatLonOperations(area_weights),
         )
-    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=sample_time,
+        i_time_start=0,
+    )
+    enso_agg.record_batch(batch)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()
     overlap = max(1.0 - shift, 0.0)
     if overlap < OVERLAP_THRESHOLD:  # should be empty dict
@@ -208,6 +225,14 @@ def test_enso_agg_calendar(calendar):
             timestep=datetime.timedelta(hours=6),
             gridded_operations=LatLonOperations(area_weights),
         )
-    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
+    batch = InferenceBatchData(
+        prediction=gen_data,
+        prediction_norm={},
+        target=target_data,
+        target_norm=None,
+        time=sample_time,
+        i_time_start=0,
+    )
+    enso_agg.record_batch(batch)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()
     assert (target_coefficients is not None) and (gen_coefficients is not None)

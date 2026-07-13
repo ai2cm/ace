@@ -13,16 +13,9 @@ import yaml
 
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
-from fme.core.wandb import WANDB_RUN_ID_FILE
-from fme.downscaling.data import TropicalOversamplingConfig
+from fme.downscaling.data import RegionSamplingConfig
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
-from fme.downscaling.train import (
-    Trainer,
-    TrainerConfig,
-    _resume_from_results_dir_if_not_preempted,
-    main,
-    restore_checkpoint,
-)
+from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -66,47 +59,13 @@ def _trainer_config_kwargs(tmp_path):
     )
 
 
-def test_trainer_config_tropical_oversampling_requires_patch_extents(tmp_path):
+def test_trainer_config_region_sampling_requires_patch_extents(tmp_path):
     base = _trainer_config_kwargs(tmp_path)
-    with pytest.raises(ValueError, match="tropical_oversampling requires"):
+    with pytest.raises(ValueError, match="region_sampling requires"):
         TrainerConfig(
             **base,
-            tropical_oversampling=TropicalOversamplingConfig(),
+            region_sampling=RegionSamplingConfig(),
         )
-
-
-def test_trainer_config_tropical_oversampling_with_patch_extents_ok(tmp_path):
-    base = _trainer_config_kwargs(tmp_path)
-    TrainerConfig(
-        **base,
-        coarse_patch_extent_lat=16,
-        coarse_patch_extent_lon=16,
-        tropical_oversampling=TropicalOversamplingConfig(),
-    )
-
-
-@pytest.mark.parametrize(
-    "clear_wandb_run_id, expected_wandb_run_id_exists",
-    [
-        (False, True),
-        (True, False),
-    ],
-)
-def test_resume_from_results_dir_wandb_run_id(
-    tmp_path, clear_wandb_run_id, expected_wandb_run_id_exists
-):
-    resume_results_dir = tmp_path / "resume_results"
-    experiment_dir = tmp_path / "experiment"
-    resume_results_dir.mkdir()
-    (resume_results_dir / WANDB_RUN_ID_FILE).write_text("wandb-id")
-
-    _resume_from_results_dir_if_not_preempted(
-        experiment_dir=experiment_dir,
-        resume_results_dir=resume_results_dir,
-        clear_wandb_run_id=clear_wandb_run_id,
-    )
-
-    assert (experiment_dir / WANDB_RUN_ID_FILE).exists() == expected_wandb_run_id_exists
 
 
 @pytest.fixture
@@ -225,18 +184,14 @@ def default_trainer_config(
         "multiple_input_multiple_out",
     ],
 )
+@pytest.mark.medium_duration
 def test_train_main_only(
     in_names,
     out_names,
     default_trainer_config,
     tmp_path,
-    very_fast_only: bool,
 ):
     """Check that the training loop runs without errors."""
-
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     config = _update_in_out_names(default_trainer_config, in_names, out_names)
     config["max_epochs"] = 1
     config_path = _store_config(tmp_path, config)
@@ -245,10 +200,9 @@ def test_train_main_only(
         main(config_path=config_path)
 
 
-def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool):
+@pytest.mark.medium_duration
+def test_train_main_logs(default_trainer_config, tmp_path):
     """Check that training loop records the appropriate logs."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
 
     with mock_wandb() as wandb:
         train_config_path = _store_config(tmp_path, default_trainer_config)
@@ -271,10 +225,8 @@ def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool)
         assert len(keys) > 5 or keys == set(["train/batch_loss"])
 
 
-def test_restore_checkpoint(default_trainer_config, tmp_path, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
+@pytest.mark.medium_duration
+def test_restore_checkpoint(default_trainer_config, tmp_path):
     config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
     trainer1 = config.build()
     trainer2 = config.build()
@@ -308,10 +260,9 @@ def test_restore_checkpoint(default_trainer_config, tmp_path, very_fast_only: bo
     )
 
 
-def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
+@pytest.mark.medium_duration
+def test_resume(default_trainer_config, tmp_path):
     """Make sure the training is resumed from a checkpoint when restarted."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
 
     trainer_config_segment_one = dict(default_trainer_config)
     trainer_config_segment_one["max_epochs"] = 2
@@ -351,14 +302,11 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
             mock.assert_called()
 
 
+@pytest.mark.slow
 @pytest.mark.serial
-def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
+def test_resume_two_workers(default_trainer_config, tmp_path):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
-    if skip_slow:
-        # script is slow as everything is re-imported when it runs
-        pytest.skip("Skipping slow tests")
-
     default_trainer_config["logging"]["log_to_wandb"] = False
     default_trainer_config["max_epochs"] = 1
     train_config_path = _store_config(tmp_path, default_trainer_config)

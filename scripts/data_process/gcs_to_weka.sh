@@ -58,7 +58,7 @@ cd "$REPO_ROOT" && gantry run \
     --gpus 0 \
     --shared-memory 40GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --no-python \
     --install "echo 'skipping installation step'" \
     -- bash -c "mkdir -p $WEKA_PATH && gsutil -m -o Credentials:gs_service_key_file=/tmp/google_application_credentials.json rsync -r $GS_PATH $WEKA_PATH"

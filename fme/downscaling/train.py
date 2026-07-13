@@ -11,20 +11,24 @@ import dacite
 import torch
 import yaml
 
-from fme.core.cli import prepare_directory
+from fme.core.cli import prepare_directory, remove_stale_tmp_checkpoints
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
-from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
-from fme.downscaling.aggregators import Aggregator, GenerationAggregator
+from fme.core.wandb import WandB
+from fme.downscaling.aggregators import (
+    Aggregator,
+    GenerationAggregator,
+    GenerationSummary,
+)
 from fme.downscaling.data import (
     PairedBatchData,
     PairedDataLoaderConfig,
     PairedGriddedData,
-    TropicalOversamplingConfig,
+    RegionSamplingConfig,
     load_static_inputs,
 )
 from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
@@ -117,6 +121,8 @@ class Trainer:
                 self.config.checkpoint_dir
             ):
                 os.makedirs(self.config.checkpoint_dir)
+            if self.config.checkpoint_dir is not None:
+                remove_stale_tmp_checkpoints(self.config.checkpoint_dir)
 
         self.epoch_checkpoint_path: str | None = None
 
@@ -139,17 +145,12 @@ class Trainer:
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
 
-        self._best_valid_loss_name = "metrics/relative_crps_bicubic"
-        self._best_histogram_tail_name = (
-            "histogram/prediction_frac_of_target/99.9999th-percentile"
-        )
-
     def _get_batch_generator(
         self,
         data: PairedGriddedData,
         random_offset: bool,
         shuffle: bool,
-        tropical_oversampling: TropicalOversamplingConfig | None = None,
+        region_sampling: RegionSamplingConfig | None = None,
     ):
         if self.patch_data:
             batch_generator = data.get_patched_generator(
@@ -158,7 +159,7 @@ class Trainer:
                 drop_partial_patches=True,
                 random_offset=random_offset,
                 shuffle=shuffle,
-                tropical_oversampling=tropical_oversampling,
+                region_sampling=region_sampling,
             )
         else:
             batch_generator = data.get_generator()
@@ -180,7 +181,7 @@ class Trainer:
             self.train_data,
             random_offset=True,
             shuffle=True,
-            tropical_oversampling=self.config.tropical_oversampling,
+            region_sampling=self.config.region_sampling,
         )
         outputs = None
         for i, batch in enumerate(train_batch_generator):
@@ -237,7 +238,7 @@ class Trainer:
         else:
             yield
 
-    def valid_one_epoch(self) -> dict[str, float]:
+    def valid_one_epoch(self) -> GenerationSummary:
         self.model.module.eval()
         if (
             self.patch_data
@@ -289,16 +290,13 @@ class Trainer:
 
         wandb = WandB.get_instance()
         validation_metrics = validation_aggregator.get_wandb(prefix="validation")
-        generation_metrics = generation_aggregator.get_wandb(prefix="generation")
+        generation_summary = generation_aggregator.get_summary(prefix="generation")
 
         wandb.log(
-            {**generation_metrics, **validation_metrics},
+            {**generation_summary.logs, **validation_metrics},
             self.num_batches_seen,
         )
-        channel_mean_checkpoint_metrics = (
-            generation_aggregator.get_checkpoint_selection_metrics()
-        )
-        return channel_mean_checkpoint_metrics
+        return generation_summary
 
     @property
     def resuming(self) -> bool:
@@ -306,37 +304,35 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_best_checkpoint(self, valid_metrics: dict[str, float]) -> None:
-        if self.best_checkpoint_path is not None:
-            if self.validate_using_ema:
-                best_checkpoint_context = self._ema_context
-            else:
-                best_checkpoint_context = contextlib.nullcontext  # type: ignore
-            # Best checkpoint is hard coded to use validation CRPS channel mean
-            if valid_metrics[self._best_valid_loss_name] < self.best_valid_loss:
-                logging.info("Saving best checkpoint")
-                self.best_valid_loss = valid_metrics[self._best_valid_loss_name]
-                with best_checkpoint_context():
-                    _save_checkpoint(self, self.best_checkpoint_path)
-            else:
-                logging.info(
-                    "Validation loss did not improve, will not overwrite "
-                    "best checkpoint."
-                )
-        if self.best_histogram_tail_checkpoint_path is not None:
-            histogram_tail_metric = valid_metrics[self._best_histogram_tail_name]
-            if histogram_tail_metric < self.best_histogram_tail_metric:
-                logging.info("Saving checkpoint for best histogram tail.")
-                self.best_histogram_tail_metric = histogram_tail_metric
-                with best_checkpoint_context():
-                    _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
-            else:
-                logging.info(
-                    "Histogram tail metric did not improve, will not overwrite "
-                    "best histogram tail checkpoint."
-                )
-        else:
+    def save_best_checkpoint(self, summary: GenerationSummary) -> None:
+        if self.best_checkpoint_path is None:
             raise ValueError("Best checkpoint path is not set")
+        if self.validate_using_ema:
+            best_checkpoint_context = self._ema_context
+        else:
+            best_checkpoint_context = contextlib.nullcontext  # type: ignore
+        if summary.validation_loss < self.best_valid_loss:
+            logging.info("Saving best checkpoint")
+            self.best_valid_loss = summary.validation_loss
+            with best_checkpoint_context():
+                _save_checkpoint(self, self.best_checkpoint_path)
+        else:
+            logging.info(
+                "Validation loss did not improve, will not overwrite "
+                "best checkpoint."
+            )
+        if self.best_histogram_tail_checkpoint_path is None:
+            raise ValueError("Best checkpoint path is not set")
+        if summary.histogram_tail_metric < self.best_histogram_tail_metric:
+            logging.info("Saving checkpoint for best histogram tail.")
+            self.best_histogram_tail_metric = summary.histogram_tail_metric
+            with best_checkpoint_context():
+                _save_checkpoint(self, self.best_histogram_tail_checkpoint_path)
+        else:
+            logging.info(
+                "Histogram tail metric did not improve, will not overwrite "
+                "best histogram tail checkpoint."
+            )
 
     def save_epoch_checkpoints(self) -> None:
         if self.epoch_checkpoint_path is not None:
@@ -376,10 +372,10 @@ class Trainer:
             wandb.log({"epoch": epoch}, step=self.num_batches_seen)
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
-                valid_metrics = self.valid_one_epoch()
+                generation_summary = self.valid_one_epoch()
                 valid_end = time.time()
                 if dist.is_root():
-                    self.save_best_checkpoint(valid_metrics)
+                    self.save_best_checkpoint(generation_summary)
             else:
                 valid_end = train_end
             if dist.is_root():
@@ -406,13 +402,13 @@ class TrainerConfig:
             over patches of the given coarse extent rather than the full
             domain.
         coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
-        tropical_oversampling: Optional config to oversample patches
-            whose center latitude is within +/-lat_threshold of the
-            equator during training. The total number of patches per
-            batch is unchanged; patches are drawn with replacement
-            from a weighted distribution where tropical patches have
-            higher relative weight. Only applied to the training
-            generator (validation patches are unchanged so metrics
+        region_sampling: Optional config to oversample patches
+            whose center falls within a specified lat/lon region
+            during training. The total number of patches per batch is
+            unchanged; patches are drawn with replacement from a
+            weighted distribution where region patches have higher
+            relative weight. Only applied to the training generator
+            (validation patches are unchanged so metrics
             stay comparable). Requires ``coarse_patch_extent_lat`` and
             ``coarse_patch_extent_lon`` to be set.
     """
@@ -436,7 +432,7 @@ class TrainerConfig:
     resume_results_dir: str | None = None
     resume_clear_wandb_run_id: bool = False
     log_loss_vs_noise: bool = False
-    tropical_oversampling: TropicalOversamplingConfig | None = None
+    region_sampling: RegionSamplingConfig | None = None
 
     def __post_init__(self):
         if (
@@ -450,16 +446,12 @@ class TrainerConfig:
                 "Either none or both of coarse_patch_extent_lat and "
                 "coarse_patch_extent_lon must be set."
             )
-        if self.tropical_oversampling is not None and (
+        if self.region_sampling is not None and (
             self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None
         ):
             raise ValueError(
-                "tropical_oversampling requires both coarse_patch_extent_lat "
+                "region_sampling requires both coarse_patch_extent_lat "
                 "and coarse_patch_extent_lon to be set."
-            )
-        if self.resume_clear_wandb_run_id and self.resume_results_dir is None:
-            raise ValueError(
-                "resume_clear_wandb_run_id is True but resume_results_dir is unset."
             )
 
     @property
@@ -514,9 +506,7 @@ class TrainerConfig:
         )
 
 
-def _resume_from_results_dir_if_not_preempted(
-    experiment_dir, resume_results_dir, clear_wandb_run_id=False
-):
+def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
     resuming_from_preempt = os.path.isfile(
         os.path.join(experiment_dir, "checkpoints/latest.ckpt")
     )
@@ -528,10 +518,7 @@ def _resume_from_results_dir_if_not_preempted(
                 f"Existing results directory {resume_results_dir} does not exist."
             )
         shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
-        if clear_wandb_run_id:
-            wandb_path = os.path.join(experiment_dir, WANDB_RUN_ID_FILE)
-            if os.path.isfile(wandb_path):
-                os.remove(wandb_path)
+        remove_stale_tmp_checkpoints(os.path.join(experiment_dir, "checkpoints"))
 
 
 def main(config_path: str):

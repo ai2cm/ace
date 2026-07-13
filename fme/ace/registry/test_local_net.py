@@ -210,3 +210,24 @@ def test_local_net_conditional_with_labels():
     labels = BatchLabels.new_from_set(all_labels, n_samples=2, device=fme.get_device())
     out = module(x, labels=labels)
     assert out.shape == (2, n_out, *IMG_SHAPE)
+
+
+def test_local_net_label_embed_dim():
+    """LocalNet with label_embed_dim > 0 should use learned label embeddings."""
+    n_in, n_out = 3, 2
+    all_labels = {"label_a", "label_b"}
+    dataset_info = _get_dataset_info(all_labels=all_labels)
+    builder = LocalNetBuilder(
+        embed_dim=16,
+        noise_embed_dim=8,
+        context_pos_embed_dim=4,
+        label_embed_dim=3,
+        block_types=["disco", "disco"],
+        affine_norms=True,
+    )
+    module = builder.build(n_in, n_out, dataset_info).to(fme.get_device())
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    labels = BatchLabels.new_from_set(all_labels, n_samples=2, device=fme.get_device())
+    out = module(x, labels=labels.tensor)
+    assert out.shape == (2, n_out, *IMG_SHAPE)
+    assert any("label_embedding" in name for name, _ in module.named_parameters())

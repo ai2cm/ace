@@ -16,8 +16,7 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.ace.aggregator.inference.main import StepMeanEntry
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
@@ -277,6 +276,78 @@ def test_inference_plus_one_model(
     )
 
 
+@pytest.mark.parametrize("n_forward_steps", [2, int(30 / 20 * 36)])
+def test_typed_metric_config_inference(tmp_path: pathlib.Path, n_forward_steps: int):
+    """Validates default aggregator config with default metrics end-to-end."""
+    in_names = ["var"]
+    out_names = ["var"]
+    stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        timestep=datetime.timedelta(days=20),
+    )
+    all_names = list(set(in_names).union(out_names))
+    time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        time_varying_values=time_varying_values,
+        timestep_days=datetime.timedelta(days=20).total_seconds() / 86400,
+        save_vertical_coordinate=False,
+    )
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=True,
+        ),
+        loader=data.inference_data_loader_config,
+        aggregator=InferenceEvaluatorAggregatorConfig(),
+        data_writer=DataWriterConfig(
+            save_prediction_files=False,
+            save_monthly_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+        wandb_logs = wandb.get_logs()
+
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert len(wandb_logs) == n_ic_timesteps + n_forward_steps + summary_log_step
+    for i in range(n_ic_timesteps + n_forward_steps):
+        log = wandb_logs[i]
+        for var in out_names:
+            if i == 0 and var not in in_names:
+                assert f"inference/mean/weighted_rmse/{var}" not in log
+            else:
+                assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
+
+
 def inference_helper(
     tmp_path,
     in_names,
@@ -333,8 +404,6 @@ def inference_helper(
         prediction_loader=prediction_data,
         aggregator=InferenceEvaluatorAggregatorConfig(
             monthly_reference_data=monthly_reference_filename,
-            log_video=True,
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
         ),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
@@ -521,9 +590,7 @@ def test_inference_writer_boundaries(
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=forward_steps_in_memory,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
@@ -679,9 +746,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -777,13 +842,9 @@ def test_compute_derived_quantities(has_required_fields):
         assert not existence_check
 
 
-def test_derived_metrics_run_without_errors(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
+@pytest.mark.medium_duration
+def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     """Checks that derived metrics are computed during inferece without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     n_forward_steps = 2
 
     in_names = ["var", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
@@ -827,9 +888,7 @@ def test_derived_metrics_run_without_errors(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,
@@ -951,9 +1010,7 @@ def test_inference_override(tmp_path: pathlib.Path):
             save_prediction_files=False,
             files=[FileWriterConfig("autoregressive")],
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[] if n_forward_steps < 20 else [StepMeanEntry(step=20)],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -1163,13 +1220,11 @@ def test_resolve_variable_metadata(
         pytest.param(NameConfig("solar_constant"), id="solar-constant-as-name"),
     ],
 )
+@pytest.mark.medium_duration
 def test_evaluator_with_derived_forcings(
     tmp_path: pathlib.Path,
     solar_constant: NameConfig | ValueConfig,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     forward_steps_in_memory = 2
     insolation_name = "DSWRFtoa"
     in_names = ["var", "forcing_var", insolation_name]
@@ -1214,9 +1269,7 @@ def test_evaluator_with_derived_forcings(
             log_to_file=False,
             log_to_wandb=False,
         ),
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_monthly_files=False,
@@ -1241,12 +1294,8 @@ def test_evaluator_with_derived_forcings(
     assert insolation_name not in ds
 
 
-def test_evaluator_with_non_local_experiment_dir(
-    tmp_path: pathlib.Path, very_fast_only: bool
-):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
+@pytest.mark.medium_duration
+def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
     # Use an in-memory filesystem for the experiment directory to test using
     # an experiment_dir on a non-local filesystem.
     experiment_dir = "memory://experiment_dir"
@@ -1289,9 +1338,7 @@ def test_evaluator_with_non_local_experiment_dir(
             log_to_wandb=False,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_monthly_files=False,
             save_prediction_files=False,
@@ -1552,10 +1599,7 @@ def test_inference_with_validation(tmp_path: pathlib.Path, validation_config_kwa
             log_to_wandb=True,
         ),
         loader=data.inference_data_loader_config,
-        aggregator=InferenceEvaluatorAggregatorConfig(
-            log_video=False,
-            log_step_means=[],
-        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
             save_prediction_files=False,
             save_monthly_files=False,

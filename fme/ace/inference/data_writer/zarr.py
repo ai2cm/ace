@@ -27,10 +27,7 @@ def _variable_metadata_to_dict(
 ) -> dict[str, dict[str, str]] | None:
     if variable_metadata is None:
         return None
-    return {
-        var: {"units": metadata.units, "long_name": metadata.long_name}
-        for var, metadata in variable_metadata.items()
-    }
+    return {var: metadata.as_attrs() for var, metadata in variable_metadata.items()}
 
 
 def _get_encoded_lead_times(
@@ -330,6 +327,7 @@ class SeparateICZarrWriterAdapter:
                     array_attributes=self.variable_metadata,
                     group_attributes=self.dataset_metadata,
                     nondim_coords=self._nondim_coords,
+                    time_calendar=first_batch_time.dt.calendar,
                     mode="w",
                     overwrite_check=self.overwrite_check,
                 )

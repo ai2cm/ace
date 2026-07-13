@@ -3,7 +3,7 @@ import dataclasses
 import pathlib
 import time
 from collections.abc import Callable
-from typing import Self
+from typing import Self, final
 
 import dacite
 import matplotlib.pyplot as plt
@@ -271,6 +271,7 @@ class BenchmarkResult:
 
 class BenchmarkABC(abc.ABC):
     @classmethod
+    @final
     def new_from_fn(
         cls,
         fn: Callable[[Timer], TensorDict],
@@ -279,6 +280,10 @@ class BenchmarkABC(abc.ABC):
             @classmethod
             def new(cls) -> "FnBenchmark":
                 return FnBenchmark()
+
+            @classmethod
+            def new_for_regression(cls) -> "FnBenchmark | None":
+                return None
 
             def run_instance(self, timer: Timer) -> TensorDict:
                 return fn(timer)
@@ -295,6 +300,7 @@ class BenchmarkABC(abc.ABC):
         pass
 
     @classmethod
+    @abc.abstractmethod
     def new_for_regression(cls: type[Self]) -> Self | None:
         """
         Initialize any state needed for regression testing.
@@ -306,9 +312,10 @@ class BenchmarkABC(abc.ABC):
         This exists as a separate method from new so that it can
         use small data sizes more conducive to storing regression targets in git.
         """
-        return None
+        pass
 
     @classmethod
+    @final
     def run_benchmark(cls, iters=10, warmup=1) -> BenchmarkResult:
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available, cannot run benchmark.")
@@ -333,6 +340,7 @@ class BenchmarkABC(abc.ABC):
         )
 
     @classmethod
+    @final
     def run_regression(cls) -> TensorDict | None:
         benchmark = cls.new_for_regression()
         if benchmark is None:

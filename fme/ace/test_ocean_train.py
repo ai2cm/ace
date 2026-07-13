@@ -227,12 +227,13 @@ train_loader:
     spatial_dimensions: latlon
   batch_size: 2
   num_data_workers: 0
-validation_loader:
-  dataset:
-    data_path: '{valid_data_path}'
-    spatial_dimensions: latlon
-  batch_size: 2
-  num_data_workers: 0
+validation:
+- loader:
+    dataset:
+      data_path: '{valid_data_path}'
+      spatial_dimensions: latlon
+    batch_size: 2
+    num_data_workers: 0
 optimization:
   use_gradient_accumulation: true
   optimizer_type: "Adam"
@@ -279,19 +280,19 @@ stepper:
             method: scaled_temperature
             constant_unaccounted_heating: 0.1
 inference:
-  aggregator:
-    monthly_reference_data: {monthly_data_filename}
-    log_step_means: []
-  loader:
-    dataset:
-      data_path: '{valid_data_path}'
-      spatial_dimensions: latlon
-    start_indices:
-      first: 0
-      n_initial_conditions: 2
-      interval: 1
-  n_forward_steps: {inference_forward_steps}
-  forward_steps_in_memory: 2
+  - aggregator:
+      monthly_reference_data: {monthly_data_filename}
+      log_step_means: []
+    loader:
+      dataset:
+        data_path: '{valid_data_path}'
+        spatial_dimensions: latlon
+      start_indices:
+        first: 0
+        n_initial_conditions: 2
+        interval: 1
+    n_forward_steps: {inference_forward_steps}
+    forward_steps_in_memory: 2
 """
 
 _INFERENCE_CONFIG_TEMPLATE = """
@@ -403,7 +404,9 @@ def _setup(
     path,
     log_to_wandb=True,
     max_epochs=1,
-    n_time=60,
+    # inline inference uses two initial conditions at indices 0 and 1, so it
+    # needs inference_forward_steps + 2 timesteps of data on disk
+    n_time=12,
     timestep_days=2,
     inference_forward_steps=10,
     save_per_epoch_diagnostics=True,
@@ -506,11 +509,9 @@ def _setup(
     return train_config_filename, inference_config_filename
 
 
-def test_train_and_inference(tmp_path, very_fast_only: bool):
+@pytest.mark.medium_duration
+def test_train_and_inference(tmp_path):
     """Ensure that ACE Ocean training and subsequent standalone inference run."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     train_config, inference_config = _setup(tmp_path)
 
     with mock_wandb() as wandb:

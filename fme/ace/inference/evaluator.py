@@ -11,8 +11,14 @@ import numpy.typing as npt
 import torch
 
 import fme
-from fme.ace.aggregator import OneStepAggregatorConfig
-from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator import (
+    LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregatorConfig,
+)
+from fme.ace.aggregator.inference import (
+    InferenceEvaluatorAggregatorConfig,
+    LegacyFlagInferenceEvaluatorAggregatorConfig,
+)
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_gridded_data, get_inference_data
@@ -25,7 +31,7 @@ from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
     load_stepper,
-    load_stepper_config,
+    load_stepper_config_with_override,
 )
 from fme.ace.stepper.single_module import (
     StepperConfig,
@@ -44,6 +50,7 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
+from fme.core.random_state import RandomState
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -118,8 +125,8 @@ class ValidationConfig:
     """
 
     loader: DataLoaderConfig
-    aggregator: OneStepAggregatorConfig = dataclasses.field(
-        default_factory=lambda: OneStepAggregatorConfig()
+    aggregator: OneStepAggregatorConfig | LegacyFlagOneStepAggregatorConfig = (
+        dataclasses.field(default_factory=lambda: OneStepAggregatorConfig())
     )
     stepper_training: TrainStepperConfig = dataclasses.field(
         default_factory=lambda: TrainStepperConfig()
@@ -213,6 +220,11 @@ class InferenceEvaluatorConfig:
         n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
             stochastic model weather inference. n_ensemble_per_ic = 1 is default
             inference behavior.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a reproducible
+            noise sequence, independent of forward_steps_in_memory. Leave unset
+            (None) for the default non-reproducible behavior. Only affects the
+            stepper rollout (not the prediction_loader comparison path).
     """
 
     experiment_dir: str
@@ -225,29 +237,21 @@ class InferenceEvaluatorConfig:
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
-    )
+    aggregator: (
+        InferenceEvaluatorAggregatorConfig
+        | LegacyFlagInferenceEvaluatorAggregatorConfig
+    ) = dataclasses.field(default_factory=lambda: InferenceEvaluatorAggregatorConfig())
     stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
     n_ensemble_per_ic: int = 1
+    seed: int | None = None
 
     def __post_init__(self):
-        if self.data_writer.time_coarsen is not None:
-            self.data_writer.time_coarsen.validate(
-                self.forward_steps_in_memory,
-                self.n_forward_steps,
-            )
-        if self.data_writer.files is not None:
-            for file_config in self.data_writer.files:
-                if file_config.time_coarsen is not None:
-                    file_config.time_coarsen.validate(
-                        self.forward_steps_in_memory,
-                        self.n_forward_steps,
-                    )
-        for log_step_mean in self.aggregator.log_step_means:
-            log_step_mean.validate(self.n_forward_steps)
+        self.data_writer.validate_time_coarsen(
+            self.forward_steps_in_memory,
+            self.n_forward_steps,
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -261,7 +265,9 @@ class InferenceEvaluatorConfig:
 
     def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, self.stepper_override)
+        return load_stepper_config_with_override(
+            self.checkpoint_path, self.stepper_override
+        )
 
     def get_data_writer(
         self,
@@ -355,6 +361,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
+        if config.seed is not None:
+            data._initial_condition = data.initial_condition.with_random_state(
+                RandomState.from_seed(config.seed)
+            )
         stepper = config.load_stepper()
         stepper.set_eval()
 
@@ -368,10 +378,17 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
                     f"error. The incompatiblity found was: {str(err)}"
                 ) from err
 
-        aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
+        aggregator_config = config.aggregator
         for batch in data.loader:
             initial_time = batch.time.isel(time=0)
             break
+        if config.n_ensemble_per_ic > 1:
+            initial_time = initial_time.isel(
+                sample=np.repeat(
+                    np.arange(initial_time.sizes["sample"]),
+                    config.n_ensemble_per_ic,
+                )
+            )
         variable_metadata = resolve_variable_metadata(
             dataset_metadata=data.variable_metadata,
             stepper_metadata=stepper.training_variable_metadata,
@@ -397,7 +414,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             train_stepper_config = config.validation.stepper_training
             train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
 
-            aggregator = config.validation.aggregator.build(
+            val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,
                 loss_scaling=train_stepper.effective_loss_scaling,
                 save_diagnostics=True,
@@ -407,7 +424,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         run_validation(
             train_stepper=train_stepper,
             validation_data=valid_data,
-            aggregator=aggregator,
+            aggregator=val_aggregator,
             label="val",
             log_progress=True,
         )

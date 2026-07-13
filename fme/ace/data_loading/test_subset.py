@@ -2,12 +2,7 @@ import pytest
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.dataloader import (
-    SlidingWindowDataLoader,
-    TorchDataLoader,
-    get_skip_batches,
-    get_stop_batches,
-)
+from fme.ace.data_loading.dataloader import SlidingWindowDataLoader, TorchDataLoader
 from fme.ace.data_loading.getters import CollateFn
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.subset import SubsetDataset
@@ -59,7 +54,11 @@ def get_data_loader(
 
 
 def get_sliding_window_data_loader(
-    start: int, end: int, time_buffer: int, shuffle: bool = False
+    start: int,
+    end: int,
+    time_buffer: int,
+    shuffle: bool = False,
+    pool_size: int = 1,
 ):
     if (end - start) % (time_buffer + 1) != 0:
         raise ValueError(
@@ -74,6 +73,7 @@ def get_sliding_window_data_loader(
         output_n_timesteps=IntSchedule.from_constant(1),
         time_buffer=time_buffer,
         shuffle=shuffle,
+        pool_size=pool_size,
     )
 
 
@@ -189,57 +189,45 @@ def test_sliding_window_data_loader_subset_random_stop(
     assert subset_times == original_times[:stop]
 
 
-@pytest.mark.parametrize(
-    "sub_batches_per_contained_batch, start, "
-    "expected_n_batches_to_skip, expected_n_sub_batches_to_skip",
-    [
-        pytest.param(3, 0, 0, 0, id="start_0"),
-        pytest.param(3, 1, 0, 1, id="start_during_first_batch"),
-        pytest.param(3, 4, 1, 1, id="start_during_second_batch"),
-        pytest.param(3, 6, 2, 0, id="start_at_batch_boundary"),
-    ],
-)
-def test_get_skip_batches(
-    sub_batches_per_contained_batch,
-    start,
-    expected_n_batches_to_skip,
-    expected_n_sub_batches_to_skip,
-):
-    n_batches_to_skip, n_sub_batches_to_skip = get_skip_batches(
-        sub_batches_per_contained_batch, start
+@pytest.mark.parametrize("pool_size", [2, 3])
+@pytest.mark.parametrize("shuffle", [True, False])
+def test_sliding_window_pool_size_gt1_all_times_present(pool_size, shuffle):
+    n_times = 12
+    time_buffer = 2
+    loader = get_sliding_window_data_loader(
+        0, n_times, time_buffer=time_buffer, shuffle=shuffle, pool_size=pool_size
     )
-    assert (
-        n_batches_to_skip,
-        n_sub_batches_to_skip,
-    ) == (
-        expected_n_batches_to_skip,
-        expected_n_sub_batches_to_skip,
-    )
+    times = [get_batch_time(batch) for batch in loader]
+    assert sorted(times) == list(range(n_times))
 
 
-@pytest.mark.parametrize(
-    "sub_batches_per_contained_batch, stop, "
-    "expected_n_batches_to_stop, expected_n_sub_batches_to_skip_last",
-    [
-        pytest.param(3, 2, 1, 1, id="stop_in_first_batch"),
-        pytest.param(3, 4, 2, 2, id="stop_in_second_batch"),
-        pytest.param(3, 5, 2, 1, id="stop_later_in_second_batch"),
-        pytest.param(3, 6, 2, 0, id="stop_at_batch_boundary"),
-    ],
-)
-def test_get_stop_batches(
-    sub_batches_per_contained_batch,
-    stop,
-    expected_n_batches_to_stop,
-    expected_n_sub_batches_to_skip_last,
-):
-    n_batches_to_stop, n_sub_batches_to_skip_last = get_stop_batches(
-        sub_batches_per_contained_batch, stop
+@pytest.mark.parametrize("pool_size", [2, 3])
+@pytest.mark.parametrize("shuffle", [True, False])
+@pytest.mark.parametrize("start", [0, 3, 4])
+def test_sliding_window_pool_size_gt1_subset_start(pool_size, shuffle, start):
+    n_times = 12
+    time_buffer = 2
+    loader = get_sliding_window_data_loader(
+        0, n_times, time_buffer=time_buffer, shuffle=shuffle, pool_size=pool_size
     )
-    assert (
-        n_batches_to_stop,
-        n_sub_batches_to_skip_last,
-    ) == (
-        expected_n_batches_to_stop,
-        expected_n_sub_batches_to_skip_last,
+    original_times = [get_batch_time(batch) for batch in loader]
+    subset = loader.subset(start_batch=start)
+    subset_times = [get_batch_time(batch) for batch in subset]
+    assert len(subset_times) == n_times - start
+    assert subset_times == original_times[start:]
+
+
+@pytest.mark.parametrize("pool_size", [2, 3])
+@pytest.mark.parametrize("shuffle", [True, False])
+@pytest.mark.parametrize("stop", [3, 4, 6])
+def test_sliding_window_pool_size_gt1_subset_stop(pool_size, shuffle, stop):
+    n_times = 12
+    time_buffer = 2
+    loader = get_sliding_window_data_loader(
+        0, n_times, time_buffer=time_buffer, shuffle=shuffle, pool_size=pool_size
     )
+    original_times = [get_batch_time(batch) for batch in loader]
+    subset = loader.subset(stop_batch=stop)
+    subset_times = [get_batch_time(batch) for batch in subset]
+    assert len(subset_times) == stop
+    assert subset_times == original_times[:stop]

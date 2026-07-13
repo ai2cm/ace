@@ -8,12 +8,14 @@ import torch
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed.distributed import Distributed
+from fme.core.models.conditional_sfno.s2convolutions import validate_spectral_ratio
 from fme.core.models.conditional_sfno.sfnonet import (
     Context,
     ContextConfig,
     SFNONetConfig,
     get_lat_lon_sfnonet,
 )
+from fme.core.rand import randn
 
 
 def isotropic_noise(
@@ -25,8 +27,8 @@ def isotropic_noise(
 ) -> torch.Tensor:
     # --- draw independent N(0,1) parts --------------------------------------
     coeff_shape = (*leading_shape, lmax, mmax)
-    real = torch.randn(coeff_shape, dtype=torch.float32, device=device)
-    imag = torch.randn(coeff_shape, dtype=torch.float32, device=device)
+    real = randn(coeff_shape, dtype=torch.float32, device=device)
+    imag = randn(coeff_shape, dtype=torch.float32, device=device)
     imag[..., :, 0] = 0.0  # m = 0 ⇒ purely real
 
     # m > 0: make Re and Im each N(0,½)  → |a_{ℓ m}|² has variance 1
@@ -58,7 +60,12 @@ class NoiseConditionedModel(torch.nn.Module):
         img_shape: Global spatial dimensions (lat, lon) of the input data.
         embed_dim_noise: Dimension of noise channels.
         embed_dim_pos: Dimension of learned positional embedding. 0 disables.
-        embed_dim_labels: Dimension of label embeddings. 0 disables.
+        n_labels: Number of distinct labels (input dimension for one-hot
+            encoded labels). 0 disables label conditioning.
+        label_embed_dim: Dimension of the learned label embedding space.
+            When > 0, a Linear(n_labels, label_embed_dim) layer maps one-hot
+            labels to a shared embedding before downstream conditioning.
+            When 0, one-hot labels are used directly (legacy behavior).
         inverse_sht: Optional inverse spherical harmonic transform callable.
             If provided, isotropic noise is generated via SHT; otherwise
             gaussian noise is used.
@@ -70,7 +77,8 @@ class NoiseConditionedModel(torch.nn.Module):
         img_shape: tuple[int, int],
         embed_dim_noise: int = 256,
         embed_dim_pos: int = 0,
-        embed_dim_labels: int = 0,
+        n_labels: int = 0,
+        label_embed_dim: int = 0,
         inverse_sht: Callable[[torch.Tensor], torch.Tensor] | None = None,
         lmax: int = 0,
         mmax: int = 0,
@@ -82,20 +90,31 @@ class NoiseConditionedModel(torch.nn.Module):
         self._inverse_sht = inverse_sht
         self._lmax = lmax
         self._mmax = mmax
+
+        if label_embed_dim > 0 and n_labels == 0:
+            raise ValueError("label_embed_dim > 0 requires n_labels > 0")
+
+        if label_embed_dim > 0:
+            self.label_embedding: torch.nn.Linear | None = torch.nn.Linear(
+                n_labels, label_embed_dim
+            )
+            effective_label_dim = label_embed_dim
+        else:
+            self.label_embedding = None
+            effective_label_dim = n_labels
+
         self.label_pos_embed: torch.nn.Parameter | None = None
-        # register pos embed if pos_embed_dim != 0
         if embed_dim_pos != 0:
             self.pos_embed = torch.nn.Parameter(
                 torch.zeros(
                     1, embed_dim_pos, img_shape[0], img_shape[1], requires_grad=True
                 )
             )
-            # initialize pos embed with std=0.02
             torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
-            if embed_dim_labels > 0:
+            if effective_label_dim > 0:
                 self.label_pos_embed = torch.nn.Parameter(
                     torch.zeros(
-                        embed_dim_labels,
+                        effective_label_dim,
                         embed_dim_pos,
                         img_shape[0],
                         img_shape[1],
@@ -119,11 +138,14 @@ class NoiseConditionedModel(torch.nn.Module):
                 device=x.device,
             )
         else:
-            noise = torch.randn(
-                [x.shape[0], self.embed_dim, *x.shape[-2:]],
+            noise = randn(
+                torch.Size([x.shape[0], self.embed_dim, *x.shape[-2:]]),
                 device=x.device,
                 dtype=x.dtype,
             )
+
+        if labels is not None and self.label_embedding is not None:
+            labels = self.label_embedding(labels)
 
         h_slice, w_slice = Distributed.get_instance().get_local_slices(self.img_shape)
 
@@ -175,6 +197,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         noise_type: Type of noise to use for conditioning.
         context_pos_embed_dim: Dimension of the position embedding to use
             for conditioning.
+        label_embed_dim: Dimension of the learned label embedding space.
+            When > 0, a shared linear layer maps one-hot labels to this
+            embedding dimension before downstream conditioning layers.
+            When 0 (default), one-hot labels are used directly.
         global_layer_norm: Whether to reduce along the spatial domain when applying
             layer normalization.
         num_layers: Number of blocks (SFNO and MLP) in the model.
@@ -217,6 +243,24 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             0 (default) disables LoRA.
         spectral_lora_alpha: Strength of the LoRA adaptations for spectral convolutions.
             Defaults to spectral_lora_rank.
+        filter_preserves_global_mean: If True, the spectral filter preserves
+            the l=0 (global mean) spherical harmonic coefficient, so that
+            global mean changes can only result from local operations
+            (norms, MLPs, skip connections).
+        spectral_ratio: Fraction of embed_dim that participates in the
+            spectral filter's SHT and per-mode complex weight. When < 1, a
+            Conv1x1 down-projection is applied before forward_transform and
+            an up-projection after inverse_transform, reducing both the SHT
+            cost and the size of the per-mode complex weight tensor. When
+            filter_residual is enabled, the round-trip residual also passes
+            through the projections. Only supported for filter_type='linear'
+            and incompatible with local_blocks.
+        clip_latent_global_means: If True, the per-channel spatial mean of
+            the post-encoder latent representation is tracked during
+            training and, in eval, the latent is shifted so that mean falls
+            within the observed envelope (no-op when it already does).
+            Bounds the global-mean of the latent the transformer blocks see
+            at inference to the range observed in training.
     """
 
     spectral_transform: Literal["sht"] = "sht"
@@ -226,6 +270,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     embed_dim: int = 256
     noise_embed_dim: int = 256
     context_pos_embed_dim: int = 0
+    label_embed_dim: int = 0
     noise_type: Literal["isotropic", "gaussian"] = "gaussian"
     global_layer_norm: bool = False
     num_layers: int = 12
@@ -254,6 +299,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     lora_alpha: float | None = None
     spectral_lora_rank: int = 0
     spectral_lora_alpha: float | None = None
+    filter_preserves_global_mean: bool = False
+    spectral_ratio: float = 1.0
+    clip_latent_global_means: bool = False
 
     def __post_init__(self):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
@@ -269,6 +317,14 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 "Only 'dhconv' operator_type is supported for "
                 "NoiseConditionedSFNO models."
             )
+        validate_spectral_ratio(
+            self.spectral_ratio,
+            self.embed_dim,
+            self.filter_num_groups,
+            filter_type=self.filter_type,
+            preserves_global_mean=self.filter_preserves_global_mean,
+            local_blocks=bool(self.local_blocks),
+        )
 
     def build(
         self,
@@ -276,6 +332,12 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_out_channels: int,
         dataset_info: DatasetInfo,
     ):
+        n_labels = len(dataset_info.all_labels)
+        if self.label_embed_dim > 0:
+            effective_label_dim = self.label_embed_dim
+        else:
+            effective_label_dim = n_labels
+
         sfno_config = SFNONetConfig(
             embed_dim=self.embed_dim,
             filter_type=self.filter_type,
@@ -298,6 +360,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             lora_alpha=self.lora_alpha,
             spectral_lora_rank=self.spectral_lora_rank,
             spectral_lora_alpha=self.spectral_lora_alpha,
+            filter_preserves_global_mean=self.filter_preserves_global_mean,
+            spectral_ratio=self.spectral_ratio,
+            clip_latent_global_means=self.clip_latent_global_means,
         )
         sfno_net = get_lat_lon_sfnonet(
             params=sfno_config,
@@ -309,7 +374,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 embed_dim_scalar=0,
                 embed_dim_pos=self.context_pos_embed_dim,
                 embed_dim_noise=self.noise_embed_dim,
-                embed_dim_labels=len(dataset_info.all_labels),
+                embed_dim_labels=effective_label_dim,
             ),
         )
         if self.noise_type == "isotropic":
@@ -324,7 +389,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             sfno_net,
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=self.context_pos_embed_dim,
-            embed_dim_labels=len(dataset_info.all_labels),
+            n_labels=n_labels,
+            label_embed_dim=self.label_embed_dim,
             img_shape=dataset_info.img_shape,
             inverse_sht=inverse_sht,
             lmax=lmax,

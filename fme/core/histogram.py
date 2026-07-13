@@ -443,7 +443,9 @@ class ComparedDynamicHistograms:
         plt.tight_layout()
         return fig
 
-    def get_wandb(self) -> dict[str, float]:
+    def get_wandb(
+        self, percentile_variables: set[str] | None = None
+    ) -> dict[str, float]:
         return_dict: dict[str, matplotlib.figure.Figure | float] = {}
 
         for field_name, histograms in self._get_histograms().items():
@@ -452,12 +454,15 @@ class ComparedDynamicHistograms:
             fig = self._plot_histogram(target, prediction)
             return_dict[field_name] = fig
             plt.close(fig)
-            if target is not None:
+            emit_percentiles = (
+                percentile_variables is None or field_name in percentile_variables
+            )
+            if emit_percentiles and target is not None:
                 for p in self.percentiles:
                     return_dict[f"target/{p}th-percentile/{field_name}"] = quantile(
                         target.bin_edges, target.counts, p / 100.0
                     )
-            if prediction is not None:
+            if emit_percentiles and prediction is not None:
                 for p in self.percentiles:
                     return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
                         prediction.bin_edges, prediction.counts, p / 100.0
@@ -563,7 +568,9 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
                 )
         return percentile_metrics
 
-    def get_wandb(self) -> dict[str, float]:
+    def get_wandb(
+        self, percentile_variables: set[str] | None = None
+    ) -> dict[str, float]:
         return_metrics: dict[str, matplotlib.figure.Figure | float] = {}
         target_metrics: dict[str, float] = {}
 
@@ -573,7 +580,10 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
             fig = self._plot_histogram(target, prediction)
             return_metrics[field_name] = fig
             plt.close(fig)
-            if prediction is not None:
+            emit_percentiles = (
+                percentile_variables is None or field_name in percentile_variables
+            )
+            if emit_percentiles and prediction is not None:
                 return_metrics.update(
                     self._get_percentile_metrics_for_field(prediction, field_name)
                 )

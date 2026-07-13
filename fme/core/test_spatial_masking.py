@@ -4,7 +4,7 @@ import pytest
 import torch
 
 import fme
-from fme.core.masking import StaticMasking, StaticMaskingConfig
+from fme.core.spatial_masking import StaticSpatialMasking, StaticSpatialMaskingConfig
 
 DEVICE = fme.get_device()
 
@@ -34,7 +34,7 @@ class _Mask:
             # 2D variable
             return self.mask_2d
 
-    def build_output_masker(self):
+    def build_output_spatial_masker(self):
         raise NotImplementedError
 
     def to(self, device: str) -> "_Mask":
@@ -42,7 +42,7 @@ class _Mask:
 
 
 def test_masking_config():
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=1,
         fill_value=0.0,
     )
@@ -51,12 +51,12 @@ def test_masking_config():
     _ = config.build(_Mask(mask_2d=torch.ones(1, 1), mask_3d=torch.ones(1, 1, 1)))
 
     with pytest.raises(ValueError, match="mask_value must be either 0 or 1"):
-        _ = StaticMaskingConfig(
+        _ = StaticSpatialMaskingConfig(
             mask_value=3,
             fill_value=0.0,
         )
 
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=1,
         fill_value="mean",
     )
@@ -89,7 +89,7 @@ _DATA = {
     ],
 )
 def test_masking(exclude):
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value=0.0,
         exclude_names_and_prefixes=exclude,
@@ -116,7 +116,7 @@ def test_masking(exclude):
     ],
 )
 def test_masking_exclusion(exclude):
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value=float("nan"),
         exclude_names_and_prefixes=[exclude],
@@ -138,7 +138,7 @@ def test_masking_exclusion(exclude):
 
 
 def test_masking_with_means():
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value="mean",
     )
@@ -159,7 +159,7 @@ def test_masking_with_means():
 
 
 def test_masking_no_3d_masking():
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value=0.0,
         exclude_names_and_prefixes=["specific_total_water"],
@@ -174,7 +174,7 @@ def test_masking_no_3d_masking():
 
 
 def test_masking_no_surface_masking():
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value=0.0,
         exclude_names_and_prefixes=["PRESsfc"],
@@ -189,7 +189,7 @@ def test_masking_no_surface_masking():
 
 
 def test_masking_missing_2d_mask():
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value=0.0,
         exclude_names_and_prefixes=["specific_total_water"],
@@ -200,7 +200,7 @@ def test_masking_missing_2d_mask():
 
 
 def test_masking_missing_3d_mask():
-    config = StaticMaskingConfig(
+    config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value=0.0,
     )
@@ -213,7 +213,7 @@ def test_masking_missing_3d_mask():
 
 
 def test_static_masking_error_on_missing_mean():
-    mask = StaticMasking(
+    mask = StaticSpatialMasking(
         mask_value=0,
         fill_value={
             "specific_total_water_0": torch.tensor(2.0, device=DEVICE),
@@ -226,7 +226,7 @@ def test_static_masking_error_on_missing_mean():
 
 
 def test_static_masking_mask_ignored_name():
-    mask = StaticMasking(
+    mask = StaticSpatialMasking(
         mask_value=0,
         fill_value=float("nan"),
         mask=_Mask(_MASK_2D, _MASK_3D),

@@ -25,7 +25,8 @@ This is a Python machine learning project for atmospheric modeling (ACE - AI2 Cl
 - Run pre-commit hooks: `pre-commit run --all-files`
 
 When running tests in a conda environment, use `python -m pytest` (not `pytest`) to ensure the correct interpreter is used.
-Pre-commit hooks run ruff, ruff-format, and mypy. If ruff-format modifies files, re-stage and create a new commit (do not amend).
+Pre-commit hooks run ruff, ruff-format, and mypy.
+Use pre-commit instead of `ruff` or `ruff-format` directly.
 
 ### Parallel / Spatial Parallel Testing
 
@@ -47,15 +48,49 @@ not validate cross-backend correctness.
 
 ## Code Guidelines for Agents
 
+### Committing
+
+When committing changes, do not include Co-Authored-By: Claude in the commit message. This is because Claude bears no accountability or responsibility for the changes, the user is the sole author accountable.
+
+When committing to a branch that has an open PR, check whether the PR description needs to be updated to reflect the changes.
+When amending a PR description, make sure it still reflects the change _from main_, not the change from a previous, ephemeral state of the PR.
+
+### PR description template
+
+When making PRs, use the template that exists in the repo under .github/pull_request_template.md, if one exists.
+
+The PR description becomes the squash-and-merge commit message, so keep it self-contained and describe the final state of the change from main. PR-process information belongs in PR comments, not the description.
+
+### Commit/PR process
+
+Changes that will go to main should be made in branches so that PRs can be made for review.
+Before starting, plan out how the changes will be made in one or more atomic commits.
+Commits should leave the codebase in a consistent state, and should not add unused features that can't be reviewed in isolation.
+They should also include tests for any new functionality, and should not break existing tests.
+
+When making new branches, use the naming convention:
+`<type>/<short-description>`, where `<type>` is one of:
+- feature: Any new functionality (most common branch type).
+- refactor: No changes to features or configs, just code restructuring.
+- fix: Bug fixes.
+- exp: Branch used for running experiments, likely will not be merged to main.
+- config: Changes to configurations under config/.
+- scripts: Changes isolated to a single directory under scripts/.
+- docs: Documentation changes only.
+
 ### Naming
 
 - Config classes loaded from user-specified yaml: append `Config` to the built type (`TrainStepperConfig`).
 - Private functions get a `_` prefix.
 
+### Code style
+
+- isinstance checks and type: ignore statements are a sign that types should be refactored, when adding them you must justify the decision.
+
 ### Config design
 
 - Validate in `__post_init__`, not at runtime.
-- Config loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
+- Trained checkpoint loading backwards compatibility for inference is critical, but can be broken for training; use deprecation warnings for config removal. Ask user if unsure.
 
 ### Testing
 

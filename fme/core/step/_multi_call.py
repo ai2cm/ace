@@ -5,6 +5,8 @@ from collections.abc import Callable
 from torch import nn
 
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
+from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
@@ -13,7 +15,7 @@ TEMPLATE = "{name}{suffix}"
 
 StepMethod = Callable[
     [StepArgs, Callable[[nn.Module], nn.Module]],
-    TensorDict,
+    StepOutput,
 ]
 
 
@@ -163,7 +165,7 @@ class MultiCall:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         predictions = {}
         if (
             self.forcing_name not in args.input
@@ -172,13 +174,15 @@ class MultiCall:
             raise ValueError(
                 f"forcing name {self.forcing_name} not in input or next_step_input_data"
             )
+        stepper_state: StepperState | None = args.stepper_state
         for suffix, multiplier in self.forcing_multipliers.items():
             scale_forcing_func = self._get_scale_forcing_func(multiplier)
             scaled_args = args.apply_input_process_func(scale_forcing_func)
-            output = self._step(scaled_args, wrapper)
+            result = self._step(scaled_args, wrapper)
+            stepper_state = result.stepper_state
 
             for name in self.output_names:
                 new_name = get_multi_call_name(name, suffix)
-                predictions[new_name] = output[name]
+                predictions[new_name] = result.output[name]
 
-        return predictions
+        return StepOutput(output=predictions, stepper_state=stepper_state)

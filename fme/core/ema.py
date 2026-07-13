@@ -53,13 +53,33 @@ class EMAConfig:
     Configuration for exponential moving average of model weights.
 
     Parameters:
-        decay: decay rate for the moving average
+        decay: The decay rate of the moving average.
+        faster_decay_at_start: Whether to use the number of updates to determine
+            the decay rate. If True, the decay rate will be min(decay, (1 +
+            num_updates) / (10 + num_updates)). If False, the decay rate
+            will be decay.
+        resume_ema_ckpt_path: Optional path to a training checkpoint
+            (e.g., ``ckpt.tar``) whose EMA running state (averaged weights and
+            update counter) should be loaded into the freshly-built ``EMATracker``
+            for fine-tuning. The current config's ``decay`` and
+            ``faster_decay_at_start`` are kept; only the running state is
+            transferred. Intended for non-resuming jobs; preemption resume in
+            the Trainer overrides this state via ``EMATracker.from_state``.
     """
 
     decay: float = 0.9999
+    faster_decay_at_start: bool = True
+    resume_ema_ckpt_path: str | None = None
 
     def build(self, model: HasNamedParameters):
-        return EMATracker(model, decay=self.decay, faster_decay_at_start=True)
+        ema = EMATracker(
+            model,
+            decay=self.decay,
+            faster_decay_at_start=self.faster_decay_at_start,
+        )
+        if self.resume_ema_ckpt_path is not None:
+            _load_finetune_ema_state(ema, self.resume_ema_ckpt_path)
+        return ema
 
 
 class EMATracker:
@@ -208,6 +228,38 @@ class EMATracker:
             },
         }
 
+    def load_ema_state_for_finetuning(self, state: dict):
+        """Load EMA running state from a checkpoint for fine-tuning.
+
+        Restores the averaged parameter weights and update counter from
+        a previously saved EMA state. The current tracker's ``decay`` and
+        ``faster_decay_at_start`` (set at construction from the current
+        config) are preserved; only the running state is transferred.
+
+        Args:
+            state: The EMA state dict as saved by ``get_state()``,
+                containing at least ``"ema_params"``, ``"num_updates"``,
+                and ``"module_name_to_ema_name"``.
+
+        Raises:
+            ValueError: If the state does not contain ``"ema_params"``
+                (e.g. from a checkpoint saved without
+                ``include_optimization=True``).
+        """
+        if "ema_params" not in state:
+            raise ValueError(
+                "EMA state does not contain ema_params. Only ckpt.tar "
+                "checkpoints (saved with include_optimization=True) "
+                "contain the full EMA state needed for fine-tuning."
+            )
+        device = get_device()
+        self.num_updates = state["num_updates"].to(device, copy=True)
+        self._module_name_to_ema_name = state["module_name_to_ema_name"]
+        self._ema_params = {
+            name: param.to(device, copy=True)
+            for name, param in state["ema_params"].items()
+        }
+
     @classmethod
     def from_state(cls, state, model) -> "EMATracker":
         """
@@ -233,3 +285,24 @@ class EMATracker:
         else:
             logging.warning("EMA params not found in state and will not be restored.")
         return ema
+
+
+def _load_finetune_ema_state(ema: EMATracker, checkpoint_path: str):
+    """Load EMA running state from a training checkpoint for fine-tuning.
+
+    Only loads the EMA averaged weights and update counter from the
+    checkpoint. The current tracker's decay and faster_decay_at_start
+    are preserved from the current config.
+
+    The checkpoint is loaded on CPU so that only the EMA state (not model
+    weights, optimizer, etc.) is transferred to the training device.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if "ema" not in checkpoint:
+        raise ValueError(
+            f"Checkpoint at {checkpoint_path} does not contain EMA state. "
+            "Only training checkpoints (ckpt.tar) contain EMA state."
+        )
+    ema_state = checkpoint["ema"]
+    del checkpoint
+    ema.load_ema_state_for_finetuning(ema_state)

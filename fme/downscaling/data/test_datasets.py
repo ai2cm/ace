@@ -4,7 +4,12 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.coordinates import NullVerticalCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.testing import assert_dataset_item_length
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.downscaling.data.datasets import (
     BatchData,
     BatchItem,
@@ -15,8 +20,8 @@ from fme.downscaling.data.datasets import (
     LatLonCoordinates,
     PairedBatchData,
     PairedBatchItem,
-    TropicalOversamplingConfig,
-    _sample_indices_with_tropical_oversampling,
+    RegionSamplingConfig,
+    _sample_indices_with_region_sampling,
     patched_batch_gen_from_paired_loader,
 )
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
@@ -201,6 +206,33 @@ def test_batch_item_validation(key, failing_value):
         BatchItem(**kwargs)
 
 
+def _make_horizontal_subset_dataset(coords, data_tensor, lat_interval, lon_interval):
+    """Build a HorizontalSubsetDataset over a single mocked base-dataset item.
+
+    Uses a real DatasetProperties (so ``all_labels`` is a real set) and centralizes
+    the hand-built DatasetItem tuple, guarded by ``assert_dataset_item_length``.
+    """
+    properties = DatasetProperties(
+        variable_metadata={"x": VariableMetadata(units="", long_name="")},
+        vertical_coordinate=NullVerticalCoordinate(),
+        horizontal_coordinates=coords,
+        spatial_mask_provider=SpatialMaskProvider(),
+        timestep=None,
+        is_remote=False,
+        all_labels=set(),
+    )
+    datum: DatasetItem = ({"x": data_tensor}, xr.DataArray([0.0]), set(), 0, None)
+    assert_dataset_item_length(datum)
+    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
+    base_dataset.__getitem__.return_value = datum
+    return HorizontalSubsetDataset(
+        dataset=base_dataset,
+        properties=properties,
+        lat_interval=lat_interval,
+        lon_interval=lon_interval,
+    )
+
+
 @pytest.mark.parametrize(
     "lat_interval,lon_interval,n_lat,n_lon,expected_n_lat,expected_n_lon",
     [
@@ -218,26 +250,15 @@ def test_horizontal_subset(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 
-    datum: tuple[dict[str, torch.Tensor], xr.DataArray, set[str], int] = (
-        {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
-        xr.DataArray([0.0]),
-        set(),
-        0,
-    )
-    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
-    properties = MagicMock(spec=DatasetProperties)
-    properties.horizontal_coordinates = coords
-    properties.all_labels = MagicMock(spec=set)
-    base_dataset.__getitem__.return_value = datum
-    dataset = HorizontalSubsetDataset(
-        dataset=base_dataset,
-        properties=properties,
+    dataset = _make_horizontal_subset_dataset(
+        coords=coords,
+        data_tensor=torch.zeros(batch_size, n_timesteps, n_lat, n_lon),
         lat_interval=ClosedInterval(float(lat_interval[0]), float(lat_interval[1])),
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
     )
 
-    subset, _, labels, _ = dataset[0]
-    assert labels is properties.all_labels
+    subset, _, labels, _, _ = dataset[0]
+    assert labels is dataset._properties.all_labels
     assert subset["x"].shape == (
         batch_size,
         n_timesteps,
@@ -246,6 +267,46 @@ def test_horizontal_subset(
     )
     assert dataset.subset_latlon_coordinates.lat.shape == (expected_n_lat,)
     assert dataset.subset_latlon_coordinates.lon.shape == (expected_n_lon,)
+
+
+@pytest.mark.parametrize(
+    "lon_interval,expected_lons",
+    [
+        pytest.param((-90.0, 45.0), [-90.0, -45.0, 0.0, 45.0], id="negative-start"),
+        pytest.param((270.0, 405.0), [270.0, 315.0, 360.0, 405.0], id="stop-past-360"),
+    ],
+)
+def test_horizontal_subset_prime_meridian_spanning(lon_interval, expected_lons):
+    """HorizontalSubsetDataset must handle lon intervals that cross 0°/360°.
+
+    (-90, 45) and (270, 405) select the same physical data; coordinates are
+    returned in whichever convention the caller supplied.
+    """
+    # 8-point longitude grid in 0–360° convention, 45° spacing
+    lons = torch.tensor([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0])
+    n_lat, n_lon = 4, 8
+    coords = LatLonCoordinates(lat=torch.linspace(0.0, 1.0, n_lat), lon=lons)
+    # Data: lon index encodes original position so we can verify the roll
+    data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+    data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
+
+    dataset = _make_horizontal_subset_dataset(
+        coords=coords,
+        data_tensor=data_tensor,
+        lat_interval=ClosedInterval(float("-inf"), float("inf")),
+        lon_interval=ClosedInterval(*lon_interval),
+    )
+
+    assert dataset.subset_latlon_coordinates.lon.shape == (4,)
+    assert torch.allclose(
+        dataset.subset_latlon_coordinates.lon, torch.tensor(expected_lons)
+    )
+
+    subset, _, _, _, _ = dataset[0]
+    assert subset["x"].shape == (1, 1, n_lat, 4)
+    # Data values should correspond to original lon indices 6, 7, 0, 1
+    expected_vals = torch.tensor([6.0, 7.0, 0.0, 1.0])
+    assert torch.allclose(subset["x"][0, 0, 0], expected_vals)
 
 
 def test_batch_data_from_sequence():
@@ -285,7 +346,7 @@ def test_batch_data_expand_and_fold():
 
 
 def get_mock_dataset(field_leading_dim=1):
-    # Mock dataset that returns (data, time) tuples
+    # Mock dataset that returns DatasetItem tuples
     dataset = MagicMock()
     dataset.__len__ = MagicMock(return_value=2)
     dataset.__getitem__ = MagicMock(
@@ -294,6 +355,7 @@ def get_mock_dataset(field_leading_dim=1):
             data_array([0]),
             set(),
             0,
+            None,
         )
     )
     return dataset
@@ -468,93 +530,92 @@ def test_batch_data_apply_patch_already_patched_raises():
         list(patched.generate_from_patches([patch]))
 
 
-@pytest.mark.parametrize(
-    "lat_threshold, multiplier, match",
-    [
-        pytest.param(30.0, 0, "multiplier", id="multiplier_zero"),
-        pytest.param(30.0, -1, "multiplier", id="multiplier_negative"),
-        pytest.param(0.0, 3, "lat_threshold", id="lat_threshold_zero"),
-        pytest.param(-1.0, 3, "lat_threshold", id="lat_threshold_negative"),
-        pytest.param(90.0, 3, "lat_threshold", id="lat_threshold_90"),
-        pytest.param(120.0, 3, "lat_threshold", id="lat_threshold_too_large"),
-    ],
-)
-def test_tropical_oversampling_config_validation(lat_threshold, multiplier, match):
-    with pytest.raises(ValueError, match=match):
-        TropicalOversamplingConfig(lat_threshold=lat_threshold, multiplier=multiplier)
+def test_region_sampling_config_error_on_negative():
+    with pytest.raises(ValueError, match="weight must be > 0"):
+        RegionSamplingConfig(weight=-1.0)
 
 
-def _make_lat_patches(slices_y: list[slice]) -> list[Patch]:
-    full = slice(None)
+def _make_patches(
+    slices_y: list[slice], slices_x: list[slice] | None = None
+) -> list[Patch]:
+    if slices_x is None:
+        slices_x = [slice(None)] * len(slices_y)
     return [
         Patch(
-            input_slice=_HorizontalSlice(y=s, x=full),
-            output_slice=_HorizontalSlice(y=full, x=full),
+            input_slice=_HorizontalSlice(y=sy, x=sx),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
         )
-        for s in slices_y
+        for sy, sx in zip(slices_y, slices_x)
     ]
 
 
 def test_sample_indices_preserves_length():
     coarse_lats = torch.linspace(-66, 70, 12)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=3)
-
-    indices = _sample_indices_with_tropical_oversampling(patches, coarse_lats, config)
+    coarse_lons = torch.linspace(0, 360, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
+    )
+    config = RegionSamplingConfig(lat_interval=ClosedInterval(-30.0, 30.0), weight=3)
+    indices = _sample_indices_with_region_sampling(
+        patches, coarse_lats, coarse_lons, config
+    )
     assert len(indices) == len(patches)
 
 
-def test_sample_indices_multiplier_one_is_uniform():
-    coarse_lats = torch.linspace(-66, 70, 12)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=1)
-
-    # All weights equal, so over many draws every patch should appear
+def test_sample_indices_region_overrepresented():
+    coarse_lats = torch.linspace(-90, 90, 12)
+    coarse_lons = torch.linspace(0, 360, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(8, 12)], slices_x=None
+    )
+    config = RegionSamplingConfig(
+        lat_interval=ClosedInterval(-30.0, 30.0), weight=1000.0
+    )
     counts = [0, 0, 0]
-    n_draws = 3000
+    n_draws = 300
     for _ in range(n_draws):
-        indices = _sample_indices_with_tropical_oversampling(
-            patches, coarse_lats, config
+        indices = _sample_indices_with_region_sampling(
+            patches, coarse_lats, coarse_lons, config
         )
         for idx in indices:
             counts[idx] += 1
     total = sum(counts)
-    for c in counts:
-        assert abs(c / total - 1 / 3) < 0.05
+    assert counts[1] / total > 0.99
 
 
-def test_sample_indices_tropical_overrepresented():
-    # patch 0 center ~ -47.5 (extratropical), patch 1 center ~ 2.0 (tropical),
-    # patch 2 center ~ 51.5 (extratropical)
-    coarse_lats = torch.linspace(-66, 70, 12)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8), slice(8, 12)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=5)
-
-    counts = [0, 0, 0]
-    n_draws = 3000
+def test_sample_indices_lat_and_lon_selection():
+    # 2x2 grid of patches; only the patch at (lat_center ~ 0, lon_center ~ 45)
+    # falls inside both intervals.
+    coarse_lats = torch.linspace(-60, 60, 8)  # 4-point patches span ~60 deg
+    coarse_lons = torch.linspace(0, 180, 8)
+    patches = _make_patches(
+        slices_y=[slice(0, 4), slice(4, 8), slice(0, 4), slice(4, 8)],
+        slices_x=[slice(0, 4), slice(0, 4), slice(4, 8), slice(4, 8)],
+    )
+    # patch centers:
+    #   0: lat ~ -30, lon ~ 38.6
+    #   1: lat ~ 30,  lon ~ 38.6
+    #   2: lat ~ -30, lon ~ 141.4
+    #   3: lat ~ 30,  lon ~ 141.4
+    config = RegionSamplingConfig(
+        lat_interval=ClosedInterval(-35.0, -25.0),
+        lon_interval=ClosedInterval(30.0, 50.0),
+        weight=1000,
+    )
+    counts = [0, 0, 0, 0]
+    n_draws = 300
     for _ in range(n_draws):
-        indices = _sample_indices_with_tropical_oversampling(
-            patches, coarse_lats, config
+        indices = _sample_indices_with_region_sampling(
+            patches, coarse_lats, coarse_lons, config
         )
         for idx in indices:
             counts[idx] += 1
-    # Expected weights: [1, 5, 1] -> fractions [1/7, 5/7, 1/7]
     total = sum(counts)
-    assert counts[1] / total > 0.6  # ~5/7 ≈ 0.714
+    # Only patch 0 (lat ~ -30, lon ~ 38.6) is inside both intervals
+    assert counts[0] / total > 0.99
 
 
-def test_sample_indices_all_extratropical():
-    coarse_lats = torch.linspace(40.0, 80.0, 8)
-    patches = _make_lat_patches([slice(0, 4), slice(4, 8)])
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=5)
-
-    indices = _sample_indices_with_tropical_oversampling(patches, coarse_lats, config)
-    # Length preserved; all weights equal so it's uniform sampling
-    assert len(indices) == 2
-    assert all(i in (0, 1) for i in indices)
-
-
-def _make_paired_batch_for_tropical(
+def _make_paired_batch(
     n_lat=12, n_lon=8, batch_size=2, downscale_factor=1
 ) -> PairedBatchData:
     lat_coarse = torch.linspace(-66.0, 70.0, n_lat)
@@ -584,7 +645,7 @@ def _make_paired_batch_for_tropical(
 
 def test_patched_batch_gen_from_paired_loader_no_oversampling():
     n_lat, n_lon = 12, 8
-    batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
+    batch = _make_paired_batch(n_lat=n_lat, n_lon=n_lon)
 
     yielded = list(
         patched_batch_gen_from_paired_loader(
@@ -603,8 +664,8 @@ def test_patched_batch_gen_from_paired_loader_no_oversampling():
 
 def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count():
     n_lat, n_lon = 12, 8
-    batch = _make_paired_batch_for_tropical(n_lat=n_lat, n_lon=n_lon)
-    config = TropicalOversamplingConfig(lat_threshold=30.0, multiplier=3)
+    batch = _make_paired_batch(n_lat=n_lat, n_lon=n_lon)
+    config = RegionSamplingConfig(lat_interval=ClosedInterval(-30.0, 30.0), weight=3)
 
     yielded = list(
         patched_batch_gen_from_paired_loader(
@@ -615,7 +676,7 @@ def test_patched_batch_gen_from_paired_loader_with_oversampling_preserves_count(
             random_offset=False,
             shuffle=False,
             drop_partial_patches=True,
-            tropical_oversampling=config,
+            region_sampling=config,
         )
     )
     # Same number of patches as without oversampling (3)

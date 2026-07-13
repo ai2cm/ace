@@ -8,7 +8,9 @@ import torch
 
 import fme
 from fme.ace.stepper import load_stepper as load_single_stepper
-from fme.ace.stepper import load_stepper_config as load_single_stepper_config
+from fme.ace.stepper import (
+    load_stepper_config_with_override as load_single_stepper_config,
+)
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata

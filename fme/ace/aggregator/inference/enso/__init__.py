@@ -1,6 +1,5 @@
-from .dynamic_index import (
-    LatLonRegion,
-    PairedRegionalIndexAggregator,
-    RegionalIndexAggregator,
+from .dynamic_index import PairedRegionalIndexAggregator, RegionalIndexAggregator
+from .enso_coefficient import (
+    EnsoCoefficientEvaluatorAggregator,
+    EnsoCoefficientMetricConfig,
 )
-from .enso_coefficient import EnsoCoefficientEvaluatorAggregator

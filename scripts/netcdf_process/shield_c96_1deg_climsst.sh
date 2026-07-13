@@ -17,7 +17,7 @@ cd $REPO_ROOT && gantry run \
     --gpus 0 \
     --shared-memory 40GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- bash -c "cd /gantry-runtime/scripts/data_process && make fv3gfs_1deg_climSST_monthly_netcdfs"

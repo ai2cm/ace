@@ -67,8 +67,8 @@ def _setup(
         hcoord=mock_data.hcoord,
         ocean_timestep=mock_data.ocean.timestep,
         atmos_timestep=mock_data.atmosphere.timestep,
-        ocean_mask_provider=mock_data.ocean.mask_provider,
-        atmos_mask_provider=mock_data.atmosphere.mask_provider,
+        ocean_spatial_mask_provider=mock_data.ocean.spatial_mask_provider,
+        atmos_spatial_mask_provider=mock_data.atmosphere.spatial_mask_provider,
     ).dataset_info
     checkpoint_path = save_coupled_stepper(
         tmp_path,
@@ -157,16 +157,13 @@ def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
         (3, 1, 2),
     ],
 )
+@pytest.mark.medium_duration
 def test_inference(
     tmp_path: pathlib.Path,
     n_coupled_steps: int,
     coupled_steps_in_memory: int,
     n_initial_conditions: int,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
     ocean_out_names = ["o_prog", "sst", "o_diag"]
     atmos_in_names = ["a_prog", "surface_temperature", "forcing_var", "ocean_fraction"]
@@ -238,13 +235,11 @@ def test_inference(
         1,
     ],
 )
+@pytest.mark.medium_duration
 def test_inference_with_empty_ocean_forcing(
     tmp_path: pathlib.Path,
     atmosphere_times_offset: int,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     n_coupled_steps = 2
     coupled_steps_in_memory = 2
     n_initial_conditions = 3
