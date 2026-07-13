@@ -1,0 +1,40 @@
+# Prescribed-SST inference for the SHiELD-AMIP-only +4K land-amplification
+# response evaluation — CONTROL (0K, observed SST) arm.
+#
+# SST is prescribed from the forcing dataset's surface_temperature over ocean
+# (the checkpoint's stepper carries ocean: {interpolate: true,
+# surface_temperature_name: surface_temperature, ocean_fraction_name:
+# ocean_fraction}); there is deliberately NO perturbations block — the +2K/+4K
+# arms get their warming purely by pointing at the p2k/p4k forcing datasets.
+#
+# Normalization, in_names/out_names/next_step_forcing_names all come from the
+# mounted checkpoint (/ckpt.tar), NOT from this file — so the SAME config is
+# reused for the with-CO2 and no-CO2 checkpoints (the no-CO2 stepper simply
+# does not request global_mean_co2 from the forcing loader). The launcher
+# selects the checkpoint per job.
+#
+# Window: full matched 1979-2020 (start 1979-01-02, the first day present in
+# the p2k/p4k targets; 15339 daily forward steps land on 2020-12-31). Same
+# start_indices / n_forward_steps across all six jobs.
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 73
+n_forward_steps: 15339
+initial_condition:
+  path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '1979-01-02T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0001.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  project: ace
