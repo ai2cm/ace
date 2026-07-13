@@ -6,14 +6,14 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-tmp2m-oversample-tropics-12x-low-sigma"
-CONFIG_FILENAME="train-prmsl-low-sigma-oversample-tropics.yaml"
+JOB_NAME="xshield-downscaling-100km-to-3km-tmp2m-oversample-tropics-per-channel-loss-noise-low-sigma"
+CONFIG_FILENAME="train-prmsl-multivar-low-sigma-per-channel-loss-noise.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 wandb_group=""
 
- # since we use a service account API key for wandb, we use the beaker username to set the wandb username
+# since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8 # TODO: change to 8 after testing
