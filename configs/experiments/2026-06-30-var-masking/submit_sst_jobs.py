@@ -18,32 +18,30 @@ Usage:
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
 from generate_eval_configs import TRAINING_RESULT_DATASETS
-from generate_masking_configs import CONFIG_PREFIX, WANDB_PREFIX
 from generate_sst_configs import (
     MODELS,
     RUN_CONFIGS_DIR,
     SST_PERTURBATIONS,
+    _model_for_run,
     sst_config_filename,
 )
 
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-inference.sh"
-WANDB_GROUP = "ace2-var-masking-sst-perts-2026-07-08"
+WANDB_GROUP = "ace2-var-masking-sst-perts-2026-06-30"
 # best_inference_ckpt.tar is always written by training; mounted at /ckpt.tar.
 CHECKPOINT_PATH = "training_checkpoints/best_inference_ckpt.tar"
-
-
-def _model_for_run(run_name: str) -> str:
-    suffix = run_name.removeprefix(WANDB_PREFIX)
-    for model_key, base_model in MODELS.items():
-        stem_suffix = base_model.stem.removeprefix(CONFIG_PREFIX)
-        if suffix == stem_suffix or suffix.startswith(f"{stem_suffix}-"):
-            return model_key
-    raise ValueError(f"cannot determine model for run {run_name!r}")
+# Non-primary run variants excluded from the default run set (still usable via
+# --run): cooldown/bestinfcooldown extensions, -old snapshots, and the fixed
+# SST-perturbation eval runs (-p0k/-p2k/-p4k) rather than training runs proper.
+EXCLUDED_RUN_SUFFIX = re.compile(r"(cooldown|-old|-p[024]k)$")
+# Per-seed reruns of a primary config, e.g. "-seed0-v1"; excluded by default.
+EXCLUDED_RUN_INFIX = re.compile(r"-seed\d+")
 
 
 def validate_configs(models: list[str], levels: list[str]) -> None:
@@ -85,6 +83,12 @@ def main() -> None:
         help="Restrict to these SST perturbation levels (default: all).",
     )
     parser.add_argument(
+        "--version",
+        choices=["v1", "v2"],
+        default=None,
+        help="Restrict to runs ending in this version suffix (default: both).",
+    )
+    parser.add_argument(
         "--beaker-workspace",
         default="ai2/climate-titan",
         help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
@@ -104,7 +108,13 @@ def main() -> None:
     args = parser.parse_args()
 
     levels = args.perturbation or list(SST_PERTURBATIONS)
-    run_names = args.run or sorted(TRAINING_RESULT_DATASETS)
+    run_names = args.run or sorted(
+        name
+        for name in TRAINING_RESULT_DATASETS
+        if not EXCLUDED_RUN_SUFFIX.search(name) and not EXCLUDED_RUN_INFIX.search(name)
+    )
+    if args.version is not None:
+        run_names = [name for name in run_names if name.endswith(f"-{args.version}")]
 
     unknown_runs = sorted(set(run_names) - set(TRAINING_RESULT_DATASETS))
     if unknown_runs:

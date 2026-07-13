@@ -20,7 +20,13 @@ import pathlib
 from typing import NamedTuple
 
 import yaml
-from generate_masking_configs import BASE_MODELS, RUN_CONFIGS_DIR
+from generate_eval_configs import TRAINING_RESULT_DATASETS, _fetch_wandb_run_names
+from generate_masking_configs import (
+    BASE_MODELS,
+    CONFIG_PREFIX,
+    RUN_CONFIGS_DIR,
+    WANDB_PREFIX,
+)
 
 HERE = pathlib.Path(__file__).parent
 SST_CONFIG_PREFIX = "ace-inference-sst-config-4deg-"
@@ -73,6 +79,30 @@ def sst_config_filename(model: str, level: str) -> str:
     return f"{SST_CONFIG_PREFIX}{model}-{level}.yaml"
 
 
+def _model_for_run(run_name: str) -> str:
+    suffix = run_name.removeprefix(WANDB_PREFIX)
+    for model_key, base_model in MODELS.items():
+        stem_suffix = base_model.stem.removeprefix(CONFIG_PREFIX)
+        if suffix == stem_suffix or suffix.startswith(f"{stem_suffix}-"):
+            return model_key
+    raise ValueError(f"cannot determine model for run {run_name!r}")
+
+
+def _all_runs_finished_in_wandb(model: str, level: str) -> bool:
+    """True if every training run for ``model`` already has a finished
+    wandb run for this SST perturbation level (job name ``{run_name}-{level}``,
+    submitted by submit_sst_jobs.py into the run's own training project).
+    """
+    project = MODELS[model].project
+    finished_runs = _fetch_wandb_run_names(project)
+    runs_for_model = [
+        run_name
+        for run_name in TRAINING_RESULT_DATASETS
+        if _model_for_run(run_name) == model
+    ]
+    return all(f"{run_name}-{level}" in finished_runs for run_name in runs_for_model)
+
+
 def _build_inference_config(
     data_path: str,
     file_pattern: str,
@@ -115,12 +145,17 @@ def _build_inference_config(
     }
 
 
-def generate_configs(existing_only: bool = False) -> None:
+def generate_configs(
+    existing_only: bool = False, skip_if_in_wandb: bool = False
+) -> None:
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
     for model, spec in DATASETS.items():
         project = MODELS[model].project
         for level, amplitude in SST_PERTURBATIONS.items():
             out_path = RUN_CONFIGS_DIR / sst_config_filename(model, level)
+            if skip_if_in_wandb and _all_runs_finished_in_wandb(model, level):
+                print(f"Skipped {out_path.name} (all runs exist in wandb)")
+                continue
             if existing_only and not out_path.exists():
                 print(f"Skipped {out_path.name}")
                 continue
@@ -144,8 +179,18 @@ def main() -> None:
         action="store_true",
         help="Only rewrite SST configs that already exist.",
     )
+    parser.add_argument(
+        "--skip-if-in-wandb",
+        action="store_true",
+        help=(
+            "Skip (model, level) configs whose training runs all already have "
+            "a finished SST-perturbation run in wandb."
+        ),
+    )
     args = parser.parse_args()
-    generate_configs(existing_only=args.existing_only)
+    generate_configs(
+        existing_only=args.existing_only, skip_if_in_wandb=args.skip_if_in_wandb
+    )
 
 
 if __name__ == "__main__":
