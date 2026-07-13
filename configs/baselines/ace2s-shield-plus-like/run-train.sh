@@ -170,3 +170,8 @@ run_training "train-4deg-daily-ace2s-shield-plus-v2arch.yaml" "train-4deg-daily-
 
 # --- v2arch residual arm (matched pair: only residual_prediction flipped), seed 0 (1 GPU) ---
 run_training "train-4deg-daily-ace2s-shield-plus-v2arch-residual.yaml" "train-4deg-daily-ace2s-shield-plus-v2arch-residual-rs0" 1
+
+# --- modern-arm 1-step-only pre-train (tnorm + inline +2K/+4K), seed 0 (1 GPU) ---
+# Transfer-learning donor checkpoint
+# (research: investigations/2026-06-30-1deg-climate-improvement-transfer).
+run_training "train-4deg-daily-shield-plus-modern-pretrain-1step.yaml" "train-4deg-daily-shield-plus-modern-pretrain-1step-rs0" 1
