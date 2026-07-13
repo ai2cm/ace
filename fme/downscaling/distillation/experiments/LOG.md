@@ -13,11 +13,17 @@ Central planning + outcomes log for distilled downscaling students. Process:
 Every launched run gets a row. `verdict`: ✅ win · ➖ flat · ❌ degrade · ⏳ running
 · ⚠️ invalid. Regenerate a row with `check_runs.py --registry-row <id>`.
 
+> **Note on `state`:** a wandb/beaker state of **`crashed` usually means the run was
+> *manually cancelled***, not that it hit a genuine error — these are experiment arms
+> we stop once we've seen enough (or that get preempted). Don't over-interpret
+> "crashed" as a failure; check the last step and metrics. A real error shows a
+> traceback in the beaker logs.
+
 | wandb | date | experiment name | beaker | commit | method / knobs | state | verdict | report |
 |---|---|---|---|---|---|---|---|---|
 | `f7z93y0a` | 2026-07-07 | …-prate-baseline | `01KWX5CVJQ2BP53VH95WKPVPED` | [`26868ca`](https://github.com/ai2cm/ace/commit/26868ca) | fdistill, no spectral (reference) | crashed@29510 | ➖ baseline | [report](reports/2026-07-07-prate-baseline-f7z93y0a.md) |
 | `i26sidsm` | 2026-07-08 | …-prate-spectral-fix | `01KX00N9SE3ZVQFHQJ54XS0TAP` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, gan=1e-3 | crashed@27820 | ✅ win (mid-train ckpt) | [report](reports/2026-07-08-prate-spectral-fix-i26sidsm.md) |
-| `6dotglmg` | 2026-07-09 | …-prate-spectral-lowgan-fix | `01KX4DRYQ0RSQEWRY5F6QBP9BY` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, **gan=3e-4** | ⏳ running | ⏳ | [report](reports/2026-07-09-prate-spectral-lowgan-fix-6dotglmg.md) |
+| `6dotglmg` | 2026-07-09 | …-prate-spectral-lowgan-fix | `01KX4DRYQ0RSQEWRY5F6QBP9BY` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, **gan=3e-4** | crashed@14040 | ➖ inconclusive (mild tail gain; crashed before late-drift regime) | [report](reports/2026-07-09-prate-spectral-lowgan-fix-6dotglmg.md) |
 | `xgcaf2rt` | 2026-07-10 | …-prate-spectral-midhi | `01KX6T1BM73VETZF53TWBHSEFE` | [`e7679c0`](https://github.com/ai2cm/ace/commit/e7679c0a9583bc42ee07d7eacf8e8db619c120d0) | fdistill, spectral W=1e-2, **min_wavenumber=85** (drop lo third, flat mid+hi) | canceled@52k | ➖ neutral (tied at best-sustained spectrum; `best_student.ckpt`@2730) | [report](reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md) |
 | `TBD` | 2026-07-13 | …-prate-spectral-gamma0p5 | `01KXEN0NJ81G7R1SF1F4ZFZV2R` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=0.5** (gentle hi tilt; lo≈0.61× hi≈1.37×) | starting | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma0p5-TBD.md) |
 | `TBD` | 2026-07-13 | …-prate-spectral-gamma1 | `01KXEN0PH05655AQD3FWJRSCXQ` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=1** (linear hi tilt; lo≈0.33× hi≈1.7×) | starting | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma1-TBD.md) |
@@ -46,10 +52,11 @@ point at the standardized reports.
 
 ## Active / planned
 
-- **`6dotglmg` (reduce-GAN arm)** — first *valid* low-GAN test (gan 1e-3→3e-4 on the
-  fixed target). Hypothesis: leaning off the GAN cuts the late tail-overshoot / drift
-  seen in `i26sidsm` without giving back the spectral gains. Report when it has
-  enough history; pick a mid-training checkpoint.
+- ~~**`6dotglmg` (reduce-GAN arm)**~~ — ➖ **done, inconclusive** (reported 2026-07-13):
+  crashed@14k, mildly better tails at matched steps but **crashed before the late-drift
+  regime** it was meant to test (drift at 14k identical to baseline). Needs a **longer
+  re-run** (≥28k, with checkpointing) to actually test the drift hypothesis — ideally
+  after spec 13 early-stop. See report.
 - ~~**`xgcaf2rt` (mid+high band arm)**~~ — ➖ **done, neutral** (checked & canceled
   2026-07-13): the `min_wavenumber=85` cut is tied with flat-band `i26sidsm` at the
   best-sustained spectrum (marginally better mid+hi, within noise). See report +
@@ -94,6 +101,13 @@ _Reverse-chronological; one line per finding, linking the run report._
   flips by which selector you read. Motivates a spectral-aware early-stop/selection
   criterion (new planned item). See
   [report](reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md).
+- **2026-07-13** — ➖ **Reduce-GAN arm `6dotglmg` (gan=3e-4) reported: inconclusive.**
+  Marginally better spectrum + tails than `i26sidsm` at matched steps (tail 1.10 vs 1.17
+  @14k), no downside — but it **crashed@14k, before the late-drift regime** (baseline
+  drifts +61%→+632% only after 14k; at 14k both are ~+60%). The headline "does low-GAN
+  tame late drift" question is untested; the +92%-vs-+632% gap was a run-length artifact.
+  Re-run longer with checkpointing. See
+  [report](reports/2026-07-09-prate-spectral-lowgan-fix-6dotglmg.md).
 - **2026-07-09** — Launched the first valid reduce-GAN arm `6dotglmg` (gan=3e-4);
   the earlier `gpx5574t` low-GAN run was invalid (pre-fix target, crashed early).
 - **2026-07-08** — ✅ **Corrected spectral-matching loss is a large win.** `i26sidsm`
