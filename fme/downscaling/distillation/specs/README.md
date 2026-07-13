@@ -28,9 +28,10 @@ Before starting any task, read (both co-located with this folder):
 | `10-share-generation-postprocessing.md` | Single-source the residual base + reuse `postprocess_generated` in validation (de-dup the logic that caused the residual-base bug) | — |
 | `11-spectral-matching-loss.md` | Auxiliary spectral-matching loss penalizing the student's high-k PSD deficit | — |
 | `12-multi-tap-discriminator.md` | Multi-head (multi-scale) GAN discriminator: test FastGen's multiple-`feature_indices` critic on the lo-noise expert | 10 |
+| `13-spectral-aware-early-stopping.md` | Spectral-based checkpoint selector + patience early stop, so runs stop at their spectral optimum instead of drifting (saves compute; makes cross-run comparison honest) | — |
 
 Tasks 01 and 02 are independent and unblock everything else; do them first.
-Tasks 11–12 are research/experiment specs (not part of the refactor series).
+Tasks 11–13 are research/experiment specs (not part of the refactor series).
 
 ## Shared context (verified 2026-06-10)
 
