@@ -61,8 +61,8 @@ train_aggregator:
   ensemble_metrics: true
 inference:
   # Short-case cadence: every other epoch. The epochs field is a slice over
-  # [1..max_epochs], so start 1 / step 2 fires on epochs 2,4,...,240 — which
-  # includes every EMA-checkpoint-save epoch (10,20,...,240) and the final
+  # [1..max_epochs], so start 1 / step 2 fires on epochs 2,4,...,120 — which
+  # includes every EMA-checkpoint-save epoch (10,20,...,120) and the final
   # epoch.
   - name: som_1xco2_5year
     weight: 1.0
@@ -289,7 +289,7 @@ inference:
       histogram:
         enabled: true
   # Long-case cadence: every 10 epochs. start 9 is a slice index over
-  # [1..max_epochs], so these fire on epochs 10,20,...,240 — exactly the
+  # [1..max_epochs], so these fire on epochs 10,20,...,120 — exactly the
   # EMA-checkpoint-save epochs, including the final epoch.
   - name: amip_long_43year
     weight: 0.0
