@@ -82,9 +82,21 @@ andrep-downscaling`.
 - Watch specifically: `power_spectrum/mean_abs_norm_bias/PRMSL` and low-k, plus PRMSL /
   wind CRPS (the coarse fields Hi would most plausibly help).
 
+## Launched
+
+| | |
+|---|---|
+| Job | `evaluate-moe-lo-only-from-noise200-xshield-amip-100km-to-3km-conus` |
+| wandb run | `TBD` — project `andrep-downscaling` (appears once the eval inits) |
+| Beaker experiment | `01KXEYCC9HAZ7F1G85E3KRPKFD` — https://beaker.org/ex/01KXEYCC9HAZ7F1G85E3KRPKFD |
+| Commit | `af4d134` — https://github.com/ai2cm/ace/commit/af4d134 |
+| Launcher | `configs/experiments/2026-07-07-distilled-moe-eval/run-lo-only.sh` (CONUS only) |
+| State | `starting` (submitted 2026-07-13) |
+
 ## Result  <!-- filled after the eval run -->
 
-_Pending — launch the Lo-only eval, then `--compare-eval` vs `rmoodemk`._
+_Pending eval completion — then `check_runs.py --compare-eval rmoodemk <this-run>
+--project andrep-downscaling`._
 
 ## Verdict  <!-- HUMAN: fill this in -->
 
