@@ -20,10 +20,10 @@ point of a `band_gamma ∈ {0, 0.5, 1}` ramp (0 = `i26sidsm`; ~2 ≈ `xgcaf2rt`)
 | | |
 |---|---|
 | Experiment name | `ace-downscaling-distillation-fdistill-with-val-prate-spectral-gamma0p5` |
-| wandb run | `TBD` — https://wandb.ai/ai2cm/fastgen/runs/TBD |
-| Beaker experiment | `TBD` — https://beaker.org/ex/TBD |
-| Commit | `TBD` — filled post-launch (gantry clones the pushed commit) |
-| State / last step | `launching` |
+| wandb run | `TBD` — https://wandb.ai/ai2cm/fastgen/runs/TBD (appears once training inits) |
+| Beaker experiment | `01KXEN0NJ81G7R1SF1F4ZFZV2R` — https://beaker.org/ex/01KXEN0NJ81G7R1SF1F4ZFZV2R |
+| Commit | `06aee7f9c` — https://github.com/ai2cm/ace/commit/06aee7f9c |
+| State / last step | `starting` (submitted 2026-07-13, image pulling) |
 
 ## Config
 
