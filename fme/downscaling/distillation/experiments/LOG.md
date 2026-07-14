@@ -98,6 +98,18 @@ point at the standardized reports.
   /lo). **Launched 2026-07-13, CONUS only** — beaker `01KXEYCC9HAZ7F1G85E3KRPKFD`,
   commit `af4d134`. Write-up:
   [report](reports/2026-07-13-lo-only-from-noise200-ablation-TBD.md).
+- **★ PLANNED — 4-step f-distill, warm-started from the 2-step spectral winner.** Train a
+  4-step student (`--student-steps 4`) warm-started from `i26sidsm`'s
+  `best_student_tail.ckpt`, spectral W=1e-2, baseline = `i26sidsm` (2-step). Does 2× the
+  NFE buy enough spectral/tail quality? Plus a cheap no-train probe: **1-step eval of the
+  2-step `i26sidsm`** to measure the 2nd step's contribution (a lower bound on
+  native-1-step quality, not a fair 1-vs-2 test). **Mechanism note:** f-distill training
+  is *not* step-independent — `student_sample_steps` sets the discrete `t_list` nodes
+  `t_student` is sampled from and whether `input_student` is pure noise (1-step) or
+  **real-data re-noised** (N-step interior nodes, teacher-forced → exposure bias at
+  inference). See [[fdistill-step-coupling]] / `dmd2.py:97–116`. Needs a warm-start
+  entrypoint flag (sub-task 1). Write-up:
+  [report](reports/2026-07-13-4step-fdistill-warmstart-TBD.md).
 - **Next (experiments):** port the tuned spectral config (flat all-band, `i26sidsm`) to
   the multi-variable MoE runs with per-variable `variable_weights` (up-weight the
   worst-spectrum variables). If the mid band still lags, the remaining lever is a
