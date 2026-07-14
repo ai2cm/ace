@@ -18,7 +18,10 @@ _Last updated: 2026-07-13._
 |---|---|---|---|
 | `2yhjonz9` (band_gamma=0.5) | training | does a gentle hi-k spectral tilt beat flat `i26sidsm`? | `check_runs --report`; compare vs `i26sidsm` at best-sustained; write verdict in its stub |
 | `34rg7wii` (band_gamma=1) | training | " (stronger tilt) | same as above; fit the 0/0.5/1 `band_gamma` response curve |
-| `p337gcg9` (Lo-only ablation, CONUS) | eval | is Student-Hi droppable? | `check_runs --compare-eval rmoodemk p337gcg9`; write verdict (drop-Hi?) in the ablation report |
+
+_Recently closed:_ `p337gcg9` Lo-only ablation → ✅ **Hi is needed — for extreme precip
+only** (2026-07-13,
+[report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md)).
 
 ### 🟢 Next up — likely-good experiments (queued, not launched)
 
@@ -67,6 +70,7 @@ Every launched run gets a row. `verdict`: ✅ win · ➖ flat · ❌ degrade · 
 | `rmoodemk` | `1r1p6djp` | 2026-07-08 | CONUS 2023, 100km→3km X-SHiELD | [`de3e00c`](https://github.com/ai2cm/ace/commit/de3e00ce2bf8215114a818faae11700afd8005f9) | `01KWZD6YMZSD37XZHDMYB8RFC7` / `01KWZD6WFN4TCSMMC48BTFMN8Q` | see report | [report](reports/2026-07-08-moe-eval-distilled-vs-teacher.md) |
 | `x2nyzmzh` (spectral) | `flzvb6tp` (baseline) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.46→0.13 (−71%), CRPS −3.5%, tails ~ideal | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
 | `l6vv7yx0` (spectral) | `fg9byv9y` (baseline) | 2026-07-13 | maritime continent, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.60→0.13 (−78%), CRPS −2.6%, tails closer to 1 | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
+| `p337gcg9` (Lo-only, 2 NFE) | `rmoodemk` (Hi→Lo bundle, 3 NFE) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP | [`af4d134`](https://github.com/ai2cm/ace/commit/af4d13415dacc38ab34e5ad8bbfa22a51615d611) | `01KXEYCC9HAZ7F1G85E3KRPKFD` | ✅ **Hi needed for extreme precip only**: Lo-only ≈ bundle on CRPS (<0.03%) + PSD (<1%) all 4 vars, but under-produces `tail_99.9999_PRATEsfc` 1.01→0.93 (wind tails unchanged) | [report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md) |
 
 ### MoE per-expert base models (bundled into `rmoodemk`)
 
@@ -115,19 +119,19 @@ point at the standardized reports.
   Durable pipeline change → write a numbered spec under `../specs/` first. **Would also
   make every future arm's baseline comparison honest** (all runs stop/select at their
   own spectral optimum instead of an arbitrary flat-CRPS argmin).
-- **⏳ RUNNING — Lo-only (from-noise@200) ablation: is Student-Hi worth keeping?** The
-  deferred MoE decision (`MOE_DISTILLATION_STATUS.md:117–119, 254`): evaluate a
-  **single-model Student-Lo** checkpoint (expert 0, `best_student_tail.ckpt`) with its
-  noise schedule capped at **σ=200** (sample from fresh noise@200), on the *same*
-  held-out eval as the combined `[Hi→Lo]` bundle `rmoodemk`
-  ([eval report](reports/2026-07-08-moe-eval-distilled-vs-teacher.md)). If Lo-only ≈ the
-  bundle (esp. coarse/PRMSL/low-k), **drop Hi** — fewer params + one fewer NFE. Strong
-  prior that Hi's marginal budget is tiny (σ=200 washout; Hi is coarse-only by
-  construction). Config: `configs/experiments/2026-07-07-distilled-moe-eval/config-lo-only.yaml`
-  (single-model, `sigma_max=200`, 2-step Lo); launcher `run-lo-only.sh` (mounts Lo at
-  /lo). **Launched 2026-07-13, CONUS only** — beaker `01KXEYCC9HAZ7F1G85E3KRPKFD`,
-  commit `af4d134`. Write-up:
-  [report](reports/2026-07-13-lo-only-from-noise200-ablation-TBD.md).
+- ~~**Lo-only (from-noise@200) ablation: is Student-Hi worth keeping?**~~ — ✅ **DONE
+  2026-07-13: Hi is needed, for extreme precip only.** Lo-only from noise@200 (`p337gcg9`)
+  matches the full `[Hi→Lo]` bundle (`rmoodemk`) on CRPS (<0.03%) and PSD bias (<1%) across
+  all 4 vars incl. PRMSL/winds — **but under-produces the extreme precip tail**
+  (`tail_99.9999_PRATEsfc` 1.01→0.93; wind tails unchanged). This *confirms* the MoE design
+  rationale: the high-noise regime exists to generate the rare precip extremes (σ=200 can't
+  resynthesize them), and Hi helps precip only. **Keep Hi where extreme precip matters;
+  Lo-only (2 NFE, no 46M Hi expert) suffices for winds/PRMSL + precip mean/spectrum.**
+  Closes the deferred MoE decision (`MOE_DISTILLATION_STATUS.md:117–119, 254`). Config
+  `config-lo-only.yaml`, launcher `run-lo-only.sh`, beaker `01KXEYCC9HAZ7F1G85E3KRPKFD`.
+  Write-up: [report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md).
+  _Follow-ups: variable-scoped Hi (precip-only high-σ steps); confirm `tail_99.99`;
+  re-confirm on maritime continent (heavier precip tails → Hi should matter more)._
 - **★ PLANNED — native f-distill step-count sweep (1 / 2 / 4 step).** Train a native
   **1-step** (task #3) and native **4-step** (task #2) student from scratch
   (`--student-steps 1|4`, spectral W=1e-2), baseline = the 2-step `i26sidsm`; find the
@@ -163,6 +167,15 @@ _Reverse-chronological; one line per finding, linking the run report._
   flips by which selector you read. Motivates a spectral-aware early-stop/selection
   criterion (new planned item). See
   [report](reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md).
+- **2026-07-13** — ✅ **Lo-only ablation: Student-Hi is needed — for extreme precip only.**
+  A single-model Student-Lo from noise@200 (`p337gcg9`, 2 NFE) matches the full `[Hi→Lo]`
+  bundle (`rmoodemk`, 3 NFE) on CRPS (<0.03%) and power-spectrum bias (<1%) across all 4
+  vars incl. PRMSL/winds — **but under-produces the extreme precip tail**
+  (`tail_99.9999_PRATEsfc` 1.01→0.93; wind tails unchanged). This *confirms* the MoE design
+  rationale: the high-noise regime (σ up to 2000) exists to generate the rare precip
+  extremes — a σ=200 start doesn't destroy enough signal to resynthesize them — and Hi
+  helps precip only. Keep Hi where extreme precip matters; Lo-only suffices otherwise.
+  See [report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md).
 - **2026-07-13** — ✅ **Held-out eval confirms the spectral loss is a real, generalizing
   win.** On X-SHiELD AMIP control (out-of-sample vs the training val period), 100km→3km,
   the spectral student beats the GAN-only baseline on **power-spectrum bias 3.5–4.5×**

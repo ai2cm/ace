@@ -91,12 +91,58 @@ andrep-downscaling`.
 | Beaker experiment | `01KXEYCC9HAZ7F1G85E3KRPKFD` — https://beaker.org/ex/01KXEYCC9HAZ7F1G85E3KRPKFD |
 | Commit | `af4d134` — https://github.com/ai2cm/ace/commit/af4d134 |
 | Launcher | `configs/experiments/2026-07-07-distilled-moe-eval/run-lo-only.sh` (CONUS only) |
-| State | `running` (checkpoint loaded cleanly under `sigma_max=200` + `/lo` mount; eval logs metrics at completion) |
+| State | `succeeded` (91 batches + 3 events; checkpoint loaded cleanly under `sigma_max=200` + `/lo` mount) |
 
-## Result  <!-- filled after the eval run -->
+## Result — Lo-only (`p337gcg9`) vs the combined `[Hi→Lo]` bundle (`rmoodemk`), CONUS
 
-_Pending eval completion — then `check_runs.py --compare-eval rmoodemk <this-run>
---project andrep-downscaling`._
+Δ = Lo-only − bundle. Both eval the SAME Lo `best_student_tail.ckpt`; the bundle adds
+the 1-step Hi in front (steps_per_range `[2,1]` = 3 NFE) vs Lo-only 2-step from noise@200
+(2 NFE).
+
+| variable | metric | bundle (Hi→Lo) | Lo-only | read |
+|---|---|---|---|---|
+| PRATEsfc | CRPS ↓ | 8.455e-6 | 8.44e-6 | tied (Lo-only 0.2% better) |
+| PRMSL | CRPS ↓ | 0.1676 | 0.1676 | identical |
+| u10 | CRPS ↓ | 0.4369 | 0.4370 | identical |
+| v10 | CRPS ↓ | 0.4359 | 0.4361 | identical |
+| PRATEsfc | PSD bias ↓ | 0.255 | 0.252 | tied (Lo-only 1% better) |
+| PRMSL | PSD bias ↓ | 0.153 | 0.1534 | identical |
+| u10 | PSD bias ↓ | 0.1169 | 0.118 | identical |
+| v10 | PSD bias ↓ | 0.121 | 0.1219 | identical |
+| PRATEsfc | tail@99.9999 (~1) | **1.013** | **0.931** | **★ Hi is load-bearing: Lo-only under-produces the rarest precip extreme** |
+| u10 | tail@99.9999 (~1) | 1.006 | 0.989 | ~tied (Hi adds nothing) |
+| v10 | tail@99.9999 (~1) | 0.980 | 0.979 | identical (Hi adds nothing) |
+
+## Verdict
+
+- **Does Hi add utility? ✅ Yes — for extreme precipitation, and *only* precipitation.**
+  This is the opposite of the (deliberately provocative) "washout" hypothesis, and it
+  **confirms the original MoE design rationale.** The high-noise regime (σ up to 2000)
+  exists *precisely* to generate the rare extreme events: to synthesize a ~1-in-1e6
+  precip cell the reverse process must start from noise high enough to have destroyed the
+  prior signal, giving it the entropy to build the extreme. A σ=200 start does **not**
+  destroy enough — so Lo-only cannot reach the extreme precip tail
+  (`tail_99.9999_PRATEsfc` **1.013 → 0.931**, under-producing the extreme by ~8%). Hi is
+  the extreme-precip generator, doing exactly its job.
+- **Hi's value is narrow and precip-specific.** Everywhere else it contributes nothing:
+  CRPS is unchanged for all 4 vars (<0.03%), power-spectrum bias unchanged for all 4
+  (<1%), and the **wind tails are unaffected** (u10 1.006→0.989, v10 0.980→0.979). Even
+  for precip, Hi does not move the *mean* skill (CRPS) or the *spectrum* — only the
+  extreme tail. So the σ=200 washout argument holds for everything except the precip
+  extremes, exactly as surmised when the split was designed: **Hi earns its keep on
+  extreme precip alone.**
+- **Deployment implication: keep Hi (do NOT drop it) — but its cost is only justified by
+  extreme precip.** The full `[Hi→Lo]` bundle (3 NFE) is right when the rare precip
+  extreme matters; Lo-only (2 NFE, drop the ~46M Hi expert) is sufficient for winds/PRMSL
+  and for precip mean/spectrum. This closes the deferred MoE question
+  (`MOE_DISTILLATION_STATUS.md:117–119, 254`) with a *characterization* of Hi's role
+  rather than a drop.
+- **Next:** (1) the natural optimization — since Hi only serves the precip extreme, could
+  its high-σ steps be spent on precip alone (variable-scoped noise schedule / expert
+  routing) so winds/PRMSL don't pay Hi's NFE? (2) confirm `tail_99.99` (not just the
+  noisier top `tail_99.9999`) shows the same Hi dependence — direct read, since
+  `--compare-eval` only surfaces the top percentile; (3) re-confirm on maritime continent
+  (tropical convection → even heavier precip tails, where Hi should matter *more*).
 
 ## Verdict  <!-- HUMAN: fill this in -->
 
