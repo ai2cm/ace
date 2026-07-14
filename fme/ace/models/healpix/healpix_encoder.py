@@ -128,7 +128,16 @@ class UNetEncoderConfig:
 
 
 class UNetEncoder(nn.Module):
-    """Generic UNetEncoder that can be applied to arbitrary meshes."""
+    """Runs the encoder levels in sequence, returning each level's activation.
+
+    Receives the ordered per-level modules already built by
+    :meth:`UNetEncoderConfig._build` (each a downsample-then-conv
+    ``nn.Sequential``, or just a conv at the shallowest level) and applies them
+    in order, feeding each level's output into the next. It builds nothing
+    itself and holds no config. The returned per-level activations are the skip
+    connections the decoder consumes; the module is agnostic to the mesh, the
+    padding backend, and the channel schedule, which live in the config.
+    """
 
     def __init__(self, encoder: nn.ModuleList):
         """

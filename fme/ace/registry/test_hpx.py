@@ -27,7 +27,7 @@ from fme.ace.models.healpix.healpix_blocks import (
     TransposedConvUpsampleBlockConfig,
     UpsamplingBlockConfig,
 )
-from fme.ace.models.healpix.healpix_decoder import UNetDecoder
+from fme.ace.models.healpix.healpix_decoder import DecoderLevel, UNetDecoder
 from fme.ace.models.healpix.healpix_encoder import UNetEncoder
 from fme.ace.models.healpix.healpix_layers import (
     HEALPixLayer,
@@ -1158,8 +1158,12 @@ def test_HEALPixUNet_initialize():
         nside=_nside_levels(img, len(enc.n_channels)),
     ).to(device)
     assert isinstance(model, HEALPixUNet)
-    for layer in model.decoder.decoder:
-        assert set(layer.keys()) == {"upsamp", "conv"}
+    levels = list(model.decoder.decoder)
+    for i, level in enumerate(levels):
+        assert isinstance(level, DecoderLevel)
+        assert isinstance(level.conv, nn.Module)
+        # the deepest level (built first) has no upsample; the rest do
+        assert (level.upsamp is None) == (i == 0)
 
 
 def test_HEALPixUNet_forward_shape():

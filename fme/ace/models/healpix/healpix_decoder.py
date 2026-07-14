@@ -78,9 +78,9 @@ class UNetDecoderConfig:
     ) -> "UNetDecoder":
         """Construct the ordered per-level decoder modules plus output layer.
 
-        Builds a per-level ``{upsamp, conv}`` module dict (threading channel
-        counts and validating the nside upsample ratios) and the output layer,
-        then passes the built modules to :class:`UNetDecoder`.
+        Builds one :class:`DecoderLevel` per level (threading channel counts and
+        validating the nside upsample ratios) and the output layer, then passes
+        the built modules to :class:`UNetDecoder`.
         """
         dilations = self.dilations
         if dilations is None:
@@ -129,14 +129,7 @@ class UNetDecoderConfig:
                 ctx=ctx.layer(n_levels - 1 - n),
             )
 
-            decoder.append(
-                nn.ModuleDict(
-                    {
-                        "upsamp": up_sample_module,
-                        "conv": conv_module,
-                    }
-                )
-            )
+            decoder.append(DecoderLevel(upsamp=up_sample_module, conv=conv_module))
 
         output_layer = self.output_layer.build(
             in_channels=curr_channel,
@@ -151,8 +144,44 @@ class UNetDecoderConfig:
         )
 
 
+class DecoderLevel(nn.Module):
+    """One decoder level: optional upsample + skip-concat, then a conv block.
+
+    The deepest level (built first, ``upsamp is None``) receives the encoder
+    bottleneck and applies only its conv block. Each shallower level upsamples
+    the running activation, concatenates the matching encoder skip connection
+    along the channel dimension, then applies its conv block. Bundling the
+    upsample and conv into one module keeps this per-level branching structure
+    with the module that runs it, so :class:`UNetDecoder.forward` never reaches
+    into the level's internals.
+    """
+
+    def __init__(self, upsamp: Optional[nn.Module], conv: nn.Module):
+        super().__init__()
+        self.upsamp = upsamp
+        self.conv = conv
+        self.channel_dim = 1
+
+    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Running activation from the deeper level.
+            skip: Matching encoder skip connection (unused when ``upsamp`` is
+                ``None``, i.e. the deepest level).
+        """
+        if self.upsamp is not None:
+            x = torch.cat([self.upsamp(x), skip], dim=self.channel_dim)
+        return self.conv(x)
+
+
 class UNetDecoder(nn.Module):
-    """Generic UNetDecoder that can be applied to arbitrary meshes."""
+    """Applies the decoder levels deepest-to-shallowest, then the output layer.
+
+    Receives the ordered per-level :class:`DecoderLevel` modules and the output
+    layer already built by :meth:`UNetDecoderConfig._build`; it constructs
+    nothing itself, so it is directly constructible from its signature and its
+    ``forward`` needs no knowledge of how the levels were assembled.
+    """
 
     def __init__(
         self,
@@ -160,15 +189,12 @@ class UNetDecoder(nn.Module):
         output_layer: nn.Module,
     ):
         """
-        Initialize the UNetDecoder.
-
         Args:
-            decoder: Ordered per-level ``{upsamp, conv}`` module dicts built by
+            decoder: Ordered per-level :class:`DecoderLevel` modules built by
                 :meth:`UNetDecoderConfig._build`.
             output_layer: Final output-projection module.
         """
         super().__init__()
-        self.channel_dim = 1
         self.decoder = decoder
         self.output_layer = output_layer
 
@@ -177,15 +203,13 @@ class UNetDecoder(nn.Module):
         Forward pass of the UNetDecoder.
 
         Args:
-            inputs: Sequence of tensors, one for each decoder level.
+            inputs: Sequence of tensors, one per decoder level (encoder outputs,
+                shallow-to-deep).
 
         Returns:
             The decoded values.
         """
         x = inputs[-1]
-        for n, layer in enumerate(self.decoder):
-            if layer["upsamp"] is not None:
-                up = layer["upsamp"](x)
-                x = torch.cat([up, inputs[-1 - n]], dim=self.channel_dim)
-            x = layer["conv"](x)
+        for n, level in enumerate(self.decoder):
+            x = level(x, inputs[-1 - n])
         return self.output_layer(x)
