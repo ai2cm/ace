@@ -1,0 +1,60 @@
+# COUPLED slab-ocean evaluator for the 4deg/daily ACE2S-SHiELD+ checkpoints
+# (paper-arm f3fhd6hn, v2 2ijn8ynx, v2+residual wh6j37yg). Identical to
+# eval-paperarm-som-1xco2.yaml EXCEPT for the stepper_override.ocean block
+# below, which flips the checkpoint's *prescribed*-SST ocean into a coupled
+# slab-ocean model at inference time (Clark et al. show a prescribed-SST-trained
+# model runs well in slab mode without retraining). SST becomes a PREDICTED
+# prognostic instead of a read forcing; the dataset now supplies the slab's
+# forcing (prescribed_qflux, prescribed_mixed_layer_depth) plus ocean_fraction
+# and CO2, exactly as the SOM training data carries them.
+#
+# This makes the report's SOM 1xCO2 bias maps (Fig 5) like-for-like with the
+# paper's 1-degree row, which is itself a coupled slab-ocean run. Our
+# checkpoints carry NO total_energy_budget_correction (it is not overridable via
+# stepper_override), so this is the faithful coupled behavior of the models as
+# trained; any surface-temperature drift over the 5-year mean is the expected
+# consequence of the omitted energy corrector.
+#
+# 8 staggered starts x 1825 daily steps (5-year equilibrium mean), matching the
+# training config's som_1xco2_5year case.
+experiment_dir: /results
+n_forward_steps: 1825
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+stepper_override:
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+    interpolate: true
+    slab:
+      mixed_layer_depth_name: prescribed_mixed_layer_depth
+      q_flux_name: prescribed_qflux
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '2032-07-01T00:00:00'
+      - '2033-01-01T00:00:00'
+      - '2033-07-01T00:00:00'
+      - '2034-01-01T00:00:00'
+      - '2034-07-01T00:00:00'
+      - '2035-01-01T00:00:00'
+      - '2035-07-01T00:00:00'
+      - '2036-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset
+    file_pattern: 1xCO2-ic_0003.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  zonal_mean:
+    enabled: false
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
