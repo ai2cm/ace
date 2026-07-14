@@ -64,6 +64,7 @@ def test_labels_exist():
         "test/snapshot/image-error/a",
         "test/mean_map/image-full-field/a",
         "test/mean_map/image-error/a",
+        "test/r2/a",
         "test/power_spectrum/positive_norm_bias/a",
         "test/power_spectrum/negative_norm_bias/a",
         "test/power_spectrum/mean_abs_norm_bias/a",
@@ -133,6 +134,7 @@ def test_flush_diagnostics(tmpdir, epoch):
         "mean",
         "snapshot",
         "mean_map",
+        "r2",
     ]
     for file in expected_files:
         assert (output_dir / f"{file}_diagnostics.nc").exists()
@@ -232,8 +234,12 @@ def test_legacy_config_builds_same_log_keys():
     typed_logs = typed_agg.get_logs(label="test")
     legacy_logs = legacy_agg.get_logs(label="test")
 
-    assert set(typed_logs.keys()) == set(legacy_logs.keys())
-    for key in typed_logs:
+    # r2 is enabled by default in the typed config but is not part of the frozen
+    # legacy metric set, so it is the only expected difference in log keys.
+    r2_keys = {k for k in typed_logs if "/r2/" in k}
+    assert r2_keys
+    assert set(typed_logs.keys()) - r2_keys == set(legacy_logs.keys())
+    for key in legacy_logs:
         typed_val = typed_logs[key]
         legacy_val = legacy_logs[key]
         if isinstance(typed_val, float):
@@ -384,7 +390,11 @@ def test_legacy_disabled_flags_match_typed_config():
     typed_logs = typed_agg.get_logs(label="test")
     legacy_logs = legacy_agg.get_logs(label="test")
 
-    assert set(typed_logs.keys()) == set(legacy_logs.keys())
+    # r2 is enabled by default in the typed config but is not part of the frozen
+    # legacy metric set, so it is the only expected difference in log keys.
+    r2_keys = {k for k in typed_logs if "/r2/" in k}
+    assert r2_keys
+    assert set(typed_logs.keys()) - r2_keys == set(legacy_logs.keys())
     assert not any("snapshot" in k for k in typed_logs)
     assert not any("mean_map" in k for k in typed_logs)
 
