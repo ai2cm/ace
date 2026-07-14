@@ -1,22 +1,15 @@
 # Ocean-only Samudra trained from scratch on CM4 1pctCO2, with an MLP
-# vector-readout head that predicts the next-12-month Nino3.4 index
-# (nino34_lead_01..12) alongside the usual ocean fields.
+# vector-readout head predicting the next-12-month Nino3.4 index
+# (nino34_lead_01..12). Based on the known-good CM4 1pctCO2 ocean pretraining
+# config (minimal ocean_corrector: force_positive + sea_ice_fraction only; NO
+# surface_energy_flux / ocean_heat_content corrections).
 #
-# Mounts required at runtime:
-#   /climate-default : CM4 1pctCO2 ocean zarrs + the nino-leads zarr
-#   /ocean_stats     : the stats dataset that INCLUDES nino34_lead_* in
-#                      ocean/centering.nc and ocean/scaling-full-field.nc
-#                      (e.g. the coupled-stats-with-nino-leads dataset).
+# Mounts: /climate-default (ocean zarrs + nino-leads zarr), /ocean_stats
+# (stats dataset that INCLUDES nino34_lead_* in ocean/*.nc).
 #
-# Notes:
-# - The 12 nino34_lead_* are OUTPUT-ONLY diagnostics (not in in_names) and are
-#   listed LAST in out_names; Samudra's n_vector_outputs=12 makes the final
-#   conv produce the physical fields and the MLP head produce the 12 scalars,
-#   broadcast to constant channels appended last (channel order = out_names).
-# - Nino labels are NaN in the record tail (future targets don't exist).
-#   train stop_time is set ~1.5 yr before the record end (0350-12-29) so no
-#   training window sees a NaN nino target; validation (0251-0255) is NaN-free.
-# - Watch val .../mean_norm/weighted_rmse/nino34_lead_XX: < 1.0 beats climatology.
+# nino34_lead_* are OUTPUT-ONLY (not in in_names), listed LAST in out_names, and
+# produced by the MLP head (n_vector_outputs=12). train stop_time is trimmed to
+# avoid the nino tail NaN (future targets don't exist near the record end).
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
@@ -24,39 +17,40 @@ ema:
   decay: 0.999
 max_epochs: 150
 inference:
-  - n_forward_steps: 1440  # ~20 years at 5-day steps
-    forward_steps_in_memory: 40
-    loader:
-      start_indices:
-        times:
-        - '0251-01-03T12:00:00'
-        - '0262-06-22T12:00:00'
-        - '0273-12-09T12:00:00'
-        - '0285-05-28T12:00:00'
-        - '0296-11-14T12:00:00'
-        - '0308-05-03T12:00:00'
-        - '0319-10-20T12:00:00'
-        - '0331-04-08T12:00:00'
-      dataset:
-        merge:
-        - data_path: /climate-default
-          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
-          engine: zarr
-        - data_path: /climate-default
-          file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
-          engine: zarr
-        - data_path: /climate-default
-          file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
-          engine: zarr
-      num_data_workers: 8
-    aggregator:
-      log_histograms: false
+  n_forward_steps: 1440
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+      - '0251-01-03T12:00:00'
+      - '0262-06-22T12:00:00'
+      - '0273-12-09T12:00:00'
+      - '0285-05-28T12:00:00'
+      - '0296-11-14T12:00:00'
+      - '0308-05-03T12:00:00'
+      - '0319-10-20T12:00:00'
+      - '0331-04-08T12:00:00'
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
+        engine: zarr
+    num_data_workers: 4
+  aggregator:
+    log_histograms: false
 logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
   project: ace-samudra-cm4
   entity: ai2cm
+  metrics_log_dir: /results/metrics
 train_loader:
   batch_size: 16
   num_data_workers: 8
@@ -121,17 +115,17 @@ stepper:
     mask_value: 0
     fill_value: 0.0
     exclude_names_and_prefixes:
-      - land_fraction
-      - DLWRFsfc
-      - DSWRFsfc
-      - ULWRFsfc
-      - USWRFsfc
-      - LHTFLsfc
-      - SHTFLsfc
-      - PRATEsfc
-      - eastward_surface_wind_stress
-      - northward_surface_wind_stress
-      - total_frozen_precipitation_rate
+    - land_fraction
+    - DLWRFsfc
+    - DSWRFsfc
+    - ULWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+    - total_frozen_precipitation_rate
   step:
     type: single_module
     config:
@@ -154,8 +148,8 @@ stepper:
           - 1
           - 1
           norm: instance
-          # 12 outputs come from the MLP readout head (the nino34_lead_* below),
-          # not the final convolution.
+          # 12 outputs (nino34_lead_*) come from the MLP readout head, not the
+          # final convolution.
           n_vector_outputs: 12
       normalization:
         network:
@@ -191,10 +185,6 @@ stepper:
             remove_negative_ocean_fraction: false
             zero_where_ice_free_names:
             - sea_ice_volume
-          surface_energy_flux_correction:
-            method: prescribed
-          ocean_heat_content_correction:
-            method: scaled_temperature
       next_step_forcing_names:
       - DLWRFsfc
       - DSWRFsfc
@@ -207,11 +197,9 @@ stepper:
       - northward_surface_wind_stress
       - total_frozen_precipitation_rate
       in_names:
-      # time-invariant
       - land_fraction
       - sea_surface_fraction
       - deptho
-      # atmosphere forcing
       - DLWRFsfc
       - DSWRFsfc
       - ULWRFsfc
@@ -222,7 +210,6 @@ stepper:
       - eastward_surface_wind_stress
       - northward_surface_wind_stress
       - total_frozen_precipitation_rate
-      # ocean prognostic
       - sst
       - ssu
       - ssv
@@ -303,11 +290,9 @@ stepper:
       - vo_16
       - vo_17
       - vo_18
-      # sea ice prognostic
       - ocean_sea_ice_fraction
       - sea_ice_volume
       out_names:
-      # ocean prognostic
       - sst
       - ssu
       - ssv
@@ -388,16 +373,13 @@ stepper:
       - vo_16
       - vo_17
       - vo_18
-      # sea ice prognostic
       - ocean_sea_ice_fraction
       - sea_ice_volume
-      # diagnostic (from the final convolution)
       - hfds_total_area
       - tauuo
       - tauvo
       - wfo
-      # Nino3.4 lead vector (from the MLP readout head; must be LAST and
-      # number exactly n_vector_outputs=12)
+      # Nino3.4 lead vector (MLP readout head; LAST, exactly n_vector_outputs=12)
       - nino34_lead_01
       - nino34_lead_02
       - nino34_lead_03

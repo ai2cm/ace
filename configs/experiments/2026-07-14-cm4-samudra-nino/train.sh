@@ -9,7 +9,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=1
 
 # Stats dataset that INCLUDES nino34_lead_* in ocean/centering.nc and
 # ocean/scaling-full-field.nc (mounted at /ocean_stats so the config's
@@ -48,6 +48,7 @@ gantry run \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
+    --allow-dirty \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
