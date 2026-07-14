@@ -1,5 +1,5 @@
-# source_run: ace2-var-mask-nc-sfno-c96-mask40-co2bern90-mask0.25-seed1-v2
-# source_dataset: 01KXA42B9ZJWDSDY8VCRQJ3XA4
+# source_run: ace2-var-mask-nc-sfno-c96-mask40-co2default-mask0.25-seed1-v2
+# source_dataset: 01KXG1BED71Y1VVGSRDVG0FZFB
 experiment_dir: /results
 logging:
   log_to_screen: true
