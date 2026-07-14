@@ -407,8 +407,8 @@ def test_sfnonet_spectral_ratio_rejects_non_linear_filter():
 
 def test_sfnonet_spectral_ratio_allows_preserve_global_mean():
     # spectral_ratio < 1 and filter_preserves_global_mean are now compatible:
-    # the l=0 coefficient is restored in full-channel grid space, outside the
-    # reduced-channel bottleneck.
+    # the l=0 per-mode weight is bypassed in the spectral domain, so the config
+    # no longer needs to be rejected.
     SFNONetConfig(
         embed_dim=16,
         num_layers=2,
