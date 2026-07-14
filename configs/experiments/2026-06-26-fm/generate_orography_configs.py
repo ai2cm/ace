@@ -32,8 +32,8 @@ from generate_eval_configs import EVAL_SUITE_CONFIG_PREFIX as _EVAL_SUITE_CONFIG
 OROGRAPHY_EVAL_SUITE_CONFIG_PREFIX = f"{_EVAL_SUITE_CONFIG_PREFIX}orog-"
 
 # Orography-swap evals only ever run the best-inference checkpoint (not
-# besttrain/lastepoch) -- submit_eval_jobs.py sources it directly from the
-# corresponding non-orography run's own result dataset, so there is no
+# besttrain/lastepoch) -- submit_orography_jobs.py sources it directly from
+# the corresponding non-orography run's own result dataset, so there is no
 # separate "orography training run" or dataset to record.
 OROGRAPHY_CHECKPOINT_SUFFIXES = ("-bestinf",)
 

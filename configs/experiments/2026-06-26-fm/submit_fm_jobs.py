@@ -12,10 +12,9 @@ Usage:
 """
 
 import argparse
-import os
 import pathlib
-import subprocess
 
+from _submit_common import add_beaker_args, submit_job
 from _version_select import add_version_arg, stem_matches_version
 
 HERE = pathlib.Path(__file__).parent
@@ -68,27 +67,11 @@ def wandb_run_names() -> set[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_version_arg(parser)
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print commands without executing them.",
-    )
-    parser.add_argument(
-        "--beaker-workspace",
-        default="ai2/climate-titan",
-        help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
-    )
-    parser.add_argument(
-        "--beaker-cluster",
-        nargs="+",
-        default=["ai2/titan"],
-        metavar="CLUSTER",
-        help=("Beaker cluster(s) to target (default: ai2/titan)."),
-    )
-    parser.add_argument(
-        "--beaker-priority",
-        default="urgent",
-        help="Beaker job priority (default: urgent).",
+    add_beaker_args(
+        parser,
+        default_workspace="ai2/climate-titan",
+        default_cluster=["ai2/titan"],
+        default_priority="urgent",
     )
     parser.add_argument(
         "--skip-if-in-wandb",
@@ -111,22 +94,13 @@ def main() -> None:
         if job_name in existing_runs:
             print(f"Skipping (already in wandb): {job_name}")
             continue
-        cmd = [
-            str(RUN_SCRIPT),
-            f"{BASE_CONFIGS_DIRNAME}/{config_filename}",
-            job_name,
-            WANDB_GROUP,
-        ]
-        print("Submitting:", " ".join(cmd))
-        if not args.dry_run:
-            env = {
-                **os.environ,
-                "WANDB_PROJECT": WANDB_PROJECT,
-                "BEAKER_WORKSPACE": args.beaker_workspace,
-                "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
-                "BEAKER_PRIORITY": args.beaker_priority,
-            }
-            subprocess.run(cmd, check=True, cwd=HERE, env=env)
+        submit_job(
+            RUN_SCRIPT,
+            [f"{BASE_CONFIGS_DIRNAME}/{config_filename}", job_name, WANDB_GROUP],
+            wandb_project=WANDB_PROJECT,
+            args=args,
+            cwd=HERE,
+        )
 
 
 if __name__ == "__main__":
