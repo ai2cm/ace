@@ -1,0 +1,38 @@
+# Prescribed-SST inference for the SHiELD-AMIP-only spatial out-of-sample (OOS)
+# near-surface-T tracking evaluation — CONTROL (0K, observed SST) arm,
+# restricted to the OUT-OF-SAMPLE window.
+#
+# Identical to ace-inference-shield-amip-control.yaml except the rollout window:
+# start 2015-01-01 (training ended 2013, 2014 was validation, so 2015 on is
+# out-of-sample) and n_forward_steps 2541 -> lands on 2021-12-16, the last time
+# in ic_0001. Because the rollout is confined to the OOS tail, the saved
+# time_mean_diagnostics.nc IS the OOS time-mean (the full-window control run
+# saved only a 1979-2020 mean and no gridded series, so its OOS sub-period
+# could not be sliced out).
+#
+# SST prescribed from the forcing dataset over ocean via the checkpoint's
+# ocean.interpolate; no perturbations block. Normalization / in_names all from
+# the mounted checkpoint (/ckpt.tar) — the SAME config serves the with-CO2 and
+# no-CO2 checkpoints (the no-CO2 stepper does not request global_mean_co2).
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 73
+n_forward_steps: 2541
+initial_condition:
+  path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2015-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0001.zarr
+    engine: zarr
+  num_data_workers: 8
+logging:
+  project: ace
