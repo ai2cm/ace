@@ -55,10 +55,10 @@ class StreamConfig:
             pipeline/face_masks.py) for sources whose staggered velocities
             carry remap-born zeros over land. When set, the stream's rotated
             pairs have the flagged faces treated as invalid before center
-            interpolation, and are restricted and regrid-normalized to the
-            artifact's static center footprint instead of the tracer
-            wetmask (their output NaN pattern then equals their
-            per-variable ``mask_<name>_k`` statics rather than ``mask_k``).
+            interpolation, so the wall-zero fill at centers with no valid
+            face on an axis (see run._rotate_pairs) applies where a
+            properly-masked source would put it instead of the fake zeros
+            being averaged into coastal centers.
     """
 
     name: str

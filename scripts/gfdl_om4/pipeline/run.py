@@ -28,17 +28,19 @@ Masking conventions of the output store:
   dropped, and cells inside the wetmask that are instantaneously dry are
   filled from the level above (the water immediately overlying the
   vacated sliver). See _conform_to_wetmask.
-- Every rotated-pair output additionally gets a per-variable mask static
-  (``mask_<name>_k`` for 3D pairs, ``mask_<name>`` for 2D ones): training
-  masks rotated vector components by variable name. Pairs of a stream with
-  a ``face_mask_url`` (sources whose staggered velocities carry remap-born
-  zeros over land; see pipeline/face_masks.py) are the one exception to
-  NaN-equals-``mask_k``: masking the fake faces leaves a small static set
-  of wet centers with no valid face on some axis, so those pairs are
-  restricted and regrid-normalized to the artifact's center footprint
-  instead, and their NaN pattern equals their per-variable masks (a subset
-  of ``mask_k``; target cells whose contributing centers all drop are
-  NaN). Unmasked pairs' per-variable masks equal the tracer masks.
+- Rotated C-grid pairs are interpolated to tracer centers dropping invalid
+  (land) faces from the average; a wet center whose faces on an axis are
+  all land is a wall for that axis, where the model's resolved normal
+  component is identically zero by no-normal-flow, so that grid-relative
+  component is set to 0.0 *before* rotation (rotation mixes the
+  components, so filling after it would zero a valid along-wall component
+  too — e.g. the along-channel flow of a one-cell-wide channel). Pairs of
+  a stream with a ``face_mask_url`` (sources whose staggered velocities
+  carry remap-born zeros over land; see pipeline/face_masks.py) first get
+  those fake faces invalidated, which makes the wall-zero fill apply at
+  the same centers a properly-masked source would produce. Either way the
+  pair's footprint is the tracer wetmask, so NaN-equals-``mask_k`` holds
+  for every output.
 - ``sea_surface_fraction`` is the regridded surface ocean fraction (0 over
   land, not NaN), usable to weight coastal cells.
 - Variables listed in a stream's ``full_cell_variables`` (e.g.
@@ -88,8 +90,6 @@ def land_nan_exempt_names(level_count: int) -> list[str]:
 
     An explicit list rather than a name-pattern match, so that a new
     variable whose name happens to contain e.g. "mask_" is still masked.
-    The per-variable rotated-pair masks are exempted separately, by
-    build_statics, which knows their names.
     """
     return (
         [f"mask_{k}" for k in range(level_count)]
@@ -380,20 +380,20 @@ def _rotate_pairs(
     """Interpolate each configured C-grid vector pair to tracer centers and
     rotate it to geographic components, preserving names and attrs.
 
-    Without ``face_masks``, ocean cells whose staggered neighbors are all
-    invalid (some vector fields, e.g. surface stresses, carry a stricter
-    staggered-point mask than the tracer wetmask at a small number of
-    coastal cells) are set to zero, so the pair keeps the reference wetmask
-    footprint exactly.
+    Faces the source masks as land drop out of the face->center average. An
+    ocean center whose faces on an axis are *all* land is a wall for that
+    axis — the model's resolved normal component there is identically zero
+    by no-normal-flow — so that grid-relative component is set to 0.0. The
+    fill happens *before* rotation: rotation mixes the components, so
+    filling afterwards would also zero a valid along-wall component (e.g.
+    the along-channel flow of a one-cell-wide channel). Every pair
+    therefore keeps the reference wetmask footprint exactly.
 
     With ``face_masks`` (the stream's level-selected face-mask artifact),
     flagged faces — land points the source carries as valid zeros — are
-    treated as invalid before interpolation, and the pair is restricted to
-    the artifact's static center footprint instead of being zero-filled:
-    zero-filling the wet centers that lose their last valid face would bake
-    fake still-water into exactly the coastal cells the masking un-biases.
-    Rotation couples the components, so a center missing either component
-    drops from both.
+    first treated as invalid, so the wall-zero fill applies at the same
+    centers a properly-masked source would produce instead of the fake
+    zeros being averaged into coastal centers.
     """
     pairs = [pair for pair in stream.rotated_pairs if pair[0] in ds.data_vars]
     if not pairs:
@@ -409,26 +409,20 @@ def _rotate_pairs(
                 u_in, v_in, wetmask, f"stream {stream.name!r}"
             )
         u, v = interpolate_to_cell_centers(u_in, v_in, wetmask)
+        u = u.fillna(0.0).where(wetmask)
+        v = v.fillna(0.0).where(wetmask)
         u, v = rotate_vectors(u, v, angle)
+        rotation_note = (
+            "interpolated from C-grid points to tracer centers (normalizing "
+            "by valid ocean neighbors; a grid-relative component with no "
+            "valid face on its axis is 0 at the center, the no-normal-flow "
+            "wall value) and rotated from grid-relative to geographic "
+            "components"
+        )
         if face_masks is not None:
-            u = u.where(face_masks["center_mask"])
-            v = v.where(face_masks["center_mask"])
             rotation_note = (
                 "structurally-zero coastal C-grid faces (land carried as "
-                "valid zeros by the source) treated as invalid, "
-                "interpolated to tracer centers (normalizing by valid "
-                "ocean neighbors) and rotated from grid-relative to "
-                "geographic components; NaN at ocean cells with no valid "
-                "face on some axis (see the variable's mask_* static)"
-            )
-        else:
-            u = u.fillna(0.0).where(wetmask)
-            v = v.fillna(0.0).where(wetmask)
-            rotation_note = (
-                "interpolated from C-grid points to tracer centers "
-                "(normalizing by valid ocean neighbors; ocean cells with no "
-                "valid neighbor set to 0) and rotated from grid-relative to "
-                "geographic components"
+                "valid zeros by the source) treated as invalid; " + rotation_note
             )
         ds = ds.drop_vars([u_name, v_name])
         ds[u_name] = u.assign_attrs(u_attrs, **{DERIVATION_ATTR: rotation_note})
@@ -451,45 +445,25 @@ def _process_chunk(
     Every variable is conformed to the reference-time wetmask (see
     _conform_to_wetmask), asserted to match it exactly, and the regrid is
     normalized by it — so the output NaN pattern equals the ``mask_k``
-    statics at every timestep. Face-masked rotated pairs are the exception:
-    they are asserted against, and normalized by, the face-mask artifact's
-    static center footprint, so their NaN pattern equals their per-variable
-    mask statics.
+    statics at every timestep.
     """
     context = f"stream {stream.name!r}"
     if level_index is not None:
         context += f" level {level_index}"
 
     face_masks = None
-    face_masked_names: set[str] = set()
     if stream.face_mask_url is not None:
         face_masks = get_face_masks(stream.face_mask_url).isel(
             {LEVEL_DIM: level_index if level_index is not None else 0}, drop=True
         )
-        face_masked_names = {
-            name for pair in stream.rotated_pairs for name in pair
-        } & set(ds.data_vars)
 
     ds = _conform_to_wetmask(ds, stream, wetmask, level_index, context)
     ds = _rotate_pairs(ds, stream, wetmask, weights_url, face_masks)
     for name in ds.data_vars:
-        expected = (
-            face_masks["center_mask"]
-            if name in face_masked_names and face_masks is not None
-            else wetmask
-        )
-        _assert_footprint(ds[name], expected, context)
+        _assert_footprint(ds[name], wetmask, context)
 
     regridder = get_regridder(weights_url, target_grid_name)
-    regridded, ocean_fraction = regrid_normalized(
-        ds.drop_vars(sorted(face_masked_names)), regridder, wetmask
-    )
-    if face_masked_names:
-        assert face_masks is not None
-        regridded_pairs, _ = regrid_normalized(
-            ds[sorted(face_masked_names)], regridder, face_masks["center_mask"]
-        )
-        regridded = regridded.merge(regridded_pairs)
+    regridded, ocean_fraction = regrid_normalized(ds, regridder, wetmask)
 
     output = xr.Dataset()
     for name, da in regridded.data_vars.items():
@@ -588,11 +562,7 @@ def _interface_depths(level_centers: np.ndarray) -> np.ndarray:
     return interfaces
 
 
-def build_statics(
-    config: PipelineConfig,
-    wetmask: xr.DataArray,
-    stream_datasets: dict[str, xr.Dataset],
-) -> xr.Dataset:
+def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
     """Eagerly build all static output fields on the target grid."""
     regridder = get_regridder(config.weights_url, config.target_grid)
     statics = xr.Dataset()
@@ -619,73 +589,6 @@ def build_statics(
             ),
         )
     statics["mask_2d"] = statics["mask_0"].copy()
-
-    # Per-variable masks for every rotated-pair output (training masks
-    # rotated vector components per variable name): ``mask_<name>_k`` for 3D
-    # pairs, ``mask_<name>`` for 2D ones. For a face-masked stream the mask
-    # is the regridded face-mask center footprint — a subset of ``mask_k``
-    # (ocean cells whose contributing centers all lack a valid staggered
-    # face are 0). For unmasked pairs it equals the tracer masks exactly.
-    velocity_mask_names: list[str] = []
-    for stream in config.streams:
-        pair_names = {name for pair in stream.rotated_pairs for name in pair}
-        if not pair_names:
-            continue
-        footprint_masks = {}
-        if stream.face_mask_url is not None:
-            center_mask = get_face_masks(stream.face_mask_url)["center_mask"]
-            if center_mask.sizes[LEVEL_DIM] != level_count:
-                raise AssertionError(
-                    f"face-mask artifact has {center_mask.sizes[LEVEL_DIM]} "
-                    f"levels; expected {level_count}"
-                )
-            for k in range(level_count):
-                fraction = regridder(
-                    center_mask.isel({LEVEL_DIM: k}, drop=True).astype("float64"),
-                    keep_attrs=False,
-                ).fillna(0.0)
-                footprint_masks[k] = (fraction > OCEAN_FRACTION_THRESHOLD).astype(
-                    OUTPUT_DTYPE
-                )
-        for name in sorted(pair_names):
-            out_name = stream.renaming.get(name, name)
-            source_da = stream_datasets[stream.name][name]
-            level_indices: list[int | None] = (
-                list(range(level_count)) if LEVEL_DIM in source_da.dims else [None]
-            )
-            for level_index in level_indices:
-                if level_index is None:
-                    mask_name = f"mask_{out_name}"
-                    level = 0
-                else:
-                    mask_name = f"mask_{out_name}_{level_index}"
-                    level = level_index
-                if stream.face_mask_url is not None:
-                    mask = footprint_masks[level].copy()
-                    derivation = (
-                        f"1 where the regridded level-{level} face-masked "
-                        "velocity footprint (tracer wetmask restricted to "
-                        "centers with a valid staggered face on both axes) "
-                        f"exceeds {OCEAN_FRACTION_THRESHOLD:g}, else 0; the "
-                        f"NaN pattern of {out_name}, a subset of mask_{level}"
-                    )
-                    provenance = provenance_attrs(
-                        stream.face_mask_url, "center_mask", derivation
-                    )
-                else:
-                    mask = statics[f"mask_{level}"].copy()
-                    provenance = provenance_attrs(
-                        config.wetmask.store,
-                        config.wetmask.variable,
-                        f"equal to mask_{level}: the NaN pattern of "
-                        f"{out_name}, whose footprint is the tracer wetmask",
-                    )
-                statics[mask_name] = mask.assign_attrs(
-                    long_name=f"ocean mask for {out_name}",
-                    units="0 if no value, 1 if value",
-                    **provenance,
-                )
-                velocity_mask_names.append(mask_name)
 
     assert surface_fraction is not None
     statics["sea_surface_fraction"] = surface_fraction.astype(
@@ -753,7 +656,7 @@ def build_statics(
         )
 
     # Enforce the land-NaN convention on everything not explicitly exempt.
-    exempt = set(land_nan_exempt_names(level_count)) | set(velocity_mask_names)
+    exempt = set(land_nan_exempt_names(level_count))
     land = statics["mask_2d"] == 0
     for name in statics.data_vars:
         if name not in exempt and statics[name].ndim > 0:
@@ -939,7 +842,7 @@ def main():
     get_regridder(config.weights_url, config.target_grid)
 
     logger.info("[statics] building static fields")
-    statics = build_statics(config, wetmask, stream_datasets)
+    statics = build_statics(config, wetmask)
 
     input_urls = sorted(
         {stream.store for stream in config.streams}

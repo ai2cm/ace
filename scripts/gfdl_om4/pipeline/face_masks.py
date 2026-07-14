@@ -5,9 +5,8 @@ with value exactly 0.0* where the native vertical grid masks them as land:
 MOM6's online z*-remap fills land columns with zeros instead of NaN. The
 valid-neighbor C-grid -> tracer-center interpolation would average these
 fake zeros into adjacent wet centers, biasing coastal speeds low. This
-module precomputes, per level, which faces to treat as invalid, plus the
-resulting tracer-center footprint the interpolated velocity pair can
-actually cover.
+module precomputes, per level, which faces to treat as invalid, plus (as a
+diagnostic) the tracer centers left with no valid face on some axis.
 
 A face is masked iff it satisfies the conjunction
 
@@ -28,11 +27,11 @@ An artifact is a GCS prefix containing ``face_masks.nc`` with:
 - ``u_face_mask`` (z_l, yh, xq) — True where a u face must be treated as
   invalid before center interpolation.
 - ``v_face_mask`` (z_l, yq, xh) — likewise for v faces.
-- ``center_mask`` (z_l, yh, xh) — the static velocity footprint: tracer
-  wetmask AND at least one surviving valid face on each axis. Because
-  rotation couples the components, a center missing either component drops
-  from both; interpolated pairs are restricted and regrid-normalized to
-  this footprint instead of the tracer wetmask (see run._rotate_pairs).
+- ``center_mask`` (z_l, yh, xh) — diagnostic: tracer wetmask AND at least
+  one surviving valid face on each axis. Centers outside it (wet but
+  walled on some axis) get the zero no-normal-flow wall value for that
+  grid-relative component during interpolation (see run._rotate_pairs);
+  the pipeline itself only consumes the face masks.
 
 Artifacts are published alongside the regridding weights and treated as
 immutable; generation is self-verifying (see generate_face_masks) and

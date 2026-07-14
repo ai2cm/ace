@@ -39,13 +39,12 @@ Contents:
   velocities carry remap-born zeros over land (MOM6's online z\*-remap
   leaves coastal velocity faces valid with value exactly 0.0 where the
   native vertical grid masks them as land). Scans the source, flags faces
-  that are structurally zero with a dry tracer neighbor, derives the
-  static tracer-center footprint the masked pair can cover, and publishes
-  both as a versioned GCS artifact; streams opt in via `face_mask_url`.
-  Every rotated-pair output gets per-variable mask statics
-  (`mask_<name>_k` / `mask_<name>`); for face-masked pairs these mark
-  their (slightly smaller) footprint at the target resolution, otherwise
-  they equal the tracer masks.
+  that are structurally zero with a dry tracer neighbor, and publishes the
+  masks as a versioned GCS artifact; streams opt in via `face_mask_url`.
+  During center interpolation a wet cell whose faces on an axis are all
+  land is a wall for that axis, and that grid-relative component is set
+  to the no-normal-flow value 0 before rotation, so every velocity output
+  keeps the tracer wetmask footprint (`mask_k`).
 
 ## Setup
 
