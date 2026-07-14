@@ -51,6 +51,14 @@ class StreamConfig:
             its wetmask-normalized twin doesn't collide.
         postprocess: named post-regrid transforms to apply per chunk, in
             order (see pipeline/postprocess.py).
+        face_mask_url: URL prefix of a precomputed face-mask artifact (see
+            pipeline/face_masks.py) for sources whose staggered velocities
+            carry remap-born zeros over land. When set, the stream's rotated
+            pairs have the flagged faces treated as invalid before center
+            interpolation, and are restricted and regrid-normalized to the
+            artifact's static center footprint instead of the tracer
+            wetmask (their output NaN pattern then equals their
+            per-variable ``mask_<name>_k`` statics rather than ``mask_k``).
     """
 
     name: str
@@ -62,6 +70,7 @@ class StreamConfig:
     time_subsample_stride: int | None = None
     full_cell_variables: list[str] = dataclasses.field(default_factory=list)
     postprocess: list[str] = dataclasses.field(default_factory=list)
+    face_mask_url: str | None = None
 
     def __post_init__(self):
         for pair in self.rotated_pairs:
@@ -97,6 +106,11 @@ class StreamConfig:
                     f"unknown postprocess {name!r} in stream {self.name!r}; "
                     f"available: {sorted(POSTPROCESS)}"
                 )
+        if self.face_mask_url is not None and not self.rotated_pairs:
+            raise ValueError(
+                f"stream {self.name!r} sets face_mask_url but has no "
+                "rotated_pairs for it to apply to"
+            )
 
 
 @dataclasses.dataclass

@@ -30,6 +30,10 @@ streams:
       - rhoinsitu
     rotated_pairs:
       - [uo, vo]
+    # These sources carry coastal staggered velocity faces that are valid
+    # with value exactly 0.0 where the vertical remap unmasked land columns;
+    # the artifact flags them so they are not averaged into coastal centers.
+    face_mask_url: gs://vcm-ml-scratch/jamesd/gfdl-om4-face-masks/v1/om4-picontrol-2026-06-24
     postprocess:
       - kelvin_sst
   # 5-day-mean surface fluxes/forcings, whose end-of-interval time labels

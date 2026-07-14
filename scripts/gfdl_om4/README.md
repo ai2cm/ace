@@ -35,6 +35,17 @@ Contents:
   conservative weights for a source×target grid pair and stores them as a
   versioned GCS artifact, plus the per-process cached regridder loader used
   by workers.
+- `pipeline/face_masks.py`: one-time setup step for sources whose staggered
+  velocities carry remap-born zeros over land (MOM6's online z\*-remap
+  leaves coastal velocity faces valid with value exactly 0.0 where the
+  native vertical grid masks them as land). Scans the source, flags faces
+  that are structurally zero with a dry tracer neighbor, derives the
+  static tracer-center footprint the masked pair can cover, and publishes
+  both as a versioned GCS artifact; streams opt in via `face_mask_url`.
+  Every rotated-pair output gets per-variable mask statics
+  (`mask_<name>_k` / `mask_<name>`); for face-masked pairs these mark
+  their (slightly smaller) footprint at the target resolution, otherwise
+  they equal the tracer masks.
 
 ## Setup
 
@@ -44,6 +55,7 @@ weights:
 ```
 make create_environment      # conda env gfdl-om4-ingestion
 make generate_weights        # precompute all conservative regridding weights
+make generate_face_masks     # scan sources for remap-born zero velocity faces
 ```
 
 ## Running
