@@ -407,7 +407,7 @@ inference:
     loader:
       start_indices:
         times:
-          - '1979-01-01T00:00:00'
+          - '1979-01-02T00:00:00'
       dataset:
         data_path: /climate-default/2026-07-09-vertically-resolved-c96-4deg-daily-shield-amip-p4k-dataset
         file_pattern: AMIP-p4K.zarr
@@ -447,7 +447,7 @@ inference:
     loader:
       start_indices:
         times:
-          - '1979-01-01T00:00:00'
+          - '1979-01-02T00:00:00'
       dataset:
         data_path: /climate-default/2026-07-09-vertically-resolved-c96-4deg-daily-shield-amip-p2k-dataset
         file_pattern: AMIP-p2K.zarr
