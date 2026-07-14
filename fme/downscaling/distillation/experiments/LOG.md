@@ -8,6 +8,36 @@ Central planning + outcomes log for distilled downscaling students. Process:
 
 ---
 
+## ⚡ At a glance  <!-- keep this current: the daily check-in view -->
+
+_Last updated: 2026-07-13._
+
+### 🔴 In flight — check for updates, finish write-ups when done
+
+| run | kind | question | on completion |
+|---|---|---|---|
+| `2yhjonz9` (band_gamma=0.5) | training | does a gentle hi-k spectral tilt beat flat `i26sidsm`? | `check_runs --report`; compare vs `i26sidsm` at best-sustained; write verdict in its stub |
+| `34rg7wii` (band_gamma=1) | training | " (stronger tilt) | same as above; fit the 0/0.5/1 `band_gamma` response curve |
+| `p337gcg9` (Lo-only ablation, CONUS) | eval | is Student-Hi droppable? | `check_runs --compare-eval rmoodemk p337gcg9`; write verdict (drop-Hi?) in the ablation report |
+
+### 🟢 Next up — likely-good experiments (queued, not launched)
+
+1. **Native step-count sweep** — 1-step (task #3) + 4-step (task #2) f-distill vs the
+   2-step `i26sidsm`; find the quality-vs-NFE knee.
+   ([write-up](reports/2026-07-13-fdistill-step-count-sweep-TBD.md))
+2. **Spectral-aware early stop + `best_student_spec` selector** — spec 13 / task #1;
+   also fixes the checkpoint-selection trap that confounds every comparison.
+3. **Port the tuned spectral loss → multi-variable MoE** with per-var `variable_weights`
+   (up-weight the worst-spectrum vars; winds/PRMSL were the MoE weak spots).
+4. **Multi-scale (multi-head) discriminator** — spec 12 flagship E2; the big untested GAN
+   texture lever for the winds hi-k gap single taps never closed.
+5. **Non-monotonic mid *bump*** (SpectralMatchingLoss code change) — only if the
+   `band_gamma` sweep shows the mid band still lags.
+6. **Longer reduce-GAN re-run** (`gan=3e-4`) — `6dotglmg` stopped at 14k, before the
+   late-drift regime it was meant to test; re-run with checkpointing.
+
+---
+
 ## Run registry
 
 Every launched run gets a row. `verdict`: ✅ win · ➖ flat · ❌ degrade · ⏳ running
@@ -98,18 +128,16 @@ point at the standardized reports.
   /lo). **Launched 2026-07-13, CONUS only** — beaker `01KXEYCC9HAZ7F1G85E3KRPKFD`,
   commit `af4d134`. Write-up:
   [report](reports/2026-07-13-lo-only-from-noise200-ablation-TBD.md).
-- **★ PLANNED — 4-step f-distill, warm-started from the 2-step spectral winner.** Train a
-  4-step student (`--student-steps 4`) warm-started from `i26sidsm`'s
-  `best_student_tail.ckpt`, spectral W=1e-2, baseline = `i26sidsm` (2-step). Does 2× the
-  NFE buy enough spectral/tail quality? Plus a cheap no-train probe: **1-step eval of the
-  2-step `i26sidsm`** to measure the 2nd step's contribution (a lower bound on
-  native-1-step quality, not a fair 1-vs-2 test). **Mechanism note:** f-distill training
-  is *not* step-independent — `student_sample_steps` sets the discrete `t_list` nodes
-  `t_student` is sampled from and whether `input_student` is pure noise (1-step) or
-  **real-data re-noised** (N-step interior nodes, teacher-forced → exposure bias at
-  inference). See [[fdistill-step-coupling]] / `dmd2.py:97–116`. Needs a warm-start
-  entrypoint flag (sub-task 1). Write-up:
-  [report](reports/2026-07-13-4step-fdistill-warmstart-TBD.md).
+- **★ PLANNED — native f-distill step-count sweep (1 / 2 / 4 step).** Train a native
+  **1-step** (task #3) and native **4-step** (task #2) student from scratch
+  (`--student-steps 1|4`, spectral W=1e-2), baseline = the 2-step `i26sidsm`; find the
+  quality-vs-NFE knee. No warm-start (training is short; a native run at each step count
+  is the fair test — a 1-step *eval* of the 2-step model only lower-bounds native-1-step).
+  **Mechanism:** f-distill training is *not* step-independent — `student_sample_steps` sets
+  the discrete `t_list` nodes `t_student` is drawn from and whether `input_student` is pure
+  noise (1-step) or real-data re-noised (N-step interior, teacher-forced → inference
+  exposure bias). See [[fdistill-step-coupling]] / `dmd2.py:97–116`. Write-up:
+  [report](reports/2026-07-13-fdistill-step-count-sweep-TBD.md).
 - **Next (experiments):** port the tuned spectral config (flat all-band, `i26sidsm`) to
   the multi-variable MoE runs with per-variable `variable_weights` (up-weight the
   worst-spectrum variables). If the mid band still lags, the remaining lever is a
