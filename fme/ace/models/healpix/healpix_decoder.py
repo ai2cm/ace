@@ -91,7 +91,7 @@ class UNetDecoderConfig:
         n_channels = self.n_channels
         n_levels = len(n_channels)
 
-        decoder: List[nn.Module] = []
+        decoder: list[DecoderLevel] = []
         for n, curr_channel in enumerate(n_channels):
             up_sample_module = None
             level_nside = (
@@ -139,7 +139,7 @@ class UNetDecoderConfig:
         )
 
         return UNetDecoder(
-            decoder=nn.ModuleList(decoder),
+            decoder=decoder,
             output_layer=output_layer,
         )
 
@@ -185,17 +185,18 @@ class UNetDecoder(nn.Module):
 
     def __init__(
         self,
-        decoder: nn.ModuleList,
+        decoder: list[DecoderLevel],
         output_layer: nn.Module,
     ):
         """
         Args:
             decoder: Ordered per-level :class:`DecoderLevel` modules built by
-                :meth:`UNetDecoderConfig._build`.
+                :meth:`UNetDecoderConfig._build`; wrapped in an
+                ``nn.ModuleList`` here for submodule registration.
             output_layer: Final output-projection module.
         """
         super().__init__()
-        self.decoder = decoder
+        self.decoder = nn.ModuleList(decoder)
         self.output_layer = output_layer
 
     def forward(self, inputs: Sequence[torch.Tensor]) -> torch.Tensor:

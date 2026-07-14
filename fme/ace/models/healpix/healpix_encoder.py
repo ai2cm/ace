@@ -91,7 +91,7 @@ class UNetEncoderConfig:
         down_factor = self.down_sampling_block.downsample_spatial_factor()
 
         old_channels = input_channels
-        encoder: List[nn.Module] = []
+        encoder: list[nn.Sequential] = []
         for n, curr_channel in enumerate(self.n_channels):
             modules: List[nn.Module] = []
             if n > 0:
@@ -124,7 +124,7 @@ class UNetEncoderConfig:
 
             encoder.append(nn.Sequential(*modules))
 
-        return UNetEncoder(encoder=nn.ModuleList(encoder))
+        return UNetEncoder(encoder=encoder)
 
 
 class UNetEncoder(nn.Module):
@@ -139,14 +139,15 @@ class UNetEncoder(nn.Module):
     padding backend, and the channel schedule, which live in the config.
     """
 
-    def __init__(self, encoder: nn.ModuleList):
+    def __init__(self, encoder: list[nn.Sequential]):
         """
         Args:
             encoder: Ordered per-level encoder modules built by
-                :meth:`UNetEncoderConfig._build`.
+                :meth:`UNetEncoderConfig._build`; wrapped in an
+                ``nn.ModuleList`` here for submodule registration.
         """
         super().__init__()
-        self.encoder = encoder
+        self.encoder = nn.ModuleList(encoder)
 
     def forward(self, inputs: torch.Tensor) -> Sequence[torch.Tensor]:
         """
