@@ -1,5 +1,5 @@
 
 ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KVBMGDWE3EHZGH0W8V5SRHEA|done|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KVBMGDWE3EHZGH0W8V5SRHEA/ICx1-500yr||ai2/climate-titan|b200
-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KVBMGDWE3EHZGH0W8V5SRHEA|done|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KVBMGDWE3EHZGH0W8V5SRHEA/ICx9-40yr||ai2/climate-titan|b200
+ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KVBMGDWE3EHZGH0W8V5SRHEA|run_inf_ICx1-40yr-timing|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KVBMGDWE3EHZGH0W8V5SRHEA/ICx1-40yr||ai2/climate-titan|h100
 
-ft-deterministic-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KWWYQ545FC8G3TXEAH8NHYQY|run_inf_ICx1-500yr|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWWYQ545FC8G3TXEAH8NHYQY/ICx1-500yr||ai2/climate-titan|b200
+ft-deterministic-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KWWYQ545FC8G3TXEAH8NHYQY|done|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWWYQ545FC8G3TXEAH8NHYQY/ICx1-500yr||ai2/climate-titan|b200
