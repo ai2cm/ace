@@ -19,7 +19,7 @@ from generate_eval_configs import (
     CONFIG_PREFIX,
     DEFAULT_CHECKPOINT_PATH,
     DEFAULT_SOURCE_MAP,
-    HERE,
+    RUN_CONFIGS_DIR,
     _build_eval_suite_config,
     _fetch_wandb_run_names,
     _write_config,
@@ -30,6 +30,12 @@ from generate_eval_configs import (
 from generate_eval_configs import EVAL_SUITE_CONFIG_PREFIX as _EVAL_SUITE_CONFIG_PREFIX
 
 OROGRAPHY_EVAL_SUITE_CONFIG_PREFIX = f"{_EVAL_SUITE_CONFIG_PREFIX}orog-"
+
+# Orography-swap evals only ever run the best-inference checkpoint (not
+# besttrain/lastepoch) -- submit_eval_jobs.py sources it directly from the
+# corresponding non-orography run's own result dataset, so there is no
+# separate "orography training run" or dataset to record.
+OROGRAPHY_CHECKPOINT_SUFFIXES = ("-bestinf",)
 
 # Plain data_path/file_pattern/engine dicts identifying each grid's native
 # store, confirmed against the real GCS zarr stores. Both are the same 4°
@@ -112,7 +118,7 @@ def generate_orography_eval_config(
         for entry in cfg["inferences"]:
             loader = entry["config"]["loader"]
             loader["dataset"] = _swap_hgtsfc_grid(loader["dataset"], grid)
-        out_path = HERE / source_config_to_orography_eval_suite_config(
+        out_path = RUN_CONFIGS_DIR / source_config_to_orography_eval_suite_config(
             source_path.name, grid
         )
         _write_config(
@@ -123,6 +129,7 @@ def generate_orography_eval_config(
             existing_only,
             wandb_run_names,
             eval_run_name_base=eval_suite_config_to_run_name(out_path.name),
+            checkpoint_suffixes=OROGRAPHY_CHECKPOINT_SUFFIXES,
         )
 
 

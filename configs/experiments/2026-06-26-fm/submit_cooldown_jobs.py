@@ -18,6 +18,8 @@ import subprocess
 from _version_select import add_version_arg, stem_matches_version
 
 HERE = pathlib.Path(__file__).parent
+RUN_CONFIGS_DIR = HERE / "run_configs"
+RUN_CONFIGS_DIRNAME = RUN_CONFIGS_DIR.name
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
 WANDB_PROJECT = "FM"
@@ -28,7 +30,7 @@ CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 def configs_for_version(version: str | None) -> list[str]:
     return sorted(
         path.name
-        for path in HERE.glob("*cooldown.yaml")
+        for path in RUN_CONFIGS_DIR.glob("*cooldown.yaml")
         if path.name.startswith(CONFIG_PREFIX)
         and stem_matches_version(path.stem, version)
     )
@@ -75,7 +77,7 @@ def main() -> None:
 
     configs = configs_for_version(args.version)
     for config_filename in configs:
-        config_path = HERE / config_filename
+        config_path = RUN_CONFIGS_DIR / config_filename
         if not config_path.exists():
             raise FileNotFoundError(
                 f"{config_filename} not found"
@@ -89,7 +91,12 @@ def main() -> None:
                 "with real Beaker dataset IDs first."
             )
         job_name = config_to_job_name(config_filename)
-        cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]
+        cmd = [
+            str(RUN_SCRIPT),
+            f"{RUN_CONFIGS_DIRNAME}/{config_filename}",
+            job_name,
+            WANDB_GROUP,
+        ]
         print("Submitting:", " ".join(cmd))
         if not args.dry_run:
             env = {

@@ -28,6 +28,8 @@ CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 EVAL_CHECKPOINT_NAME_SUFFIXES = ("-besttrain", "-bestinf", "-lastepoch")
 
 HERE = pathlib.Path(__file__).parent
+BASE_CONFIGS_DIR = HERE / "base_configs"
+RUN_CONFIGS_DIR = HERE / "run_configs"
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
@@ -151,11 +153,12 @@ def _write_config(
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
     eval_run_name_base: str | None = None,
+    checkpoint_suffixes: tuple[str, ...] = EVAL_CHECKPOINT_NAME_SUFFIXES,
 ) -> None:
     if wandb_run_names is not None:
         eval_run_name_base = eval_run_name_base or source_run_name
         eval_run_names = [
-            f"{eval_run_name_base}{suffix}" for suffix in EVAL_CHECKPOINT_NAME_SUFFIXES
+            f"{eval_run_name_base}{suffix}" for suffix in checkpoint_suffixes
         ]
         if all(name in wandb_run_names for name in eval_run_names):
             if out_path.exists():
@@ -200,7 +203,7 @@ def generate_eval_config(
         inference_names=inference_names,
         checkpoint_path=checkpoint_path,
     )
-    out_path = HERE / source_config_to_eval_suite_config(source_path.name)
+    out_path = RUN_CONFIGS_DIR / source_config_to_eval_suite_config(source_path.name)
     _write_config(
         cfg,
         out_path,
@@ -214,7 +217,7 @@ def generate_eval_config(
 def discover_source_configs(version: str | None) -> list[pathlib.Path]:
     return sorted(
         p
-        for p in HERE.glob("*.yaml")
+        for p in BASE_CONFIGS_DIR.glob("*.yaml")
         if p.name.startswith(CONFIG_PREFIX)
         and "nc-sfno" in p.name
         and stem_matches_version(p.stem, version)

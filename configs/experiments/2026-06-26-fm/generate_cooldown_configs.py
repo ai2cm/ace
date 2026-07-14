@@ -32,6 +32,8 @@ import yaml
 from _version_select import add_version_arg, stem_matches_version
 
 HERE = pathlib.Path(__file__).parent
+BASE_CONFIGS_DIR = HERE / "base_configs"
+RUN_CONFIGS_DIR = HERE / "run_configs"
 WANDB_PROJECT = "FM"
 WANDB_ENTITY = "ai2cm"
 WANDB_PREFIX = "ace2-fm-"  # stripped from wandb run names before comparison
@@ -195,7 +197,7 @@ def generate_cooldown_config(
     wandb_run_names: set[str] | None = None,
     suffix: str = "-cooldown",
 ) -> None:
-    out_path = HERE / f"{source_path.stem}{suffix}.yaml"
+    out_path = RUN_CONFIGS_DIR / f"{source_path.stem}{suffix}.yaml"
 
     beaker_dataset_id = None
     if source_map is not None:
@@ -318,7 +320,7 @@ def main() -> None:
 
     source_configs = sorted(
         p
-        for p in HERE.glob("*.yaml")
+        for p in BASE_CONFIGS_DIR.glob("*.yaml")
         if p.name.startswith(CONFIG_PREFIX)
         and "nc-sfno" in p.name
         and stem_matches_version(p.stem, args.version)

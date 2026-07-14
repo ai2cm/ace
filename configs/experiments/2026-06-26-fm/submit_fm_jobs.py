@@ -19,6 +19,8 @@ import subprocess
 from _version_select import add_version_arg, stem_matches_version
 
 HERE = pathlib.Path(__file__).parent
+BASE_CONFIGS_DIR = HERE / "base_configs"
+BASE_CONFIGS_DIRNAME = BASE_CONFIGS_DIR.name
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 
 WANDB_ENTITY = "ai2cm"
@@ -37,7 +39,7 @@ def configs_for_version(version: str | None) -> list[str]:
     # submit_cooldown_jobs.py, and eval suites use a different prefix.
     return sorted(
         path.name
-        for path in HERE.glob("*.yaml")
+        for path in BASE_CONFIGS_DIR.glob("*.yaml")
         if path.name.startswith(CONFIG_PREFIX)
         and "nc-sfno" in path.name
         and stem_matches_version(path.stem, version)
@@ -102,14 +104,19 @@ def main() -> None:
 
     configs = configs_for_version(args.version)
     for config_filename in configs:
-        config_path = HERE / config_filename
+        config_path = BASE_CONFIGS_DIR / config_filename
         if not config_path.exists():
             raise FileNotFoundError(f"{config_filename} not found")
         job_name = config_to_job_name(config_filename)
         if job_name in existing_runs:
             print(f"Skipping (already in wandb): {job_name}")
             continue
-        cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]
+        cmd = [
+            str(RUN_SCRIPT),
+            f"{BASE_CONFIGS_DIRNAME}/{config_filename}",
+            job_name,
+            WANDB_GROUP,
+        ]
         print("Submitting:", " ".join(cmd))
         if not args.dry_run:
             env = {
