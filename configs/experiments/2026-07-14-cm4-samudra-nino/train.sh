@@ -32,11 +32,10 @@ gantry run \
     --task-name $JOB_NAME \
     --description "Ocean-only Samudra CM4 1pctCO2 from scratch with Nino3.4 readout head" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace ai2/ace \
-    --priority normal \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --preemptible \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/saturn-cirrascale \
+    --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
