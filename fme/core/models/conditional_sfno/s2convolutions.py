@@ -152,9 +152,9 @@ class SpectralConvS2(nn.Module):
     (global-mean) mode: the per-mode weight at l=0 is bypassed, so the filter
     cannot do global-level reasoning. Its l=0 weight then trains to zero
     gradient. At ``spectral_ratio == 1`` this holds the global mean exactly; at
-    ``spectral_ratio < 1`` the l=0 still passes through the shared channel
-    projections (pre_proj/post_proj), which is a fixed mix, not per-mode
-    reasoning, so the mean is largely but not exactly preserved.
+    ``spectral_ratio < 1`` the l=0 instead passes through the shared channel
+    projections (pre_proj/post_proj), so the mean is no longer held fixed --
+    but that is a fixed channel mix, not per-mode l=0 reasoning.
     """
 
     def __init__(
@@ -415,9 +415,12 @@ class SpectralConvS2(nn.Module):
             )
             xp = xp + self.lora_scaling * lora_update
             if self._preserve_global_mean and self._has_global_mean:
-                # Bypass the l=0 per-mode weight: pass the input's l=0 through
-                # unchanged so the filter does no global-mean reasoning. See the
-                # class docstring for the exact-vs-approximate behavior by ratio.
+                # Skip the per-mode weight at l=0 by passing the input's l=0
+                # through unchanged, so the filter cannot reason about or alter
+                # the global mean. With spectral_ratio < 1 this l=0 is the
+                # bottleneck (pre_proj) representation, so the mean still passes
+                # through the shared pre/post projections rather than being held
+                # exactly; that is intended (see the class-level note).
                 xp = torch.cat([x[..., :1, :], xp[..., 1:, :]], dim=-2)
             xp = xp.reshape(B, self.spectral_channels, H, W)
             x = xp.contiguous()
