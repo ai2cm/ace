@@ -21,11 +21,13 @@ forcing_loader:
       data_path: /climate-default
       file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
       engine: zarr
+      n_repeats: 10
   ocean:
     dataset:
       data_path: /climate-default
       file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
       engine: zarr
+      n_repeats: 10
   num_data_workers: 1
 initial_condition:
   ocean:
