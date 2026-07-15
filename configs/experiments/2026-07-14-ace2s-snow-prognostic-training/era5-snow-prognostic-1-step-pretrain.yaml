@@ -7,8 +7,11 @@ max_epochs: 120
 ema:
   decay: 0.999
 inference:
-  # Long climate rollout (unnamed so its W&B metric keys match the control/other runs).
-  - n_forward_steps: 7300
+  # Long climate rollout. Explicitly named "inference" so its W&B metric keys match the
+  # control/other runs: with more than one inference entry, an unnamed first entry defaults
+  # to "inference_0" (not "inference"), which would break cross-run comparison.
+  - name: inference
+    n_forward_steps: 7300
     forward_steps_in_memory: 40
     loader:
       start_indices:
@@ -33,7 +36,7 @@ inference:
   # nproc_per_node=4), quarterly across the held-out 1996-2005 period, each rolled out
   # 40 steps (~10 days at 6-hourly). Inference data may not be subset, so ICs are given
   # as explicit held-out timestamps; tune the count/spacing/lead as desired.
-  - name: short-lead
+  - name: inference-short-lead
     n_forward_steps: 40
     forward_steps_in_memory: 40
     loader:

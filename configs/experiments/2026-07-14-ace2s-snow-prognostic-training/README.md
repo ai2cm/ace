@@ -32,12 +32,13 @@ replicating the standard two-stage ACE2S recipe otherwise.
   and RMSE at the first forecast step) logs automatically during one-step validation. (Merged from
   `feature/one-step-r2-metric`.)
 - **Short-lead, many-IC inline inference**: each config runs the standard long climate rollout
-  **plus** a second `short-lead` inference (40 held-out ICs given as explicit timestamps — ERA5
+  **plus** a second `inference-short-lead` inference (40 held-out ICs given as explicit timestamps — ERA5
   quarterly 1996-2005, CM4 across validation years 0306-0310 — each a ~10-day rollout) to emphasize
   short-range skill. Inference data may not be subset, so ICs are listed as explicit timestamps
-  rather than index ranges. The long-rollout entry is left unnamed so its W&B metric keys stay
-  comparable with other/prior runs; only the short-lead entry is named. IC count/spacing and lead
-  (`n_forward_steps`) are tunables.
+  rather than index ranges. The long rollout is explicitly named `inference` so its W&B metric keys
+  match the control/other runs — with more than one inference entry, an unnamed first entry would
+  default to `inference_0` (not `inference`) and break cross-run comparison. IC count/spacing and
+  lead (`n_forward_steps`) are tunables.
 
 ## Base recipes (ported)
 
@@ -90,5 +91,5 @@ W&B (project `ace`, group `ace2s-snow-prognostic`).
 
 After a model finetunes, compare against the deployed ACE2S control checkpoints. Focus on snow
 skill (the new `surface_snow_amount`/`surface_snow_area_fraction` metrics and the one-step
-skill_map panels), the `short-lead` inference section for short-range skill, and near-surface T/Q
+skill_map panels), the `inference-short-lead` section for short-range skill, and near-surface T/Q
 to check for regressions from the added prognostic state.
