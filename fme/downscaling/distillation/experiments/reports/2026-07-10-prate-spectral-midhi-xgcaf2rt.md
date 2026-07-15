@@ -37,6 +37,16 @@ keeping `band_gamma=0` so **mid and high are weighted equally**. Expectation: mi
 - **Band geometry:** student fine output is 512 wide → `nw = 512//2+1 = 257`
   wavenumbers. Eval thirds: lo `[0,85)` · mid `[85,170)` · hi `[170,257)`.
 
+> **Metric selection:** the `first → best@% → last` trajectories in §2/§3 use each
+> metric's own optimum; the **deploy-relevant** checkpoint is `best_student_tail`
+> (the one bundled into eval, as for `f7z93y0a`/`i26sidsm`). For this run it lands at
+> **step 1690 (3%)** — spectrally poor (`spec_mean` 0.30) — so `best_student_tail`
+> here is **not** representative and `best_student.ckpt` @2730 is recommended instead.
+> §3's "Comparison at the SELECTED checkpoints" gives the checkpoint-matched read
+> against `i26sidsm` (whose best_tail @7930 → 0.060/0.12/0.14, `spec_mean` 0.11), and
+> §3's best-sustained rows give the step-controlled comparison. This decoupling of
+> tail/CRPS selectors from the spectral optimum is this run's headline finding.
+
 ## 1 · Training behavior
 
 - **GAN health:** `healthy` — gen 1.2, disc 1.18 (both engaged; no collapse).

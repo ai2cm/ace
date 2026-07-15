@@ -193,10 +193,16 @@ _Reverse-chronological; one line per finding, linking the run report._
   [report](reports/2026-07-09-prate-spectral-lowgan-fix-6dotglmg.md).
 - **2026-07-09** — Launched the first valid reduce-GAN arm `6dotglmg` (gan=3e-4);
   the earlier `gpx5574t` low-GAN run was invalid (pre-fix target, crashed early).
-- **2026-07-08** — ✅ **Corrected spectral-matching loss is a large win.** `i26sidsm`
-  beats the GAN-only baseline 5–20× on `spec_mae` and improves the independent `crps`
-  + `tail_99.99`, without fighting distillation (`f_distill_loss` ≈ baseline). Late
-  drift persists → best model is mid-training. See
+- **2026-07-08** — ✅ **Corrected spectral-matching loss is a clear win.** Compared
+  **checkpoint-matched** (each run at its own `best_student_tail` — the checkpoint
+  actually deployed to eval: baseline @2470, `i26sidsm` @7930), `i26sidsm` beats the
+  GAN-only baseline **~3–4× on `spec_mae`** (mean 0.11 vs 0.36) while keeping the
+  independent metrics tied (`crps_mean` 0.105 vs 0.105; tails both ~ideal ~1.0), without
+  fighting distillation (`f_distill_loss` ≈ baseline). Same direction/magnitude as the
+  held-out X-SHiELD eval (−71–78% PSD bias). _(An earlier entry cited "5–20×" from
+  last-step values; that compared the two runs' drifted end states and overstated it —
+  the checkpoint-matched gain is ~3–4×.)_ Late drift persists → true spectral optimum is
+  mid-training, missed by CRPS/tail selectors. See
   [report](reports/2026-07-08-prate-spectral-fix-i26sidsm.md).
 - **2026-07-07** — ❌ First spectral arms (`s4abc6ba`, `gpx5574t`) were net-harmful
   due to two coupled bugs (matched teacher's x0 *prediction* not a *sample*;

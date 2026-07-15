@@ -21,6 +21,15 @@ the spectral gains? (The pre-fix `gpx5574t` low-GAN run was invalid.)_
   **`gan_weight=3e-4`** (vs `i26sidsm`'s 1e-3 — the only change).
 - **Baseline for comparison:** `i26sidsm` (gan=1e-3, else identical).
 
+> **Metric selection:** validation trajectories below are anchored at the
+> **`best_student_tail` checkpoint — step 8190** (~58% of this 14k-step run; where
+> `val/tail_best_score` bottomed at 0.00056) — the checkpoint that would ship if this
+> arm were deployed (matching `f7z93y0a`/`i26sidsm`). Trajectories are
+> `first → best_tail@8190 → last`. Unlike the longer runs, this arm's tail-min lands
+> late (58%) because it **crashed at 14k before the late-drift regime**, so best_tail
+> here still sits in the good spectral regime — see §4. §4's matched-step comparison to
+> `i26sidsm` is the primary read; training/loss metrics are end of run.
+
 ## 1 · Training behavior
 
 - **GAN health:** `healthy` — gen 1.34, disc 1.08 (both engaged; no collapse).
@@ -36,30 +45,37 @@ the spectral gains? (The pre-fix `gpx5574t` low-GAN run was invalid.)_
 
   _f_distill dominates; the GAN term is now ~half its `i26sidsm` share, as intended._
 
-- **`val/crps_mean`:** improved 10% first→best, then +3% best→last.
-- **`val/spec_mae_mean`:** improved 96% first→best, then +92% best→last. **⚠️ this
-  drift figure is not comparable to `i26sidsm`'s +632%** — see §4 (run crashed at 14k,
-  a much shorter run, so it never entered the late-drift regime).
+- **`val/crps_mean`:** 0.1164 → **0.1053** (best_tail@8190) → 0.1075 (+2% best_tail→last).
+- **`val/spec_mae_mean`:** 0.921 → **0.0456** (best_tail@8190) → 0.0633 (+39% best_tail→last).
+  **⚠️ this drift is not comparable to `i26sidsm`'s catastrophic +632%** — see §4 (run
+  crashed at 14k, a much shorter run, so it never entered the late-drift regime; the
+  per-band optima are lower still, ~0.01, mid-run).
 
 ## 2 · Tail behavior
 
-Ratio to teacher; ~1.0 ideal, >1 over-produces extremes, <1 under.
+Ratio to teacher; ~1.0 ideal, >1 over-produces extremes, <1 under. Values at
+`best_student_tail` (step 8190).
 
 | variable | tail_99.99 | tail_99.9999 |
 |---|---|---|
-| PRATEsfc | 0.823 → 1.0@34% → 1.08 | 0.776 → 1.0@58% → 1.05 |
+| PRATEsfc | 0.823 → **1.060** → 1.081 | 0.776 → **1.001** → 1.052 |
 
-Worst tail: **PRATEsfc**.
+Worst tail: **PRATEsfc** (only variable). Both tails near-ideal at best_tail and only
+mildly over-produced by end (1.08 / 1.05) — no drift blow-up (run stopped at 14k).
 
 ## 3 · Power spectrum
 
-`spec_mae` per band (relative error; lower better).
+`spec_mae` per band (relative error; lower better). Values at `best_student_tail`
+(step 8190).
 
 | variable | lo | mid | hi |
 |---|---|---|---|
-| PRATEsfc | 1.13 → 0.0116@14% → 0.117 | 1.12 → 0.0137@99% → 0.0286 | 0.512 → 0.00356@18% → 0.0449 |
+| PRATEsfc | 1.13 → **0.078** → 0.117 | 1.12 → **0.019** → 0.029 | 0.512 → **0.041** → 0.045 |
 
-Worst spectrum: **PRATEsfc** · PSD figures: `val/power_spectrum/<VAR>` in wandb.
+Worst spectrum: **lo band** at best_tail (0.078) · PSD figures:
+`val/power_spectrum/<VAR>` in wandb. Note best_tail@8190 lands at a clean, near-optimal
+spectrum here (`spec_mean` 0.046 vs best-sustained 0.040) — the tail selector and the
+spectral optimum happen to coincide because the run never drifted.
 
 ## 4 · Training trajectory vs baseline `i26sidsm`
 
@@ -100,6 +116,9 @@ Spectrum (partly constrained) is ~tied.
   — is **untested** (drift rate at 14k is identical to baseline, +57% vs +61%; baseline's
   blow-up to +632% is a >14k phenomenon).
 - **Recommended checkpoint:** best-sustained ~step 2.9k (`spec_mean` 0.040, tail 1.07).
+  The saved `best_student_tail.ckpt` @8190 is nearly as good here (`spec_mean` 0.046,
+  tails 1.06/1.00) — selector and spectral optimum coincide because this run crashed
+  before drifting (contrast `i26sidsm`, whose best_tail sits at a noisy 0.11).
 - **Next action:** **re-run longer** to actually reach the late-drift regime (≥28k, with
   checkpointing so a crash doesn't lose the answer) — ideally after spec 13 (spectral
   early-stop) lands so it stops at the optimum instead of drifting. Until then, low-GAN
