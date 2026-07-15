@@ -7,6 +7,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.spatial_masking import (
     NullSpatialMasking,
     SpatialMasking,
@@ -30,7 +31,9 @@ class SpatialMaskProviderABC(abc.ABC):
     def update(self: SelfType, other: SelfType) -> None: ...
 
     @abc.abstractmethod
-    def build_output_spatial_masker(self) -> SpatialMasking: ...
+    def build_output_spatial_masker(
+        self, exclude: NameAndPrefixMatcher | None = None
+    ) -> SpatialMasking: ...
 
     @abc.abstractmethod
     def localize(self: SelfType) -> SelfType:
@@ -57,7 +60,9 @@ class _NullSpatialMaskProvider(SpatialMaskProviderABC):
                 f"Attempted to update NullSpatialMaskProvider with non-null {other}"
             )
 
-    def build_output_spatial_masker(self) -> SpatialMasking:
+    def build_output_spatial_masker(
+        self, exclude: NameAndPrefixMatcher | None = None
+    ) -> SpatialMasking:
         return NullSpatialMasking()
 
     def get_state(self) -> dict[str, Any]:
@@ -105,16 +110,24 @@ class SpatialMaskProvider(SpatialMaskProviderABC):
                     "to start with the string 'mask_'."
                 )
 
-    def build_output_spatial_masker(self) -> SpatialMasking:
+    def build_output_spatial_masker(
+        self, exclude: NameAndPrefixMatcher | None = None
+    ) -> SpatialMasking:
         """
         Returns a StaticSpatialMasking object that fills in NaNs outside of mask
         valid points, i.e. where the mask value is 0.
 
+        Args:
+            exclude: Names/prefixes to leave unmasked. Use this for outputs that
+                are not spatial fields (e.g. broadcast scalar readouts), which
+                would otherwise be NaN-filled on land and mismatch their
+                spatially-constant targets.
         """
         return StaticSpatialMasking(
             mask_value=0,
             fill_value=float("nan"),
             mask=self,
+            exclude=exclude if exclude is not None else NameAndPrefixMatcher(),
         )
 
     @property

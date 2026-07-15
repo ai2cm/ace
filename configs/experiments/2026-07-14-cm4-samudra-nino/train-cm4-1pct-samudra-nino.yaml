@@ -120,6 +120,22 @@ stepper:
     - eastward_surface_wind_stress
     - northward_surface_wind_stress
     - total_frozen_precipitation_rate
+  # nino34_lead_* are broadcast scalar readouts, not spatial fields; exclude them
+  # from land (output) masking so their (finite, spatially-constant) predictions
+  # aren't NaN-filled on land and mismatched against their finite targets.
+  output_masking_exclude_names:
+  - nino34_lead_01
+  - nino34_lead_02
+  - nino34_lead_03
+  - nino34_lead_04
+  - nino34_lead_05
+  - nino34_lead_06
+  - nino34_lead_07
+  - nino34_lead_08
+  - nino34_lead_09
+  - nino34_lead_10
+  - nino34_lead_11
+  - nino34_lead_12
   step:
     type: single_module
     config:

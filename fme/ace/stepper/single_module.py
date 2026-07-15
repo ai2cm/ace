@@ -36,6 +36,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
 from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -530,6 +531,11 @@ class StepperConfig:
         step: The step configuration.
         input_masking: Config for masking step inputs.
         derived_forcings: Configuration for deriving forcing variables.
+        output_masking_exclude_names: Output names/prefixes to leave unmasked by
+            the land (spatial) output masking. Use for non-spatial outputs such
+            as broadcast scalar readouts (e.g. ``nino34_lead_*``), which would
+            otherwise be NaN-filled on land and mismatch their spatially-constant
+            targets, producing a NaN loss.
     """
 
     step: StepSelector
@@ -537,6 +543,7 @@ class StepperConfig:
     derived_forcings: DerivedForcingsConfig = dataclasses.field(
         default_factory=lambda: DerivedForcingsConfig()
     )
+    output_masking_exclude_names: list[str] | None = None
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -623,7 +630,9 @@ class StepperConfig:
             )
         try:
             output_masking: SpatialMasking = (
-                dataset_info.spatial_mask_provider.build_output_spatial_masker()
+                dataset_info.spatial_mask_provider.build_output_spatial_masker(
+                    exclude=NameAndPrefixMatcher(self.output_masking_exclude_names)
+                )
             )
         except MissingDatasetInfo:
             output_masking = NullSpatialMasking()

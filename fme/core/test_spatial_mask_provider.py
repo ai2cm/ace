@@ -2,7 +2,34 @@ import pytest
 import torch
 
 from fme.core.device import get_device
+from fme.core.name_and_prefix_matcher import NameAndPrefixMatcher
 from fme.core.spatial_mask_provider import NullSpatialMaskProvider, SpatialMaskProvider
+
+
+def test_build_output_spatial_masker_exclude():
+    # one land point (mask value 0); masked vars get NaN there, excluded ones don't.
+    mask = torch.ones(1, 2, 2)
+    mask[0, 0, 0] = 0.0
+    provider = SpatialMaskProvider(masks={"mask_2d": mask, "mask_1": mask})
+    masker = provider.build_output_spatial_masker(
+        exclude=NameAndPrefixMatcher(["nino34_lead_01"])
+    )
+    out = masker(
+        {
+            "sst": torch.ones(1, 2, 2),
+            "nino34_lead_01": torch.full((1, 2, 2), 0.5),
+        }
+    )
+    # a masked spatial field gets NaN on the land point
+    assert int(torch.isnan(out["sst"]).sum()) == 1
+    # the excluded (broadcast-scalar) output is left finite and constant
+    assert int(torch.isnan(out["nino34_lead_01"]).sum()) == 0
+    assert float(out["nino34_lead_01"].std()) == 0.0
+    # without exclude, the trailing "_01" maps it to mask_1 and it would be NaN'd
+    unmasked = provider.build_output_spatial_masker()(
+        {"nino34_lead_01": torch.full((1, 2, 2), 0.5)}
+    )
+    assert int(torch.isnan(unmasked["nino34_lead_01"]).sum()) == 1
 
 
 def test_mask_provider_init_error():
