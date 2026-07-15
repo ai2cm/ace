@@ -1756,6 +1756,8 @@ class TrainStepper(
             data_mask=data_mask,
         )
         step_total_loss = step_loss.total()
+        if not bool(torch.isfinite(step_total_loss).all()):
+            _log_nonfinite_step_loss(step, gen_step, target_step)
         metrics[f"loss_step_{step}"] = step_total_loss.detach()
         if optimize:
             per_ch = step_loss.get_channel_losses()
@@ -1835,6 +1837,40 @@ class TrainStepper(
 
     def set_epoch(self, epoch: int) -> None:
         self._stepper.set_epoch(epoch)
+
+
+def _log_nonfinite_step_loss(
+    step: int,
+    gen_step: TensorMapping,
+    target_step: TensorMapping,
+) -> None:
+    """Log which output channels have non-finite gen/target values when a
+    training step loss is non-finite, to localize the source of a NaN loss.
+    """
+    lines: list[str] = []
+    for name in sorted(gen_step):
+        g = gen_step[name]
+        g_bad = int((~torch.isfinite(g)).sum())
+        t = target_step.get(name) if hasattr(target_step, "get") else None
+        t_bad = int((~torch.isfinite(t)).sum()) if t is not None else -1
+        if g_bad > 0 or t_bad > 0:
+            lines.append(
+                f"  {name}: gen_nonfinite={g_bad}/{g.numel()} "
+                f"target_nonfinite={t_bad}"
+            )
+    detail = (
+        "\n".join(lines)
+        if lines
+        else (
+            "  (no non-finite gen/target channels; the NaN likely arises inside the "
+            "loss reduction/normalization)"
+        )
+    )
+    logging.error(
+        "Non-finite loss at forward step %d. Non-finite output channels:\n%s",
+        step,
+        detail,
+    )
 
 
 def get_serialized_stepper_vertical_coordinate(

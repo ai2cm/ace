@@ -2,9 +2,11 @@
 
 set -e
 
-JOB_NAME="cm4-1pct-samudra-nino-train"
-JOB_GROUP="cm4-1pct-samudra-nino"
-CONFIG_FILENAME="train-cm4-1pct-samudra-nino-from-scratch.yaml"
+# Override CONFIG_FILENAME to run the no-nino control, e.g.:
+#   CONFIG_FILENAME=train-cm4-1pct-samudra-CONTROL-no-nino.yaml JOB_NAME=cm4-1pct-control ./train.sh
+CONFIG_FILENAME="${CONFIG_FILENAME:-train-cm4-1pct-samudra-nino-from-scratch.yaml}"
+JOB_NAME="${JOB_NAME:-cm4-1pct-samudra-nino-train}"
+JOB_GROUP="${JOB_GROUP:-cm4-1pct-samudra-nino}"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
