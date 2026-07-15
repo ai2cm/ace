@@ -48,45 +48,86 @@ Contents:
 
 ## Setup
 
-One-time setup to prepare the conda environment and precompute regridding
-weights:
+One-time setup to prepare the conda environment and precompute the durable
+pipeline inputs (published under the dated, immutable
+`INPUTS_URL_ROOT` prefix in the Makefile — regenerating requires a new
+prefix or explicit overwrite flags):
 
 ```
 make create_environment      # conda env gfdl-om4-ingestion
-make generate_weights        # precompute all conservative regridding weights
-make generate_face_masks     # scan sources for remap-born zero velocity faces
+make generate_weights        # conservative regridding weights (F90 + F22.5)
+make generate_face_masks     # per-simulation remap-born-zero face masks
 ```
+
+Face-mask artifacts are per-simulation (see `pipeline/face_masks.py`): each
+`generate_face_masks_*` target scans that source's first year against the
+independently-censused expected surface-face counts baked into the target.
+
+## Configs
+
+One config per output store, under `configs/`: {piControl, 1pctCO2} ×
+{1° `F90`, 4° `F22.5`}. All input artifacts (weights, face masks) come from
+the permanent inputs prefix, sources are read from
+`vcm-ml-raw-flexible-retention`, and outputs are flat dated zarrs in
+`gs://vcm-ml-intermediate/`; nothing consumed by a production run lives
+under `vcm-ml-scratch`.
 
 ## Running
 
-### Test runs
+### Smoke tests
 
-A local DirectRunner subset run (a few timesteps, writes to a scratch
-store):
+Each config has a local DirectRunner smoke test that runs a few timesteps
+into a throwaway scratch store, asserts the wetmask conform step is a no-op
+(`--max-conformed-cells 0`), and checks the output opens with the expected
+variable set:
 
 ```
-make test_run
+make smoke_tests             # all four configs + the checks below
+make smoke_test_picontrol_1deg   # or any single config
 ```
 
-or directly, with any beam pipeline options after the script's own
-arguments:
+`make smoke_tests` additionally verifies that the piControl and 1pctCO2
+configs derive identical wetmasks (`make check_wetmask_equivalence`;
+downstream training/analysis assumes the stores share one mask — a
+difference is a stop-and-report finding, not something to conform around),
+and that a repeat run against an existing output store refuses to
+initialize into it (`make smoke_test_repeat_fails`).
+
+The pipeline can also be invoked directly, with any beam pipeline options
+after the script's own arguments:
 
 ```
 python -m pipeline.run --config configs/om4-picontrol-1deg.yaml \
     --num-timesteps 6 --output-path <url> --runner DirectRunner
 ```
 
-### Production runs
+### Production launch checklist
 
-A production run on Google Cloud Dataflow — build and push the worker
-image, then launch (the config's output path is used as-is):
+1. **Smoke test** — `make smoke_tests` (or the single-config target for the
+   config being launched) against the exact configs to be launched.
+2. **Launch** — build and push the worker image, then launch on Google
+   Cloud Dataflow (the config's output path is used as-is, and the run
+   aborts if a store already exists there):
 
-```
-make push_dataflow
-make dataflow                # or CONFIG=configs/<other>.yaml make dataflow
-```
+   ```
+   make push_dataflow
+   make dataflow_picontrol_1deg     # one target per config
+   ```
 
-`make dataflow` invokes `run-dataflow.sh`, which supplies the Dataflow
+   Expect a silent multi-minute setup phase before workers start: the
+   driver builds the template (processing the first timestep of every
+   stream) and writes its metadata serially — accepted behavior, not a
+   hang.
+3. **Inspect** — after the job completes, check the store:
+
+   ```
+   python -m pipeline.check_output --config configs/om4-picontrol-1deg.yaml
+   ```
+
+   and review the job's Dataflow console page for stage-level errors
+   before consuming the output.
+
+`make dataflow*` invokes `run-dataflow.sh`, which supplies the Dataflow
 resource flags (project, region, temp location, worker shape, container
 image). Unlike the era5 pipeline, the pipeline code here is a package, so
 the worker image copies `pipeline/` in and puts it on `PYTHONPATH` rather

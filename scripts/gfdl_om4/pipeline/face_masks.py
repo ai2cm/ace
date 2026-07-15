@@ -40,8 +40,8 @@ refuses to clobber. Example invocation (see also the Makefile):
     python -m pipeline.face_masks \\
         --config configs/om4-picontrol-1deg.yaml \\
         --stream snapshot_ocean \\
-        --output-url \\
-          gs://vcm-ml-scratch/jamesd/gfdl-om4-face-masks/v1/om4-picontrol-2026-06-24 \\
+        --output-url $FACE_MASKS_URL_ROOT/om4-picontrol-2026-06-19 \\
+        --start-time 0151-01-06 --end-time 0152-01-01 \\
         --expected-surface-count-u 16960 \\
         --expected-surface-count-v 16694
 """
@@ -181,10 +181,20 @@ def generate_face_masks(
     expected_surface_count_u: int | None = None,
     expected_surface_count_v: int | None = None,
     overwrite: bool = False,
+    start_time: str | None = None,
+    end_time: str | None = None,
 ) -> None:
-    """Scan a stream's C-grid velocity pair over the config's full time
-    window, compute the per-level face masks and center footprint, verify
-    them, and write the artifact under the ``output_url`` prefix.
+    """Scan a stream's C-grid velocity pair over the config's time window
+    (optionally overridden by ``start_time``/``end_time``), compute the
+    per-level face masks and center footprint, verify them, and write the
+    artifact under the ``output_url`` prefix.
+
+    The masks are static, so a window that samples the source's structural
+    zeros is enough (e.g. the first year of a multi-century simulation);
+    false flags would require a real velocity to be exactly 0.0 at every
+    scanned step, and the run-time staleness assertion
+    (run._assert_no_masked_candidate_faces) still guards every processed
+    chunk of the full series.
 
     Self-verification, before anything is written:
 
@@ -210,12 +220,15 @@ def generate_face_masks(
     if fs.exists(url) and not overwrite:
         raise FileExistsError(
             f"Face-mask artifact already exists at {url}. Published artifacts "
-            "are immutable: bump the version in the output URL (e.g. "
-            "FACE_MASKS_VERSION in the Makefile), or pass --overwrite if you "
-            "really mean to replace it."
+            "are immutable: publish under a new output URL, or pass "
+            "--overwrite if you really mean to replace it."
         )
 
     config = load_config(config_path)
+    if start_time is not None:
+        config.start_time = start_time
+    if end_time is not None:
+        config.end_time = end_time
     streams = [s for s in config.streams if s.name == stream_name]
     if not streams:
         raise ValueError(
@@ -372,6 +385,13 @@ def main() -> None:
         help="Assert this many flagged surface v faces (independent census)",
     )
     parser.add_argument(
+        "--start-time",
+        help="Override the config's inclusive scan-window start (e.g. 0151-01-06)",
+    )
+    parser.add_argument(
+        "--end-time", help="Override the config's inclusive scan-window end"
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace an existing artifact at the output URL "
@@ -386,6 +406,8 @@ def main() -> None:
         args.expected_surface_count_u,
         args.expected_surface_count_v,
         args.overwrite,
+        args.start_time,
+        args.end_time,
     )
 
 

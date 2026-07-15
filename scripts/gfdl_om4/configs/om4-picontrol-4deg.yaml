@@ -1,11 +1,11 @@
-# 5-daily 1-degree ocean (Samudra) store from the 200-year CM4 piControl
+# 5-daily 4-degree ocean (Samudra) store from the 200-year CM4 piControl
 # simulation.
-target_grid: F90
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F90
+target_grid: F22.5
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F22.5
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 output:
-  path: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+  path: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr
   time_chunk_size: 1
   time_shard_size: 365
 wetmask:

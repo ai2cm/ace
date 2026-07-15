@@ -56,6 +56,7 @@ import argparse
 import logging
 
 import apache_beam as beam
+import fsspec
 import numpy as np
 import xarray as xr
 import xarray_beam as xbeam
@@ -105,6 +106,21 @@ def _make_zarr_store(url: str, read_only: bool = True):
         return ObjectStore(from_url(url), read_only=read_only)
     else:
         return url
+
+
+def _assert_output_store_absent(path: str) -> None:
+    """Refuse to initialize into a pre-existing output store.
+
+    Output stores are written once and treated as immutable; initializing
+    the template into an existing store would corrupt or silently overwrite
+    it. Delete the store explicitly or pick a new output path.
+    """
+    fs, root = fsspec.url_to_fs(path)
+    if fs.exists(root):
+        raise FileExistsError(
+            f"output store already exists at {path}; refusing to initialize "
+            "into it. Delete it explicitly or choose a new output path."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +289,7 @@ def _conform_to_wetmask(
     wetmask: xr.DataArray,
     level_index: int | None,
     context: str,
+    max_conformed_cells: int | None = None,
 ) -> xr.Dataset:
     """Force every tracer-grid variable's valid-data footprint to equal the
     reference-time wetmask.
@@ -297,6 +314,10 @@ def _conform_to_wetmask(
     still fails loudly instead of being silently rewritten. Staggered
     (C-grid) variables are not touched here; they conform to the wetmask
     during center interpolation in _rotate_pairs.
+
+    ``max_conformed_cells``, when given, is a stricter per-variable bound on
+    the conformed-cell count for this chunk (0 asserts the conform step is a
+    no-op, e.g. in smoke-test runs over a few timesteps).
     """
     limit = MAX_FOOTPRINT_DRIFT_FRACTION * max(int(wetmask.sum()), 1)
     conformed = ds.copy()
@@ -313,6 +334,13 @@ def _conform_to_wetmask(
                 f"at {missing + dropped} cells (limit "
                 f"{limit * da.sizes.get(TIME_DIM, 1):.0f}); source is "
                 "inconsistent with the wetmask, refusing to conform"
+            )
+        if max_conformed_cells is not None and missing + dropped > max_conformed_cells:
+            raise AssertionError(
+                f"{context}: the wetmask conform step would touch "
+                f"{missing + dropped} cells of {name!r}, above the "
+                f"requested --max-conformed-cells bound of "
+                f"{max_conformed_cells}"
             )
         if missing:
             if level_index is None or level_index == 0:
@@ -437,6 +465,7 @@ def _process_chunk(
     weights_url: str,
     target_grid_name: str,
     level_index: int | None,
+    max_conformed_cells: int | None = None,
 ) -> xr.Dataset:
     """Transform one in-memory chunk: conform to the wetmask, rotate, check
     footprints, regrid, and (for 3D chunks) split the level into suffixed 2D
@@ -457,7 +486,9 @@ def _process_chunk(
             {LEVEL_DIM: level_index if level_index is not None else 0}, drop=True
         )
 
-    ds = _conform_to_wetmask(ds, stream, wetmask, level_index, context)
+    ds = _conform_to_wetmask(
+        ds, stream, wetmask, level_index, context, max_conformed_cells
+    )
     ds = _rotate_pairs(ds, stream, wetmask, weights_url, face_masks)
     for name in ds.data_vars:
         _assert_footprint(ds[name], wetmask, context)
@@ -519,6 +550,7 @@ def process_chunk(
     wetmask: xr.DataArray | None = None,
     weights_url: str | None = None,
     target_grid_name: str | None = None,
+    max_conformed_cells: int | None = None,
 ) -> tuple[xbeam.Key, xr.Dataset]:
     """Beam entry point: process one (time, level) chunk of a stream."""
     assert stream is not None
@@ -533,7 +565,13 @@ def process_chunk(
         # surface level of the wetmask.
         wetmask = wetmask.isel({LEVEL_DIM: 0}, drop=True)
     output = _process_chunk(
-        ds, stream, wetmask, weights_url, target_grid_name, level_index
+        ds,
+        stream,
+        wetmask,
+        weights_url,
+        target_grid_name,
+        level_index,
+        max_conformed_cells,
     )
     new_key = xbeam.Key(
         {TIME_DIM: key.offsets[TIME_DIM], "lat": 0, "lon": 0},
@@ -779,6 +817,13 @@ def _get_parser() -> argparse.ArgumentParser:
         help="Process only the first N timesteps (for subset test runs)",
     )
     parser.add_argument("--output-path", help="Override the config's output path")
+    parser.add_argument(
+        "--max-conformed-cells",
+        type=int,
+        help="Fail if the wetmask conform step touches more than this many "
+        "cells of any variable in any chunk (0 asserts the conform step is "
+        "a no-op, for smoke-test runs)",
+    )
     return parser
 
 
@@ -793,6 +838,7 @@ def main():
         config.end_time = args.end_time
     if args.output_path is not None:
         config.output.path = args.output_path
+    _assert_output_store_absent(config.output.path)
 
     logger.info(
         "[config] streams=%s target_grid=%s output=%s time_chunk=%d time_shard=%d",
@@ -904,6 +950,7 @@ def main():
                         wetmask=wetmask,
                         weights_url=config.weights_url,
                         target_grid_name=config.target_grid,
+                        max_conformed_cells=args.max_conformed_cells,
                     )
                     | f"{label}_consolidate" >> xbeam.ConsolidateChunks(output_shards)
                     | f"{label}_to_zarr"

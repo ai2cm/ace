@@ -31,7 +31,9 @@ DIRECT_ARGS=(
 DATAFLOW_ARGS=(
     --project vcm-ml
     --region us-central1
-    --temp_location gs://vcm-ml-scratch/jamesd/gfdl-om4-ingestion/temp/
+    # A dated temp prefix: staged artifacts must never be picked up from an
+    # older launch generation's leftovers.
+    --temp_location gs://vcm-ml-scratch/jamesd/gfdl-om4-ingestion-2026-07-15/temp/
     --experiments use_runner_v2
     --sdk_location container
     --sdk_container_image "$SDK_CONTAINER_IMAGE"
