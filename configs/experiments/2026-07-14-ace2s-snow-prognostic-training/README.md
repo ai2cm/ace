@@ -29,16 +29,28 @@ replicating the standard two-stage ACE2S recipe otherwise.
   (corrected) `PRATEsfc`, since frozen precip is a component of total precip. (Merged from
   `feature/frozen-precip-corrector`.)
 - **One-step skill-map validation metric**: the default-on `skill_map` aggregator (per-gridcell R²
-  and RMSE at the first forecast step) logs automatically during one-step validation. (Merged from
+  and RMSE at the first forecast step) logs automatically during one-step validation, with the R²
+  panel on a fixed [-1, 1] colorbar so near-constant snow variables don't wash it out. (Merged from
   `feature/one-step-r2-metric`.)
 - **Short-lead, many-IC inline inference**: each config runs the standard long climate rollout
-  **plus** a second `inference-short-lead` inference (40 held-out ICs given as explicit timestamps — ERA5
-  quarterly 1996-2005, CM4 across validation years 0306-0310 — each a ~10-day rollout) to emphasize
-  short-range skill. Inference data may not be subset, so ICs are listed as explicit timestamps
-  rather than index ranges. The long rollout is explicitly named `inference` so its W&B metric keys
-  match the control/other runs — with more than one inference entry, an unnamed first entry would
-  default to `inference_0` (not `inference`) and break cross-run comparison. IC count/spacing and
-  lead (`n_forward_steps`) are tunables.
+  **plus** a second `inference-short-lead` probe (40 held-out ICs as explicit timestamps — ERA5
+  quarterly 1996-2005, CM4 across validation years 0306-0310 — each a ~10-day rollout, 10-member
+  ensemble). It logs a discrete short-range skill ladder: `step_means` RMSE/bias (denorm per-variable
+  + norm `channel_mean`) and `ensembles` CRPS / spread-skill / ensemble-mean RMSE at leads
+  1/2/4/8/20/40 (6h→10d). `weight: 0` (diagnostic — does not drive checkpoint selection);
+  `forward_steps_in_memory: 8` bounds memory under the 10× ensemble broadcast; climate metrics
+  (`power_spectrum`, `zonal_mean`) are disabled as meaningless over 10 days. Inline inference cannot
+  log the continuous lead-time curve (`enable_time_series=False`); the discrete ladder is the
+  workaround. The long rollout is explicitly named `inference` so its W&B keys match the control/other
+  runs — with >1 inference entry, an unnamed first entry defaults to `inference_0` (not `inference`)
+  and breaks cross-run comparison.
+- **Reading the 10-day skill gain vs control**: the gain is read by overlaying a control run against
+  the treatment on the shared `inference-short-lead` keys (`mean_step_{k}/...`, `ensemble_step_{k}/...`).
+  This requires the control to be retrained with a **byte-identical** `inference-short-lead` block
+  (same name, IC timestamps, `step_means`/`ensembles`, `n_ensemble_per_ic`) so the keys and ICs
+  match — otherwise the W&B overlay silently breaks. **TODO when control-rerun configs are created:
+  copy this entry verbatim into them.** (A continuous lead-time curve, if ever wanted, needs the
+  offline evaluator with `enable_time_series=True`.)
 
 ## Base recipes (ported)
 

@@ -31,13 +31,16 @@ inference:
       num_data_workers: 8
     aggregator:
       log_histograms: true
-  # Short-lead, many-IC rollout emphasizing short-range skill. 40 ICs (divisible by
-  # nproc_per_node=4), spread across the held-out validation years (0306-0310), each
-  # rolled out 40 steps (~10 days at 6-hourly). Inference data may not be subset, so ICs
-  # are given as explicit held-out timestamps; tune the count/spacing/lead as desired.
+  # Short-lead, many-IC skill probe (diagnostic; weight 0). 40 held-out ICs (validation
+  # years 0306-0310), each a ~10-day (40-step) rollout with a 10-member ensemble. Logs a
+  # discrete RMSE/bias ladder (step_means) + CRPS/spread (ensembles) at leads 1/2/4/8/20/40.
+  # Inference data may not be subset, so ICs are explicit held-out timestamps. Keep this
+  # entry IDENTICAL in the control rerun for a paired W&B comparison.
   - name: inference-short-lead
     n_forward_steps: 40
-    forward_steps_in_memory: 40
+    forward_steps_in_memory: 8      # lowered to bound memory under the 10x ensemble broadcast
+    n_ensemble_per_ic: 10
+    weight: 0.0
     loader:
       start_indices:
         times:
@@ -87,7 +90,32 @@ inference:
         engine: zarr
       num_data_workers: 8
     aggregator:
-      log_histograms: true
+      # Discrete short-lead skill: step_means = per-IC-averaged RMSE/bias at each lead
+      # (denorm = physical per-variable; norm adds the cross-variable channel_mean);
+      # ensembles = CRPS / spread-skill-ratio / ensemble-mean RMSE (norm) at each lead.
+      step_means:
+        - {step: 1, target: denorm}
+        - {step: 1, target: norm}
+        - {step: 2, target: denorm}
+        - {step: 2, target: norm}
+        - {step: 4, target: denorm}
+        - {step: 4, target: norm}
+        - {step: 8, target: denorm}
+        - {step: 8, target: norm}
+        - {step: 20, target: denorm}
+        - {step: 20, target: norm}
+        - {step: 40, target: denorm}
+        - {step: 40, target: norm}
+      ensembles:
+        - {step: 1, target: norm}
+        - {step: 2, target: norm}
+        - {step: 4, target: norm}
+        - {step: 8, target: norm}
+        - {step: 20, target: norm}
+        - {step: 40, target: norm}
+      # 10-day window: climate/long-rollout metrics are not meaningful.
+      power_spectrum: {enabled: false}
+      zonal_mean: {enabled: false}
 logging:
   log_to_screen: true
   log_to_wandb: true
