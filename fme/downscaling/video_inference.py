@@ -137,6 +137,12 @@ class VideoInferenceConfig:
     use_ema: bool = True
     # Cap the number of batches processed per rank; for smoke tests.
     max_batches: int | None = None
+    # If True, overwrite an existing store at output_path (mode="w") instead
+    # of the safe default (mode="w-", fail if it already exists). Use this
+    # while iterating on a run that keeps failing/retrying; leave False once
+    # a run is expected to succeed, so a completed store can't be clobbered
+    # by accident.
+    overwrite: bool = False
 
     def configure_logging(self, log_filename: str) -> None:
         config = dataclasses.asdict(self)
@@ -206,7 +212,7 @@ def run_inference(config: VideoInferenceConfig) -> None:
         nondim_coords={
             "frame_source": xr.DataArray(frame_source, dims=[TIME_NAME]),
         },
-        mode="w-",
+        mode="w" if config.overwrite else "w-",
         time_calendar="julian",
     )
     writer.initialize_store(data_dtype=np.float32)

@@ -18,6 +18,11 @@ output_path: /climate-default/2026-06-25-temporal-diffusion/inference/global-1de
 n_ensemble: 32
 ensemble_chunk_size: 1
 use_ema: true
+# The first attempt crashed after initialize_store() had already created the
+# zarr, so a retry with the safe default (mode="w-") refuses to touch it.
+# Set back to false once a run is expected to actually complete, so a
+# finished store can't be clobbered by accident.
+overwrite: true
 logging:
   log_to_screen: true
   log_to_wandb: false
