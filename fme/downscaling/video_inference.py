@@ -16,6 +16,7 @@ Run (mirrors video_train.py's invocation):
 
 import argparse
 import dataclasses
+import itertools
 import logging
 import os
 from dataclasses import dataclass
@@ -177,8 +178,17 @@ def run_inference(config: VideoInferenceConfig) -> None:
     frame_source = np.ones(n_time, dtype=np.int8)
     frame_source[0::clip_stride] = 0
 
-    lat = griddata.fine_coords.coords["lat"]
-    lon = griddata.fine_coords.coords["lon"]
+    # griddata.fine_coords reflects the *pre*-lat_extent/lon_extent-crop
+    # domain (it's built from build_from_config_sequence's properties, before
+    # _build_aligned_subset_pair applies the crop) -- e.g. with
+    # lat_extent: {-88, 88} the raw store has 180 latitude points but the
+    # data actually fed to the model, and hence generate()'s output, is
+    # cropped to 176. Get the true post-crop lat/lon from the first real
+    # batch's own coordinates instead, which is what the model actually used.
+    batch_iterator = griddata.get_generator()
+    first_batch = next(batch_iterator)
+    lat = first_batch.fine.latlon_coordinates.lat[0].cpu().numpy()
+    lon = first_batch.fine.latlon_coordinates.lon[0].cpu().numpy()
     n_lat, n_lon = len(lat), len(lon)
 
     coords = {
@@ -218,7 +228,7 @@ def run_inference(config: VideoInferenceConfig) -> None:
     writer.initialize_store(data_dtype=np.float32)
 
     n_batches = len(griddata.loader)
-    for i, batch in enumerate(griddata.get_generator()):
+    for i, batch in enumerate(itertools.chain([first_batch], batch_iterator)):
         if config.max_batches is not None and i >= config.max_batches:
             break
 
