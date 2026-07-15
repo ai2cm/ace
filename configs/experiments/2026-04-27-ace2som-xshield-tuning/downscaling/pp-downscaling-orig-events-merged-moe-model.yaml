@@ -56,8 +56,8 @@ events:
     start: 7
     stop: 23
   lon_extent:
-    start: 130.0
-    stop: 146.0
+    start: 130
+    stop: 146
   save_generated_samples: true
   n_samples: 16
 - name: WPacific_hurricane_landfall_china_20230510

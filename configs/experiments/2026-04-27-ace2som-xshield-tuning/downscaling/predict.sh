@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="predict-perfect-pred-events-merged-moe-model"
+JOB_NAME="predict-perfect-pred-tc-tracks-corrected-range"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="pp-downscaling-orig-events-merged-moe-model.yaml"
+CONFIG_FILENAME="pp-downscaling-xshield-tracks.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -30,7 +30,8 @@ wandb_group=""
 #--not-preemptible \
 #     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
 
-#    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
+#    --dataset $EXISTING_RESULTS_DATASET:bundled_moe_multivariate.ckpt:/ckpt.tar \
+
     # --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
     # --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
 gantry run \
@@ -47,7 +48,8 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:bundled_moe_multivariate.ckpt:/ckpt.tar \
+    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
