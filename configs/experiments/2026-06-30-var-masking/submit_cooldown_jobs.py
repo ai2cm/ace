@@ -36,8 +36,8 @@ CONFIGS = sorted(
 
 
 def config_to_job_name(config_filename: str) -> str:
-    # ace-train-config-4deg-nc-sfno-c96-mask10-co2default-cooldown.yaml
-    # -> ace2-var-mask-nc-sfno-c96-mask10-co2default-v2-cooldown
+    # ace-train-config-4deg-nc-sfno-era5-mask10-co2default-cooldown.yaml
+    # -> ace2-var-mask-nc-sfno-era5-mask10-co2default-v1-cooldown
     suffix = pathlib.Path(config_filename).stem.removeprefix(CONFIG_PREFIX)
     for cooldown_suffix in COOLDOWN_SUFFIXES:
         if suffix.endswith(cooldown_suffix):

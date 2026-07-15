@@ -1,11 +1,10 @@
-"""Submit SST-perturbation inference jobs for the VarMaskingC96/ERA5 checkpoints.
+"""Submit SST-perturbation inference jobs for the VarMasking8 (ERA5) checkpoints.
 
 For each training run in wandb_to_beaker_map.json, submits one free-running
-inference job per SST perturbation level, against the run's own model's
-native varying-CO2 forcing dataset (see generate_sst_configs.py). Each job
-mounts that run's best_inference_ckpt.tar at /ckpt.tar and runs the matching
-config from run_configs/ (produced by generate_sst_configs.py) via
-run-ace-inference.sh.
+inference job per SST perturbation level, against the native varying-CO2
+forcing dataset (see generate_sst_configs.py). Each job mounts that run's
+best_inference_ckpt.tar at /ckpt.tar and runs the matching config from
+run_configs/ (produced by generate_sst_configs.py) via run-ace-inference.sh.
 
 Usage:
     python submit_sst_jobs.py [--dry-run] [--run RUN [RUN ...]]
@@ -23,13 +22,8 @@ import subprocess
 import sys
 
 from generate_eval_configs import TRAINING_RESULT_DATASETS
-from generate_sst_configs import (
-    MODELS,
-    RUN_CONFIGS_DIR,
-    SST_PERTURBATIONS,
-    _model_for_run,
-    sst_config_filename,
-)
+from generate_masking_configs import WANDB_PROJECT
+from generate_sst_configs import RUN_CONFIGS_DIR, SST_PERTURBATIONS, sst_config_filename
 
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-inference.sh"
@@ -44,21 +38,20 @@ EXCLUDED_RUN_SUFFIX = re.compile(r"(cooldown|-old|-p[024]k)$")
 EXCLUDED_RUN_INFIX = re.compile(r"-seed\d+")
 
 
-def validate_configs(models: list[str], levels: list[str]) -> None:
-    for model in models:
-        for level in levels:
-            config_path = RUN_CONFIGS_DIR / sst_config_filename(model, level)
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "fme.ace.validate_config",
-                    "--config_type",
-                    "inference",
-                    str(config_path),
-                ],
-                check=True,
-            )
+def validate_configs(levels: list[str]) -> None:
+    for level in levels:
+        config_path = RUN_CONFIGS_DIR / sst_config_filename(level)
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "fme.ace.validate_config",
+                "--config_type",
+                "inference",
+                str(config_path),
+            ],
+            check=True,
+        )
 
 
 def main() -> None:
@@ -123,26 +116,20 @@ def main() -> None:
             f"available: {sorted(TRAINING_RESULT_DATASETS)}"
         )
 
-    run_models = {run_name: _model_for_run(run_name) for run_name in run_names}
-    models_needed = sorted(set(run_models.values()))
-
-    for model in models_needed:
-        for level in levels:
-            config_path = RUN_CONFIGS_DIR / sst_config_filename(model, level)
-            if not config_path.exists():
-                raise FileNotFoundError(
-                    f"{config_path.name} not found — run generate_sst_configs.py first"
-                )
+    for level in levels:
+        config_path = RUN_CONFIGS_DIR / sst_config_filename(level)
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"{config_path.name} not found — run generate_sst_configs.py first"
+            )
 
     if not args.dry_run:
-        validate_configs(models_needed, levels)
+        validate_configs(levels)
 
     for run_name in run_names:
         source_dataset_id = TRAINING_RESULT_DATASETS[run_name]
-        model = run_models[run_name]
-        project = MODELS[model].project
         for level in levels:
-            config_filename = sst_config_filename(model, level)
+            config_filename = sst_config_filename(level)
             job_name = f"{run_name}-{level}"
             cmd = [
                 str(RUN_SCRIPT),
@@ -156,7 +143,7 @@ def main() -> None:
             if not args.dry_run:
                 env = {
                     **os.environ,
-                    "WANDB_PROJECT": project,
+                    "WANDB_PROJECT": WANDB_PROJECT,
                     "BEAKER_WORKSPACE": args.beaker_workspace,
                     "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
                     "BEAKER_PRIORITY": args.beaker_priority,

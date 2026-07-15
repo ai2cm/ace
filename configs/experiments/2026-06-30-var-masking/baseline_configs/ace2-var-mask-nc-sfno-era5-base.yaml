@@ -1,4 +1,4 @@
-seed: 3
+seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -15,7 +15,7 @@ inference:
 - name: 10year
   weight: 0.0
   epochs:
-    start: 10
+    start: 0
     step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 73
@@ -113,7 +113,7 @@ inference:
 - name: 10year_insample
   weight: 1.0
   epochs:
-    start: 10
+    start: 0
     step: 10
   n_forward_steps: 3652
   forward_steps_in_memory: 73
@@ -160,7 +160,7 @@ inference:
 - name: weather_2024
   weight: 0.0
   epochs:
-    start: 10
+    start: 0
     step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
@@ -221,7 +221,7 @@ inference:
 - name: weather_1994
   weight: 0.0
   epochs:
-    start: 10
+    start: 0
     step: 10
   n_forward_steps: 5
   forward_steps_in_memory: 5
@@ -282,7 +282,7 @@ inference:
 - name: long_46year
   weight: 0.0
   epochs:
-    start: 10
+    start: 0
     step: 10
   n_forward_steps: 16794
   forward_steps_in_memory: 73
@@ -329,7 +329,7 @@ inference:
 - name: long_46year_constant_co2
   weight: 0.0
   epochs:
-    start: 10
+    start: 0
     step: 10
   n_forward_steps: 16794
   forward_steps_in_memory: 73
@@ -379,7 +379,7 @@ logging:
   log_to_screen: true
   log_to_wandb: true
   log_to_file: true
-  project: VarMaskingERA5
+  project: VarMasking8
   entity: ai2cm
 train_loader:
   batch_size: 8
@@ -482,7 +482,7 @@ stepper:
           use_mlp: true
           num_layers: 8
           operator_type: dhconv
-          clip_latent_global_means: true
+          clip_latent_global_means: false
       normalization:
         network:
           global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
@@ -617,6 +617,5 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 40
-          probability: 0.25
+          max_masked_vars: 0
       include_channel_mask_inputs: true

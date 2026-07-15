@@ -18,8 +18,8 @@ from generate_masking_configs import (
     CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
     WANDB_PREFIX,
+    WANDB_PROJECT,
     WANDB_SUFFIX,
-    config_to_project,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -28,8 +28,8 @@ WANDB_GROUP = "ace2-var-masking-2026-06-30"
 
 
 def config_to_job_name(config_filename: str) -> str:
-    # ace-train-config-4deg-nc-sfno-c96-mask10-co2default.yaml
-    # -> ace2-var-mask-nc-sfno-c96-mask10-co2default-v2
+    # ace-train-config-4deg-nc-sfno-era5-mask10-co2default.yaml
+    # -> ace2-var-mask-nc-sfno-era5-mask10-co2default-v1
     suffix = pathlib.Path(config_filename).stem.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
 
@@ -72,10 +72,9 @@ def main() -> None:
     }
     for config_filename in configs:
         job_name = config_to_job_name(config_filename)
-        project = config_to_project(config_filename)
-        env = {**base_env, "WANDB_PROJECT": project}
+        env = {**base_env, "WANDB_PROJECT": WANDB_PROJECT}
         cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]
-        print(f"Submitting ({project}):", " ".join(cmd))
+        print(f"Submitting ({WANDB_PROJECT}):", " ".join(cmd))
         if not args.dry_run:
             subprocess.run(cmd, check=True, cwd=HERE, env=env)
 

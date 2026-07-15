@@ -1,4 +1,4 @@
-"""Generate evaluator suite configs for the VarMaskingC96 training runs.
+"""Generate evaluator suite configs for the var-masking training runs.
 
 Each suite config contains all inline inference entries from the corresponding
 training config in ``run_configs/``.  submit_eval_jobs.py submits one job per
@@ -20,8 +20,8 @@ from generate_masking_configs import (
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PREFIX,
+    WANDB_PROJECT,
     WANDB_SUFFIX,
-    config_to_project,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -34,8 +34,14 @@ DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 
 # Mapping of training run name -> Beaker result dataset ID, loaded from the
 # source map. Consumed by submit_eval_jobs.py to locate each run's checkpoints.
-with open(DEFAULT_SOURCE_MAP) as _f:
-    TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
+# The map is populated by update_beaker_map.py as training runs finish, so it
+# may not exist yet (e.g. right after a base-config migration with no
+# finished runs).
+if pathlib.Path(DEFAULT_SOURCE_MAP).exists():
+    with open(DEFAULT_SOURCE_MAP) as _f:
+        TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
+else:
+    TRAINING_RESULT_DATASETS = {}
 
 
 def source_config_to_run_name(config_filename: str) -> str:
@@ -194,10 +200,9 @@ def generate_eval_config(
     delete_if_in_wandb: bool = False,
 ) -> None:
     source_run_name = source_config_to_run_name(source_path.name)
-    project = config_to_project(source_path.name)
     source_dataset_id = source_map.get(source_run_name)
     if source_dataset_id is None:
-        run_state = _fetch_wandb_run_states(project).get(source_run_name)
+        run_state = _fetch_wandb_run_states(WANDB_PROJECT).get(source_run_name)
         if run_state == "finished":
             raise KeyError(
                 f"Run {source_run_name!r} is finished in wandb but has no "
@@ -225,7 +230,7 @@ def generate_eval_config(
         source_run_name,
         source_dataset_id,
         existing_only,
-        project,
+        WANDB_PROJECT,
         delete_if_in_wandb,
     )
 

@@ -6,7 +6,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
-WANDB_PROJECT=${WANDB_PROJECT:-VarMaskingC96}
+WANDB_PROJECT=${WANDB_PROJECT:-VarMasking8}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/saturn ai2/jupiter ai2/ceres"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
@@ -64,4 +64,4 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-run_training "${1:-ace-train-config-4deg-nc-sfno-c96-mask10-co2default.yaml}" "${2:-ace2-var-mask-nc-sfno-c96-mask10-co2default-v2}" "${3:-ace2-var-masking-2026-06-30}"
+run_training "${1:-ace-train-config-4deg-nc-sfno-era5-mask10-co2default.yaml}" "${2:-ace2-var-mask-nc-sfno-era5-mask10-co2default-v1}" "${3:-ace2-var-masking-2026-06-30}"

@@ -20,7 +20,7 @@ import pathlib
 import re
 import subprocess
 
-from generate_masking_configs import BASE_MODELS, WANDB_ENTITY
+from generate_masking_configs import WANDB_ENTITY, WANDB_PROJECT
 
 HERE = pathlib.Path(__file__).parent
 DEFAULT_MAP = HERE / "wandb_to_beaker_map.json"
@@ -65,11 +65,8 @@ def _fetch_run_notes() -> dict[str, str | None]:
     import wandb  # lazy import: keeps the module importable without wandb
 
     api = wandb.Api()
-    run_notes: dict[str, str | None] = {}
-    for model in BASE_MODELS:
-        runs = api.runs(f"{WANDB_ENTITY}/{model.project}")
-        run_notes.update({run.name: run.notes for run in runs})
-    return run_notes
+    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
+    return {run.name: run.notes for run in runs}
 
 
 def main() -> None:

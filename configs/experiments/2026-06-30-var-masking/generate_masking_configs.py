@@ -1,8 +1,7 @@
-"""Generate var-masking training configs from the nc-sfno base configs.
+"""Generate var-masking training configs from the nc-sfno era5 base config.
 
-Configs are generated for both base models (c96 and era5); versioning is ``-v2``
-throughout (via ``WANDB_SUFFIX``). Two config groups are written to
-``run_configs/`` (emptied first) per model, 16 per model:
+Versioning is ``-v1`` throughout (via ``WANDB_SUFFIX``). Two config groups are
+written to ``run_configs/`` (emptied first), 16 total:
 
   A. uniform mask-level sweep (``default`` scheme, ``max_masked_vars``): 0, 5,
      10, 30, crossed with co2 bernoulli masking (co2default off / co2bern90 drop
@@ -13,21 +12,28 @@ throughout (via ``WANDB_SUFFIX``). Two config groups are written to
      batch. Probabilities 1.00, 0.80, 0.50, 0.20 crossed with the same co2 axis.
      4 x 2 = 8 configs.
 
-global_mean_co2 is already an input channel in the base configs
+global_mean_co2 is already an input channel in the base config
 (in_names + next_step_forcing_names).
 """
 
 import argparse
 import copy
 import pathlib
-from typing import NamedTuple
 
 import yaml
 
 WANDB_ENTITY = "ai2cm"
+WANDB_PROJECT = "VarMasking8"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v2"  # stripped from wandb run names before comparison
+WANDB_SUFFIX = "-v1"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = "ace-train-config-4deg-"  # stripped from config stems
+
+# Generated config filename prefix (independent of the source baseline filename
+# below).
+BASE_CONFIG_STEM = "ace-train-config-4deg-nc-sfno-era5"
+
+# Baseline config sourced for every generated config.
+BASE_CONFIG_FILENAME = "ace2-var-mask-nc-sfno-era5-base.yaml"
 
 CO2_FIELD = "global_mean_co2"
 
@@ -44,34 +50,10 @@ BASELINE_CONFIGS_DIR = HERE / "baseline_configs"
 RUN_CONFIGS_DIR = HERE / "run_configs"
 
 
-class BaseModel(NamedTuple):
-    stem: str  # base config filename stem (also the generated config prefix)
-    project: str  # wandb project for this model's runs
-
-
-# One entry per base config. Source of truth shared with the seed generator.
-BASE_MODELS = [
-    BaseModel("ace-train-config-4deg-nc-sfno-c96", "VarMaskingC96"),
-    BaseModel("ace-train-config-4deg-nc-sfno-era5", "VarMaskingERA5"),
-]
-
-# Kept for backward compat with scripts/run-ace-train.sh default.
-WANDB_PROJECT = BASE_MODELS[0].project
-
-
 def config_name_to_run_name(name: str) -> str:
     """Wandb run name for a generated config stem (no .yaml)."""
     suffix = name.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
-
-
-def config_to_project(config_filename: str) -> str:
-    """Wandb project for a generated config, from its base-model stem."""
-    stem = pathlib.Path(config_filename).stem
-    for model in BASE_MODELS:
-        if stem.startswith(model.stem):
-            return model.project
-    raise ValueError(f"no BASE_MODELS entry matches config {config_filename}")
 
 
 def _fetch_wandb_run_names(project: str) -> set[str]:
@@ -99,18 +81,17 @@ def _build_input_dropout(
     return dropout
 
 
-def _apply_settings(cfg: dict, input_dropout: dict, project: str) -> None:
+def _apply_settings(cfg: dict, input_dropout: dict) -> None:
     step_cfg = cfg["stepper"]["step"]["config"]
     step_cfg["input_dropout"] = input_dropout
     step_cfg["include_channel_mask_inputs"] = True
-    cfg["logging"]["project"] = project
+    cfg["logging"]["project"] = WANDB_PROJECT
 
 
 def _write_config(
     base: dict,
     dropout: dict,
     name: str,
-    project: str,
     wandb_run_names: set[str] | None = None,
 ) -> None:
     out_path = RUN_CONFIGS_DIR / f"{name}.yaml"
@@ -122,7 +103,7 @@ def _write_config(
             print(f"Skipped {out_path.name} (run exists in wandb)")
         return
     cfg = copy.deepcopy(base)
-    _apply_settings(cfg, dropout, project)
+    _apply_settings(cfg, dropout)
     out_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
     print(f"Wrote {out_path.name}")
 
@@ -133,31 +114,28 @@ def generate_configs(fetch_wandb: bool = False) -> None:
         yaml_path.unlink()
         print(f"Removed {yaml_path.name}")
 
-    for model in BASE_MODELS:
-        base_config = BASELINE_CONFIGS_DIR / f"{model.stem}.yaml"
-        base = yaml.safe_load(base_config.read_text())
+    base_config = BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAME
+    base = yaml.safe_load(base_config.read_text())
 
-        wandb_run_names: set[str] | None = None
-        if fetch_wandb:
-            print(f"Fetching run names from {WANDB_ENTITY}/{model.project}...")
-            wandb_run_names = _fetch_wandb_run_names(model.project)
-            print(f"Found {len(wandb_run_names)} existing runs.")
+    wandb_run_names: set[str] | None = None
+    if fetch_wandb:
+        print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
+        wandb_run_names = _fetch_wandb_run_names(WANDB_PROJECT)
+        print(f"Found {len(wandb_run_names)} existing runs.")
 
-        # Group A: uniform mask-level sweep x co2.
-        for mask_level in MASK_LEVELS:
-            for co2_name, co2_rate in CO2_OPTIONS.items():
-                dropout = _build_input_dropout(mask_level, co2_rate)
-                name = f"{model.stem}-mask{mask_level}-{co2_name}"
-                _write_config(base, dropout, name, model.project, wandb_run_names)
-
-        # Group B: uniform 0-MASK_ALL scheme, probability-gated, x co2.
+    # Group A: uniform mask-level sweep x co2.
+    for mask_level in MASK_LEVELS:
         for co2_name, co2_rate in CO2_OPTIONS.items():
-            for probability in MASK_PROBABILITIES:
-                dropout = _build_input_dropout(
-                    MASK_ALL, co2_rate, probability=probability
-                )
-                name = f"{model.stem}-mask{MASK_ALL}-{co2_name}-mask{probability:.2f}"
-                _write_config(base, dropout, name, model.project, wandb_run_names)
+            dropout = _build_input_dropout(mask_level, co2_rate)
+            name = f"{BASE_CONFIG_STEM}-mask{mask_level}-{co2_name}"
+            _write_config(base, dropout, name, wandb_run_names)
+
+    # Group B: uniform 0-MASK_ALL scheme, probability-gated, x co2.
+    for co2_name, co2_rate in CO2_OPTIONS.items():
+        for probability in MASK_PROBABILITIES:
+            dropout = _build_input_dropout(MASK_ALL, co2_rate, probability=probability)
+            name = f"{BASE_CONFIG_STEM}-mask{MASK_ALL}-{co2_name}-mask{probability:.2f}"
+            _write_config(base, dropout, name, wandb_run_names)
 
 
 def main() -> None:

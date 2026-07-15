@@ -1,4 +1,4 @@
-"""Run all evaluator entries in a generated VarMaskingC96 eval suite."""
+"""Run all evaluator entries in a generated var-masking eval suite."""
 
 import argparse
 import logging
