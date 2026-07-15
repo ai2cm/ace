@@ -28,6 +28,8 @@ WANDB_USERNAME=${WANDB_USERNAME:-bhenn1983}   # W&B handle (differs from the Bea
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
 JOB_GROUP="ace2s-snow-prognostic"
+DATA_TAG="1deg-6h"                            # data resolution + timestep for this experiment dir;
+                                              # a new data regime gets its own dated dir (e.g. 4deg-daily)
 SELECT="${1:-}"                               # optional substring filter on job name
 
 cd "$REPO_ROOT"  # so the config path resolves regardless of where this is run from
@@ -93,8 +95,8 @@ run_training() {
 }
 
 # ---- Stage 1: 1-step pretrain (one seed each) --------------------------------------
-run_training "era5-snow-prognostic-1-step-pretrain.yaml" "ace2s-snowprog-era5-pretrain" "seed=0"
-run_training "cm4-snow-prognostic-1-step-pretrain.yaml"  "ace2s-snowprog-cm4-pretrain"  "seed=0"
+run_training "era5-snow-prognostic-1-step-pretrain.yaml" "ace2s-snowprog-era5-${DATA_TAG}-pretrain" "seed=0"
+run_training "cm4-snow-prognostic-1-step-pretrain.yaml"  "ace2s-snowprog-cm4-${DATA_TAG}-pretrain"  "seed=0"
 
 # ---- Stage 2: multi-step finetune (warm-start from the pretrain checkpoints) --------
 # Fill in each pretrain job's beaker result dataset ID, then uncomment the block and
@@ -103,5 +105,5 @@ run_training "cm4-snow-prognostic-1-step-pretrain.yaml"  "ace2s-snowprog-cm4-pre
 PRETRAIN_DATASET_ERA5=""   # e.g. 01K...
 PRETRAIN_DATASET_CM4=""
 
-# run_training "era5-multi-step-finetuning.yaml" "ace2s-snowprog-era5-finetune" --ckpt "$PRETRAIN_DATASET_ERA5" "seed=0"
-# run_training "cm4-multi-step-finetuning.yaml"  "ace2s-snowprog-cm4-finetune"  --ckpt "$PRETRAIN_DATASET_CM4"  "seed=0"
+# run_training "era5-multi-step-finetuning.yaml" "ace2s-snowprog-era5-${DATA_TAG}-finetune" --ckpt "$PRETRAIN_DATASET_ERA5" "seed=0"
+# run_training "cm4-multi-step-finetuning.yaml"  "ace2s-snowprog-cm4-${DATA_TAG}-finetune"  --ckpt "$PRETRAIN_DATASET_CM4"  "seed=0"
