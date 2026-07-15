@@ -1,16 +1,15 @@
 """Generate var-masking training configs from the nc-sfno era5 base config.
 
-Versioning is ``-v1`` throughout (via ``WANDB_SUFFIX``). Two config groups are
-written to ``run_configs/`` (emptied first), 16 total:
+Versioning is ``-v1`` throughout (via ``WANDB_SUFFIX``). Full factorial sweep
+written to ``run_configs/`` (emptied first) over three axes:
 
-  A. uniform mask-level sweep (``default`` scheme, ``max_masked_vars``): 0, 5,
-     10, 30, crossed with co2 bernoulli masking (co2default off / co2bern90 drop
-     ``global_mean_co2`` w.p. 0.9). 4 x 2 = 8 configs.
+  - uniform mask-level (``default`` scheme, ``max_masked_vars``): 0, 5, 10,
+    20, 30.
+  - co2 bernoulli masking: off, or drop ``global_mean_co2`` w.p. 0.75.
+  - global mean removal (``global_mean_removal`` stepper config): baseline
+    (as in the base config) or none (key removed).
 
-  B. probability gate: the ``default`` uniform scheme masks up to ``MASK_ALL``
-     (40) variables and is gated by a ``probability`` that it fires on any given
-     batch. Probabilities 1.00, 0.80, 0.50, 0.20 crossed with the same co2 axis.
-     4 x 2 = 8 configs.
+5 x 2 x 2 = 20 configs.
 
 global_mean_co2 is already an input channel in the base config
 (in_names + next_step_forcing_names).
@@ -36,14 +35,11 @@ BASE_CONFIG_STEM = "ace-train-config-4deg-nc-sfno-era5"
 BASE_CONFIG_FILENAME = "ace2-var-mask-nc-sfno-era5-base.yaml"
 
 CO2_FIELD = "global_mean_co2"
+GMR_FIELD = "global_mean_removal"
 
-# Group A factors: uniform mask-level sweep x co2 bernoulli masking.
-MASK_LEVELS = [0, 5, 10, 30]  # uniform default max_masked_vars
-CO2_OPTIONS = {"co2default": None, "co2bern90": 0.9}
-
-# Group B: uniform 0-MASK_ALL masking gated by a per-batch firing probability.
-MASK_ALL = 40
-MASK_PROBABILITIES = [1.00, 0.80, 0.50, 0.20]
+MASK_LEVELS = [0, 5, 10, 20, 30]  # uniform default max_masked_vars
+CO2_OPTIONS = {"co2default": None, "co2bern75": 0.75}
+GMR_OPTIONS = {"gmron": True, "gmroff": False}  # True: keep baseline config
 
 HERE = pathlib.Path(__file__).parent
 BASELINE_CONFIGS_DIR = HERE / "baseline_configs"
@@ -64,34 +60,30 @@ def _fetch_wandb_run_names(project: str) -> set[str]:
     return {run.name for run in runs}
 
 
-def _build_input_dropout(
-    mask_level: int,
-    co2_rate: float | None,
-    probability: float | None = None,
-) -> dict:
-    groups = []
-    if co2_rate is not None:
-        groups.append({"variables": [CO2_FIELD], "masking": {"rate": co2_rate}})
+def _apply_settings(
+    cfg: dict, mask_level: int, co2_rate: float | None, keep_gmr: bool
+) -> None:
     default: dict = {"max_masked_vars": mask_level}
-    if probability is not None:
-        default["probability"] = probability
     dropout: dict = {"default": default}
-    if groups:
-        dropout["override_groups"] = groups
-    return dropout
+    if co2_rate is not None:
+        dropout["override_groups"] = [
+            {"variables": [CO2_FIELD], "masking": {"rate": co2_rate}}
+        ]
 
-
-def _apply_settings(cfg: dict, input_dropout: dict) -> None:
     step_cfg = cfg["stepper"]["step"]["config"]
-    step_cfg["input_dropout"] = input_dropout
+    step_cfg["input_dropout"] = dropout
     step_cfg["include_channel_mask_inputs"] = True
+    if not keep_gmr:
+        del step_cfg[GMR_FIELD]
     cfg["logging"]["project"] = WANDB_PROJECT
 
 
 def _write_config(
     base: dict,
-    dropout: dict,
     name: str,
+    mask_level: int,
+    co2_rate: float | None,
+    keep_gmr: bool,
     wandb_run_names: set[str] | None = None,
 ) -> None:
     out_path = RUN_CONFIGS_DIR / f"{name}.yaml"
@@ -103,7 +95,7 @@ def _write_config(
             print(f"Skipped {out_path.name} (run exists in wandb)")
         return
     cfg = copy.deepcopy(base)
-    _apply_settings(cfg, dropout)
+    _apply_settings(cfg, mask_level, co2_rate, keep_gmr)
     out_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
     print(f"Wrote {out_path.name}")
 
@@ -123,19 +115,13 @@ def generate_configs(fetch_wandb: bool = False) -> None:
         wandb_run_names = _fetch_wandb_run_names(WANDB_PROJECT)
         print(f"Found {len(wandb_run_names)} existing runs.")
 
-    # Group A: uniform mask-level sweep x co2.
     for mask_level in MASK_LEVELS:
-        for co2_name, co2_rate in CO2_OPTIONS.items():
-            dropout = _build_input_dropout(mask_level, co2_rate)
-            name = f"{BASE_CONFIG_STEM}-mask{mask_level}-{co2_name}"
-            _write_config(base, dropout, name, wandb_run_names)
-
-    # Group B: uniform 0-MASK_ALL scheme, probability-gated, x co2.
-    for co2_name, co2_rate in CO2_OPTIONS.items():
-        for probability in MASK_PROBABILITIES:
-            dropout = _build_input_dropout(MASK_ALL, co2_rate, probability=probability)
-            name = f"{BASE_CONFIG_STEM}-mask{MASK_ALL}-{co2_name}-mask{probability:.2f}"
-            _write_config(base, dropout, name, wandb_run_names)
+        for gmr_name, keep_gmr in GMR_OPTIONS.items():
+            for co2_name, co2_rate in CO2_OPTIONS.items():
+                name = f"{BASE_CONFIG_STEM}-{gmr_name}-mask{mask_level}-{co2_name}"
+                _write_config(
+                    base, name, mask_level, co2_rate, keep_gmr, wandb_run_names
+                )
 
 
 def main() -> None:
