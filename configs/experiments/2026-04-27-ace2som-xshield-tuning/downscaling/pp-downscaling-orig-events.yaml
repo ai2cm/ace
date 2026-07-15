@@ -1,0 +1,163 @@
+experiment_dir: /climate-default/home/annak/2026-07-09-perfect-pred-tc-tracks
+model:
+  denoising_expert_configs:
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_low_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 0.005
+      sigma_max: 200.0
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_high_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 200.0
+      sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+    - data_path:  /climate-default
+      file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 2
+  batch_size: 1
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 16
+  lon_extent:
+    start: 0
+    stop: 16
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
+events:
+- name: WPacific_hurricane_20230425
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130.0
+    stop: 146.0
+  save_generated_samples: true
+  n_samples: 16
+- name: WPacific_hurricane_landfall_china_20230510
+  date: 2023-05-10T12:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 104
+    stop: 120
+  save_generated_samples: true
+  n_samples: 16
+- name: extratropical_cyclone_US_20230403
+  date: 2023-04-03T12:00
+  lat_extent:
+    start: 34
+    stop: 50
+  lon_extent:
+    start: 254
+    stop: 270
+  save_generated_samples: true
+  n_samples: 16
+- name: santa_ana_winds_20231221
+  date: 2023-12-21T06:00
+  lat_extent:
+    start: 26
+    stop: 42
+  lon_extent:
+    start: 234
+    stop: 250
+  save_generated_samples: true
+  n_samples: 16
+- name: alpine_foehn_20230330
+  date: 2023-03-30T18:00
+  lat_extent:
+    start: 37
+    stop: 53
+  lon_extent:
+    start: 2
+    stop: 18
+  save_generated_samples: true
+  n_samples: 16
+- name: hindu_kush_20230122
+  date: 2023-01-22T06:00
+  lat_extent:
+    start: 28
+    stop: 44
+  lon_extent:
+    start: 60
+    stop: 76
+  save_generated_samples: true
+  n_samples: 16
+- name: WPac_tc_20230426T06
+  date: 2023-04-26T06:00
+  lat_extent:
+    start: 8
+    stop: 24
+  lon_extent:
+    start: 130
+    stop: 146
+  save_generated_samples: true
+  n_samples: 16
+- name: Phl_tc_landfall_20230514T06
+  date: 2023-05-14T06:00
+  lat_extent:
+    start: 4
+    stop: 20
+  lon_extent:
+    start: 117
+    stop: 133
+  save_generated_samples: true
+  n_samples: 16
+- name: Phl_tc_landfall_20230517T18
+  date: 2023-05-17T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 133
+    stop: 149
+  save_generated_samples: true
+  n_samples: 16
+- name: Taiwan_tc_landfall_20230707T18
+  date: 2023-07-07T18:00
+  lat_extent:
+    start: 14
+    stop: 30
+  lon_extent:
+    start: 115
+    stop: 131
+  save_generated_samples: true
+  n_samples: 16
+- name: Japan_tc_landfall_20230919T18
+  date: 2023-09-19T18:00
+  lat_extent:
+    start: 22
+    stop: 38
+  lon_extent:
+    start: 123
+    stop: 139
+  save_generated_samples: true
+  n_samples: 16
+- name: Phl_tc_landfall_20231027T00
+  date: 2023-10-27T00:00
+  lat_extent:
+    start: 8
+    stop: 24
+  lon_extent:
+    start: 115
+    stop: 131
+  save_generated_samples: true
+  n_samples: 16

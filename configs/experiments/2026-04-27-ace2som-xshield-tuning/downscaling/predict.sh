@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="predict-xshield-tc-tracks"
+JOB_NAME="predict-perfect-pred-events"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="pp-downscaling-xshield-tracks.yaml"
+CONFIG_FILENAME="pp-downscaling-orig-events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME

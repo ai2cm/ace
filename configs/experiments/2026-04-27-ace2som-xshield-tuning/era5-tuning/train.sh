@@ -12,24 +12,25 @@ WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_GROUP=ace
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=4
-STATS_DATASET=andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019
+#STATS_DATASET=andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019
+STATS_DATASET=annak/2026-07-14-era5-1deg-8layer-stats-1990-2019-prmsl-hpa
 #STATS_DATASET=andrep/2025-09-11-X-SHiELD-AMIP-1deg-8layer-11yr-stats
 SEED_OFFSET=10
 
 cd $REPO_ROOT
 
 # ERA5 pretraining https://beaker.org/orgs/ai2/workspaces/ace/work/01KSN76D3GQ7MVP058Y2Z2TGKE
-PRE_TRAINED_WEIGHTS_DATASETS=("01KSVC6YS7C18SGYV4VPZYZ232")
+#PRE_TRAINED_WEIGHTS_DATASETS=("01KSVC6YS7C18SGYV4VPZYZ232")
 
 # ERA5 1 step pretraining
-#PRE_TRAINED_WEIGHTS_DATASETS=("01KSK9T5C7PXVR66ERW1E26HFF")
+PRE_TRAINED_WEIGHTS_DATASETS=("01KSK9T5C7PXVR66ERW1E26HFF")
 
 # ERA5 pretraining, different random seed, with energy correction and embed_dim 32
 #PRE_TRAINED_WEIGHTS_DATASETS=("01KVZV0DFM43B7XREKTYK210VX")
 
 for seed in {0..0}; do
     #job_name="ace2som-xshield-tune-1yr-even-split-single-decoder-seed${seed}"
-    job_name="ace2s-era5-tune-xshield-10yr-no-missing-vars-seed${seed}"
+    job_name="ace2s-era5-tune-xshield-10yr-1step-correct-PRMSL-units-seed${seed}"
     fine_tune_seed=$((seed + SEED_OFFSET))
     override="seed=${fine_tune_seed}"
     python -m fme.ace.validate_config --config_type train $CONFIG_PATH --override $override
@@ -42,6 +43,8 @@ for seed in {0..0}; do
         --priority high \
         --preemptible \
         --cluster ai2/titan \
+        --cluster ai2/ceres \
+        --cluster ai2/jupiter \
         --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_JOB_TYPE=training \
