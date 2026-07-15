@@ -10,18 +10,21 @@ Central planning + outcomes log for distilled downscaling students. Process:
 
 ## ⚡ At a glance  <!-- keep this current: the daily check-in view -->
 
-_Last updated: 2026-07-13._
+_Last updated: 2026-07-14._
 
 ### 🔴 In flight — check for updates, finish write-ups when done
 
-| run | kind | question | on completion |
-|---|---|---|---|
-| `2yhjonz9` (band_gamma=0.5) | training | does a gentle hi-k spectral tilt beat flat `i26sidsm`? | `check_runs --report`; compare vs `i26sidsm` at best-sustained; write verdict in its stub |
-| `34rg7wii` (band_gamma=1) | training | " (stronger tilt) | same as above; fit the 0/0.5/1 `band_gamma` response curve |
+_None._ (`band_gamma` sweep closed 2026-07-14 — see below.)
 
-_Recently closed:_ `p337gcg9` Lo-only ablation → ✅ **Hi is needed — for extreme precip
-only** (2026-07-13,
-[report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md)).
+_Recently closed:_
+- `2yhjonz9` (band_gamma=0.5) + `34rg7wii` (band_gamma=1) → ➕ **mild positive; monotonic
+  response curve** (2026-07-14). The hi-k tilt works as designed — best-sustained hi
+  `spec_mae` improves 0.074→0.066→0.050 and overall mean 0.043→0.038→0.035 across
+  γ=0/0.5/1 — at a monotonic lo cost (0.022→0.024→0.037). Small gains; γ=1 best on mean.
+  ([γ0.5](reports/2026-07-13-prate-spectral-gamma0p5-2yhjonz9.md) ·
+  [γ1](reports/2026-07-13-prate-spectral-gamma1-34rg7wii.md)).
+- `p337gcg9` Lo-only ablation → ✅ **Hi is needed — for extreme precip only** (2026-07-13,
+  [report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md)).
 
 ### 🟢 Next up — likely-good experiments (queued, not launched)
 
@@ -34,8 +37,10 @@ only** (2026-07-13,
    (up-weight the worst-spectrum vars; winds/PRMSL were the MoE weak spots).
 4. **Multi-scale (multi-head) discriminator** — spec 12 flagship E2; the big untested GAN
    texture lever for the winds hi-k gap single taps never closed.
-5. **Non-monotonic mid *bump*** (SpectralMatchingLoss code change) — only if the
-   `band_gamma` sweep shows the mid band still lags.
+5. **Non-monotonic hi *bump*** (SpectralMatchingLoss code change) — motivated by the
+   closed `band_gamma` sweep: monotonic tilt improves hi but makes **lo** the limiting
+   band at γ=1, so the better lever is a bump that lifts hi/mid **without** down-weighting
+   lo (rather than pushing γ higher toward the neutral `xgcaf2rt` regime).
 6. **Longer reduce-GAN re-run** (`gan=3e-4`) — `6dotglmg` stopped at 14k, before the
    late-drift regime it was meant to test; re-run with checkpointing.
 
@@ -43,8 +48,8 @@ only** (2026-07-13,
 
 ## Run registry
 
-Every launched run gets a row. `verdict`: ✅ win · ➖ flat · ❌ degrade · ⏳ running
-· ⚠️ invalid. Regenerate a row with `check_runs.py --registry-row <id>`.
+Every launched run gets a row. `verdict`: ✅ win · ➕ mild positive · ➖ flat · ❌ degrade
+· ⏳ running · ⚠️ invalid. Regenerate a row with `check_runs.py --registry-row <id>`.
 
 > **Note on `state`:** a wandb/beaker state of **`crashed` usually means the run was
 > *manually cancelled***, not that it hit a genuine error — these are experiment arms
@@ -58,8 +63,8 @@ Every launched run gets a row. `verdict`: ✅ win · ➖ flat · ❌ degrade · 
 | `i26sidsm` | 2026-07-08 | …-prate-spectral-fix | `01KX00N9SE3ZVQFHQJ54XS0TAP` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, gan=1e-3 | crashed@27820 | ✅ win (mid-train ckpt) | [report](reports/2026-07-08-prate-spectral-fix-i26sidsm.md) |
 | `6dotglmg` | 2026-07-09 | …-prate-spectral-lowgan-fix | `01KX4DRYQ0RSQEWRY5F6QBP9BY` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, **gan=3e-4** | crashed@14040 | ➖ inconclusive (mild tail gain; crashed before late-drift regime) | [report](reports/2026-07-09-prate-spectral-lowgan-fix-6dotglmg.md) |
 | `xgcaf2rt` | 2026-07-10 | …-prate-spectral-midhi | `01KX6T1BM73VETZF53TWBHSEFE` | [`e7679c0`](https://github.com/ai2cm/ace/commit/e7679c0a9583bc42ee07d7eacf8e8db619c120d0) | fdistill, spectral W=1e-2, **min_wavenumber=85** (drop lo third, flat mid+hi) | canceled@52k | ➖ neutral (tied at best-sustained spectrum; `best_student.ckpt`@2730) | [report](reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md) |
-| `2yhjonz9` | 2026-07-13 | …-prate-spectral-gamma0p5 | `01KXEN0NJ81G7R1SF1F4ZFZV2R` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=0.5** (gentle hi tilt; lo≈0.61× hi≈1.37×) | running | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma0p5-2yhjonz9.md) |
-| `34rg7wii` | 2026-07-13 | …-prate-spectral-gamma1 | `01KXEN0PH05655AQD3FWJRSCXQ` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=1** (linear hi tilt; lo≈0.33× hi≈1.7×) | running | ⏳ | [report](reports/2026-07-13-prate-spectral-gamma1-34rg7wii.md) |
+| `2yhjonz9` | 2026-07-13 | …-prate-spectral-gamma0p5 | `01KXEN0NJ81G7R1SF1F4ZFZV2R` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=0.5** (gentle hi tilt; lo≈0.61× hi≈1.37×) | canceled@18850 | ➕ mild positive (best-sustained hi 0.066 / mean 0.038 vs flat 0.074 / 0.043; small lo cost) | [report](reports/2026-07-13-prate-spectral-gamma0p5-2yhjonz9.md) |
+| `34rg7wii` | 2026-07-13 | …-prate-spectral-gamma1 | `01KXEN0PH05655AQD3FWJRSCXQ` | [`06aee7f`](https://github.com/ai2cm/ace/commit/06aee7f9c) | fdistill, spectral W=1e-2, **band_gamma=1** (linear hi tilt; lo≈0.33× hi≈1.7×) | canceled@17680 | ➕ mild positive (best-sustained hi 0.050 / mean 0.035 — best of sweep; lo cost +68%) | [report](reports/2026-07-13-prate-spectral-gamma1-34rg7wii.md) |
 | `s4abc6ba` | 2026-07-07 | …-prate-spectral | — | [`ae3979b`](https://github.com/ai2cm/ace/commit/ae3979b) | fdistill, spectral W=1e-2 (**pre-fix target**) | stopped | ⚠️ invalid (wrong target) | — |
 | `gpx5574t` | 2026-07-07 | …-prate-spectral-lowgan | `01KWYPADNHC7SK58FMA981XTQV` | [`ae3979b`](https://github.com/ai2cm/ace/commit/ae3979b) | fdistill, spectral+gan=3e-4 (**pre-fix target**) | crashed@3770 | ⚠️ invalid (wrong target) | — |
 
@@ -93,13 +98,17 @@ point at the standardized reports.
   regime** it was meant to test (drift at 14k identical to baseline). Needs a **longer
   re-run** (≥28k, with checkpointing) to actually test the drift hypothesis — ideally
   after spec 13 early-stop. See report.
-- **⏳ `band_gamma` sweep (running, launched 2026-07-13)** — `2yhjonz9` (gamma=0.5) +
+- ~~**`band_gamma` sweep (launched 2026-07-13)**~~ — ➕ **done, mild positive; monotonic
+  response curve** (canceled 2026-07-14, trained enough). `2yhjonz9` (gamma=0.5) +
   `34rg7wii` (gamma=1), f-distill PRATEsfc, W=1e-2 / gan=1e-3 / min_wavenumber=0, only
-  `band_gamma` varies. Both verified at iteration 1 with the right band_gamma. Fills the
-  gentle-tilt regime between the flat win `i26sidsm` (gamma=0) and the low-suppression
-  `xgcaf2rt` (~gamma=2). Report when they have history; watch `spec_mae_hi` (should
-  improve) vs `spec_mae_lo` (the cost) and the PSD tail for overshoot. Compare at
-  best-sustained / matched steps.
+  `band_gamma` varies. At each run's best-sustained spectrum the tilt behaves exactly as
+  designed and **monotonically**: `spec_mae_hi` improves 0.074→0.066→0.050 across
+  γ=0/0.5/1, overall mean 0.043→0.038→0.035, at a monotonic lo cost 0.022→0.024→0.037.
+  γ=1 is best on mean (−19% vs flat) and hi (−32%) but lo becomes the worst band (+68%).
+  Because lo stays constrained (0.33×/0.61×, not zeroed like `xgcaf2rt`), it degrades
+  gracefully and the net mean still improves — the opposite of the neutral hard cut.
+  Gains are small; both runs show the checkpoint-selection trap (best_tail lands at
+  8–10%, spectrally unconverged). See reports + outcomes bullet.
 - ~~**`xgcaf2rt` (mid+high band arm)**~~ — ➖ **done, neutral** (checked & canceled
   2026-07-13): the `min_wavenumber=85` cut is tied with flat-band `i26sidsm` at the
   best-sustained spectrum (marginally better mid+hi, within noise). See report +
@@ -142,12 +151,14 @@ point at the standardized reports.
   noise (1-step) or real-data re-noised (N-step interior, teacher-forced → inference
   exposure bias). See [[fdistill-step-coupling]] / `dmd2.py:97–116`. Write-up:
   [report](reports/2026-07-13-fdistill-step-count-sweep-TBD.md).
-- **Next (experiments):** port the tuned spectral config (flat all-band, `i26sidsm`) to
-  the multi-variable MoE runs with per-variable `variable_weights` (up-weight the
-  worst-spectrum variables). If the mid band still lags, the remaining lever is a
-  genuine mid *bump* — a **non-monotonic** band weight that adds mid emphasis on top of
-  the full flat band (needs a `SpectralMatchingLoss` change; `band_gamma` is monotonic
-  today).
+- **Next (experiments):** port the tuned spectral config to the multi-variable MoE runs
+  with per-variable `variable_weights` (up-weight the worst-spectrum variables). Config
+  choice for the port: **flat all-band (`i26sidsm`)** is the safe default; **`band_gamma`
+  ≈ 0.5–1** gives a small, monotonic hi-k gain (sweep closed 2026-07-14) if hi texture is
+  the priority and a modest lo cost is acceptable. The remaining lever beyond the
+  monotonic ramp is a **non-monotonic** band weight that lifts hi/mid **without**
+  down-weighting lo (needs a `SpectralMatchingLoss` change; `band_gamma` can only tilt
+  monotonically today, and at γ=1 lo is already the limiting band).
 
 ---
 
@@ -155,6 +166,20 @@ point at the standardized reports.
 
 _Reverse-chronological; one line per finding, linking the run report._
 
+- **2026-07-14** — ➕ **`band_gamma` hi-k tilt is a mild, monotonic positive.** The
+  `{0, 0.5, 1}` sweep (`i26sidsm` / `2yhjonz9` / `34rg7wii`) shows, at each run's
+  best-sustained spectrum, that tilting the spectral budget toward high-k does exactly
+  what it targets and monotonically: **hi `spec_mae` 0.074→0.066→0.050**, overall
+  **mean 0.043→0.038→0.035**, paid for by **lo 0.022→0.024→0.037**; `crps` and tails
+  tied. γ=1 is the best-mean point (−19% vs flat) but makes lo the worst band. Unlike the
+  hard cut `xgcaf2rt` (which zeroed lo and came back neutral), the gentle tilt keeps lo
+  in the loss so it degrades gracefully and the net mean improves. **Small win; the
+  bigger lever is likely a non-monotonic mid/hi *bump* that lifts hi without starving lo
+  (needs a `SpectralMatchingLoss` change).** Both arms again show the checkpoint-selection
+  trap (best_tail lands at 8–10%, spectrally unconverged → deploy the best-sustained /
+  spec-13 checkpoint, not best_tail). Confirm the gain out-of-sample before adopting over
+  flat. See [γ0.5](reports/2026-07-13-prate-spectral-gamma0p5-2yhjonz9.md) ·
+  [γ1](reports/2026-07-13-prate-spectral-gamma1-34rg7wii.md).
 - **2026-07-13** — ➖ **The mid+high band-cut arm `xgcaf2rt` is roughly neutral**
   (corrected — an earlier entry called it ❌ degrade; that was a windowing artifact,
   see the report Caveats). Compared **at the selected checkpoints** and at each run's

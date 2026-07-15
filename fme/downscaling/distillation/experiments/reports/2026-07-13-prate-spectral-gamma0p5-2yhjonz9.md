@@ -23,7 +23,7 @@ point of a `band_gamma ∈ {0, 0.5, 1}` ramp (0 = `i26sidsm`; ~2 ≈ `xgcaf2rt`)
 | wandb run | `2yhjonz9` — https://wandb.ai/ai2cm/fastgen/runs/2yhjonz9 |
 | Beaker experiment | `01KXEN0NJ81G7R1SF1F4ZFZV2R` — https://beaker.org/ex/01KXEN0NJ81G7R1SF1F4ZFZV2R |
 | Commit | `06aee7f9c` — https://github.com/ai2cm/ace/commit/06aee7f9c |
-| State / last step | `running` (verified: iteration 1 reached; logs confirm `Spectral matching loss enabled: weight=0.01 band_gamma=0.5 min_wavenumber=0`) |
+| State / last step | `canceled` @ `18850` (stopped 2026-07-14 — trained enough; useful spectral optimum was ~2.3k) |
 
 ## Config
 
@@ -42,28 +42,105 @@ point of a `band_gamma ∈ {0, 0.5, 1}` ramp (0 = `i26sidsm`; ~2 ≈ `xgcaf2rt`)
   against sibling arm `gamma1` (`band_gamma=1`) and the low-suppression endpoint
   `xgcaf2rt` (`min_wavenumber=85`).
 
+> **Metric selection:** §2/§3 trajectories are `first → best_tail@1560 → last`, anchored
+> at the **`best_student_tail` checkpoint (step 1560, 8%)** — the deploy-relevant
+> checkpoint (matching the other reports). ⚠️ As with `xgcaf2rt`, this run's tail-min
+> lands **early, before spectral convergence**, so best_tail here is spectrally poor
+> (`spec_mean` 0.21) and **not** representative. The fair, step-controlled read is §4's
+> best-sustained spectrum (rolling median). Training/loss metrics are end of run.
+
 ## 1 · Training behavior
 
-_Pending first report generation._
+- **GAN health:** `healthy` (end of run) — gen 1.02, disc 1.18 (both engaged).
+- **Loss domination** (end of run):
+
+  | term | last | note |
+  |---|---|---|
+  | `train/f_distill_loss` | 0.0573 | dominates the generator objective (expected) |
+  | `train/spectral_loss_weighted` | 0.00284 | ~0.05× f_distill (gentle; band-reweighted, same total magnitude as `i26sidsm`) |
+  | `train/gan_loss_gen` | 1.020 | ×weight 0.001 = 0.00102; 0.018× f_distill |
+  | `train/fake_score_loss` | 0.0205 |  |
+  | `train/total_loss` | 0.969 |  |
+
+  _`band_gamma` only redistributes the (fixed-magnitude) spectral term across
+  wavenumbers; it does not change how hard the spectral loss pulls overall._
+
+- **`val/crps_mean`:** 0.1156 → **0.1063** (best_tail@1560) → 0.1122 (min overall 0.1046).
+- **`val/spec_mae_mean`:** 0.930 → **0.206** (best_tail@1560, noisy early snapshot) →
+  0.103 (best-sustained 0.038 @2340; min 0.030). See §4 for the robust read.
 
 ## 2 · Tail behavior
 
-_Pending._
+Ratio to teacher; ~1.0 ideal, >1 over-produces extremes, <1 under. Values at
+`best_student_tail` (step 1560).
+
+| variable | tail_99.99 | tail_99.9999 |
+|---|---|---|
+| PRATEsfc | 0.817 → **0.974** → 1.423 | 0.772 → **0.997** → 1.371 |
+
+Worst tail: **PRATEsfc** (only variable). Near-ideal at best_tail; over-produces by end
+of run (1.42 / 1.37) — the same late-drift signature as `i26sidsm`.
 
 ## 3 · Power spectrum
 
-_Pending._
+`spec_mae` per band (relative error; lower better). Values at `best_student_tail`
+(step 1560).
 
-## 4 · Training trajectory vs baseline `i26sidsm`
+| variable | lo | mid | hi |
+|---|---|---|---|
+| PRATEsfc | 1.15 → **0.211** → 0.241 | 1.14 → **0.250** → 0.029 | 0.505 → **0.158** → 0.039 |
 
-_Pending — convergence speed + constrained (mid/hi) vs less-constrained (lo/tails)._
+⚠️ best_tail@1560 is an early, spectrally-**unconverged** checkpoint (`spec_mean` 0.21) —
+these band values are not representative and are noisy per-val. The real per-band read is
+§4's best-sustained rolling median. PSD figures: `val/power_spectrum/<VAR>` in wandb.
 
-## Verdict  <!-- HUMAN: fill this in -->
+## 4 · Response curve + trajectory vs baseline `i26sidsm`
 
-- **Outcome vs baseline `i26sidsm`:** TODO — did `spec_mae_hi` improve, and did lo hold?
-- **Recommended checkpoint:** TODO (best-sustained / spec-13 selected; mid-training if late drift).
-- **Next action:** TODO — where 0.5 sits on the `band_gamma` response curve vs 0 / 1.
+`band_gamma=0.5` sets band weights `∝ (k/k_max)^0.5` (mean-1 normalized): **lo 0.61× /
+mid 1.06× / hi 1.37×**. Unlike `xgcaf2rt`'s hard `min_wavenumber=85` cut, lo stays in the
+loss (just down-weighted). Comparison at each run's **best-sustained spectrum**
+(rolling-median, window ~650 steps — the fair, step- and noise-controlled read):
+
+| `band_gamma` | run | bs step (frac) | lo | mid | hi | **mean** | tail99.99 / 99.9999 |
+|---|---|---|---|---|---|---|---|
+| 0 (flat) | `i26sidsm` | 2340 (8%) | **0.022** | 0.038 | 0.074 | 0.043 | 1.10 / 1.07 |
+| **0.5** | **this** | 2340 (12%) | 0.024 | 0.044 | **0.066** | **0.038** | 1.09 / 1.07 |
+| 1 (linear) | `gamma1` | 2600 (15%) | 0.037 | 0.022 | 0.050 | 0.035 | 1.06 / 1.04 |
+
+**Read (this arm vs flat `i26sidsm`):** the gentle tilt does what it targets — **hi band
+improves** 0.074→0.066 (−11%) and **overall `spec_mean` improves** 0.043→0.038 (−12%) —
+at a **small lo cost** (0.022→0.024, +9%). `crps` and tails are tied. A real but modest
+gain; γ=0.5 sits, as designed, between flat and the stronger `gamma1` on a **monotonic**
+response curve (more γ → better hi, worse lo, slightly better mean).
+
+**Convergence speed — unchanged.** Spectrum reaches within 10% of best-sustained at step
+2340, same absolute step as `i26sidsm` (2340) and `gamma1` (2600); `band_gamma` does not
+speed or slow convergence.
+
+**Checkpoint-selection trap (again).** `best_student_tail` landed at 8% (`spec_mean`
+0.21), far from the spectral optimum at ~12% — so the *deployed* checkpoint would be
+spectrally poor. The gentle mean gain is only visible at the best-sustained step, which
+no current selector targets (motivates spec 13).
+
+## Verdict
+
+- **Outcome vs baseline `i26sidsm`:** ➕ **mild positive.** The gentle high-k tilt gives
+  a small, real improvement at best-sustained spectrum — **hi 0.074→0.066, mean
+  0.043→0.038 (−12%)** — for a small lo cost (+9%), with tails and CRPS tied. Crucially,
+  because lo is only down-weighted (0.61×) rather than zeroed, it degrades gracefully —
+  the opposite of the neutral hard-cut `xgcaf2rt`. This is the gentle midpoint of a
+  monotonic `band_gamma` response curve (§4).
+- **Recommended checkpoint:** best-sustained ~step 2340 (`spec_mean` 0.038). **Do not
+  deploy `best_student_tail` @1560** — it sits at an unconverged 0.21 spectrum. A
+  spectral-aware selector (spec 13) is needed to capture the optimum.
+- **Next action:** compare with `gamma1` — the curve is monotonic and `gamma1` is
+  marginally better on mean (0.035) but pays more lo (0.037). Decide whether the small
+  gain justifies the extra knob over flat; confirm at the spec-13-selected checkpoint
+  (and ideally a held-out eval) before adopting.
 
 ## Caveats
 
 - ⚠️ _Prepend here if a later run invalidates this one._
+- ⚠️ Per-val `spec_mae` is noisy (single-snapshot spikes); all §4 numbers are rolling
+  medians. The best_tail-step values in §2/§3 are a single early snapshot and should not
+  be read as this arm's spectral quality — use §4.
