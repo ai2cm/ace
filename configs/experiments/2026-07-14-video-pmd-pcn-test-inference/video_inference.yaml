@@ -7,8 +7,16 @@
 checkpoint_path: /checkpoint/checkpoints/best.ckpt
 experiment_dir: /results
 output_path: /climate-default/2026-06-25-temporal-diffusion/inference/global-1degree-24to3-pcn-v1/test-2023-2024-ens32.zarr
+# ensemble_chunk_size=8 (B_eff=local_batch_size*chunk=2*8=16) failed on the
+# first real run with `RuntimeError: Input tensor is too large.` -- a hard
+# int32 indexing overflow in the level-0 grouped blur conv (FIRBlur), not an
+# OOM: N*C*T*H*W*kH*kW = 16*128*9*180*360*9 ~= 10.7B elements, over the
+# 2^31-1 cuDNN/PyTorch limit for grouped conv3d. chunk_size=1 (B_eff=2)
+# matches the batch size training's own generate() calls already ran
+# successfully (generate_n_samples: 1, local batch 2) -- known-safe, not a
+# guess. Raise only after confirming a larger value clears the same op.
 n_ensemble: 32
-ensemble_chunk_size: 8  # sub-batch generate() calls to bound GPU memory; tune after smoke test
+ensemble_chunk_size: 1
 use_ema: true
 logging:
   log_to_screen: true
