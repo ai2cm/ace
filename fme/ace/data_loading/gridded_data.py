@@ -88,7 +88,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         return DatasetInfo(
             horizontal_coordinates=self._global_properties.horizontal_coordinates,
             vertical_coordinate=self._global_properties.vertical_coordinate,
-            mask_provider=self._global_properties.mask_provider,
+            spatial_mask_provider=self._global_properties.spatial_mask_provider,
             timestep=self._timestep,
             variable_metadata=self._global_properties.variable_metadata,
             all_labels=self._global_properties.all_labels,
@@ -206,7 +206,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return DatasetInfo(
             horizontal_coordinates=self._global_properties.horizontal_coordinates,
             vertical_coordinate=self._global_properties.vertical_coordinate,
-            mask_provider=self._global_properties.mask_provider,
+            spatial_mask_provider=self._global_properties.spatial_mask_provider,
             timestep=self.timestep,
             all_labels=self._global_properties.all_labels,
         )
@@ -246,6 +246,13 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     @property
     def initial_condition(self) -> PrognosticState:
         return self._initial_condition
+
+    def apply_config_seed(self, seed: int | None) -> None:
+        """Seed the initial condition's random state from ``config.seed``,
+        unless it already carries one (see
+        ``PrognosticState.apply_config_seed``).
+        """
+        self._initial_condition = self._initial_condition.apply_config_seed(seed)
 
     @property
     def initial_time(self) -> xr.DataArray:

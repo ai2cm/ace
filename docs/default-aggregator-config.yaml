@@ -32,11 +32,15 @@ aggregator:
     log_mean_maps: false
     enabled: true
     strict: false
+    target: denorm
+    channel_mean_names: null
   power_spectrum:
     variables: null
     name: power_spectrum
     enabled: true
     strict: false
+    report_directional_bias: true
+    plot_variables: null
   zonal_mean:
     variables: null
     name: zonal_mean
@@ -70,6 +74,7 @@ aggregator:
     name: histogram
     enabled: false
     strict: true
+    percentile_variables: null
   seasonal:
     variables: null
     name: seasonal
@@ -81,6 +86,8 @@ aggregator:
     reference_data: null
     enabled: true
     strict: false
+    report_crps: true
+    report_rmse: true
   enso_index:
     name: enso_index
     enabled: true
@@ -93,5 +100,21 @@ aggregator:
     name: ipo_index
     enabled: true
     strict: false
+  trend:
+    variables: null
+    name: trend
+    enabled: false
+    strict: false
+  near_zero_fraction:
+    variables: []
+    eps: 0.0
+    per_variable_eps: {}
+    name: near_zero_fraction
+    include_maps: false
+    enabled: false
+    strict: true
   monthly_reference_data: null
   time_mean_reference_data: null
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: false

@@ -90,9 +90,14 @@ def get_dataset(
     names: Sequence[str],
     n_timesteps: IntSchedule,
     strict: bool = True,
+    allow_missing_variables: bool = False,
 ) -> tuple[XarrayConcat, DatasetProperties]:
     datasets, properties = get_xarray_datasets(
-        dataset_configs, names, n_timesteps, strict=strict
+        dataset_configs,
+        names,
+        n_timesteps,
+        strict=strict,
+        allow_missing_variables=allow_missing_variables,
     )
     ensemble = XarrayConcat(datasets, strict=strict)
     return ensemble, properties
@@ -119,12 +124,14 @@ class ConcatDatasetConfig(DatasetConfigABC):
         self,
         names: Sequence[str],
         n_timesteps: IntSchedule,
+        allow_missing_variables: bool = False,
     ) -> tuple[DatasetABC, DatasetProperties]:
         return get_dataset(
             self.concat,
             names,
             n_timesteps,
             strict=self.strict,
+            allow_missing_variables=allow_missing_variables,
         )
 
     @property

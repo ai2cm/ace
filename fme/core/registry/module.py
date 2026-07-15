@@ -61,6 +61,8 @@ class ModuleConfig(abc.ABC):
 CONDITIONAL_BUILDERS = [
     "NoiseConditionedSFNO",
     "LocalNet",
+    "SwinTransformer",
+    "NoiseConditionedSwinTransformer",
 ]
 
 
@@ -134,11 +136,15 @@ class ModuleSelector:
         type: the type of the ModuleConfig
         config: data for a ModuleConfig instance of the indicated type
         conditional: whether to condition the predictions on batch labels.
+        allow_missing_variables: whether the data pipeline is allowed to
+            produce variable masks (for incomplete datasets). When False
+            (default), missing required variables cause an error.
     """
 
     type: str
     config: Mapping[str, Any]
     conditional: bool = False
+    allow_missing_variables: bool = False
     registry: ClassVar[Registry[ModuleConfig]] = Registry[ModuleConfig]()
 
     def __post_init__(self):
@@ -150,6 +156,10 @@ class ModuleSelector:
                 f"got {self.type} (available: {CONDITIONAL_BUILDERS})"
             )
         self._instance = self.registry.get(self.type, self.config)
+        # Normalize config to include the built ModuleConfig's default values,
+        # so that defaults are captured when the config is serialized (e.g.
+        # logged to Weights & Biases). See issue #596.
+        self.config = dataclasses.asdict(self._instance)
 
     @property
     def module_config(self) -> ModuleConfig:

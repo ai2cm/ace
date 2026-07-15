@@ -35,14 +35,15 @@ train_loader:
       - data_path: traindata/ic_0008
       - data_path: traindata/ic_0009
       - data_path: traindata/ic_0010
-validation_loader:
-  batch_size: 16
-  num_data_workers: 4
-  prefetch_factor: 4
-  dataset:
-    data_path: validation
-    subset:
-      step: 5
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 4
+    prefetch_factor: 4
+    dataset:
+      data_path: validation
+      subset:
+        step: 5
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001

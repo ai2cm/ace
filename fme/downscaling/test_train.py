@@ -13,14 +13,9 @@ import yaml
 
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
+from fme.downscaling.data import RegionSamplingConfig
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
-from fme.downscaling.train import (
-    Trainer,
-    TrainerConfig,
-    _get_complement_percentile_prefix,
-    main,
-    restore_checkpoint,
-)
+from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -49,6 +44,28 @@ def test_trainer(tmp_path):
 
     with pytest.raises(RuntimeError):
         trainer.train_one_epoch()
+
+
+def _trainer_config_kwargs(tmp_path):
+    return dict(
+        model=MagicMock(),
+        optimization=MagicMock(),
+        train_data=MagicMock(),
+        validation_data=MagicMock(),
+        max_epochs=1,
+        experiment_dir=str(tmp_path),
+        save_checkpoints=False,
+        logging=MagicMock(),
+    )
+
+
+def test_trainer_config_region_sampling_requires_patch_extents(tmp_path):
+    base = _trainer_config_kwargs(tmp_path)
+    with pytest.raises(ValueError, match="region_sampling requires"):
+        TrainerConfig(
+            **base,
+            region_sampling=RegionSamplingConfig(),
+        )
 
 
 @pytest.fixture
@@ -167,18 +184,14 @@ def default_trainer_config(
         "multiple_input_multiple_out",
     ],
 )
+@pytest.mark.medium_duration
 def test_train_main_only(
     in_names,
     out_names,
     default_trainer_config,
     tmp_path,
-    very_fast_only: bool,
 ):
     """Check that the training loop runs without errors."""
-
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     config = _update_in_out_names(default_trainer_config, in_names, out_names)
     config["max_epochs"] = 1
     config_path = _store_config(tmp_path, config)
@@ -187,10 +200,9 @@ def test_train_main_only(
         main(config_path=config_path)
 
 
-def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool):
+@pytest.mark.medium_duration
+def test_train_main_logs(default_trainer_config, tmp_path):
     """Check that training loop records the appropriate logs."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
 
     with mock_wandb() as wandb:
         train_config_path = _store_config(tmp_path, default_trainer_config)
@@ -213,10 +225,8 @@ def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool)
         assert len(keys) > 5 or keys == set(["train/batch_loss"])
 
 
-def test_restore_checkpoint(default_trainer_config, tmp_path, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
+@pytest.mark.medium_duration
+def test_restore_checkpoint(default_trainer_config, tmp_path):
     config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
     trainer1 = config.build()
     trainer2 = config.build()
@@ -250,10 +260,9 @@ def test_restore_checkpoint(default_trainer_config, tmp_path, very_fast_only: bo
     )
 
 
-def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
+@pytest.mark.medium_duration
+def test_resume(default_trainer_config, tmp_path):
     """Make sure the training is resumed from a checkpoint when restarted."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
 
     trainer_config_segment_one = dict(default_trainer_config)
     trainer_config_segment_one["max_epochs"] = 2
@@ -293,14 +302,11 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
             mock.assert_called()
 
 
+@pytest.mark.slow
 @pytest.mark.serial
-def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
+def test_resume_two_workers(default_trainer_config, tmp_path):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
-    if skip_slow:
-        # script is slow as everything is re-imported when it runs
-        pytest.skip("Skipping slow tests")
-
     default_trainer_config["logging"]["log_to_wandb"] = False
     default_trainer_config["max_epochs"] = 1
     train_config_path = _store_config(tmp_path, default_trainer_config)
@@ -318,25 +324,3 @@ def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     initial_process.check_returncode()
     resume_process = subprocess.run(command)
     resume_process.check_returncode()
-
-
-@pytest.mark.parametrize(
-    "prefix, expected",
-    [
-        (
-            "histogram/prediction_frac_of_target/99.99th-percentile/var0",
-            "histogram/prediction_frac_of_target/0.01th-percentile/var0",
-        ),
-        (
-            "some_metric/percentile/99.9999/var0",
-            "some_metric/percentile/0.0001/var0",
-        ),
-        (
-            "no_percentile_here/some_metric",
-            None,
-        ),
-    ],
-)
-def test_get_complement_percentile_prefix(prefix, expected):
-    result = _get_complement_percentile_prefix(prefix)
-    assert result == expected

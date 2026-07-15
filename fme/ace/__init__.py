@@ -12,15 +12,31 @@ from fme.ace.aggregator.inference.main import (
     LegacyFlagInferenceEvaluatorAggregatorConfig,
     StepMeanEntry,
 )
+from fme.ace.aggregator.inference.near_zero_fraction import NearZeroFractionMetricConfig
 from fme.ace.aggregator.inference.reduced import MeanMetricConfig
 from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
 from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
+from fme.ace.aggregator.inference.step_diagnostics import StepDiagnosticsMetricConfig
 from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
+from fme.ace.aggregator.inference.trend import TrendMetricConfig
 from fme.ace.aggregator.inference.video import VideoMetricConfig
 from fme.ace.aggregator.inference.zonal_mean import ZonalMeanMetricConfig
-from fme.ace.aggregator.one_step import OneStepAggregatorConfig
-from fme.ace.aggregator.one_step.ensemble import EnsembleMetricConfig
-from fme.ace.aggregator.one_step.reduced import StepMeanMetricConfig
+from fme.ace.aggregator.one_step import (
+    LegacyFlagOneStepAggregatorConfig,
+    OneStepAggregatorConfig,
+    build_one_step_aggregator,
+)
+from fme.ace.aggregator.one_step.ensemble import (
+    EnsembleMetricConfig,
+    OneStepEnsembleMetricConfig,
+)
+from fme.ace.aggregator.one_step.map import OneStepMapMetricConfig
+from fme.ace.aggregator.one_step.reduced import (
+    OneStepMeanMetricConfig,
+    StepMeanMetricConfig,
+)
+from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
+from fme.ace.aggregator.one_step.spectrum import OneStepSpectrumMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.ace.data_loading.getters import get_forcing_data
@@ -50,13 +66,14 @@ from fme.ace.inference.inference import (
     InitialConditionConfig,
     run_inference_from_config,
 )
-from fme.ace.models.healpix.healpix_activations import (
-    CappedGELUConfig,
+from fme.ace.models.healpix.healpix_activations import CappedGELUConfig
+from fme.ace.models.healpix.healpix_blocks import (
+    ConvBlockConfig,
     DownsamplingBlockConfig,
+    UpsamplingBlockConfig,
 )
-from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.registry.hpx import (
-    HEALPixRecUNetBuilder,
+    HEALPixUNetBuilder,
     UNetDecoderConfig,
     UNetEncoderConfig,
 )
@@ -96,13 +113,13 @@ from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import StepLossConfig
-from fme.core.masking import StaticMaskingConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import CheckpointConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
+from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import (
     MultiCallStepConfig,
     SeparateRadiationStepConfig,
@@ -110,15 +127,23 @@ from fme.core.step import (
 )
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 from . import step
 from .inference.inference import get_initial_condition
+from .requirements import InitialConditionRequirements
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,
     DataLoaderConfig,
     EMAConfig,
     InlineInferenceConfig,
+    InlineValidationConfig,
     LoggingConfig,
     OptimizationConfig,
     TrainConfig,

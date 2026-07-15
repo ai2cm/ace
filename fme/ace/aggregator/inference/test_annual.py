@@ -12,19 +12,27 @@ import fme
 from fme.ace.aggregator.inference.annual import (
     GlobalMeanAnnualAggregator,
     PairedGlobalMeanAnnualAggregator,
+    get_crps,
+    get_r2,
+    get_rmse,
 )
 from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.testing import mock_distributed
 
 TIMESTEP = datetime.timedelta(hours=6)
 
 
-def test_paired_annual_aggregator(tmpdir):
+def _record_paired_annual_aggregator(
+    tmpdir, report_crps: bool = True, report_rmse: bool = True
+) -> PairedGlobalMeanAnnualAggregator:
+    """Build a paired annual aggregator and record one batch of two full years
+    of random target/prediction data (enough for the plotting and metric paths
+    to be exercised)."""
     n_lat = 16
     n_lon = 32
     # need to have two actual full years of data for plotting to get exercised
@@ -51,6 +59,8 @@ def test_paired_annual_aggregator(tmpdir):
         ops=LatLonOperations(area_weights),
         timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
+        report_crps=report_crps,
+        report_rmse=report_rmse,
     )
     target_data = {
         "a": torch.randn(n_sample, n_time, n_lat, n_lon, device=get_device())
@@ -78,10 +88,49 @@ def test_paired_annual_aggregator(tmpdir):
         i_time_start=0,
     )
     agg.record_batch(batch)
+    return agg
+
+
+def test_paired_annual_aggregator(tmpdir):
+    agg = _record_paired_annual_aggregator(tmpdir)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     assert "test/a" in logs
     assert isinstance(logs["test/a"], plt.Figure)
+    assert "test/r2/a_target" in logs
+    assert "test/rmse/a" in logs
+    assert "test/crps/a" in logs
+
+    # the reported RMSE should equal the RMSE between the ensemble-mean annual
+    # evolution of the prediction and that of the target
+    ds = agg.get_dataset()
+    target_ensemble_mean = ds["a"].sel(source="target").mean("sample")
+    gen_ensemble_mean = ds["a"].sel(source="prediction").mean("sample")
+    expected_rmse = float(
+        np.sqrt(np.nanmean((gen_ensemble_mean - target_ensemble_mean).values ** 2))
+    )
+    np.testing.assert_allclose(logs["test/rmse/a"], expected_rmse, rtol=1e-5)
+
+    # the reported CRPS should be the fair CRPS of the predicted ensemble annual
+    # evolution against the target ensemble-mean annual evolution
+    expected_crps = get_crps(ds["a"].sel(source="prediction"), target_ensemble_mean)
+    assert not np.isnan(logs["test/crps/a"])
+    np.testing.assert_allclose(logs["test/crps/a"], expected_crps, rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "report_crps,report_rmse",
+    [(True, True), (True, False), (False, True), (False, False)],
+)
+def test_paired_annual_aggregator_metric_toggles(tmpdir, report_crps, report_rmse):
+    agg = _record_paired_annual_aggregator(
+        tmpdir, report_crps=report_crps, report_rmse=report_rmse
+    )
+    logs = agg.get_logs(label="test")
+    assert ("test/crps/a" in logs) == report_crps
+    assert ("test/rmse/a" in logs) == report_rmse
+    # the annual-evolution plot and R2 are reported regardless of the toggles
+    assert "test/a" in logs
     assert "test/r2/a_target" in logs
 
 
@@ -113,9 +162,11 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
     mask = np.ones((n_lat, n_lon))
     mask[1, 1] = 0
     monthly_ds["a"] = monthly_ds["a"].where(mask > 0)
-    mask_provider = MaskProvider({"mask_a": torch.tensor(mask)}).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider({"mask_a": torch.tensor(mask)}).to(
+        get_device()
+    )
     agg = PairedGlobalMeanAnnualAggregator(
-        ops=LatLonOperations(area_weights, mask_provider),
+        ops=LatLonOperations(area_weights, spatial_mask_provider),
         timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
     )
@@ -171,12 +222,73 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
         annual_mean_series, expected_series, rtol=1e-4, atol=1e-7
     )
     logs = agg.get_logs(label="test")
+    assert not np.isnan(logs["test/rmse/a"])
+    assert not np.isnan(logs["test/crps/a"])
     for source in ["target", "gen"]:
         r2 = logs[f"test/r2/a_{source}"]
         assert not np.isnan(r2)
         big_r2 = 50  # account for small denominators
         assert r2 > -big_r2  # can be -inf if NaNs improperly handled
         assert r2 < 1
+
+
+def test_get_rmse_ignores_nan_gap_years():
+    # gap years from reindexing show up as NaN; a year is dropped when either
+    # series is NaN (2001 only in da, 2004 only in reference), and the RMSE over
+    # the remaining years must match a hand-computed value, not propagate NaN.
+    years = [2000, 2001, 2002, 2003, 2004]
+    da = xr.DataArray(
+        [1.0, np.nan, 3.0, 5.0, 2.0], dims=["year"], coords={"year": years}
+    )
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, 2.0, np.nan], dims=["year"], coords={"year": years}
+    )
+    # squared errors over the valid years 2000/2002/2003: 0, 1, 9 -> mean 10/3
+    expected = float(np.sqrt(10.0 / 3.0))
+    np.testing.assert_allclose(get_rmse(da, reference), expected, rtol=1e-12)
+
+
+def test_get_r2_ignores_nan_gap_years():
+    # get_r2 sees the same NaN gap years as get_rmse and must ignore them
+    # rather than returning NaN, dropping a year when either series is NaN
+    # (2001 only in da, 2004 only in reference).
+    years = [2000, 2001, 2002, 2003, 2004]
+    da = xr.DataArray(
+        [1.0, np.nan, 3.0, 5.0, 2.0], dims=["year"], coords={"year": years}
+    )
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, 2.0, np.nan], dims=["year"], coords={"year": years}
+    )
+    # over the valid years 2000/2002/2003: ref mean 5/3,
+    # SS_ref = (1-5/3)^2 + (2-5/3)^2 + (2-5/3)^2 = 2/3; SS_pred = 0+1+9 = 10
+    expected = float(1 - 10.0 / (2.0 / 3.0))
+    result = get_r2(da, reference)
+    assert not np.isnan(result)
+    np.testing.assert_allclose(result, expected, rtol=1e-12)
+
+
+def test_get_crps_ignores_nan_gap_years():
+    # gap years from reindexing show up as NaN in either the prediction or the
+    # reference; the CRPS over the remaining years must match a hand-computed
+    # value, not propagate NaN.
+    years = [2000, 2001, 2002, 2003]
+    da = xr.DataArray(
+        [[1.0, np.nan, 3.0, 5.0], [2.0, np.nan, 4.0, 6.0]],
+        dims=["sample", "year"],
+        coords={"year": years},
+    )
+    reference = xr.DataArray(
+        [1.0, 2.0, 2.0, np.nan], dims=["year"], coords={"year": years}
+    )
+    # fair CRPS per year (2 members) is mean_i|x_i - y| - 0.5 |x_0 - x_1|:
+    #   2000: members [1, 2], y=1 -> (0 + 1)/2 - 0.5 * 1 = 0.0
+    #   2002: members [3, 4], y=2 -> (1 + 2)/2 - 0.5 * 1 = 1.0
+    # 2001 is dropped (NaN prediction) and 2003 is dropped (NaN reference):
+    #   mean over the remaining years 2000/2002: (0 + 1)/2 = 0.5
+    expected = 0.5
+    result = get_crps(da, reference)
+    assert not np.isnan(result)
+    np.testing.assert_allclose(result, expected, rtol=1e-6)
 
 
 @pytest.mark.parametrize("use_mock_distributed", [False, True])
@@ -294,10 +406,10 @@ def test_annual_aggregator_with_nans():
     data["a"][:, :, 1, 1] = float("nan")
     masks = {"mask_a": torch.ones_like(data["a"][0, 0])}
     masks["mask_a"][1, 1] = 0
-    mask_provider = MaskProvider(masks).to(get_device())
+    spatial_mask_provider = SpatialMaskProvider(masks).to(get_device())
 
     agg = GlobalMeanAnnualAggregator(
-        ops=LatLonOperations(area_weights, mask_provider), timestep=TIMESTEP
+        ops=LatLonOperations(area_weights, spatial_mask_provider), timestep=TIMESTEP
     )
     time = xr.DataArray(
         [

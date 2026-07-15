@@ -91,4 +91,5 @@ class ForcingDeriver:
             horizontal_dims=forcing.horizontal_dims,
             epoch=forcing.epoch,
             n_ensemble=forcing.n_ensemble,
+            data_mask=forcing.data_mask,
         )

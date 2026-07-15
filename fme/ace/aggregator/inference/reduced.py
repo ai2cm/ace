@@ -19,7 +19,7 @@ from .data import InferenceBatchData, MetricBuildResult
 
 
 @dataclasses.dataclass
-class _SeriesData:
+class SeriesData:
     metric_name: str
     var_name: str
     data: np.ndarray
@@ -29,6 +29,52 @@ class _SeriesData:
 
     def get_xarray_key(self) -> str:
         return f"{self.metric_name}-{self.var_name}"
+
+
+def get_series_data(
+    variable_metrics: Mapping[str, "MeanMetric | SingleTargetMeanMetric"],
+    dist: Distributed,
+    step_slice: slice | None = None,
+) -> list[SeriesData]:
+    """Converts stored variable_metrics to a list."""
+    data: list[SeriesData] = []
+    for name, metric in variable_metrics.items():
+        metric_results = metric.get()  # TensorDict: {var_name: metric_series}
+        sorted_keys = sorted(list(metric_results.keys()))
+        for key in sorted_keys:
+            arr = metric_results[key].detach()
+            if step_slice is not None:
+                arr = arr[step_slice]
+            datum = SeriesData(
+                metric_name=name,
+                var_name=key,
+                data=dist.reduce_mean(arr).cpu().numpy(),
+            )
+            data.append(datum)
+    return data
+
+
+def series_data_to_dataset(
+    series_data: list[SeriesData],
+    variable_metadata: Mapping[str, VariableMetadata],
+) -> xr.Dataset:
+    """Converts a list of series data to a dataset over forecast_step."""
+    data_vars = {}
+    for datum in series_data:
+        metadata = variable_metadata.get(
+            datum.var_name, VariableMetadata("unknown_units", datum.var_name)
+        )
+        data_vars[datum.get_xarray_key()] = xr.DataArray(
+            datum.data, dims=["forecast_step"], attrs=metadata.as_attrs()
+        )
+
+    if len(data_vars.values()) > 0:
+        n_forecast_steps = len(next(iter(data_vars.values())))
+        coords = {"forecast_step": np.arange(n_forecast_steps)}
+    else:
+        coords = {"forecast_step": np.arange(0)}
+
+    return xr.Dataset(data_vars=data_vars, coords=coords)
 
 
 def get_gen_shape(gen_data: TensorMapping):
@@ -269,25 +315,11 @@ class MeanAggregator:
             )
         self._n_batches += 1
 
-    def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
+    def _get_series_data(self, step_slice: slice | None = None) -> list[SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: list[_SeriesData] = []
-        for name, metric in self._variable_metrics.items():
-            metric_results = metric.get()  # TensorDict: {var_name: metric_series}
-            sorted_keys = sorted(list(metric_results.keys()))
-            for key in sorted_keys:
-                arr = metric_results[key].detach()
-                if step_slice is not None:
-                    arr = arr[step_slice]
-                datum = _SeriesData(
-                    metric_name=name,
-                    var_name=key,
-                    data=self._dist.reduce_mean(arr).cpu().numpy(),
-                )
-                data.append(datum)
-        return data
+        return get_series_data(self._variable_metrics, self._dist, step_slice)
 
     @torch.no_grad()
     def get_logs(self, label: str, step_slice: slice | None = None):
@@ -313,22 +345,7 @@ class MeanAggregator:
         """
         Returns a dataset representation of the logs.
         """
-        data_vars = {}
-        for datum in self._get_series_data():
-            metadata = self._variable_metadata.get(
-                datum.var_name, VariableMetadata("unknown_units", datum.var_name)
-            )
-            data_vars[datum.get_xarray_key()] = xr.DataArray(
-                datum.data, dims=["forecast_step"], attrs=metadata._asdict()
-            )
-
-        if len(data_vars.values()) > 0:
-            n_forecast_steps = len(next(iter(data_vars.values())))
-            coords = {"forecast_step": np.arange(n_forecast_steps)}
-        else:
-            coords = {"forecast_step": np.arange(0)}
-
-        return xr.Dataset(data_vars=data_vars, coords=coords)
+        return series_data_to_dataset(self._get_series_data(), self._variable_metadata)
 
 
 def data_to_table(data: dict[str, np.ndarray], init_step: int = 0) -> Table:
@@ -453,25 +470,11 @@ class SingleTargetMeanAggregator:
             )
         self._n_batches += 1
 
-    def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
+    def _get_series_data(self, step_slice: slice | None = None) -> list[SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: list[_SeriesData] = []
-        for name, metric in self._variable_metrics.items():
-            metric_results = metric.get()  # TensorDict: {var_name: metric_series}
-            sorted_keys = sorted(list(metric_results.keys()))
-            for key in sorted_keys:
-                arr = metric_results[key].detach()
-                if step_slice is not None:
-                    arr = arr[step_slice]
-                datum = _SeriesData(
-                    metric_name=name,
-                    var_name=key,
-                    data=self._dist.reduce_mean(arr).cpu().numpy(),
-                )
-                data.append(datum)
-        return data
+        return get_series_data(self._variable_metrics, self._dist, step_slice)
 
     @torch.no_grad()
     def get_logs(self, label: str, step_slice: slice | None = None):
@@ -497,18 +500,7 @@ class SingleTargetMeanAggregator:
         """
         Returns a dataset representation of the logs.
         """
-        data_vars = {}
-        for datum in self._get_series_data():
-            metadata = self._variable_metadata.get(
-                datum.var_name, VariableMetadata("unknown_units", datum.var_name)
-            )
-            data_vars[datum.get_xarray_key()] = xr.DataArray(
-                datum.data, dims=["forecast_step"], attrs=metadata._asdict()
-            )
-
-        n_forecast_steps = len(next(iter(data_vars.values())))
-        coords = {"forecast_step": np.arange(n_forecast_steps)}
-        return xr.Dataset(data_vars=data_vars, coords=coords)
+        return series_data_to_dataset(self._get_series_data(), self._variable_metadata)
 
 
 @dataclasses.dataclass

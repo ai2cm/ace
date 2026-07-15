@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.ensemble import get_crps as _ensemble_crps
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
@@ -27,10 +28,14 @@ class PairedGlobalMeanAnnualAggregator:
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         monthly_reference_data: xr.Dataset | None = None,
+        report_crps: bool = True,
+        report_rmse: bool = True,
     ):
         self._area_weighted_mean = ops.area_weighted_mean
         self.timestep = timestep
         self.variable_metadata = variable_metadata or {}
+        self._report_crps = report_crps
+        self._report_rmse = report_rmse
         self._target_aggregator = GlobalMeanAnnualAggregator(
             ops, timestep, variable_metadata
         )
@@ -91,8 +96,8 @@ class PairedGlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
@@ -113,6 +118,12 @@ class PairedGlobalMeanAnnualAggregator:
             if gen.sizes["year"] > 1:
                 target_ensemble_mean = target[name].mean("sample")
                 gen_ensemble_mean = gen[name].mean("sample")
+                if self._report_rmse:
+                    metrics[f"rmse/{name}"] = get_rmse(
+                        gen_ensemble_mean, target_ensemble_mean
+                    )
+                if self._report_crps:
+                    metrics[f"crps/{name}"] = get_crps(gen[name], target_ensemble_mean)
                 # compute R2 values
                 if ref is not None:
                     r2_target = get_r2(target_ensemble_mean, ref.mean)
@@ -235,8 +246,8 @@ class GlobalMeanAnnualAggregator:
                 continue
 
             if name in self.variable_metadata:
-                long_name = self.variable_metadata[name].long_name
-                units = self.variable_metadata[name].units
+                long_name = self.variable_metadata[name].display_long_name(name)
+                units = self.variable_metadata[name].display_units("unknown units")
             else:
                 long_name = name
                 units = "unknown units"
@@ -309,11 +320,43 @@ def _add_dataarray(da1: xr.DataArray, da2: xr.DataArray):
 
 
 def get_r2(da: xr.DataArray, reference: xr.DataArray) -> float:
-    """Compute the R2 value of the target compared to the reference."""
+    """Compute the R2 value of the data compared to the reference over years,
+    ignoring NaN values (e.g. gap years filled in by reindexing).
+    """
     ref_data = reference.sel(year=da.year)
-    SS_ref = np.sum((ref_data.values - np.mean(ref_data.values)) ** 2)
-    SS_pred = np.sum((da - ref_data).values ** 2)
+    valid = ~(np.isnan(da.values) | np.isnan(ref_data.values))
+    ref_valid = ref_data.values[valid]
+    pred_valid = da.values[valid]
+    SS_ref = np.sum((ref_valid - np.mean(ref_valid)) ** 2)
+    SS_pred = np.sum((pred_valid - ref_valid) ** 2)
     return float(1 - SS_pred / SS_ref)
+
+
+def get_rmse(da: xr.DataArray, reference: xr.DataArray) -> float:
+    """Compute the RMSE of the data compared to the reference over years,
+    ignoring NaN values (e.g. gap years filled in by reindexing).
+    """
+    ref_data = reference.sel(year=da.year)
+    return float(np.sqrt(np.nanmean((da - ref_data).values ** 2)))
+
+
+def get_crps(da: xr.DataArray, reference: xr.DataArray) -> float:
+    """Compute the fair CRPS of the ensemble annual evolution ``da`` against the
+    ``reference`` annual evolution, averaged over years and ignoring NaN values
+    (e.g. gap years filled in by reindexing).
+
+    ``da`` carries a "sample" (ensemble) dimension and a "year" dimension;
+    ``reference`` is the per-year verifying observation. CRPS is computed per
+    year (treating years as the batch and samples as the ensemble) and averaged
+    over the non-NaN years, so it requires no external reference data.
+    """
+    ref_data = reference.sel(year=da.year)
+    # [year, sample] forecast and [year, 1] observation, matching the
+    # [n_batch, n_ensemble, ...] convention of fme.core.ensemble.get_crps.
+    gen = torch.as_tensor(da.transpose("year", "sample").values, dtype=torch.float32)
+    obs = torch.as_tensor(ref_data.values, dtype=torch.float32).unsqueeze(1)
+    crps_per_year = _ensemble_crps(gen, obs)
+    return float(np.nanmean(crps_per_year.numpy()))
 
 
 def _gather_sample_datasets(
@@ -377,6 +420,8 @@ class AnnualMetricConfig:
     reference_data: str | None = None
     enabled: bool = True
     strict: bool = False
+    report_crps: bool = True
+    report_rmse: bool = True
 
     def get_name(self) -> str:
         return self.name
@@ -397,5 +442,7 @@ class AnnualMetricConfig:
             timestep=ctx.timestep,
             variable_metadata=ctx.variable_metadata,
             monthly_reference_data=ref,
+            report_crps=self.report_crps,
+            report_rmse=self.report_rmse,
         )
         return MetricBuildResult(aggregator=maybe_filter(agg, self.variables))

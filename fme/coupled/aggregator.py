@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import os
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import torch
 import xarray as xr
@@ -35,17 +35,19 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
 from fme.ace.aggregator.inference.main import MetricConfig as AceMetricConfig
-from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
+from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
+from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import (
     AggregatorABC,
+    AggregatorSummary,
     InferenceAggregatorABC,
-    InferenceLog,
     InferenceLogs,
+    InferenceSummary,
 )
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.normalizer import NormalizeFn
 from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
@@ -59,19 +61,26 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
     def __init__(self):
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
+        self._per_step_losses = PerStepLossAggregator()
 
     @torch.no_grad()
     def record_batch(self, batch: CoupledTrainOutput):
         self._loss += batch.total_metrics["loss"]
         self._n_batches += 1
+        for component in (batch.ocean, batch.atmosphere):
+            step_metrics = {
+                k: v for k, v in component.metrics.items() if k.startswith("loss/")
+            }
+            self._per_step_losses.record(step_metrics)
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, torch.Tensor]:
-        logs = {f"{label}/mean/loss": self._loss / self._n_batches}
+    def get_summary(self, label: str) -> AggregatorSummary:
         dist = Distributed.get_instance()
-        for key in sorted(logs.keys()):
-            logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
-        return logs
+        loss = float(dist.reduce_mean(self._loss / self._n_batches).cpu().numpy())
+        logs: dict[str, float] = {}
+        logs[f"{label}/mean/loss"] = loss
+        logs.update(self._per_step_losses.get_logs(label))
+        return AggregatorSummary(logs=logs, loss=loss)
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None):
@@ -95,6 +104,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
+        config: OneStepAggregatorConfig | None = None,
     ):
         """
         Args:
@@ -107,6 +117,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             ocean_channel_mean_names: Names to include in ocean channel-mean metrics.
             atmosphere_channel_mean_names: Names to include in atmosphere channel-mean
                 metrics.
+            config: Configuration applied to both the ocean and atmosphere
+                sub-aggregators. Defaults to ``OneStepAggregatorConfig()``.
 
         """
         self._dist = Distributed.get_instance()
@@ -114,9 +126,10 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._loss_ocean = torch.tensor(0.0, device=get_device())
         self._loss_atmos = torch.tensor(0.0, device=get_device())
         self._n_batches = 0
+        config = config or OneStepAggregatorConfig()
         self._aggregators = {
-            "ocean": OneStepAggregator_(
-                dataset_info.ocean,
+            "ocean": config.build(
+                dataset_info=dataset_info.ocean,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "ocean")
@@ -126,8 +139,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 loss_scaling=loss_scaling.ocean,
                 channel_mean_names=ocean_channel_mean_names,
             ),
-            "atmosphere": OneStepAggregator_(
-                dataset_info.atmosphere,
+            "atmosphere": config.build(
+                dataset_info=dataset_info.atmosphere,
                 save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "atmosphere")
@@ -162,22 +175,21 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._n_batches += 1
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        """
-        Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
-        """
+    def get_summary(self, label: str) -> AggregatorSummary:
         if self._num_channels_ocean is None or self._num_channels_atmos is None:
             raise ValueError("No data recorded.")
-        ocean_logs = self._aggregators["ocean"].get_logs(label)
-        atmos_logs = self._aggregators["atmosphere"].get_logs(label)
-        # loss is not included in component metrics so these are both nans
-        ocean_logs.pop(f"{label}/mean/loss")
-        atmos_logs.pop(f"{label}/mean/loss")
+        if self._n_batches == 0:
+            raise ValueError("No data recorded.")
+        ocean_summary = self._aggregators["ocean"].get_summary(label)
+        atmos_summary = self._aggregators["atmosphere"].get_summary(label)
+        ocean_logs = dict(ocean_summary.logs)
+        atmos_logs = dict(atmos_summary.logs)
+        # component aggregators don't track the combined loss, so their
+        # per-component {label}/mean/loss values are NaN — drop them in
+        # favor of the combined loss computed below.
+        ocean_logs.pop(f"{label}/mean/loss", None)
+        atmos_logs.pop(f"{label}/mean/loss", None)
         prefix = f"{label}/mean_norm/weighted_rmse"
-        # rename channel_mean RMSEs
         ocean_logs[f"{prefix}/ocean_channel_mean"] = ocean_logs.pop(
             f"{prefix}/channel_mean"
         )
@@ -190,11 +202,13 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 "Duplicate keys found in ocean and atmosphere "
                 f"{label} logs: {duplicates}."
             )
-        logs = {**ocean_logs, **atmos_logs}
-        loss = self._loss / self._n_batches
-        logs[f"{label}/mean/loss"] = float(
-            self._dist.reduce_mean(loss.detach()).cpu().numpy()
+        loss = float(
+            self._dist.reduce_mean((self._loss / self._n_batches).detach())
+            .cpu()
+            .numpy()
         )
+        logs = {**ocean_logs, **atmos_logs}
+        logs[f"{label}/mean/loss"] = loss
         loss_ocean = self._loss_ocean / self._n_batches
         logs[f"{label}/mean/loss/ocean"] = float(
             self._dist.reduce_mean(loss_ocean.detach()).cpu().numpy()
@@ -203,7 +217,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         logs[f"{label}/mean/loss/atmosphere"] = float(
             self._dist.reduce_mean(loss_atmos.detach()).cpu().numpy()
         )
-        return logs
+        return AggregatorSummary(logs=logs, loss=loss)
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
@@ -298,8 +312,8 @@ class InferenceEvaluatorAggregatorConfig:
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
         initial_time: xr.DataArray,
-        ocean_normalize: Callable[[TensorMapping], TensorDict],
-        atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        ocean_normalize: NormalizeFn,
+        atmosphere_normalize: NormalizeFn,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
@@ -484,11 +498,13 @@ class InferenceEvaluatorAggregator(
         return _combine_logs(ocean_logs, atmos_logs, n_atmos_steps_per_ocean_step=1)
 
     @torch.no_grad()
-    def get_summary_logs(self) -> InferenceLog:
+    def get_summary(self) -> InferenceSummary:
         if self._num_channels_ocean is None or self._num_channels_atmos is None:
             raise ValueError("No data recorded.")
-        ocean_logs = self.ocean.get_summary_logs()
-        atmos_logs = self.atmosphere.get_summary_logs()
+        ocean_summary = self.ocean.get_summary()
+        atmos_summary = self.atmosphere.get_summary()
+        ocean_logs = dict(ocean_summary.logs)
+        atmos_logs = dict(atmos_summary.logs)
         prefix = "time_mean_norm/rmse"
         ocean_channel_mean = ocean_logs.pop(f"{prefix}/channel_mean")
         atmos_channel_mean = atmos_logs.pop(f"{prefix}/channel_mean")
@@ -513,11 +529,15 @@ class InferenceEvaluatorAggregator(
                 "Duplicate keys found in ocean and atmosphere "
                 f"inference evaluator aggregator logs: {duplicates}."
             )
-        return {
+        logs = {
             "time_mean_norm/rmse/channel_mean": channel_mean,
             **ocean_logs,
             **atmos_logs,
         }
+        return InferenceSummary(logs=logs, loss=channel_mean)
+
+    def get_summary_logs(self):
+        return self.get_summary().logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
@@ -634,19 +654,21 @@ class InferenceAggregator(
         # initial condition "steps" must align, so record both
         return _combine_logs(ocean_logs, atmos_logs, n_atmos_steps_per_ocean_step=1)
 
-    def get_summary_logs(self) -> InferenceLog:
-        ocean_logs = self.ocean.get_summary_logs()
-        atmos_logs = self.atmosphere.get_summary_logs()
-        duplicates = set(ocean_logs.keys()) & set(atmos_logs.keys())
+    def get_summary(self) -> InferenceSummary:
+        ocean_summary = self.ocean.get_summary()
+        atmos_summary = self.atmosphere.get_summary()
+        duplicates = set(ocean_summary.logs.keys()) & set(atmos_summary.logs.keys())
         if len(duplicates) > 0:
             raise ValueError(
                 "Duplicate keys found in ocean and atmosphere "
                 f"inference evaluator aggregator logs: {duplicates}."
             )
-        return {
-            **ocean_logs,
-            **atmos_logs,
-        }
+        return InferenceSummary(
+            logs={**ocean_summary.logs, **atmos_summary.logs}, loss=None
+        )
+
+    def get_summary_logs(self):
+        return self.get_summary().logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):

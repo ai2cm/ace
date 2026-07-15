@@ -6,12 +6,17 @@ import torch
 
 from fme.ace.aggregator.inference.data import InferenceBatchData, make_dummy_time
 from fme.ace.aggregator.inference.spectrum import PairedSphericalPowerSpectrumAggregator
+from fme.ace.aggregator.loss_metrics import (
+    PerChannelLossAggregator,
+    PerStepLossAggregator,
+)
+from fme.ace.aggregator.one_step.ensemble import _EnsembleAggregator
 from fme.ace.aggregator.one_step.reduced import MeanAggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.fill import SmoothFloodFill
-from fme.core.generics.aggregator import AggregatorABC
+from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
@@ -27,11 +32,15 @@ class TrainAggregatorConfig:
         weighted_rmse: Whether to compute the weighted RMSE.
         per_channel_loss: Whether to accumulate and report per-variable (per-channel)
             loss in get_logs (e.g. train/mean/loss/<var_name>).
+        ensemble_metrics: Whether to compute ensemble metrics (CRPS, SSR bias, and
+            ensemble-mean RMSE) over the training batches. Disabled by default;
+            requires the batch to carry an ensemble dimension.
     """
 
     spherical_power_spectrum: bool = True
     weighted_rmse: bool = True
     per_channel_loss: bool = True
+    ensemble_metrics: bool = False
 
 
 class Aggregator(Protocol):
@@ -76,8 +85,10 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, config: TrainAggregatorConfig, operations: GriddedOperations):
         self._n_loss_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
-        self._per_channel_loss: dict[str, torch.Tensor] = {}
-        self._per_channel_loss_enabled = config.per_channel_loss
+        self._per_step_losses = PerStepLossAggregator()
+        self._per_channel_losses: PerChannelLossAggregator | None = (
+            PerChannelLossAggregator() if config.per_channel_loss else None
+        )
         self._paired_aggregators: dict[str, Aggregator] = {}
         if config.spherical_power_spectrum:
             try:
@@ -100,18 +111,34 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
                 include_bias=False,
                 include_grad_mag_percent_diff=False,
             )
+        self._ensemble_aggregator: _EnsembleAggregator | None = None
+        self._n_ensemble_batches = 0
+        if config.ensemble_metrics:
+            self._ensemble_aggregator = _EnsembleAggregator(
+                gridded_operations=operations,
+                log_mean_maps=False,
+            )
 
     @torch.no_grad()
     def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
         self._n_loss_batches += 1
-        if self._per_channel_loss_enabled and batch.per_channel_losses is not None:
-            for var_name, value in batch.per_channel_losses.items():
-                acc = self._per_channel_loss.get(
-                    var_name,
-                    torch.tensor(0.0, device=get_device(), dtype=value.dtype),
-                )
-                self._per_channel_loss[var_name] = acc + value
+        step_metrics = {
+            k: v for k, v in batch.metrics.items() if k.startswith("loss_step_")
+        }
+        self._per_step_losses.record(step_metrics)
+        if (
+            self._per_channel_losses is not None
+            and batch.per_channel_losses is not None
+        ):
+            self._per_channel_losses.record(batch.per_channel_losses)
+
+        if self._ensemble_aggregator is not None and batch.n_ensemble > 1:
+            self._ensemble_aggregator.record_batch(
+                target_data=batch.target_data,
+                gen_data=batch.gen_data,
+            )
+            self._n_ensemble_batches += 1
 
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
@@ -122,29 +149,32 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
             )
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> dict[str, torch.Tensor]:
-        """
-        Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
-        """
-        logs = {}
+    def get_summary(self, label: str) -> AggregatorSummary:
+        logs: dict[str, float] = {}
         if self._n_loss_batches > 0:
             for name, aggregator in self._paired_aggregators.items():
                 logs.update(
                     {f"{label}/{k}": v for k, v in aggregator.get_logs(name).items()}
                 )
-        dist = Distributed.get_instance()
-        logs[f"{label}/mean/loss"] = float(
-            dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy()
-        )
-        if self._n_loss_batches > 0 and self._per_channel_loss_enabled:
-            for var_name, acc in self._per_channel_loss.items():
-                logs[f"{label}/mean/loss/{var_name}"] = float(
-                    dist.reduce_mean(acc / self._n_loss_batches).cpu().numpy()
+            if self._ensemble_aggregator is not None and self._n_ensemble_batches > 0:
+                logs.update(
+                    {
+                        f"{label}/{k}": v
+                        for k, v in self._ensemble_aggregator.get_logs(
+                            "ensemble"
+                        ).items()
+                    }
                 )
-        return logs
+        dist = Distributed.get_instance()
+        loss = float(dist.reduce_mean(self._loss / self._n_loss_batches).cpu().numpy())
+        logs[f"{label}/mean/loss"] = loss
+        logs.update(self._per_step_losses.get_logs(label))
+        if self._per_channel_losses is not None:
+            logs.update(self._per_channel_losses.get_logs(label))
+        return AggregatorSummary(logs=logs, loss=loss)
+
+    def get_logs(self, label: str):
+        return self.get_summary(label).logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None) -> None:

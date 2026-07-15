@@ -145,14 +145,17 @@ class InferenceDataset(torch.utils.data.Dataset):
     ) -> DatasetProperties:
         if dataset_info is None:
             return ocean_properties
-        ocean_mask_is_empty = not ocean_properties.mask_provider.masks
+        ocean_mask_is_empty = not ocean_properties.spatial_mask_provider.masks
         identical_masks = (
-            len(ocean_properties.mask_provider.masks) > 0
-            and len(dataset_info.ocean.mask_provider.masks) > 0
-            and ocean_properties.mask_provider == dataset_info.ocean.mask_provider
+            len(ocean_properties.spatial_mask_provider.masks) > 0
+            and len(dataset_info.ocean.spatial_mask_provider.masks) > 0
+            and ocean_properties.spatial_mask_provider
+            == dataset_info.ocean.spatial_mask_provider
         )
         if ocean_mask_is_empty or identical_masks:
-            ocean_properties.update_mask_provider(dataset_info.ocean.mask_provider)
+            ocean_properties.update_spatial_mask_provider(
+                dataset_info.ocean.spatial_mask_provider
+            )
         else:
             logging.warning(
                 "Not updating ocean mask provider from dataset info in the checkpoint"
@@ -241,7 +244,7 @@ def _make_dummy_ocean_forcing(
         variable_metadata=dict(dataset_info.ocean.variable_metadata),
         vertical_coordinate=dataset_info.ocean.vertical_coordinate,
         horizontal_coordinates=dataset_info.ocean.horizontal_coordinates,
-        mask_provider=dataset_info.ocean.mask_provider,
+        spatial_mask_provider=dataset_info.ocean.spatial_mask_provider,
         timestep=dataset_info.ocean.timestep,
         is_remote=False,
         all_labels=set(),

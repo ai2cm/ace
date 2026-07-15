@@ -1,6 +1,23 @@
 import dataclasses
+from collections.abc import Sequence
 
 from fme.core.dataset.schedule import IntSchedule
+
+
+@dataclasses.dataclass
+class InitialConditionRequirements:
+    """
+    The requirements an inference run places on its initial condition.
+
+    Parameters:
+        prognostic_names: Names of the prognostic variables the stepper needs.
+        labels: Labels for the initial conditions, or None for none.
+        n_ensemble: Number of ensemble members per initial state.
+    """
+
+    prognostic_names: Sequence[str]
+    labels: list[str] | None = None
+    n_ensemble: int = 1
 
 
 @dataclasses.dataclass
@@ -25,10 +42,14 @@ class DataRequirements:
     Parameters:
         names: Names of the variables to load.
         n_timesteps: Number of timesteps to load in each batch window.
+        allow_missing_variables: If True, the data loader may omit some
+            required variables and provide a data_mask instead. If False,
+            missing variables cause an error.
     """
 
     names: list[str]
     n_timesteps: int | IntSchedule
+    allow_missing_variables: bool = False
 
     @property
     def n_timesteps_schedule(self) -> IntSchedule:

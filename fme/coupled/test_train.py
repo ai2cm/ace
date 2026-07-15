@@ -37,18 +37,19 @@ train_loader:
       data_path: {atmosphere_data_path}
       subset:
           start_time: '1970-01-01'
-validation_loader:
-  batch_size: 2
-  num_data_workers: 0
-  dataset:
-    ocean:
-      data_path: {ocean_data_path}
-      subset:
-          start_time: '1970-01-01'
-    atmosphere:
-      data_path: {atmosphere_data_path}
-      subset:
-          start_time: '1970-01-01'
+validation:
+- loader:
+    batch_size: 2
+    num_data_workers: 0
+    dataset:
+      ocean:
+        data_path: {ocean_data_path}
+        subset:
+            start_time: '1970-01-01'
+      atmosphere:
+        data_path: {atmosphere_data_path}
+        subset:
+            start_time: '1970-01-01'
 inference:
   loader:
     dataset:
@@ -73,14 +74,12 @@ stepper_training:
     loss:
       type: {loss_type}
       kwargs: {loss_kwargs}
-    loss_contributions:
-      weight: {loss_ocean_weight}
+    loss_weight: {loss_ocean_weight}
   atmosphere:
     loss:
       type: {loss_type}
       kwargs: {loss_kwargs}
-    loss_contributions:
-      n_steps: {loss_atmos_n_steps}
+    n_steps: {loss_atmos_n_steps}
 stepper:
   sst_name: {ocean_sfc_temp_name}
   ocean_fraction_prediction:
@@ -267,13 +266,9 @@ def _write_test_yaml_files(
         (3, True),  # CRPS training with EnsembleLoss
     ],
 )
-def test_train_and_inference(
-    tmp_path, loss_atmos_n_steps, crps_training: bool, very_fast_only: bool
-):
+@pytest.mark.medium_duration
+def test_train_and_inference(tmp_path, loss_atmos_n_steps, crps_training: bool):
     """Ensure that coupled training and standalone inference run without errors."""
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-
     set_seed(42 + loss_atmos_n_steps)
 
     data_dir = tmp_path / "coupled_data"
@@ -420,6 +415,11 @@ def test_train_and_inference(
     assert "val/mean/loss/ocean" in epoch_logs
     # atmos loss contributions
     assert "val/mean/loss/atmosphere" in epoch_logs
+    np.testing.assert_allclose(
+        epoch_logs["val/mean/loss"],
+        epoch_logs["val/mean/loss/atmosphere"] + epoch_logs["val/mean/loss/ocean"],
+        atol=1e-6,
+    )
     if loss_atmos_n_steps == 0:
         np.testing.assert_allclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
 

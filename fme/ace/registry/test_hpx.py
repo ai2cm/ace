@@ -1,20 +1,45 @@
 import dataclasses
 import datetime
 import logging
+from typing import Literal
 
+import dacite
 import numpy as np
 import pytest
-import torch as th
+import torch
+import torch.nn as nn
 
-from fme.ace.models.healpix.healpix_activations import (
-    CappedGELUConfig,
+from fme.ace.models.healpix.healpix_activations import CappedGELUConfig
+from fme.ace.models.healpix.healpix_blocks import (
+    AvgPoolDownsamplingBlockConfig,
+    BasicConvBlockConfig,
+    ConvBlockConfig,
+    ConvNeXtBlockConfig,
+    DealiasedDownsample,
+    DealiasedDownsampleBlockConfig,
     DownsamplingBlockConfig,
+    HEALPixLayerBuildContext,
+    MaxPoolDownsamplingBlockConfig,
+    MultiSymmetricConvNeXtBlockConfig,
+    SmoothedInterpolateConv,
+    SmoothedInterpolateConvBlockConfig,
+    TransposedConvUpsampleBlockConfig,
+    UpsamplingBlockConfig,
 )
-from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.models.healpix.healpix_decoder import UNetDecoder
 from fme.ace.models.healpix.healpix_encoder import UNetEncoder
-from fme.ace.models.healpix.healpix_layers import HEALPixPadding
-from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
+from fme.ace.models.healpix.healpix_layers import (
+    HEALPixLayer,
+    HEALPixPadding,
+    HEALPixPaddingIsolatitude,
+    HEALPixPaddingv2,
+    have_earth2grid,
+)
+from fme.ace.models.healpix.healpix_paddings import (
+    isolatitude_pad_folded,
+    make_hpx_padding_layer,
+)
+from fme.ace.models.healpix.healpix_unet import HEALPixUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.ace.stepper import StepperConfig
 from fme.core.coordinates import HEALPixCoordinates, HybridSigmaPressureCoordinate
@@ -32,26 +57,49 @@ logger = logging.getLogger("__name__")
 def fix_random_seeds(seed=0):
     """Fix random seeds for reproducibility"""
     np.random.seed(seed)
-    th.manual_seed(seed)
-    th.cuda.manual_seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 
-def conv_next_block_config(in_channels=3, out_channels=1):
+def _layer_ctx(
+    mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "karlbauer",
+    *,
+    nside: int | None = None,
+    nside_after: int | None = None,
+) -> HEALPixLayerBuildContext:
+    return HEALPixLayerBuildContext(
+        hpx_padding_mode=mode,
+        nside=nside,
+        nside_after=nside_after,
+    )
+
+
+def conv_next_block_config():
     activation_block_config = CappedGELUConfig(cap_value=10)
-    conv_next_block_config = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
+    return ConvNeXtBlockConfig(
         activation=activation_block_config,
         kernel_size=3,
-        dilation=1,
         upscale_factor=4,
-        block_type="ConvNeXtBlock",
     )
-    return conv_next_block_config
 
 
 def down_sampling_block_config():
-    return DownsamplingBlockConfig(pooling=2, block_type="AvgPool")
+    return AvgPoolDownsamplingBlockConfig(pooling=2)
+
+
+def up_sampling_block_config():
+    activation_block_config = CappedGELUConfig(cap_value=10)
+    return TransposedConvUpsampleBlockConfig(
+        activation=activation_block_config,
+        stride=2,
+    )
+
+
+def output_layer_config():
+    return BasicConvBlockConfig(
+        kernel_size=1,
+        n_layers=1,
+    )
 
 
 def encoder_config(
@@ -65,50 +113,15 @@ def encoder_config(
     )
 
 
-def up_sampling_block_config(in_channels=3, out_channels=1):
-    activation_block_config = CappedGELUConfig(cap_value=10)
-    transposed_conv_upsample_block_config = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        activation=activation_block_config,
-        stride=2,
-        block_type="TransposedConvUpsample",
-    )
-    return transposed_conv_upsample_block_config
-
-
-def output_layer_config(in_channels=3, out_channels=2):
-    conv_block_config = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        kernel_size=1,
-        dilation=1,
-        n_layers=1,
-        block_type="BasicConvBlock",
-    )
-    return conv_block_config
-
-
-def recurrent_block_config(in_channels=3):
-    recurrent_block_config = RecurrentBlockConfig(
-        in_channels=in_channels,
-        kernel_size=1,
-        block_type="ConvGRUBlock",
-    )
-    return recurrent_block_config
-
-
 def decoder_config(
     conv_next_block_config,
     up_sampling_block_config,
     output_layer_config,
-    recurrent_block_config,
     n_channels=[34, 68, 136],
 ):
     decoder_config = UNetDecoderConfig(
         conv_block=conv_next_block_config,
         up_sampling_block=up_sampling_block_config,
-        recurrent_block=recurrent_block_config,
         output_layer=output_layer_config,
         n_channels=n_channels,
         dilations=[4, 2, 1],
@@ -116,11 +129,55 @@ def decoder_config(
     return decoder_config
 
 
+def _nside_levels(shallow: int, n_levels: int) -> list[int]:
+    """Face height/width per UNet level, shallowest to deepest."""
+    return [max(1, shallow // (2**i)) for i in range(n_levels)]
+
+
+def _hpx_unet_configs(
+    img: int = 16,
+    encoder_n_channels: list[int] | None = None,
+    decoder_n_channels: list[int] | None = None,
+    output_channels: int = 4,
+    padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "karlbauer",
+):
+    """Build minimal encoder/decoder configs for HEALPixUNet tests."""
+    if encoder_n_channels is None:
+        encoder_n_channels = [8, 16]
+    if decoder_n_channels is None:
+        decoder_n_channels = list(reversed(encoder_n_channels))
+
+    enc_conv = ConvNeXtBlockConfig()
+    down = AvgPoolDownsamplingBlockConfig(
+        pooling=2,
+    )
+    enc = UNetEncoderConfig(
+        conv_block=enc_conv,
+        down_sampling_block=down,
+        n_channels=encoder_n_channels,
+        n_layers=[1] * len(encoder_n_channels),
+    )
+    dec_conv = ConvNeXtBlockConfig()
+    dec = UNetDecoderConfig(
+        conv_block=dec_conv,
+        up_sampling_block=TransposedConvUpsampleBlockConfig(
+            stride=2,
+        ),
+        output_layer=BasicConvBlockConfig(
+            n_layers=1,
+            kernel_size=1,
+        ),
+        n_channels=decoder_n_channels,
+        n_layers=[1] * len(decoder_n_channels),
+    )
+    return enc, dec
+
+
 def _test_data():
     # create dummy data
     def generate_test_data(batch_size=8, time_dim=1, channels=7, img_size=16):
         device = get_device()
-        test_data = th.randn(batch_size, 12, time_dim * channels, img_size, img_size)
+        test_data = torch.randn(batch_size, 12, time_dim * channels, img_size, img_size)
         return test_data.to(device)
 
     return generate_test_data
@@ -130,7 +187,7 @@ def constant_data():
     # create dummy data
     def generate_constant_data(channels=2, img_size=16):
         device = get_device()
-        constants = th.randn(12, channels, img_size, img_size)
+        constants = torch.randn(12, channels, img_size, img_size)
 
         return constants.to(device)
 
@@ -141,58 +198,42 @@ def insolation_data():
     # create dummy data
     def generate_insolation_data(batch_size=8, time_dim=1, img_size=16):
         device = get_device()
-        insolation = th.randn(batch_size, 12, time_dim, img_size, img_size)
+        insolation = torch.randn(batch_size, 12, time_dim, img_size, img_size)
 
         return insolation.to(device)
 
     return generate_insolation_data
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 @pytest.mark.parametrize("shape", [pytest.param((8, 16))])
 def test_hpx_init(shape):
-    in_channels = 7
-    out_channels = 7
-    prognostic_variables = min(in_channels, out_channels)
-    n_constants = 1
-    decoder_input_channels = 1
-    input_time_size = 2
-    output_time_size = 4
     device = get_device()
 
     conv_next_block = conv_next_block_config()
     down_sampling_block = down_sampling_block_config()
-    recurrent_block = recurrent_block_config()
     encoder = encoder_config(conv_next_block, down_sampling_block)
     up_sampling_block = up_sampling_block_config()
     output_layer = output_layer_config()
-    decoder = decoder_config(
-        conv_next_block, up_sampling_block, output_layer, recurrent_block
-    )
+    decoder = decoder_config(conv_next_block, up_sampling_block, output_layer)
 
     hpx_config_data = {
         "encoder": dataclasses.asdict(encoder),
         "decoder": dataclasses.asdict(decoder),
-        "prognostic_variables": prognostic_variables,
-        "n_constants": n_constants,
-        "decoder_input_channels": decoder_input_channels,
-        "input_time_size": input_time_size,
-        "output_time_size": output_time_size,
     }
 
     horizontal_coordinates = HEALPixCoordinates(
-        th.arange(12), th.arange(8), th.arange(8)
+        torch.arange(12), torch.arange(8), torch.arange(8)
     )
     vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=th.arange(7), bk=th.arange(7)
+        ak=torch.arange(7), bk=torch.arange(7)
     ).to(device)
     stepper_config = StepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
                 SingleModuleStepConfig(
-                    builder=ModuleSelector(
-                        type="HEALPixRecUNet", config=hpx_config_data
-                    ),
+                    builder=ModuleSelector(type="HEALPixUNet", config=hpx_config_data),
                     in_names=["x"],
                     out_names=["x"],
                     normalization=NetworkAndLossNormalizationConfig(
@@ -213,280 +254,18 @@ def test_hpx_init(shape):
         ),
     )
     assert len(stepper.modules) == 1
-    assert type(stepper.modules[0].module) is HEALPixRecUNet
+    assert type(stepper.modules[0].module) is HEALPixUNet
 
 
-@pytest.mark.parametrize(
-    "in_channels, out_channels, n_constants, decoder_input_channels, input_time_size, \
-    output_time_size, couplings, expected_exception, expected_message",
-    [
-        (7, 7, 1, 1, 2, 4, None, None, None),  # Valid case
-        (
-            7,
-            7,
-            1,
-            1,
-            2,
-            3,
-            None,
-            ValueError,
-            "'output_time_size' must be a multiple of 'input_time_size'",
-        ),  # Bad input and output time dims
-        (
-            7,
-            7,
-            0,
-            2,
-            2,
-            3,
-            ["t2m", "v10m"],
-            NotImplementedError,
-            "support for coupled models with no constant field",
-        ),  # Couplings with no constants
-        (
-            7,
-            7,
-            2,
-            0,
-            2,
-            3,
-            ["t2m", "v10m"],
-            NotImplementedError,
-            "support for coupled models with no decoder",
-        ),  # Couplings with no decoder input channels
-        (
-            7,
-            7,
-            0,
-            0,
-            2,
-            3,
-            None,
-            ValueError,
-            "'output_time_size' must be a multiple of 'input_time_size'",
-        ),  # No constant fields and no decoder
-    ],
-)
-def test_HEALPixRecUNet_initialize(
-    in_channels,
-    out_channels,
-    n_constants,
-    decoder_input_channels,
-    input_time_size,
-    output_time_size,
-    couplings,
-    expected_exception,
-    expected_message,
-):
-    prognostic_variables = min(out_channels, in_channels)
-    conv_next_block = conv_next_block_config()
-    up_sampling_block = up_sampling_block_config()
-    output_layer = output_layer_config()
-    recurrent_block = recurrent_block_config()
-    encoder = encoder_config(conv_next_block, down_sampling_block_config())
-    decoder = decoder_config(
-        conv_next_block, up_sampling_block, output_layer, recurrent_block
-    )
-    device = get_device()
-
-    if expected_exception:
-        with pytest.raises(expected_exception, match=expected_message):
-            model = HEALPixRecUNet(
-                encoder=encoder,
-                decoder=decoder,
-                input_channels=in_channels,
-                output_channels=out_channels,
-                prognostic_variables=prognostic_variables,
-                n_constants=n_constants,
-                decoder_input_channels=decoder_input_channels,
-                input_time_size=input_time_size,
-                output_time_size=output_time_size,
-                couplings=couplings,
-            ).to(device)
-    else:
-        model = HEALPixRecUNet(
-            encoder=encoder,
-            decoder=decoder,
-            input_channels=in_channels,
-            output_channels=out_channels,
-            prognostic_variables=prognostic_variables,
-            n_constants=n_constants,
-            decoder_input_channels=decoder_input_channels,
-            input_time_size=input_time_size,
-            output_time_size=output_time_size,
-            couplings=couplings,
-        ).to(device)
-        assert isinstance(model, HEALPixRecUNet)
-
-
-def test_HEALPixRecUNet_integration_steps():
-    in_channels = 2
-    out_channels = 2
-    prognostic_variables = min(out_channels, in_channels)
-    n_constants = 1
-    decoder_input_channels = 0
-    input_time_size = 2
-    output_time_size = 4
-    device = get_device()
-
-    conv_next_block = conv_next_block_config()
-    up_sampling_block = up_sampling_block_config()
-    output_layer = output_layer_config()
-    recurrent_block = recurrent_block_config()
-    encoder = encoder_config(conv_next_block, down_sampling_block_config())
-    decoder = decoder_config(
-        conv_next_block, up_sampling_block, output_layer, recurrent_block
-    )
-
-    model = HEALPixRecUNet(
-        encoder=encoder,
-        decoder=decoder,
-        input_channels=in_channels,
-        output_channels=out_channels,
-        prognostic_variables=prognostic_variables,
-        n_constants=n_constants,
-        decoder_input_channels=decoder_input_channels,
-        input_time_size=input_time_size,
-        output_time_size=output_time_size,
-    ).to(device)
-
-    assert model.integration_steps == output_time_size // input_time_size
-
-
-def test_HEALPixRecUNet_reset(very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    # create a smaller version of the dlwp healpix model
-    in_channels = 3
-    out_channels = 3
-    prognostic_variables = min(out_channels, in_channels)
-    n_constants = 2
-    decoder_input_channels = 1
-    input_time_size = 2
-    output_time_size = 4
-    size = 16
-    device = get_device()
-
-    conv_next_block = conv_next_block_config()
-    up_sampling_block = up_sampling_block_config()
-    output_layer = output_layer_config()
-    recurrent_block = recurrent_block_config()
-    encoder = encoder_config(conv_next_block, down_sampling_block_config())
-    decoder = decoder_config(
-        conv_next_block, up_sampling_block, output_layer, recurrent_block
-    )
-
-    fix_random_seeds(seed=42)
-    x = _test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
-    decoder_inputs = insolation_data()(time_dim=input_time_size, img_size=size)
-    constants = constant_data()(channels=n_constants, img_size=size)
-    batch_size = x.shape[0]
-    constants = constants.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
-    inputs = th.concat(
-        (x, decoder_inputs, constants), dim=-3
-    )  # [x, decoder_inputs, constants]
-
-    model = HEALPixRecUNet(
-        encoder=encoder,
-        decoder=decoder,
-        input_channels=in_channels,
-        output_channels=out_channels,
-        prognostic_variables=prognostic_variables,
-        n_constants=n_constants,
-        decoder_input_channels=decoder_input_channels,
-        input_time_size=input_time_size,
-        output_time_size=output_time_size,
-        enable_healpixpad=False,
-        delta_time="6h",
-    ).to(device)
-
-    out_var = model(inputs)
-    model.reset()
-
-    assert compare_output(out_var, model(inputs))
-
-
-# Checks the model can perform a forward class on various input configurations
-# [full inputs, no decoder inputs, no constant inputs]
-@pytest.mark.parametrize(
-    "inputs_config, in_channels, decoder_input_channels, \
-        out_channels, input_time_size, output_time_size, n_constants, size",
-    [
-        ([0, 1, 2], 3, 1, 3, 2, 4, 2, 16),  # full inputs
-        ([0, 2], 3, 0, 3, 2, 4, 2, 16),  # no decoder inputs
-        ([0, 1], 3, 1, 3, 2, 4, 0, 16),  # no constant inputs
-    ],
-)
-def test_HEALPixRecUNet_forward(
-    inputs_config,
-    in_channels,
-    decoder_input_channels,
-    out_channels,
-    input_time_size,
-    output_time_size,
-    n_constants,
-    size,
-    very_fast_only: bool,
-):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    prognostic_variables = min(out_channels, in_channels)
-    device = get_device()
-    conv_next_block = conv_next_block_config()
-    up_sampling_block = up_sampling_block_config()
-    output_layer = output_layer_config()
-    recurrent_block = recurrent_block_config()
-    encoder = encoder_config(conv_next_block, down_sampling_block_config())
-    decoder = decoder_config(
-        conv_next_block, up_sampling_block, output_layer, recurrent_block
-    )
-
-    fix_random_seeds(seed=42)
-    x = _test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
-    batch_size = x.shape[0]
-
-    if decoder_input_channels > 0:
-        decoder_inputs = insolation_data()(time_dim=input_time_size, img_size=size)
-    else:
-        decoder_inputs = insolation_data()(time_dim=0, img_size=size)
-    constants = constant_data()(channels=n_constants, img_size=size)
-    constants = constants.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
-
-    all_inputs = [x, decoder_inputs, constants]
-    inputs = th.concat(all_inputs, dim=-3)
-
-    model = HEALPixRecUNet(
-        encoder=encoder,
-        decoder=decoder,
-        input_channels=in_channels,
-        output_channels=out_channels,
-        prognostic_variables=prognostic_variables,
-        n_constants=n_constants,
-        decoder_input_channels=decoder_input_channels,
-        input_time_size=input_time_size,
-        output_time_size=output_time_size,
-        enable_healpixpad=False,
-        delta_time="6h",
-    ).to(device)
-    model(inputs)
-
-
-# pragma mark - encoder
-
-
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetEncoder_initialize():
     device = get_device()
     channels = 2
     n_channels = (16, 32, 64)
 
     # Dicts for block configs used by encoder
-    conv_block_config = ConvBlockConfig(
-        in_channels=channels,
-        block_type="ConvNeXtBlock",
-    )
-    down_sampling_block_config = DownsamplingBlockConfig(
-        pooling=2, block_type="MaxPool"
-    )
+    conv_block_config = ConvNeXtBlockConfig()
+    down_sampling_block_config = MaxPoolDownsamplingBlockConfig(pooling=2)
 
     encoder = UNetEncoder(
         conv_block=conv_block_config,
@@ -507,6 +286,7 @@ def test_UNetEncoder_initialize():
     assert isinstance(encoder, UNetEncoder)
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetEncoder_forward():
     channels = 2
     hw_size = 16
@@ -515,13 +295,8 @@ def test_UNetEncoder_forward():
     device = get_device()
 
     # block configs used by encoder
-    conv_block_config = ConvBlockConfig(
-        in_channels=channels,
-        block_type="ConvNeXtBlock",
-    )
-    down_sampling_block_config = DownsamplingBlockConfig(
-        pooling=2, block_type="MaxPool"
-    )
+    conv_block_config = ConvNeXtBlockConfig()
+    down_sampling_block_config = MaxPoolDownsamplingBlockConfig(pooling=2)
     encoder = UNetEncoder(
         conv_block=conv_block_config,
         down_sampling_block=down_sampling_block_config,
@@ -530,11 +305,8 @@ def test_UNetEncoder_forward():
     ).to(device)
 
     tensor_size = [b_size, channels, hw_size, hw_size]
-    invar = th.rand(tensor_size).to(device)
+    invar = torch.rand(tensor_size).to(device)
     outvar = encoder(invar)
-
-    # doesn't do anything
-    encoder.reset()
 
     # outvar is a module list
     for idx, out_tensor in enumerate(outvar):
@@ -544,88 +316,40 @@ def test_UNetEncoder_forward():
         assert out_tensor.shape[2] == tensor_size[2] // (2**idx)
 
 
-def test_UNetEncoder_reset():
-    channels = 2
-    n_channels = (16, 32, 64)
-    device = get_device()
-
-    # Dicts for block configs used by encoder
-    conv_block_config = ConvBlockConfig(
-        in_channels=channels,
-        block_type="ConvNeXtBlock",
-    )
-    down_sampling_block_config = DownsamplingBlockConfig(
-        pooling=2,
-        block_type="MaxPool",
-    )
-    encoder = UNetEncoder(
-        conv_block=conv_block_config,
-        down_sampling_block=down_sampling_block_config,
-        n_channels=n_channels,
-        input_channels=channels,
-    ).to(device)
-
-    # doesn't do anything
-    encoder.reset()
-    assert isinstance(encoder, UNetEncoder)
-
-
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetDecoder_initilization():
-    in_channels = 2
-    out_channels = 1
     n_channels = (64, 32, 16)
     device = get_device()
 
     # Dicts for block configs used by decoder
-    conv_block_config = ConvBlockConfig(
-        in_channels=in_channels, out_channels=out_channels, block_type="ConvNeXtBlock"
-    )
-    up_sampling_block_config = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        stride=2,
-        block_type="TransposedConvUpsample",
-    )
+    conv_block_config = ConvNeXtBlockConfig()
+    up_sampling_block_config = TransposedConvUpsampleBlockConfig(stride=2)
 
-    output_layer_config = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
+    output_layer_config = ConvNeXtBlockConfig(
         kernel_size=1,
-        dilation=1,
-        n_layers=1,
-        block_type="ConvNeXtBlock",
-    )
-
-    recurrent_block_config = RecurrentBlockConfig(
-        in_channels=2,
-        kernel_size=1,
-        block_type="ConvGRUBlock",
     )
 
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=recurrent_block_config,
         n_channels=n_channels,
     ).to(device)
 
     assert isinstance(decoder, UNetDecoder)
 
-    # without the recurrent block and with dilations
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=None,
         n_channels=n_channels,
         dilations=[1, 1, 1],
     ).to(device)
     assert isinstance(decoder, UNetDecoder)
 
 
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
 def test_UNetDecoder_forward():
-    in_channels = 2
     out_channels = 1
     hw_size = 32
     b_size = 12
@@ -633,147 +357,50 @@ def test_UNetDecoder_forward():
     device = get_device()
 
     # Dicts for block configs used by decoder
-    conv_block_config = ConvBlockConfig(
-        in_channels=in_channels, out_channels=out_channels, block_type="ConvNeXtBlock"
-    )
-    up_sampling_block_config = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        stride=2,
-        block_type="TransposedConvUpsample",
-    )
-    output_layer_config = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
+    conv_block_config = ConvNeXtBlockConfig()
+    up_sampling_block_config = TransposedConvUpsampleBlockConfig(stride=2)
+    output_layer_config = BasicConvBlockConfig(
         kernel_size=1,
-        dilation=1,
         n_layers=1,
-        block_type="BasicConvBlock",
     )
-    recurrent_block_config = RecurrentBlockConfig(
-        in_channels=2,
-        kernel_size=1,
-        block_type="ConvGRUBlock",
-    )
-
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=recurrent_block_config,
         n_channels=n_channels,
     ).to(device)
 
-    output_2_size = th.Size([b_size, out_channels, hw_size, hw_size])
+    output_2_size = torch.Size([b_size, out_channels, hw_size, hw_size])
 
     # build the list of tensors for the decoder
     invars = []
     # decoder has an algorithm that goes back to front
     for idx in range(len(n_channels) - 1, -1, -1):
         tensor_size = [b_size, n_channels[idx], hw_size, hw_size]
-        invars.append(th.rand(tensor_size).to(device))
+        invars.append(torch.rand(tensor_size).to(device))
         hw_size = hw_size // 2
 
     outvar = decoder(invars)
     assert outvar.shape == output_2_size
 
-    # make sure history is taken into account with ConvGRU
-    outvar_hist = decoder(invars)
-    assert not compare_output(outvar, outvar_hist)
+    outvar_repeat = decoder(invars)
+    assert compare_output(outvar, outvar_repeat)
 
-    # check with no recurrent
     decoder = UNetDecoder(
         conv_block=conv_block_config,
         up_sampling_block=up_sampling_block_config,
         output_layer=output_layer_config,
-        recurrent_block=None,
         n_channels=n_channels,
         dilations=[1, 1, 1],
     ).to(device)
 
     outvar = decoder(invars)
     assert outvar.shape == output_2_size
-
-
-def test_UNetDecoder_reset():
-    in_channels = 2
-    out_channels = 1
-    hw_size = 32
-    b_size = 12
-    n_channels = (64, 32, 16)
-    device = get_device()
-
-    # Dicts for block configs used by decoder
-    conv_block = ConvBlockConfig(in_channels=in_channels, block_type="ConvNeXtBlock")
-    up_sampling_block = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        block_type="TransposedConvUpsample",
-    )
-    output_layer = ConvBlockConfig(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        kernel_size=1,
-        dilation=1,
-        n_layers=1,
-        block_type="BasicConvBlock",
-    )
-
-    recurrent_block = RecurrentBlockConfig(
-        in_channels=2, kernel_size=1, block_type="ConvLSTMBlock"
-    )
-
-    decoder = UNetDecoder(
-        conv_block=conv_block,
-        up_sampling_block=up_sampling_block,
-        output_layer=output_layer,
-        recurrent_block=recurrent_block,
-        n_channels=n_channels,
-    ).to(device)
-
-    # build the list of tensors for the decoder
-    invars = []
-    # decoder has an algorithm that goes back to front
-    for idx in range(len(n_channels) - 1, -1, -1):
-        tensor_size = [b_size, n_channels[idx], hw_size, hw_size]
-        invars.append(th.rand(tensor_size).to(device))
-        hw_size = hw_size // 2
-
-    outvar = decoder(invars)
-
-    # make sure history is taken into account with ConvGRU
-    outvar_hist = decoder(invars)
-    assert not compare_output(outvar, outvar_hist)
-
-    # make sure after reset we get the same result
-    decoder.reset()
-    outvar_reset = decoder(invars)
-    assert compare_output(outvar, outvar_reset)
-
-    # test reset without recurrent block
-    decoder = UNetDecoder(
-        conv_block=conv_block,
-        up_sampling_block=up_sampling_block,
-        output_layer=output_layer,
-        recurrent_block=None,
-        n_channels=n_channels,
-    ).to(device)
-
-    outvar = decoder(invars)
-
-    # without the recurrent block should be the same
-    outvar_hist = decoder(invars)
-    assert compare_output(outvar, outvar_hist)
-
-    # make sure after reset we get the same result
-    decoder.reset()
-    outvar_reset = decoder(invars)
-    assert compare_output(outvar, outvar_reset)
 
 
 def compare_output(
-    output_1: th.Tensor | tuple[th.Tensor, ...],
-    output_2: th.Tensor | tuple[th.Tensor, ...],
+    output_1: torch.Tensor | tuple[torch.Tensor, ...],
+    output_2: torch.Tensor | tuple[torch.Tensor, ...],
     rtol: float = 1e-5,
     atol: float = 1e-5,
 ) -> bool:
@@ -789,17 +416,19 @@ def compare_output(
         If outputs are the same
     """
     # Output of tensor
-    if isinstance(output_1, th.Tensor):
-        return th.allclose(output_1, output_2, rtol, atol)
+    if isinstance(output_1, torch.Tensor):
+        return torch.allclose(output_1, output_2, rtol, atol)
     # Output of tuple of tensors
     elif isinstance(output_1, tuple):
         # Loop through tuple of outputs
         for i, (out_1, out_2) in enumerate(zip(output_1, output_2)):
             # If tensor use allclose
-            if isinstance(out_1, th.Tensor):
-                if not th.allclose(out_1, out_2, rtol, atol):
+            if isinstance(out_1, torch.Tensor):
+                if not torch.allclose(out_1, out_2, rtol, atol):
                     logger.warning(f"Failed comparison between outputs {i}")
-                    logger.warning(f"Max Difference: {th.amax(th.abs(out_1 - out_2))}")
+                    logger.warning(
+                        f"Max Difference: {torch.amax(torch.abs(out_1 - out_2))}"
+                    )
                     logger.warning(f"Difference: {out_1 - out_2}")
                     return False
             # Otherwise assume primative
@@ -831,7 +460,7 @@ def compare_output(
     else:
         logger.error(
             "Model returned invalid type for unit test, \
-            should be th.Tensor or Tuple[th.Tensor]"
+            should be torch.Tensor or Tuple[torch.Tensor]"
         )
         return False
     return True
@@ -844,7 +473,7 @@ def mock_data():
     Shape: [B=1, F=12, C=1, H=4, W=4] - a single batch with 12 faces, one channel,
         4x4 grid
     """
-    return th.arange(1, 12 * 4 * 4 + 1, dtype=th.float32).reshape((12, 1, 4, 4))
+    return torch.arange(1, 12 * 4 * 4 + 1, dtype=torch.float32).reshape((12, 1, 4, 4))
 
 
 @pytest.fixture
@@ -852,7 +481,7 @@ def healpix_padding():
     padding = 2
 
     """Instantiate HEALPixPadding with the specified padding."""
-    return HEALPixPadding(padding=padding, enable_nhwc=False)
+    return HEALPixPadding(padding=padding)
 
 
 def test_healpix_padding_pn(healpix_padding):
@@ -863,7 +492,7 @@ def test_healpix_padding_pn(healpix_padding):
     padding = 2
 
     # Mock the neighbor faces, assuming they are 4x4 for simplicity.
-    face = th.ones((1, 1, 4, 4))
+    face = torch.ones((1, 1, 4, 4))
     top = face
     top_left = face * 2
     left = face * 3
@@ -881,13 +510,13 @@ def test_healpix_padding_pn(healpix_padding):
     # Check if padding applied matches expected size: 4 + 2*padding in each dimension
     assert padded.shape[-2:] == (4 + 2 * padding, 4 + 2 * padding)
     # North padding (top two rows) should match `top`
-    assert th.all(padded[..., :padding, padding:-padding] == top[..., -padding:, :])
+    assert torch.all(padded[..., :padding, padding:-padding] == top[..., -padding:, :])
     # Northwest corner padding should match `top_left`
-    assert th.all(
+    assert torch.all(
         padded[..., :padding, :padding] == top_left[..., -padding:, -padding:]
     )
     # Northeast corner padding should match `top_right`
-    assert th.all(
+    assert torch.all(
         padded[..., :padding, -padding:] == top_right[..., -padding:, :padding]
     )
 
@@ -900,7 +529,7 @@ def test_healpix_padding_pe(healpix_padding):
     padding = 2
 
     # Mock the neighbor faces, assuming they are 4x4 for simplicity.
-    face = th.ones((1, 1, 4, 4))
+    face = torch.ones((1, 1, 4, 4))
     top = face
     top_left = face * 2
     left = face * 3
@@ -918,9 +547,11 @@ def test_healpix_padding_pe(healpix_padding):
     # Check if padding applied matches expected size: 4 + 2*padding in each dimension
     assert padded.shape[-2:] == (4 + 2 * padding, 4 + 2 * padding)
     # Left padding (left two columns) should match `left`
-    assert th.all(padded[..., padding:-padding, :padding] == left[..., :, -padding:])
+    assert torch.all(padded[..., padding:-padding, :padding] == left[..., :, -padding:])
     # Right padding (right two columns) should match `right`
-    assert th.all(padded[..., padding:-padding, -padding:] == right[..., :, :padding])
+    assert torch.all(
+        padded[..., padding:-padding, -padding:] == right[..., :, :padding]
+    )
 
 
 def test_healpix_padding_ps(healpix_padding):
@@ -931,7 +562,7 @@ def test_healpix_padding_ps(healpix_padding):
     padding = 2
 
     # Mock the neighbor faces, assuming they are 4x4 for simplicity.
-    face = th.ones((1, 1, 4, 4))
+    face = torch.ones((1, 1, 4, 4))
     top = face
     top_left = face * 2
     left = face * 3
@@ -949,13 +580,15 @@ def test_healpix_padding_ps(healpix_padding):
     # Check if padding applied matches expected size: 4 + 2*padding in each dimension
     assert padded.shape[-2:] == (4 + 2 * padding, 4 + 2 * padding)
     # South padding (bottom two rows) should match `bottom`
-    assert th.all(padded[..., -padding:, padding:-padding] == bottom[..., :padding, :])
+    assert torch.all(
+        padded[..., -padding:, padding:-padding] == bottom[..., :padding, :]
+    )
     # Southwest corner padding should match `bottom_left`
-    assert th.all(
+    assert torch.all(
         padded[..., -padding:, :padding] == bottom_left[..., :padding, -padding:]
     )
     # Southeast corner padding should match `bottom_right`
-    assert th.all(
+    assert torch.all(
         padded[..., -padding:, -padding:] == bottom_right[..., :padding, :padding]
     )
 
@@ -973,7 +606,6 @@ def test_healpix_padding_forward(healpix_padding, mock_data):
     expected_width = mock_data.shape[-1] + 2 * padding
     assert padded_data.shape[-2:] == (expected_height, expected_width)
 
-    # TODO: check each face to confirm padding values in each region
     for face_idx in range(mock_data.shape[0]):
         face_data = padded_data[face_idx, 0]
 
@@ -983,3 +615,639 @@ def test_healpix_padding_forward(healpix_padding, mock_data):
         assert (
             data_region == original_data
         ).all(), f"Data region on face {face_idx} has been altered."
+
+
+# --- HEALPix padding modes + dealias / smoothed blocks ---
+
+
+def test_HEALPixPaddingIsolatitude_initialization():
+    pad = HEALPixPaddingIsolatitude(padding=2, nside=16)
+    assert isinstance(pad, HEALPixPaddingIsolatitude)
+
+    with pytest.raises(ValueError, match="invalid value for 'padding'"):
+        HEALPixPaddingIsolatitude(padding=0, nside=16)
+    with pytest.raises(ValueError, match="nside must be a positive int"):
+        HEALPixPaddingIsolatitude(padding=1, nside=0)
+
+
+@pytest.mark.parametrize("padding", [1, 2, 3, 4, 5])
+def test_HEALPixPaddingIsolatitude_forward_shape_cpu(padding: int):
+    """Folded layout [B*12, C, H, H] -> [B*12, C, H+2p, H+2p]."""
+    num_faces = 12
+    batch_size = 2
+    hw = 16
+    c = 4
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding (isolatitude corner synthesis)")
+
+    pad_mod = HEALPixPaddingIsolatitude(padding=padding, nside=hw)
+    invar = torch.rand(batch_size * num_faces, c, hw, hw)
+    outvar = pad_mod(invar)
+    hw_p = hw + 2 * padding
+    assert outvar.shape == (batch_size * num_faces, c, hw_p, hw_p)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+@pytest.mark.parametrize("padding", [1, 2, 3])
+def test_HEALPixPaddingIsolatitude_forward_shape_cuda(padding: int):
+    num_faces = 12
+    batch_size = 1
+    hw = 16
+    c = 2
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding")
+    torch.cuda.empty_cache()
+    pad_mod = HEALPixPaddingIsolatitude(padding=padding, nside=hw).cuda()
+    invar = torch.rand(batch_size * num_faces, c, hw, hw, device="cuda")
+    outvar = pad_mod(invar)
+    hw_p = hw + 2 * padding
+    assert outvar.shape == (batch_size * num_faces, c, hw_p, hw_p)
+
+
+@pytest.mark.parametrize("padding", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("hw", [16, 32, 64])
+def test_healpix_padding_isolatitude_matches_folded_reference(padding: int, hw: int):
+    """Gather-based HEALPixPaddingIsolatitude must match isolatitude_pad_folded."""
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding (isolatitude corner synthesis)")
+
+    torch.manual_seed(0)
+    batch_size = 2
+    num_faces = 12
+    c = 3
+    x = torch.randn(batch_size * num_faces, c, hw, hw)
+
+    ref = isolatitude_pad_folded(x, padding)
+    y = HEALPixPaddingIsolatitude(padding=padding, nside=hw)(x)
+
+    # Gather path uses 0.5 * (g0 + g1) in a form that can differ by ~1 ULP from the
+    # reference on some output cells.
+    torch.testing.assert_close(y, ref, rtol=1.0e-5, atol=1.0e-6)
+
+
+@pytest.mark.parametrize("padding", [1, 2])
+@pytest.mark.parametrize("hw", [4, 8])
+def test_healpix_padding_isolatitude_gradcheck_cpu(padding: int, hw: int):
+    """Analytic backward matches finite differences (double precision)."""
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding")
+
+    pad = HEALPixPaddingIsolatitude(padding=padding, nside=hw).double()
+
+    batch_size = 1
+    c = 2
+    x = torch.randn(
+        batch_size * 12,
+        c,
+        hw,
+        hw,
+        dtype=torch.double,
+        requires_grad=True,
+    )
+
+    def fn(t: torch.Tensor) -> torch.Tensor:
+        return pad(t).sum()
+
+    assert torch.autograd.gradcheck(
+        fn,
+        (x,),
+        eps=1e-6,
+        atol=1e-4,
+        rtol=1e-3,
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+@pytest.mark.parametrize("padding", [1, 2])
+@pytest.mark.parametrize("hw", [8, 16])
+def test_healpix_padding_isolatitude_gradcheck_cuda(padding: int, hw: int):
+    if 2 * padding > hw:
+        pytest.skip("face size too small for padding")
+    torch.cuda.empty_cache()
+    pad = HEALPixPaddingIsolatitude(padding=padding, nside=hw).double().cuda()
+    x = torch.randn(
+        1 * 12,
+        2,
+        hw,
+        hw,
+        dtype=torch.double,
+        device="cuda",
+        requires_grad=True,
+    )
+
+    def fn(t: torch.Tensor) -> torch.Tensor:
+        return pad(t).sum()
+
+    assert torch.autograd.gradcheck(
+        fn,
+        (x,),
+        eps=1e-5,
+        atol=1e-3,
+        rtol=1e-2,
+    )
+
+
+def test_healpix_padding_isolatitude_backward_grad_matches_finite_diff():
+    """Spot-check gradient vs central difference on a few entries (float32, CPU)."""
+    padding, hw = 1, 16
+    torch.manual_seed(42)
+    pad = HEALPixPaddingIsolatitude(padding=padding, nside=hw)
+    x0 = torch.randn(12, 2, hw, hw)
+    x = x0.clone().requires_grad_(True)
+    (g_analytic,) = torch.autograd.grad(pad(x).sum(), x)
+
+    eps = 1e-3
+    indices = [(0, 0, 0, 0), (3, 1, 7, 7), (11, 0, 15, 15), (5, 1, 8, 8)]
+    for b, c, h, w in indices:
+        xp = x0.clone()
+        xp[b, c, h, w] += eps
+        xm = x0.clone()
+        xm[b, c, h, w] -= eps
+        g_fd_ij = (pad(xp).sum() - pad(xm).sum()) / (2 * eps)
+        torch.testing.assert_close(
+            g_analytic[b, c, h, w],
+            g_fd_ij,
+            rtol=0.02,
+            atol=0.02,
+        )
+
+
+def _folded_padding_dealias(
+    batch: int = 2, channels: int = 3, h: int = 16, device=None, dtype=torch.float32
+):
+    if device is None:
+        device = torch.device("cpu")
+    return torch.randn(batch * 12, channels, h, h, device=device, dtype=dtype)
+
+
+@pytest.mark.parametrize("mode", ["karlbauer", "isolatitude"])
+def test_healpix_layer_conv_same_geometry(mode):
+    h = 16
+    x = _folded_padding_dealias(h=h)
+    kwargs = dict(
+        layer=nn.Conv2d,
+        in_channels=3,
+        out_channels=3,
+        kernel_size=3,
+        stride=1,
+        padding="same",
+        hpx_padding_mode=mode,
+    )
+    if mode == "isolatitude":
+        kwargs["nside"] = h
+    layer = HEALPixLayer(**kwargs)
+    y = layer(x)
+    assert y.shape == x.shape
+    assert torch.isfinite(y).all()
+
+
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
+def test_healpix_layer_earth2grid():
+    h = 16
+    x = _folded_padding_dealias(h=h)
+    layer = HEALPixLayer(
+        nn.Conv2d,
+        in_channels=3,
+        out_channels=3,
+        kernel_size=3,
+        stride=1,
+        padding="same",
+        hpx_padding_mode="earth2grid",
+    )
+    y = layer(x)
+    assert y.shape == x.shape
+    assert torch.isfinite(y).all()
+
+
+def test_make_hpx_padding_factory_types():
+    p = make_hpx_padding_layer(1, "karlbauer")
+    assert p is not None
+    p2 = make_hpx_padding_layer(1, "isolatitude", nside=8)
+    assert p2 is not None
+
+
+def test_healpix_layer_uses_mode_selected_padding_class():
+    k_layer = HEALPixLayer(
+        nn.Conv2d,
+        in_channels=3,
+        out_channels=3,
+        kernel_size=3,
+        hpx_padding_mode="karlbauer",
+    )
+    assert isinstance(k_layer.layers[0], HEALPixPadding)
+
+    i_layer = HEALPixLayer(
+        nn.Conv2d,
+        in_channels=3,
+        out_channels=3,
+        kernel_size=3,
+        hpx_padding_mode="isolatitude",
+        nside=16,
+    )
+    assert isinstance(i_layer.layers[0], HEALPixPaddingIsolatitude)
+
+    if have_earth2grid:
+        e_layer = HEALPixLayer(
+            nn.Conv2d,
+            in_channels=3,
+            out_channels=3,
+            kernel_size=3,
+            hpx_padding_mode="earth2grid",
+        )
+        assert isinstance(e_layer.layers[0], HEALPixPaddingv2)
+
+
+@pytest.mark.parametrize("mode", ["karlbauer", "isolatitude"])
+def test_dealiased_downsample_forward(mode):
+    h = 16
+    x = _folded_padding_dealias(h=h)
+    kwargs = dict(
+        in_channels=3,
+        stride=2,
+        hpx_padding_mode=mode,
+    )
+    if mode == "isolatitude":
+        kwargs["nside"] = h
+    m = DealiasedDownsample(**kwargs)
+    y = m(x)
+    assert y.shape[-2:] == (h // 2, h // 2)
+
+
+@pytest.mark.parametrize("mode", ["karlbauer", "isolatitude"])
+def test_smoothed_interpolate_conv_forward(mode):
+    h = 16
+    x = _folded_padding_dealias(h=h)
+    kwargs = dict(
+        in_channels=3,
+        out_channels=5,
+        kernel_size=3,
+        scale_factor=2,
+        mode="nearest",
+        hpx_padding_mode=mode,
+    )
+    if mode == "isolatitude":
+        kwargs["nside"] = h
+        kwargs["nside_after"] = h * 2
+    m = SmoothedInterpolateConv(**kwargs)
+    y = m(x)
+    assert y.shape[-2:] == (h * 2, h * 2)
+    assert y.shape[1] == 5
+
+
+def test_dealiased_downsample_config_uses_pooling():
+    cfg = DealiasedDownsampleBlockConfig(
+        pooling=4,
+        resample_filter=(1.0, 2.0, 1.0),
+    )
+    assert cfg.downsample_spatial_factor() == 4
+    module = cfg.build(in_channels=3, ctx=_layer_ctx())
+    assert isinstance(module, DealiasedDownsample)
+
+
+def test_dealiased_downsample_config_accepts_list_filter():
+    cfg = DealiasedDownsampleBlockConfig(
+        pooling=2,
+        resample_filter=[1.0, 2.0, 1.0],
+    )
+    module = cfg.build(in_channels=3, ctx=_layer_ctx())
+    assert isinstance(module, DealiasedDownsample)
+
+
+def test_smoothed_interpolate_conv_config_builds():
+    cfg = SmoothedInterpolateConvBlockConfig(
+        kernel_size=3,
+        stride=2,
+        upsample_mode="nearest",
+    )
+    module = cfg.build(
+        in_channels=3,
+        out_channels=5,
+        ctx=_layer_ctx(),
+    )
+    assert isinstance(module, SmoothedInterpolateConv)
+
+
+def test_healpix_unet_dealias_smoothed():
+    img = 16
+    conv = ConvNeXtBlockConfig()
+    down = DealiasedDownsampleBlockConfig(
+        pooling=2,
+    )
+    enc = UNetEncoderConfig(
+        conv_block=conv,
+        down_sampling_block=down,
+        n_channels=[8, 16],
+        n_layers=[1, 1],
+    )
+    up = SmoothedInterpolateConvBlockConfig(
+        stride=2,
+        upsample_mode="nearest",
+    )
+    dec = UNetDecoderConfig(
+        conv_block=conv,
+        up_sampling_block=up,
+        output_layer=BasicConvBlockConfig(
+            n_layers=1,
+            kernel_size=1,
+        ),
+        n_channels=[16, 8],
+        n_layers=[1, 1],
+    )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Channel count matches prior stacked layout:
+    # 2*(3+1) prognostic+decoder + 1 constant
+    in_ch = 9
+    m = HEALPixUNet(
+        encoder=enc,
+        decoder=dec,
+        input_channels=in_ch,
+        output_channels=4,
+        hpx_padding_mode="karlbauer",
+        nside=_nside_levels(img, len(enc.n_channels)),
+    ).to(device)
+    b = 2
+    x = torch.randn(b, 12, 2 * 3, img, img, device=device)
+    dec_in = torch.randn(b, 12, 2, img, img, device=device)
+    const = torch.randn(b, 12, 1, img, img, device=device)
+    inp = torch.cat([x, dec_in, const], dim=2)
+    out = m(inp)
+    assert out.shape[0] == b
+    assert torch.isfinite(out).all()
+
+
+def test_multi_symmetric_convnext_block_forward():
+    cfg = MultiSymmetricConvNeXtBlockConfig(
+        kernel_size=3,
+        upscale_factor=4,
+        n_layers=2,
+    )
+    layer = cfg.build(
+        in_channels=3,
+        out_channels=5,
+        latent_channels=4,
+        ctx=_layer_ctx(nside=16),
+    )
+    x = _folded_padding_dealias(channels=3, h=16)
+    y = layer(x)
+    assert y.shape == (x.shape[0], 5, 16, 16)
+    assert torch.isfinite(y).all()
+
+
+def test_multi_symmetric_isolatitude_forward():
+    img = 16
+    conv = MultiSymmetricConvNeXtBlockConfig(
+        n_layers=2,
+        activation=CappedGELUConfig(cap_value=10),
+    ).build(
+        in_channels=3,
+        out_channels=3,
+        latent_channels=4,
+        ctx=_layer_ctx("isolatitude", nside=img),
+    )
+    x = _folded_padding_dealias(channels=3, h=img)
+    y = conv(x)
+    assert y.shape == x.shape
+    assert torch.isfinite(y).all()
+
+
+def test_smoothed_interpolate_isolatitude_forward():
+    img = 16
+    x = _folded_padding_dealias(channels=3, h=img)
+    up = SmoothedInterpolateConvBlockConfig(
+        stride=2,
+        upsample_mode="nearest",
+        activation=CappedGELUConfig(cap_value=10),
+    ).build(
+        in_channels=3,
+        out_channels=3,
+        ctx=_layer_ctx("isolatitude", nside=img, nside_after=img * 2),
+    )
+    y_up = up(x)
+    assert y_up.shape[-2:] == (img * 2, img * 2)
+    assert torch.isfinite(y_up).all()
+
+
+def test_healpix_unet_isolatitude_nside_sequence():
+    conv_cfg = ConvNeXtBlockConfig(
+        kernel_size=3,
+        activation=CappedGELUConfig(cap_value=10),
+    )
+    encoder = UNetEncoderConfig(
+        conv_block=conv_cfg,
+        down_sampling_block=AvgPoolDownsamplingBlockConfig(pooling=2),
+        n_channels=[8, 8, 8],
+        n_layers=[1, 1, 1],
+        dilations=[1, 1, 1],
+    )
+    decoder = UNetDecoderConfig(
+        conv_block=ConvNeXtBlockConfig(
+            kernel_size=3,
+            activation=CappedGELUConfig(cap_value=10),
+        ),
+        up_sampling_block=TransposedConvUpsampleBlockConfig(
+            stride=2,
+            activation=CappedGELUConfig(cap_value=10),
+        ),
+        output_layer=BasicConvBlockConfig(
+            kernel_size=1,
+            n_layers=1,
+        ),
+        n_channels=[8, 8, 8],
+        n_layers=[1, 1, 1],
+        dilations=[1, 1, 1],
+    )
+    model = HEALPixUNet(
+        encoder=encoder,
+        decoder=decoder,
+        input_channels=5,
+        output_channels=4,
+        hpx_padding_mode="isolatitude",
+        nside=[64, 32, 16],
+    )
+    x = torch.randn(1, 12, 5, 64, 64)
+    y = model(x)
+    assert y.shape == (1, 12, 4, 64, 64)
+    assert torch.isfinite(y).all()
+
+
+def test_healpix_block_configs_resolve_via_dacite():
+    @dataclasses.dataclass
+    class Container:
+        down: DownsamplingBlockConfig
+        up: UpsamplingBlockConfig
+        conv: ConvBlockConfig
+
+    data = {
+        "down": {"block_type": "DealiasedDownsample", "pooling": 2},
+        "up": {
+            "block_type": "SmoothedInterpolateConv",
+            "stride": 2,
+            "kernel_size": 3,
+        },
+        "conv": {"block_type": "ConvNeXtBlock", "upscale_factor": 4},
+    }
+    loaded = dacite.from_dict(Container, data, dacite.Config(strict=True))
+    assert isinstance(loaded.down, DealiasedDownsampleBlockConfig)
+    assert isinstance(loaded.up, SmoothedInterpolateConvBlockConfig)
+    assert isinstance(loaded.conv, ConvNeXtBlockConfig)
+
+
+# pragma mark - HEALPixUNet
+
+
+def test_HEALPixUNet_initialize():
+    img = 16
+    in_channels = 5
+    out_channels = 4
+    enc, dec = _hpx_unet_configs(img=img, output_channels=out_channels)
+    device = get_device()
+
+    model = HEALPixUNet(
+        encoder=enc,
+        decoder=dec,
+        input_channels=in_channels,
+        output_channels=out_channels,
+        hpx_padding_mode="karlbauer",
+        nside=_nside_levels(img, len(enc.n_channels)),
+    ).to(device)
+    assert isinstance(model, HEALPixUNet)
+    for layer in model.decoder.decoder:
+        assert set(layer.keys()) == {"upsamp", "conv"}
+
+
+def test_HEALPixUNet_forward_shape():
+    img = 16
+    in_channels = 5
+    out_channels = 4
+    batch = 2
+    enc, dec = _hpx_unet_configs(img=img, output_channels=out_channels)
+    device = get_device()
+
+    model = HEALPixUNet(
+        encoder=enc,
+        decoder=dec,
+        input_channels=in_channels,
+        output_channels=out_channels,
+        hpx_padding_mode="karlbauer",
+        nside=_nside_levels(img, len(enc.n_channels)),
+    ).to(device)
+
+    x = torch.randn(batch, 12, in_channels, img, img, device=device)
+    y = model(x)
+    assert y.shape == (batch, 12, out_channels, img, img)
+    assert torch.isfinite(y).all()
+
+
+def test_HEALPixUNet_input_channel_validation():
+    img = 16
+    in_channels = 5
+    out_channels = 4
+    enc, dec = _hpx_unet_configs(img=img, output_channels=out_channels)
+    device = get_device()
+
+    model = HEALPixUNet(
+        encoder=enc,
+        decoder=dec,
+        input_channels=in_channels,
+        output_channels=out_channels,
+        hpx_padding_mode="karlbauer",
+        nside=_nside_levels(img, len(enc.n_channels)),
+    ).to(device)
+
+    bad_input = torch.randn(1, 12, in_channels + 1, img, img, device=device)
+    with pytest.raises(
+        ValueError, match=f"Expected input to have {in_channels} channels"
+    ):
+        model(bad_input)
+
+    bad_ndim = torch.randn(1, 12, in_channels, img, img, img, device=device)
+    with pytest.raises(ValueError, match="5D input"):
+        model(bad_ndim)
+
+
+@pytest.mark.parametrize("mode", ["karlbauer", "isolatitude"])
+def test_HEALPixUNet_forward_padding_mode(mode):
+    img = 16
+    in_channels = 5
+    out_channels = 4
+    batch = 2
+    enc, dec = _hpx_unet_configs(
+        img=img, output_channels=out_channels, padding_mode=mode
+    )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = HEALPixUNet(
+        encoder=enc,
+        decoder=dec,
+        input_channels=in_channels,
+        output_channels=out_channels,
+        hpx_padding_mode=mode,
+        nside=_nside_levels(img, len(enc.n_channels)),
+    ).to(device)
+
+    x = torch.randn(batch, 12, in_channels, img, img, device=device)
+    y = model(x)
+    assert y.shape == (batch, 12, out_channels, img, img)
+    assert torch.isfinite(y).all()
+
+
+@pytest.mark.skipif(not have_earth2grid, reason="earth2grid not installed")
+def test_HEALPixUNet_in_stepper():
+    """End-to-end build of a HEALPixUNet through the stepper config."""
+    in_channels = 3
+    img = 8
+    encoder = encoder_config(
+        conv_next_block_config(),
+        down_sampling_block_config(),
+        n_channels=[16, 32, 64],
+    )
+    decoder = UNetDecoderConfig(
+        conv_block=conv_next_block_config(),
+        up_sampling_block=up_sampling_block_config(),
+        output_layer=output_layer_config(),
+        n_channels=[64, 32, 16],
+        dilations=[4, 2, 1],
+    )
+
+    hpx_unet_config_data = {
+        "encoder": dataclasses.asdict(encoder),
+        "decoder": dataclasses.asdict(decoder),
+        "nside": _nside_levels(img, len(encoder.n_channels)),
+    }
+
+    horizontal_coordinates = HEALPixCoordinates(
+        torch.arange(12), torch.arange(img), torch.arange(img)
+    )
+    device = get_device()
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(in_channels), bk=torch.arange(in_channels)
+    ).to(device)
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="HEALPixUNet", config=hpx_unet_config_data
+                    ),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"x": float(np.random.randn(1).item())},
+                            stds={"x": float(np.random.randn(1).item())},
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+    stepper = stepper_config.get_stepper(
+        dataset_info=DatasetInfo(
+            horizontal_coordinates=horizontal_coordinates,
+            vertical_coordinate=vertical_coordinate,
+            timestep=TIMESTEP,
+        ),
+    )
+    assert len(stepper.modules) == 1
+    assert type(stepper.modules[0].module) is HEALPixUNet
