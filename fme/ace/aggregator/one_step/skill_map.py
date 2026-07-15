@@ -50,6 +50,13 @@ class SkillMapAggregator:
             "step [{units}]"
         ),
     }
+    # R² has natural bounds (1 = perfect, 0 = no better than the sample mean),
+    # so its map uses a fixed diverging scale rather than data-derived limits.
+    # This keeps the colorbar comparable across epochs and stops extreme
+    # negative outliers (from gridcells with tiny target variance) from washing
+    # out the informative range. Out-of-range values saturate at the ends.
+    _R2_VMIN = -1.0
+    _R2_VMAX = 1.0
 
     def __init__(
         self,
@@ -150,11 +157,20 @@ class SkillMapAggregator:
         image_logs = {}
         for statistic, data in maps.items():
             for name in data:
-                image_logs[f"{statistic}/{name}"] = plot_paneled_data(
-                    [[data[name].cpu().numpy()]],
-                    diverging=False,
-                    caption=self._get_caption(statistic, name),
-                )
+                panel = [[data[name].cpu().numpy()]]
+                caption = self._get_caption(statistic, name)
+                if statistic == "r2":
+                    # fixed diverging [-1, 1] scale (see _R2_VMIN/_R2_VMAX)
+                    image = plot_paneled_data(
+                        panel,
+                        diverging=True,
+                        caption=caption,
+                        vmin=self._R2_VMIN,
+                        vmax=self._R2_VMAX,
+                    )
+                else:
+                    image = plot_paneled_data(panel, diverging=False, caption=caption)
+                image_logs[f"{statistic}/{name}"] = image
         return {f"{label}/{key}": image_logs[key] for key in image_logs}
 
     def _get_caption(self, statistic: str, name: str) -> str:

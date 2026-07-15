@@ -121,23 +121,43 @@ def plot_paneled_data(
     diverging: bool,
     caption: str | None = None,
     roll_lon: bool = True,
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> Image:
-    """Plot a list of 2D data arrays in a paneled plot."""
+    """Plot a list of 2D data arrays in a paneled plot.
+
+    Args:
+        data: Rows of 2D panels to stitch into a single image.
+        diverging: If True, use a diverging (RdBu_r) colormap; when the color
+            limits are computed automatically they are also made symmetric
+            about zero.
+        caption: Caption to prepend to the auto-generated vmin/vmax caption.
+        roll_lon: Whether to roll the longitude axis for display.
+        vmin: Lower color limit. If None, computed from the data (the default,
+            preserving the historical behavior). Provide both vmin and vmax to
+            use a fixed range (e.g. for a metric with natural bounds).
+        vmax: Upper color limit. If None, computed from the data.
+    """
     if diverging:
         cmap = "RdBu_r"
     else:
         cmap = None
-    vmin = np.inf
-    vmax = -np.inf
-    for row in data:
-        for arr in row:
-            vmin = min(vmin, np.nanmin(arr))
-            vmax = max(vmax, np.nanmax(arr))
-    if diverging:
-        vmax = max(abs(vmin), abs(vmax))
-        vmin = -vmax
-    if vmin > vmax:  # occurs when all data is nan
-        vmin, vmax = 0, 0
+    if vmin is None or vmax is None:
+        auto_vmin = np.inf
+        auto_vmax = -np.inf
+        for row in data:
+            for arr in row:
+                auto_vmin = min(auto_vmin, np.nanmin(arr))
+                auto_vmax = max(auto_vmax, np.nanmax(arr))
+        if diverging:
+            auto_vmax = max(abs(auto_vmin), abs(auto_vmax))
+            auto_vmin = -auto_vmax
+        if auto_vmin > auto_vmax:  # occurs when all data is nan
+            auto_vmin, auto_vmax = 0, 0
+        if vmin is None:
+            vmin = auto_vmin
+        if vmax is None:
+            vmax = auto_vmax
     if caption is not None:
         caption += " "
     else:
