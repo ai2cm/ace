@@ -1,7 +1,8 @@
 # Config Diff: Old vs New
 
-- Old: `VarMasking4/ace2-var-mask-nc-sfno-mask20-uniform-co2-default-v4.yaml`
-- New: `VarMaskingERA5/ace2-var-mask-nc-sfno-era5-mask30-co2default-v2.yaml`
+Source dir: `/Users/alexeyy/Git/explore2/alexeyy`
+Old: `masking_comparison/VarMasking4/ace2-var-mask-nc-sfno-mask20-uniform-co2-default-v4.yaml`
+New: `masking_comparison/VarMaskingERA5/ace2-var-mask-nc-sfno-era5-mask30-co2default-v2.yaml`
 
 ## Masking scheme (main point of comparison)
 
@@ -54,7 +55,6 @@
 
 - Old: `filter_num_groups: 1`, no `spectral_ratio`, no `clip_latent_global_means`.
 - New: `filter_num_groups: 16`, adds `spectral_ratio: 0.125`, adds `clip_latent_global_means: true`.
-- Notes: GMR off (A/B), clipping off
 
 ## stepper in_names / out_names
 
