@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="predict-perfect-pred-events"
+JOB_NAME="predict-perfect-pred-events-merged-moe-model"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="pp-downscaling-orig-events.yaml"
+CONFIG_FILENAME="pp-downscaling-orig-events-merged-moe-model.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -24,14 +24,15 @@ IMAGE="$(cat latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRGZT4X2QCW2RFH7WN7X8BYA
 EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRBYGNYJ6FD7PGNF3VVHQ5V1
-
+EXISTING_RESULTS_DATASET=annak/bundled_moe_multivariate
 wandb_group=""
 
 #--not-preemptible \
 #     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
 
 #    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
-
+    # --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+    # --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on ACE2S-SHiELD' \
@@ -46,8 +47,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
-    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET:/ckpt.tar \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
@@ -55,4 +55,4 @@ gantry run \
     --no-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
-    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.predict $CONFIG_PATH
+    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.evaluator $CONFIG_PATH
