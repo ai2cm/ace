@@ -13,9 +13,17 @@ import yaml
 
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
+from fme.core.wandb import WANDB_RUN_ID_FILE
+from fme.downscaling.aggregators import GenerationSummary
 from fme.downscaling.data import RegionSamplingConfig
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
-from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
+from fme.downscaling.train import (
+    Trainer,
+    TrainerConfig,
+    _resume_from_results_dir_if_not_preempted,
+    main,
+    restore_checkpoint,
+)
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -46,6 +54,41 @@ def test_trainer(tmp_path):
         trainer.train_one_epoch()
 
 
+def test_save_best_checkpoint_selects_metrics_independently(tmp_path):
+    trainer = MagicMock(spec=Trainer)
+    trainer.best_checkpoint_path = str(tmp_path / "best.ckpt")
+    trainer.best_histogram_tail_checkpoint_path = str(
+        tmp_path / "best_histogram_tail.ckpt"
+    )
+    trainer.validate_using_ema = False
+    trainer.best_valid_loss = float("inf")
+    trainer.best_histogram_tail_metric = float("inf")
+
+    first_summary = GenerationSummary(
+        logs={}, validation_loss=2.0, histogram_tail_metric=0.1
+    )
+    second_summary = GenerationSummary(
+        logs={}, validation_loss=1.0, histogram_tail_metric=0.2
+    )
+    third_summary = GenerationSummary(
+        logs={}, validation_loss=1.5, histogram_tail_metric=0.05
+    )
+
+    with unittest.mock.patch("fme.downscaling.train._save_checkpoint") as save:
+        Trainer.save_best_checkpoint(trainer, first_summary)
+        Trainer.save_best_checkpoint(trainer, second_summary)
+        Trainer.save_best_checkpoint(trainer, third_summary)
+
+    assert save.call_args_list == [
+        unittest.mock.call(trainer, trainer.best_checkpoint_path),
+        unittest.mock.call(trainer, trainer.best_histogram_tail_checkpoint_path),
+        unittest.mock.call(trainer, trainer.best_checkpoint_path),
+        unittest.mock.call(trainer, trainer.best_histogram_tail_checkpoint_path),
+    ]
+    assert trainer.best_valid_loss == 1.0
+    assert trainer.best_histogram_tail_metric == 0.05
+
+
 def _trainer_config_kwargs(tmp_path):
     return dict(
         model=MagicMock(),
@@ -66,6 +109,30 @@ def test_trainer_config_region_sampling_requires_patch_extents(tmp_path):
             **base,
             region_sampling=RegionSamplingConfig(),
         )
+
+
+@pytest.mark.parametrize(
+    "clear_wandb_run_id, expected_wandb_run_id_exists",
+    [
+        (False, True),
+        (True, False),
+    ],
+)
+def test_resume_from_results_dir_wandb_run_id(
+    tmp_path, clear_wandb_run_id, expected_wandb_run_id_exists
+):
+    resume_results_dir = tmp_path / "resume_results"
+    experiment_dir = tmp_path / "experiment"
+    resume_results_dir.mkdir()
+    (resume_results_dir / WANDB_RUN_ID_FILE).write_text("wandb-id")
+
+    _resume_from_results_dir_if_not_preempted(
+        experiment_dir=experiment_dir,
+        resume_results_dir=resume_results_dir,
+        clear_wandb_run_id=clear_wandb_run_id,
+    )
+
+    assert (experiment_dir / WANDB_RUN_ID_FILE).exists() == expected_wandb_run_id_exists
 
 
 @pytest.fixture

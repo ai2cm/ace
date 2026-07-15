@@ -18,7 +18,7 @@ from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
-from fme.core.wandb import WandB
+from fme.core.wandb import WANDB_RUN_ID_FILE, WandB
 from fme.downscaling.aggregators import (
     Aggregator,
     GenerationAggregator,
@@ -259,8 +259,6 @@ class Trainer:
                 self.model.downscale_factor,
                 percentiles=[99.99, 99.9999],
                 include_positional_comparisons=include_positional_comparisons,
-                histogram_ckpt_selection_metric=self._best_histogram_tail_name,
-                best_ckpt_selection_metric=self._best_valid_loss_name,
             )
             batch: PairedBatchData
             validation_batch_generator = self._get_batch_generator(
@@ -453,6 +451,10 @@ class TrainerConfig:
                 "region_sampling requires both coarse_patch_extent_lat "
                 "and coarse_patch_extent_lon to be set."
             )
+        if self.resume_clear_wandb_run_id and self.resume_results_dir is None:
+            raise ValueError(
+                "resume_clear_wandb_run_id is True but resume_results_dir is unset."
+            )
 
     @property
     def checkpoint_dir(self) -> str:
@@ -506,7 +508,9 @@ class TrainerConfig:
         )
 
 
-def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
+def _resume_from_results_dir_if_not_preempted(
+    experiment_dir, resume_results_dir, clear_wandb_run_id=False
+):
     resuming_from_preempt = os.path.isfile(
         os.path.join(experiment_dir, "checkpoints/latest.ckpt")
     )
@@ -519,6 +523,10 @@ def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir
             )
         shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
         remove_stale_tmp_checkpoints(os.path.join(experiment_dir, "checkpoints"))
+        if clear_wandb_run_id:
+            wandb_path = os.path.join(experiment_dir, WANDB_RUN_ID_FILE)
+            if os.path.isfile(wandb_path):
+                os.remove(wandb_path)
 
 
 def main(config_path: str):
