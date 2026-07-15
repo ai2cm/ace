@@ -192,6 +192,36 @@ def test_include_flags_gate_each_statistic():
     assert list(rmse_only.get_dataset().data_vars) == ["rmse-a"]
 
 
+def test_r2_panel_uses_fixed_diverging_scale(monkeypatch):
+    from fme.ace.aggregator.one_step import skill_map as skill_map_mod
+
+    calls = []
+
+    def fake_plot_paneled_data(
+        data, diverging, caption=None, roll_lon=True, vmin=None, vmax=None
+    ):
+        calls.append(dict(diverging=diverging, vmin=vmin, vmax=vmax, caption=caption))
+        return object()  # stand-in for the wandb Image
+
+    monkeypatch.setattr(skill_map_mod, "plot_paneled_data", fake_plot_paneled_data)
+
+    agg = SkillMapAggregator(DIMS)
+    _record(agg, target=_batch(sample=8, nx=3, ny=4), gen=_batch(sample=8, nx=3, ny=4))
+    logs = agg.get_logs(label="skill_map")
+    assert set(logs) == {"skill_map/r2/a", "skill_map/rmse/a"}
+
+    r2_call = next(c for c in calls if "determination" in c["caption"])
+    rmse_call = next(c for c in calls if "root-mean-squared" in c["caption"])
+    # R² gets a fixed diverging [-1, 1] scale for cross-epoch comparability
+    assert r2_call["diverging"] is True
+    assert r2_call["vmin"] == -1.0
+    assert r2_call["vmax"] == 1.0
+    # RMSE keeps auto-scaling (no natural bound)
+    assert rmse_call["diverging"] is False
+    assert rmse_call["vmin"] is None
+    assert rmse_call["vmax"] is None
+
+
 def test_metric_config_builds_aggregator():
     coords = LatLonCoordinates(lon=torch.arange(4), lat=torch.arange(3))
     ds_info = DatasetInfo(horizontal_coordinates=coords)
