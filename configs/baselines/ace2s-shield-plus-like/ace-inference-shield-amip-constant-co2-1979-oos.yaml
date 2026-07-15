@@ -1,0 +1,43 @@
+# Prescribed-SST inference for the SHiELD-AMIP-only spatial out-of-sample (OOS)
+# near-surface-T tracking evaluation — CONSTANT-CO2 arm, OOS window.
+#
+# Identical to ace-inference-shield-amip-control-oos.yaml (same with-CO2
+# checkpoint, same 2015-01-01 start, 2541 steps to 2021-12-16, prescribed SST via
+# the checkpoint's ocean.interpolate; the saved time_mean_diagnostics.nc IS the
+# OOS time-mean) EXCEPT that global_mean_co2 is overwritten to a constant 1979
+# value for every forcing step.
+#
+# The rollout starts from the true 2015 state and sees the real 2015-2021
+# prescribed SST, but the model is fed 1979-level CO2 throughout. Differenced
+# against the with-CO2 (real-CO2) arm, this isolates the near-surface-T response
+# to the full accumulated 1979->present CO2 change, while staying a 2015-start
+# rerun directly comparable to the with-CO2 and no-CO2 spatial arms.
+#
+# The constant is global_mean_co2 at 1979-01-02 in ic_0001.zarr (the same value
+# used by the full-window constant-CO2 config). Only meaningful for the WITH-CO2
+# checkpoint (the no-CO2 stepper never requests global_mean_co2).
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 73
+n_forward_steps: 2541
+initial_condition:
+  path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2015-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0001.zarr
+    engine: zarr
+    overwrite:
+      constant:
+        global_mean_co2: 0.00033660000190138817
+  num_data_workers: 8
+logging:
+  project: ace
