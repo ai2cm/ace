@@ -1,0 +1,148 @@
+# arg: --dataset jamesd/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats:/statsdata
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 50
+ema:
+  decay: 0.999
+inference:
+  # Long climate rollout (unnamed so its W&B metric keys match the control/other runs).
+  - n_forward_steps: 29200
+    forward_steps_in_memory: 20
+    loader:
+      start_indices:
+        times:
+          - '0151-01-01T06:00:00'
+          - '0171-01-01T06:00:00'
+          - '0191-01-01T06:00:00'
+          - '0211-01-01T06:00:00'
+          - '0231-01-01T06:00:00'
+          - '0251-01-01T06:00:00'
+          - '0271-01-01T06:00:00'
+          - '0291-01-01T06:00:00'
+      dataset:
+        data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+  # Short-lead, many-IC rollout emphasizing short-range skill. 40 ICs (divisible by
+  # nproc_per_node=4), spread across the held-out validation years (0306-0310), each
+  # rolled out 40 steps (~10 days at 6-hourly). Inference data may not be subset, so ICs
+  # are given as explicit held-out timestamps; tune the count/spacing/lead as desired.
+  - name: short-lead
+    n_forward_steps: 40
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '0306-01-01T06:00:00'
+          - '0306-02-01T06:00:00'
+          - '0306-04-01T06:00:00'
+          - '0306-05-01T06:00:00'
+          - '0306-07-01T06:00:00'
+          - '0306-08-01T06:00:00'
+          - '0306-10-01T06:00:00'
+          - '0306-11-01T06:00:00'
+          - '0307-01-01T06:00:00'
+          - '0307-02-01T06:00:00'
+          - '0307-04-01T06:00:00'
+          - '0307-05-01T06:00:00'
+          - '0307-07-01T06:00:00'
+          - '0307-08-01T06:00:00'
+          - '0307-10-01T06:00:00'
+          - '0307-11-01T06:00:00'
+          - '0308-01-01T06:00:00'
+          - '0308-02-01T06:00:00'
+          - '0308-04-01T06:00:00'
+          - '0308-05-01T06:00:00'
+          - '0308-07-01T06:00:00'
+          - '0308-08-01T06:00:00'
+          - '0308-10-01T06:00:00'
+          - '0308-11-01T06:00:00'
+          - '0309-01-01T06:00:00'
+          - '0309-02-01T06:00:00'
+          - '0309-04-01T06:00:00'
+          - '0309-05-01T06:00:00'
+          - '0309-07-01T06:00:00'
+          - '0309-08-01T06:00:00'
+          - '0309-10-01T06:00:00'
+          - '0309-11-01T06:00:00'
+          - '0310-01-01T06:00:00'
+          - '0310-02-01T06:00:00'
+          - '0310-04-01T06:00:00'
+          - '0310-05-01T06:00:00'
+          - '0310-07-01T06:00:00'
+          - '0310-08-01T06:00:00'
+          - '0310-10-01T06:00:00'
+          - '0310-11-01T06:00:00'
+      dataset:
+        data_path: /climate-default
+        file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 2
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
+    subset:
+      stop_time: '0306-01-01T06:00:00'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 4
+    prefetch_factor: 4
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+      engine: zarr
+      subset:
+        start_time: '0306-01-01T06:00:00'
+        stop_time: '0311-01-01T06:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  # Warm-start from the corresponding snow-prognostic pretrain checkpoint, mounted at
+  # /weights by run-ace-train.sh (--ckpt). in_names/out_names/corrector (including
+  # clip_frozen_precipitation and the snow variables) are inherited from the checkpoint.
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar

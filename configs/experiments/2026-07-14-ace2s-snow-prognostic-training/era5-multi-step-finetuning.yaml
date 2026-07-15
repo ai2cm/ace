@@ -1,0 +1,162 @@
+# arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 120
+ema:
+  decay: 0.999
+inference:
+  # Long climate rollout (unnamed so its W&B metric keys match the control/other runs).
+  - n_forward_steps: 7300
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-02-15T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-05-15T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-08-15T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1996-11-15T00:00:00'
+      dataset:
+        data_path: /climate-default/
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+  # Short-lead, many-IC rollout emphasizing short-range skill. 40 ICs (divisible by
+  # nproc_per_node=4), quarterly across the held-out 1996-2005 period, each rolled out
+  # 40 steps (~10 days at 6-hourly). Inference data may not be subset, so ICs are given
+  # as explicit held-out timestamps; tune the count/spacing/lead as desired.
+  - name: short-lead
+    n_forward_steps: 40
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1997-01-01T00:00:00'
+          - '1997-04-01T00:00:00'
+          - '1997-07-01T00:00:00'
+          - '1997-10-01T00:00:00'
+          - '1998-01-01T00:00:00'
+          - '1998-04-01T00:00:00'
+          - '1998-07-01T00:00:00'
+          - '1998-10-01T00:00:00'
+          - '1999-01-01T00:00:00'
+          - '1999-04-01T00:00:00'
+          - '1999-07-01T00:00:00'
+          - '1999-10-01T00:00:00'
+          - '2000-01-01T00:00:00'
+          - '2000-04-01T00:00:00'
+          - '2000-07-01T00:00:00'
+          - '2000-10-01T00:00:00'
+          - '2001-01-01T00:00:00'
+          - '2001-04-01T00:00:00'
+          - '2001-07-01T00:00:00'
+          - '2001-10-01T00:00:00'
+          - '2002-01-01T00:00:00'
+          - '2002-04-01T00:00:00'
+          - '2002-07-01T00:00:00'
+          - '2002-10-01T00:00:00'
+          - '2003-01-01T00:00:00'
+          - '2003-04-01T00:00:00'
+          - '2003-07-01T00:00:00'
+          - '2003-10-01T00:00:00'
+          - '2004-01-01T00:00:00'
+          - '2004-04-01T00:00:00'
+          - '2004-07-01T00:00:00'
+          - '2004-10-01T00:00:00'
+          - '2005-01-01T00:00:00'
+          - '2005-04-01T00:00:00'
+          - '2005-07-01T00:00:00'
+          - '2005-10-01T00:00:00'
+      dataset:
+        data_path: /climate-default/
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 8
+  prefetch_factor: 2
+  dataset:
+    concat:
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        stop_time: '1995-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2011-01-01'
+        stop_time: '2019-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2021-01-01'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 8
+    prefetch_factor: 2
+    dataset:
+      data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1996-01-01'
+        stop_time: '1997-12-31'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  # Warm-start from the corresponding snow-prognostic pretrain checkpoint, mounted at
+  # /weights by run-ace-train.sh (--ckpt). in_names/out_names/corrector (including
+  # clip_frozen_precipitation and the snow variables) are inherited from the checkpoint.
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar

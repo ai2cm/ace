@@ -1,0 +1,304 @@
+# arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 120
+ema:
+  decay: 0.999
+inference:
+  # Long climate rollout (unnamed so its W&B metric keys match the control/other runs).
+  - n_forward_steps: 7300
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-02-15T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-05-15T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-08-15T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1996-11-15T00:00:00'
+      dataset:
+        data_path: /climate-default/
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+  # Short-lead, many-IC rollout emphasizing short-range skill. 40 ICs (divisible by
+  # nproc_per_node=4), quarterly across the held-out 1996-2005 period, each rolled out
+  # 40 steps (~10 days at 6-hourly). Inference data may not be subset, so ICs are given
+  # as explicit held-out timestamps; tune the count/spacing/lead as desired.
+  - name: short-lead
+    n_forward_steps: 40
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1997-01-01T00:00:00'
+          - '1997-04-01T00:00:00'
+          - '1997-07-01T00:00:00'
+          - '1997-10-01T00:00:00'
+          - '1998-01-01T00:00:00'
+          - '1998-04-01T00:00:00'
+          - '1998-07-01T00:00:00'
+          - '1998-10-01T00:00:00'
+          - '1999-01-01T00:00:00'
+          - '1999-04-01T00:00:00'
+          - '1999-07-01T00:00:00'
+          - '1999-10-01T00:00:00'
+          - '2000-01-01T00:00:00'
+          - '2000-04-01T00:00:00'
+          - '2000-07-01T00:00:00'
+          - '2000-10-01T00:00:00'
+          - '2001-01-01T00:00:00'
+          - '2001-04-01T00:00:00'
+          - '2001-07-01T00:00:00'
+          - '2001-10-01T00:00:00'
+          - '2002-01-01T00:00:00'
+          - '2002-04-01T00:00:00'
+          - '2002-07-01T00:00:00'
+          - '2002-10-01T00:00:00'
+          - '2003-01-01T00:00:00'
+          - '2003-04-01T00:00:00'
+          - '2003-07-01T00:00:00'
+          - '2003-10-01T00:00:00'
+          - '2004-01-01T00:00:00'
+          - '2004-04-01T00:00:00'
+          - '2004-07-01T00:00:00'
+          - '2004-10-01T00:00:00'
+          - '2005-01-01T00:00:00'
+          - '2005-04-01T00:00:00'
+          - '2005-07-01T00:00:00'
+          - '2005-10-01T00:00:00'
+      dataset:
+        data_path: /climate-default/
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      log_histograms: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 8
+  prefetch_factor: 2
+  dataset:
+    concat:
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        stop_time: '1995-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2011-01-01'
+        stop_time: '2019-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2021-01-01'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 8
+    prefetch_factor: 2
+    dataset:
+      data_path: /climate-default/
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1996-01-01'
+        stop_time: '1997-12-31'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 1
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 512
+          noise_embed_dim: 64
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+          affine_norms: true
+      normalization:
+        network:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-full-field.nc
+        residual:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        # Clip predicted frozen precipitation to the (corrected) total precipitation
+        # rate; frozen precip is a component of total precip and cannot exceed it.
+        clip_frozen_precipitation: true
+        force_positive_names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - Q2m
+        - PRATEsfc
+        - total_frozen_precipitation_rate
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+        # New snow outputs are non-negative.
+        - surface_snow_amount
+        - surface_snow_area_fraction
+      next_step_forcing_names:
+      - DSWRFtoa
+      in_names:
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      # Snow water equivalent as a prognostic variable (predicted and fed back).
+      - surface_snow_amount
+      - DSWRFtoa
+      - HGTsfc
+      - global_mean_co2
+      - PRESsfc
+      - surface_temperature
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      out_names:
+      - PRESsfc
+      - surface_temperature
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+      - tendency_of_total_water_path_due_to_advection
+      - TMP850
+      - h500
+      - total_frozen_precipitation_rate
+      - PRMSL
+      - eastward_surface_stress
+      - northward_surface_stress
+      # Snow water equivalent (prognostic; also in in_names) and snow-covered area
+      # (diagnostic; out only).
+      - surface_snow_amount
+      - surface_snow_area_fraction
