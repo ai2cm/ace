@@ -59,9 +59,14 @@ class DomainConfig:
             latent-channel blocks. Order defines channel order for every
             component built against this domain.
         grid_like: For a domain with no dataset behind it (a latent space),
-            the name of the domain whose grid it shares. Domains without
-            ``grid_like`` must be bound to a ``DatasetInfo`` (i.e. paired
-            with data) at pool build time.
+            the name of the domain whose ``DatasetInfo`` it inherits at build
+            time. Note this shares the referenced domain's *entire*
+            ``DatasetInfo`` — not only its grid, but its vertical coordinate,
+            timestep, and metadata — since no separate dataset describes the
+            latent space; a backbone stepping in a latent domain therefore
+            borrows those from the referenced data-backed domain. Domains
+            without ``grid_like`` must be bound to a ``DatasetInfo`` (i.e.
+            paired with data) at pool build time.
     """
 
     channels: list[str | LatentChannels]

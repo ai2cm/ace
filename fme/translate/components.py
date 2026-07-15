@@ -519,6 +519,11 @@ class ComponentPool:
         per-domain ``dataset_info`` (without external init or freezing) and
         their weights restored; backbones are rebuilt via the self-contained
         ``Stepper.from_state`` (its checkpoint path need not still exist).
+
+        As with ``Stepper.from_state``, the reloaded pool is left unfrozen:
+        both transforms (via ``build_for_load``) and backbones drop their
+        configured freeze. To resume training with freezing intact, build from
+        the config and ``load_state`` the weights instead.
         """
         config = ComponentPoolConfig.from_state(state["config"])
         dataset_info = {

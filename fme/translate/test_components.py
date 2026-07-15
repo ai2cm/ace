@@ -504,6 +504,30 @@ def test_config_dacite_round_trip():
     reloaded.build({"physical": get_dataset_info(img_shape=IMG_SHAPE)})
 
 
+def test_checkpoint_backbone_config_dacite_round_trip():
+    """The frozen-donor arm's config (a checkpoint-sourced backbone) round-trips
+    through get_state/from_state, preserving the checkpoint source and freeze.
+    """
+    config = ComponentPoolConfig(
+        domains={"physical": DomainConfig(channels=["a"])},
+        backbones={
+            "backbone": BackboneConfig(
+                domain="physical",
+                checkpoint=CheckpointStepperConfig(checkpoint_path="donor.pt"),
+                init_from_checkpoint=True,
+                parameter_init=_all_frozen_init(),
+            )
+        },
+    )
+    reloaded = ComponentPoolConfig.from_state(config.get_state())
+    backbone = reloaded.backbones["backbone"]
+    assert backbone.stepper is None
+    assert backbone.checkpoint is not None
+    assert backbone.checkpoint.checkpoint_path == "donor.pt"
+    assert backbone.init_from_checkpoint is True
+    assert backbone.parameter_init.parameters[0].frozen.include == ["*"]
+
+
 # ---------------------------------------------------------------------------
 # train / eval / epoch fan-out
 # ---------------------------------------------------------------------------
