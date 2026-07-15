@@ -31,6 +31,7 @@ collapsed mode is at least centred on the teacher's distribution).
 
 from __future__ import annotations
 
+import statistics
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -248,6 +249,21 @@ class BestStudentCheckpointCallback:
             the score is the mean over variables of ``|ratio - 1|`` (each
             variable's discrepancy counts; no cross-variable cancellation).
             Useful when CRPS has plateaued but tail fidelity is still evolving.
+        best_spec_checkpoint_path: Optional destination path for a checkpoint
+            selected by the spectral metric (``val/spec_mae_mean`` = mean over
+            variables of the zonal-PSD log-ratio MAE).  Because that metric is
+            spiky per-validation, selection uses its rolling median over the
+            last ``spec_patience_window`` validations rather than the raw value,
+            so a lucky single-snapshot dip cannot win.  ``None`` disables the
+            selector (no ``best_student_spec.ckpt`` written).
+        early_stop_patience: Number of consecutive validations with no
+            improvement in *any* selector (CRPS, tail, or spectral) after which
+            training is asked to stop (the conservative "any-improved" policy).
+            ``None`` (default) disables early stopping; the run trains to
+            ``max_iter`` as before.  See ``should_stop``.
+        spec_patience_window: Window (in validations) of the rolling median used
+            for the spectral selector and the spectral improvement signal that
+            feeds early stopping (default 5).
         validation_mode: How the student output ensemble is produced before
             comparing to the teacher zarr (see ``student_sampling``):
 
@@ -298,6 +314,9 @@ class BestStudentCheckpointCallback:
         tail_references: dict[str, float] | None = None,
         tail_hist_bins: int = 10000,
         best_tail_checkpoint_path: str | None = None,
+        best_spec_checkpoint_path: str | None = None,
+        early_stop_patience: int | None = None,
+        spec_patience_window: int = 5,
         validation_mode: str = "from_noise",
         frozen_lo_net: torch.nn.Module | None = None,
         frozen_lo_sample_steps: int = 2,
@@ -363,6 +382,20 @@ class BestStudentCheckpointCallback:
         # Tracks min mean-over-vars |ratio - 1.0| for best_tail_checkpoint_path
         # selection, using the highest (most extreme) percentile.
         self._best_tail_score = float("inf")
+        # Spectral selector + early stopping.  The spectral metric is selected
+        # on a rolling median (it is spiky per-validation), and early stop uses
+        # the improvement of any selector (CRPS/tail/spec) — see _record_validation.
+        self._best_spec_checkpoint_path = best_spec_checkpoint_path
+        if spec_patience_window < 1:
+            raise ValueError("spec_patience_window must be >= 1")
+        self._spec_patience_window = spec_patience_window
+        self._best_spec = float("inf")
+        self._spec_history: list[float] = []
+        if early_stop_patience is not None and early_stop_patience < 1:
+            raise ValueError("early_stop_patience must be >= 1 when set")
+        self._early_stop_patience = early_stop_patience
+        self._checks_since_improvement = 0
+        self._stop_requested = False
         self._teacher_ds: xr.Dataset | None = None
 
     @staticmethod
@@ -399,42 +432,100 @@ class BestStudentCheckpointCallback:
         except ImportError:
             return
 
-        import fastgen.utils.logging_utils as logger
-
         student: AceDiffusionTeacher = model.net
         # Validation runs on ALL ranks (sharded) — see class docstring.
         crps_by_var, tail_by_pct, spec_by_var, spec_curves = (
             self._compute_validation_crps(student)
         )
-        crps = crps_by_var["mean"]
 
         if not is_rank0():
             return
 
+        # Update the best checkpoints (rank-0 writes) and the early-stop
+        # counter, then log so val/*_best reflect this iteration's result.
+        self._record_validation(
+            student, crps_by_var, tail_by_pct, spec_by_var, iteration
+        )
+        self._log_to_wandb(
+            crps_by_var, tail_by_pct, spec_by_var, spec_curves, iteration
+        )
+
+    def should_stop(self) -> bool:
+        """Whether early stopping has requested training to terminate.
+
+        Set on rank-0 by ``_record_validation`` once ``early_stop_patience``
+        consecutive validations pass with no improvement in any selector.  Read
+        by the FastGen ``AutoResumeInterface`` injected in ``fastgen_train`` (see
+        ``_EarlyStopAutoResume``), which the trainer polls each iteration and
+        which handles the DDP rank-0 → all-ranks broadcast.  Always ``False``
+        when ``early_stop_patience`` is ``None``.
+        """
+        return self._stop_requested
+
+    @staticmethod
+    def _spec_mae_mean(spec_by_var: dict[str, dict[str, float]]) -> float:
+        """Mean over variables of the spectral log-ratio MAE (``inf`` if empty).
+
+        Mirrors ``val/spec_mae_mean``; used for both the spectral selector and
+        wandb logging so the two never diverge.
+        """
+        maes = [m["mae"] for m in spec_by_var.values() if "mae" in m]
+        return float(np.mean(maes)) if maes else float("inf")
+
+    def _record_validation(
+        self,
+        student: AceDiffusionTeacher,
+        crps_by_var: dict[str, float],
+        tail_by_pct: dict[float, dict[str, float]],
+        spec_by_var: dict[str, dict[str, float]],
+        iteration: int,
+    ) -> None:
+        """Update the CRPS/tail/spectral best checkpoints and early-stop counter.
+
+        Runs on rank-0 only (it writes checkpoints and mutates selection state).
+        Each selector saves on strict improvement of its own metric.  The
+        early-stop counter resets whenever *any* selector improves and
+        increments otherwise, so a run is only cut once none of CRPS, tail, or
+        spectral fidelity is still improving — the conservative "any-improved"
+        policy.  Kept free of FastGen imports so it is unit-testable directly.
+        """
         from fme.downscaling.distillation.student_checkpoint import (
             save_student_checkpoint,
         )
 
-        # CRPS-best checkpoint.
+        try:
+            import fastgen.utils.logging_utils as _logger
+
+            _log = _logger.info
+        except ImportError:
+            import logging
+
+            _log = logging.getLogger(__name__).info
+
+        crps = crps_by_var["mean"]
         tail_summary = self._tail_summary_str(tail_by_pct)
-        if crps < self._best_crps:
+
+        # CRPS-best checkpoint.
+        crps_improved = crps < self._best_crps
+        if crps_improved:
             self._best_crps = crps
             save_student_checkpoint(
                 student_module=student._ace_module,
                 teacher=self._teacher_model,
                 path=self._best_checkpoint_path,
             )
-            logger.info(
+            _log(
                 f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f}"
                 f"{tail_summary} (new best) → {self._best_checkpoint_path}"
             )
         else:
-            logger.info(
+            _log(
                 f"[BestStudentCallback] iteration={iteration} CRPS={crps:.6f}"
                 f"{tail_summary} (best={self._best_crps:.6f}, no improvement)"
             )
 
         # Tail-best checkpoint: highest percentile, mean-over-vars |ratio - 1|.
+        tail_improved = False
         if self._best_tail_checkpoint_path and self._tail_percentiles:
             top_pct = max(self._tail_percentiles)
             ratios = {
@@ -444,23 +535,66 @@ class BestStudentCheckpointCallback:
             }
             tail_score = _tail_deviation_score(ratios)
             if np.isfinite(tail_score) and tail_score < self._best_tail_score:
+                tail_improved = True
                 self._best_tail_score = tail_score
                 save_student_checkpoint(
                     student_module=student._ace_module,
                     teacher=self._teacher_model,
                     path=self._best_tail_checkpoint_path,
                 )
-                logger.info(
+                _log(
                     f"[BestStudentCallback] iteration={iteration}"
                     f" tail_{top_pct} mean|ratio-1|={tail_score:.4f}"
                     f" (new tail best) → {self._best_tail_checkpoint_path}"
                 )
 
-        # Log after the best-checkpoint update so val/crps_best includes
-        # this iteration's result.
-        self._log_to_wandb(
-            crps_by_var, tail_by_pct, spec_by_var, spec_curves, iteration
-        )
+        # Spectral-best checkpoint: rolling median of val/spec_mae_mean (spiky
+        # per-validation, so a single-snapshot dip cannot win).  The median is
+        # tracked even without a checkpoint path so it can feed the early-stop
+        # improvement signal below.
+        spec_improved = False
+        spec_mae_mean = self._spec_mae_mean(spec_by_var)
+        if np.isfinite(spec_mae_mean):
+            self._spec_history.append(spec_mae_mean)
+            if len(self._spec_history) > self._spec_patience_window:
+                self._spec_history = self._spec_history[-self._spec_patience_window :]
+            spec_median = statistics.median(self._spec_history)
+            if spec_median < self._best_spec:
+                spec_improved = True
+                self._best_spec = spec_median
+                if self._best_spec_checkpoint_path:
+                    save_student_checkpoint(
+                        student_module=student._ace_module,
+                        teacher=self._teacher_model,
+                        path=self._best_spec_checkpoint_path,
+                    )
+                    _log(
+                        f"[BestStudentCallback] iteration={iteration}"
+                        f" spec_mae_mean(median)={spec_median:.6f}"
+                        f" (new spec best) → {self._best_spec_checkpoint_path}"
+                    )
+
+        # Early stop: reset on any improvement, else count non-improving
+        # validations and request termination once patience is exceeded.
+        if self._early_stop_patience is not None:
+            if crps_improved or tail_improved or spec_improved:
+                self._checks_since_improvement = 0
+            else:
+                self._checks_since_improvement += 1
+                if (
+                    self._checks_since_improvement >= self._early_stop_patience
+                    and not self._stop_requested
+                ):
+                    self._stop_requested = True
+                    _log(
+                        "[BestStudentCallback] early stop requested at "
+                        f"iteration={iteration}: no improvement in any selector "
+                        f"for {self._checks_since_improvement} validations "
+                        f"(patience={self._early_stop_patience}). Best so far: "
+                        f"CRPS={self._best_crps:.6f}, "
+                        f"tail={self._best_tail_score:.4f}, "
+                        f"spec={self._best_spec:.6f}."
+                    )
 
     def _tail_summary_str(self, tail_by_pct: dict[float, dict[str, float]]) -> str:
         parts = []
@@ -501,10 +635,13 @@ class BestStudentCheckpointCallback:
         for var, metrics in spec_by_var.items():
             for band, v in metrics.items():
                 payload[f"val/spec_{band}_{var}"] = v
-        if spec_by_var:
-            payload["val/spec_mae_mean"] = float(
-                np.mean([m["mae"] for m in spec_by_var.values()])
-            )
+        spec_mae_mean = self._spec_mae_mean(spec_by_var)
+        if np.isfinite(spec_mae_mean):
+            payload["val/spec_mae_mean"] = spec_mae_mean
+        if self._best_spec_checkpoint_path and np.isfinite(self._best_spec):
+            payload["val/spec_best"] = self._best_spec
+        if self._early_stop_patience is not None:
+            payload["val/checks_since_improvement"] = self._checks_since_improvement
         # Raw mean-PSD curves (student vs teacher), one loglog figure per
         # variable, logged as the **raw matplotlib figure** (NOT wandb.Image) so
         # wandb auto-converts it to an interactive chart — matching the evaluator's

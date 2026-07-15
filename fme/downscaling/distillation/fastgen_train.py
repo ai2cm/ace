@@ -175,6 +175,37 @@ class _CheckpointPruner:
         return lambda *args, **kwargs: None
 
 
+class _EarlyStopAutoResume:
+    """FastGen ``AutoResumeInterface`` that terminates on metric-based early stop.
+
+    FastGen's ``Trainer`` polls ``auto_resume.termination_requested()`` once per
+    iteration; when it returns True the trainer runs its clean-shutdown callbacks
+    and returns, and it handles the DDP rank-0 → all-ranks broadcast itself. We
+    reuse that designed extension point so early stopping needs no changes to the
+    unmodified FastGen clone (see ARCHITECTURE.md).
+
+    Duck-typed rather than subclassing ``AutoResumeInterface`` so this module needs
+    no FastGen import; ``create_auto_resume`` returns the instance as-is and the
+    trainer never isinstance-checks it. ``init`` / ``get_resume_details`` /
+    ``request_resume`` are no-ops, so a termination is a clean stop, not a requeue.
+    """
+
+    def __init__(self, callback: BestStudentCheckpointCallback) -> None:
+        self._callback = callback
+
+    def init(self) -> None:
+        return None
+
+    def get_resume_details(self):
+        return None
+
+    def termination_requested(self) -> bool:
+        return bool(self._callback.should_stop())
+
+    def request_resume(self, user_dict) -> None:
+        return None
+
+
 class AceInfiniteDataLoader:
     """Infinite iterator wrapping ACE's ``GriddedData`` for FastGen.
 
@@ -449,6 +480,33 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=int(os.environ.get("ACE_EARLY_STOP_PATIENCE", "0")),
+        dest="early_stop_patience",
+        metavar="N",
+        help=(
+            "Stop training once N consecutive validations pass with no "
+            "improvement in ANY best-student selector (CRPS, tail, or "
+            "spectral). 0 (default) disables early stopping. Only active when "
+            "--val-dataset/--val-data-yaml are set. Defaults to "
+            "$ACE_EARLY_STOP_PATIENCE."
+        ),
+    )
+    parser.add_argument(
+        "--spec-patience-window",
+        type=int,
+        default=int(os.environ.get("ACE_SPEC_PATIENCE_WINDOW", "5")),
+        dest="spec_patience_window",
+        metavar="W",
+        help=(
+            "Rolling-median window (in validations) for the spectral "
+            "(best_student_spec.ckpt) selector and its early-stop improvement "
+            "signal; smooths the spiky per-validation spec_mae_mean (default "
+            "5). Defaults to $ACE_SPEC_PATIENCE_WINDOW."
+        ),
+    )
+    parser.add_argument(
         "opts",
         default=None,
         nargs=argparse.REMAINDER,
@@ -490,6 +548,8 @@ def main() -> None:
     # render every output channel (variable) as its own per-channel-normalized
     # panel — one row per sample, one column per variable.  Column labels come
     # from the teacher out_packer, populated below once the teacher loads.
+    from omegaconf import DictConfig
+
     import fastgen.callbacks.wandb as _wandb_mod
     import fastgen.utils.distributed.ddp as _fastgen_ddp
     import fastgen.utils.logging_utils as logger
@@ -500,7 +560,6 @@ def main() -> None:
     from fastgen.utils.distributed import clean_up, is_rank0, synchronize, world_size
     from fastgen.utils.io_utils import set_env_vars
     from fastgen.utils.scripts import set_cuda_backend
-    from omegaconf import DictConfig
 
     _orig_to_wandb = _wandb_mod.to_wandb
     # Output-variable names for panel labels; filled once the teacher loads.
@@ -809,13 +868,13 @@ def main() -> None:
         model.set_spectral_loss(spectral_loss, args.spectral_loss_weight)
     synchronize()
 
-    logger.info("Initialising FastGen Trainer...")
-    fastgen_trainer = Trainer(config)
-    fastgen_trainer.callbacks._callbacks["ckpt_pruner"] = _CheckpointPruner(
-        save_dir=config.trainer.checkpointer.save_dir,
-        max_to_keep=20,
-    )
-
+    # ------------------------------------------------------------------
+    # 9b. Build the best-student validation callback (if enabled) *before* the
+    #     trainer, so early stopping can inject an AutoResume referencing it
+    #     (FastGen polls auto_resume each iteration to decide whether to stop).
+    # ------------------------------------------------------------------
+    early_stop_patience = args.early_stop_patience or None
+    best_student_callback: BestStudentCheckpointCallback | None = None
     if args.val_dataset and args.val_data_yaml:
         val_data_cfg = _load_data_config(args.val_data_yaml)
         val_data_cfg.shuffle = False
@@ -823,7 +882,7 @@ def main() -> None:
         coarse_val_data = val_data_cfg.build(
             requirements=requirements, dist=ace_dist_val
         )
-        # Separate directory so evaluation jobs can mount just these two files
+        # Separate directory so evaluation jobs can mount just these files
         # without downloading all the raw .pth training checkpoints.
         best_student_dir = os.path.join(
             config.log_config.save_path, "student_checkpoints"
@@ -832,6 +891,9 @@ def main() -> None:
         best_student_path = os.path.join(best_student_dir, "best_student.ckpt")
         best_student_tail_path = os.path.join(
             best_student_dir, "best_student_tail.ckpt"
+        )
+        best_student_spec_path = os.path.join(
+            best_student_dir, "best_student_spec.ckpt"
         )
         # The config baked into the saved student checkpoint must match the
         # architecture the student was initialised from (see AceDiffusionTeacher:
@@ -871,28 +933,48 @@ def main() -> None:
                 f"(steps={args.frozen_lo_steps}, "
                 f"sigma_min={args.frozen_lo_sigma_min})."
             )
-        fastgen_trainer.callbacks._callbacks["best_student"] = (
-            BestStudentCheckpointCallback(
-                val_dataset_path=args.val_dataset,
-                coarse_val_data=coarse_val_data,
-                teacher_model=_teacher_diffusion_model,
-                best_checkpoint_path=best_student_path,
-                coarse_patch_yx=coarse_patch_yx,
-                student_sample_steps=config.model.student_sample_steps,
-                best_tail_checkpoint_path=best_student_tail_path,
-                validation_mode=args.val_mode,
-                frozen_lo_net=frozen_lo_net,
-                frozen_lo_sample_steps=args.frozen_lo_steps,
-                frozen_lo_sigma_min=args.frozen_lo_sigma_min,
-            )
+        best_student_callback = BestStudentCheckpointCallback(
+            val_dataset_path=args.val_dataset,
+            coarse_val_data=coarse_val_data,
+            teacher_model=_teacher_diffusion_model,
+            best_checkpoint_path=best_student_path,
+            coarse_patch_yx=coarse_patch_yx,
+            student_sample_steps=config.model.student_sample_steps,
+            best_tail_checkpoint_path=best_student_tail_path,
+            best_spec_checkpoint_path=best_student_spec_path,
+            early_stop_patience=early_stop_patience,
+            spec_patience_window=args.spec_patience_window,
+            validation_mode=args.val_mode,
+            frozen_lo_net=frozen_lo_net,
+            frozen_lo_sample_steps=args.frozen_lo_steps,
+            frozen_lo_sigma_min=args.frozen_lo_sigma_min,
         )
         logger.info(
             f"BestStudentCheckpointCallback active: val={args.val_dataset}, "
             f"best_ckpt={best_student_path}, "
             f"best_tail_ckpt={best_student_tail_path}, "
+            f"best_spec_ckpt={best_student_spec_path}, "
             f"validation_mode={args.val_mode}, "
-            f"student_sample_steps={config.model.student_sample_steps}"
+            f"student_sample_steps={config.model.student_sample_steps}, "
+            f"early_stop_patience={early_stop_patience}, "
+            f"spec_patience_window={args.spec_patience_window}"
         )
+
+    logger.info("Initialising FastGen Trainer...")
+    # Early stopping needs both an active validation callback and a patience > 0;
+    # otherwise the trainer keeps FastGen's default NoOpAutoResume.
+    auto_resume = (
+        _EarlyStopAutoResume(best_student_callback)
+        if best_student_callback is not None and early_stop_patience is not None
+        else None
+    )
+    fastgen_trainer = Trainer(config, auto_resume=auto_resume)
+    fastgen_trainer.callbacks._callbacks["ckpt_pruner"] = _CheckpointPruner(
+        save_dir=config.trainer.checkpointer.save_dir,
+        max_to_keep=20,
+    )
+    if best_student_callback is not None:
+        fastgen_trainer.callbacks._callbacks["best_student"] = best_student_callback
 
     synchronize()
 

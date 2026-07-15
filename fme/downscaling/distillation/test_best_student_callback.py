@@ -93,14 +93,23 @@ def _make_callback(
     student_sample_steps: int = 1,
     frozen_lo_net: torch.nn.Module | None = None,
     frozen_lo_sample_steps: int = 2,
+    best_checkpoint_path: str = "unused.ckpt",
+    best_tail_checkpoint_path: str | None = None,
+    best_spec_checkpoint_path: str | None = None,
+    early_stop_patience: int | None = None,
+    spec_patience_window: int = 5,
 ) -> BestStudentCheckpointCallback:
     return BestStudentCheckpointCallback(
         val_dataset_path="unused.zarr",
         coarse_val_data=None,  # type: ignore[arg-type]  # not touched in __init__
         teacher_model=teacher_model,  # type: ignore[arg-type]
-        best_checkpoint_path="unused.ckpt",
+        best_checkpoint_path=best_checkpoint_path,
         n_student_samples=n_student_samples,
         student_sample_steps=student_sample_steps,
+        best_tail_checkpoint_path=best_tail_checkpoint_path,
+        best_spec_checkpoint_path=best_spec_checkpoint_path,
+        early_stop_patience=early_stop_patience,
+        spec_patience_window=spec_patience_window,
         validation_mode=validation_mode,
         frozen_lo_net=frozen_lo_net,
         frozen_lo_sample_steps=frozen_lo_sample_steps,
@@ -528,3 +537,115 @@ def test_invalid_tail_direction_rejected():
             tail_directions={"a": "sideways"},
             validation_mode="from_noise",
         )
+
+
+# ---------------------------------------------------------------------------
+# Spectral selector + early stopping (spec-13).
+#
+# These drive ``_record_validation`` directly with canned metric dicts,
+# bypassing the sharded validation pass and the rank-0 guard, and monkeypatch
+# ``save_student_checkpoint`` so no checkpoints touch disk.
+# ---------------------------------------------------------------------------
+
+
+def _patch_save(monkeypatch) -> list[str]:
+    """Record ``save_student_checkpoint`` destinations without touching disk."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "fme.downscaling.distillation.student_checkpoint.save_student_checkpoint",
+        lambda student_module, teacher, path, **kwargs: calls.append(path),
+    )
+    return calls
+
+
+def _fake_student() -> _FakeStudent:
+    # save_student_checkpoint is patched out, so the module is never invoked.
+    return _FakeStudent(torch.nn.Identity(), sigma_min=0.01, sigma_max=1.0)
+
+
+def _drive(cb, student, iteration, crps, spec):
+    """Run one validation with a scalar CRPS mean and spectral MAE."""
+    crps_by_var = {"a": crps, "mean": crps}
+    spec_by_var = {"a": {"mae": spec}} if spec is not None else {}
+    cb._record_validation(student, crps_by_var, {}, spec_by_var, iteration)
+
+
+def test_spec_selector_uses_rolling_median_not_spike(monkeypatch):
+    calls = _patch_save(monkeypatch)
+    cb = _make_callback(
+        _FakeTeacherModel(["a"]),
+        best_checkpoint_path="crps.ckpt",
+        best_spec_checkpoint_path="spec.ckpt",
+        spec_patience_window=3,
+    )
+    student = _fake_student()
+    # A transient dip at step 2 must NOT win; the sustained 0.6 level from step 4
+    # on is the real minimum of the rolling median.
+    specs = [1.0, 1.0, 0.2, 1.0, 0.6, 0.6, 0.6]
+    for i, s in enumerate(specs):
+        _drive(cb, student, i, crps=5.0, spec=s)
+    spec_saves = [p for p in calls if p == "spec.ckpt"]
+    # Two sustained-median improvements: inf→1.0 at step 0, 1.0→0.6 at step 4.
+    assert len(spec_saves) == 2
+    # The transient 0.2 spike never became the selected best.
+    assert cb._best_spec == pytest.approx(0.6)
+
+
+def test_early_stop_triggers_after_patience(monkeypatch):
+    _patch_save(monkeypatch)
+    cb = _make_callback(
+        _FakeTeacherModel(["a"]),
+        best_spec_checkpoint_path="spec.ckpt",
+        early_stop_patience=3,
+        spec_patience_window=1,
+    )
+    student = _fake_student()
+    # Step 0 improves (crps inf→5, spec inf→1); nothing improves afterward.
+    _drive(cb, student, 0, crps=5.0, spec=1.0)
+    assert not cb.should_stop()
+    for i in (1, 2):
+        _drive(cb, student, i, crps=5.0, spec=1.0)
+        assert not cb.should_stop()
+    # Third consecutive non-improving validation hits patience.
+    _drive(cb, student, 3, crps=5.0, spec=1.0)
+    assert cb.should_stop()
+
+
+def test_early_stop_counter_resets_on_improvement(monkeypatch):
+    _patch_save(monkeypatch)
+    cb = _make_callback(
+        _FakeTeacherModel(["a"]),
+        best_spec_checkpoint_path="spec.ckpt",
+        early_stop_patience=3,
+        spec_patience_window=1,
+    )
+    student = _fake_student()
+    # CRPS drops at step 3, resetting the counter before it reaches patience.
+    for i, crps in enumerate([5.0, 5.0, 5.0, 4.0, 5.0, 5.0]):
+        _drive(cb, student, i, crps=crps, spec=1.0)
+    # Without the reset the counter would have hit 3 at step 3 and stopped.
+    assert not cb.should_stop()
+    assert cb._checks_since_improvement == 2
+
+
+def test_early_stop_and_spec_disabled_by_default(monkeypatch):
+    calls = _patch_save(monkeypatch)
+    # No spec path, no patience → behavior matches today (CRPS/tail only).
+    cb = _make_callback(_FakeTeacherModel(["a"]), best_checkpoint_path="crps.ckpt")
+    student = _fake_student()
+    for i in range(6):
+        _drive(cb, student, i, crps=5.0, spec=1.0)
+    assert not cb.should_stop()
+    # No spectral checkpoint written; only the CRPS best, once, at step 0.
+    assert "spec.ckpt" not in calls
+    assert calls == ["crps.ckpt"]
+
+
+def test_invalid_early_stop_patience_rejected():
+    with pytest.raises(ValueError, match="early_stop_patience"):
+        _make_callback(_FakeTeacherModel(["a"]), early_stop_patience=0)
+
+
+def test_invalid_spec_patience_window_rejected():
+    with pytest.raises(ValueError, match="spec_patience_window"):
+        _make_callback(_FakeTeacherModel(["a"]), spec_patience_window=0)

@@ -1,6 +1,6 @@
 # 13 — Spectral-aware early stopping + checkpoint selection
 
-> **Status: proposed (2026-07-13).** Motivated by run `xgcaf2rt` (mid+hi spectral
+> **Status: implemented (2026-07-15; proposed 2026-07-13).** Motivated by run `xgcaf2rt` (mid+hi spectral
 > arm) — see
 > [`../experiments/reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md`](../experiments/reports/2026-07-10-prate-spectral-midhi-xgcaf2rt.md).
 > Research/robustness spec, independent of the 01–12 refactor series.
@@ -72,6 +72,41 @@ mechanism FastGen's `Trainer` honors for stopping**, e.g.:
 If none exists cleanly, the fallback is an entrypoint-level guard in `fastgen_train.py`
 that checks the callback's stop flag after each validation and breaks — kept in the ACE
 adapter layer, not in `Fastgen/`. **Record the finding in this spec before coding.**
+
+### Resolution (verified 2026-07-15, implemented)
+
+FastGen exposes a **designed** extension point that requires no patch: `Trainer(config,
+auto_resume=...)` accepts an `AutoResumeInterface` (`FastGen/fastgen/utils/autoresume.py`).
+The loop polls `self.auto_resume.termination_requested()` **every iteration** via
+`auto_resume_exit` (`FastGen/fastgen/trainer.py:213`, def at `:484`); when it returns True
+the trainer runs its clean-shutdown callbacks (`on_train_end`/`on_app_end`) and returns.
+It also performs the DDP rank-0 → all-ranks broadcast itself (`trainer.py:500-516`).
+
+Implementation: `BestStudentCheckpointCallback` tracks a `_stop_requested` flag (set only
+on rank-0, inside `_record_validation`) and exposes `should_stop()`. `fastgen_train.py`
+injects a small duck-typed `_EarlyStopAutoResume` wrapping the callback whose
+`termination_requested()` returns `should_stop()` and whose `request_resume`/`init`/
+`get_resume_details` are no-ops (so termination is a clean stop, not a requeue). Zero
+changes to `FastGen/`.
+
+Why this over the two fallbacks considered:
+- **Raising a `StopTraining` exception** (the spec's least-invasive suggestion) is unsafe
+  under DDP: one rank raising mid-NCCL-collective deadlocks the others; it also skips the
+  clean-shutdown/checkpoint-flush path. The AutoResume route is DDP-safe by construction.
+- **Mutating `config.trainer.max_iter` at runtime does not work** — the loop's
+  `range(iter_start+1, max_iter)` is materialized once when the `for` begins, so later
+  mutation has no effect.
+
+**Deviation from §Proposed design (per 2026-07-15 decision):** the early-stop *condition*
+is broadened from spec-metric-only to **any-improved** — the patience counter resets when
+*any* selector (CRPS, tail, or the new spectral rolling-median) improves, and stops only
+once none is improving. This is the more conservative policy (won't cut a run while a
+deployed `best_student_tail.ckpt` is still improving). The spectral selector +
+`best_student_spec.ckpt` (item 1) are implemented as specified and also feed this signal.
+Default patience `10` validations, rolling window `5`; opt-in via `--early-stop-patience` /
+`ACE_EARLY_STOP_PATIENCE` (0/unset = off) and `--spec-patience-window` /
+`ACE_SPEC_PATIENCE_WINDOW`, threaded through `fastgen_train.py` (not the spike config, to
+match the existing `--val-*` callback-arg plumbing).
 
 ## Tests (`best_student_callback` unit tests)
 
