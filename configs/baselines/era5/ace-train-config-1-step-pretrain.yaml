@@ -40,11 +40,11 @@ train_loader:
   num_data_workers: 8
   prefetch_factor: 2
   dataset:
-    - data_path: /climate-default/
-      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
-      engine: zarr
-      subset:
-        start_time: '2021-01-01'
+    data_path: /climate-default/
+    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+    subset:
+      start_time: '2021-01-01'
 validation:
   loader:
     batch_size: 64
