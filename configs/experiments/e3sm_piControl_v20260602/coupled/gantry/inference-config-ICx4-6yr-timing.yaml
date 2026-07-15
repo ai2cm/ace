@@ -1,0 +1,39 @@
+experiment_dir: /results
+n_coupled_steps: 420
+coupled_steps_in_memory: 15
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+forcing_loader:
+  atmosphere:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
+      engine: zarr
+      n_repeats: 6
+  ocean:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+      engine: zarr
+      n_repeats: 6
+  num_data_workers: 1
+initial_condition:
+  ocean:
+    path: /climate-default/home/elynn/fme-dataset/v20260602-E3SMv3-piControl-105yr-coupled-IC/0520-0527-01-03_ocean_ic.nc
+  atmosphere:
+    path: /climate-default/home/elynn/fme-dataset/v20260602-E3SMv3-piControl-105yr-coupled-IC/0520-0527-01-03_atmosphere_ic.nc
+  start_indices:
+    first: 0
+    n_initial_conditions: 4
