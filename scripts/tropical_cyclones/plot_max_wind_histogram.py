@@ -1,23 +1,28 @@
 """
-Plot a histogram of per-track maximum wind speed from detect_tc_tracks output.
+Plot per-track peak-intensity histograms from detect_tc_tracks output.
 
 Reads one or more ``tracks.csv`` files written by ``detect_tc_tracks.py`` (each
-with a ``track_id`` and ``wind`` column, one row per track point), reduces each
-track to its single maximum wind speed, and plots the distribution of those
-per-track maxima as a histogram. Given multiple input files, all histograms are
-overlaid on the same figure so distributions can be compared directly.
+with ``track_id``, ``wind``, and ``slp`` columns, one row per track point),
+reduces each track to two peak-intensity values, and plots their distributions
+side by side:
+
+  * Maximum wind speed per track.
+  * Minimum sea-level pressure per track.
+
+Given multiple input files, all histograms are overlaid on the same axes so
+distributions can be compared directly.
 
 Usage examples:
     # Single run
-    python plot_max_wind_histogram.py out/tracks.csv --out max_wind_hist.png
+    python plot_max_wind_histogram.py out/tracks.csv --out peak_intensity_hist.png
 
     # Compare two runs on the same axes (auto-labelled by parent dir name)
     python plot_max_wind_histogram.py runA/tracks.csv runB/tracks.csv \
-        --out max_wind_hist.png
+        --out peak_intensity_hist.png
 
     # Explicit legend labels
     python plot_max_wind_histogram.py runA/tracks.csv runB/tracks.csv \
-        --labels ACE X-SHiELD --out max_wind_hist.png
+        --labels ACE X-SHiELD --out peak_intensity_hist.png
 """
 
 import argparse
@@ -32,28 +37,48 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def per_track_max_wind(csv_path: Path, wind_col: str = "wind") -> pd.Series:
-    """Return the maximum wind speed for each track in a tracks.csv file.
+def per_track_peaks(
+    csv_path: Path,
+    wind_col: str = "wind",
+    slp_col: str = "slp",
+) -> pd.DataFrame:
+    """Reduce each track to its peak wind and minimum sea-level pressure.
 
     Groups the (one-row-per-track-point) tracks table by ``track_id`` and takes
-    the max of ``wind_col``, yielding one value per track.
+    the maximum of ``wind_col`` and the minimum of ``slp_col``, yielding one
+    value of each per track.
+
+    Returns a DataFrame indexed by ``track_id`` with columns ``max_wind`` (m/s)
+    and ``min_slp`` (same units as the input, typically Pa).
     """
     df = pd.read_csv(csv_path)
-    for col in ("track_id", wind_col):
+    for col in ("track_id", wind_col, slp_col):
         if col not in df.columns:
             raise KeyError(
                 f"{col!r} column not found in {csv_path}; available: "
                 f"{list(df.columns)}"
             )
-    max_wind = df.groupby("track_id")[wind_col].max()
-    logger.info(
-        "%s: %d tracks, max wind range %.1f-%.1f m/s",
-        csv_path,
-        len(max_wind),
-        max_wind.min() if len(max_wind) else float("nan"),
-        max_wind.max() if len(max_wind) else float("nan"),
+
+    grouped = df.groupby("track_id")
+    peaks = pd.DataFrame(
+        {
+            "max_wind": grouped[wind_col].max(),
+            "min_slp": grouped[slp_col].min(),
+        }
     )
-    return max_wind
+    if len(peaks):
+        logger.info(
+            "%s: %d tracks, max wind %.1f-%.1f m/s, min slp %.0f-%.0f (input units)",
+            csv_path,
+            len(peaks),
+            peaks["max_wind"].min(),
+            peaks["max_wind"].max(),
+            peaks["min_slp"].min(),
+            peaks["min_slp"].max(),
+        )
+    else:
+        logger.info("%s: 0 tracks", csv_path)
+    return peaks
 
 
 def _default_label(csv_path: Path) -> str:
@@ -62,39 +87,73 @@ def _default_label(csv_path: Path) -> str:
     return parent if parent else csv_path.stem
 
 
-def plot_histograms(
-    max_winds: list[pd.Series],
+def _overlay_hist(
+    ax: plt.Axes,
+    values: list[np.ndarray],
     labels: list[str],
     bins: int,
-    out_path: Path,
-    wind_col: str = "wind",
+    xlabel: str,
+    show_legend: bool,
 ) -> None:
-    """Overlay per-track max-wind histograms for each input on one figure."""
-    # Share a common bin edge set so overlaid histograms are directly
-    # comparable rather than each series binning over its own range.
-    all_vals = np.concatenate([mw.values for mw in max_winds if len(mw)])
+    """Overlay step histograms for each input series on one axis.
+
+    Uses a common bin-edge set across inputs so the overlaid histograms are
+    directly comparable rather than each series binning over its own range.
+    """
+    all_vals = np.concatenate([v for v in values if len(v)])
     if len(all_vals) == 0:
         raise ValueError("No tracks found in any input file; nothing to plot.")
     bin_edges = np.linspace(all_vals.min(), all_vals.max(), bins + 1)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for max_wind, label in zip(max_winds, labels):
+    for vals, label in zip(values, labels):
         ax.hist(
-            max_wind.values,
+            vals,
             bins=bin_edges,
-            alpha=0.5 if len(max_winds) > 1 else 1.0,
-            label=f"{label} (n={len(max_wind)})",
-            edgecolor="black",
-            linewidth=0.5,
+            histtype="step",
+            linewidth=1.5,
+            label=f"{label} (n={len(vals)})",
         )
-    ax.set_xlabel("Maximum wind speed per track (m/s)")
+    ax.set_xlabel(xlabel)
     ax.set_ylabel("Number of tracks")
-    ax.set_title("Distribution of tropical cyclone peak wind speed")
-    if len(max_winds) > 1:
+    if show_legend:
         ax.legend()
+
+
+def plot_histograms(
+    peaks: list[pd.DataFrame],
+    labels: list[str],
+    bins: int,
+    out_path: Path,
+) -> None:
+    """Plot per-track peak-wind and min-SLP histograms side by side."""
+    multiple = len(peaks) > 1
+    fig, (ax_wind, ax_slp) = plt.subplots(1, 2, figsize=(13, 5))
+
+    _overlay_hist(
+        ax_wind,
+        [p["max_wind"].values for p in peaks],
+        labels,
+        bins,
+        "Maximum wind speed per track (m/s)",
+        show_legend=multiple,
+    )
+    ax_wind.set_title("Peak wind speed")
+
+    # SLP is stored in Pa; plot in hPa, the meteorological convention.
+    _overlay_hist(
+        ax_slp,
+        [p["min_slp"].values / 100.0 for p in peaks],
+        labels,
+        bins,
+        "Minimum sea-level pressure per track (hPa)",
+        show_legend=multiple,
+    )
+    ax_slp.set_title("Minimum sea-level pressure")
+
+    fig.suptitle("Distribution of tropical cyclone peak intensity")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
-    logger.info("Wrote histogram to %s", out_path)
+    logger.info("Wrote histograms to %s", out_path)
 
 
 def main() -> None:
@@ -109,7 +168,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="max_wind_histogram.png",
+        default="peak_intensity_histogram.png",
         help="Output image path.",
     )
     parser.add_argument(
@@ -129,6 +188,11 @@ def main() -> None:
         default="wind",
         help="Name of the wind-speed column in the tracks CSV.",
     )
+    parser.add_argument(
+        "--slp-col",
+        default="slp",
+        help="Name of the sea-level-pressure column in the tracks CSV.",
+    )
     args = parser.parse_args()
 
     csv_paths = [Path(p) for p in args.tracks_csv]
@@ -139,13 +203,15 @@ def main() -> None:
         )
     labels = args.labels or [_default_label(p) for p in csv_paths]
 
-    max_winds = [per_track_max_wind(p, wind_col=args.wind_col) for p in csv_paths]
+    peaks = [
+        per_track_peaks(p, wind_col=args.wind_col, slp_col=args.slp_col)
+        for p in csv_paths
+    ]
     plot_histograms(
-        max_winds,
+        peaks,
         labels,
         bins=args.bins,
         out_path=Path(args.out),
-        wind_col=args.wind_col,
     )
 
 

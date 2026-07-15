@@ -22,6 +22,7 @@ NETCDF_ROOT ?= /usr
 # --detect-exe/--stitch-exe at $(TC_INSTALL_PREFIX)/bin/DetectNodes and
 # $(TC_INSTALL_PREFIX)/bin/StitchNodes when running the script.
 tc_deps:
+	sudo apt-get install -y netcdf-bin libnetcdf-dev libnetcdf-c++4-dev libhdf5-dev
 	if [ ! -d $(TC_SRC_DIR) ]; then \
 		git clone https://github.com/ClimateGlobalChange/tempestextremes $(TC_SRC_DIR); \
 	fi

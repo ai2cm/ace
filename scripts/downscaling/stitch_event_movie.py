@@ -12,10 +12,12 @@ upsampled coarse data that fills the rest of the frame.
 
 Usage:
     python stitch_event_movie.py <events_dir> --coarse-data <ace_output.zarr> \\
-        --variable PRMSL [--event-name tc_001] [--output-dir movies] \\
+        [--variable PRMSL] [--event-name tc_001] [--output-dir movies] \\
         [--reduction mean|sample] [--sample 0] [--fps 4] [--format gif]
 
 The coarse data should be the same ACE global output zarr that was downscaled.
+If ``--variable`` is omitted, one movie per event is rendered for each of
+PRMSL, wind_speed, and PRATEsfc.
 """
 
 import argparse
@@ -42,6 +44,9 @@ WIND_SPEED = "wind_speed"
 U10_CANDIDATES = ("eastward_wind_at_ten_meters", "UGRD10m")
 V10_CANDIDATES = ("northward_wind_at_ten_meters", "VGRD10m")
 
+# Variables animated when --variable is not passed.
+DEFAULT_VARIABLES = ("PRMSL", WIND_SPEED, "PRATEsfc")
+
 
 def _resolve_var(ds: xr.Dataset, candidates: tuple[str, ...], suffix: str = "") -> str:
     """Return the first ``candidates`` entry (plus ``suffix``) present in ``ds``."""
@@ -50,6 +55,19 @@ def _resolve_var(ds: xr.Dataset, candidates: tuple[str, ...], suffix: str = "") 
         if key in ds:
             return key
     raise KeyError(f"None of {candidates} (suffix={suffix!r}) found in dataset")
+
+
+def _rename_latlon(ds: xr.Dataset) -> xr.Dataset:
+    """Rename ``grid_yt``/``grid_xt`` to ``lat``/``lon`` so downstream code is
+    uniform. Some inputs (e.g. FV3/X-SHiELD zarrs) name their horizontal
+    coordinates ``grid_yt``/``grid_xt`` instead of ``lat``/``lon``.
+    """
+    renames = {
+        src: dst
+        for src, dst in (("grid_yt", "lat"), ("grid_xt", "lon"))
+        if src in ds.variables and dst not in ds.variables
+    }
+    return ds.rename(renames) if renames else ds
 
 
 def parse_datestamp(stamp: str) -> datetime:
@@ -86,7 +104,7 @@ def load_patch(path: Path, variable: str, reduction: str, sample: int) -> xr.Dat
 
     ``wind_speed`` is derived from the eastward/northward 10m wind components.
     """
-    ds = xr.open_dataset(path)
+    ds = _rename_latlon(xr.open_dataset(path))
     if variable == WIND_SPEED:
         u_name = _resolve_var(ds, U10_CANDIDATES, "_predicted")
         v_name = _resolve_var(ds, V10_CANDIDATES, "_predicted")
@@ -98,19 +116,28 @@ def load_patch(path: Path, variable: str, reduction: str, sample: int) -> xr.Dat
     return patch.load()
 
 
-def normalize_coarse_lon(coarse: xr.Dataset, target_lons: np.ndarray) -> xr.Dataset:
-    """Roll the coarse longitude coordinate into the patches' convention.
+def _unwrap_lon(lon, reference: float):
+    """Shift longitudes into the 360-degree-wide window centred on ``reference``.
 
-    The downscaled patch lon coordinate may be in either the [-180, 180] or
-    [0, 360] convention; convert the coarse data to match so slicing lines up.
+    Mapping every longitude to within +/-180 of a common reference keeps a domain
+    that straddles the antimeridian (or prime meridian) contiguous: a box at +179
+    and one at -179 stay ~2 deg apart instead of spanning the whole globe.
+    """
+    lon = np.asarray(lon, dtype=float)
+    return reference + (lon - reference + 180.0) % 360.0 - 180.0
+
+
+def unwrap_coarse_lon(coarse: xr.DataArray, reference: float) -> xr.DataArray:
+    """Shift the coarse longitude coordinate into the patches' frame.
+
+    The coarse data is global, so reindexing its longitudes into the window
+    centred on ``reference`` (then re-sorting) makes the region around the patches
+    contiguous and correctly ordered for slicing -- whether the patches use the
+    [-180, 180] or [0, 360] convention and whether or not the domain crosses the
+    antimeridian.
     """
     lon = coarse["lon"].values
-    needs_negative = target_lons.min() < 0
-    has_negative = lon.min() < 0
-    if needs_negative and not has_negative:
-        coarse = coarse.assign_coords(lon=((lon + 180.0) % 360.0) - 180.0)
-    elif not needs_negative and has_negative:
-        coarse = coarse.assign_coords(lon=lon % 360.0)
+    coarse = coarse.assign_coords(lon=_unwrap_lon(lon, reference))
     return coarse.sortby("lon")
 
 
@@ -185,7 +212,7 @@ def compute_color_limits(
         flat = np.asarray(arr.values, dtype=float).ravel()
         values.append(flat[np.isfinite(flat)])
     stacked = np.concatenate(values)
-    return float(np.percentile(stacked, 2)), float(np.percentile(stacked, 98))
+    return float(np.nanmin(stacked)), float(np.nanmax(stacked))
 
 
 def render_event(
@@ -203,16 +230,30 @@ def render_event(
     patches = [load_patch(path, variable, reduction, sample) for _, path in snapshots]
     times = [when for when, _ in snapshots]
 
-    # Full movie extent spans the union of all snapshot boxes.
-    extents = [_edge_extent(p) for p in patches]
+    # Full movie extent spans the union of all snapshot boxes. Longitudes are
+    # unwrapped into a common window centred on the first box so a track that
+    # crosses the antimeridian (or prime meridian) stays contiguous instead of
+    # spanning the whole globe.
+    raw_extents = [_edge_extent(p) for p in patches]
+    ref_lon = 0.5 * (raw_extents[0][0] + raw_extents[0][1])
+    lon_shifts = [
+        _unwrap_lon(0.5 * (lon0 + lon1), ref_lon) - 0.5 * (lon0 + lon1)
+        for lon0, lon1, _, _ in raw_extents
+    ]
+    extents = [
+        (lon0 + s, lon1 + s, lat0, lat1)
+        for (lon0, lon1, lat0, lat1), s in zip(raw_extents, lon_shifts)
+    ]
     lon_min = min(e[0] for e in extents)
     lon_max = max(e[1] for e in extents)
     lat_min = min(e[2] for e in extents)
     lat_max = max(e[3] for e in extents)
+    # Centre the projection on the domain so coastlines render correctly across
+    # the seam (and for eastern-hemisphere domains beyond +180 in the unwrapped
+    # frame); data is still supplied in plain PlateCarree() coordinates.
+    central_lon = 0.5 * (lon_min + lon_max)
 
-    coarse_var = normalize_coarse_lon(
-        coarse_var.to_dataset(name="v"), np.array([lon_min, lon_max])
-    )["v"]
+    coarse_var = unwrap_coarse_lon(coarse_var, ref_lon)
 
     coarse_frames = [
         crop(
@@ -232,7 +273,7 @@ def render_event(
     frames = []
     for i, (when, patch) in enumerate(zip(times, patches)):
         fig = plt.figure(figsize=(6, 6))
-        ax = plt.axes(projection=ccrs.PlateCarree())
+        ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=central_lon))
         ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
 
         coarse_data, coarse_extent = oriented(coarse_frames[i])
@@ -250,6 +291,8 @@ def render_event(
         )
 
         patch_data, (p_lon0, p_lon1, p_lat0, p_lat1) = oriented(patch)
+        p_lon0 += lon_shifts[i]
+        p_lon1 += lon_shifts[i]
         img = ax.imshow(
             patch_data,
             extent=[p_lon0, p_lon1, p_lat0, p_lat1],
@@ -322,9 +365,10 @@ def parse_args():
     )
     parser.add_argument(
         "--variable",
-        default="PRMSL",
+        default=None,
         help="Variable to animate (e.g. PRMSL, PRATEsfc, wind_speed). "
-        "wind_speed is derived from the 10m wind components.",
+        "wind_speed is derived from the 10m wind components. If omitted, "
+        f"renders all of {', '.join(DEFAULT_VARIABLES)}.",
     )
     parser.add_argument(
         "--event-name",
@@ -370,28 +414,39 @@ def main():
         print(f"No matching event files found in {events_dir}")
         return
 
-    coarse = xr.open_zarr(args.coarse_data)
+    coarse = _rename_latlon(xr.open_zarr(args.coarse_data))
     if "sample" in coarse.dims:
         coarse = coarse.isel(sample=0)
-    coarse_var = select_coarse_var(coarse, args.variable)
 
-    output_dir = Path(args.output_dir)
+    # Events with a single snapshot cannot be animated; drop them once (rather
+    # than re-reporting per variable) before looping.
+    renderable = {}
     for event_name, snapshots in groups.items():
         if len(snapshots) < 2:
             print(f"Skipping {event_name}: only {len(snapshots)} snapshot(s).")
             continue
-        render_event(
-            event_name=event_name,
-            snapshots=snapshots,
-            coarse_var=coarse_var,
-            variable=args.variable,
-            reduction=args.reduction,
-            sample=args.sample,
-            coarse_pad=args.coarse_pad,
-            cmap=args.cmap,
-            fps=args.fps,
-            output_path=output_dir / f"{event_name}_{args.variable}.{args.format}",
-        )
+        renderable[event_name] = snapshots
+
+    variables = (
+        [args.variable] if args.variable is not None else list(DEFAULT_VARIABLES)
+    )
+
+    output_dir = Path(args.output_dir)
+    for variable in variables:
+        coarse_var = select_coarse_var(coarse, variable)
+        for event_name, snapshots in renderable.items():
+            render_event(
+                event_name=event_name,
+                snapshots=snapshots,
+                coarse_var=coarse_var,
+                variable=variable,
+                reduction=args.reduction,
+                sample=args.sample,
+                coarse_pad=args.coarse_pad,
+                cmap=args.cmap,
+                fps=args.fps,
+                output_path=output_dir / f"{event_name}_{variable}.{args.format}",
+            )
 
 
 if __name__ == "__main__":

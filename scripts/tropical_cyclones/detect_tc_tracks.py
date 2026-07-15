@@ -12,8 +12,9 @@ instead of a Z300-Z500 thickness decrease. The required temperature drop is
 standard recipe under hydrostatic balance.
 
 The pipeline is:
-  1. Open the ACE zarr and assemble the four fields TempestExtremes needs
-     (sea-level pressure, T3, 10m u/v wind) into per-chunk NetCDF files.
+  1. Open the ACE zarr and assemble the fields TempestExtremes needs
+     (sea-level pressure, T3, 10m u/v wind, surface height) into per-chunk
+     NetCDF files.
   2. Run ``DetectNodes`` to find candidate TC centers at each timestep.
   3. Run ``StitchNodes`` to link candidates into tracks.
   4. Parse the StitchNodes output into a tidy CSV (one row per track point).
@@ -68,9 +69,14 @@ MERGE_DIST = 6.0  # merge candidates within 6.0 deg GCD
 STITCH_RANGE = 8.0  # max deg between consecutive track points
 STITCH_MINTIME = "54h"  # minimum track duration
 STITCH_MAXGAP = "24h"  # maximum time gap within a track
-# Track must have wind >= 10 m/s for >= 10 steps and stay within +/- 50 lat.
-STITCH_THRESHOLD = "wind,>=,10.0,10;lat,<=,50.0,10;lat,>=,-50.0,10"
-IN_FMT = "lon,lat,slp,wind"
+# Track must have wind >= 10 m/s for >= 10 steps, stay within +/- 50 lat, and
+# sit over surface height <= 150 m (near sea level) for >= 10 steps.
+STITCH_THRESHOLD = "wind,>=,10,10;lat,<=,50.0,10;lat,>=,-50.0,10;zs,<=,150.0,10"
+
+# DetectNodes output columns (after the leading i,j) must match IN_FMT in order;
+# see OUTPUT_CMD, which produces slp (PSL), wind (|U10,V10|), and zs (ZS).
+IN_FMT = "lon,lat,slp,wind,zs"
+OUTPUT_CMD = "PSL,min,0;_VECMAG(U10,V10),max,2.0;ZS,min,0"
 
 _HPA_UNITS = {"hpa", "mb", "millibar", "millibars"}
 
@@ -112,6 +118,67 @@ def _pressure_to_pa(da: xr.DataArray) -> xr.DataArray:
     return da
 
 
+def _select_surface_height(
+    ds: xr.Dataset,
+    zs_ds: xr.Dataset | None,
+    zs_var: str,
+    psl: xr.DataArray,
+) -> xr.DataArray:
+    """Get the surface-height field for the ZS track filter.
+
+    Prefers ``zs_var`` from the main dataset; if it's absent there, falls back
+    to ``zs_ds`` (the optional ``--zs-zarr`` dataset), which must be on the same
+    grid (same shape). Surface height is static, so any leading sample/time dims
+    are dropped, the field is placed on ``psl``'s spatial grid, and then
+    broadcast onto ``psl``'s time axis so DetectNodes sees it at every timestep.
+    """
+    if zs_var in ds:
+        zs = ds[zs_var]
+    elif zs_ds is not None and zs_var in zs_ds:
+        logger.warning(
+            "%s not found in main dataset; taking it from the --zs-zarr "
+            "fallback dataset (must be on the same grid)",
+            zs_var,
+        )
+        zs = zs_ds[zs_var]
+    elif zs_ds is not None:
+        raise KeyError(
+            f"{zs_var!r} not found in the main dataset nor in the --zs-zarr "
+            f"fallback; main vars: {list(ds.data_vars)}, "
+            f"fallback vars: {list(zs_ds.data_vars)}"
+        )
+    else:
+        raise KeyError(
+            f"{zs_var!r} not found in the main dataset (pass a dataset "
+            f"containing it via --zs-zarr); available: {list(ds.data_vars)}"
+        )
+
+    for extra in ("sample", "time"):
+        if extra in zs.dims:
+            zs = zs.isel({extra: 0}, drop=True)
+
+    # Put ZS on PSL's spatial grid before broadcasting over time. A fallback
+    # --zs-zarr may name its grid dims differently (e.g. lat/lon vs the main
+    # grid_yt/grid_xt); broadcasting by name would then form a giant outer
+    # product instead of overlaying the grids. Remap positionally after
+    # checking the shapes match, and drop the source's own spatial coords so
+    # xarray uses PSL's (a differently-labeled same-shape grid would otherwise
+    # align to all-NaN).
+    spatial_dims = tuple(d for d in psl.dims if d != "time")
+    expected_shape = tuple(psl.sizes[d] for d in spatial_dims)
+    if tuple(zs.dims) != spatial_dims:
+        if zs.shape != expected_shape:
+            raise ValueError(
+                f"surface-height field {dict(zs.sizes)} does not match the main "
+                f"grid {dict(zip(spatial_dims, expected_shape))}; regrid the "
+                "--zs-zarr source onto the main grid first."
+            )
+        zs = xr.DataArray(zs.data, dims=spatial_dims)
+    if "time" in psl.dims:
+        zs = zs.broadcast_like(psl)
+    return zs
+
+
 def build_te_dataset(
     ds: xr.Dataset,
     psl_var: str,
@@ -119,13 +186,16 @@ def build_te_dataset(
     t3_var: str,
     u_var: str,
     v_var: str,
+    zs_var: str,
     sample: int,
+    zs_ds: xr.Dataset | None = None,
 ) -> xr.Dataset:
     """Assemble the TempestExtremes input fields from an ACE dataset.
 
     Selects sea-level pressure (preferring ``psl_var`` if present, else falling
-    back to surface pressure), the T3 temperature layer, and 10m winds, and
-    renames them to the canonical names used in the DetectNodes command.
+    back to surface pressure), the T3 temperature layer, 10m winds, and surface
+    height (from ``ds``, or from ``zs_ds`` if absent there), and renames them to
+    the canonical names used in the DetectNodes command.
     """
     if "sample" in ds.dims:
         logger.info("Selecting sample=%d of %d", sample, ds.sizes["sample"])
@@ -158,18 +228,22 @@ def build_te_dataset(
                 f"{name!r} not found in dataset; available: {list(ds.data_vars)}"
             )
 
+    zs = _select_surface_height(ds, zs_ds, zs_var, psl)
+
     out = xr.Dataset(
         {
             "PSL": psl,
             "T3": ds[t3_var],
             "U10": ds[u_var],
             "V10": ds[v_var],
+            "ZS": zs,
         }
     )
     out["PSL"].attrs["units"] = "Pa"
     out["T3"].attrs["units"] = "K"
     out["U10"].attrs["units"] = "m/s"
     out["V10"].attrs["units"] = "m/s"
+    out["ZS"].attrs["units"] = "m"
     return out
 
 
@@ -337,7 +411,7 @@ def run_detect_nodes(
         "--mergedist",
         str(MERGE_DIST),
         "--outputcmd",
-        "PSL,min,0;_VECMAG(U10,V10),max,2.0",
+        OUTPUT_CMD,
         "--latname",
         lat_name,
         "--lonname",
@@ -401,10 +475,10 @@ def parse_stitch_output(path: Path) -> pd.DataFrame:
     line, followed by one line per track point:
 
         start  <npts>  <year> <month> <day> <hour>
-            <i> <j> <lon> <lat> <slp> <wind> <year> <month> <day> <hour>
+            <i> <j> <lon> <lat> <slp> <wind> <zs> <year> <month> <day> <hour>
             ...
 
-    Returns columns: track_id, time, lon, lat, slp (Pa), wind (m/s).
+    Returns columns: track_id, time, lon, lat, slp (Pa), wind (m/s), zs (m).
     """
     rows = []
     track_id = -1
@@ -415,8 +489,8 @@ def parse_stitch_output(path: Path) -> pd.DataFrame:
         if tokens[0] == "start":
             track_id += 1
             continue
-        # Point line: i, j, lon, lat, slp, wind, year, month, day, hour
-        _i, _j, lon, lat, slp, wind, year, month, day, hour = tokens[:10]
+        # Point line: i, j, lon, lat, slp, wind, zs, year, month, day, hour
+        _i, _j, lon, lat, slp, wind, zs, year, month, day, hour = tokens[:11]
         rows.append(
             {
                 "track_id": track_id,
@@ -430,6 +504,7 @@ def parse_stitch_output(path: Path) -> pd.DataFrame:
                 "lat": float(lat),
                 "slp": float(slp),
                 "wind": float(wind),
+                "zs": float(zs),
             }
         )
     df = pd.DataFrame(rows)
@@ -523,6 +598,18 @@ def main() -> None:
     parser.add_argument("--u-var", default="UGRD10m", help="10m eastward wind var.")
     parser.add_argument("--v-var", default="VGRD10m", help="10m northward wind var.")
     parser.add_argument(
+        "--zs-var",
+        default="HGTsfc",
+        help="Surface height (orography) var for the zs track filter.",
+    )
+    parser.add_argument(
+        "--zs-zarr",
+        default=None,
+        help="Path/URI of a fallback zarr containing --zs-var, consulted only "
+        "if that var is absent from the main dataset. Must be on the same "
+        "lat/lon grid.",
+    )
+    parser.add_argument(
         "--lat-name",
         default=None,
         help="Latitude coord name. If not set, auto-detected from known "
@@ -587,6 +674,10 @@ def main() -> None:
         if lat_name is None or lon_name is None:
             lat_name, lon_name = detect_lat_lon_names(ds)
             logger.info("Auto-detected lat/lon coord names: %s, %s", lat_name, lon_name)
+        zs_ds = None
+        if args.zs_zarr is not None:
+            logger.info("Opening fallback zs dataset %s", args.zs_zarr)
+            zs_ds = xr.open_zarr(args.zs_zarr)
         te_ds = build_te_dataset(
             ds,
             psl_var=args.psl_var,
@@ -594,7 +685,9 @@ def main() -> None:
             t3_var=args.t3_var,
             u_var=args.u_var,
             v_var=args.v_var,
+            zs_var=args.zs_var,
             sample=args.sample,
+            zs_ds=zs_ds,
         )
         list_path = write_netcdf_chunks(te_ds, out_dir, args.chunk_size)
     else:
