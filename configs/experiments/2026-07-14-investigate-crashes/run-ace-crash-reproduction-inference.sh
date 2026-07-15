@@ -65,6 +65,7 @@ for model in "${!MODELS[@]}"; do
             forcing_loader.dataset.overwrite.constant.global_mean_co2=$co2_concentration \
             initial_condition.path=$GCS_ROOT/spin-up/restart.nc \
             initial_condition.start_indices.list=[0] \
+            initial_condition.engine=netcdf4 \
             n_forward_steps=1460 \
             experiment_dir=$GCS_ROOT/main \
             seed=2 \
@@ -73,7 +74,7 @@ for model in "${!MODELS[@]}"; do
         python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
         python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $main_overrides
 
-        job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-output-around-crash"
+        job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-output-around-crash-main"
         gantry run \
             --name $job_name \
             --description 'Run inference with ACE' \
@@ -96,8 +97,6 @@ for model in "${!MODELS[@]}"; do
             --min-runtime 8h \
             --install "pip install --no-deps ." \
             -- /bin/bash -c "\
-                python -I -m fme.ace.inference $CONFIG_PATH --override $spin_up_overrides \
-                && \
                 python -I -m fme.ace.inference $CONFIG_PATH --override $main_overrides \
             "
     done

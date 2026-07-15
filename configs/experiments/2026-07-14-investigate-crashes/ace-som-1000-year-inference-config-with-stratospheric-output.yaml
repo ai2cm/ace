@@ -9,6 +9,10 @@ data_writer:
         - eastward_wind_0
         - northward_wind_0
         - specific_total_water_0
+      format:
+        name: zarr
+        chunks:
+          time: 1
 logging:
   project: ace-shield
   log_to_screen: true
