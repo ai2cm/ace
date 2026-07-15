@@ -1,6 +1,6 @@
 experiment_dir: /climate-default/home/annak/2026-07-09-perfect-pred-tc-tracks
 model:
-  checkpoint_path: /ckpt.tar
+  mixture_of_experts_path: /ckpt.tar
 data:
   coarse:
     - data_path:  /climate-default
