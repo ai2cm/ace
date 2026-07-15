@@ -13,8 +13,8 @@ model:
     noise_weight_exponent_channels:
       eastward_wind_at_ten_meters: 0.75
       northward_wind_at_ten_meters: 0.75
-      PRMSL: 1.25
-      air_temperature_at_two_meters: 1.25
+      PRMSL: 0.5
+      air_temperature_at_two_meters: 0.5
   use_amp_bf16: true
   out_names:
   - eastward_wind_at_ten_meters
