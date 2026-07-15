@@ -90,4 +90,11 @@ run_training() {
 # disabled (one-line flip from train-1deg-daily-v2-era5-only.yaml), fg16xws64 +
 # stitched window otherwise held fixed. 1deg analog of the 4deg
 # train-4deg-daily-v2-era5-only-no-residual run (znnaox7t).
-run_training "train-1deg-daily-v2-era5-only-no-residual.yaml" "train-1deg-daily-v2-era5-only-no-residual-rs0" 4
+# [already launched 2026-06-26 as 21y5985o] run_training "train-1deg-daily-v2-era5-only-no-residual.yaml" "train-1deg-daily-v2-era5-only-no-residual-rs0" 4
+
+# --- v2 ERA5-only NO-residual, NO-CO2 (the AIMIP-protocol recipe: no CO2 input), seed 0 ---
+# aimip-participant-comparison: 1deg/daily no-CO2 sibling of 21y5985o (drop global_mean_co2
+# from in_names/next_step_forcing_names + remove the degenerate long_46year_constant_co2
+# inference), to run through the full AIMIP evaluation. Default target: ai2/ace, high,
+# jupiter+titan (not the urgent/climate-titan the earlier 1deg siblings used).
+run_training "train-1deg-daily-v2-era5-only-no-residual-no-co2.yaml" "train-1deg-daily-v2-era5-only-no-residual-no-co2-rs0" 4 "ai2/ace" "high" "ai2/jupiter ai2/titan"
