@@ -53,7 +53,7 @@ run_training() {
 
 base_name="ace2s"
 
-# run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-ace2-weighting-rs0"
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-ace2-weighting-rs0-test-per-channel-val"
 # run_training "ace-train-config-1-step-pretrain-no-weighting.yaml" "$base_name-era5-1-step-pre-training-no-channel-weightings-rs0"
 # run_training "ace-train-config-1-step-pretrain-ace2-weighting-inverse.yaml" "$base_name-era5-1-step-pre-training-inverse-ace2-weighting-rs0"
 
@@ -65,4 +65,4 @@ base_name="ace2s"
 # run_training "ace-train-config-multi-step-ft-ace2-weighting-inverse.yaml" "$base_name-era5-multi-step-fine-tuning-inverse-ace2-channel-weightings-rs0"
 # run_training "ace-train-config-1-step-pretrain-no-weighting-32-noise-embed-dim.yaml" "$base_name-era5-1-step-pre-training-no-channel-weightings-32-noise-embed-dim-rs1"
 # run_training "ace-train-config-1-step-pretrain-no-weighting-32-noise-embed-dim-energy-corrector-on.yaml" "$base_name-era5-1-step-pre-training-no-channel-weightings-32-noise-embed-dim-energy-corrector-on-rs1"
-run_training "ace-train-config-multi-step-ft-ace-train-config-multi-step-ft-no-weighting-32-noise-embed-dim-energy-corrector-on.yaml" "$base_name-era5-multi-step-fine-tuning-no-channel-weightings-h500-5x-32-noise-embed-dim-energy-corrector-on-rs1"
+# run_training "ace-train-config-multi-step-ft-ace-train-config-multi-step-ft-no-weighting-32-noise-embed-dim-energy-corrector-on.yaml" "$base_name-era5-multi-step-fine-tuning-no-channel-weightings-h500-5x-32-noise-embed-dim-energy-corrector-on-rs1"
