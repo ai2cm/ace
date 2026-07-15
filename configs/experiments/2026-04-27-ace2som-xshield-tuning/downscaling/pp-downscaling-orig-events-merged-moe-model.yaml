@@ -3,12 +3,21 @@ model:
   mixture_of_experts_path: /ckpt.tar
 data:
   coarse:
-    - data_path:  /climate-default
-      file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
-      engine: zarr
-      subset:
-        start: 0
-        stop: 2
+    - merge:
+      - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+        file_pattern: 100km.zarr
+        engine: zarr
+        subset:
+          #start_time: '2023-01-01T00:00:00'
+          start: 0
+          stop: 2
+      - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+        file_pattern: prmsl_100km.zarr
+        engine: zarr
+        subset:
+          #start_time: '2023-01-01T00:00:00'
+          start: 0
+          stop: 2
   fine:
     - merge:
       - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
