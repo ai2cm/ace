@@ -452,7 +452,7 @@ class CoupledStepperConfig:
                 "The atmosphere stepper 'ocean' config is missing but must be set for "
                 "coupled emulation."
             )
-        if atmosphere_ocean_config.slab is not None:
+        if atmosphere_ocean_config.is_slab:
             raise ValueError(
                 "The atmosphere stepper 'ocean' config cannot use 'slab' for "
                 "coupled emulation."
