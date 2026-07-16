@@ -346,11 +346,20 @@ class OceanInputFieldsConfig:
     Attributes:
         sea_surface_fraction_name: Name of sea surface fraction variable.
         sea_surface_temperature_name: Name of sea surface temperature variable.
+        sea_ice_fraction_name: Name of the sea ice area fraction variable
+            (fraction of the full grid cell area), used to derive sea ice
+            concentration when the ocean-relative concentration variable is
+            absent.
+        ocean_sea_ice_fraction_name: Name of the sea ice concentration variable
+            (fraction of the sea surface area in a grid cell), used directly
+            when present.
     """
 
     sea_surface_fraction_name: str = "sea_surface_fraction"
     sea_surface_temperature_name: str = "sst"
     hfds_name: str = "hfds"
+    sea_ice_fraction_name: str = "sea_ice_fraction"
+    ocean_sea_ice_fraction_name: str = "ocean_sea_ice_fraction"
 
 
 @dataclasses.dataclass
@@ -406,12 +415,21 @@ class CoupledSeaIceConfig:
             to the output dataset. If window_avg is also configured, then the window-
             average is applied to ocean grid cells only based on the forumula
             (1 - ofrac_window_avg) * ts + ofrac_window_avg * ts_window_avg.
+        use_atmosphere_sea_ice_fraction_fallback: If true (default), the
+            atmosphere's own sea ice fraction may be used as the sea ice
+            source when no separate sea ice dataset is provided and the
+            ocean-sourced path does not apply. If false, reaching that
+            fallback raises a ValueError, so a misconfiguration (e.g. a
+            missing ocean sea ice variable, or an unintentionally configured
+            window_avg) fails loudly instead of silently training on the
+            atmosphere's own field.
         timedelta: Time resolution of the sea ice data (default: "6h").
 
     """
 
     window_avg: WindowAvgDatasetConfig | None = None
     include_ts: bool = False
+    use_atmosphere_sea_ice_fraction_fallback: bool = True
     timedelta: str = "6h"
 
     def apply_window_avg_and_reindex(
@@ -440,6 +458,93 @@ class CoupledSeaIceConfig:
         return ds_avg
 
 
+def _compute_fractions_from_ocean(
+    atmos: xr.Dataset,
+    ocean: xr.Dataset,
+    input_field_names: CoupledFieldNamesConfig,
+) -> xr.Dataset:
+    """Compute coherent surface-type fractions from the ocean dataset's sea ice
+    fields, at the ocean's native temporal resolution.
+
+    Sea ice concentration is taken directly from the ocean's ocean-relative
+    concentration variable when present, and otherwise derived as sea ice
+    fraction / sea surface fraction clipped to [0, 1]. The modified sea surface
+    fraction is 1 - land fraction where the ocean's sea surface fraction is
+    positive and 0 elsewhere, and the sea ice and ocean fractions are recomposed
+    from the concentration.
+
+    Args:
+        atmos: Atmosphere dataset containing the land fraction.
+        ocean: Ocean dataset containing sea surface fraction and sea ice fields.
+            Its time instants are assumed to coincide with atmosphere timestamps.
+        input_field_names: Names of input fields.
+
+    Returns:
+        Dataset on the ocean's time coordinate containing modified land, ocean,
+        and sea ice fractions, sea ice concentration, and sea surface fraction.
+    """
+    tdim = input_field_names.time_dim
+    latdim = input_field_names.latitude_dim
+    londim = input_field_names.longitude_dim
+
+    lfrac_name = input_field_names.atmosphere.land_fraction_name
+    ifrac_name = input_field_names.atmosphere.sea_ice_fraction_name
+    ofrac_name = input_field_names.atmosphere.ocean_fraction_name
+    sfrac_name = input_field_names.ocean.sea_surface_fraction_name
+    ocean_ifrac_name = input_field_names.ocean.sea_ice_fraction_name
+    ocean_sic_name = input_field_names.ocean.ocean_sea_ice_fraction_name
+    sic_name = input_field_names.derived.ocean_sea_ice_fraction_name
+
+    ocean = ocean.assign_coords({latdim: atmos[latdim], londim: atmos[londim]})
+
+    lfrac = atmos[lfrac_name].clip(min=0.0, max=1.0)
+    if tdim in lfrac.dims:
+        lfrac = lfrac.sel({tdim: ocean[tdim]})
+
+    sfrac = ocean[sfrac_name].fillna(0.0).clip(min=0.0, max=1.0)
+    sfrac.attrs = {
+        "long_name": "sea surface fraction",
+        "units": "unitless",
+    }
+
+    if ocean_sic_name in ocean.data_vars:
+        logging.info(
+            f"Using sea ice concentration {ocean_sic_name} from the ocean dataset."
+        )
+        sic_mod = ocean[ocean_sic_name].fillna(0.0).clip(min=0.0, max=1.0)
+    else:
+        logging.info(
+            "Deriving sea ice concentration as "
+            f"{ocean_ifrac_name} / {sfrac_name} from the ocean dataset."
+        )
+        sic_mod = (ocean[ocean_ifrac_name] / sfrac).clip(0, 1).fillna(0.0)
+    sic_mod.attrs = {
+        "long_name": "sea ice concentration",
+        "units": "unitless",
+    }
+
+    sfrac_mod = (1 - lfrac).where(sfrac > 0, 0.0)
+    lfrac_mod = 1 - sfrac_mod
+
+    # compute sea ice fraction and ocean fraction from sic
+    ifrac_mod = sic_mod * sfrac_mod
+    ofrac_mod = (1 - sic_mod) * sfrac_mod
+
+    lfrac_mod.attrs = atmos[lfrac_name].attrs
+    ifrac_mod.attrs = atmos[ifrac_name].attrs
+    ofrac_mod.attrs = atmos[ofrac_name].attrs
+
+    return xr.Dataset(
+        {
+            lfrac_name: lfrac_mod,
+            sfrac_name: sfrac,
+            ofrac_name: ofrac_mod,
+            sic_name: sic_mod,
+            ifrac_name: ifrac_mod,
+        }
+    )
+
+
 def compute_coupled_sea_ice(
     atmos: xr.Dataset,
     config: CoupledSeaIceConfig,
@@ -454,14 +559,29 @@ def compute_coupled_sea_ice(
     Derives consistent sea ice concentration, fractions, and masks by combining
     information from the processed atmosphere and ocean datasets.
 
+    The sea ice source is selected by presence priority:
+
+        1. the separate sea ice dataset, when provided;
+        2. else the ocean dataset, when no window_avg is configured and the
+           ocean carries sea ice fields. Fractions are computed at the ocean's
+           native temporal resolution and forward-filled onto the atmosphere's
+           time index, with no window-averaging;
+        3. else the atmosphere's own sea ice fraction (including whenever a
+           window_avg is configured), allowed only when
+           config.use_atmosphere_sea_ice_fraction_fallback is true.
+
     Args:
         atmos: Atmosphere dataset containing land fraction, sea ice fraction, and
             ocean fraction.
         sea_ice: Optional separate sea ice dataset. If provided, sea ice fraction
-            is taken from here instead of from atmosphere dataset. Assumed to have
-            the same temporal resolution as the atmos dataset.
-        ocean: Optional separate dataset containing sea surface fraction. Unused if
-            sea_ice is non-null and contains sea surface fraction.
+            is taken from here instead of from the ocean or atmosphere datasets.
+            Assumed to have the same temporal resolution as the atmos dataset.
+        ocean: Optional separate dataset containing sea surface fraction and,
+            optionally, sea ice fields. If sea_ice is None, no window_avg is
+            configured, and the ocean carries sea ice fields, the sea ice
+            fractions are sourced from this dataset; otherwise it is only used
+            for sea surface fraction (and is unused if sea_ice is non-null and
+            contains sea surface fraction).
         config: Configuration for window averaging and including surface temperature.
         input_field_names: Names of input fields. If None, uses defaults.
         atmos_extras: Optional configuration for copying extra variables from the
@@ -500,70 +620,112 @@ def compute_coupled_sea_ice(
     # new field
     sic_name = input_field_names.derived.ocean_sea_ice_fraction_name
 
-    lfrac = atmos[lfrac_name].clip(min=0.0, max=1.0)
+    ocean_has_sea_ice_fields = ocean is not None and (
+        input_field_names.ocean.ocean_sea_ice_fraction_name in ocean.data_vars
+        or input_field_names.ocean.sea_ice_fraction_name in ocean.data_vars
+    )
+    # Gating on window_avg exists solely so the E3SM coupled configs — which
+    # configure a window_avg and an ocean store that carries sea ice fields —
+    # stay on the atmosphere-sourced path byte-for-byte. If those configs are
+    # confirmed to not need that guarantee (or move to the ocean-sourced
+    # path), the gate can be dropped.
+    use_ocean_source = (
+        sea_ice is None and config.window_avg is None and ocean_has_sea_ice_fields
+    )
+    if (
+        sea_ice is None
+        and not use_ocean_source
+        and not config.use_atmosphere_sea_ice_fraction_fallback
+    ):
+        raise ValueError(
+            "No separate sea ice dataset is configured and the ocean-sourced "
+            "sea ice path does not apply (it requires an ocean dataset with "
+            "sea ice fields and no window_avg), so the atmosphere's own sea "
+            "ice fraction would be used. Set "
+            "use_atmosphere_sea_ice_fraction_fallback to true to allow this."
+        )
 
-    sfrac = 1 - lfrac
-    if sea_ice is not None and sfrac_name in sea_ice:
-        sfrac = sea_ice[sfrac_name]
-    elif ocean is not None and sfrac_name in ocean:
-        sfrac = ocean[sfrac_name]
+    if use_ocean_source:
+        assert ocean is not None
+        logging.info("Computing sea ice fractions from the ocean dataset.")
+        fractions = _compute_fractions_from_ocean(atmos, ocean, input_field_names)
+        ds = fractions.reindex({tdim: atmos[tdim]}, method="ffill")
+        if config.include_ts:
+            ts = atmos[ts_name]
+            ts_ocean_cadence = ts.sel({tdim: fractions[tdim]}).reindex(
+                {tdim: atmos[tdim]}, method="ffill"
+            )
+            ds[ts_name] = _interpolate_sst(
+                ts=ts,
+                sst=ts_ocean_cadence,
+                ofrac=ds[ofrac_name],
+            )
+            ds[ts_name].attrs = ts.attrs
     else:
-        logging.warning(
-            f"{sfrac_name} not found. "
-            "Assuming sea surface fraction is 1 - land fraction."
-        )
-    sfrac = (
-        sfrac.fillna(0.0)
-        .clip(min=0.0, max=1.0)
-        .assign_coords({latdim: atmos.lat, londim: atmos.lon})
-    )
-    sfrac.attrs = {
-        "long_name": "sea surface fraction",
-        "units": "unitless",
-    }
+        lfrac = atmos[lfrac_name].clip(min=0.0, max=1.0)
 
-    ifrac = atmos[ifrac_name].clip(min=0.0, max=1.0)
-    if sea_ice is not None:
-        ifrac = (
-            sea_ice[ifrac_name]
-            .fillna(0.0)
+        sfrac = 1 - lfrac
+        if sea_ice is not None and sfrac_name in sea_ice:
+            sfrac = sea_ice[sfrac_name]
+        elif ocean is not None and sfrac_name in ocean:
+            sfrac = ocean[sfrac_name]
+        else:
+            logging.warning(
+                f"{sfrac_name} not found. "
+                "Assuming sea surface fraction is 1 - land fraction."
+            )
+        sfrac = (
+            sfrac.fillna(0.0)
             .clip(min=0.0, max=1.0)
-            .assign_coords({latdim: atmos[latdim], londim: atmos[londim]})
+            .assign_coords({latdim: atmos.lat, londim: atmos.lon})
         )
-
-    sfrac_mod = (1 - lfrac).where(sfrac > 0, 0.0)
-    lfrac_mod = 1 - sfrac_mod
-
-    # compute sea ice concentratiion
-    sic_mod = (ifrac / sfrac).clip(0, 1).fillna(0.0)
-    sic_mod.attrs = {
-        "long_name": "sea ice concentration",
-        "units": "unitless",
-    }
-
-    # compute sea ice fraction and ocean fraction from sic
-    ifrac_mod = sic_mod * sfrac_mod
-    ofrac_mod = (1 - sic_mod) * sfrac_mod
-
-    lfrac_mod.attrs = lfrac.attrs
-    ifrac_mod.attrs = ifrac.attrs
-    ofrac_mod.attrs = atmos[ofrac_name].attrs
-
-    ds = xr.Dataset(
-        {
-            lfrac_name: lfrac_mod,
-            sfrac_name: sfrac,
-            ofrac_name: ofrac_mod,
-            sic_name: sic_mod,
-            ifrac_name: ifrac_mod,
-            ts_name: atmos[ts_name],
+        sfrac.attrs = {
+            "long_name": "sea surface fraction",
+            "units": "unitless",
         }
-    )
-    ds = config.apply_window_avg_and_reindex(
-        ds,
-        input_field_names.atmosphere,
-        input_field_names.time_dim,
-    )
+
+        ifrac = atmos[ifrac_name].clip(min=0.0, max=1.0)
+        if sea_ice is not None:
+            ifrac = (
+                sea_ice[ifrac_name]
+                .fillna(0.0)
+                .clip(min=0.0, max=1.0)
+                .assign_coords({latdim: atmos[latdim], londim: atmos[londim]})
+            )
+
+        sfrac_mod = (1 - lfrac).where(sfrac > 0, 0.0)
+        lfrac_mod = 1 - sfrac_mod
+
+        # compute sea ice concentratiion
+        sic_mod = (ifrac / sfrac).clip(0, 1).fillna(0.0)
+        sic_mod.attrs = {
+            "long_name": "sea ice concentration",
+            "units": "unitless",
+        }
+
+        # compute sea ice fraction and ocean fraction from sic
+        ifrac_mod = sic_mod * sfrac_mod
+        ofrac_mod = (1 - sic_mod) * sfrac_mod
+
+        lfrac_mod.attrs = lfrac.attrs
+        ifrac_mod.attrs = ifrac.attrs
+        ofrac_mod.attrs = atmos[ofrac_name].attrs
+
+        ds = xr.Dataset(
+            {
+                lfrac_name: lfrac_mod,
+                sfrac_name: sfrac,
+                ofrac_name: ofrac_mod,
+                sic_name: sic_mod,
+                ifrac_name: ifrac_mod,
+                ts_name: atmos[ts_name],
+            }
+        )
+        ds = config.apply_window_avg_and_reindex(
+            ds,
+            input_field_names.atmosphere,
+            input_field_names.time_dim,
+        )
     ds[tdim] = _make_serializable_time_coord(
         ds=atmos, tdim=tdim, timedelta=config.timedelta
     )
@@ -589,7 +751,10 @@ def compute_coupled_ocean(
     """Create coupled ocean dataset at ocean timesteps.
 
     Selects coupled sea ice fields at ocean time coordinates and optionally
-    adds extra variables from the ocean dataset.
+    adds extra variables from the ocean dataset. The heat flux into sea water
+    scaled by sea surface fraction is copied from the ocean dataset when
+    already present there, and derived from the heat flux and sea surface
+    fraction otherwise.
 
     Args:
         ocean: Ocean input dataset.
@@ -624,21 +789,29 @@ def compute_coupled_ocean(
 
     ds = coupled_sea_ice
     if ts_name in ds.data_vars:
-        ds = ds.drop(ts_name)
+        # the coupled sea ice dataset's surface temperature is an atmosphere
+        # field (include_ts); the coupled ocean dataset carries sst instead
+        ds = ds.drop_vars(ts_name)
 
-    ds = config.apply_sea_ice_window_avg(coupled_sea_ice)
+    ds = config.apply_sea_ice_window_avg(ds)
     ds = ds.sel({tdim: ocean[tdim]})
     ds = xr.merge([ds, config.apply_surface_flux_window_avg(atmos)])
     ds[tdim] = _make_serializable_time_coord(
         ds=ocean, tdim=tdim, timedelta=config.timedelta
     )
 
-    sfrac = ds[sfrac_name]
-    ds[hfds_total_area_name] = ocean[hfds_name] * sfrac
-    ds[hfds_total_area_name].attrs = {
-        "long_name": "heat flux into sea water scaled by sea surface fraction",
-        "units": ocean[hfds_name].attrs.get("units", "W/m2"),
-    }
+    if hfds_total_area_name in ocean.data_vars:
+        logging.info(
+            f"Using {hfds_total_area_name} from the ocean dataset instead of "
+            "deriving it."
+        )
+        ds[hfds_total_area_name] = ocean[hfds_total_area_name]
+    else:
+        ds[hfds_total_area_name] = ocean[hfds_name] * ds[sfrac_name]
+        ds[hfds_total_area_name].attrs = {
+            "long_name": "heat flux into sea water scaled by sea surface fraction",
+            "units": ocean[hfds_name].attrs.get("units", "W/m2"),
+        }
 
     sea_ice_mask = config.compute_sea_ice_mask(ocean[sst_name])
     sea_ice_mask.attrs = {
