@@ -1,4 +1,4 @@
-seed: 2
+seed: 1
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -617,5 +617,5 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 0
+          max_masked_vars: 20
       include_channel_mask_inputs: true

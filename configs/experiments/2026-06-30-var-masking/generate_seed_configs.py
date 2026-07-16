@@ -49,7 +49,7 @@ class SeedGroup(NamedTuple):
 # Masking subset to replicate across seeds.
 SEED_GROUPS = [
     SeedGroup("mask0", 0),
-    SeedGroup("mask30", 30),
+    SeedGroup("mask20", 20),
 ]
 
 

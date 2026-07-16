@@ -1,4 +1,4 @@
-seed: 3
+seed: 2
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -617,5 +617,10 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 30
+          max_masked_vars: 20
+        override_groups:
+        - variables:
+          - global_mean_co2
+          masking:
+            rate: 0.75
       include_channel_mask_inputs: true
