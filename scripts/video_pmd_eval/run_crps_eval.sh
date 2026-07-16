@@ -48,7 +48,7 @@ CREATE_OUTPUT=$(beaker session create \
     --timeout 30m \
     --name "$SESSION_NAME" \
     --result /results \
-    -- bash -c "set -e; echo $B64 | base64 -d > /tmp/crps_eval.py; cd /tmp; python3 /tmp/crps_eval.py 2>&1 | tee /results/output.log; echo CRPS_EVAL_DONE" 2>&1)
+    -- bash -c "set -e; echo $B64 | base64 -d > /tmp/crps_eval.py; cd /results; python3 /tmp/crps_eval.py 2>&1 | tee /results/output.log; echo CRPS_EVAL_DONE" 2>&1)
 
 echo "$CREATE_OUTPUT"
 SESSION_ID=$(echo "$CREATE_OUTPUT" | grep -oE '01[A-Z0-9]{24}' | head -1)
