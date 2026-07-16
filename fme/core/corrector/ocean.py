@@ -60,8 +60,14 @@ class SeaIceFractionConfig:
         input_data: TensorMapping,
         keep_gradient: bool = False,
     ) -> TensorDict:
-        out = {**gen_data}
-        sif = out[self.sea_ice_fraction_name]
+        """
+        Returns:
+            A ``TensorDict`` containing only the fields modified by this
+            correction (the sea ice fraction and the fields zeroed where
+            ice-free).
+        """
+        out: TensorDict = {}
+        sif = gen_data[self.sea_ice_fraction_name]
         clamped_sif = torch.clamp(sif, min=0.0, max=1.0)
         if keep_gradient:
             clamped_sif = replace_value_keep_gradient(sif, clamped_sif)
@@ -151,10 +157,16 @@ class SeaIceFractionCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        return (
-            self.config(gen_data, input_data, keep_gradient=self.keep_gradient),
-            corrector_state,
-        )
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the sea ice fraction and the fields zeroed where
+            ice-free). ``SeaIceFractionConfig.__call__`` already returns only
+            those fields, preserving the straight-through estimator when
+            ``keep_gradient`` is set.
+        """
+        corrected = self.config(gen_data, input_data, keep_gradient=self.keep_gradient)
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
@@ -170,13 +182,18 @@ class SurfaceEnergyFluxCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        gen_data = _correct_hfds(
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the field modified by this
+            correction (the net downward surface heat flux, ``hfds``).
+        """
+        corrected = _correct_hfds(
             input_data,
             gen_data,
             forcing_data,
             method=self.method,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
@@ -196,12 +213,18 @@ class OceanHeatContentCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the potential temperature at every depth level, and
+            the sea surface temperature when present).
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Ocean heat content correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        gen_data = _force_conserve_ocean_heat_content(
+        corrected = _force_conserve_ocean_heat_content(
             input_data,
             gen_data,
             forcing_data,
@@ -211,7 +234,7 @@ class OceanHeatContentCorrection:
             self.method,
             self.unaccounted_heating,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -376,7 +399,7 @@ def _correct_hfds(
     net_flux = _compute_ocean_net_surface_energy_flux(
         forcing_data, input.sea_surface_temperature
     )
-    out = dict(gen_data)
+    out: TensorDict = {}
     if "hfds" in gen_data:
         hfds_name = "hfds"
     else:
@@ -459,12 +482,13 @@ def _force_conserve_ocean_heat_content(
         global_input_ocean_heat_content + expected_change_ocean_heat_content
     ) / global_gen_ocean_heat_content
     # apply same temperature correction to all vertical layers
+    out: TensorDict = {}
     n_levels = gen.sea_water_potential_temperature.shape[-1]
     for k in range(n_levels):
         name = f"thetao_{k}"
-        gen.data[name] = gen.data[name] * heat_content_correction_ratio
+        out[name] = gen.data[name] * heat_content_correction_ratio
     if "sst" in gen.data:
-        gen.data["sst"] = (  # assuming sst in Kelvin
+        out["sst"] = (  # assuming sst in Kelvin
             gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
         ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
-    return gen.data
+    return out

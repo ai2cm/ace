@@ -66,3 +66,25 @@ class CorrectorState:
         if self.global_dry_air_mass is not None:
             return self.global_dry_air_mass.shape[0]
         return None
+
+    def to_state_dict(self) -> dict[str, torch.Tensor]:
+        """Serialize the set fields for a restart. An unseeded (all-None) field
+        is omitted, so a round-trip of an empty ``CorrectorState`` stays empty.
+        """
+        if self.global_dry_air_mass is None:
+            return {}
+        return {"global_dry_air_mass": self.global_dry_air_mass}
+
+    @classmethod
+    def from_state_dict(cls, state: dict[str, torch.Tensor]) -> "CorrectorState":
+        """Rebuild from a serialized state; absent fields stay ``None``."""
+        return cls(global_dry_air_mass=state.get("global_dry_air_mass"))
+
+    @staticmethod
+    def per_sample_state_keys() -> set[str]:
+        """``to_state_dict`` keys whose tensors carry a leading per-sample
+        dimension. All corrector fields are per-sample (see class docstring), so
+        a serializer can mark them explicitly rather than inferring it from
+        shape.
+        """
+        return {"global_dry_air_mass"}

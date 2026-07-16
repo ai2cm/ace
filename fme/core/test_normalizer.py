@@ -11,6 +11,7 @@ from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
+    NormalizeFn,
     StandardNormalizer,
     _combine_normalizers,
 )
@@ -34,6 +35,41 @@ def test_normalize_depends_on_std():
     normalized = normalizer.normalize(tensors)
     assert normalized["a"] == torch.tensor(1.0)
     assert normalized["b"] == torch.tensor(0.5)
+
+
+def test_normalize_without_mean_divides_by_std_only():
+    means = {"a": torch.tensor(1.0), "b": torch.tensor(2.0)}
+    stds = {"a": torch.tensor(2.0), "b": torch.tensor(4.0)}
+    normalizer = StandardNormalizer(means=means, stds=stds)
+    tensors = {"a": torch.tensor(3.0), "b": torch.tensor(3.0), "c": torch.tensor(3.0)}
+    normalized = normalizer.normalize(tensors, apply_mean=False)
+    assert normalized["a"] == torch.tensor(1.5)
+    assert normalized["b"] == torch.tensor(0.75)
+    assert "c" not in normalized
+
+
+def test_normalize_applies_mean_by_default():
+    means = {"a": torch.tensor(1.0), "b": torch.tensor(2.0)}
+    stds = {"a": torch.tensor(2.0), "b": torch.tensor(4.0)}
+    normalizer = StandardNormalizer(means=means, stds=stds)
+    tensors = {"a": torch.tensor(3.0), "b": torch.tensor(3.0)}
+    normalized = normalizer.normalize(tensors)
+    torch.testing.assert_close(
+        normalized, normalizer.normalize(tensors, apply_mean=True)
+    )
+    assert normalized["a"] == torch.tensor(1.0)
+    assert normalized["b"] == torch.tensor(0.25)
+
+
+def test_normalize_satisfies_normalize_fn_protocol():
+    normalizer = StandardNormalizer(
+        means={"a": torch.tensor(1.0)}, stds={"a": torch.tensor(2.0)}
+    )
+    # the annotation makes mypy verify that normalize satisfies the protocol
+    normalize: NormalizeFn = normalizer.normalize
+    tensors = {"a": torch.tensor(3.0)}
+    assert normalize(tensors)["a"] == torch.tensor(1.0)
+    assert normalize(tensors, apply_mean=False)["a"] == torch.tensor(1.5)
 
 
 def test_denormalize_depends_on_mean():

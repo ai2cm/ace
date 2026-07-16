@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 
 import pytest
@@ -47,7 +48,7 @@ def test_ocean_corrector_force_positive():
     input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
     gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
-    corrected_gen, _ = corrector(input_data, gen_data, {}, None)
+    corrected_gen = corrector(input_data, gen_data, {}, None).corrected
     for name in ["so_0", "so_1"]:
         x = corrected_gen[name].clone()
         x[_LAT, _LON] = 0.0
@@ -99,14 +100,22 @@ def test_ocean_corrector_keep_gradient_through_clamps_forward_unchanged():
         "so_0": torch.randn(IMG_SHAPE, device=DEVICE),
         "sea_ice_fraction": torch.randn(IMG_SHAPE, device=DEVICE),
     }
-    baseline = OceanCorrectorConfig(
-        force_positive_names=["so_0"], sea_ice_fraction_correction=sif
-    )._build(ops, None, timestep)(input_data, gen_data, {}, None)[0]
-    ste = OceanCorrectorConfig(
-        force_positive_names=["so_0"],
-        sea_ice_fraction_correction=sif,
-        keep_gradient_through_clamps=True,
-    )._build(ops, None, timestep)(input_data, gen_data, {}, None)[0]
+    baseline = (
+        OceanCorrectorConfig(
+            force_positive_names=["so_0"], sea_ice_fraction_correction=sif
+        )
+        ._build(ops, None, timestep)(input_data, gen_data, {}, None)
+        .corrected
+    )
+    ste = (
+        OceanCorrectorConfig(
+            force_positive_names=["so_0"],
+            sea_ice_fraction_correction=sif,
+            keep_gradient_through_clamps=True,
+        )
+        ._build(ops, None, timestep)(input_data, gen_data, {}, None)
+        .corrected
+    )
     for name in baseline:
         torch.testing.assert_close(baseline[name], ste[name])
 
@@ -134,7 +143,9 @@ def test_ocean_corrector_has_no_negative_ocean_fraction():
     assert negative_sea_ice_fraction.any()
 
     next_step_input_data: TensorMapping = {}
-    gen_data_corrected, _ = corrector(input_data, gen_data, next_step_input_data, None)
+    gen_data_corrected = corrector(
+        input_data, gen_data, next_step_input_data, None
+    ).corrected
     corrected_violation = (
         input_data["land_fraction"] + gen_data_corrected["sea_ice_fraction"]
     ) > 1.0
@@ -166,7 +177,9 @@ def test_ocean_corrector_has_negative_ocean_fraction():
     assert negative_sea_ice_fraction.any()
 
     next_step_input_data: TensorMapping = {}
-    gen_data_corrected, _ = corrector(input_data, gen_data, next_step_input_data, None)
+    gen_data_corrected = corrector(
+        input_data, gen_data, next_step_input_data, None
+    ).corrected
     corrected_violation = (
         input_data["land_fraction"] + gen_data_corrected["sea_ice_fraction"]
     ) > 1.0
@@ -192,7 +205,7 @@ def test_zero_where_ice_free_names():
         "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
     }
     corrector = config._build(ops, None, timestep)
-    gen_data_corrected, _ = corrector(input_data, gen_data, {}, None)
+    gen_data_corrected = corrector(input_data, gen_data, {}, None).corrected
     sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
     thickness = gen_data_corrected["HI"]
     torch.testing.assert_close(
@@ -218,7 +231,7 @@ def test_zero_where_ice_free_names_multiple_variables():
         "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
     }
     corrector = config._build(ops, None, timestep)
-    gen_data_corrected, _ = corrector(input_data, gen_data, {}, None)
+    gen_data_corrected = corrector(input_data, gen_data, {}, None).corrected
     sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
     for name in ["HI", "HS"]:
         values = gen_data_corrected[name]
@@ -302,7 +315,7 @@ def test_surface_energy_flux_correction_resid():
     expected_net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
     expected_hfds = gen_hfds + ocean_fraction * expected_net_flux
 
-    corrected, _ = corrector(input_data, gen_data, forcing_data, None)
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
     torch.testing.assert_close(corrected["hfds"], expected_hfds)
     # on land ocean_fraction is 0, so hfds is unchanged
     torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
@@ -344,7 +357,7 @@ def test_surface_energy_flux_correction_prescribed():
     net_flux = _compute_ocean_net_surface_energy_flux(input_data, sst)
     expected_hfds = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
 
-    corrected, _ = corrector(input_data, gen_data, forcing_data, None)
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
     torch.testing.assert_close(corrected["hfds"], expected_hfds)
     # on land (ocean_fraction=0), hfds equals gen_hfds
     torch.testing.assert_close(corrected["hfds"][-1, :], gen_hfds[-1, :])
@@ -420,9 +433,16 @@ def test_ocean_heat_content_correction(hfds_type):
     input_data = OceanData(input_data_dict, depth_coordinate)
     gen_data = OceanData(gen_data_dict, depth_coordinate)
     corrector = config._build(ops, depth_coordinate, timestep)
-    gen_data_corrected_dict, _ = corrector(
-        input_data_dict, gen_data_dict, forcing_data_dict, None
-    )
+    result = corrector(input_data_dict, gen_data_dict, forcing_data_dict, None)
+    gen_data_corrected_dict = result.corrected
+
+    # the OHC correction writes every potential-temperature level and the SST;
+    # the heat-flux fields are read but not written, so they stay out of the set
+    assert set(result.modified_names) == {"thetao_0", "thetao_1", "sst"}
+    for name, delta in result.diagnostics.delta.items():
+        torch.testing.assert_close(
+            delta, result.corrected[name] - gen_data_dict[name], equal_nan=True
+        )
 
     input_ohc = input_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
     gen_ohc = gen_data.ocean_heat_content.nanmean(dim=(-1, -2), keepdim=True)
@@ -455,3 +475,67 @@ def test_ocean_heat_content_correction(hfds_type):
         gen_data_corrected.ocean_heat_content,
         equal_nan=True,
     )
+
+
+def test_ocean_corrector_config_fields_are_known():
+    # Staleness guard: if a new corrector option is added to
+    # OceanCorrectorConfig this fails, flagging that the corrector delta/
+    # modified-return tests need to exercise it.
+    expected = {
+        "force_positive_names",
+        "sea_ice_fraction_correction",
+        "surface_energy_flux_correction",
+        "ocean_heat_content_correction",
+        "keep_gradient_through_clamps",
+        "corrector_disabled_epochs",  # inherited epoch-scheduling field
+    }
+    actual = {f.name for f in dataclasses.fields(OceanCorrectorConfig)}
+    assert actual == expected, (
+        "OceanCorrectorConfig fields changed; update the corrector delta tests "
+        f"to cover the new option(s): {actual ^ expected}"
+    )
+
+
+def test_ocean_corrector_delta_matches_modified_returns():
+    torch.manual_seed(0)
+    config = OceanCorrectorConfig(
+        force_positive_names=["so_0"],
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            zero_where_ice_free_names=["HI", "HS"],
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = config._build(ops, None, timestep)
+    input_data = {"land_fraction": torch.rand(IMG_SHAPE, device=DEVICE)}
+    gen_data = {
+        "so_0": torch.randn(IMG_SHAPE, device=DEVICE),
+        "so_1": torch.randn(IMG_SHAPE, device=DEVICE),  # uncorrected field
+        "sea_ice_fraction": torch.rand(IMG_SHAPE, device=DEVICE),
+        "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
+        "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
+    }
+    result = corrector(input_data, gen_data, {}, None)
+    # delta keys are exactly the corrector's modified names
+    assert set(result.diagnostics.delta) == set(result.modified_names)
+    for name, delta in result.diagnostics.delta.items():
+        torch.testing.assert_close(delta, result.corrected[name] - gen_data[name])
+    assert set(result.modified_names) == {"so_0", "sea_ice_fraction", "HI", "HS"}
+    # the uncorrected field passes through unchanged and is absent from the set
+    assert "so_1" not in result.modified_names
+    torch.testing.assert_close(result.corrected["so_1"], gen_data["so_1"])
+
+
+def test_ocean_corrector_empty_delta_when_nothing_modified():
+    # A corrector with no field-modifying option emits an empty delta and an
+    # unchanged copy of gen_data.
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = OceanCorrectorConfig()._build(ops, None, timestep)
+    gen_data = {"so_0": torch.randn(IMG_SHAPE, device=DEVICE)}
+    result = corrector({}, gen_data, {}, None)
+    assert dict(result.diagnostics.delta) == {}
+    assert set(result.modified_names) == set()
+    torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])

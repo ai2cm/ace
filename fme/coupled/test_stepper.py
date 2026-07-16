@@ -30,6 +30,7 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
+from fme.core.var_masking import UniformMaskingConfig, VariableMaskingConfig
 from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
@@ -1205,6 +1206,7 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    atmosphere_input_dropout: VariableMaskingConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1244,6 +1246,7 @@ def get_stepper_config(
                                 surface_temperature_name=sfc_temp_name_in_atmosphere_data,
                                 ocean_fraction_name=ocean_fraction_name,
                             ),
+                            input_dropout=atmosphere_input_dropout,
                         ),
                     ),
                 ),
@@ -1290,6 +1293,7 @@ def get_stepper_and_batch(
     atmosphere_builder: ModuleSelector | None = None,
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
+    atmosphere_input_dropout: VariableMaskingConfig | None = None,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)
@@ -1324,6 +1328,7 @@ def get_stepper_and_batch(
         # n_forward_times_atmosphere = 2 * n_forward_times_ocean
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
+        atmosphere_input_dropout=atmosphere_input_dropout,
     )
     dataset_info = CoupledDatasetInfoBuilder(
         vcoord=coupled_data.vertical_coord
@@ -1359,6 +1364,29 @@ def get_train_stepper_and_batch(
         )
     train_stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     return train_stepper, coupled_data, config, dataset_info
+
+
+def test_coupled_training_with_input_dropout_runs():
+    """input_dropout on a coupled component trains without error.
+
+    Each forward step samples its own mask in train mode, so coupled training
+    needs no special coordination; the batch must step through successfully.
+    """
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        ocean_in_names=["sst"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=2,
+        atmosphere_input_dropout=VariableMaskingConfig(default=UniformMaskingConfig(1)),
+    )
+    output = train_stepper.train_on_batch(
+        data=coupled_data.data,
+        optimization=NullOptimization(),
+    )
+    assert "surface_temperature" in output.atmosphere.gen_data
 
 
 @pytest.mark.parametrize(
