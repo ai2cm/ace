@@ -12,8 +12,8 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -310,15 +310,19 @@ class MultiCallStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
-        state, stepper_state = self._wrapped_step.step(
-            args=args,
-            wrapper=wrapper,
-        )
+    ) -> StepOutput:
+        wrapped = self._wrapped_step.step(args=args, wrapper=wrapper)
+        output = wrapped.output
         if self._multi_call is not None:
-            multi_called_outputs, _ = self._multi_call.step(args=args, wrapper=wrapper)
-            state = {**multi_called_outputs, **state}
-        return state, stepper_state
+            # The multi-call's own state and diagnostics are discarded; only the
+            # wrapped step's are carried.
+            multi_called = self._multi_call.step(args=args, wrapper=wrapper)
+            output = {**multi_called.output, **output}
+        return StepOutput(
+            output=output,
+            stepper_state=wrapped.stepper_state,
+            corrector_diagnostics=wrapped.corrector_diagnostics,
+        )
 
     def get_state(self) -> dict[str, Any]:
         """

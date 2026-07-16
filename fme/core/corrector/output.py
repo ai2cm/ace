@@ -1,7 +1,8 @@
 import dataclasses
-from collections.abc import Iterable
+from collections.abc import Iterable, KeysView
 
 from fme.core.corrector.state import CorrectorState
+from fme.core.spatial_masking import SpatialMasking
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -17,6 +18,25 @@ class CorrectorDiagnostics:
     """
 
     delta: TensorMapping = dataclasses.field(default_factory=dict)
+
+    def apply_output_masking(self, masking: SpatialMasking) -> "CorrectorDiagnostics":
+        """Return a new ``CorrectorDiagnostics`` with the output spatial masking
+        applied to ``delta``; ``self`` is not mutated.
+
+        This accepts a spatial masking specifically, not an arbitrary
+        output-processing function. Masking a difference with an
+        absolute-field masker is correct only because the output masker fills
+        with NaN: off-mask the delta becomes NaN, matching
+        ``masked_output - masked_snapshot`` (``NaN - NaN``). A finite fill
+        (e.g. 0 or a mean) would inject a spurious offset and break the
+        ``delta = output - snapshot`` invariant, and any value-transforming
+        function would corrupt the delta outright.
+
+        Args:
+            masking: The stepper's output spatial masking (NaN-fill, or the
+                no-op ``NullSpatialMasking``).
+        """
+        return CorrectorDiagnostics(delta=masking(self.delta))
 
 
 @dataclasses.dataclass
@@ -34,6 +54,15 @@ class CorrectorOutput:
         default_factory=CorrectorDiagnostics
     )
     corrector_state: CorrectorState | None = None
+
+    @property
+    def modified_names(self) -> KeysView[str]:
+        """Names of the variables the corrector modified this step.
+
+        These are exactly the keys of the diagnostics ``delta``, i.e. the union
+        of the fields returned by each applied correction.
+        """
+        return self.diagnostics.delta.keys()
 
 
 def build_corrector_diagnostics(

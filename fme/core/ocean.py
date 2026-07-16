@@ -1,3 +1,4 @@
+import abc
 import dataclasses
 import datetime
 
@@ -10,7 +11,7 @@ from .constants import DENSITY_OF_WATER, SPECIFIC_HEAT_OF_WATER
 from .prescriber import Prescriber
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class SlabOceanConfig:
     """
     Configuration for a slab ocean model.
@@ -28,7 +29,65 @@ class SlabOceanConfig:
         return [self.mixed_layer_depth_name, self.q_flux_name]
 
 
-@dataclasses.dataclass
+class SurfaceTemperature(abc.ABC):
+    """Computes the next-step sea surface temperature for an :class:`Ocean`.
+
+    Each ocean model (prescribed or slab) is a self-contained callable object
+    bundling the field names and operators it needs, so :class:`Ocean` applies
+    it without reading any config fields itself.
+    """
+
+    @abc.abstractmethod
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> torch.Tensor: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class PrescribedSurfaceTemperature(SurfaceTemperature):
+    """Next-step surface temperature taken directly from the target data."""
+
+    surface_temperature_name: str
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> torch.Tensor:
+        return target_data[self.surface_temperature_name]
+
+
+@dataclasses.dataclass(frozen=True)
+class SlabOceanSurfaceTemperature(SurfaceTemperature):
+    """Next-step surface temperature from a slab ocean mixed-layer tendency."""
+
+    surface_temperature_name: str
+    q_flux_name: str
+    mixed_layer_depth_name: str
+    timestep: datetime.timedelta
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data: TensorMapping,
+    ) -> torch.Tensor:
+        temperature_tendency = mixed_layer_temperature_tendency(
+            AtmosphereData(gen_data).net_surface_energy_flux_without_frozen_precip,
+            target_data[self.q_flux_name],
+            target_data[self.mixed_layer_depth_name],
+        )
+        return (
+            input_data[self.surface_temperature_name]
+            + temperature_tendency * self.timestep.total_seconds()
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class OceanConfig:
     """
     Configuration for determining sea surface temperature from an ocean model.
@@ -61,7 +120,39 @@ class OceanConfig:
                 "To use a surface ocean model, the surface temperature must be present"
                 f" in_names and out_names, but {self.surface_temperature_name} is not."
             )
-        return Ocean(config=self, timestep=timestep)
+        return self._build(timestep)
+
+    def _build(self, timestep: datetime.timedelta) -> "Ocean":
+        prescriber = Prescriber(
+            prescribed_name=self.surface_temperature_name,
+            mask_name=self.ocean_fraction_name,
+            mask_value=1,
+            interpolate=self.interpolate,
+        )
+        surface_temperature: SurfaceTemperature
+        if self.slab is None:
+            surface_temperature = PrescribedSurfaceTemperature(
+                self.surface_temperature_name
+            )
+        else:
+            surface_temperature = SlabOceanSurfaceTemperature(
+                surface_temperature_name=self.surface_temperature_name,
+                q_flux_name=self.slab.q_flux_name,
+                mixed_layer_depth_name=self.slab.mixed_layer_depth_name,
+                timestep=timestep,
+            )
+        return Ocean(
+            surface_temperature=surface_temperature,
+            prescriber=prescriber,
+            forcing_names=self.forcing_names,
+            surface_temperature_name=self.surface_temperature_name,
+            ocean_fraction_name=self.ocean_fraction_name,
+        )
+
+    @property
+    def is_slab(self) -> bool:
+        """Whether this config uses a slab ocean model."""
+        return self.slab is not None
 
     @property
     def forcing_names(self) -> list[str]:
@@ -76,28 +167,27 @@ class OceanConfig:
 class Ocean:
     """Overwrite sea surface temperature with that predicted from some ocean model."""
 
-    def __init__(self, config: OceanConfig, timestep: datetime.timedelta):
+    def __init__(
+        self,
+        surface_temperature: SurfaceTemperature,
+        prescriber: Prescriber,
+        forcing_names: list[str],
+        surface_temperature_name: str,
+        ocean_fraction_name: str,
+    ):
         """
         Args:
-            config: Configuration for the surface ocean model.
-            timestep: Timestep of the model.
+            surface_temperature: Computes the next-step surface temperature.
+            prescriber: Overwrites the surface temperature in the ocean region.
+            forcing_names: Variables required from the forcing data.
+            surface_temperature_name: Name of the sea surface temperature field.
+            ocean_fraction_name: Name of the ocean fraction field.
         """
-        self.surface_temperature_name = config.surface_temperature_name
-        self.ocean_fraction_name = config.ocean_fraction_name
-        self.prescriber = Prescriber(
-            prescribed_name=config.surface_temperature_name,
-            mask_name=config.ocean_fraction_name,
-            mask_value=1,
-            interpolate=config.interpolate,
-        )
-        self._forcing_names = config.forcing_names
-        if config.slab is None:
-            self.type = "prescribed"
-        else:
-            self.type = "slab"
-            self.mixed_layer_depth_name = config.slab.mixed_layer_depth_name
-            self.q_flux_name = config.slab.q_flux_name
-        self.timestep = timestep
+        self._surface_temperature = surface_temperature
+        self.prescriber = prescriber
+        self._forcing_names = forcing_names
+        self.surface_temperature_name = surface_temperature_name
+        self.ocean_fraction_name = ocean_fraction_name
 
     def __call__(
         self,
@@ -115,21 +205,9 @@ class Ocean:
         Returns:
             gen_data with sea surface temperature overwritten by ocean model.
         """
-        if self.type == "prescribed":
-            next_step_temperature = target_data[self.surface_temperature_name]
-        elif self.type == "slab":
-            temperature_tendency = mixed_layer_temperature_tendency(
-                AtmosphereData(gen_data).net_surface_energy_flux_without_frozen_precip,
-                target_data[self.q_flux_name],
-                target_data[self.mixed_layer_depth_name],
-            )
-            next_step_temperature = (
-                input_data[self.surface_temperature_name]
-                + temperature_tendency * self.timestep.total_seconds()
-            )
-        else:
-            raise NotImplementedError(f"Ocean type={self.type} is not implemented")
-
+        next_step_temperature = self._surface_temperature(
+            input_data, gen_data, target_data
+        )
         return self.prescriber(
             target_data,
             gen_data,
