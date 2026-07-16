@@ -24,7 +24,7 @@ data:
       engine: zarr
       subset:
         start: 0
-        stop: 4
+        stop: 8
   batch_size: 4
   num_data_workers: 0
   strict_ensemble: false
