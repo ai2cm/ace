@@ -34,10 +34,16 @@ from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallConfig, MultiCallStepConfig
 from fme.core.step.secondary_decoder import SecondaryDecoderConfig
-from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 DEFAULT_IMG_SHAPE = (45, 90)
 
@@ -452,14 +458,84 @@ def test_step_regression(
     input_data = dist.scatter_spatial(input_data, img_shape)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
 
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     # Gather local outputs back to global for comparison
     output = dist.gather_spatial(output, img_shape)
 
     cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")
+
+
+@pytest.mark.parallel
+def test_input_dropout_mask_identical_across_spatial_tiles():
+    """The sampled input-dropout mask must be identical across spatial tiles.
+
+    All spatial co-ranks hold the same samples but advance ``torch.rand``
+    independently; without the spatial broadcast each tile would mask different
+    channels and corrupt the sample.  We force RNG divergence by seeding each
+    rank with its global rank, then verify ranks within a spatial group receive
+    identical masks while letting data-parallel groups differ.
+    """
+    dist = Distributed.get_instance()
+    n_dp = dist.total_data_parallel_ranks
+    spatial_size = dist.world_size // n_dp
+    in_names = ["a", "b", "c", "d"]
+    out_names = ["a", "b", "c", "d"]
+    selector = StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=get_network_and_loss_normalization_config(in_names),
+                input_dropout=VariableMaskingConfig(
+                    default=UniformMaskingConfig(2),
+                    override_groups=[
+                        MaskingGroupConfig(
+                            variables=["a"], masking=BernoulliMaskingConfig(rate=0.5)
+                        ),
+                        MaskingGroupConfig(
+                            variables=["b"], masking=BernoulliMaskingConfig(rate=0.5)
+                        ),
+                    ],
+                ),
+            )
+        ),
+    )
+    step = get_step(selector, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
+    for module in step.modules:
+        module.train()
+    # Force per-rank RNG divergence to mimic real spatial-parallel training.
+    torch.manual_seed(dist.rank)
+    mask = step._draw_input_dropout_mask()
+    assert mask is not None
+    # Absent key means the channel is present (not dropped); reconstruct the
+    # full per-channel indicator so tiles that drop different channels compare.
+    stacked = torch.stack(
+        [
+            mask[name].float()
+            if name in mask
+            else torch.ones(1, device=fme.get_device())
+            for name in in_names
+        ]
+    )  # [C, 1]
+    gathered = dist.gather(stacked)
+    if dist.is_root():
+        assert gathered is not None
+        assert len(gathered) == dist.world_size
+        for group_start in range(0, dist.world_size, spatial_size):
+            root = gathered[group_start].to(fme.get_device())
+            for offset in range(spatial_size):
+                torch.testing.assert_close(
+                    gathered[group_start + offset].to(fme.get_device()), root
+                )

@@ -45,6 +45,7 @@ from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
+from fme.core.random_state import RandomState
 from fme.core.timing import GlobalTimer
 
 from .evaluator import resolve_variable_metadata
@@ -210,6 +211,10 @@ class InferenceConfig:
         n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
             stochastic model weather inference. n_ensemble_per_ic = 1 is default
             inference behavior.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a reproducible
+            noise sequence, independent of forward_steps_in_memory. Leave unset
+            (None) for the default non-reproducible behavior.
     """
 
     experiment_dir: str
@@ -229,6 +234,7 @@ class InferenceConfig:
     allow_incompatible_dataset: bool = False
     labels: list[str] | None = None
     n_ensemble_per_ic: int = 1
+    seed: int | None = None
 
     def __post_init__(self):
         self.data_writer.validate_time_coarsen(
@@ -336,6 +342,10 @@ def run_inference_from_config(config: InferenceConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
+        if config.seed is not None:
+            data._initial_condition = data.initial_condition.with_random_state(
+                RandomState.from_seed(config.seed)
+            )
 
         if not config.allow_incompatible_dataset:
             try:
@@ -357,6 +367,7 @@ def run_inference_from_config(config: InferenceConfig):
             dataset_info=dataset_info,
             n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
             output_dir=config.experiment_dir,
+            normalize=stepper.normalizer.normalize,
         )
 
         writer = config.get_data_writer(

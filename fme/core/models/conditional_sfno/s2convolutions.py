@@ -60,7 +60,9 @@ def validate_spectral_ratio(
         channels_name: name of ``channels`` to use in error messages.
         num_groups_name: name of ``num_groups`` to use in error messages.
         filter_type: if given, ``spectral_ratio < 1`` requires ``"linear"``.
-        preserves_global_mean: if True, ``spectral_ratio < 1`` is rejected.
+        preserves_global_mean: passed by callers but does not gate
+            ``spectral_ratio``; the two are compatible (see
+            ``SpectralConvS2.forward``).
         global_mean_arg_name: name of the global-mean flag for error messages.
         local_blocks: if True, ``spectral_ratio < 1`` is rejected.
 
@@ -75,15 +77,6 @@ def validate_spectral_ratio(
             raise NotImplementedError(
                 "spectral_ratio < 1 is only supported for filter_type='linear', "
                 f"got filter_type='{filter_type}'."
-            )
-        if preserves_global_mean:
-            # The l=0 mode is sandwiched between the pre/post channel
-            # projections, so the original C-channel global mean is not
-            # recoverable from the spectral_channels-wide bottleneck.
-            raise NotImplementedError(
-                f"{global_mean_arg_name} is not supported with spectral_ratio < 1, "
-                "since the l=0 mode is sandwiched between the pre/post channel "
-                "projections."
             )
         if local_blocks:
             raise NotImplementedError(
@@ -154,6 +147,14 @@ class SpectralConvS2(nn.Module):
     the two-sphere S2 using the Spherical Harmonic Transforms in torch-harmonics, but
     supports convolutions on the periodic domain via the RealFFT2 and InverseRealFFT2
     wrappers.
+
+    ``preserve_global_mean`` stops the spectral filter from acting on the l=0
+    (global-mean) mode: the per-mode weight at l=0 is bypassed, so the filter
+    cannot do global-level reasoning. Its l=0 weight then trains to zero
+    gradient. At ``spectral_ratio == 1`` this holds the global mean exactly; at
+    ``spectral_ratio < 1`` the l=0 instead passes through the shared channel
+    projections (pre_proj/post_proj), so the mean is no longer held fixed --
+    but that is a fixed channel mix, not per-mode l=0 reasoning.
     """
 
     def __init__(
@@ -414,6 +415,12 @@ class SpectralConvS2(nn.Module):
             )
             xp = xp + self.lora_scaling * lora_update
             if self._preserve_global_mean and self._has_global_mean:
+                # Skip the per-mode weight at l=0 by passing the input's l=0
+                # through unchanged, so the filter cannot reason about or alter
+                # the global mean. With spectral_ratio < 1 this l=0 is the
+                # bottleneck (pre_proj) representation, so the mean still passes
+                # through the shared pre/post projections rather than being held
+                # exactly; that is intended (see the class-level note).
                 xp = torch.cat([x[..., :1, :], xp[..., 1:, :]], dim=-2)
             xp = xp.reshape(B, self.spectral_channels, H, W)
             x = xp.contiguous()
