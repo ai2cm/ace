@@ -932,6 +932,12 @@ def main() -> None:
         best_student_spec_path = os.path.join(
             best_student_dir, "best_student_spec.ckpt"
         )
+        # Sidecar holding the callback's selection state (bests + early-stop
+        # counter) so a preemption + relaunch against the same save_path
+        # resumes cleanly rather than resetting the bests.
+        best_student_state_path = os.path.join(
+            best_student_dir, "best_student_state.pt"
+        )
         # The config baked into the saved student checkpoint must match the
         # architecture the student was initialised from (see AceDiffusionTeacher:
         # expert `expert_index`, or the last/high-noise expert when distilling the
@@ -989,6 +995,7 @@ def main() -> None:
             combined_tolerance=args.combined_tolerance,
             combined_improvement=args.combined_improvement,
             combined_keep=max(args.combined_keep, 1),
+            state_checkpoint_path=best_student_state_path,
             validation_mode=args.val_mode,
             frozen_lo_net=frozen_lo_net,
             frozen_lo_sample_steps=args.frozen_lo_steps,
@@ -1003,11 +1010,25 @@ def main() -> None:
             f"combined_tolerance={args.combined_tolerance}, "
             f"combined_improvement={args.combined_improvement}, "
             f"combined_keep={args.combined_keep}, "
+            f"state_ckpt={best_student_state_path}, "
             f"validation_mode={args.val_mode}, "
             f"student_sample_steps={config.model.student_sample_steps}, "
             f"early_stop_patience={early_stop_patience}, "
             f"spec_patience_window={args.spec_patience_window}"
         )
+        # Resume observability: the callback restored its bests in __init__ if a
+        # sidecar was present (it logs the restored values itself); note the
+        # fresh-start case here so a clean vs resumed launch is visible in logs.
+        if os.path.exists(best_student_state_path):
+            logger.info(
+                "Resuming best-student selection state from "
+                f"{best_student_state_path} (see restored bests above)."
+            )
+        else:
+            logger.info(
+                "No prior best-student selection state found at "
+                f"{best_student_state_path}; starting selection from scratch."
+            )
 
     logger.info("Initialising FastGen Trainer...")
     # Early stopping needs both an active validation callback and a patience > 0;

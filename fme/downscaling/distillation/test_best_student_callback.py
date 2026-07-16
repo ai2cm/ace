@@ -10,6 +10,7 @@ normalizer and for the student denoiser.
 
 from __future__ import annotations
 
+import logging
 import pathlib
 
 import numpy as np
@@ -105,6 +106,7 @@ def _make_callback(
     combined_tolerance: float = 1.05,
     combined_improvement: float = 0.95,
     combined_keep: int = 3,
+    state_checkpoint_path: str | None = None,
 ) -> BestStudentCheckpointCallback:
     return BestStudentCheckpointCallback(
         val_dataset_path="unused.zarr",
@@ -121,6 +123,7 @@ def _make_callback(
         combined_tolerance=combined_tolerance,
         combined_improvement=combined_improvement,
         combined_keep=combined_keep,
+        state_checkpoint_path=state_checkpoint_path,
         validation_mode=validation_mode,
         frozen_lo_net=frozen_lo_net,
         frozen_lo_sample_steps=frozen_lo_sample_steps,
@@ -834,3 +837,131 @@ def test_save_candidate_checkpoint_prunes_by_iteration_number(monkeypatch, tmp_p
         "best_student_combined_10.ckpt",
         "best_student_combined_9.ckpt",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Preemption-safe resume: the callback persists its selection state to a
+# sidecar after every validation and reloads it at construction, so a restart
+# does not reset the bests (silently overwriting best_student*.ckpt with a
+# worse student) or the early-stop counter.
+# ---------------------------------------------------------------------------
+
+
+def _make_state_callback(
+    tmp_path, state_path, **kwargs
+) -> BestStudentCheckpointCallback:
+    kwargs.setdefault("spec_patience_window", 1)
+    return _make_callback(
+        _FakeTeacherModel(["a"]),
+        best_checkpoint_path=str(tmp_path / "crps.ckpt"),
+        best_tail_checkpoint_path=str(tmp_path / "tail.ckpt"),
+        best_spec_checkpoint_path=str(tmp_path / "spec.ckpt"),
+        state_checkpoint_path=state_path,
+        **kwargs,
+    )
+
+
+def test_state_round_trip_restores_bests(monkeypatch, tmp_path):
+    _patch_save(monkeypatch)
+    state_path = str(tmp_path / "state.pt")
+    cb = _make_state_callback(tmp_path, state_path, early_stop_patience=3)
+    student = _fake_student()
+    _drive(cb, student, 0, crps=5.0, spec=1.0, tail=1.10)
+    _drive(cb, student, 1, crps=5.0, spec=1.0, tail=1.10)  # no improvement
+
+    restored = _make_state_callback(tmp_path, state_path, early_stop_patience=3)
+    assert restored._best_crps == pytest.approx(5.0)
+    assert restored._best_tail_score == pytest.approx(0.10)
+    assert restored._best_spec == pytest.approx(1.0)
+    assert restored._spec_history == [pytest.approx(1.0)]
+    assert restored._checks_since_improvement == 1
+    assert restored._stop_requested is False
+
+
+def test_state_prevents_silent_overwrite_after_resume(monkeypatch, tmp_path):
+    calls = _patch_save(monkeypatch)
+    state_path = str(tmp_path / "state.pt")
+    crps_ckpt = str(tmp_path / "crps.ckpt")
+    student = _fake_student()
+
+    cb = _make_state_callback(tmp_path, state_path)
+    _drive(cb, student, 0, crps=3.0, spec=1.0, tail=1.10)  # best_crps -> 3.0
+
+    # Resume: a worse validation must NOT overwrite best_student.ckpt.
+    calls.clear()
+    restored = _make_state_callback(tmp_path, state_path)
+    _drive(restored, student, 1, crps=5.0, spec=1.0, tail=1.10)
+    assert crps_ckpt not in calls
+
+    # Contrast with the old behavior (no persistence): inf best -> overwrite.
+    calls.clear()
+    fresh = _make_state_callback(tmp_path, None)
+    _drive(fresh, student, 1, crps=5.0, spec=1.0, tail=1.10)
+    assert crps_ckpt in calls
+
+
+def test_state_early_stop_counter_survives_resume(monkeypatch, tmp_path):
+    _patch_save(monkeypatch)
+    state_path = str(tmp_path / "state.pt")
+    student = _fake_student()
+
+    cb = _make_state_callback(tmp_path, state_path, early_stop_patience=3)
+    _drive(cb, student, 0, crps=5.0, spec=1.0, tail=1.10)  # improves, checks=0
+    _drive(cb, student, 1, crps=5.0, spec=1.0, tail=1.10)  # checks=1
+    _drive(cb, student, 2, crps=5.0, spec=1.0, tail=1.10)  # checks=2
+    assert not cb.should_stop()
+
+    # A relaunch that would otherwise reset the counter to 0 must continue.
+    restored = _make_state_callback(tmp_path, state_path, early_stop_patience=3)
+    assert restored._checks_since_improvement == 2
+    _drive(restored, student, 3, crps=5.0, spec=1.0, tail=1.10)  # checks=3 -> stop
+    assert restored.should_stop()
+
+
+def test_state_spec_history_trimmed_to_current_window(monkeypatch, tmp_path):
+    _patch_save(monkeypatch)
+    state_path = str(tmp_path / "state.pt")
+    student = _fake_student()
+
+    cb = _make_state_callback(tmp_path, state_path, spec_patience_window=5)
+    for i, spec in enumerate([1.0, 0.9, 0.8, 0.7]):
+        _drive(cb, student, i, crps=5.0, spec=spec, tail=1.10)
+    assert cb._spec_history == [pytest.approx(v) for v in (1.0, 0.9, 0.8, 0.7)]
+
+    # A relaunch with a smaller window keeps only the most recent values.
+    restored = _make_state_callback(tmp_path, state_path, spec_patience_window=2)
+    assert restored._spec_history == [pytest.approx(0.8), pytest.approx(0.7)]
+
+
+def test_state_missing_sidecar_uses_defaults(tmp_path):
+    cb = _make_state_callback(tmp_path, str(tmp_path / "does_not_exist.pt"))
+    assert cb._best_crps == float("inf")
+    assert cb._checks_since_improvement == 0
+
+
+def test_state_corrupt_sidecar_warns_and_uses_defaults(tmp_path, caplog):
+    state_path = tmp_path / "state.pt"
+    state_path.write_bytes(b"not a torch checkpoint")
+    with caplog.at_level(logging.WARNING):
+        cb = _make_state_callback(tmp_path, str(state_path))
+    assert cb._best_crps == float("inf")
+    assert "could not load selection state" in caplog.text
+
+
+def test_state_disabled_by_default(monkeypatch, tmp_path):
+    _patch_save(monkeypatch)
+    cb = _make_state_callback(tmp_path, None)
+    student = _fake_student()
+    _drive(cb, student, 0, crps=5.0, spec=1.0, tail=1.10)
+    # No sidecar param -> nothing written, but get_state() is still a real dict.
+    assert not any(tmp_path.glob("*.pt"))
+    assert "_best_crps" in cb.get_state()
+
+
+def test_get_state_is_a_real_method_not_getattr_stub(tmp_path):
+    # Guards against the __getattr__ no-op lambda swallowing get_state (the
+    # original bug: the callback's catch-all returned lambdas for any method).
+    cb = _make_state_callback(tmp_path, None)
+    state = cb.get_state()
+    assert state is not None
+    assert "_best_crps" in state and "_checks_since_improvement" in state

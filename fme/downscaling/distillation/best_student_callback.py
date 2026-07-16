@@ -31,8 +31,10 @@ collapsed mode is at least centred on the teacher's distribution).
 
 from __future__ import annotations
 
+import logging
+import os
 import statistics
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -192,6 +194,12 @@ class BestStudentCheckpointCallback:
     Those samples are compared against the pre-saved teacher zarr using CRPS.
     The teacher model itself is **not** re-run during training.
 
+    The selection state (all-time bests, spectral-history window, early-stop
+    counter) is persisted to ``state_checkpoint_path`` after every validation
+    and reloaded at construction, so a preemption + relaunch resumes cleanly
+    instead of resetting the bests (which would overwrite the best checkpoints
+    with a worse student) or the early-stop counter.
+
     Args:
         val_dataset_path: Path to a zarr store produced by
             ``fme.downscaling.inference`` with dims
@@ -286,6 +294,16 @@ class BestStudentCheckpointCallback:
             better).  Must be in (0, 1).
         combined_keep: Number of most-recent combined candidates retained on
             disk; older ones are pruned (default 3).  Must be >= 1.
+        state_checkpoint_path: Optional path for a small sidecar file holding
+            the selection state (all-time bests, spectral-history window, and
+            early-stop counter).  It is written after every validation and
+            reloaded at construction, so a preemption + relaunch resumes with
+            the bests and early-stop progress intact rather than resetting to
+            their defaults — otherwise the first post-resume validation would
+            overwrite ``best_student*.ckpt`` with a possibly-worse student and
+            early stopping could never fire under frequent preemption.  Lives
+            alongside the best-student checkpoints in the per-run directory;
+            ``None`` (default) disables persistence.
         validation_mode: How the student output ensemble is produced before
             comparing to the teacher zarr (see ``student_sampling``):
 
@@ -343,6 +361,7 @@ class BestStudentCheckpointCallback:
         combined_tolerance: float = 1.05,
         combined_improvement: float = 0.95,
         combined_keep: int = 3,
+        state_checkpoint_path: str | None = None,
         validation_mode: str = "from_noise",
         frozen_lo_net: torch.nn.Module | None = None,
         frozen_lo_sample_steps: int = 2,
@@ -435,6 +454,77 @@ class BestStudentCheckpointCallback:
         self._checks_since_improvement = 0
         self._stop_requested = False
         self._teacher_ds: xr.Dataset | None = None
+        # Restore selection state from a prior (pre-preemption) run, if any, so
+        # the bests / early-stop counter continue instead of resetting. Must run
+        # after every default above is set, so a loaded value wins.
+        self._state_checkpoint_path = state_checkpoint_path
+        self._maybe_load_state()
+
+    # Selection state persisted across preemption+resume (see
+    # ``state_checkpoint_path``). Config-derived fields (paths, percentiles,
+    # scales, patience settings) are intentionally excluded — they come from
+    # ``__init__`` each launch.
+    _STATE_KEYS = (
+        "_best_crps",
+        "_best_tail_score",
+        "_best_spec",
+        "_spec_history",
+        "_checks_since_improvement",
+        "_stop_requested",
+        "_combined_saves",
+    )
+
+    def get_state(self) -> dict[str, Any]:
+        """Serialize the selection/early-stop state to a plain dict."""
+        state: dict[str, Any] = {"version": 1}
+        for key in self._STATE_KEYS:
+            state[key] = getattr(self, key)
+        return state
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        """Restore selection state produced by ``get_state`` (in place)."""
+        for key in self._STATE_KEYS:
+            if key in state:
+                setattr(self, key, state[key])
+        # The window may differ from the run that wrote the state; trim so the
+        # rolling median uses at most the current window.
+        self._spec_history = list(self._spec_history)[-self._spec_patience_window :]
+
+    def _persist_state(self) -> None:
+        """Atomically write the selection state to the sidecar (rank-0 only).
+
+        No-op when ``state_checkpoint_path`` is unset. Called after every
+        validation so the bests, spectral history, and early-stop counter are
+        always fresh and aligned with the ``best_student*.ckpt`` files.
+        """
+        if self._state_checkpoint_path is None:
+            return
+        tmp_path = self._state_checkpoint_path + ".tmp"
+        torch.save(self.get_state(), tmp_path)
+        os.replace(tmp_path, self._state_checkpoint_path)
+
+    def _maybe_load_state(self) -> None:
+        """Load the sidecar state if present; keep defaults on any failure."""
+        path = self._state_checkpoint_path
+        if path is None or not os.path.exists(path):
+            return
+        log = logging.getLogger(__name__)
+        try:
+            state = torch.load(path, map_location="cpu", weights_only=False)
+            self.load_state(state)
+        except Exception as exc:  # noqa: BLE001 - never block training on a bad sidecar
+            log.warning(
+                "[BestStudentCallback] could not load selection state from "
+                f"{path!r} ({exc}); starting from defaults."
+            )
+            return
+        log.info(
+            "[BestStudentCallback] restored selection state from "
+            f"{path!r}: CRPS={self._best_crps:.6f}, "
+            f"tail={self._best_tail_score:.4f}, spec={self._best_spec:.6f}, "
+            f"checks_since_improvement={self._checks_since_improvement}, "
+            f"stop_requested={self._stop_requested}."
+        )
 
     @staticmethod
     def _per_var_scales(teacher_model: DiffusionModel) -> dict[str, float]:
@@ -682,6 +772,10 @@ class BestStudentCheckpointCallback:
                         f"tail={self._best_tail_score:.4f}, "
                         f"spec={self._best_spec:.6f}."
                     )
+
+        # Persist the freshly-updated selection state so a preemption + resume
+        # continues from here (see ``state_checkpoint_path``).
+        self._persist_state()
 
     def _tail_summary_str(self, tail_by_pct: dict[float, dict[str, float]]) -> str:
         parts = []
