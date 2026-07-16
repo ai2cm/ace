@@ -507,6 +507,43 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--combined-tolerance",
+        type=float,
+        default=float(os.environ.get("ACE_COMBINED_TOLERANCE", "1.05")),
+        dest="combined_tolerance",
+        metavar="TOL",
+        help=(
+            "Combined-selector 'within range' multiplier: a metric counts as "
+            "near its all-time best when metric <= best * TOL (default 1.05). "
+            "Defaults to $ACE_COMBINED_TOLERANCE."
+        ),
+    )
+    parser.add_argument(
+        "--combined-improvement",
+        type=float,
+        default=float(os.environ.get("ACE_COMBINED_IMPROVEMENT", "0.95")),
+        dest="combined_improvement",
+        metavar="IMP",
+        help=(
+            "Combined-selector 'substantial improvement' multiplier: a metric "
+            "counts as substantially improved when metric <= best * IMP "
+            "(default 0.95). Defaults to $ACE_COMBINED_IMPROVEMENT."
+        ),
+    )
+    parser.add_argument(
+        "--combined-keep",
+        type=int,
+        default=int(os.environ.get("ACE_COMBINED_KEEP", "3")),
+        dest="combined_keep",
+        metavar="K",
+        help=(
+            "Number of most-recent combined tail+spectral candidate "
+            "checkpoints (best_student_combined_<iteration>.ckpt) retained; "
+            "older ones are pruned. 0 disables the combined selector "
+            "(default 3). Defaults to $ACE_COMBINED_KEEP."
+        ),
+    )
+    parser.add_argument(
         "opts",
         default=None,
         nargs=argparse.REMAINDER,
@@ -933,6 +970,10 @@ def main() -> None:
                 f"(steps={args.frozen_lo_steps}, "
                 f"sigma_min={args.frozen_lo_sigma_min})."
             )
+        # Combined tail+spectral candidates land next to the other best-student
+        # checkpoints; --combined-keep 0 disables the selector entirely (the
+        # keep value passed then is irrelevant but must satisfy the ctor).
+        combined_checkpoint_dir = best_student_dir if args.combined_keep > 0 else None
         best_student_callback = BestStudentCheckpointCallback(
             val_dataset_path=args.val_dataset,
             coarse_val_data=coarse_val_data,
@@ -944,6 +985,10 @@ def main() -> None:
             best_spec_checkpoint_path=best_student_spec_path,
             early_stop_patience=early_stop_patience,
             spec_patience_window=args.spec_patience_window,
+            combined_checkpoint_dir=combined_checkpoint_dir,
+            combined_tolerance=args.combined_tolerance,
+            combined_improvement=args.combined_improvement,
+            combined_keep=max(args.combined_keep, 1),
             validation_mode=args.val_mode,
             frozen_lo_net=frozen_lo_net,
             frozen_lo_sample_steps=args.frozen_lo_steps,
@@ -954,6 +999,10 @@ def main() -> None:
             f"best_ckpt={best_student_path}, "
             f"best_tail_ckpt={best_student_tail_path}, "
             f"best_spec_ckpt={best_student_spec_path}, "
+            f"combined_dir={combined_checkpoint_dir}, "
+            f"combined_tolerance={args.combined_tolerance}, "
+            f"combined_improvement={args.combined_improvement}, "
+            f"combined_keep={args.combined_keep}, "
             f"validation_mode={args.val_mode}, "
             f"student_sample_steps={config.model.student_sample_steps}, "
             f"early_stop_patience={early_stop_patience}, "

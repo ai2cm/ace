@@ -92,6 +92,61 @@ def save_student_checkpoint(
     torch.save({"model": state}, path)
 
 
+def save_candidate_checkpoint(
+    student_module: torch.nn.Module,
+    teacher: DiffusionModel,
+    directory: str | pathlib.Path,
+    iteration: int,
+    keep: int = 3,
+    prefix: str = "best_student_combined",
+    num_sampling_steps: int | None = None,
+    sampler_type: str = "fastgen",
+) -> pathlib.Path:
+    """Save an iteration-stamped candidate checkpoint, keeping the newest few.
+
+    Writes ``<directory>/<prefix>_<iteration>.ckpt`` via
+    ``save_student_checkpoint`` and then prunes older ``<prefix>_*.ckpt``
+    files so at most ``keep`` remain.  Pruning globs the directory (rather
+    than tracking saved paths in memory) so it stays correct across training
+    resumes, where in-memory selector state is reset but earlier candidate
+    files may already exist on disk.
+
+    Args:
+        student_module: See ``save_student_checkpoint``.
+        teacher: See ``save_student_checkpoint``.
+        directory: Directory in which candidate checkpoints accumulate.
+        iteration: Training iteration stamped into the filename; candidates
+            are ranked (for pruning) by this number.
+        keep: Number of most-recent candidates retained (>= 1).
+        prefix: Filename prefix shared by all candidates in the rotation.
+        num_sampling_steps: See ``save_student_checkpoint``.
+        sampler_type: See ``save_student_checkpoint``.
+
+    Returns:
+        The path of the checkpoint that was written.
+    """
+    directory = pathlib.Path(directory)
+    path = directory / f"{prefix}_{iteration}.ckpt"
+    save_student_checkpoint(
+        student_module=student_module,
+        teacher=teacher,
+        path=path,
+        num_sampling_steps=num_sampling_steps,
+        sampler_type=sampler_type,
+    )
+    candidates: list[tuple[int, pathlib.Path]] = []
+    for existing in directory.glob(f"{prefix}_*.ckpt"):
+        suffix = existing.stem[len(prefix) + 1 :]
+        try:
+            candidates.append((int(suffix), existing))
+        except ValueError:
+            continue
+    candidates.sort(key=lambda pair: pair[0])
+    for _, stale in candidates[:-keep] if keep > 0 else candidates:
+        stale.unlink(missing_ok=True)
+    return path
+
+
 def load_student_module_into_teacher(
     path: str | pathlib.Path,
     teacher: DiffusionModel,

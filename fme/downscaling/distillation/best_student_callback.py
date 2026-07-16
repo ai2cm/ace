@@ -264,6 +264,28 @@ class BestStudentCheckpointCallback:
         spec_patience_window: Window (in validations) of the rolling median used
             for the spectral selector and the spectral improvement signal that
             feeds early stopping (default 5).
+        combined_checkpoint_dir: Optional directory for iteration-stamped
+            candidate checkpoints (``best_student_combined_<iteration>.ckpt``)
+            selected by the *combined* tail+spectral rule: a candidate is saved
+            when one metric is within ``combined_tolerance`` of its all-time
+            best while the other beats its all-time best by at least
+            ``combined_improvement`` — i.e. a jointly good checkpoint that a
+            single-metric selector would miss.  Bests are compared as they were
+            *before* the current validation's updates, and the spectral signal
+            is the same rolling median the spectral selector uses.  Because the
+            rule needs finite prior bests, no candidate is saved on the first
+            validation, and the selector is only live when
+            ``best_tail_checkpoint_path`` is set (that selector maintains the
+            tail best).  ``None`` (default) disables candidate saving.
+        combined_tolerance: "Within range" multiplier for the combined rule: a
+            metric counts as near-best when ``metric <= best * tolerance``
+            (default 1.05, i.e. within 5%).  Must be >= 1.
+        combined_improvement: "Substantial improvement" multiplier: a metric
+            counts as substantially improved when
+            ``metric <= best * improvement`` (default 0.95, i.e. at least 5%
+            better).  Must be in (0, 1).
+        combined_keep: Number of most-recent combined candidates retained on
+            disk; older ones are pruned (default 3).  Must be >= 1.
         validation_mode: How the student output ensemble is produced before
             comparing to the teacher zarr (see ``student_sampling``):
 
@@ -317,6 +339,10 @@ class BestStudentCheckpointCallback:
         best_spec_checkpoint_path: str | None = None,
         early_stop_patience: int | None = None,
         spec_patience_window: int = 5,
+        combined_checkpoint_dir: str | None = None,
+        combined_tolerance: float = 1.05,
+        combined_improvement: float = 0.95,
+        combined_keep: int = 3,
         validation_mode: str = "from_noise",
         frozen_lo_net: torch.nn.Module | None = None,
         frozen_lo_sample_steps: int = 2,
@@ -391,6 +417,18 @@ class BestStudentCheckpointCallback:
         self._spec_patience_window = spec_patience_window
         self._best_spec = float("inf")
         self._spec_history: list[float] = []
+        # Combined tail+spectral candidate selector (see class docstring).
+        if combined_tolerance < 1.0:
+            raise ValueError("combined_tolerance must be >= 1.0")
+        if not 0.0 < combined_improvement < 1.0:
+            raise ValueError("combined_improvement must be in (0, 1)")
+        if combined_keep < 1:
+            raise ValueError("combined_keep must be >= 1")
+        self._combined_checkpoint_dir = combined_checkpoint_dir
+        self._combined_tolerance = combined_tolerance
+        self._combined_improvement = combined_improvement
+        self._combined_keep = combined_keep
+        self._combined_saves = 0
         if early_stop_patience is not None and early_stop_patience < 1:
             raise ValueError("early_stop_patience must be >= 1 when set")
         self._early_stop_patience = early_stop_patience
@@ -490,6 +528,7 @@ class BestStudentCheckpointCallback:
         policy.  Kept free of FastGen imports so it is unit-testable directly.
         """
         from fme.downscaling.distillation.student_checkpoint import (
+            save_candidate_checkpoint,
             save_student_checkpoint,
         )
 
@@ -504,6 +543,12 @@ class BestStudentCheckpointCallback:
 
         crps = crps_by_var["mean"]
         tail_summary = self._tail_summary_str(tail_by_pct)
+
+        # The combined selector compares against the per-metric bests as they
+        # were BEFORE this validation's own updates — otherwise a substantial
+        # improvement would raise the bar before the combined check sees it.
+        prev_best_tail = self._best_tail_score
+        prev_best_spec = self._best_spec
 
         # CRPS-best checkpoint.
         crps_improved = crps < self._best_crps
@@ -524,9 +569,12 @@ class BestStudentCheckpointCallback:
                 f"{tail_summary} (best={self._best_crps:.6f}, no improvement)"
             )
 
-        # Tail-best checkpoint: highest percentile, mean-over-vars |ratio - 1|.
-        tail_improved = False
-        if self._best_tail_checkpoint_path and self._tail_percentiles:
+        # Tail score: highest percentile, mean-over-vars |ratio - 1|.  Computed
+        # whenever tail data is present (the combined selector below also reads
+        # it); the tail-best save and best update remain gated on the tail
+        # checkpoint path, exactly as before.
+        tail_score: float | None = None
+        if self._tail_percentiles:
             top_pct = max(self._tail_percentiles)
             ratios = {
                 var: ratio
@@ -534,6 +582,8 @@ class BestStudentCheckpointCallback:
                 if var != "mean"
             }
             tail_score = _tail_deviation_score(ratios)
+        tail_improved = False
+        if self._best_tail_checkpoint_path and tail_score is not None:
             if np.isfinite(tail_score) and tail_score < self._best_tail_score:
                 tail_improved = True
                 self._best_tail_score = tail_score
@@ -553,6 +603,7 @@ class BestStudentCheckpointCallback:
         # tracked even without a checkpoint path so it can feed the early-stop
         # improvement signal below.
         spec_improved = False
+        spec_median: float | None = None
         spec_mae_mean = self._spec_mae_mean(spec_by_var)
         if np.isfinite(spec_mae_mean):
             self._spec_history.append(spec_mae_mean)
@@ -573,6 +624,42 @@ class BestStudentCheckpointCallback:
                         f" spec_mae_mean(median)={spec_median:.6f}"
                         f" (new spec best) → {self._best_spec_checkpoint_path}"
                     )
+
+        # Combined tail+spectral candidate: one metric within tolerance of its
+        # pre-update all-time best while the other substantially beats its
+        # pre-update all-time best.  Skipped until both prior bests are finite
+        # (with the infs of the first validation any finite metric would
+        # trivially qualify and burn a candidate slot on an arbitrary early
+        # checkpoint).  Deliberately absent from the early-stop signal below: a
+        # combined save implies a substantial tail-or-spec improvement, so the
+        # corresponding individual selector already resets the counter.
+        if (
+            self._combined_checkpoint_dir is not None
+            and tail_score is not None
+            and np.isfinite(tail_score)
+            and spec_median is not None
+            and np.isfinite(prev_best_tail)
+            and np.isfinite(prev_best_spec)
+        ):
+            tail_near = tail_score <= prev_best_tail * self._combined_tolerance
+            tail_sub = tail_score <= prev_best_tail * self._combined_improvement
+            spec_near = spec_median <= prev_best_spec * self._combined_tolerance
+            spec_sub = spec_median <= prev_best_spec * self._combined_improvement
+            if (tail_near and spec_sub) or (spec_near and tail_sub):
+                candidate_path = save_candidate_checkpoint(
+                    student_module=student._ace_module,
+                    teacher=self._teacher_model,
+                    directory=self._combined_checkpoint_dir,
+                    iteration=iteration,
+                    keep=self._combined_keep,
+                )
+                self._combined_saves += 1
+                _log(
+                    f"[BestStudentCallback] iteration={iteration} combined"
+                    f" candidate (tail={tail_score:.4f} vs best"
+                    f" {prev_best_tail:.4f}, spec_median={spec_median:.6f} vs"
+                    f" best {prev_best_spec:.6f}) → {candidate_path}"
+                )
 
         # Early stop: reset on any improvement, else count non-improving
         # validations and request termination once patience is exceeded.
@@ -640,6 +727,10 @@ class BestStudentCheckpointCallback:
             payload["val/spec_mae_mean"] = spec_mae_mean
         if self._best_spec_checkpoint_path and np.isfinite(self._best_spec):
             payload["val/spec_best"] = self._best_spec
+        if self._combined_checkpoint_dir is not None:
+            # Cumulative candidate count; step increases mark the iterations
+            # at which combined candidates were written.
+            payload["val/combined_saves"] = self._combined_saves
         if self._early_stop_patience is not None:
             payload["val/checks_since_improvement"] = self._checks_since_improvement
         # Raw mean-PSD curves (student vs teacher), one loglog figure per

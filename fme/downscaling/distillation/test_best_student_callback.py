@@ -10,6 +10,8 @@ normalizer and for the student denoiser.
 
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 import pytest
 import torch
@@ -22,6 +24,7 @@ from fme.downscaling.distillation.best_student_callback import (
     _tail_magnitude,
     _tail_quantile_level,
 )
+from fme.downscaling.distillation.student_checkpoint import save_candidate_checkpoint
 
 
 class _ScaleNormalizer:
@@ -98,6 +101,10 @@ def _make_callback(
     best_spec_checkpoint_path: str | None = None,
     early_stop_patience: int | None = None,
     spec_patience_window: int = 5,
+    combined_checkpoint_dir: str | None = None,
+    combined_tolerance: float = 1.05,
+    combined_improvement: float = 0.95,
+    combined_keep: int = 3,
 ) -> BestStudentCheckpointCallback:
     return BestStudentCheckpointCallback(
         val_dataset_path="unused.zarr",
@@ -110,6 +117,10 @@ def _make_callback(
         best_spec_checkpoint_path=best_spec_checkpoint_path,
         early_stop_patience=early_stop_patience,
         spec_patience_window=spec_patience_window,
+        combined_checkpoint_dir=combined_checkpoint_dir,
+        combined_tolerance=combined_tolerance,
+        combined_improvement=combined_improvement,
+        combined_keep=combined_keep,
         validation_mode=validation_mode,
         frozen_lo_net=frozen_lo_net,
         frozen_lo_sample_steps=frozen_lo_sample_steps,
@@ -553,7 +564,22 @@ def _patch_save(monkeypatch) -> list[str]:
     calls: list[str] = []
     monkeypatch.setattr(
         "fme.downscaling.distillation.student_checkpoint.save_student_checkpoint",
-        lambda student_module, teacher, path, **kwargs: calls.append(path),
+        lambda student_module, teacher, path, **kwargs: calls.append(str(path)),
+    )
+    return calls
+
+
+def _patch_save_touch(monkeypatch) -> list[str]:
+    """Like ``_patch_save`` but creates empty files so glob-pruning is real."""
+    calls: list[str] = []
+
+    def _touch(student_module, teacher, path, **kwargs):
+        pathlib.Path(path).touch()
+        calls.append(str(path))
+
+    monkeypatch.setattr(
+        "fme.downscaling.distillation.student_checkpoint.save_student_checkpoint",
+        _touch,
     )
     return calls
 
@@ -563,11 +589,13 @@ def _fake_student() -> _FakeStudent:
     return _FakeStudent(torch.nn.Identity(), sigma_min=0.01, sigma_max=1.0)
 
 
-def _drive(cb, student, iteration, crps, spec):
-    """Run one validation with a scalar CRPS mean and spectral MAE."""
+def _drive(cb, student, iteration, crps, spec, tail=None):
+    """Run one validation with a scalar CRPS mean, spectral MAE, and tail ratio."""
     crps_by_var = {"a": crps, "mean": crps}
     spec_by_var = {"a": {"mae": spec}} if spec is not None else {}
-    cb._record_validation(student, crps_by_var, {}, spec_by_var, iteration)
+    # 99.9999 is the default top percentile; tail_score == |tail - 1|.
+    tail_by_pct = {99.9999: {"a": tail, "mean": tail}} if tail is not None else {}
+    cb._record_validation(student, crps_by_var, tail_by_pct, spec_by_var, iteration)
 
 
 def test_spec_selector_uses_rolling_median_not_spike(monkeypatch):
@@ -649,3 +677,160 @@ def test_invalid_early_stop_patience_rejected():
 def test_invalid_spec_patience_window_rejected():
     with pytest.raises(ValueError, match="spec_patience_window"):
         _make_callback(_FakeTeacherModel(["a"]), spec_patience_window=0)
+
+
+# ---------------------------------------------------------------------------
+# Combined tail+spectral candidate selector.
+#
+# All callbacks here set best_tail_checkpoint_path (the combined selector needs
+# a finite tail best, which only that selector maintains) and
+# spec_patience_window=1 so spec_median equals the raw per-validation value.
+# ---------------------------------------------------------------------------
+
+
+def _make_combined_callback(tmp_path, **kwargs) -> BestStudentCheckpointCallback:
+    return _make_callback(
+        _FakeTeacherModel(["a"]),
+        best_checkpoint_path=str(tmp_path / "crps.ckpt"),
+        best_tail_checkpoint_path=str(tmp_path / "tail.ckpt"),
+        best_spec_checkpoint_path=str(tmp_path / "spec.ckpt"),
+        spec_patience_window=1,
+        combined_checkpoint_dir=str(tmp_path),
+        **kwargs,
+    )
+
+
+def test_combined_fires_on_tail_near_best_and_spec_substantial(monkeypatch, tmp_path):
+    calls = _patch_save(monkeypatch)
+    cb = _make_combined_callback(tmp_path)
+    student = _fake_student()
+    # Seed the bests: tail score 0.10, spec 1.0.  No candidate (bests were inf).
+    _drive(cb, student, 0, crps=5.0, spec=1.0, tail=1.10)
+    # Tail 0.104 <= 0.10 * 1.05 (near, not a new best); spec 0.90 <= 1.0 * 0.95.
+    _drive(cb, student, 1, crps=5.0, spec=0.90, tail=1.104)
+    combined = str(tmp_path / "best_student_combined_1.ckpt")
+    assert combined in calls
+    assert cb._combined_saves == 1
+    # The tail selector itself did not re-save (tail did not improve).
+    assert calls.count(str(tmp_path / "tail.ckpt")) == 1
+    # Regression for the pre-update baseline: the spec selector already lowered
+    # its best to 0.90 in the same validation, yet the candidate still fired.
+    assert cb._best_spec == pytest.approx(0.90)
+
+
+def test_combined_fires_on_spec_near_best_and_tail_substantial(monkeypatch, tmp_path):
+    calls = _patch_save(monkeypatch)
+    cb = _make_combined_callback(tmp_path)
+    student = _fake_student()
+    _drive(cb, student, 0, crps=5.0, spec=1.0, tail=1.10)
+    # Tail 0.09 <= 0.10 * 0.95 (substantial); spec 1.04 <= 1.0 * 1.05 (near).
+    _drive(cb, student, 1, crps=5.0, spec=1.04, tail=1.09)
+    assert str(tmp_path / "best_student_combined_1.ckpt") in calls
+
+
+def test_combined_requires_substantial_improvement(monkeypatch, tmp_path):
+    calls = _patch_save(monkeypatch)
+    cb = _make_combined_callback(tmp_path)
+    student = _fake_student()
+    _drive(cb, student, 0, crps=5.0, spec=1.0, tail=1.10)
+    # Both metrics near-best (within 5%) but neither beats its best by 5%.
+    _drive(cb, student, 1, crps=5.0, spec=0.98, tail=1.104)
+    assert not any("best_student_combined" in p for p in calls)
+    assert cb._combined_saves == 0
+
+
+def test_combined_skips_until_both_bests_finite(monkeypatch, tmp_path):
+    calls = _patch_save(monkeypatch)
+    cb = _make_combined_callback(tmp_path)
+    student = _fake_student()
+    # Excellent first validation must not burn a candidate slot: with the
+    # bests still at inf, any finite metrics would trivially qualify.
+    _drive(cb, student, 0, crps=5.0, spec=0.5, tail=1.01)
+    assert not any("best_student_combined" in p for p in calls)
+
+
+def test_combined_pruning_keeps_most_recent(monkeypatch, tmp_path):
+    _patch_save_touch(monkeypatch)
+    cb = _make_combined_callback(tmp_path)
+    student = _fake_student()
+    # Seed, then five candidates: tail stays at its best (near) while spec
+    # drops >= 5% each validation (substantial).
+    for i, spec in enumerate([1.0, 0.9, 0.8, 0.7, 0.6, 0.5]):
+        _drive(cb, student, i, crps=5.0, spec=spec, tail=1.10)
+    assert cb._combined_saves == 5
+    remaining = sorted(p.name for p in tmp_path.glob("best_student_combined_*"))
+    assert remaining == [
+        "best_student_combined_3.ckpt",
+        "best_student_combined_4.ckpt",
+        "best_student_combined_5.ckpt",
+    ]
+
+
+def test_combined_prunes_preexisting_files_on_disk(monkeypatch, tmp_path):
+    _patch_save_touch(monkeypatch)
+    # Simulates resume: a candidate from before the restart is on disk but
+    # unknown to the (reset) in-memory selector state.
+    (tmp_path / "best_student_combined_0.ckpt").touch()
+    cb = _make_combined_callback(tmp_path)
+    student = _fake_student()
+    for i, spec in enumerate([1.0, 0.9, 0.8, 0.7]):
+        _drive(cb, student, i, crps=5.0, spec=spec, tail=1.10)
+    remaining = sorted(p.name for p in tmp_path.glob("best_student_combined_*"))
+    assert remaining == [
+        "best_student_combined_1.ckpt",
+        "best_student_combined_2.ckpt",
+        "best_student_combined_3.ckpt",
+    ]
+
+
+def test_combined_disabled_by_default(monkeypatch, tmp_path):
+    calls = _patch_save(monkeypatch)
+    cb = _make_callback(
+        _FakeTeacherModel(["a"]),
+        best_checkpoint_path="crps.ckpt",
+        best_tail_checkpoint_path="tail.ckpt",
+        spec_patience_window=1,
+    )
+    student = _fake_student()
+    _drive(cb, student, 0, crps=5.0, spec=1.0, tail=1.10)
+    _drive(cb, student, 1, crps=5.0, spec=0.90, tail=1.104)
+    # Combined-qualifying metrics, but no combined dir → save sequence is
+    # unchanged from today: CRPS + tail at step 0 only.
+    assert calls == ["crps.ckpt", "tail.ckpt"]
+
+
+def test_invalid_combined_tolerance_rejected():
+    with pytest.raises(ValueError, match="combined_tolerance"):
+        _make_callback(_FakeTeacherModel(["a"]), combined_tolerance=0.9)
+
+
+def test_invalid_combined_improvement_rejected():
+    with pytest.raises(ValueError, match="combined_improvement"):
+        _make_callback(_FakeTeacherModel(["a"]), combined_improvement=1.0)
+    with pytest.raises(ValueError, match="combined_improvement"):
+        _make_callback(_FakeTeacherModel(["a"]), combined_improvement=0.0)
+
+
+def test_invalid_combined_keep_rejected():
+    with pytest.raises(ValueError, match="combined_keep"):
+        _make_callback(_FakeTeacherModel(["a"]), combined_keep=0)
+
+
+def test_save_candidate_checkpoint_prunes_by_iteration_number(monkeypatch, tmp_path):
+    _patch_save_touch(monkeypatch)
+    (tmp_path / "best_student_combined_2.ckpt").touch()
+    (tmp_path / "best_student_combined_9.ckpt").touch()
+    path = save_candidate_checkpoint(
+        student_module=torch.nn.Identity(),
+        teacher=None,  # type: ignore[arg-type]  # patched save ignores it
+        directory=tmp_path,
+        iteration=10,
+        keep=2,
+    )
+    assert path == tmp_path / "best_student_combined_10.ckpt"
+    remaining = sorted(p.name for p in tmp_path.glob("best_student_combined_*"))
+    # Numeric ordering: lexicographic sorting would have pruned "_10" instead.
+    assert remaining == [
+        "best_student_combined_10.ckpt",
+        "best_student_combined_9.ckpt",
+    ]
