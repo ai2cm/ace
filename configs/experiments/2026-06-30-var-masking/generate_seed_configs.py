@@ -3,19 +3,20 @@
 For a chosen subset of the var-masking sweep this writes ``n_seeds`` copies of
 each config (default 5), differing only in the top-level ``seed`` field, so the
 same masking scheme can be trained multiple times to estimate run-to-run spread.
-Versioning is ``-v1`` throughout (inherited from ``WANDB_SUFFIX``).
+Versioning is ``-v1`` throughout (inherited from ``WANDB_SUFFIX``). The
+``global_mean_removal`` stepper config is kept as in the baseline (no gmr axis
+here, unlike ``generate_masking_configs.py``).
 
 Configs are written into ``run_configs/`` (only ``*-seed*.yaml`` files are
 cleared first, leaving the other experiments' configs untouched). The masking
-subset, each crossed with the co2 axis (co2default off / co2bern90 drops
-``global_mean_co2`` w.p. 0.9) and with the seeds, is:
+subset, each crossed with the co2 axis (co2default off / co2bern75 drops
+``global_mean_co2`` w.p. 0.75) and with the seeds, is:
 
   - mask0:  no masking (``max_masked_vars`` = 0).
-  - mask10: uniform 0-10 masking (``max_masked_vars`` = 10).
-  - mask40: uniform 0-40 masking (``max_masked_vars`` = 40) gated by a 25%
-            ``probability`` of firing on any given batch.
+  - mask30: uniform 0-30 masking (``max_masked_vars`` = 30).
 
-With the default 5 seeds this is 3 x 2 x 5 = 30 configs.
+With the default 5 seeds this is 2 x 2 x 5 = 20 configs:
+mask30-co2bern75, mask30-co2default, mask0-co2bern75, mask0-co2default.
 """
 
 import argparse
@@ -32,32 +33,30 @@ from generate_masking_configs import (
     WANDB_ENTITY,
     WANDB_PROJECT,
     _apply_settings,
-    _build_input_dropout,
     _fetch_wandb_run_names,
     config_name_to_run_name,
 )
 
 DEFAULT_N_SEEDS = 5
+KEEP_GMR = True  # no gmr axis here; keep global_mean_removal as in baseline
 
 
 class SeedGroup(NamedTuple):
     label: str
-    mask_level: int | None  # ignored when mask_all is True
-    mask_all: bool  # if True, max_masked_vars = len(in_names)
-    probability: float | None
+    mask_level: int
 
 
 # Masking subset to replicate across seeds.
 SEED_GROUPS = [
-    SeedGroup("mask0", 0, False, None),
-    SeedGroup("mask10", 10, False, None),
-    SeedGroup("mask40", 40, False, 0.25),
+    SeedGroup("mask0", 0),
+    SeedGroup("mask30", 30),
 ]
 
 
 def _write_config(
     base: dict,
-    dropout: dict,
+    mask_level: int,
+    co2_rate: float | None,
     seed: int,
     name: str,
     wandb_run_names: set[str] | None = None,
@@ -71,7 +70,7 @@ def _write_config(
             print(f"Skipped {out_path.name} (run exists in wandb)")
         return
     cfg = copy.deepcopy(base)
-    _apply_settings(cfg, dropout)
+    _apply_settings(cfg, mask_level, co2_rate, KEEP_GMR)
     cfg["seed"] = seed
     out_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
     print(f"Wrote {out_path.name}")
@@ -88,9 +87,6 @@ def generate_configs(
 
     base_config = BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAME
     base = yaml.safe_load(base_config.read_text())
-    in_names = list(base["stepper"]["step"]["config"]["in_names"])
-    # N caps max_masked_vars at the pool size, so a fired draw masks all vars.
-    mask_all = len(in_names)
 
     wandb_run_names: set[str] | None = None
     if fetch_wandb:
@@ -99,19 +95,13 @@ def generate_configs(
         print(f"Found {len(wandb_run_names)} existing runs.")
 
     for group in SEED_GROUPS:
-        mask_level = mask_all if group.mask_all else group.mask_level
-        assert mask_level is not None
-        probability = group.probability
         for co2_name, co2_rate in CO2_OPTIONS.items():
-            dropout = _build_input_dropout(
-                mask_level, co2_rate, probability=probability
-            )
             base_name = f"{BASE_CONFIG_STEM}-{group.label}-{co2_name}"
-            if probability is not None:
-                base_name = f"{base_name}-mask{probability:.2f}"
             for seed in range(n_seeds):
                 name = f"{base_name}-seed{seed}"
-                _write_config(base, dropout, seed, name, wandb_run_names)
+                _write_config(
+                    base, group.mask_level, co2_rate, seed, name, wandb_run_names
+                )
 
 
 def main() -> None:
