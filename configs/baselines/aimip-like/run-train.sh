@@ -1,32 +1,105 @@
 #!/bin/bash
+#
+# Adopted from the canonical reference launcher:
+#   research/.claude/skills/launching-runs/run-train.reference.sh
+# Only the BASELINE-SPECIFIC gantry block and the run_training calls at the
+# bottom are edited; the GUARDRAILS block is copied verbatim (git grep the
+# markers to detect drift).
+#
+# Prior launch waves for this baseline family (the residual-config sweep and
+# the RH/qsat moisture eval) launched from earlier revisions of this script;
+# see git history and the per-experiment records for their beaker/wandb links.
+#
+# Usage (run FROM this configs directory):
+#   ./run-train.sh                  # launch every run_training call below
+#   ./run-train.sh ft3step          # launch only calls matching a substring
 
-set -e
+set -euo pipefail
 
-SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
-WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
+# === GUARDRAILS (copy verbatim from the reference; do not hand-edit) =========
+WANDB_IDENTITY="mcgibbon"   # the wandb username every run must attribute to
+
+SCRIPT_PATH=$(git rev-parse --show-prefix)   # repo-root-relative dir of this script
 REPO_ROOT=$(git rev-parse --show-toplevel)
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+
+# WANDB attribution guard. The beaker job env does not carry WANDB_USERNAME, and
+# the beaker account (jeremym) makes wandb fall back to the API-key service
+# account, so an unset/null/jeremym value silently misattributes the run. Beaker
+# specs are immutable, so a miss costs a full stop+relaunch+rewrite-every-record
+# cycle — fail loud, before submit.
+WANDB_USERNAME=${WANDB_USERNAME:-$WANDB_IDENTITY}
+if [[ "$WANDB_USERNAME" != "$WANDB_IDENTITY" ]]; then
+  echo "ERROR: WANDB_USERNAME='$WANDB_USERNAME' but runs must attribute to '$WANDB_IDENTITY'." >&2
+  echo "       (BEAKER_USERNAME='$BEAKER_USERNAME' would misattribute to the wandb service account.)" >&2
+  echo "       Run:  export WANDB_USERNAME=$WANDB_IDENTITY   before launching." >&2
+  exit 1
+fi
+
+# cwd / path guard. An empty SCRIPT_PATH means the script was run from the repo
+# root (or outside the configs dir): CONFIG_PATH would become "/<config>.yaml"
+# and gantry would submit a doomed job even after local validate_config fails.
+if [[ -z "$SCRIPT_PATH" ]]; then
+  echo "ERROR: SCRIPT_PATH (git rev-parse --show-prefix) is empty." >&2
+  echo "       Invoke run-train.sh FROM its own configs directory, not the repo root." >&2
+  exit 1
+fi
+
+# Config-line filter. With no args every run_training call runs; with args, only
+# calls whose config filename OR job name contains one of the substrings.
+LAUNCH_FILTERS=("$@")
+should_run() {  # should_run <config_filename> <job_name>
+  [[ ${#LAUNCH_FILTERS[@]} -eq 0 ]] && return 0
+  local f
+  for f in "${LAUNCH_FILTERS[@]}"; do
+    [[ "$1" == *"$f"* || "$2" == *"$f"* ]] && return 0
+  done
+  return 1
+}
+
+# Post-launch attribution assertion. gantry submits asynchronously, so the wandb
+# run may not exist at submit time; call this once the run has registered (or as
+# a standalone follow-up check) to confirm wandb really recorded it under
+# WANDB_IDENTITY before you write records / move on.
+#   assert_wandb_attribution <wandb_run_id> [wandb_project]   # default ai2cm/ace
+assert_wandb_attribution() {
+  local run_id="$1" project="${2:-ai2cm/ace}"
+  python - "$run_id" "$project" "$WANDB_IDENTITY" <<'PY'
+import sys
+import wandb
+run_id, project, expected = sys.argv[1], sys.argv[2], sys.argv[3]
+got = wandb.Api().run(f"{project}/{run_id}").user.username
+assert got == expected, f"wandb run {run_id} attributed to {got!r}, expected {expected!r}"
+print(f"OK: wandb run {run_id} attributed to {got}")
+PY
+}
+# === END GUARDRAILS =========================================================
 
 cd "$REPO_ROOT"
 
 run_training() {
   local config_filename="$1"
   local job_name="$2"
-  local N_GPUS="$3"
-  local WORKSPACE="${4:-ai2/climate-titan}"
-  local PRIORITY="${5:-urgent}"
-  local CLUSTER="${6:-ai2/titan}"  # space-separated list allowed, e.g. "ai2/jupiter ai2/titan"
+  local N_GPUS="${3:-1}"
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
-  # Expand the (possibly multi-value) cluster list into repeated --cluster flags
-  local cluster_args=()
-  for c in $CLUSTER; do
-    cluster_args+=(--cluster "$c")
-  done
+  should_run "$config_filename" "$job_name" || { echo "skip (filter): $job_name"; return 0; }
 
+  # path guard: the resolved local config must exist before we pay for gantry.
+  # (cwd is REPO_ROOT here, so CONFIG_PATH is the repo-relative path.)
+  if [[ ! -f "$CONFIG_PATH" ]]; then
+    echo "ERROR: config not found: $REPO_ROOT/$CONFIG_PATH" >&2
+    echo "       Check the filename and that you launched from the configs dir." >&2
+    exit 1
+  fi
+
+  echo "launching: $job_name  ($CONFIG_PATH)"
+
+  # --- BASELINE-SPECIFIC: edit only the block below for this baseline ---------
+  # Validate locally to fail fast on config bugs before paying for GPU spin-up.
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
 
-  # Extract additional args from config header
+  # Extract additional gantry flags from "# arg: ..." headers in the YAML.
   local extra_args=()
   while IFS= read -r line; do
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
@@ -34,11 +107,12 @@ run_training() {
 
   gantry run \
     --name "$job_name" \
-    --description 'Run ACE training (AIMIP-like baseline)' \
-    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-    --workspace "$WORKSPACE" \
-    --priority "$PRIORITY" \
-    "${cluster_args[@]}" \
+    --description 'Run ACE training (RH multistep fine-tune)' \
+    --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
+    --workspace ai2/ace \
+    --priority high \
+    --cluster ai2/jupiter \
+    --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -47,7 +121,7 @@ run_training() {
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --gpus "$N_GPUS" \
-    --shared-memory 400GiB \
+    --shared-memory "$((N_GPUS * 50))GiB" \
     --weka climate-default:/climate-default \
     --budget ai2/atec-climate \
     --allow-dirty \
@@ -55,127 +129,27 @@ run_training() {
     --install "pip install --no-deps ." \
     "${extra_args[@]}" \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
+  # --- END BASELINE-SPECIFIC --------------------------------------------------
 }
 
 # =============================================================================
-# Residual-config hyperparameter sweep (filter_num_groups x spectral_ratio)
-# Task: research/tasks/2026-06-15-residual-config-hyperparameter-sweep.md
-# Investigation: 2026-06-12-residual-recipe-selection
+# Multi-timestep fine-tuning of the RH-input-append model (stability probe)
+# Task:          research/tasks/2026-07-16-multistep-finetune-rh-input-stability.md
+# Investigation: 2026-07-16-multistep-finetune-rh-stability
 #
-# Branch: experiment/2026-06-15-residual-config-sweep, cut from ace main --
-# main already has residual prediction, spectral_ratio,
-# clip_latent_global_means, and the persistence_names constant-CO2 inference
-# loop. Merged on top: feature/concurrent-inline-inference (reconciled onto
-# main's #1227 InferenceSummary interface) so inline inference batches
-# concurrently, and fix/broadcast-ensemble-time-ordering (c54bc54cd), whose
-# block-ordered broadcast_ensemble is required for concurrent inference with
-# n_ensemble_per_ic > 1 (otherwise it crashes on a time-coordinate mismatch).
+# Fine-tune recipe (both arms): 3 forward steps, optimize on ALL steps
+# (optimize_last_step_only: false), gradient accumulation on, 80 epochs, lr 1e-4,
+# weights-only init from the base run's best_ckpt.tar via
+# stepper_training.parameter_init.
 #
-# All configs derive from the latest era5-only-residual config (the version
-# with the 10year_insample + long_46year_constant_co2 eval loops), changed
-# only by: max_epochs 60 -> 120, the swept knob(s), and seed.
-#
-# global_mean_co2 is in next_step_forcing_names (prescribed forcing, not
-# prognostic) for every config below.
-#
-# Grid (12 runs, 1 GPU each, ~120 epochs; embed_dim 512 unless noted):
-#   baseline (fg1, sr1.0):      seeds 0, 1, 2
-#   spectral_ratio sweep:       sr 0.50, sr 0.25            (seed 0)
-#   filter_num_groups sweep:    fg 4, fg 8, fg 16           (seed 0)
-#   intersection:               fg8xsr0.25, fg8xsr0.50, fg4xsr0.25 (seed 0)
-#   large-model + deep spectral cut: embed_dim 1024, sr 0.125 (seed 0)
-# Select on validation skill; accept if inference is not significantly worse.
+#   A1  fine-tune the v1 residual RH-input-append base (wandb xm6dc54c;
+#       checkpoint dataset 01KVV1FRHHEQKPJV2XM7T5MJ4Y mounted at /weights via the
+#       "# arg: --dataset ..." header in the config).
+#   B1  from-scratch v2-no-residual RH-input-append base (v2 stitched-window
+#       loader + residual_prediction: false; single-step, 120 epochs). Its
+#       fine-tune (B2) is launched once B1 finishes, from a config that mounts
+#       B1's checkpoint dataset.
 # =============================================================================
 
-# --- LAUNCHED 2026-06-16 to ai2/ace from commit 77418ebd4 (12 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
-# --- Wave 1: baseline residual, 3 seeds (Jupiter+Titan, high) ---
-# run_training "train-4deg-daily-v1-era5-only-residual.yaml"      "train-4deg-daily-v1-era5-only-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-residual-rs1.yaml"  "train-4deg-daily-v1-era5-only-residual-rs1" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-residual-rs2.yaml"  "train-4deg-daily-v1-era5-only-residual-rs2" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# --- Wave 2: spectral_ratio sweep (seed 0) (Jupiter+Titan, high) ---
-# run_training "train-4deg-daily-v1-era5-only-sr0p50-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p50-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# --- Wave 3: filter_num_groups sweep (seed 0) (Jupiter+Titan, high) ---
-# run_training "train-4deg-daily-v1-era5-only-fg4-residual.yaml"  "train-4deg-daily-v1-era5-only-fg4-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg8-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg16-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# --- Wave 4: fg x sr intersection (seed 0) (Jupiter+Titan, high) ---
-# run_training "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual.yaml" "train-4deg-daily-v1-era5-only-fg8-sr0p50-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual.yaml" "train-4deg-daily-v1-era5-only-fg4-sr0p25-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# --- Wave 5: embed_dim 1024 + spectral_ratio 0.125 (seed 0) (Jupiter+Titan, high) ---
-# run_training "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-n1024-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# --- Wave 6: complete the fg x sr grid (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
-# Fills the missing cells of the fg {4,8,16} x sr {0.5, 0.25, 0.125} grid at
-# embed_dim 512. Already covered by Wave 4: fg4xsr0.25, fg8xsr0.25, fg8xsr0.50.
-# (n1024xsr0.125 is embed_dim 1024, not part of this 512 grid.) 6 new runs.
-# --- LAUNCHED 2026-06-17 to ai2/ace from commit f6632e8d5 (6 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
-# run_training "train-4deg-daily-v1-era5-only-fg4-sr0p50-residual.yaml"   "train-4deg-daily-v1-era5-only-fg4-sr0p50-residual-rs0"   1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg4-sr0p125-residual.yaml"  "train-4deg-daily-v1-era5-only-fg4-sr0p125-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg8-sr0p125-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-sr0p125-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p50-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual.yaml"  "train-4deg-daily-v1-era5-only-fg16-sr0p25-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# --- Wave 7: extend the grid into deeper spectral cuts (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
-# Intersect filter_num_groups {8,16,32,64} with the two deepest spectral cuts:
-# spectral_ratio 0.125 -> 64 spectral channels (ws64) and 0.0625 -> 32 (ws32),
-# at embed_dim 512. Run names use the wsNN convention (latent spectral width)
-# instead of srNN. filter_num_groups must divide the channel count, so fg64xws32
-# (64 > 32) is invalid and omitted. Already covered by Wave 6: fg8xws64 and
-# fg16xws64 (the fg8/fg16-sr0p125 runs). 5 new runs.
-# --- LAUNCHED 2026-06-20 to ai2/ace from commit e334b4be1 (5 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
-# run_training "train-4deg-daily-v1-era5-only-fg32-ws64-residual.yaml" "train-4deg-daily-v1-era5-only-fg32-ws64-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg64-ws64-residual.yaml" "train-4deg-daily-v1-era5-only-fg64-ws64-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg8-ws32-residual.yaml"  "train-4deg-daily-v1-era5-only-fg8-ws32-residual-rs0"  1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg16-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg16-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg32-ws32-residual.yaml" "train-4deg-daily-v1-era5-only-fg32-ws32-residual-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# =============================================================================
-# Climate-invariant moisture eval on the stable residual base (fg16 x ws64,
-# embed_dim 512, the selected residual recipe; wandb j8r0z322 is the plain
-# base / shared control).
-# Tasks: research/tasks/2026-06-15-retest-qsat-scaling-on-stable-residual-base.md
-#        research/tasks/2026-06-16-implement-and-evaluate-the-rh-like-q-qsat-saturation-normalized-humidity-representation.md
-#
-# Branch: experiment/rh-saturation-normalized-humidity with
-# experiment/2026-06-15-residual-config-sweep merged in -- one branch carrying
-# the RH (q/qsat) feature, qsat-scaled GMR, the concurrent-inline-inference +
-# broadcast-ordering apparatus, and the stable residual base config.
-#
-# Both variants derive from train-...-fg16-sr0p125-residual.yaml, changed only
-# by enabling one moisture knob; global_mean_co2 is kept in every config.
-#   qsat-scaling:    global_mean_removal.qsat_scaled_names on the humidity set
-#                    (specific_total_water_0-7, LHTFLsfc, PRATEsfc, twp-advection,
-#                    Q2m) -- the qsat retest treatment.
-#   rh-input-append: saturation_normalization [names specific_total_water_*,
-#                    prediction false, input append] -- the RH cheapest-first
-#                    probe (redundant q/qsat input channels, q predictions kept).
-# Deeper RH knobs (RH-space prediction; replace) added below as a parallel wave.
-#   rh-predict-top: saturation_normalization [names specific_total_water_0,1,
-#                    prediction true, input replace] -- RH-space prediction
-#                    scoped to the top levels (smallest RH-advection cost).
-#   rh-full:        saturation_normalization [names specific_total_water_*,
-#                    prediction true, input replace] -- full-column RH (the
-#                    replace end of the append-vs-replace contrast vs
-#                    rh-input-append). NB: under residual prediction the step
-#                    framework forbids replace-input with prediction off for a
-#                    prognostic field (rh_in must equal rh_out), so the "replace"
-#                    arm necessarily predicts in RH; replace+predict-off is not a
-#                    valid config on this base.
-# =============================================================================
-
-# --- Wave: RH/qsat moisture eval (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
-# --- LAUNCHED 2026-06-22 to ai2/ace from commit 2d1738dc6 (2 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
-# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling.yaml"    "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-qsat-scaling-rs0"    1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-
-# --- Wave: RH knob sweep steps 2+3 (seed 0, embed_dim 512) (Jupiter+Titan, high) ---
-# --- LAUNCHED 2026-06-22 to ai2/ace from commit 1526c39e4 (2 jobs, 1 GPU each, jupiter+titan high). Lines commented to prevent re-submission; see experiment records for beaker/wandb links. ---
-# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-predict-top.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-predict-top-rs0" 1 ai2/ace high "ai2/jupiter ai2/titan"
-# run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-full.yaml"        "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-full-rs0"        1 ai2/ace high "ai2/jupiter ai2/titan"
+run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-ft3step.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-ft3step-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append.yaml"       "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-rs0"       1
