@@ -8,6 +8,7 @@ import numpy.typing as npt
 
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.segment import SegmentContext
 from fme.core.cloud import makedirs
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
@@ -19,6 +20,24 @@ from fme.coupled.data_loading.data_typing import CoupledCoords
 
 OCEAN_OUTPUT_DIR_NAME = "ocean"
 ATMOSPHERE_OUTPUT_DIR_NAME = "atmosphere"
+
+
+def _component_segment_context(
+    segment_context: SegmentContext | None, component_dir_name: str
+) -> SegmentContext | None:
+    """Point a run-level segment context at one component's subdirectories."""
+    if segment_context is None:
+        return None
+    return dataclasses.replace(
+        segment_context,
+        run_dir=os.path.join(segment_context.run_dir, component_dir_name),
+        segment_dir=os.path.join(segment_context.segment_dir, component_dir_name),
+        previous_segment_dir=(
+            os.path.join(segment_context.previous_segment_dir, component_dir_name)
+            if segment_context.previous_segment_dir is not None
+            else None
+        ),
+    )
 
 
 @dataclasses.dataclass
@@ -49,6 +68,7 @@ class CoupledDataWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: CoupledCoords,
         dataset_metadata: dict[str, DatasetMetadata],
+        segment_context: SegmentContext | None = None,
     ) -> "CoupledPairedDataWriter":
         ocean_dir = os.path.join(experiment_dir, OCEAN_OUTPUT_DIR_NAME)
         makedirs(ocean_dir, exist_ok=True)
@@ -63,6 +83,9 @@ class CoupledDataWriterConfig:
                 variable_metadata=variable_metadata,
                 coords=coords.ocean,
                 dataset_metadata=dataset_metadata["ocean"],
+                segment_context=_component_segment_context(
+                    segment_context, OCEAN_OUTPUT_DIR_NAME
+                ),
             ),
             atmosphere_writer=self.atmosphere.build_paired(
                 experiment_dir=atmos_dir,
@@ -72,6 +95,9 @@ class CoupledDataWriterConfig:
                 variable_metadata=variable_metadata,
                 coords=coords.atmosphere,
                 dataset_metadata=dataset_metadata["atmosphere"],
+                segment_context=_component_segment_context(
+                    segment_context, ATMOSPHERE_OUTPUT_DIR_NAME
+                ),
             ),
         )
 

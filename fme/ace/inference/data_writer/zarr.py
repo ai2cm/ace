@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import cftime
+import fsspec
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -86,12 +87,32 @@ def _get_ace_time_coords(
 
 @dataclass
 class ZarrWriterConfig:
+    """
+    Configuration for zarr output stores.
+
+    Parameters:
+        chunks: Chunk sizes by dimension name.
+        overwrite_check: If true, check when recording each batch that the
+            slice of the existing store does not already contain data.
+        path: Directory in which to create the store, on any fsspec-compatible
+            filesystem (e.g. a remote bucket URL). If not given, stores are
+            created in the experiment directory, or in the root experiment
+            directory when running segmented inference so that all segments
+            write to the same store.
+    """
+
     name: Literal["zarr"] = "zarr"  # defined for yaml+dacite ease of use
     chunks: dict[str, int] | None = field(
         default_factory=lambda: {"time": 1, "sample": 1}
     )
     overwrite_check: bool = False
     suffix: str = "zarr"
+    path: str | None = None
+
+
+def _store_exists(path: str) -> bool:
+    fs, _ = fsspec.url_to_fs(path)
+    return fs.exists(path)
 
 
 def ensure_numpy_coords(
@@ -123,7 +144,33 @@ class ZarrWriterAdapter:
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
         overwrite_check: bool = False,
+        start_timestep: int = 0,
     ):
+        """
+        Args:
+            path: Path of the zarr store.
+            dims: Order of data dimensions.
+            data_coords: Coordinate arrays for the spatial dimensions.
+            timestep: The time delta between each written timestep.
+            n_timesteps: Number of timesteps the store holds. When writing a
+                segment of a longer run, this is the whole run's length, not
+                the segment's.
+            initial_condition_times: 1D array of initial condition times. When
+                ``start_timestep`` is 0 these must be the run's initial
+                condition times, from which the store's time coordinates are
+                computed.
+            variable_metadata: Metadata for each variable.
+            dataset_metadata: Metadata for the dataset.
+            data_vars: Variables to write, or None to write all.
+            chunks: Chunk sizes by dimension name.
+            overwrite_check: If true, check when recording each batch that the
+                slice of the existing store does not already contain data.
+            start_timestep: Time index at which the first appended batch is
+                written. When positive, the store must already exist (it is
+                created by the run's first segment, whose initial condition
+                times determine the whole store's time coordinates) and is
+                opened for writing rather than overwritten.
+        """
         self.path = path
         self.dims = dims
 
@@ -131,7 +178,8 @@ class ZarrWriterAdapter:
         self.n_timesteps = n_timesteps
         self.initial_condition_times = initial_condition_times
         self.n_initial_conditions = len(self.initial_condition_times)
-        self._current_timestep = 0
+        self._start_timestep = start_timestep
+        self._current_timestep = start_timestep
         self.variable_metadata = _variable_metadata_to_dict(variable_metadata)
 
         dataset_metadata = copy.copy(dataset_metadata)
@@ -173,6 +221,13 @@ class ZarrWriterAdapter:
         return self._writer
 
     def _initialize_writer(self, batch_time: xr.DataArray):
+        if self._start_timestep > 0 and not _store_exists(self.path):
+            raise RuntimeError(
+                f"Cannot resume writing to {self.path} at timestep "
+                f"{self._start_timestep}: the store does not exist. It is "
+                "created by the run's first segment, whose initial condition "
+                "times determine the whole store's time coordinates."
+            )
         # batch.time is dataarray with dims (sample, time) w/o coords
         lead_times_coord, init_times_coord, valid_times_coord = _get_ace_time_coords(
             self.initial_condition_times, batch_time, self.timestep, self.n_timesteps
@@ -200,7 +255,9 @@ class ZarrWriterAdapter:
             time_units=TIMEDELTA_ENCODING_UNITS,
             time_calendar=None,
             nondim_coords=self._nondim_coords,
-            mode="w",  # ACE data writers are expected to overwrite existing data
+            # ACE data writers are expected to overwrite existing data, but a
+            # resumed segment writes its region into the existing store
+            mode="a" if self._start_timestep > 0 else "w",
             overwrite_check=self.overwrite_check,
         )
 
@@ -259,6 +316,7 @@ class SeparateICZarrWriterAdapter:
         data_vars: list[str] | None = None,
         chunks: dict[str, int] | None = None,
         overwrite_check: bool = False,
+        start_timestep: int = 0,
     ):
         self.path = path
         self.dims = dims
@@ -268,7 +326,8 @@ class SeparateICZarrWriterAdapter:
         self.n_timesteps = n_timesteps
         self.initial_condition_times = initial_condition_times
         self.n_initial_conditions = len(self.initial_condition_times)
-        self._current_timestep = 0
+        self._start_timestep = start_timestep
+        self._current_timestep = start_timestep
         self.data_vars = data_vars
         self.chunks = chunks
         self.overwrite_check = overwrite_check
@@ -309,6 +368,15 @@ class SeparateICZarrWriterAdapter:
             self.n_timesteps,
         )
         for s in range(self.n_initial_conditions):
+            member_path = self.path.replace(".zarr", f"_ic{s:04d}.zarr")
+            if self._start_timestep > 0 and not _store_exists(member_path):
+                raise RuntimeError(
+                    f"Cannot resume writing to {member_path} at timestep "
+                    f"{self._start_timestep}: the store does not exist. It is "
+                    "created by the run's first segment, whose initial "
+                    "condition times determine the whole store's time "
+                    "coordinates."
+                )
             _coords = copy.copy(self.coords)
             init_time_numeric = cftime.date2num(
                 self.initial_condition_times[s],
@@ -318,7 +386,7 @@ class SeparateICZarrWriterAdapter:
             _coords["time"] = init_time_numeric + lead_time_microseconds
             self._writers.append(
                 ZarrWriter(
-                    path=self.path.replace(".zarr", f"_ic{s:04d}.zarr"),
+                    path=member_path,
                     dims=self.dims,
                     coords=_coords,
                     data_vars=self.data_vars,
@@ -328,7 +396,7 @@ class SeparateICZarrWriterAdapter:
                     group_attributes=self.dataset_metadata,
                     nondim_coords=self._nondim_coords,
                     time_calendar=first_batch_time.dt.calendar,
-                    mode="w",
+                    mode="a" if self._start_timestep > 0 else "w",
                     overwrite_check=self.overwrite_check,
                 )
             )

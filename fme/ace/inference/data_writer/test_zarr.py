@@ -218,3 +218,67 @@ def test_zarr_adapter_single_timestep_data(
 
     ds = xr.open_zarr(str(tmpdir / "test.zarr"))
     assert ds.time.size == 1
+
+
+def _segment_adapter_args(tmpdir, n_timesteps: int, start_timestep: int) -> dict:
+    return dict(
+        path=str(tmpdir / "test.zarr"),
+        dims=("sample", "time", "lat", "lon"),
+        data_coords=ensure_numpy_coords(
+            {
+                "lat": xr.DataArray([0, 1], dims=["lat"]),
+                "lon": xr.DataArray([0, 1], dims=["lon"]),
+            }
+        ),
+        timestep=datetime.timedelta(days=1),
+        n_timesteps=n_timesteps,
+        initial_condition_times=np.array([cftime.datetime(2019, 12, 31)]),
+        start_timestep=start_timestep,
+    )
+
+
+def _daily_batch_time(start_day: int, n_times: int) -> xr.DataArray:
+    return xr.DataArray(
+        [[cftime.datetime(2020, 1, start_day + i) for i in range(n_times)]],
+        dims=("sample", "time"),
+    )
+
+
+def test_zarr_adapter_segmented_resume(tmpdir):
+    """Two adapters writing consecutive segments of a run produce the same
+    store as one adapter writing the whole run."""
+    data = {
+        "foo": torch.arange(4, dtype=torch.float32).reshape(1, 4, 1, 1)
+        * torch.ones(1, 4, 2, 2)
+    }
+    first_half = {k: v[:, :2] for k, v in data.items()}
+    second_half = {k: v[:, 2:] for k, v in data.items()}
+
+    segment_0 = ZarrWriterAdapter(
+        **_segment_adapter_args(tmpdir, n_timesteps=4, start_timestep=0)
+    )
+    segment_0.append_batch(first_half, _daily_batch_time(1, 2))
+    segment_1 = ZarrWriterAdapter(
+        **_segment_adapter_args(tmpdir, n_timesteps=4, start_timestep=2)
+    )
+    segment_1.append_batch(second_half, _daily_batch_time(3, 2))
+    ds_segmented = xr.open_zarr(str(tmpdir / "test.zarr")).load()
+
+    single_dir = tmpdir.mkdir("single")
+    single = ZarrWriterAdapter(
+        **_segment_adapter_args(single_dir, n_timesteps=4, start_timestep=0)
+    )
+    single.append_batch(first_half, _daily_batch_time(1, 2))
+    single.append_batch(second_half, _daily_batch_time(3, 2))
+    ds_single = xr.open_zarr(str(single_dir / "test.zarr")).load()
+
+    xr.testing.assert_identical(ds_segmented, ds_single)
+
+
+def test_zarr_adapter_resume_requires_existing_store(tmpdir):
+    data = {"foo": torch.zeros(1, 2, 2, 2)}
+    adapter = ZarrWriterAdapter(
+        **_segment_adapter_args(tmpdir, n_timesteps=4, start_timestep=2)
+    )
+    with pytest.raises(RuntimeError, match="does not exist"):
+        adapter.append_batch(data, _daily_batch_time(3, 2))

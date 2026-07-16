@@ -23,6 +23,7 @@ from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
+from .segment import SegmentContext
 from .step_diagnostics import STEP_DIAGNOSTICS_DIR, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
@@ -108,6 +109,7 @@ class DataWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        segment_context: SegmentContext | None = None,
     ) -> "PairedDataWriter":
         writers: list[PairedSubwriter] = []
         if self.save_prediction_files:
@@ -145,6 +147,7 @@ class DataWriterConfig:
                     variable_metadata=variable_metadata,
                     coords=coords,
                     dataset_metadata=dataset_metadata,
+                    segment_context=segment_context,
                 )
             )
         return PairedDataWriter(
@@ -200,6 +203,7 @@ class DataWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        segment_context: SegmentContext | None = None,
     ) -> "DataWriter":
         writers: list[Subwriter] = []
         # TODO: handle writing HEALPix data
@@ -240,6 +244,7 @@ class DataWriterConfig:
                         variable_metadata=variable_metadata,
                         coords=coords,
                         dataset_metadata=dataset_metadata,
+                        segment_context=segment_context,
                     )
                 )
         return DataWriter(
