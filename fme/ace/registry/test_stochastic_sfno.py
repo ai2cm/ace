@@ -4,7 +4,12 @@ import pytest
 import torch
 from torch_harmonics import InverseRealSHT
 
-from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO, isotropic_noise
+from fme.ace.registry.stochastic_sfno import (
+    NoiseConditionedSFNO,
+    NoiseConditionedSFNOBuilder,
+    isotropic_noise,
+)
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context
 
@@ -88,3 +93,40 @@ def test_noise_conditioned_sfno_onehot_labels():
     args, _ = mock_sfno.call_args
     context = args[1]
     assert context.labels.shape == (batch_size, n_labels)
+
+
+def _build_small_noise_sfno(
+    drop_rate: float = 0.0, drop_path_rate: float = 0.0
+) -> NoiseConditionedSFNO:
+    builder = NoiseConditionedSFNOBuilder(
+        embed_dim=4,
+        noise_embed_dim=4,
+        num_layers=2,
+        drop_rate=drop_rate,
+        drop_path_rate=drop_path_rate,
+    )
+    return builder.build(
+        n_in_channels=3,
+        n_out_channels=3,
+        dataset_info=DatasetInfo(img_shape=(8, 16)),
+    )
+
+
+def test_noise_conditioned_sfno_builder_forwards_drop_rate():
+    """A non-zero drop_rate reaches the built network's dropout layer."""
+    model = _build_small_noise_sfno(drop_rate=0.5, drop_path_rate=0.3)
+    sfno_net = model.conditional_model
+    assert isinstance(sfno_net.pos_drop, torch.nn.Dropout)
+    assert sfno_net.pos_drop.p == 0.5
+    # drop_path_rate is spread over layers via linspace(0, rate, num_layers);
+    # the last block receives the full rate.
+    assert sfno_net.blocks[-1].drop_path.drop_prob == pytest.approx(0.3)
+
+
+def test_noise_conditioned_sfno_builder_drop_rate_default_off():
+    """The 0.0 default leaves dropout and drop-path as no-op Identity layers."""
+    model = _build_small_noise_sfno()
+    sfno_net = model.conditional_model
+    assert isinstance(sfno_net.pos_drop, torch.nn.Identity)
+    for block in sfno_net.blocks:
+        assert isinstance(block.drop_path, torch.nn.Identity)
