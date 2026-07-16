@@ -40,8 +40,8 @@ inference:
   # entry IDENTICAL in the control rerun for a paired W&B comparison.
   - name: inference-short-lead
     n_forward_steps: 40
-    forward_steps_in_memory: 8      # lowered to bound memory under the 10x ensemble broadcast
-    n_ensemble_per_ic: 10
+    forward_steps_in_memory: 2      # small window: the 40-IC x 5-member ensemble broadcast makes each step's buffer memory-heavy
+    n_ensemble_per_ic: 5
     weight: 0.0
     loader:
       start_indices:
