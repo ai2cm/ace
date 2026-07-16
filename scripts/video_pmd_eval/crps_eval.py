@@ -61,6 +61,12 @@ import pandas as pd
 import xarray as xr
 
 plt.rcParams["figure.dpi"] = 100
+# Un-truncate printed tables -- the default column/width limits were silently
+# hiding the CRPS/spread/RMSE columns of the "Overall" summary table (and the
+# "spread" column of the lead-time table) behind "..." in the log, leaving
+# only "ratio" fully legible.
+pd.set_option("display.max_columns", None)
+pd.set_option("display.width", 200)
 
 # %%
 PRED_ZARR = (
