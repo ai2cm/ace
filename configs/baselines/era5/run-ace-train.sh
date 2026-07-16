@@ -64,11 +64,24 @@ base_name="ace2s"
 # Daily ERA5 (4deg) pre-training experiments
 daily_group="era5-daily-spectral"
 
-run_training "ace-train-config-1-step-pretrain-daily.yaml" \
-  "$base_name-era5-daily-1-step-pre-training-rs0" "$daily_group"
+# run_training "ace-train-config-1-step-pretrain-daily.yaml" \
+#   "$base_name-era5-daily-1-step-pre-training-rs0" "$daily_group"
 
-run_training "ace-train-config-1-step-pretrain-daily-spectral-ratio-0.125.yaml" \
-  "$base_name-era5-daily-spectral-ratio-0.125-1-step-pre-training-rs0" "$daily_group"
+# run_training "ace-train-config-1-step-pretrain-daily-spectral-ratio-0.125.yaml" \
+#   "$base_name-era5-daily-spectral-ratio-0.125-1-step-pre-training-rs0" "$daily_group"
 
-run_training "ace-train-config-1-step-pretrain-daily-spectral-groups-16-ratio-0.125.yaml" \
-  "$base_name-era5-daily-spectral-groups-16-ratio-0.125-1-step-pre-training-rs0" "$daily_group"
+# run_training "ace-train-config-1-step-pretrain-daily-spectral-groups-16-ratio-0.125.yaml" \
+#   "$base_name-era5-daily-spectral-groups-16-ratio-0.125-1-step-pre-training-rs0" "$daily_group"
+
+# Daily multi-step fine-tuning stage. For each, take the beaker dataset id of the
+# corresponding pre-training job above, set it in the config's
+# `# arg: --dataset ...:/weights` header, then uncomment the matching line.
+
+run_training "ace-train-config-multi-step-finetuning-daily.yaml" \
+  "$base_name-era5-daily-multi-step-fine-tuning-rs0" "$daily_group"
+
+run_training "ace-train-config-multi-step-finetuning-daily-spectral-ratio-0.125.yaml" \
+  "$base_name-era5-daily-spectral-ratio-0.125-multi-step-fine-tuning-rs0" "$daily_group"
+
+run_training "ace-train-config-multi-step-finetuning-daily-spectral-groups-16-ratio-0.125.yaml" \
+  "$base_name-era5-daily-spectral-groups-16-ratio-0.125-multi-step-fine-tuning-rs0" "$daily_group"
