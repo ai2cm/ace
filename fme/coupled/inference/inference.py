@@ -15,6 +15,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.ace.inference.data_writer.segment import SegmentContext
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
 from fme.ace.requirements import InitialConditionRequirements
 from fme.core.cli import prepare_config, prepare_directory
@@ -193,6 +194,7 @@ class InferenceConfig:
     def get_data_writer(
         self,
         data: InferenceGriddedData,
+        segment_context: SegmentContext | None = None,
     ) -> CoupledPairedDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
             try:
@@ -231,6 +233,7 @@ class InferenceConfig:
             variable_metadata=variable_metadata,
             coords=data.coords,
             dataset_metadata=coupled_dataset_metadata,
+            segment_context=segment_context,
         )
 
 
@@ -289,6 +292,7 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
     )
     config_copy = copy.deepcopy(config)
     original_wandb_name = os.environ.get("WANDB_NAME")
+    previous_segment_dir: str | None = None
     for segment in range(segments):
         segment_label = f"segment_{segment:04d}"
         segment_dir = os.path.join(config.experiment_dir, segment_label)
@@ -305,8 +309,16 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
             config_copy.experiment_dir = segment_dir
             if original_wandb_name is not None:
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
+            segment_context = SegmentContext(
+                segment_index=segment,
+                total_segments=segments,
+                run_dir=config.experiment_dir,
+                segment_dir=segment_dir,
+                previous_segment_dir=previous_segment_dir,
+            )
             with GlobalTimer():
-                run_inference_from_config(config_copy)
+                run_inference_from_config(config_copy, segment_context=segment_context)
+        previous_segment_dir = segment_dir
         config_copy.initial_condition = CoupledInitialConditionConfig(
             ocean=ComponentInitialConditionConfig(
                 path=ocean_restart_path, engine="netcdf4"
@@ -317,7 +329,10 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         )
 
 
-def run_inference_from_config(config: InferenceConfig):
+def run_inference_from_config(
+    config: InferenceConfig,
+    segment_context: SegmentContext | None = None,
+):
     timer = GlobalTimer.get_instance()
     timer.start_outer("inference")
     timer.start("initialization")
@@ -364,7 +379,7 @@ def run_inference_from_config(config: InferenceConfig):
         output_dir=config.experiment_dir,
     )
 
-    writer = config.get_data_writer(data=data)
+    writer = config.get_data_writer(data=data, segment_context=segment_context)
     timer.stop("initialization")
     logging.info("Starting inference")
     logger = get_record_to_wandb(label="inference")

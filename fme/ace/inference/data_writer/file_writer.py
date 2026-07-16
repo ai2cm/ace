@@ -17,7 +17,9 @@ from fme.core.typing_ import Slice
 
 from .dataset_metadata import DatasetMetadata
 from .monthly import MonthlyDataWriter
+from .monthly_zarr import MONTHLY_SNAPSHOT_DIR, MonthlyZarrWriter
 from .raw import NetCDFWriterConfig, RawDataWriter
+from .segment import SegmentContext
 from .time_coarsen import (
     MonthlyCoarsenConfig,
     PairedTimeCoarsen,
@@ -272,9 +274,13 @@ class FileWriterConfig:
                 raise NotImplementedError(
                     "Time selection is not currently supported when writing to zarr."
                 )
-            if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+            if (
+                isinstance(self.time_coarsen, MonthlyCoarsenConfig)
+                and self.separate_ensemble_members
+            ):
                 raise NotImplementedError(
-                    "Monthly coarsening is not currently supported for the zarr format."
+                    "Writing separate ensemble members is not currently supported "
+                    "for monthly coarsening."
                 )
 
         if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
@@ -322,6 +328,7 @@ class FileWriterConfig:
         dataset_metadata: DatasetMetadata,
         prediction_suffix: str = "predictions",
         reference_suffix: str = "target",
+        segment_context: SegmentContext | None = None,
     ) -> Union["PairedFileWriter", PairedTimeCoarsen]:
         if self.save_reference:
             reference_label = f"{self.label}_{reference_suffix}"
@@ -334,6 +341,7 @@ class FileWriterConfig:
                 variable_metadata=variable_metadata,
                 coords=coords,
                 dataset_metadata=dataset_metadata,
+                segment_context=segment_context,
             )
         else:
             prediction_label = self.label
@@ -346,6 +354,7 @@ class FileWriterConfig:
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
+            segment_context=segment_context,
         )
         paired_writer = PairedFileWriter(prediction_writer, reference_writer)
         # Time coarsening is built around writer in the single build method
@@ -360,6 +369,7 @@ class FileWriterConfig:
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        segment_context: SegmentContext | None = None,
     ) -> Union["FileWriter", TimeCoarsen]:
         """
         Build a FileWriter object for saving data within the specified region.
@@ -368,12 +378,19 @@ class FileWriterConfig:
             experiment_dir: The directory where experiment outputs are saved.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
-            n_timesteps: Total number of inference forward steps.
+            n_timesteps: Total number of inference forward steps. When
+                ``segment_context`` is given, this is the number of forward
+                steps per segment.
             timestep: The time delta between each timestep.
             variable_metadata: Metadata for each variable.
             coords: Coordinate arrays for the dataset. These should be the coordinates
                 of the entire global domain, not the subset region coordinates.
             dataset_metadata: Metadata for the entire dataset.
+            segment_context: When running segmented inference, the current
+                segment. Zarr outputs then accumulate into a single whole-run
+                store shared by all segments, with each segment writing its own
+                region of the time axis; netCDF outputs are unaffected and stay
+                per-segment.
         """
         if "face" in coords:
             spatial_dims = DIM_INFO_HEALPIX
@@ -415,36 +432,82 @@ class FileWriterConfig:
             | ZarrWriterAdapter
             | SeparateICZarrWriterAdapter
             | MonthlyDataWriter
+            | MonthlyZarrWriter
         )
         if isinstance(self.format, ZarrWriterConfig):
-            if isinstance(self.time_coarsen, TimeCoarsenConfig):
-                n_timesteps_write = n_timesteps // self.time_coarsen.coarsen_factor
-                timestep_write = self.time_coarsen.coarsen_factor * timestep
+            if segment_context is not None:
+                n_timesteps_run = n_timesteps * segment_context.total_segments
+                start_timestep = n_timesteps * segment_context.segment_index
+                store_dir = self.format.path or segment_context.run_dir
             else:
-                n_timesteps_write = n_timesteps
-                timestep_write = timestep
+                n_timesteps_run = n_timesteps
+                start_timestep = 0
+                store_dir = self.format.path or experiment_dir
+            store_path = os.path.join(store_dir, f"{self.label}.zarr")
 
-            zarr_writer_cls: type[SeparateICZarrWriterAdapter | ZarrWriterAdapter]
-
-            if self.separate_ensemble_members:
-                dims = ("time", *(d.name for d in spatial_dims))
-                zarr_writer_cls = SeparateICZarrWriterAdapter
+            if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                if segment_context is not None:
+                    snapshot_path = os.path.join(
+                        segment_context.segment_dir,
+                        MONTHLY_SNAPSHOT_DIR,
+                        f"{self.label}.nc",
+                    )
+                    if segment_context.previous_segment_dir is not None:
+                        restore_path = os.path.join(
+                            segment_context.previous_segment_dir,
+                            MONTHLY_SNAPSHOT_DIR,
+                            f"{self.label}.nc",
+                        )
+                    else:
+                        restore_path = None
+                else:
+                    snapshot_path = None
+                    restore_path = None
+                raw_writer = MonthlyZarrWriter(
+                    path=store_path,
+                    initial_condition_times=initial_condition_times,
+                    n_timesteps=n_timesteps_run,
+                    timestep=timestep,
+                    save_names=self.names,
+                    variable_metadata=variable_metadata,
+                    coords=subselect_coords_,
+                    dataset_metadata=dataset_metadata,
+                    snapshot_path=snapshot_path,
+                    restore_path=restore_path,
+                )
             else:
-                dims = ("sample", "time", *(d.name for d in spatial_dims))
-                zarr_writer_cls = ZarrWriterAdapter
-            raw_writer = zarr_writer_cls(
-                path=os.path.join(experiment_dir, f"{self.label}.zarr"),
-                dims=dims,
-                data_coords=ensure_numpy_coords(subselect_coords_),
-                timestep=timestep_write,
-                n_timesteps=n_timesteps_write,
-                initial_condition_times=initial_condition_times,
-                data_vars=self.names,
-                variable_metadata=variable_metadata,
-                dataset_metadata=dataset_metadata,
-                chunks=self.format.chunks,
-                overwrite_check=self.format.overwrite_check,
-            )
+                if isinstance(self.time_coarsen, TimeCoarsenConfig):
+                    coarsen_factor = self.time_coarsen.coarsen_factor
+                    n_timesteps_write = n_timesteps_run // coarsen_factor
+                    start_timestep_write = start_timestep // coarsen_factor
+                    timestep_write = coarsen_factor * timestep
+                else:
+                    n_timesteps_write = n_timesteps_run
+                    start_timestep_write = start_timestep
+                    timestep_write = timestep
+
+                zarr_writer_cls: type[SeparateICZarrWriterAdapter | ZarrWriterAdapter]
+
+                if self.separate_ensemble_members:
+                    dims = ("time", *(d.name for d in spatial_dims))
+                    zarr_writer_cls = SeparateICZarrWriterAdapter
+                else:
+                    dims = ("sample", "time", *(d.name for d in spatial_dims))
+                    zarr_writer_cls = ZarrWriterAdapter
+                raw_writer = zarr_writer_cls(
+                    path=store_path,
+                    dims=dims,
+                    data_coords=ensure_numpy_coords(subselect_coords_),
+                    timestep=timestep_write,
+                    n_timesteps=n_timesteps_write,
+                    initial_condition_times=initial_condition_times,
+                    data_vars=self.names,
+                    variable_metadata=variable_metadata,
+                    dataset_metadata=dataset_metadata,
+                    chunks=self.format.chunks,
+                    overwrite_check=self.format.overwrite_check,
+                    start_timestep=start_timestep_write,
+                )
         else:
             if self.separate_ensemble_members:
                 raise NotImplementedError(
@@ -488,6 +551,7 @@ class FileWriter:
         params: FileWriterParams,
         writer: RawDataWriter
         | MonthlyDataWriter
+        | MonthlyZarrWriter
         | ZarrWriterAdapter
         | SeparateICZarrWriterAdapter,
         full_coords: Mapping[str, np.ndarray],
