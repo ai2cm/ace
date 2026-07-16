@@ -8,6 +8,7 @@ import dacite
 import fsspec
 import xarray as xr
 import yaml
+from fs_utils import makedirs
 from get_stats import copy
 
 STATS_NC_FILE_NAMES = [
@@ -66,8 +67,7 @@ def merge_stats(config: MergeStatsConfig):
     """
     stats_dir = config.output_directory
 
-    if not os.path.exists(stats_dir):
-        os.makedirs(stats_dir)
+    makedirs(stats_dir)
 
     for fname in STATS_NC_FILE_NAMES:
         logging.info(f"Combining {fname} stats datasets")
