@@ -17,10 +17,21 @@ variable-to-track assignment and the packing/unpacking.
 
 Design invariant (pins the regression test): when the local track has zero
 width and all three options are off, the module tree and every parameter name
-are identical to the single-track ``SphericalFourierNeuralOperatorNet``, and
-the forward computation reduces to it byte-for-byte (for the linear filter
-without a round-trip residual). An old single-track checkpoint therefore loads
-directly, with no remap.
+are identical to the single-track ``SphericalFourierNeuralOperatorNet``, so an
+old single-track checkpoint loads directly with no remap.
+
+The *forward output* additionally reduces to the single-track net byte-for-byte
+only when the spectral filter uses no round-trip residual. ``filter_residual``
+is one way to turn that residual on; the other is ``data_grid='equiangular'``,
+which gives the first and last blocks a forward/inverse transform on different
+grids and so forces ``SpectralConvS2._round_trip_residual`` true for those
+blocks. The single-track block then feeds its skip from the round-tripped
+residual, whereas this two-track block always takes the skip from the full
+normed input (see ``TwoTrackFourierNeuralOperatorBlock.forward``). Output
+equivalence therefore holds for the default ``data_grid='legendre-gauss'`` (all
+transforms share a grid, no round trip) but NOT for ``'equiangular'``. The
+regression test exercises the legendre-gauss case; a checkpoint trained with
+``'equiangular'`` loads without error but does not reproduce its output.
 """
 
 import dataclasses
@@ -152,10 +163,15 @@ class TwoTrackFourierNeuralOperatorBlock(nn.Module):
     output is zero (or, with option 2, the conv1x1 local map) and is carried
     forward by the inner-skip residual over the full width.
 
-    When ``local_channels == 0`` and both options are off, the submodule tree,
-    parameter names and forward computation are identical to
-    ``sfnonet.FourierNeuralOperatorBlock`` with ``inner_skip="linear"`` and
-    ``outer_skip="identity"``.
+    When ``local_channels == 0`` and both options are off, the submodule tree
+    and parameter names are identical to ``sfnonet.FourierNeuralOperatorBlock``
+    with ``inner_skip="linear"`` and ``outer_skip="identity"``. The forward
+    computation matches it too *only when the filter returns no round-trip
+    residual*: the skips here are always taken from the full normed input
+    ``x_norm``, while the single-track block takes them from the filter's
+    returned residual, which equals ``x_norm`` only when the filter does not
+    round-trip (see the module docstring for when it does -- ``filter_residual``
+    or ``data_grid='equiangular'``).
     """
 
     def __init__(

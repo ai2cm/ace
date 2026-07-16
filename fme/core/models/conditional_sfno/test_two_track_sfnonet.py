@@ -116,6 +116,13 @@ def test_latents_option2_wiring():
 # all options off is byte-for-byte the single-track conditional SFNO.
 # ---------------------------------------------------------------------------
 def test_two_track_zero_local_matches_single_track():
+    # data_grid="legendre-gauss" makes all four transforms share a grid, so the
+    # spectral filter never round-trips its residual and the two-track block's
+    # (full-normed-input) skip equals the single-track block's (filter-residual)
+    # skip. Byte-for-byte output equivalence holds ONLY in this regime; with
+    # data_grid="equiangular" the first/last blocks round-trip and the outputs
+    # diverge (the checkpoint still loads -- module tree and names are identical
+    # -- it just does not reproduce the output). See the module docstring.
     torch.manual_seed(0)
     in_chans, out_chans, n = 2, 3, 4
     context_config = _context_config()
