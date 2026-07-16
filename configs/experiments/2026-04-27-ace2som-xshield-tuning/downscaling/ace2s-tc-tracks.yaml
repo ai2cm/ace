@@ -1,0 +1,8623 @@
+experiment_dir: /climate-default/home/annak/2026-07-16-ace2s-shieldplus-tuned-xshield-downscaled-tc-tracks
+model:
+  denoising_expert_configs:
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_low_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 0.005
+      sigma_max: 200.0
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_high_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 200.0
+      sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+    - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
+      file_pattern: output_6hourly_predictions_ic0000.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 4
+  batch_size: 4
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 16
+  lon_extent:
+    start: 0
+    stop: 16
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
+events:
+- name: north_atlantic_000_20230913T18
+  n_samples: 8
+  date: 2023-09-13T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_000_20230914T00
+  n_samples: 8
+  date: 2023-09-14T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230914T06
+  n_samples: 8
+  date: 2023-09-14T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_000_20230914T12
+  n_samples: 8
+  date: 2023-09-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230914T18
+  n_samples: 8
+  date: 2023-09-14T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230915T00
+  n_samples: 8
+  date: 2023-09-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230915T06
+  n_samples: 8
+  date: 2023-09-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_000_20230915T12
+  n_samples: 8
+  date: 2023-09-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230915T18
+  n_samples: 8
+  date: 2023-09-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230916T00
+  n_samples: 8
+  date: 2023-09-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230916T06
+  n_samples: 8
+  date: 2023-09-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230916T12
+  n_samples: 8
+  date: 2023-09-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230916T18
+  n_samples: 8
+  date: 2023-09-16T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_000_20230917T00
+  n_samples: 8
+  date: 2023-09-17T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_000_20230917T06
+  n_samples: 8
+  date: 2023-09-17T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_000_20230917T12
+  n_samples: 8
+  date: 2023-09-17T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_000_20230917T18
+  n_samples: 8
+  date: 2023-09-17T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 316.5
+    stop: 332.5
+- name: north_atlantic_000_20230918T00
+  n_samples: 8
+  date: 2023-09-18T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 316.5
+    stop: 332.5
+- name: north_atlantic_000_20230918T06
+  n_samples: 8
+  date: 2023-09-18T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 316.5
+    stop: 332.5
+- name: north_atlantic_000_20230918T12
+  n_samples: 8
+  date: 2023-09-18T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 316.5
+    stop: 332.5
+- name: north_atlantic_000_20230918T18
+  n_samples: 8
+  date: 2023-09-18T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_000_20230919T00
+  n_samples: 8
+  date: 2023-09-19T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_000_20230919T06
+  n_samples: 8
+  date: 2023-09-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230919T12
+  n_samples: 8
+  date: 2023-09-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_000_20230919T18
+  n_samples: 8
+  date: 2023-09-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_000_20230920T00
+  n_samples: 8
+  date: 2023-09-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_000_20230920T06
+  n_samples: 8
+  date: 2023-09-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 22.415384
+    stop: 38.415384
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_000_20230920T12
+  n_samples: 8
+  date: 2023-09-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230920T18
+  n_samples: 8
+  date: 2023-09-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 314.5
+    stop: 330.5
+- name: north_atlantic_000_20230921T00
+  n_samples: 8
+  date: 2023-09-21T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 26.404282000000002
+    stop: 42.404282
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_000_20230921T06
+  n_samples: 8
+  date: 2023-09-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 27.401505
+    stop: 43.401505
+  lon_extent:
+    start: 316.5
+    stop: 332.5
+- name: north_atlantic_000_20230921T12
+  n_samples: 8
+  date: 2023-09-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 28.398730999999998
+    stop: 44.398731
+  lon_extent:
+    start: 316.5
+    stop: 332.5
+- name: north_atlantic_000_20230921T18
+  n_samples: 8
+  date: 2023-09-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 29.395954000000003
+    stop: 45.395954
+  lon_extent:
+    start: 317.5
+    stop: 333.5
+- name: north_atlantic_000_20230922T00
+  n_samples: 8
+  date: 2023-09-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 30.393177
+    stop: 46.393177
+  lon_extent:
+    start: 318.5
+    stop: 334.5
+- name: north_atlantic_000_20230922T06
+  n_samples: 8
+  date: 2023-09-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 31.3904
+    stop: 47.3904
+  lon_extent:
+    start: 319.5
+    stop: 335.5
+- name: north_atlantic_000_20230922T12
+  n_samples: 8
+  date: 2023-09-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 32.387623
+    stop: 48.387623
+  lon_extent:
+    start: 321.5
+    stop: 337.5
+- name: north_atlantic_000_20230922T18
+  n_samples: 8
+  date: 2023-09-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 32.387623
+    stop: 48.387623
+  lon_extent:
+    start: 323.5
+    stop: 339.5
+- name: north_atlantic_000_20230923T00
+  n_samples: 8
+  date: 2023-09-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 33.38485
+    stop: 49.38485
+  lon_extent:
+    start: 325.5
+    stop: 341.5
+- name: north_atlantic_000_20230923T06
+  n_samples: 8
+  date: 2023-09-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 34.382072
+    stop: 50.382072
+  lon_extent:
+    start: 327.5
+    stop: 343.5
+- name: north_atlantic_000_20230923T12
+  n_samples: 8
+  date: 2023-09-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 35.379295
+    stop: 51.379295
+  lon_extent:
+    start: 329.5
+    stop: 345.5
+- name: north_atlantic_000_20230923T18
+  n_samples: 8
+  date: 2023-09-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 35.379295
+    stop: 51.379295
+  lon_extent:
+    start: 332.5
+    stop: 348.5
+- name: north_atlantic_000_20230924T00
+  n_samples: 8
+  date: 2023-09-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 334.5
+    stop: 350.5
+- name: north_atlantic_000_20230924T06
+  n_samples: 8
+  date: 2023-09-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 336.5
+    stop: 352.5
+- name: north_atlantic_000_20230924T12
+  n_samples: 8
+  date: 2023-09-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 338.5
+    stop: 354.5
+- name: north_atlantic_000_20230924T18
+  n_samples: 8
+  date: 2023-09-24T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 340.5
+    stop: 356.5
+- name: north_atlantic_000_20230925T00
+  n_samples: 8
+  date: 2023-09-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 340.5
+    stop: 356.5
+- name: north_atlantic_000_20230925T12
+  n_samples: 8
+  date: 2023-09-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 341.5
+    stop: 357.5
+- name: north_atlantic_000_20230925T18
+  n_samples: 8
+  date: 2023-09-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 342.5
+    stop: 358.5
+- name: north_atlantic_000_20230926T00
+  n_samples: 8
+  date: 2023-09-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 37.373737
+    stop: 53.373737
+  lon_extent:
+    start: 342.5
+    stop: 358.5
+- name: north_atlantic_000_20230926T06
+  n_samples: 8
+  date: 2023-09-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 37.373737
+    stop: 53.373737
+  lon_extent:
+    start: 343.5
+    stop: 359.5
+- name: north_atlantic_000_20230926T18
+  n_samples: 8
+  date: 2023-09-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 38.37096
+    stop: 54.37096
+  lon_extent:
+    start: 344.5
+    stop: 360.5
+- name: north_atlantic_000_20230927T00
+  n_samples: 8
+  date: 2023-09-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 39.368183
+    stop: 55.368183
+  lon_extent:
+    start: 344.5
+    stop: 360.5
+- name: north_atlantic_001_20230327T00
+  n_samples: 8
+  date: 2023-03-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 38.37096
+    stop: 54.37096
+  lon_extent:
+    start: 300.5
+    stop: 316.5
+- name: north_atlantic_001_20230327T06
+  n_samples: 8
+  date: 2023-03-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 37.373737
+    stop: 53.373737
+  lon_extent:
+    start: 302.5
+    stop: 318.5
+- name: north_atlantic_001_20230327T18
+  n_samples: 8
+  date: 2023-03-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 38.37096
+    stop: 54.37096
+  lon_extent:
+    start: 302.5
+    stop: 318.5
+- name: north_atlantic_001_20230328T00
+  n_samples: 8
+  date: 2023-03-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 37.373737
+    stop: 53.373737
+  lon_extent:
+    start: 303.5
+    stop: 319.5
+- name: north_atlantic_001_20230328T06
+  n_samples: 8
+  date: 2023-03-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 306.5
+    stop: 322.5
+- name: north_atlantic_001_20230328T12
+  n_samples: 8
+  date: 2023-03-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 308.5
+    stop: 324.5
+- name: north_atlantic_001_20230328T18
+  n_samples: 8
+  date: 2023-03-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 36.376514
+    stop: 52.376514
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_001_20230329T06
+  n_samples: 8
+  date: 2023-03-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 37.373737
+    stop: 53.373737
+  lon_extent:
+    start: 316.5
+    stop: 332.5
+- name: north_atlantic_001_20230330T06
+  n_samples: 8
+  date: 2023-03-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 37.373737
+    stop: 53.373737
+  lon_extent:
+    start: 322.5
+    stop: 338.5
+- name: north_atlantic_001_20230330T12
+  n_samples: 8
+  date: 2023-03-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 38.37096
+    stop: 54.37096
+  lon_extent:
+    start: 324.5
+    stop: 340.5
+- name: north_atlantic_002_20230925T12
+  n_samples: 8
+  date: 2023-09-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 297.5
+    stop: 313.5
+- name: north_atlantic_002_20230925T18
+  n_samples: 8
+  date: 2023-09-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 297.5
+    stop: 313.5
+- name: north_atlantic_002_20230926T06
+  n_samples: 8
+  date: 2023-09-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 296.5
+    stop: 312.5
+- name: north_atlantic_002_20230926T12
+  n_samples: 8
+  date: 2023-09-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 295.5
+    stop: 311.5
+- name: north_atlantic_002_20230926T18
+  n_samples: 8
+  date: 2023-09-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 294.5
+    stop: 310.5
+- name: north_atlantic_002_20230927T06
+  n_samples: 8
+  date: 2023-09-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 293.5
+    stop: 309.5
+- name: north_atlantic_002_20230927T12
+  n_samples: 8
+  date: 2023-09-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 292.5
+    stop: 308.5
+- name: north_atlantic_002_20230927T18
+  n_samples: 8
+  date: 2023-09-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 291.5
+    stop: 307.5
+- name: north_atlantic_002_20230928T00
+  n_samples: 8
+  date: 2023-09-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 291.5
+    stop: 307.5
+- name: north_atlantic_002_20230928T06
+  n_samples: 8
+  date: 2023-09-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 290.5
+    stop: 306.5
+- name: north_atlantic_002_20230928T12
+  n_samples: 8
+  date: 2023-09-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 290.5
+    stop: 306.5
+- name: north_atlantic_002_20230928T18
+  n_samples: 8
+  date: 2023-09-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_002_20230929T00
+  n_samples: 8
+  date: 2023-09-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 288.5
+    stop: 304.5
+- name: north_atlantic_002_20230929T06
+  n_samples: 8
+  date: 2023-09-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 288.5
+    stop: 304.5
+- name: north_atlantic_002_20230929T12
+  n_samples: 8
+  date: 2023-09-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 288.5
+    stop: 304.5
+- name: north_atlantic_002_20230929T18
+  n_samples: 8
+  date: 2023-09-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 288.5
+    stop: 304.5
+- name: north_atlantic_002_20230930T00
+  n_samples: 8
+  date: 2023-09-30T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 288.5
+    stop: 304.5
+- name: north_atlantic_002_20230930T06
+  n_samples: 8
+  date: 2023-09-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 288.5
+    stop: 304.5
+- name: north_atlantic_002_20230930T12
+  n_samples: 8
+  date: 2023-09-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_002_20230930T18
+  n_samples: 8
+  date: 2023-09-30T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_002_20231001T00
+  n_samples: 8
+  date: 2023-10-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_002_20231001T06
+  n_samples: 8
+  date: 2023-10-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_002_20231001T12
+  n_samples: 8
+  date: 2023-10-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_002_20231001T18
+  n_samples: 8
+  date: 2023-10-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_002_20231002T00
+  n_samples: 8
+  date: 2023-10-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 290.5
+    stop: 306.5
+- name: north_atlantic_002_20231002T06
+  n_samples: 8
+  date: 2023-10-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 290.5
+    stop: 306.5
+- name: north_atlantic_002_20231002T18
+  n_samples: 8
+  date: 2023-10-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 291.5
+    stop: 307.5
+- name: north_atlantic_002_20231003T00
+  n_samples: 8
+  date: 2023-10-03T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 291.5
+    stop: 307.5
+- name: north_atlantic_002_20231003T06
+  n_samples: 8
+  date: 2023-10-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 292.5
+    stop: 308.5
+- name: north_atlantic_002_20231003T12
+  n_samples: 8
+  date: 2023-10-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 293.5
+    stop: 309.5
+- name: north_atlantic_002_20231003T18
+  n_samples: 8
+  date: 2023-10-03T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 293.5
+    stop: 309.5
+- name: north_atlantic_002_20231004T00
+  n_samples: 8
+  date: 2023-10-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 295.5
+    stop: 311.5
+- name: north_atlantic_002_20231004T06
+  n_samples: 8
+  date: 2023-10-04T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 295.5
+    stop: 311.5
+- name: north_atlantic_002_20231004T12
+  n_samples: 8
+  date: 2023-10-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 296.5
+    stop: 312.5
+- name: north_atlantic_002_20231004T18
+  n_samples: 8
+  date: 2023-10-04T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 297.5
+    stop: 313.5
+- name: north_atlantic_002_20231005T00
+  n_samples: 8
+  date: 2023-10-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 22.415384
+    stop: 38.415384
+  lon_extent:
+    start: 298.5
+    stop: 314.5
+- name: north_atlantic_002_20231005T06
+  n_samples: 8
+  date: 2023-10-05T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 23.412607
+    stop: 39.412607
+  lon_extent:
+    start: 299.5
+    stop: 315.5
+- name: north_atlantic_002_20231005T12
+  n_samples: 8
+  date: 2023-10-05T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 300.5
+    stop: 316.5
+- name: north_atlantic_002_20231005T18
+  n_samples: 8
+  date: 2023-10-05T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 302.5
+    stop: 318.5
+- name: north_atlantic_002_20231006T00
+  n_samples: 8
+  date: 2023-10-06T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 26.404282000000002
+    stop: 42.404282
+  lon_extent:
+    start: 304.5
+    stop: 320.5
+- name: north_atlantic_002_20231006T06
+  n_samples: 8
+  date: 2023-10-06T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 27.401505
+    stop: 43.401505
+  lon_extent:
+    start: 306.5
+    stop: 322.5
+- name: north_atlantic_002_20231006T12
+  n_samples: 8
+  date: 2023-10-06T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 27.401505
+    stop: 43.401505
+  lon_extent:
+    start: 309.5
+    stop: 325.5
+- name: north_atlantic_002_20231006T18
+  n_samples: 8
+  date: 2023-10-06T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 28.398730999999998
+    stop: 44.398731
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_002_20231007T00
+  n_samples: 8
+  date: 2023-10-07T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 28.398730999999998
+    stop: 44.398731
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_002_20231007T06
+  n_samples: 8
+  date: 2023-10-07T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 29.395954000000003
+    stop: 45.395954
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_003_20230827T18
+  n_samples: 8
+  date: 2023-08-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 315.5
+    stop: 331.5
+- name: north_atlantic_003_20230828T00
+  n_samples: 8
+  date: 2023-08-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_003_20230828T06
+  n_samples: 8
+  date: 2023-08-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 313.5
+    stop: 329.5
+- name: north_atlantic_003_20230828T12
+  n_samples: 8
+  date: 2023-08-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 312.5
+    stop: 328.5
+- name: north_atlantic_003_20230828T18
+  n_samples: 8
+  date: 2023-08-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 312.5
+    stop: 328.5
+- name: north_atlantic_003_20230829T00
+  n_samples: 8
+  date: 2023-08-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230829T06
+  n_samples: 8
+  date: 2023-08-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230829T12
+  n_samples: 8
+  date: 2023-08-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 310.5
+    stop: 326.5
+- name: north_atlantic_003_20230829T18
+  n_samples: 8
+  date: 2023-08-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230830T18
+  n_samples: 8
+  date: 2023-08-30T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230831T12
+  n_samples: 8
+  date: 2023-08-31T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230831T18
+  n_samples: 8
+  date: 2023-08-31T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230901T00
+  n_samples: 8
+  date: 2023-09-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230901T06
+  n_samples: 8
+  date: 2023-09-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230901T12
+  n_samples: 8
+  date: 2023-09-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 311.5
+    stop: 327.5
+- name: north_atlantic_003_20230901T18
+  n_samples: 8
+  date: 2023-09-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 310.5
+    stop: 326.5
+- name: north_atlantic_003_20230902T00
+  n_samples: 8
+  date: 2023-09-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 310.5
+    stop: 326.5
+- name: north_atlantic_003_20230902T06
+  n_samples: 8
+  date: 2023-09-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 309.5
+    stop: 325.5
+- name: north_atlantic_003_20230902T12
+  n_samples: 8
+  date: 2023-09-02T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 22.415384
+    stop: 38.415384
+  lon_extent:
+    start: 308.5
+    stop: 324.5
+- name: north_atlantic_003_20230902T18
+  n_samples: 8
+  date: 2023-09-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 22.415384
+    stop: 38.415384
+  lon_extent:
+    start: 307.5
+    stop: 323.5
+- name: north_atlantic_003_20230903T06
+  n_samples: 8
+  date: 2023-09-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 23.412607
+    stop: 39.412607
+  lon_extent:
+    start: 304.5
+    stop: 320.5
+- name: north_atlantic_003_20230903T12
+  n_samples: 8
+  date: 2023-09-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 302.5
+    stop: 318.5
+- name: north_atlantic_003_20230904T00
+  n_samples: 8
+  date: 2023-09-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 300.5
+    stop: 316.5
+- name: north_atlantic_003_20230904T12
+  n_samples: 8
+  date: 2023-09-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 23.412607
+    stop: 39.412607
+  lon_extent:
+    start: 298.5
+    stop: 314.5
+- name: north_atlantic_003_20230904T18
+  n_samples: 8
+  date: 2023-09-04T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 298.5
+    stop: 314.5
+- name: north_atlantic_003_20230905T00
+  n_samples: 8
+  date: 2023-09-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 297.5
+    stop: 313.5
+- name: north_atlantic_003_20230905T06
+  n_samples: 8
+  date: 2023-09-05T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 297.5
+    stop: 313.5
+- name: north_atlantic_003_20230905T12
+  n_samples: 8
+  date: 2023-09-05T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 298.5
+    stop: 314.5
+- name: north_atlantic_003_20230905T18
+  n_samples: 8
+  date: 2023-09-05T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 27.401505
+    stop: 43.401505
+  lon_extent:
+    start: 298.5
+    stop: 314.5
+- name: north_atlantic_003_20230906T00
+  n_samples: 8
+  date: 2023-09-06T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 29.395954000000003
+    stop: 45.395954
+  lon_extent:
+    start: 300.5
+    stop: 316.5
+- name: north_atlantic_003_20230906T06
+  n_samples: 8
+  date: 2023-09-06T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 31.3904
+    stop: 47.3904
+  lon_extent:
+    start: 301.5
+    stop: 317.5
+- name: north_atlantic_003_20230906T12
+  n_samples: 8
+  date: 2023-09-06T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 35.379295
+    stop: 51.379295
+  lon_extent:
+    start: 303.5
+    stop: 319.5
+- name: north_atlantic_003_20230906T18
+  n_samples: 8
+  date: 2023-09-06T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 39.368183
+    stop: 55.368183
+  lon_extent:
+    start: 306.5
+    stop: 322.5
+- name: north_atlantic_004_20230913T00
+  n_samples: 8
+  date: 2023-09-13T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 28.398730999999998
+    stop: 44.398731
+  lon_extent:
+    start: 291.5
+    stop: 307.5
+- name: north_atlantic_004_20230913T06
+  n_samples: 8
+  date: 2023-09-13T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 29.395954000000003
+    stop: 45.395954
+  lon_extent:
+    start: 290.5
+    stop: 306.5
+- name: north_atlantic_004_20230913T12
+  n_samples: 8
+  date: 2023-09-13T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 29.395954000000003
+    stop: 45.395954
+  lon_extent:
+    start: 289.5
+    stop: 305.5
+- name: north_atlantic_004_20230913T18
+  n_samples: 8
+  date: 2023-09-13T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 30.393177
+    stop: 46.393177
+  lon_extent:
+    start: 288.5
+    stop: 304.5
+- name: north_atlantic_004_20230914T00
+  n_samples: 8
+  date: 2023-09-14T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 30.393177
+    stop: 46.393177
+  lon_extent:
+    start: 287.5
+    stop: 303.5
+- name: north_atlantic_004_20230914T06
+  n_samples: 8
+  date: 2023-09-14T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 30.393177
+    stop: 46.393177
+  lon_extent:
+    start: 287.5
+    stop: 303.5
+- name: north_atlantic_004_20230914T12
+  n_samples: 8
+  date: 2023-09-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 30.393177
+    stop: 46.393177
+  lon_extent:
+    start: 286.5
+    stop: 302.5
+- name: north_atlantic_004_20230914T18
+  n_samples: 8
+  date: 2023-09-14T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 30.393177
+    stop: 46.393177
+  lon_extent:
+    start: 286.5
+    stop: 302.5
+- name: north_atlantic_004_20230915T00
+  n_samples: 8
+  date: 2023-09-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 31.3904
+    stop: 47.3904
+  lon_extent:
+    start: 285.5
+    stop: 301.5
+- name: north_atlantic_004_20230915T06
+  n_samples: 8
+  date: 2023-09-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 31.3904
+    stop: 47.3904
+  lon_extent:
+    start: 285.5
+    stop: 301.5
+- name: north_atlantic_004_20230915T12
+  n_samples: 8
+  date: 2023-09-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 31.3904
+    stop: 47.3904
+  lon_extent:
+    start: 285.5
+    stop: 301.5
+- name: north_atlantic_004_20230915T18
+  n_samples: 8
+  date: 2023-09-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 31.3904
+    stop: 47.3904
+  lon_extent:
+    start: 285.5
+    stop: 301.5
+- name: north_atlantic_004_20230916T00
+  n_samples: 8
+  date: 2023-09-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 32.387623
+    stop: 48.387623
+  lon_extent:
+    start: 284.5
+    stop: 300.5
+- name: north_atlantic_004_20230916T06
+  n_samples: 8
+  date: 2023-09-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 32.387623
+    stop: 48.387623
+  lon_extent:
+    start: 284.5
+    stop: 300.5
+- name: north_atlantic_004_20230916T12
+  n_samples: 8
+  date: 2023-09-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 32.387623
+    stop: 48.387623
+  lon_extent:
+    start: 284.5
+    stop: 300.5
+- name: ne_pacific_000_20230614T06
+  n_samples: 8
+  date: 2023-06-14T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 247.5
+    stop: 263.5
+- name: ne_pacific_000_20230614T12
+  n_samples: 8
+  date: 2023-06-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 247.5
+    stop: 263.5
+- name: ne_pacific_000_20230614T18
+  n_samples: 8
+  date: 2023-06-14T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 247.5
+    stop: 263.5
+- name: ne_pacific_000_20230615T00
+  n_samples: 8
+  date: 2023-06-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 247.5
+    stop: 263.5
+- name: ne_pacific_000_20230615T06
+  n_samples: 8
+  date: 2023-06-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 246.5
+    stop: 262.5
+- name: ne_pacific_000_20230615T12
+  n_samples: 8
+  date: 2023-06-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 246.5
+    stop: 262.5
+- name: ne_pacific_000_20230615T18
+  n_samples: 8
+  date: 2023-06-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 246.5
+    stop: 262.5
+- name: ne_pacific_000_20230616T00
+  n_samples: 8
+  date: 2023-06-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 245.5
+    stop: 261.5
+- name: ne_pacific_000_20230616T06
+  n_samples: 8
+  date: 2023-06-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 245.5
+    stop: 261.5
+- name: ne_pacific_000_20230616T12
+  n_samples: 8
+  date: 2023-06-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 244.5
+    stop: 260.5
+- name: ne_pacific_001_20230830T06
+  n_samples: 8
+  date: 2023-08-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 230.5
+    stop: 246.5
+- name: ne_pacific_001_20230830T12
+  n_samples: 8
+  date: 2023-08-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 229.5
+    stop: 245.5
+- name: ne_pacific_001_20230831T06
+  n_samples: 8
+  date: 2023-08-31T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 228.5
+    stop: 244.5
+- name: ne_pacific_001_20230831T12
+  n_samples: 8
+  date: 2023-08-31T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 227.5
+    stop: 243.5
+- name: ne_pacific_001_20230831T18
+  n_samples: 8
+  date: 2023-08-31T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 227.5
+    stop: 243.5
+- name: ne_pacific_001_20230901T00
+  n_samples: 8
+  date: 2023-09-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 227.5
+    stop: 243.5
+- name: ne_pacific_001_20230901T06
+  n_samples: 8
+  date: 2023-09-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 227.5
+    stop: 243.5
+- name: ne_pacific_001_20230901T12
+  n_samples: 8
+  date: 2023-09-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 227.5
+    stop: 243.5
+- name: ne_pacific_001_20230901T18
+  n_samples: 8
+  date: 2023-09-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 227.5
+    stop: 243.5
+- name: ne_pacific_001_20230902T00
+  n_samples: 8
+  date: 2023-09-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 227.5
+    stop: 243.5
+- name: ne_pacific_002_20230519T06
+  n_samples: 8
+  date: 2023-05-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 249.5
+    stop: 265.5
+- name: ne_pacific_002_20230519T18
+  n_samples: 8
+  date: 2023-05-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 248.5
+    stop: 264.5
+- name: ne_pacific_002_20230520T00
+  n_samples: 8
+  date: 2023-05-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 248.5
+    stop: 264.5
+- name: ne_pacific_002_20230520T06
+  n_samples: 8
+  date: 2023-05-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 248.5
+    stop: 264.5
+- name: ne_pacific_002_20230520T12
+  n_samples: 8
+  date: 2023-05-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 247.5
+    stop: 263.5
+- name: ne_pacific_002_20230521T12
+  n_samples: 8
+  date: 2023-05-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 245.5
+    stop: 261.5
+- name: ne_pacific_002_20230521T18
+  n_samples: 8
+  date: 2023-05-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 243.5
+    stop: 259.5
+- name: ne_pacific_002_20230522T00
+  n_samples: 8
+  date: 2023-05-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 243.5
+    stop: 259.5
+- name: ne_pacific_002_20230522T06
+  n_samples: 8
+  date: 2023-05-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 242.5
+    stop: 258.5
+- name: ne_pacific_002_20230522T12
+  n_samples: 8
+  date: 2023-05-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 242.5
+    stop: 258.5
+- name: ne_pacific_002_20230522T18
+  n_samples: 8
+  date: 2023-05-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 242.5
+    stop: 258.5
+- name: ne_pacific_002_20230523T00
+  n_samples: 8
+  date: 2023-05-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 241.5
+    stop: 257.5
+- name: ne_pacific_002_20230523T06
+  n_samples: 8
+  date: 2023-05-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 240.5
+    stop: 256.5
+- name: ne_pacific_002_20230523T12
+  n_samples: 8
+  date: 2023-05-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 240.5
+    stop: 256.5
+- name: ne_pacific_002_20230523T18
+  n_samples: 8
+  date: 2023-05-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 239.5
+    stop: 255.5
+- name: ne_pacific_002_20230524T00
+  n_samples: 8
+  date: 2023-05-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 238.5
+    stop: 254.5
+- name: ne_pacific_002_20230524T06
+  n_samples: 8
+  date: 2023-05-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 238.5
+    stop: 254.5
+- name: ne_pacific_002_20230524T12
+  n_samples: 8
+  date: 2023-05-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 238.5
+    stop: 254.5
+- name: ne_pacific_003_20230626T00
+  n_samples: 8
+  date: 2023-06-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 250.5
+    stop: 266.5
+- name: ne_pacific_003_20230626T12
+  n_samples: 8
+  date: 2023-06-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 249.5
+    stop: 265.5
+- name: ne_pacific_003_20230627T00
+  n_samples: 8
+  date: 2023-06-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 247.5
+    stop: 263.5
+- name: ne_pacific_003_20230627T06
+  n_samples: 8
+  date: 2023-06-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 246.5
+    stop: 262.5
+- name: ne_pacific_003_20230627T12
+  n_samples: 8
+  date: 2023-06-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 245.5
+    stop: 261.5
+- name: ne_pacific_003_20230627T18
+  n_samples: 8
+  date: 2023-06-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 244.5
+    stop: 260.5
+- name: ne_pacific_003_20230628T00
+  n_samples: 8
+  date: 2023-06-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 243.5
+    stop: 259.5
+- name: ne_pacific_003_20230628T06
+  n_samples: 8
+  date: 2023-06-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 242.5
+    stop: 258.5
+- name: ne_pacific_003_20230628T12
+  n_samples: 8
+  date: 2023-06-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 242.5
+    stop: 258.5
+- name: ne_pacific_003_20230628T18
+  n_samples: 8
+  date: 2023-06-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 241.5
+    stop: 257.5
+- name: ne_pacific_003_20230629T00
+  n_samples: 8
+  date: 2023-06-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 241.5
+    stop: 257.5
+- name: ne_pacific_003_20230629T06
+  n_samples: 8
+  date: 2023-06-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 240.5
+    stop: 256.5
+- name: ne_pacific_003_20230629T12
+  n_samples: 8
+  date: 2023-06-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 240.5
+    stop: 256.5
+- name: ne_pacific_003_20230629T18
+  n_samples: 8
+  date: 2023-06-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 240.5
+    stop: 256.5
+- name: ne_pacific_003_20230630T00
+  n_samples: 8
+  date: 2023-06-30T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 239.5
+    stop: 255.5
+- name: ne_pacific_003_20230630T06
+  n_samples: 8
+  date: 2023-06-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 239.5
+    stop: 255.5
+- name: ne_pacific_003_20230630T12
+  n_samples: 8
+  date: 2023-06-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 239.5
+    stop: 255.5
+- name: ne_pacific_003_20230630T18
+  n_samples: 8
+  date: 2023-06-30T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 238.5
+    stop: 254.5
+- name: nw_pacific_000_20231114T12
+  n_samples: 8
+  date: 2023-11-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -2.515256
+    stop: 13.484744
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: nw_pacific_000_20231114T18
+  n_samples: 8
+  date: 2023-11-14T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -1.5180309999999997
+    stop: 14.481969
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: nw_pacific_000_20231115T00
+  n_samples: 8
+  date: 2023-11-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -1.5180309999999997
+    stop: 14.481969
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: nw_pacific_000_20231115T06
+  n_samples: 8
+  date: 2023-11-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -0.520804
+    stop: 15.479196
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: nw_pacific_000_20231115T12
+  n_samples: 8
+  date: 2023-11-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 0.4764210000000002
+    stop: 16.476421000000002
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: nw_pacific_000_20231115T18
+  n_samples: 8
+  date: 2023-11-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 1.4736469999999997
+    stop: 17.473647
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: nw_pacific_000_20231116T00
+  n_samples: 8
+  date: 2023-11-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: nw_pacific_000_20231116T06
+  n_samples: 8
+  date: 2023-11-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: nw_pacific_000_20231116T12
+  n_samples: 8
+  date: 2023-11-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: nw_pacific_000_20231116T18
+  n_samples: 8
+  date: 2023-11-16T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 4.465325
+    stop: 20.465325
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: nw_pacific_000_20231117T00
+  n_samples: 8
+  date: 2023-11-17T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 4.465325
+    stop: 20.465325
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: nw_pacific_000_20231117T06
+  n_samples: 8
+  date: 2023-11-17T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 4.465325
+    stop: 20.465325
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: nw_pacific_000_20231117T12
+  n_samples: 8
+  date: 2023-11-17T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: nw_pacific_000_20231117T18
+  n_samples: 8
+  date: 2023-11-17T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: nw_pacific_000_20231118T00
+  n_samples: 8
+  date: 2023-11-18T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_000_20231118T06
+  n_samples: 8
+  date: 2023-11-18T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 145.5
+    stop: 161.5
+- name: nw_pacific_000_20231118T12
+  n_samples: 8
+  date: 2023-11-18T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 144.5
+    stop: 160.5
+- name: nw_pacific_000_20231118T18
+  n_samples: 8
+  date: 2023-11-18T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 142.5
+    stop: 158.5
+- name: nw_pacific_000_20231119T00
+  n_samples: 8
+  date: 2023-11-19T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 141.5
+    stop: 157.5
+- name: nw_pacific_000_20231119T06
+  n_samples: 8
+  date: 2023-11-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 139.5
+    stop: 155.5
+- name: nw_pacific_000_20231119T12
+  n_samples: 8
+  date: 2023-11-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 138.5
+    stop: 154.5
+- name: nw_pacific_000_20231119T18
+  n_samples: 8
+  date: 2023-11-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_000_20231120T00
+  n_samples: 8
+  date: 2023-11-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_000_20231120T06
+  n_samples: 8
+  date: 2023-11-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 136.5
+    stop: 152.5
+- name: nw_pacific_000_20231120T12
+  n_samples: 8
+  date: 2023-11-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 136.5
+    stop: 152.5
+- name: nw_pacific_000_20231120T18
+  n_samples: 8
+  date: 2023-11-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_000_20231121T00
+  n_samples: 8
+  date: 2023-11-21T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_000_20231121T06
+  n_samples: 8
+  date: 2023-11-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_000_20231121T12
+  n_samples: 8
+  date: 2023-11-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_000_20231121T18
+  n_samples: 8
+  date: 2023-11-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_000_20231122T00
+  n_samples: 8
+  date: 2023-11-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_000_20231122T06
+  n_samples: 8
+  date: 2023-11-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_000_20231122T12
+  n_samples: 8
+  date: 2023-11-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 136.5
+    stop: 152.5
+- name: nw_pacific_000_20231122T18
+  n_samples: 8
+  date: 2023-11-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_000_20231123T00
+  n_samples: 8
+  date: 2023-11-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 139.5
+    stop: 155.5
+- name: nw_pacific_000_20231123T06
+  n_samples: 8
+  date: 2023-11-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 141.5
+    stop: 157.5
+- name: nw_pacific_000_20231123T12
+  n_samples: 8
+  date: 2023-11-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_000_20231123T18
+  n_samples: 8
+  date: 2023-11-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_001_20230719T06
+  n_samples: 8
+  date: 2023-07-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: nw_pacific_001_20230719T12
+  n_samples: 8
+  date: 2023-07-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: nw_pacific_001_20230719T18
+  n_samples: 8
+  date: 2023-07-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: nw_pacific_001_20230720T00
+  n_samples: 8
+  date: 2023-07-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: nw_pacific_001_20230720T06
+  n_samples: 8
+  date: 2023-07-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_001_20230720T12
+  n_samples: 8
+  date: 2023-07-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_001_20230720T18
+  n_samples: 8
+  date: 2023-07-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_001_20230721T00
+  n_samples: 8
+  date: 2023-07-21T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_001_20230721T06
+  n_samples: 8
+  date: 2023-07-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 145.5
+    stop: 161.5
+- name: nw_pacific_001_20230721T12
+  n_samples: 8
+  date: 2023-07-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 144.5
+    stop: 160.5
+- name: nw_pacific_001_20230721T18
+  n_samples: 8
+  date: 2023-07-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 144.5
+    stop: 160.5
+- name: nw_pacific_001_20230722T00
+  n_samples: 8
+  date: 2023-07-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_001_20230722T06
+  n_samples: 8
+  date: 2023-07-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_001_20230722T12
+  n_samples: 8
+  date: 2023-07-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_001_20230722T18
+  n_samples: 8
+  date: 2023-07-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_001_20230723T00
+  n_samples: 8
+  date: 2023-07-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_001_20230723T06
+  n_samples: 8
+  date: 2023-07-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_001_20230723T12
+  n_samples: 8
+  date: 2023-07-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_001_20230723T18
+  n_samples: 8
+  date: 2023-07-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 142.5
+    stop: 158.5
+- name: nw_pacific_001_20230724T00
+  n_samples: 8
+  date: 2023-07-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 142.5
+    stop: 158.5
+- name: nw_pacific_001_20230724T06
+  n_samples: 8
+  date: 2023-07-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 142.5
+    stop: 158.5
+- name: nw_pacific_001_20230724T12
+  n_samples: 8
+  date: 2023-07-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 141.5
+    stop: 157.5
+- name: nw_pacific_001_20230724T18
+  n_samples: 8
+  date: 2023-07-24T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 141.5
+    stop: 157.5
+- name: nw_pacific_001_20230725T00
+  n_samples: 8
+  date: 2023-07-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 140.5
+    stop: 156.5
+- name: nw_pacific_001_20230725T06
+  n_samples: 8
+  date: 2023-07-25T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 140.5
+    stop: 156.5
+- name: nw_pacific_001_20230725T12
+  n_samples: 8
+  date: 2023-07-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 139.5
+    stop: 155.5
+- name: nw_pacific_001_20230725T18
+  n_samples: 8
+  date: 2023-07-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 138.5
+    stop: 154.5
+- name: nw_pacific_001_20230726T00
+  n_samples: 8
+  date: 2023-07-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_001_20230726T06
+  n_samples: 8
+  date: 2023-07-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_001_20230726T12
+  n_samples: 8
+  date: 2023-07-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 136.5
+    stop: 152.5
+- name: nw_pacific_001_20230726T18
+  n_samples: 8
+  date: 2023-07-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_001_20230727T00
+  n_samples: 8
+  date: 2023-07-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_001_20230727T06
+  n_samples: 8
+  date: 2023-07-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_001_20230727T12
+  n_samples: 8
+  date: 2023-07-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_001_20230727T18
+  n_samples: 8
+  date: 2023-07-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 133.5
+    stop: 149.5
+- name: nw_pacific_001_20230728T00
+  n_samples: 8
+  date: 2023-07-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 133.5
+    stop: 149.5
+- name: nw_pacific_001_20230728T06
+  n_samples: 8
+  date: 2023-07-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 132.5
+    stop: 148.5
+- name: nw_pacific_001_20230728T12
+  n_samples: 8
+  date: 2023-07-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 132.5
+    stop: 148.5
+- name: nw_pacific_001_20230728T18
+  n_samples: 8
+  date: 2023-07-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 131.5
+    stop: 147.5
+- name: nw_pacific_001_20230729T00
+  n_samples: 8
+  date: 2023-07-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_001_20230729T06
+  n_samples: 8
+  date: 2023-07-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_001_20230729T12
+  n_samples: 8
+  date: 2023-07-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_001_20230729T18
+  n_samples: 8
+  date: 2023-07-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_001_20230730T00
+  n_samples: 8
+  date: 2023-07-30T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_001_20230730T06
+  n_samples: 8
+  date: 2023-07-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 127.5
+    stop: 143.5
+- name: nw_pacific_001_20230730T12
+  n_samples: 8
+  date: 2023-07-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_001_20230730T18
+  n_samples: 8
+  date: 2023-07-30T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_001_20230731T00
+  n_samples: 8
+  date: 2023-07-31T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_001_20230731T06
+  n_samples: 8
+  date: 2023-07-31T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_001_20230731T12
+  n_samples: 8
+  date: 2023-07-31T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_001_20230731T18
+  n_samples: 8
+  date: 2023-07-31T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 122.5
+    stop: 138.5
+- name: nw_pacific_001_20230801T00
+  n_samples: 8
+  date: 2023-08-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 121.5
+    stop: 137.5
+- name: nw_pacific_001_20230801T06
+  n_samples: 8
+  date: 2023-08-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 121.5
+    stop: 137.5
+- name: nw_pacific_001_20230801T12
+  n_samples: 8
+  date: 2023-08-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 120.5
+    stop: 136.5
+- name: nw_pacific_001_20230801T18
+  n_samples: 8
+  date: 2023-08-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 119.5
+    stop: 135.5
+- name: nw_pacific_001_20230802T00
+  n_samples: 8
+  date: 2023-08-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 119.5
+    stop: 135.5
+- name: nw_pacific_001_20230802T06
+  n_samples: 8
+  date: 2023-08-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 118.5
+    stop: 134.5
+- name: nw_pacific_001_20230802T12
+  n_samples: 8
+  date: 2023-08-02T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 117.5
+    stop: 133.5
+- name: nw_pacific_001_20230802T18
+  n_samples: 8
+  date: 2023-08-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 116.5
+    stop: 132.5
+- name: nw_pacific_001_20230803T00
+  n_samples: 8
+  date: 2023-08-03T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 115.5
+    stop: 131.5
+- name: nw_pacific_001_20230803T06
+  n_samples: 8
+  date: 2023-08-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 115.5
+    stop: 131.5
+- name: nw_pacific_001_20230803T12
+  n_samples: 8
+  date: 2023-08-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 113.5
+    stop: 129.5
+- name: nw_pacific_001_20230803T18
+  n_samples: 8
+  date: 2023-08-03T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 113.5
+    stop: 129.5
+- name: nw_pacific_001_20230804T00
+  n_samples: 8
+  date: 2023-08-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 111.5
+    stop: 127.5
+- name: nw_pacific_001_20230804T06
+  n_samples: 8
+  date: 2023-08-04T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230804T12
+  n_samples: 8
+  date: 2023-08-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 109.5
+    stop: 125.5
+- name: nw_pacific_001_20230804T18
+  n_samples: 8
+  date: 2023-08-04T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 109.5
+    stop: 125.5
+- name: nw_pacific_001_20230805T00
+  n_samples: 8
+  date: 2023-08-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230805T06
+  n_samples: 8
+  date: 2023-08-05T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230805T12
+  n_samples: 8
+  date: 2023-08-05T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230805T18
+  n_samples: 8
+  date: 2023-08-05T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230806T00
+  n_samples: 8
+  date: 2023-08-06T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230806T06
+  n_samples: 8
+  date: 2023-08-06T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230806T12
+  n_samples: 8
+  date: 2023-08-06T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 109.5
+    stop: 125.5
+- name: nw_pacific_001_20230806T18
+  n_samples: 8
+  date: 2023-08-06T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 109.5
+    stop: 125.5
+- name: nw_pacific_001_20230807T00
+  n_samples: 8
+  date: 2023-08-07T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 110.5
+    stop: 126.5
+- name: nw_pacific_001_20230807T06
+  n_samples: 8
+  date: 2023-08-07T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 109.5
+    stop: 125.5
+- name: nw_pacific_001_20230807T12
+  n_samples: 8
+  date: 2023-08-07T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 108.5
+    stop: 124.5
+- name: nw_pacific_001_20230807T18
+  n_samples: 8
+  date: 2023-08-07T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 107.5
+    stop: 123.5
+- name: nw_pacific_001_20230808T00
+  n_samples: 8
+  date: 2023-08-08T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 107.5
+    stop: 123.5
+- name: nw_pacific_002_20231103T12
+  n_samples: 8
+  date: 2023-11-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -2.515256
+    stop: 13.484744
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: nw_pacific_002_20231103T18
+  n_samples: 8
+  date: 2023-11-03T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -2.515256
+    stop: 13.484744
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: nw_pacific_002_20231104T00
+  n_samples: 8
+  date: 2023-11-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -3.5124829999999996
+    stop: 12.487517
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: nw_pacific_002_20231104T12
+  n_samples: 8
+  date: 2023-11-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -4.509709
+    stop: 11.490291
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: nw_pacific_002_20231105T00
+  n_samples: 8
+  date: 2023-11-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -3.5124829999999996
+    stop: 12.487517
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: nw_pacific_002_20231105T06
+  n_samples: 8
+  date: 2023-11-05T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -3.5124829999999996
+    stop: 12.487517
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: nw_pacific_002_20231105T12
+  n_samples: 8
+  date: 2023-11-05T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -3.5124829999999996
+    stop: 12.487517
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: nw_pacific_002_20231106T06
+  n_samples: 8
+  date: 2023-11-06T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -2.515256
+    stop: 13.484744
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: nw_pacific_002_20231106T12
+  n_samples: 8
+  date: 2023-11-06T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -2.515256
+    stop: 13.484744
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: nw_pacific_002_20231107T00
+  n_samples: 8
+  date: 2023-11-07T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -1.5180309999999997
+    stop: 14.481969
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: nw_pacific_002_20231107T06
+  n_samples: 8
+  date: 2023-11-07T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -1.5180309999999997
+    stop: 14.481969
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: nw_pacific_002_20231107T12
+  n_samples: 8
+  date: 2023-11-07T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -0.520804
+    stop: 15.479196
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: nw_pacific_002_20231107T18
+  n_samples: 8
+  date: 2023-11-07T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -0.520804
+    stop: 15.479196
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_002_20231108T00
+  n_samples: 8
+  date: 2023-11-08T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 0.4764210000000002
+    stop: 16.476421000000002
+  lon_extent:
+    start: 145.5
+    stop: 161.5
+- name: nw_pacific_002_20231108T06
+  n_samples: 8
+  date: 2023-11-08T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 1.4736469999999997
+    stop: 17.473647
+  lon_extent:
+    start: 144.5
+    stop: 160.5
+- name: nw_pacific_002_20231108T12
+  n_samples: 8
+  date: 2023-11-08T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 1.4736469999999997
+    stop: 17.473647
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_002_20231108T18
+  n_samples: 8
+  date: 2023-11-08T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 1.4736469999999997
+    stop: 17.473647
+  lon_extent:
+    start: 142.5
+    stop: 158.5
+- name: nw_pacific_002_20231109T00
+  n_samples: 8
+  date: 2023-11-09T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 141.5
+    stop: 157.5
+- name: nw_pacific_002_20231109T06
+  n_samples: 8
+  date: 2023-11-09T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 140.5
+    stop: 156.5
+- name: nw_pacific_002_20231109T12
+  n_samples: 8
+  date: 2023-11-09T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 140.5
+    stop: 156.5
+- name: nw_pacific_002_20231109T18
+  n_samples: 8
+  date: 2023-11-09T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 138.5
+    stop: 154.5
+- name: nw_pacific_002_20231110T00
+  n_samples: 8
+  date: 2023-11-10T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 4.465325
+    stop: 20.465325
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_002_20231110T06
+  n_samples: 8
+  date: 2023-11-10T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_002_20231110T12
+  n_samples: 8
+  date: 2023-11-10T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_002_20231110T18
+  n_samples: 8
+  date: 2023-11-10T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 133.5
+    stop: 149.5
+- name: nw_pacific_002_20231111T00
+  n_samples: 8
+  date: 2023-11-11T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 132.5
+    stop: 148.5
+- name: nw_pacific_002_20231111T06
+  n_samples: 8
+  date: 2023-11-11T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 131.5
+    stop: 147.5
+- name: nw_pacific_002_20231111T12
+  n_samples: 8
+  date: 2023-11-11T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_002_20231111T18
+  n_samples: 8
+  date: 2023-11-11T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_002_20231112T00
+  n_samples: 8
+  date: 2023-11-12T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_002_20231112T06
+  n_samples: 8
+  date: 2023-11-12T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 127.5
+    stop: 143.5
+- name: nw_pacific_002_20231112T12
+  n_samples: 8
+  date: 2023-11-12T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_002_20231112T18
+  n_samples: 8
+  date: 2023-11-12T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_002_20231113T00
+  n_samples: 8
+  date: 2023-11-13T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_002_20231113T06
+  n_samples: 8
+  date: 2023-11-13T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_002_20231113T12
+  n_samples: 8
+  date: 2023-11-13T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 121.5
+    stop: 137.5
+- name: nw_pacific_002_20231113T18
+  n_samples: 8
+  date: 2023-11-13T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 120.5
+    stop: 136.5
+- name: nw_pacific_002_20231114T00
+  n_samples: 8
+  date: 2023-11-14T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 119.5
+    stop: 135.5
+- name: nw_pacific_002_20231114T06
+  n_samples: 8
+  date: 2023-11-14T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 117.5
+    stop: 133.5
+- name: nw_pacific_002_20231114T12
+  n_samples: 8
+  date: 2023-11-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 117.5
+    stop: 133.5
+- name: nw_pacific_002_20231114T18
+  n_samples: 8
+  date: 2023-11-14T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 115.5
+    stop: 131.5
+- name: nw_pacific_002_20231115T00
+  n_samples: 8
+  date: 2023-11-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 115.5
+    stop: 131.5
+- name: nw_pacific_002_20231115T06
+  n_samples: 8
+  date: 2023-11-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 114.5
+    stop: 130.5
+- name: nw_pacific_002_20231115T12
+  n_samples: 8
+  date: 2023-11-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 113.5
+    stop: 129.5
+- name: nw_pacific_002_20231115T18
+  n_samples: 8
+  date: 2023-11-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 113.5
+    stop: 129.5
+- name: nw_pacific_002_20231116T00
+  n_samples: 8
+  date: 2023-11-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 112.5
+    stop: 128.5
+- name: nw_pacific_002_20231116T06
+  n_samples: 8
+  date: 2023-11-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 112.5
+    stop: 128.5
+- name: nw_pacific_002_20231116T12
+  n_samples: 8
+  date: 2023-11-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 112.5
+    stop: 128.5
+- name: nw_pacific_002_20231116T18
+  n_samples: 8
+  date: 2023-11-16T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 112.5
+    stop: 128.5
+- name: nw_pacific_002_20231117T00
+  n_samples: 8
+  date: 2023-11-17T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 112.5
+    stop: 128.5
+- name: nw_pacific_002_20231117T06
+  n_samples: 8
+  date: 2023-11-17T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 113.5
+    stop: 129.5
+- name: nw_pacific_002_20231117T12
+  n_samples: 8
+  date: 2023-11-17T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 113.5
+    stop: 129.5
+- name: nw_pacific_002_20231117T18
+  n_samples: 8
+  date: 2023-11-17T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 115.5
+    stop: 131.5
+- name: nw_pacific_002_20231118T00
+  n_samples: 8
+  date: 2023-11-18T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 116.5
+    stop: 132.5
+- name: nw_pacific_003_20230625T00
+  n_samples: 8
+  date: 2023-06-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 1.4736469999999997
+    stop: 17.473647
+  lon_extent:
+    start: 139.5
+    stop: 155.5
+- name: nw_pacific_003_20230625T06
+  n_samples: 8
+  date: 2023-06-25T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 1.4736469999999997
+    stop: 17.473647
+  lon_extent:
+    start: 139.5
+    stop: 155.5
+- name: nw_pacific_003_20230625T12
+  n_samples: 8
+  date: 2023-06-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 138.5
+    stop: 154.5
+- name: nw_pacific_003_20230625T18
+  n_samples: 8
+  date: 2023-06-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 138.5
+    stop: 154.5
+- name: nw_pacific_003_20230626T00
+  n_samples: 8
+  date: 2023-06-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_003_20230626T06
+  n_samples: 8
+  date: 2023-06-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 2.4708740000000002
+    stop: 18.470874000000002
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_003_20230626T12
+  n_samples: 8
+  date: 2023-06-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 136.5
+    stop: 152.5
+- name: nw_pacific_003_20230626T18
+  n_samples: 8
+  date: 2023-06-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_003_20230627T00
+  n_samples: 8
+  date: 2023-06-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_003_20230627T06
+  n_samples: 8
+  date: 2023-06-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_003_20230627T12
+  n_samples: 8
+  date: 2023-06-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_003_20230627T18
+  n_samples: 8
+  date: 2023-06-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 3.4680999999999997
+    stop: 19.4681
+  lon_extent:
+    start: 133.5
+    stop: 149.5
+- name: nw_pacific_003_20230628T00
+  n_samples: 8
+  date: 2023-06-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 4.465325
+    stop: 20.465325
+  lon_extent:
+    start: 132.5
+    stop: 148.5
+- name: nw_pacific_003_20230628T06
+  n_samples: 8
+  date: 2023-06-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 4.465325
+    stop: 20.465325
+  lon_extent:
+    start: 132.5
+    stop: 148.5
+- name: nw_pacific_003_20230628T12
+  n_samples: 8
+  date: 2023-06-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 4.465325
+    stop: 20.465325
+  lon_extent:
+    start: 131.5
+    stop: 147.5
+- name: nw_pacific_003_20230628T18
+  n_samples: 8
+  date: 2023-06-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_003_20230629T00
+  n_samples: 8
+  date: 2023-06-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_003_20230629T06
+  n_samples: 8
+  date: 2023-06-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 5.4625509999999995
+    stop: 21.462550999999998
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_003_20230629T12
+  n_samples: 8
+  date: 2023-06-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_003_20230629T18
+  n_samples: 8
+  date: 2023-06-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 127.5
+    stop: 143.5
+- name: nw_pacific_003_20230630T00
+  n_samples: 8
+  date: 2023-06-30T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_003_20230630T06
+  n_samples: 8
+  date: 2023-06-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_003_20230630T12
+  n_samples: 8
+  date: 2023-06-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230630T18
+  n_samples: 8
+  date: 2023-06-30T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230701T00
+  n_samples: 8
+  date: 2023-07-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230701T06
+  n_samples: 8
+  date: 2023-07-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230701T12
+  n_samples: 8
+  date: 2023-07-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230701T18
+  n_samples: 8
+  date: 2023-07-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230702T00
+  n_samples: 8
+  date: 2023-07-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230702T06
+  n_samples: 8
+  date: 2023-07-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230702T12
+  n_samples: 8
+  date: 2023-07-02T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230702T18
+  n_samples: 8
+  date: 2023-07-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230703T00
+  n_samples: 8
+  date: 2023-07-03T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230703T06
+  n_samples: 8
+  date: 2023-07-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230703T12
+  n_samples: 8
+  date: 2023-07-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230703T18
+  n_samples: 8
+  date: 2023-07-03T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230704T00
+  n_samples: 8
+  date: 2023-07-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230704T06
+  n_samples: 8
+  date: 2023-07-04T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230704T12
+  n_samples: 8
+  date: 2023-07-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230704T18
+  n_samples: 8
+  date: 2023-07-04T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230705T00
+  n_samples: 8
+  date: 2023-07-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230705T06
+  n_samples: 8
+  date: 2023-07-05T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230705T12
+  n_samples: 8
+  date: 2023-07-05T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230705T18
+  n_samples: 8
+  date: 2023-07-05T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 123.5
+    stop: 139.5
+- name: nw_pacific_003_20230706T00
+  n_samples: 8
+  date: 2023-07-06T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230706T06
+  n_samples: 8
+  date: 2023-07-06T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230706T12
+  n_samples: 8
+  date: 2023-07-06T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230706T18
+  n_samples: 8
+  date: 2023-07-06T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 124.5
+    stop: 140.5
+- name: nw_pacific_003_20230707T00
+  n_samples: 8
+  date: 2023-07-07T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_003_20230707T06
+  n_samples: 8
+  date: 2023-07-07T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_003_20230707T12
+  n_samples: 8
+  date: 2023-07-07T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 22.415384
+    stop: 38.415384
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_003_20230707T18
+  n_samples: 8
+  date: 2023-07-07T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 22.415384
+    stop: 38.415384
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_003_20230708T00
+  n_samples: 8
+  date: 2023-07-08T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 23.412607
+    stop: 39.412607
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_003_20230708T06
+  n_samples: 8
+  date: 2023-07-08T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 23.412607
+    stop: 39.412607
+  lon_extent:
+    start: 125.5
+    stop: 141.5
+- name: nw_pacific_003_20230708T12
+  n_samples: 8
+  date: 2023-07-08T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_003_20230708T18
+  n_samples: 8
+  date: 2023-07-08T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_003_20230709T00
+  n_samples: 8
+  date: 2023-07-09T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_003_20230709T06
+  n_samples: 8
+  date: 2023-07-09T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 126.5
+    stop: 142.5
+- name: nw_pacific_003_20230709T12
+  n_samples: 8
+  date: 2023-07-09T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 127.5
+    stop: 143.5
+- name: nw_pacific_003_20230709T18
+  n_samples: 8
+  date: 2023-07-09T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 127.5
+    stop: 143.5
+- name: nw_pacific_003_20230710T00
+  n_samples: 8
+  date: 2023-07-10T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 127.5
+    stop: 143.5
+- name: nw_pacific_003_20230710T06
+  n_samples: 8
+  date: 2023-07-10T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 127.5
+    stop: 143.5
+- name: nw_pacific_003_20230710T12
+  n_samples: 8
+  date: 2023-07-10T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_003_20230710T18
+  n_samples: 8
+  date: 2023-07-10T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_003_20230711T00
+  n_samples: 8
+  date: 2023-07-11T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_003_20230711T06
+  n_samples: 8
+  date: 2023-07-11T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_003_20230711T12
+  n_samples: 8
+  date: 2023-07-11T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 131.5
+    stop: 147.5
+- name: nw_pacific_003_20230711T18
+  n_samples: 8
+  date: 2023-07-11T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 26.404282000000002
+    stop: 42.404282
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_003_20230712T00
+  n_samples: 8
+  date: 2023-07-12T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 26.404282000000002
+    stop: 42.404282
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_003_20230712T06
+  n_samples: 8
+  date: 2023-07-12T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 26.404282000000002
+    stop: 42.404282
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_004_20230926T06
+  n_samples: 8
+  date: 2023-09-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: nw_pacific_004_20230926T12
+  n_samples: 8
+  date: 2023-09-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 145.5
+    stop: 161.5
+- name: nw_pacific_004_20230926T18
+  n_samples: 8
+  date: 2023-09-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 144.5
+    stop: 160.5
+- name: nw_pacific_004_20230927T00
+  n_samples: 8
+  date: 2023-09-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 143.5
+    stop: 159.5
+- name: nw_pacific_004_20230927T12
+  n_samples: 8
+  date: 2023-09-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 141.5
+    stop: 157.5
+- name: nw_pacific_004_20230927T18
+  n_samples: 8
+  date: 2023-09-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 139.5
+    stop: 155.5
+- name: nw_pacific_004_20230928T00
+  n_samples: 8
+  date: 2023-09-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 138.5
+    stop: 154.5
+- name: nw_pacific_004_20230928T06
+  n_samples: 8
+  date: 2023-09-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_004_20230928T12
+  n_samples: 8
+  date: 2023-09-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 137.5
+    stop: 153.5
+- name: nw_pacific_004_20230928T18
+  n_samples: 8
+  date: 2023-09-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 136.5
+    stop: 152.5
+- name: nw_pacific_004_20230929T00
+  n_samples: 8
+  date: 2023-09-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_004_20230929T06
+  n_samples: 8
+  date: 2023-09-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 134.5
+    stop: 150.5
+- name: nw_pacific_004_20230929T12
+  n_samples: 8
+  date: 2023-09-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 133.5
+    stop: 149.5
+- name: nw_pacific_004_20230929T18
+  n_samples: 8
+  date: 2023-09-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 132.5
+    stop: 148.5
+- name: nw_pacific_004_20230930T00
+  n_samples: 8
+  date: 2023-09-30T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 12.44313
+    stop: 28.44313
+  lon_extent:
+    start: 131.5
+    stop: 147.5
+- name: nw_pacific_004_20230930T06
+  n_samples: 8
+  date: 2023-09-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 13.440356999999999
+    stop: 29.440357
+  lon_extent:
+    start: 131.5
+    stop: 147.5
+- name: nw_pacific_004_20230930T12
+  n_samples: 8
+  date: 2023-09-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 14.437581999999999
+    stop: 30.437582
+  lon_extent:
+    start: 130.5
+    stop: 146.5
+- name: nw_pacific_004_20230930T18
+  n_samples: 8
+  date: 2023-09-30T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 15.434807
+    stop: 31.434807
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_004_20231001T00
+  n_samples: 8
+  date: 2023-10-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 16.432034
+    stop: 32.432034
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_004_20231001T06
+  n_samples: 8
+  date: 2023-10-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 17.429258
+    stop: 33.429258000000004
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_004_20231001T12
+  n_samples: 8
+  date: 2023-10-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 18.426483
+    stop: 34.426483000000005
+  lon_extent:
+    start: 128.5
+    stop: 144.5
+- name: nw_pacific_004_20231001T18
+  n_samples: 8
+  date: 2023-10-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 19.423708
+    stop: 35.423708000000005
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_004_20231002T00
+  n_samples: 8
+  date: 2023-10-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 20.420933
+    stop: 36.420933000000005
+  lon_extent:
+    start: 129.5
+    stop: 145.5
+- name: nw_pacific_004_20231002T06
+  n_samples: 8
+  date: 2023-10-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 21.418159
+    stop: 37.418159
+  lon_extent:
+    start: 131.5
+    stop: 147.5
+- name: nw_pacific_004_20231002T12
+  n_samples: 8
+  date: 2023-10-02T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 22.415384
+    stop: 38.415384
+  lon_extent:
+    start: 133.5
+    stop: 149.5
+- name: nw_pacific_004_20231002T18
+  n_samples: 8
+  date: 2023-10-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 24.409832
+    stop: 40.409832
+  lon_extent:
+    start: 135.5
+    stop: 151.5
+- name: nw_pacific_004_20231003T00
+  n_samples: 8
+  date: 2023-10-03T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 25.407058999999997
+    stop: 41.407059
+  lon_extent:
+    start: 138.5
+    stop: 154.5
+- name: nw_pacific_004_20231003T06
+  n_samples: 8
+  date: 2023-10-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 26.404282000000002
+    stop: 42.404282
+  lon_extent:
+    start: 141.5
+    stop: 157.5
+- name: nw_pacific_004_20231003T12
+  n_samples: 8
+  date: 2023-10-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 27.401505
+    stop: 43.401505
+  lon_extent:
+    start: 145.5
+    stop: 161.5
+- name: n_indian_000_20231021T18
+  n_samples: 8
+  date: 2023-10-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 6.459777000000001
+    stop: 22.459777000000003
+  lon_extent:
+    start: 85.5
+    stop: 101.5
+- name: n_indian_000_20231022T00
+  n_samples: 8
+  date: 2023-10-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 85.5
+    stop: 101.5
+- name: n_indian_000_20231022T06
+  n_samples: 8
+  date: 2023-10-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 84.5
+    stop: 100.5
+- name: n_indian_000_20231022T12
+  n_samples: 8
+  date: 2023-10-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 7.457003
+    stop: 23.457003
+  lon_extent:
+    start: 84.5
+    stop: 100.5
+- name: n_indian_000_20231022T18
+  n_samples: 8
+  date: 2023-10-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 84.5
+    stop: 100.5
+- name: n_indian_000_20231023T00
+  n_samples: 8
+  date: 2023-10-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 83.5
+    stop: 99.5
+- name: n_indian_000_20231023T06
+  n_samples: 8
+  date: 2023-10-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 83.5
+    stop: 99.5
+- name: n_indian_000_20231023T12
+  n_samples: 8
+  date: 2023-10-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 82.5
+    stop: 98.5
+- name: n_indian_000_20231023T18
+  n_samples: 8
+  date: 2023-10-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 82.5
+    stop: 98.5
+- name: n_indian_000_20231024T00
+  n_samples: 8
+  date: 2023-10-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 81.5
+    stop: 97.5
+- name: n_indian_000_20231024T06
+  n_samples: 8
+  date: 2023-10-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 81.5
+    stop: 97.5
+- name: n_indian_000_20231024T12
+  n_samples: 8
+  date: 2023-10-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: n_indian_000_20231024T18
+  n_samples: 8
+  date: 2023-10-24T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: n_indian_000_20231025T00
+  n_samples: 8
+  date: 2023-10-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: n_indian_000_20231025T06
+  n_samples: 8
+  date: 2023-10-25T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: n_indian_000_20231025T12
+  n_samples: 8
+  date: 2023-10-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: n_indian_000_20231025T18
+  n_samples: 8
+  date: 2023-10-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: n_indian_000_20231026T00
+  n_samples: 8
+  date: 2023-10-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: n_indian_000_20231026T06
+  n_samples: 8
+  date: 2023-10-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: n_indian_000_20231026T12
+  n_samples: 8
+  date: 2023-10-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: n_indian_000_20231026T18
+  n_samples: 8
+  date: 2023-10-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: n_indian_000_20231027T00
+  n_samples: 8
+  date: 2023-10-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: n_indian_000_20231027T06
+  n_samples: 8
+  date: 2023-10-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 77.5
+    stop: 93.5
+- name: n_indian_000_20231027T12
+  n_samples: 8
+  date: 2023-10-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 11.445906
+    stop: 27.445906
+  lon_extent:
+    start: 77.5
+    stop: 93.5
+- name: n_indian_001_20230918T00
+  n_samples: 8
+  date: 2023-09-18T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: n_indian_001_20230918T06
+  n_samples: 8
+  date: 2023-09-18T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: n_indian_001_20230918T12
+  n_samples: 8
+  date: 2023-09-18T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: n_indian_001_20230918T18
+  n_samples: 8
+  date: 2023-09-18T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: n_indian_001_20230919T00
+  n_samples: 8
+  date: 2023-09-19T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 8.454229000000002
+    stop: 24.454229
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: n_indian_001_20230919T12
+  n_samples: 8
+  date: 2023-09-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: n_indian_001_20230919T18
+  n_samples: 8
+  date: 2023-09-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: n_indian_001_20230920T00
+  n_samples: 8
+  date: 2023-09-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 77.5
+    stop: 93.5
+- name: n_indian_001_20230920T06
+  n_samples: 8
+  date: 2023-09-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 76.5
+    stop: 92.5
+- name: n_indian_001_20230920T12
+  n_samples: 8
+  date: 2023-09-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: 10.448681
+    stop: 26.448681
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: n_indian_001_20230920T18
+  n_samples: 8
+  date: 2023-09-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: 9.451453999999998
+    stop: 25.451454
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: sw_indian_000_20231216T00
+  n_samples: 8
+  date: 2023-12-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -7.501387
+    stop: 8.498613
+  lon_extent:
+    start: 54.5
+    stop: 70.5
+- name: sw_indian_000_20231216T18
+  n_samples: 8
+  date: 2023-12-16T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -15.479196
+    stop: 0.520804
+  lon_extent:
+    start: 54.5
+    stop: 70.5
+- name: sw_indian_000_20231217T00
+  n_samples: 8
+  date: 2023-12-17T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -15.479196
+    stop: 0.520804
+  lon_extent:
+    start: 54.5
+    stop: 70.5
+- name: sw_indian_000_20231217T18
+  n_samples: 8
+  date: 2023-12-17T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.476421000000002
+    stop: -0.4764210000000002
+  lon_extent:
+    start: 53.5
+    stop: 69.5
+- name: sw_indian_000_20231218T18
+  n_samples: 8
+  date: 2023-12-18T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 53.5
+    stop: 69.5
+- name: sw_indian_000_20231219T00
+  n_samples: 8
+  date: 2023-12-19T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 52.5
+    stop: 68.5
+- name: sw_indian_000_20231219T12
+  n_samples: 8
+  date: 2023-12-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 51.5
+    stop: 67.5
+- name: sw_indian_000_20231219T18
+  n_samples: 8
+  date: 2023-12-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 51.5
+    stop: 67.5
+- name: sw_indian_000_20231220T00
+  n_samples: 8
+  date: 2023-12-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 50.5
+    stop: 66.5
+- name: sw_indian_000_20231220T06
+  n_samples: 8
+  date: 2023-12-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_000_20231220T12
+  n_samples: 8
+  date: 2023-12-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_000_20231220T18
+  n_samples: 8
+  date: 2023-12-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_000_20231221T00
+  n_samples: 8
+  date: 2023-12-21T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_000_20231221T06
+  n_samples: 8
+  date: 2023-12-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_000_20231221T12
+  n_samples: 8
+  date: 2023-12-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 47.5
+    stop: 63.5
+- name: sw_indian_000_20231221T18
+  n_samples: 8
+  date: 2023-12-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 47.5
+    stop: 63.5
+- name: sw_indian_000_20231222T00
+  n_samples: 8
+  date: 2023-12-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 47.5
+    stop: 63.5
+- name: sw_indian_000_20231222T06
+  n_samples: 8
+  date: 2023-12-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 46.5
+    stop: 62.5
+- name: sw_indian_000_20231222T12
+  n_samples: 8
+  date: 2023-12-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 46.5
+    stop: 62.5
+- name: sw_indian_000_20231222T18
+  n_samples: 8
+  date: 2023-12-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 45.5
+    stop: 61.5
+- name: sw_indian_000_20231223T00
+  n_samples: 8
+  date: 2023-12-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 45.5
+    stop: 61.5
+- name: sw_indian_000_20231223T06
+  n_samples: 8
+  date: 2023-12-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 45.5
+    stop: 61.5
+- name: sw_indian_000_20231223T12
+  n_samples: 8
+  date: 2023-12-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 45.5
+    stop: 61.5
+- name: sw_indian_000_20231223T18
+  n_samples: 8
+  date: 2023-12-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 45.5
+    stop: 61.5
+- name: sw_indian_000_20231224T00
+  n_samples: 8
+  date: 2023-12-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 46.5
+    stop: 62.5
+- name: sw_indian_000_20231224T06
+  n_samples: 8
+  date: 2023-12-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 46.5
+    stop: 62.5
+- name: sw_indian_000_20231224T12
+  n_samples: 8
+  date: 2023-12-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_000_20231224T18
+  n_samples: 8
+  date: 2023-12-24T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -29.440357
+    stop: -13.440356999999999
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_000_20231225T00
+  n_samples: 8
+  date: 2023-12-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -30.437582
+    stop: -14.437581999999999
+  lon_extent:
+    start: 50.5
+    stop: 66.5
+- name: sw_indian_000_20231225T06
+  n_samples: 8
+  date: 2023-12-25T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -31.434807
+    stop: -15.434807
+  lon_extent:
+    start: 51.5
+    stop: 67.5
+- name: sw_indian_000_20231225T12
+  n_samples: 8
+  date: 2023-12-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -33.429258000000004
+    stop: -17.429258
+  lon_extent:
+    start: 53.5
+    stop: 69.5
+- name: sw_indian_000_20231225T18
+  n_samples: 8
+  date: 2023-12-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -34.426483000000005
+    stop: -18.426483
+  lon_extent:
+    start: 54.5
+    stop: 70.5
+- name: sw_indian_000_20231226T00
+  n_samples: 8
+  date: 2023-12-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -36.420933000000005
+    stop: -20.420933
+  lon_extent:
+    start: 56.5
+    stop: 72.5
+- name: sw_indian_000_20231226T06
+  n_samples: 8
+  date: 2023-12-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -38.415384
+    stop: -22.415384
+  lon_extent:
+    start: 59.5
+    stop: 75.5
+- name: sw_indian_000_20231226T12
+  n_samples: 8
+  date: 2023-12-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -40.409832
+    stop: -24.409832
+  lon_extent:
+    start: 61.5
+    stop: 77.5
+- name: sw_indian_001_20221219T06
+  n_samples: 8
+  date: 2022-12-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -14.481969
+    stop: 1.5180309999999997
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: sw_indian_001_20221220T06
+  n_samples: 8
+  date: 2022-12-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -15.479196
+    stop: 0.520804
+  lon_extent:
+    start: 83.5
+    stop: 99.5
+- name: sw_indian_001_20221220T12
+  n_samples: 8
+  date: 2022-12-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -15.479196
+    stop: 0.520804
+  lon_extent:
+    start: 84.5
+    stop: 100.5
+- name: sw_indian_001_20221221T00
+  n_samples: 8
+  date: 2022-12-21T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -15.479196
+    stop: 0.520804
+  lon_extent:
+    start: 86.5
+    stop: 102.5
+- name: sw_indian_001_20221221T06
+  n_samples: 8
+  date: 2022-12-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.476421000000002
+    stop: -0.4764210000000002
+  lon_extent:
+    start: 87.5
+    stop: 103.5
+- name: sw_indian_001_20221221T12
+  n_samples: 8
+  date: 2022-12-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 87.5
+    stop: 103.5
+- name: sw_indian_001_20221221T18
+  n_samples: 8
+  date: 2022-12-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 87.5
+    stop: 103.5
+- name: sw_indian_001_20221222T00
+  n_samples: 8
+  date: 2022-12-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 87.5
+    stop: 103.5
+- name: sw_indian_001_20221222T06
+  n_samples: 8
+  date: 2022-12-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 87.5
+    stop: 103.5
+- name: sw_indian_001_20221222T12
+  n_samples: 8
+  date: 2022-12-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 86.5
+    stop: 102.5
+- name: sw_indian_001_20221222T18
+  n_samples: 8
+  date: 2022-12-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 86.5
+    stop: 102.5
+- name: sw_indian_001_20221223T00
+  n_samples: 8
+  date: 2022-12-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 85.5
+    stop: 101.5
+- name: sw_indian_001_20221223T06
+  n_samples: 8
+  date: 2022-12-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 84.5
+    stop: 100.5
+- name: sw_indian_001_20221223T12
+  n_samples: 8
+  date: 2022-12-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 83.5
+    stop: 99.5
+- name: sw_indian_001_20221223T18
+  n_samples: 8
+  date: 2022-12-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 82.5
+    stop: 98.5
+- name: sw_indian_001_20221224T00
+  n_samples: 8
+  date: 2022-12-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 81.5
+    stop: 97.5
+- name: sw_indian_001_20221224T06
+  n_samples: 8
+  date: 2022-12-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: sw_indian_001_20221224T12
+  n_samples: 8
+  date: 2022-12-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: sw_indian_001_20221225T00
+  n_samples: 8
+  date: 2022-12-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 77.5
+    stop: 93.5
+- name: sw_indian_001_20221225T06
+  n_samples: 8
+  date: 2022-12-25T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 76.5
+    stop: 92.5
+- name: sw_indian_001_20221225T12
+  n_samples: 8
+  date: 2022-12-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: sw_indian_001_20221225T18
+  n_samples: 8
+  date: 2022-12-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 74.5
+    stop: 90.5
+- name: sw_indian_001_20221226T00
+  n_samples: 8
+  date: 2022-12-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 73.5
+    stop: 89.5
+- name: sw_indian_001_20221226T06
+  n_samples: 8
+  date: 2022-12-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 72.5
+    stop: 88.5
+- name: sw_indian_001_20221226T12
+  n_samples: 8
+  date: 2022-12-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 71.5
+    stop: 87.5
+- name: sw_indian_001_20221226T18
+  n_samples: 8
+  date: 2022-12-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 70.5
+    stop: 86.5
+- name: sw_indian_001_20221227T00
+  n_samples: 8
+  date: 2022-12-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 69.5
+    stop: 85.5
+- name: sw_indian_001_20221227T06
+  n_samples: 8
+  date: 2022-12-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 68.5
+    stop: 84.5
+- name: sw_indian_001_20221228T00
+  n_samples: 8
+  date: 2022-12-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 68.5
+    stop: 84.5
+- name: sw_indian_001_20221228T18
+  n_samples: 8
+  date: 2022-12-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 71.5
+    stop: 87.5
+- name: sw_indian_001_20221229T00
+  n_samples: 8
+  date: 2022-12-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 71.5
+    stop: 87.5
+- name: sw_indian_001_20221229T06
+  n_samples: 8
+  date: 2022-12-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 72.5
+    stop: 88.5
+- name: sw_indian_001_20221229T12
+  n_samples: 8
+  date: 2022-12-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 72.5
+    stop: 88.5
+- name: sw_indian_001_20221229T18
+  n_samples: 8
+  date: 2022-12-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 74.5
+    stop: 90.5
+- name: sw_indian_001_20221230T00
+  n_samples: 8
+  date: 2022-12-30T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: sw_indian_001_20221230T06
+  n_samples: 8
+  date: 2022-12-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: sw_indian_001_20221230T12
+  n_samples: 8
+  date: 2022-12-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: sw_indian_001_20221230T18
+  n_samples: 8
+  date: 2022-12-30T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: sw_indian_001_20221231T00
+  n_samples: 8
+  date: 2022-12-31T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 74.5
+    stop: 90.5
+- name: sw_indian_001_20221231T06
+  n_samples: 8
+  date: 2022-12-31T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 73.5
+    stop: 89.5
+- name: sw_indian_001_20221231T12
+  n_samples: 8
+  date: 2022-12-31T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 73.5
+    stop: 89.5
+- name: sw_indian_001_20221231T18
+  n_samples: 8
+  date: 2022-12-31T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 72.5
+    stop: 88.5
+- name: sw_indian_001_20230101T00
+  n_samples: 8
+  date: 2023-01-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 71.5
+    stop: 87.5
+- name: sw_indian_001_20230101T06
+  n_samples: 8
+  date: 2023-01-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 70.5
+    stop: 86.5
+- name: sw_indian_001_20230101T12
+  n_samples: 8
+  date: 2023-01-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 69.5
+    stop: 85.5
+- name: sw_indian_001_20230101T18
+  n_samples: 8
+  date: 2023-01-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 68.5
+    stop: 84.5
+- name: sw_indian_001_20230102T00
+  n_samples: 8
+  date: 2023-01-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 67.5
+    stop: 83.5
+- name: sw_indian_001_20230102T06
+  n_samples: 8
+  date: 2023-01-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 66.5
+    stop: 82.5
+- name: sw_indian_001_20230102T12
+  n_samples: 8
+  date: 2023-01-02T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 65.5
+    stop: 81.5
+- name: sw_indian_001_20230102T18
+  n_samples: 8
+  date: 2023-01-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 64.5
+    stop: 80.5
+- name: sw_indian_001_20230103T00
+  n_samples: 8
+  date: 2023-01-03T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 64.5
+    stop: 80.5
+- name: sw_indian_001_20230103T06
+  n_samples: 8
+  date: 2023-01-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 63.5
+    stop: 79.5
+- name: sw_indian_001_20230103T12
+  n_samples: 8
+  date: 2023-01-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 63.5
+    stop: 79.5
+- name: sw_indian_001_20230103T18
+  n_samples: 8
+  date: 2023-01-03T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 62.5
+    stop: 78.5
+- name: sw_indian_001_20230104T00
+  n_samples: 8
+  date: 2023-01-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 62.5
+    stop: 78.5
+- name: sw_indian_001_20230104T06
+  n_samples: 8
+  date: 2023-01-04T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 61.5
+    stop: 77.5
+- name: sw_indian_001_20230104T12
+  n_samples: 8
+  date: 2023-01-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 61.5
+    stop: 77.5
+- name: sw_indian_001_20230104T18
+  n_samples: 8
+  date: 2023-01-04T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 60.5
+    stop: 76.5
+- name: sw_indian_001_20230105T00
+  n_samples: 8
+  date: 2023-01-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 60.5
+    stop: 76.5
+- name: sw_indian_001_20230105T06
+  n_samples: 8
+  date: 2023-01-05T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 59.5
+    stop: 75.5
+- name: sw_indian_001_20230105T12
+  n_samples: 8
+  date: 2023-01-05T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 58.5
+    stop: 74.5
+- name: sw_indian_001_20230105T18
+  n_samples: 8
+  date: 2023-01-05T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 58.5
+    stop: 74.5
+- name: sw_indian_001_20230106T00
+  n_samples: 8
+  date: 2023-01-06T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 57.5
+    stop: 73.5
+- name: sw_indian_001_20230106T06
+  n_samples: 8
+  date: 2023-01-06T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -29.440357
+    stop: -13.440356999999999
+  lon_extent:
+    start: 57.5
+    stop: 73.5
+- name: sw_indian_001_20230106T12
+  n_samples: 8
+  date: 2023-01-06T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -31.434807
+    stop: -15.434807
+  lon_extent:
+    start: 56.5
+    stop: 72.5
+- name: sw_indian_001_20230106T18
+  n_samples: 8
+  date: 2023-01-06T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -32.432034
+    stop: -16.432034
+  lon_extent:
+    start: 55.5
+    stop: 71.5
+- name: sw_indian_001_20230107T00
+  n_samples: 8
+  date: 2023-01-07T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -34.426483000000005
+    stop: -18.426483
+  lon_extent:
+    start: 54.5
+    stop: 70.5
+- name: sw_indian_001_20230107T06
+  n_samples: 8
+  date: 2023-01-07T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -35.423708000000005
+    stop: -19.423708
+  lon_extent:
+    start: 53.5
+    stop: 69.5
+- name: sw_indian_001_20230107T12
+  n_samples: 8
+  date: 2023-01-07T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -36.420933000000005
+    stop: -20.420933
+  lon_extent:
+    start: 53.5
+    stop: 69.5
+- name: sw_indian_001_20230107T18
+  n_samples: 8
+  date: 2023-01-07T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -36.420933000000005
+    stop: -20.420933
+  lon_extent:
+    start: 52.5
+    stop: 68.5
+- name: sw_indian_001_20230108T00
+  n_samples: 8
+  date: 2023-01-08T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -37.418159
+    stop: -21.418159
+  lon_extent:
+    start: 52.5
+    stop: 68.5
+- name: sw_indian_001_20230108T06
+  n_samples: 8
+  date: 2023-01-08T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -38.415384
+    stop: -22.415384
+  lon_extent:
+    start: 51.5
+    stop: 67.5
+- name: sw_indian_001_20230108T12
+  n_samples: 8
+  date: 2023-01-08T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -39.412607
+    stop: -23.412607
+  lon_extent:
+    start: 51.5
+    stop: 67.5
+- name: sw_indian_001_20230109T00
+  n_samples: 8
+  date: 2023-01-09T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -40.409832
+    stop: -24.409832
+  lon_extent:
+    start: 50.5
+    stop: 66.5
+- name: sw_indian_002_20230227T00
+  n_samples: 8
+  date: 2023-02-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: sw_indian_002_20230227T12
+  n_samples: 8
+  date: 2023-02-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: sw_indian_002_20230227T18
+  n_samples: 8
+  date: 2023-02-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: sw_indian_002_20230228T00
+  n_samples: 8
+  date: 2023-02-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: sw_indian_002_20230228T06
+  n_samples: 8
+  date: 2023-02-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 80.5
+    stop: 96.5
+- name: sw_indian_002_20230228T12
+  n_samples: 8
+  date: 2023-02-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: sw_indian_002_20230228T18
+  n_samples: 8
+  date: 2023-02-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 79.5
+    stop: 95.5
+- name: sw_indian_002_20230301T00
+  n_samples: 8
+  date: 2023-03-01T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: sw_indian_002_20230301T06
+  n_samples: 8
+  date: 2023-03-01T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: sw_indian_002_20230301T12
+  n_samples: 8
+  date: 2023-03-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: sw_indian_002_20230301T18
+  n_samples: 8
+  date: 2023-03-01T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 78.5
+    stop: 94.5
+- name: sw_indian_002_20230302T00
+  n_samples: 8
+  date: 2023-03-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 77.5
+    stop: 93.5
+- name: sw_indian_002_20230302T06
+  n_samples: 8
+  date: 2023-03-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 76.5
+    stop: 92.5
+- name: sw_indian_002_20230302T12
+  n_samples: 8
+  date: 2023-03-02T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 76.5
+    stop: 92.5
+- name: sw_indian_002_20230302T18
+  n_samples: 8
+  date: 2023-03-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 75.5
+    stop: 91.5
+- name: sw_indian_002_20230303T00
+  n_samples: 8
+  date: 2023-03-03T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 74.5
+    stop: 90.5
+- name: sw_indian_002_20230303T06
+  n_samples: 8
+  date: 2023-03-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 73.5
+    stop: 89.5
+- name: sw_indian_002_20230303T12
+  n_samples: 8
+  date: 2023-03-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 73.5
+    stop: 89.5
+- name: sw_indian_002_20230303T18
+  n_samples: 8
+  date: 2023-03-03T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 72.5
+    stop: 88.5
+- name: sw_indian_002_20230304T00
+  n_samples: 8
+  date: 2023-03-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 71.5
+    stop: 87.5
+- name: sw_indian_002_20230304T06
+  n_samples: 8
+  date: 2023-03-04T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 71.5
+    stop: 87.5
+- name: sw_indian_002_20230304T12
+  n_samples: 8
+  date: 2023-03-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 70.5
+    stop: 86.5
+- name: sw_indian_002_20230304T18
+  n_samples: 8
+  date: 2023-03-04T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 70.5
+    stop: 86.5
+- name: sw_indian_002_20230305T00
+  n_samples: 8
+  date: 2023-03-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 69.5
+    stop: 85.5
+- name: sw_indian_002_20230305T06
+  n_samples: 8
+  date: 2023-03-05T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -29.440357
+    stop: -13.440356999999999
+  lon_extent:
+    start: 68.5
+    stop: 84.5
+- name: sw_indian_002_20230305T12
+  n_samples: 8
+  date: 2023-03-05T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -30.437582
+    stop: -14.437581999999999
+  lon_extent:
+    start: 68.5
+    stop: 84.5
+- name: sw_indian_002_20230305T18
+  n_samples: 8
+  date: 2023-03-05T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -30.437582
+    stop: -14.437581999999999
+  lon_extent:
+    start: 67.5
+    stop: 83.5
+- name: sw_indian_002_20230306T00
+  n_samples: 8
+  date: 2023-03-06T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -31.434807
+    stop: -15.434807
+  lon_extent:
+    start: 67.5
+    stop: 83.5
+- name: sw_indian_003_20230113T00
+  n_samples: 8
+  date: 2023-01-13T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 70.5
+    stop: 86.5
+- name: sw_indian_003_20230113T18
+  n_samples: 8
+  date: 2023-01-13T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 67.5
+    stop: 83.5
+- name: sw_indian_003_20230114T00
+  n_samples: 8
+  date: 2023-01-14T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 65.5
+    stop: 81.5
+- name: sw_indian_003_20230115T00
+  n_samples: 8
+  date: 2023-01-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 62.5
+    stop: 78.5
+- name: sw_indian_003_20230115T06
+  n_samples: 8
+  date: 2023-01-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 61.5
+    stop: 77.5
+- name: sw_indian_003_20230115T12
+  n_samples: 8
+  date: 2023-01-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 60.5
+    stop: 76.5
+- name: sw_indian_003_20230115T18
+  n_samples: 8
+  date: 2023-01-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 59.5
+    stop: 75.5
+- name: sw_indian_003_20230116T00
+  n_samples: 8
+  date: 2023-01-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 58.5
+    stop: 74.5
+- name: sw_indian_003_20230116T06
+  n_samples: 8
+  date: 2023-01-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 58.5
+    stop: 74.5
+- name: sw_indian_003_20230116T12
+  n_samples: 8
+  date: 2023-01-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 59.5
+    stop: 75.5
+- name: sw_indian_003_20230116T18
+  n_samples: 8
+  date: 2023-01-16T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 59.5
+    stop: 75.5
+- name: sw_indian_003_20230117T00
+  n_samples: 8
+  date: 2023-01-17T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 60.5
+    stop: 76.5
+- name: sw_indian_003_20230117T06
+  n_samples: 8
+  date: 2023-01-17T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 61.5
+    stop: 77.5
+- name: sw_indian_003_20230117T12
+  n_samples: 8
+  date: 2023-01-17T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 60.5
+    stop: 76.5
+- name: sw_indian_003_20230117T18
+  n_samples: 8
+  date: 2023-01-17T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 60.5
+    stop: 76.5
+- name: sw_indian_003_20230118T00
+  n_samples: 8
+  date: 2023-01-18T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 60.5
+    stop: 76.5
+- name: sw_indian_003_20230118T06
+  n_samples: 8
+  date: 2023-01-18T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 61.5
+    stop: 77.5
+- name: sw_indian_003_20230118T12
+  n_samples: 8
+  date: 2023-01-18T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 62.5
+    stop: 78.5
+- name: sw_indian_003_20230118T18
+  n_samples: 8
+  date: 2023-01-18T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 63.5
+    stop: 79.5
+- name: sw_indian_003_20230119T00
+  n_samples: 8
+  date: 2023-01-19T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 63.5
+    stop: 79.5
+- name: sw_indian_003_20230119T06
+  n_samples: 8
+  date: 2023-01-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 64.5
+    stop: 80.5
+- name: sw_indian_003_20230119T12
+  n_samples: 8
+  date: 2023-01-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 64.5
+    stop: 80.5
+- name: sw_indian_003_20230119T18
+  n_samples: 8
+  date: 2023-01-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 64.5
+    stop: 80.5
+- name: sw_indian_003_20230120T00
+  n_samples: 8
+  date: 2023-01-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 65.5
+    stop: 81.5
+- name: sw_indian_003_20230120T06
+  n_samples: 8
+  date: 2023-01-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 65.5
+    stop: 81.5
+- name: sw_indian_004_20230122T06
+  n_samples: 8
+  date: 2023-01-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 39.5
+    stop: 55.5
+- name: sw_indian_004_20230123T00
+  n_samples: 8
+  date: 2023-01-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 40.5
+    stop: 56.5
+- name: sw_indian_004_20230123T06
+  n_samples: 8
+  date: 2023-01-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 42.5
+    stop: 58.5
+- name: sw_indian_004_20230123T12
+  n_samples: 8
+  date: 2023-01-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 43.5
+    stop: 59.5
+- name: sw_indian_004_20230123T18
+  n_samples: 8
+  date: 2023-01-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 45.5
+    stop: 61.5
+- name: sw_indian_004_20230124T00
+  n_samples: 8
+  date: 2023-01-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 45.5
+    stop: 61.5
+- name: sw_indian_004_20230125T00
+  n_samples: 8
+  date: 2023-01-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230125T06
+  n_samples: 8
+  date: 2023-01-25T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230125T12
+  n_samples: 8
+  date: 2023-01-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230125T18
+  n_samples: 8
+  date: 2023-01-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230126T00
+  n_samples: 8
+  date: 2023-01-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230126T06
+  n_samples: 8
+  date: 2023-01-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230126T12
+  n_samples: 8
+  date: 2023-01-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_004_20230126T18
+  n_samples: 8
+  date: 2023-01-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_004_20230127T00
+  n_samples: 8
+  date: 2023-01-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 47.5
+    stop: 63.5
+- name: sw_indian_004_20230127T06
+  n_samples: 8
+  date: 2023-01-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 47.5
+    stop: 63.5
+- name: sw_indian_004_20230127T12
+  n_samples: 8
+  date: 2023-01-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 47.5
+    stop: 63.5
+- name: sw_indian_004_20230127T18
+  n_samples: 8
+  date: 2023-01-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_004_20230128T00
+  n_samples: 8
+  date: 2023-01-28T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_004_20230128T06
+  n_samples: 8
+  date: 2023-01-28T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: sw_indian_004_20230128T12
+  n_samples: 8
+  date: 2023-01-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230128T18
+  n_samples: 8
+  date: 2023-01-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 50.5
+    stop: 66.5
+- name: sw_indian_004_20230129T00
+  n_samples: 8
+  date: 2023-01-29T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -29.440357
+    stop: -13.440356999999999
+  lon_extent:
+    start: 51.5
+    stop: 67.5
+- name: sw_indian_004_20230129T06
+  n_samples: 8
+  date: 2023-01-29T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -30.437582
+    stop: -14.437581999999999
+  lon_extent:
+    start: 51.5
+    stop: 67.5
+- name: sw_indian_004_20230129T12
+  n_samples: 8
+  date: 2023-01-29T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -31.434807
+    stop: -15.434807
+  lon_extent:
+    start: 50.5
+    stop: 66.5
+- name: sw_indian_004_20230129T18
+  n_samples: 8
+  date: 2023-01-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -32.432034
+    stop: -16.432034
+  lon_extent:
+    start: 50.5
+    stop: 66.5
+- name: sw_indian_004_20230130T06
+  n_samples: 8
+  date: 2023-01-30T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -36.420933000000005
+    stop: -20.420933
+  lon_extent:
+    start: 49.5
+    stop: 65.5
+- name: sw_indian_004_20230130T12
+  n_samples: 8
+  date: 2023-01-30T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -39.412607
+    stop: -23.412607
+  lon_extent:
+    start: 48.5
+    stop: 64.5
+- name: s_pacific_000_20231213T00
+  n_samples: 8
+  date: 2023-12-13T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 162.5
+    stop: 178.5
+- name: s_pacific_000_20231213T06
+  n_samples: 8
+  date: 2023-12-13T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 161.5
+    stop: 177.5
+- name: s_pacific_000_20231213T12
+  n_samples: 8
+  date: 2023-12-13T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 161.5
+    stop: 177.5
+- name: s_pacific_000_20231213T18
+  n_samples: 8
+  date: 2023-12-13T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 160.5
+    stop: 176.5
+- name: s_pacific_000_20231214T00
+  n_samples: 8
+  date: 2023-12-14T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 160.5
+    stop: 176.5
+- name: s_pacific_000_20231214T06
+  n_samples: 8
+  date: 2023-12-14T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 160.5
+    stop: 176.5
+- name: s_pacific_000_20231214T12
+  n_samples: 8
+  date: 2023-12-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 159.5
+    stop: 175.5
+- name: s_pacific_000_20231214T18
+  n_samples: 8
+  date: 2023-12-14T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 158.5
+    stop: 174.5
+- name: s_pacific_000_20231215T00
+  n_samples: 8
+  date: 2023-12-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231215T06
+  n_samples: 8
+  date: 2023-12-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231215T12
+  n_samples: 8
+  date: 2023-12-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231215T18
+  n_samples: 8
+  date: 2023-12-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: s_pacific_000_20231216T00
+  n_samples: 8
+  date: 2023-12-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_000_20231216T06
+  n_samples: 8
+  date: 2023-12-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_000_20231216T12
+  n_samples: 8
+  date: 2023-12-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_000_20231216T18
+  n_samples: 8
+  date: 2023-12-16T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_000_20231217T00
+  n_samples: 8
+  date: 2023-12-17T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_000_20231217T06
+  n_samples: 8
+  date: 2023-12-17T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_000_20231217T12
+  n_samples: 8
+  date: 2023-12-17T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_000_20231217T18
+  n_samples: 8
+  date: 2023-12-17T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_000_20231218T00
+  n_samples: 8
+  date: 2023-12-18T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_000_20231218T06
+  n_samples: 8
+  date: 2023-12-18T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_000_20231218T12
+  n_samples: 8
+  date: 2023-12-18T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_000_20231218T18
+  n_samples: 8
+  date: 2023-12-18T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_000_20231219T00
+  n_samples: 8
+  date: 2023-12-19T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: s_pacific_000_20231219T06
+  n_samples: 8
+  date: 2023-12-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231219T12
+  n_samples: 8
+  date: 2023-12-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231219T18
+  n_samples: 8
+  date: 2023-12-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231220T00
+  n_samples: 8
+  date: 2023-12-20T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231220T06
+  n_samples: 8
+  date: 2023-12-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231220T12
+  n_samples: 8
+  date: 2023-12-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231220T18
+  n_samples: 8
+  date: 2023-12-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -29.440357
+    stop: -13.440356999999999
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231221T00
+  n_samples: 8
+  date: 2023-12-21T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -31.434807
+    stop: -15.434807
+  lon_extent:
+    start: 158.5
+    stop: 174.5
+- name: s_pacific_000_20231221T06
+  n_samples: 8
+  date: 2023-12-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -32.432034
+    stop: -16.432034
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231221T12
+  n_samples: 8
+  date: 2023-12-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -32.432034
+    stop: -16.432034
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_000_20231221T18
+  n_samples: 8
+  date: 2023-12-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -32.432034
+    stop: -16.432034
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231222T00
+  n_samples: 8
+  date: 2023-12-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -33.429258000000004
+    stop: -17.429258
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231222T06
+  n_samples: 8
+  date: 2023-12-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -33.429258000000004
+    stop: -17.429258
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231222T12
+  n_samples: 8
+  date: 2023-12-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -33.429258000000004
+    stop: -17.429258
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_000_20231222T18
+  n_samples: 8
+  date: 2023-12-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -34.426483000000005
+    stop: -18.426483
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_001_20230306T18
+  n_samples: 8
+  date: 2023-03-06T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 146.5
+    stop: 162.5
+- name: s_pacific_001_20230307T00
+  n_samples: 8
+  date: 2023-03-07T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_001_20230307T12
+  n_samples: 8
+  date: 2023-03-07T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_001_20230308T06
+  n_samples: 8
+  date: 2023-03-08T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_001_20230308T12
+  n_samples: 8
+  date: 2023-03-08T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_001_20230308T18
+  n_samples: 8
+  date: 2023-03-08T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230309T00
+  n_samples: 8
+  date: 2023-03-09T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230309T12
+  n_samples: 8
+  date: 2023-03-09T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230310T12
+  n_samples: 8
+  date: 2023-03-10T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_001_20230310T18
+  n_samples: 8
+  date: 2023-03-10T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230311T00
+  n_samples: 8
+  date: 2023-03-11T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230311T18
+  n_samples: 8
+  date: 2023-03-11T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_001_20230312T00
+  n_samples: 8
+  date: 2023-03-12T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230312T06
+  n_samples: 8
+  date: 2023-03-12T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230312T12
+  n_samples: 8
+  date: 2023-03-12T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230312T18
+  n_samples: 8
+  date: 2023-03-12T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230313T00
+  n_samples: 8
+  date: 2023-03-13T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230313T06
+  n_samples: 8
+  date: 2023-03-13T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230313T12
+  n_samples: 8
+  date: 2023-03-13T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230313T18
+  n_samples: 8
+  date: 2023-03-13T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230314T00
+  n_samples: 8
+  date: 2023-03-14T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_001_20230314T06
+  n_samples: 8
+  date: 2023-03-14T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230314T12
+  n_samples: 8
+  date: 2023-03-14T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_001_20230314T18
+  n_samples: 8
+  date: 2023-03-14T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_001_20230315T00
+  n_samples: 8
+  date: 2023-03-15T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_001_20230315T06
+  n_samples: 8
+  date: 2023-03-15T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_001_20230315T12
+  n_samples: 8
+  date: 2023-03-15T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230315T18
+  n_samples: 8
+  date: 2023-03-15T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_001_20230316T00
+  n_samples: 8
+  date: 2023-03-16T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230316T06
+  n_samples: 8
+  date: 2023-03-16T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_001_20230316T12
+  n_samples: 8
+  date: 2023-03-16T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -25.451454
+    stop: -9.451453999999998
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_001_20230316T18
+  n_samples: 8
+  date: 2023-03-16T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_001_20230317T00
+  n_samples: 8
+  date: 2023-03-17T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -27.445906
+    stop: -11.445906
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_001_20230317T06
+  n_samples: 8
+  date: 2023-03-17T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_001_20230317T12
+  n_samples: 8
+  date: 2023-03-17T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -28.44313
+    stop: -12.44313
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_001_20230317T18
+  n_samples: 8
+  date: 2023-03-17T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -29.440357
+    stop: -13.440356999999999
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_001_20230318T00
+  n_samples: 8
+  date: 2023-03-18T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -29.440357
+    stop: -13.440356999999999
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: s_pacific_001_20230318T06
+  n_samples: 8
+  date: 2023-03-18T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -30.437582
+    stop: -14.437581999999999
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: s_pacific_001_20230318T12
+  n_samples: 8
+  date: 2023-03-18T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -30.437582
+    stop: -14.437581999999999
+  lon_extent:
+    start: 156.5
+    stop: 172.5
+- name: s_pacific_002_20230401T12
+  n_samples: 8
+  date: 2023-04-01T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 158.5
+    stop: 174.5
+- name: s_pacific_002_20230402T00
+  n_samples: 8
+  date: 2023-04-02T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 159.5
+    stop: 175.5
+- name: s_pacific_002_20230402T06
+  n_samples: 8
+  date: 2023-04-02T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 161.5
+    stop: 177.5
+- name: s_pacific_002_20230402T12
+  n_samples: 8
+  date: 2023-04-02T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 162.5
+    stop: 178.5
+- name: s_pacific_002_20230402T18
+  n_samples: 8
+  date: 2023-04-02T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 163.5
+    stop: 179.5
+- name: s_pacific_002_20230403T00
+  n_samples: 8
+  date: 2023-04-03T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 164.5
+    stop: 180.5
+- name: s_pacific_002_20230403T06
+  n_samples: 8
+  date: 2023-04-03T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 165.5
+    stop: 181.5
+- name: s_pacific_002_20230403T12
+  n_samples: 8
+  date: 2023-04-03T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 166.5
+    stop: 182.5
+- name: s_pacific_002_20230403T18
+  n_samples: 8
+  date: 2023-04-03T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 167.5
+    stop: 183.5
+- name: s_pacific_002_20230404T00
+  n_samples: 8
+  date: 2023-04-04T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 168.5
+    stop: 184.5
+- name: s_pacific_002_20230404T06
+  n_samples: 8
+  date: 2023-04-04T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 170.5
+    stop: 186.5
+- name: s_pacific_002_20230404T12
+  n_samples: 8
+  date: 2023-04-04T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 171.5
+    stop: 187.5
+- name: s_pacific_002_20230404T18
+  n_samples: 8
+  date: 2023-04-04T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 172.5
+    stop: 188.5
+- name: s_pacific_002_20230405T00
+  n_samples: 8
+  date: 2023-04-05T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 173.5
+    stop: 189.5
+- name: s_pacific_003_20231120T06
+  n_samples: 8
+  date: 2023-11-20T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_003_20231120T12
+  n_samples: 8
+  date: 2023-11-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_003_20231120T18
+  n_samples: 8
+  date: 2023-11-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_003_20231121T06
+  n_samples: 8
+  date: 2023-11-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_003_20231121T12
+  n_samples: 8
+  date: 2023-11-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_003_20231121T18
+  n_samples: 8
+  date: 2023-11-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_003_20231122T00
+  n_samples: 8
+  date: 2023-11-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_003_20231122T06
+  n_samples: 8
+  date: 2023-11-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231122T12
+  n_samples: 8
+  date: 2023-11-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231122T18
+  n_samples: 8
+  date: 2023-11-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231123T00
+  n_samples: 8
+  date: 2023-11-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231123T06
+  n_samples: 8
+  date: 2023-11-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231123T12
+  n_samples: 8
+  date: 2023-11-23T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231123T18
+  n_samples: 8
+  date: 2023-11-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231124T00
+  n_samples: 8
+  date: 2023-11-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231124T06
+  n_samples: 8
+  date: 2023-11-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231124T12
+  n_samples: 8
+  date: 2023-11-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231124T18
+  n_samples: 8
+  date: 2023-11-24T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231125T00
+  n_samples: 8
+  date: 2023-11-25T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231125T06
+  n_samples: 8
+  date: 2023-11-25T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231125T12
+  n_samples: 8
+  date: 2023-11-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231125T18
+  n_samples: 8
+  date: 2023-11-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231126T00
+  n_samples: 8
+  date: 2023-11-26T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231126T06
+  n_samples: 8
+  date: 2023-11-26T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231126T12
+  n_samples: 8
+  date: 2023-11-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -21.462550999999998
+    stop: -5.4625509999999995
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_003_20231126T18
+  n_samples: 8
+  date: 2023-11-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231127T00
+  n_samples: 8
+  date: 2023-11-27T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_003_20231127T06
+  n_samples: 8
+  date: 2023-11-27T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231127T12
+  n_samples: 8
+  date: 2023-11-27T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 152.5
+    stop: 168.5
+- name: s_pacific_003_20231127T18
+  n_samples: 8
+  date: 2023-11-27T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -24.454229
+    stop: -8.454229000000002
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_003_20231128T12
+  n_samples: 8
+  date: 2023-11-28T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_003_20231128T18
+  n_samples: 8
+  date: 2023-11-28T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -26.448681
+    stop: -10.448681
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_003_20231129T18
+  n_samples: 8
+  date: 2023-11-29T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -30.437582
+    stop: -14.437581999999999
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_004_20230419T00
+  n_samples: 8
+  date: 2023-04-19T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_004_20230419T06
+  n_samples: 8
+  date: 2023-04-19T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_004_20230419T12
+  n_samples: 8
+  date: 2023-04-19T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_004_20230419T18
+  n_samples: 8
+  date: 2023-04-19T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_004_20230420T12
+  n_samples: 8
+  date: 2023-04-20T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_004_20230420T18
+  n_samples: 8
+  date: 2023-04-20T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_004_20230421T00
+  n_samples: 8
+  date: 2023-04-21T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_004_20230421T06
+  n_samples: 8
+  date: 2023-04-21T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_004_20230421T12
+  n_samples: 8
+  date: 2023-04-21T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_004_20230421T18
+  n_samples: 8
+  date: 2023-04-21T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -18.470874000000002
+    stop: -2.4708740000000002
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_004_20230422T00
+  n_samples: 8
+  date: 2023-04-22T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 147.5
+    stop: 163.5
+- name: s_pacific_004_20230422T06
+  n_samples: 8
+  date: 2023-04-22T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_004_20230422T12
+  n_samples: 8
+  date: 2023-04-22T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 148.5
+    stop: 164.5
+- name: s_pacific_004_20230422T18
+  n_samples: 8
+  date: 2023-04-22T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.476421000000002
+    stop: -0.4764210000000002
+  lon_extent:
+    start: 149.5
+    stop: 165.5
+- name: s_pacific_004_20230423T00
+  n_samples: 8
+  date: 2023-04-23T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.476421000000002
+    stop: -0.4764210000000002
+  lon_extent:
+    start: 150.5
+    stop: 166.5
+- name: s_pacific_004_20230423T06
+  n_samples: 8
+  date: 2023-04-23T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.476421000000002
+    stop: -0.4764210000000002
+  lon_extent:
+    start: 151.5
+    stop: 167.5
+- name: s_pacific_004_20230423T18
+  n_samples: 8
+  date: 2023-04-23T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.476421000000002
+    stop: -0.4764210000000002
+  lon_extent:
+    start: 153.5
+    stop: 169.5
+- name: s_pacific_004_20230424T00
+  n_samples: 8
+  date: 2023-04-24T00:00
+  save_generated_samples: true
+  lat_extent:
+    start: -16.476421000000002
+    stop: -0.4764210000000002
+  lon_extent:
+    start: 154.5
+    stop: 170.5
+- name: s_pacific_004_20230424T06
+  n_samples: 8
+  date: 2023-04-24T06:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 155.5
+    stop: 171.5
+- name: s_pacific_004_20230424T12
+  n_samples: 8
+  date: 2023-04-24T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 157.5
+    stop: 173.5
+- name: s_pacific_004_20230424T18
+  n_samples: 8
+  date: 2023-04-24T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -17.473647
+    stop: -1.4736469999999997
+  lon_extent:
+    start: 158.5
+    stop: 174.5
+- name: s_pacific_004_20230425T12
+  n_samples: 8
+  date: 2023-04-25T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -19.4681
+    stop: -3.4680999999999997
+  lon_extent:
+    start: 162.5
+    stop: 178.5
+- name: s_pacific_004_20230425T18
+  n_samples: 8
+  date: 2023-04-25T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -20.465325
+    stop: -4.465325
+  lon_extent:
+    start: 163.5
+    stop: 179.5
+- name: s_pacific_004_20230426T12
+  n_samples: 8
+  date: 2023-04-26T12:00
+  save_generated_samples: true
+  lat_extent:
+    start: -22.459777000000003
+    stop: -6.459777000000001
+  lon_extent:
+    start: 165.5
+    stop: 181.5
+- name: s_pacific_004_20230426T18
+  n_samples: 8
+  date: 2023-04-26T18:00
+  save_generated_samples: true
+  lat_extent:
+    start: -23.457003
+    stop: -7.457003
+  lon_extent:
+    start: 165.5
+    stop: 181.5

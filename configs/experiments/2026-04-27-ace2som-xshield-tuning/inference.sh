@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="ace2s-era5-1step-tuned-xshield-inference-best-val-ckpt"
+JOB_NAME="ace2s-era5-1step-tuned-xshield-inference-correct-prmsl-units-best-inference-ckpt"
 JOB_GROUP=""
 #EXISTING_RESULTS_DATASET="01KWMYV98Q79G2FNY3CE95N2NG"  # tuned from SHiELD+
-EXISTING_RESULTS_DATASET="01KWJRMVFPTCZFJEMAY9WVXNN7"  #  tuned from 1 step ERA5
+EXISTING_RESULTS_DATASET="01KXH5K35R2D5W303ZYQDCMBKS"  #  tuned from 1 step ERA5
 
 CONFIG_FILENAME="inference-0k.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -26,9 +26,8 @@ cd $REPO_ROOT && gantry run \
     --task-name $JOB_NAME \
     --description 'Run ACE2S evaluator' \
     --beaker-image $IMAGE \
-    --workspace ai2/downscaling \
-    --priority high \
-    --not-preemptible \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --cluster ai2/titan \
     --cluster ai2/jupiter \
     --cluster ai2/ceres \

@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="predict-perfect-pred-tc-tracks-corrected-range"
+JOB_NAME="predict-ace2s-shieldplus-tuned-xshield-downscaled-tc-tracks"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="pp-downscaling-xshield-tracks.yaml"
+CONFIG_FILENAME="ace2s-tc-tracks.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=1
+NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
