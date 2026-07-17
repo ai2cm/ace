@@ -1,2 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
-v20260602-E3SMv3-piControl-target-data-only-fixed-ak||01KSTT586Z6AEVNRQDD3GZPVFB|run_105yr|best_inference_ckpt|urgent|--min-runtime 8h|||ai2/climate-titan|h100
+v20260602-E3SMv3-piControl-target-data-only-fixed-ak||01KSTT586Z6AEVNRQDD3GZPVFB|done|best_inference_ckpt|urgent|--min-runtime 8h|||ai2/climate-titan|h100
+v20260602-E3SMv3-piControl-target-data-only-fixed-ak||01KXS101Q9P1SNV54FSZV5DCBM|run_105yr|best_inference_ckpt_ak_fixed|urgent|--min-runtime 8h||01KXS101Q9P1SNV54FSZV5DCBM|ai2/climate-titan|h100
