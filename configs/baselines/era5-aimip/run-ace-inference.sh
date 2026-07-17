@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME_BASE="ace-aimip-inference-oct-1978-2024"
-JOB_GROUP="ace-aimip"
-# this is from ace-aimip-fine-tune-decoder-pressure-levels-separate-decoder-lr-warmup-RS0
-EXISTING_RESULTS_DATASET="01KAKXY0EK24K7BZK2N8SPJ5SJ"
+JOB_NAME_BASE="ace-aimip-nobgd4ek-inference-oct-1978-2024"
+JOB_GROUP="ace-aimip-nobgd4ek"
+# nobgd4ek: 1deg v2 no-residual no-CO2 checkpoint (experiment/2026-07-15-1deg-daily-v2-era5-only-no-residual-no-co2 @ f9f91c9)
+EXISTING_RESULTS_DATASET="01KXKBKW2DCAYX6Q3FRJ60K3Q6"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -36,13 +36,11 @@ launch_job () {
         --task-name $JOB_NAME \
         --description 'Run ACE2-ERA5 inference' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/ace \
+        --workspace ai2cm/ace \
         --priority high \
         --not-preemptible \
-        --cluster ai2/ceres-cirrascale \
-        --cluster ai2/titan-cirrascale \
-        --cluster ai2/saturn-cirrascale \
         --cluster ai2/jupiter-cirrascale-2 \
+        --cluster ai2/titan-cirrascale \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
         --env WANDB_JOB_TYPE=inference \
