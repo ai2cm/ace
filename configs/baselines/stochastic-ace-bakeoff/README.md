@@ -61,16 +61,33 @@ predicts `total_frozen_precipitation_rate`. Trained 80 epochs on
 an `h500: 5` per-channel loss weight. Data is 06Z daily, so every
 inference initial condition is at `T06:00:00`.
 
-In-training inference monitors 10-year stability/day-5 SSR/CRPS
-(`10year`, `10year_insample`, `weather_2024`, `weather_1994`). The
-46-year rollout is not run per arm; it and the full selection metrics
-(10-yr bias, day-5 SSR, climate-skill overview, spectral power) are a
-dedicated offline eval on the selected winner after the runs finish.
+## Checkpoint selection and in-training inference
+
+Checkpoint selection is driven by a single weight-1.0 inference loop,
+`ace2_5yr_1996`, matching the ACE2-paper's selection inference: eight
+out-of-sample initial conditions spread through 1996 (inside the held-out
+1996–2010 gap), each rolled out 5 years deterministically
+(`n_forward_steps: 1826` at daily cadence, `n_ensemble_per_ic: 1`, ICs at
+06Z). Its selection metric is the time-mean of the inference period scored
+against the rollout's own target (`time_mean_norm/rmse/channel_mean`); no
+external time-mean reference is used. The full 5-year rollout stays inside
+the held-out gap, so selection is entirely out-of-sample.
+
+The `10year`, `10year_insample`, `weather_2024`, and `weather_1994` loops
+are retained as weight-0 diagnostics (10-year stability, day-5 SSR/CRPS)
+and no longer influence selection. The 46-year rollout is not run per arm;
+it and the full selection metrics (10-yr bias, day-5 SSR, climate-skill
+overview, spectral power) are a dedicated offline eval on the selected
+winner after the runs finish.
 
 ## Train/validation split (stitch-aware ACE2 split)
 
-Train window is the ACE2 window (1940–1995, 2011–2019, 2021–2025), but
-split at the 11 ERA5 production-stream boundaries so that no residual
-training sample straddles a stream stitch (a stitch produces a spurious
-tendency). This yields 14 `subset` segments in `train_loader`. Validation
-is 1996–1997 (a held-out gap year pair between the two train blocks).
+Train window matches the ACE2-paper data span (1940–1995, 2011–2019,
+2021–2022): the final segment ends 2022-12-31 (the ACE2 data ended there),
+not 2025. It is split at the ERA5 production-stream boundaries so that no
+residual training sample straddles a stream stitch (a stitch produces a
+spurious tendency); the daily-dataset seam report confirmed no stitch
+boundary falls in 2021–2025, so capping the final segment at 2022 needs no
+new split. This yields 14 `subset` segments in `train_loader`. Validation
+is 1996–1997 (a held-out gap year pair between the two train blocks),
+unchanged.

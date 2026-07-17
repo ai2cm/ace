@@ -93,7 +93,7 @@ inference:
       histogram:
         enabled: true
   - name: 10year_insample
-    weight: 1.0
+    weight: 0.0
     epochs:
       start: 1
       step: 2
@@ -255,6 +255,45 @@ inference:
         enabled: false
       ipo_index:
         enabled: false
+  - name: ace2_5yr_1996
+    weight: 1.0
+    epochs:
+      start: 1
+      step: 2
+    n_forward_steps: 1826
+    forward_steps_in_memory: 40
+    n_ensemble_per_ic: 1
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T06:00:00'
+          - '1996-02-15T06:00:00'
+          - '1996-04-01T06:00:00'
+          - '1996-05-15T06:00:00'
+          - '1996-07-01T06:00:00'
+          - '1996-08-15T06:00:00'
+          - '1996-10-01T06:00:00'
+          - '1996-11-15T06:00:00'
+      dataset:
+        data_path: /climate-default/2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      step_means: []
+      ensembles: []
+      mean_denorm:
+        enabled: false
+        target: denorm
+      mean_norm:
+        enabled: false
+        target: norm
+      enso_index:
+        enabled: false
+      enso_coefficient:
+        enabled: false
+      histogram:
+        enabled: true
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -352,7 +391,7 @@ train_loader:
         engine: zarr
         subset:
           start_time: '2021-01-01'
-          stop_time: '2025-12-31'
+          stop_time: '2022-12-31'
 validation:
   loader:
     batch_size: 32
