@@ -205,6 +205,14 @@ def test_build_two_track_requires_zero_local_embed_dim_when_no_local():
         )
 
 
+def test_builder_threads_spectral_ratio_to_net_config():
+    # An out-of-range spectral_ratio is rejected via _net_config, proving the
+    # builder passes it through to the network config (validated against the
+    # global width).
+    with pytest.raises(ValueError, match="spectral_ratio must be in"):
+        _builder(spectral_ratio=1.5)
+
+
 # ---------------------------------------------------------------------------
 # config load round trip
 # ---------------------------------------------------------------------------

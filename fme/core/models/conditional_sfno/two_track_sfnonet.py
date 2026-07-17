@@ -48,6 +48,7 @@ from .initialization import trunc_normal_
 from .latents import Latents
 from .layers import MLP, ConditionalLayerNorm, Context, ContextConfig, DropPath
 from .lora import LoRAConv2d
+from .s2convolutions import validate_spectral_ratio
 from .sfnonet import NoLayerNorm, SpectralFilterLayer
 
 ACTIVATION_FUNCTIONS = {"relu": nn.ReLU, "gelu": nn.GELU, "silu": nn.SiLU}
@@ -117,6 +118,7 @@ class TwoTrackSFNONetConfig:
     big_skip: bool = True
     checkpointing: int = 0
     filter_num_groups: int = 1
+    spectral_ratio: float = 1.0
     filter_residual: bool = False
     filter_output: bool = False
     normalize_big_skip: bool = False
@@ -148,6 +150,18 @@ class TwoTrackSFNONetConfig:
                 f"local_embed_dim) must be divisible by filter_num_groups="
                 f"{self.filter_num_groups}."
             )
+        # The spectral filter is sized to the global width, so spectral_ratio is
+        # validated against global_channels (not embed_dim). To keep the actual
+        # filter (channels-per-group x num-groups) fixed when the global track is
+        # narrowed relative to a single-track baseline, scale spectral_ratio up
+        # by the same factor the global width was scaled down.
+        validate_spectral_ratio(
+            self.spectral_ratio,
+            global_channels,
+            self.filter_num_groups,
+            channels_name="global latent width (embed_dim - local_embed_dim)",
+            filter_type=self.filter_type,
+        )
 
     @property
     def global_embed_dim(self) -> int:
@@ -192,6 +206,7 @@ class TwoTrackFourierNeuralOperatorBlock(nn.Module):
         filter_residual: bool = False,
         affine_norms: bool = False,
         filter_num_groups: int = 1,
+        spectral_ratio: float = 1.0,
         parallel_conv1x1: bool = False,
         per_track_layer_norm: bool = False,
     ):
@@ -238,6 +253,7 @@ class TwoTrackFourierNeuralOperatorBlock(nn.Module):
             "linear",
             filter_residual=filter_residual,
             num_groups=filter_num_groups,
+            spectral_ratio=spectral_ratio,
         )
 
         if parallel_conv1x1:
@@ -437,6 +453,7 @@ class TwoTrackSphericalFourierNeuralOperatorNet(nn.Module):
                     filter_residual=params.filter_residual,
                     affine_norms=params.affine_norms,
                     filter_num_groups=params.filter_num_groups,
+                    spectral_ratio=params.spectral_ratio,
                     parallel_conv1x1=params.parallel_conv1x1,
                     per_track_layer_norm=params.per_track_layer_norm,
                 )

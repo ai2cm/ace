@@ -40,6 +40,11 @@ class TwoTrackSFNOBuilder(ModuleConfig):
         context_pos_embed_dim: Dimension of the context positional embedding.
         label_embed_dim: Dimension of a learned label embedding (0 = one-hot).
         data_grid: Grid type for the spherical harmonic transforms.
+        spectral_ratio: Fraction of the *global* latent width that
+            participates in the spectral filter (the filter is sized to the
+            global track, not embed_dim). Double it when the global width is
+            halved to keep the actual filter (channels-per-group x groups)
+            equal to a single-track baseline's.
         feed_global_to_local: OPTION 1 (default off).
         parallel_conv1x1: OPTION 2 (default off).
         per_track_layer_norm: OPTION 3 (default off).
@@ -70,6 +75,7 @@ class TwoTrackSFNOBuilder(ModuleConfig):
     normalize_big_skip: bool = False
     affine_norms: bool = False
     filter_num_groups: int = 1
+    spectral_ratio: float = 1.0
     drop_rate: float = 0.0
     drop_path_rate: float = 0.0
     feed_global_to_local: bool = False
@@ -121,6 +127,7 @@ class TwoTrackSFNOBuilder(ModuleConfig):
             filter_output=self.filter_output,
             normalize_big_skip=self.normalize_big_skip,
             affine_norms=self.affine_norms,
+            spectral_ratio=self.spectral_ratio,
             feed_global_to_local=self.feed_global_to_local,
             parallel_conv1x1=self.parallel_conv1x1,
             per_track_layer_norm=self.per_track_layer_norm,

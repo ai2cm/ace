@@ -272,3 +272,24 @@ def test_config_rejects_non_linear_filter():
         TwoTrackSFNONetConfig(
             embed_dim=8, local_embed_dim=2, filter_type="makani-linear"
         )
+
+
+# ---------------------------------------------------------------------------
+# spectral_ratio: sized against the global width (not embed_dim)
+# ---------------------------------------------------------------------------
+def test_spectral_ratio_below_one_builds_and_runs():
+    # global width = embed_dim - local_embed_dim = 16 - 6 = 10; ratio 0.5 gives a
+    # 5-channel spectral bottleneck. The net still produces the full output.
+    torch.manual_seed(0)
+    net = _build_two_track(spectral_ratio=0.5)
+    n = 2
+    x = torch.randn(n, 5, *IMG_SHAPE, device=get_device())  # 2 global + 3 local
+    out = net(x, _noise_context(n))
+    assert out.shape == (n, 4, *IMG_SHAPE)  # 3 global out + 1 local out
+
+
+def test_spectral_ratio_validated_against_global_width():
+    # spectral_ratio is checked against the global latent width, so a message
+    # naming that width (not embed_dim) is raised for an out-of-range value.
+    with pytest.raises(ValueError, match="spectral_ratio must be in"):
+        TwoTrackSFNONetConfig(embed_dim=16, local_embed_dim=6, spectral_ratio=1.5)
