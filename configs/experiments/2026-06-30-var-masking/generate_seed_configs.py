@@ -17,8 +17,11 @@ subset, each crossed with the co2 axis (co2default off / co2bern75 drops
   - mask0:  no masking (``max_masked_vars`` = 0).
   - mask30: uniform 0-30 masking (``max_masked_vars`` = 30).
 
-With the default 5 seeds this is 2 x 2 x 5 = 20 configs:
+With the default 5 seeds this is 2 x 2 x 5 = 20 configs for v1:
 mask30-co2bern75, mask30-co2default, mask0-co2bern75, mask0-co2default.
+For v2, global_mean_co2 is not an input channel (see
+``baseline_configs/versions.md``), so the co2 axis is dropped: only
+co2default is generated, 2 x 1 x 5 = 10 configs.
 """
 
 import argparse
@@ -30,13 +33,13 @@ from generate_masking_configs import (
     BASE_CONFIG_FILENAMES,
     BASE_CONFIG_STEM,
     BASELINE_CONFIGS_DIR,
-    CO2_OPTIONS,
     DEFAULT_VERSION,
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PROJECT,
     _apply_settings,
     _fetch_wandb_run_names,
+    co2_options_for_version,
     config_name_to_run_name,
 )
 
@@ -98,8 +101,9 @@ def generate_configs(
         wandb_run_names = _fetch_wandb_run_names(WANDB_PROJECT)
         print(f"Found {len(wandb_run_names)} existing runs.")
 
+    co2_options = co2_options_for_version(version)
     for group in SEED_GROUPS:
-        for co2_name, co2_rate in CO2_OPTIONS.items():
+        for co2_name, co2_rate in co2_options.items():
             base_name = f"{BASE_CONFIG_STEM}-{group.label}-{co2_name}"
             for seed in range(n_seeds):
                 name = f"{base_name}-seed{seed}-{version}"

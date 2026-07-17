@@ -12,11 +12,12 @@ axes:
   - global mean removal (``global_mean_removal`` stepper config): baseline
     (as in the base config) or none (key removed).
 
-5 x 2 x 2 = 20 configs.
+5 x 2 x 2 = 20 configs for v1.
 
 global_mean_co2 is already an input channel in the v1 baseline config
 (in_names + next_step_forcing_names); the co2 axis is meaningless for v2,
-which drops it as an input entirely (see baseline_configs/versions.md).
+which drops it as an input entirely (see baseline_configs/versions.md), so
+v2 only generates the co2default option: 5 x 2 x 1 = 10 configs.
 """
 
 import argparse
@@ -41,6 +42,18 @@ GMR_FIELD = "global_mean_removal"
 MASK_LEVELS = [0, 5, 10, 20, 30]  # uniform default max_masked_vars
 CO2_OPTIONS = {"co2default": None, "co2bern75": 0.75}
 GMR_OPTIONS = {"gmron": True, "gmroff": False}  # True: keep baseline config
+
+
+def co2_options_for_version(version: str) -> dict[str, float | None]:
+    """CO2_OPTIONS, restricted to co2default for v2+.
+
+    global_mean_co2 is not an input channel in v2 (see
+    baseline_configs/versions.md), so masking it is meaningless there.
+    """
+    if version == "v1":
+        return CO2_OPTIONS
+    return {"co2default": CO2_OPTIONS["co2default"]}
+
 
 HERE = pathlib.Path(__file__).parent
 BASELINE_CONFIGS_DIR = HERE / "baseline_configs"
@@ -148,9 +161,10 @@ def generate_configs(fetch_wandb: bool = False, version: str = DEFAULT_VERSION) 
         wandb_run_names = _fetch_wandb_run_names(WANDB_PROJECT)
         print(f"Found {len(wandb_run_names)} existing runs.")
 
+    co2_options = co2_options_for_version(version)
     for mask_level in MASK_LEVELS:
         for gmr_name, keep_gmr in GMR_OPTIONS.items():
-            for co2_name, co2_rate in CO2_OPTIONS.items():
+            for co2_name, co2_rate in co2_options.items():
                 name = (
                     f"{BASE_CONFIG_STEM}-{gmr_name}-mask{mask_level}-{co2_name}"
                     f"-{version}"
