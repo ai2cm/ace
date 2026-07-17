@@ -54,25 +54,18 @@ class PatchPredictor:
     def __init__(
         self,
         model: DiffusionModel | DenoisingMoEPredictor,
-        coarse_yx_patch_extent: tuple[int, int] | None = None,
         coarse_horizontal_overlap: int = 1,
     ):
         """
         Args:
             model: the model to use for generating predictions.
-            coarse_yx_patch_extent: The shape of the coarse region passed
-                to the downscaling model for prediction. If None, will be
-                inferred from model.coarse_shape.
             coarse_horizontal_overlap: the number of pixels to overlap
                 between patches in the coarse data.
         """
         self.model = model
         self.modules = self.model.modules
 
-        if coarse_yx_patch_extent is None:
-            coarse_yx_patch_extent = self.model.coarse_shape
-
-        self.coarse_yx_patch_extent = coarse_yx_patch_extent
+        self.coarse_yx_patch_extent = self.model.coarse_shape
         self.downscale_factor = self.model.downscale_factor
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
 
