@@ -148,3 +148,6 @@ run_training "arm2-90-10-noec.yaml"           "ace2s-bakeoff-arm2-90-10-noec-rs0
 run_training "arm3-50-50-ec.yaml"             "ace2s-bakeoff-arm3-50-50-ec-rs0"             4
 run_training "arm4-90-10-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm4-90-10-ec-whiten-g0.5-rs0" 4
 run_training "arm5-50-50-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm5-50-50-ec-whiten-g0.5-rs0" 4
+run_training "arm6-80-10-sp10-ec.yaml"        "ace2s-bakeoff-arm6-80-10-sp10-ec-rs0"        4
+run_training "arm7-90-0-sp10-ec.yaml"         "ace2s-bakeoff-arm7-90-0-sp10-ec-rs0"         4
+run_training "arm8-80-10-sp10-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm8-80-10-sp10-ec-whiten-g0.5-rs0" 4
