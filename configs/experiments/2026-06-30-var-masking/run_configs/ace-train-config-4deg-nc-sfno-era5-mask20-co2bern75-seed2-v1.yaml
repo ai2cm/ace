@@ -1,4 +1,4 @@
-seed: 3
+seed: 2
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -515,12 +515,14 @@ stepper:
         - USWRFtoa
       next_step_forcing_names:
       - DSWRFtoa
+      - global_mean_co2
       in_names:
       - land_fraction
       - ocean_fraction
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
+      - global_mean_co2
       - PRESsfc
       - surface_temperature
       - TMP2m
@@ -615,5 +617,10 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 0
+          max_masked_vars: 20
+        override_groups:
+        - variables:
+          - global_mean_co2
+          masking:
+            rate: 0.75
       include_channel_mask_inputs: true
