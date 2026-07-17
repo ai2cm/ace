@@ -1,0 +1,7 @@
+cftime
+fsspec
+gcsfs
+h5netcdf
+h5py
+xarray
+zarr
