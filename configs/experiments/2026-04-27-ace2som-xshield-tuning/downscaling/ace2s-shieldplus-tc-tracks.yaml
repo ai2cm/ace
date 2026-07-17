@@ -1,4 +1,4 @@
-experiment_dir: /climate-default/home/annak/2026-07-16-ace2s-shieldplus-tuned-xshield-downscaled-tc-tracks
+experiment_dir: /climate-default/home/annak/2026-07-16-ace2s-era5-tuned-xshield-downscaled-tc-tracks-2023
 model:
   denoising_expert_configs:
     - checkpoint_config:
@@ -19,7 +19,7 @@ model:
   churn: 0.0
 data:
   coarse:
-    - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
+    - data_path: /climate-default/home/annak/2026-07-09-ace2s-era5-1step-tuned-xshield-best-inf-ckpt
       file_pattern: output_6hourly_predictions_ic0000.zarr
       engine: zarr
       subset:
