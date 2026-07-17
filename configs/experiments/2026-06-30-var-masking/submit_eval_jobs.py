@@ -18,7 +18,12 @@ from generate_eval_configs import (
     TRAINING_RESULT_DATASETS,
     eval_suite_config_to_run_name,
 )
-from generate_masking_configs import RUN_CONFIGS_DIR, WANDB_PROJECT
+from generate_masking_configs import (
+    BASE_CONFIG_FILENAMES,
+    RUN_CONFIGS_DIR,
+    WANDB_PROJECT,
+    stem_has_version,
+)
 from run_eval_suite import run_eval_suite
 
 from fme.core.distributed import Distributed
@@ -32,12 +37,6 @@ CHECKPOINTS = [
     ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
     ("training_checkpoints/ckpt.tar", "-lastepoch"),
 ]
-
-CONFIGS = sorted(
-    path.name
-    for path in RUN_CONFIGS_DIR.glob("*.yaml")
-    if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
-)
 
 
 def validate_configs(config_filenames: list[str]) -> None:
@@ -79,18 +78,31 @@ def main() -> None:
         default="urgent",
         help="Beaker job priority (default: urgent).",
     )
+    parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=None,
+        help="Restrict to configs of this baseline version (default: all).",
+    )
     args = parser.parse_args()
 
-    if not CONFIGS:
+    configs = sorted(
+        path.name
+        for path in RUN_CONFIGS_DIR.glob("*.yaml")
+        if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
+        and (args.version is None or stem_has_version(path.stem, args.version))
+    )
+    if not configs:
         raise FileNotFoundError(
             f"no eval suite configs in {RUN_CONFIGS_DIR}"
             " — run generate_eval_configs.py first"
         )
 
     if not args.dry_run:
-        validate_configs(CONFIGS)
+        validate_configs(configs)
 
-    for config_filename in CONFIGS:
+    for config_filename in configs:
         config_path = RUN_CONFIGS_DIR / config_filename
         if not config_path.exists():
             raise FileNotFoundError(

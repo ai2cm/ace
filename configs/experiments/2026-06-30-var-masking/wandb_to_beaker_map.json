@@ -18,5 +18,14 @@
   "ace2-var-mask-nc-sfno-era5-gmron-mask30-co2bern75-v1": "01KXKXTPZP72V4C62KY58D14TN",
   "ace2-var-mask-nc-sfno-era5-gmron-mask30-co2default-v1": "01KXKXTY7QK7KNR738BRSTGJN1",
   "ace2-var-mask-nc-sfno-era5-gmron-mask5-co2bern75-v1": "01KXKXV5DKN0YNXFQ1N4T2K6X2",
-  "ace2-var-mask-nc-sfno-era5-gmron-mask5-co2default-v1": "01KXKXVCR94V73FRY8FD4YZ6FS"
+  "ace2-var-mask-nc-sfno-era5-gmron-mask5-co2default-v1": "01KXKXVCR94V73FRY8FD4YZ6FS",
+  "ace2-var-mask-nc-sfno-era5-mask0-co2bern75-seed1-v1": "01KXPHPN9SQM6QHBPQVCCHPDW6",
+  "ace2-var-mask-nc-sfno-era5-mask0-co2bern75-seed3-v1": "01KXPHQ3W01CDTV6QVY2B3TEPE",
+  "ace2-var-mask-nc-sfno-era5-mask0-co2default-seed4-v1": "01KXPHRH29WZ9C1AZ70WHRX3MC",
+  "ace2-var-mask-nc-sfno-era5-mask20-co2bern75-seed2-v1": "01KXPJFAEEBEY2K1G4YA25QV66",
+  "ace2-var-mask-nc-sfno-era5-mask20-co2bern75-seed3-v1": "01KXPJFJKSHRMV2G17VA5W7VF1",
+  "ace2-var-mask-nc-sfno-era5-mask20-co2bern75-seed4-v1": "01KXPJFTCW5S7XV1TYQQAYJ64G",
+  "ace2-var-mask-nc-sfno-era5-mask20-co2default-seed1-v1": "01KXPJG9M0VSB6CRYE21JDDHGE",
+  "ace2-var-mask-nc-sfno-era5-mask20-co2default-seed2-v1": "01KXPJYDCWDW0EBX8DYM1QB0YQ",
+  "ace2-var-mask-nc-sfno-era5-mask20-co2default-seed4-v1": "01KXPJH28Y9MBRSP3BW3G6K29A"
 }

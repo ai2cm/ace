@@ -11,7 +11,7 @@ job's result dataset has no pre_cooldown_ckpt.tar, while the succeeded retry
 writes a *new* result dataset. The map must point at the succeeded job.
 
 Usage:
-    python update_beaker_map.py [--dry-run] [--map PATH]
+    python update_beaker_map.py [--dry-run] [--map PATH] [--version {v1,v2}]
 """
 
 import argparse
@@ -20,7 +20,12 @@ import pathlib
 import re
 import subprocess
 
-from generate_masking_configs import WANDB_ENTITY, WANDB_PROJECT
+from generate_masking_configs import (
+    BASE_CONFIG_FILENAMES,
+    WANDB_ENTITY,
+    WANDB_PROJECT,
+    stem_has_version,
+)
 
 HERE = pathlib.Path(__file__).parent
 DEFAULT_MAP = HERE / "wandb_to_beaker_map.json"
@@ -82,6 +87,13 @@ def main() -> None:
         default=DEFAULT_MAP,
         help=f"Map file to update (default: {DEFAULT_MAP}).",
     )
+    parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=None,
+        help="Restrict to runs of this baseline version (default: all).",
+    )
     args = parser.parse_args()
 
     old_map: dict[str, str] = {}
@@ -93,6 +105,8 @@ def main() -> None:
     new_map = dict(old_map)
     for run_name, notes in sorted(run_notes.items()):
         if run_name.endswith(SKIP_SUFFIXES):
+            continue
+        if args.version is not None and not stem_has_version(run_name, args.version):
             continue
         experiment_id = _experiment_id_from_notes(notes)
         if experiment_id is None:

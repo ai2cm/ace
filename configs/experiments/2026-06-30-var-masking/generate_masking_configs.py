@@ -1,7 +1,10 @@
-"""Generate var-masking training configs from the nc-sfno era5 base config.
+"""Generate var-masking training configs from the nc-sfno era5 baseline config.
 
-Versioning is ``-v1`` throughout (via ``WANDB_SUFFIX``). Full factorial sweep
-written to ``run_configs/`` (emptied first) over three axes:
+Each generated config name (and thus its wandb run name) ends in ``-v1`` or
+``-v2``, matching the baseline config version it was sourced from (see
+``baseline_configs/versions.md``); ``--version`` selects which (default v1).
+Full factorial sweep written to ``run_configs/`` (emptied first) over three
+axes:
 
   - uniform mask-level (``default`` scheme, ``max_masked_vars``): 0, 5, 10,
     20, 30.
@@ -11,28 +14,26 @@ written to ``run_configs/`` (emptied first) over three axes:
 
 5 x 2 x 2 = 20 configs.
 
-global_mean_co2 is already an input channel in the base config
-(in_names + next_step_forcing_names).
+global_mean_co2 is already an input channel in the v1 baseline config
+(in_names + next_step_forcing_names); the co2 axis is meaningless for v2,
+which drops it as an input entirely (see baseline_configs/versions.md).
 """
 
 import argparse
 import copy
 import pathlib
+import re
 
 import yaml
 
 WANDB_ENTITY = "ai2cm"
 WANDB_PROJECT = "VarMasking8"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
-WANDB_SUFFIX = "-v1"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = "ace-train-config-4deg-"  # stripped from config stems
 
 # Generated config filename prefix (independent of the source baseline filename
 # below).
 BASE_CONFIG_STEM = "ace-train-config-4deg-nc-sfno-era5"
-
-# Baseline config sourced for every generated config.
-BASE_CONFIG_FILENAME = "ace2-var-mask-nc-sfno-era5-base.yaml"
 
 CO2_FIELD = "global_mean_co2"
 GMR_FIELD = "global_mean_removal"
@@ -45,11 +46,43 @@ HERE = pathlib.Path(__file__).parent
 BASELINE_CONFIGS_DIR = HERE / "baseline_configs"
 RUN_CONFIGS_DIR = HERE / "run_configs"
 
+BASELINE_CONFIG_GLOB = "ace2-var-mask-nc-sfno-era5-v*.yaml"
+
+
+def _discover_base_config_filenames() -> dict[str, str]:
+    """Baseline config filename keyed by version, discovered from
+    ``baseline_configs/`` (see ``versions.md`` there for what differs between
+    versions). A version is only ever valid if a baseline file for it exists.
+    """
+    return {
+        path.stem.rsplit("-", 1)[-1]: path.name
+        for path in sorted(BASELINE_CONFIGS_DIR.glob(BASELINE_CONFIG_GLOB))
+    }
+
+
+# Baseline config sourced for every generated config, keyed by version, e.g.
+# {"v1": "ace2-var-mask-nc-sfno-era5-v1.yaml", "v2": "...-v2.yaml"}.
+BASE_CONFIG_FILENAMES = _discover_base_config_filenames()
+DEFAULT_VERSION = "v1"
+
+
+def stem_has_version(stem: str, version: str) -> bool:
+    """True if a config stem is tagged with ``version`` (e.g. ``-v1``).
+
+    Matches the version as a ``-``-delimited token so it works whether the
+    tag is the final token (``...-v1``) or followed by another suffix
+    (``...-v1-cooldown``, ``...-v1-bestinf``).
+    """
+    return bool(re.search(rf"(^|-){re.escape(version)}(-|$)", stem))
+
 
 def config_name_to_run_name(name: str) -> str:
-    """Wandb run name for a generated config stem (no .yaml)."""
+    """Wandb run name for a generated config stem (no .yaml).
+
+    ``name`` already ends in ``-v1``/``-v2``, so no separate suffix is added.
+    """
     suffix = name.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def _fetch_wandb_run_names(project: str) -> set[str]:
@@ -100,13 +133,13 @@ def _write_config(
     print(f"Wrote {out_path.name}")
 
 
-def generate_configs(fetch_wandb: bool = False) -> None:
+def generate_configs(fetch_wandb: bool = False, version: str = DEFAULT_VERSION) -> None:
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
     for yaml_path in RUN_CONFIGS_DIR.glob("*.yaml"):
         yaml_path.unlink()
         print(f"Removed {yaml_path.name}")
 
-    base_config = BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAME
+    base_config = BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAMES[version]
     base = yaml.safe_load(base_config.read_text())
 
     wandb_run_names: set[str] | None = None
@@ -118,7 +151,10 @@ def generate_configs(fetch_wandb: bool = False) -> None:
     for mask_level in MASK_LEVELS:
         for gmr_name, keep_gmr in GMR_OPTIONS.items():
             for co2_name, co2_rate in CO2_OPTIONS.items():
-                name = f"{BASE_CONFIG_STEM}-{gmr_name}-mask{mask_level}-{co2_name}"
+                name = (
+                    f"{BASE_CONFIG_STEM}-{gmr_name}-mask{mask_level}-{co2_name}"
+                    f"-{version}"
+                )
                 _write_config(
                     base, name, mask_level, co2_rate, keep_gmr, wandb_run_names
                 )
@@ -126,6 +162,13 @@ def generate_configs(fetch_wandb: bool = False) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=DEFAULT_VERSION,
+        help=f"Baseline config version to sweep from (default: {DEFAULT_VERSION}).",
+    )
     parser.add_argument(
         "--delete-if-in-wandb",
         action="store_true",
@@ -136,7 +179,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    generate_configs(fetch_wandb=args.delete_if_in_wandb)
+    generate_configs(fetch_wandb=args.delete_if_in_wandb, version=args.version)
 
 
 if __name__ == "__main__":

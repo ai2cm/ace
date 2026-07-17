@@ -4,7 +4,8 @@ Each config produced by generate_cooldown_configs.py (in run_configs/) is
 submitted via run-ace-train.sh, which validates the config and calls gantry.
 
 Usage:
-    python submit_cooldown_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
+    python submit_cooldown_jobs.py [--dry-run] [--version {v1,v2}]
+                                   [--beaker-workspace WORKSPACE]
                                    [--beaker-cluster CLUSTER [CLUSTER ...]]
                                    [--beaker-priority PRIORITY]
 """
@@ -15,35 +16,24 @@ import pathlib
 import subprocess
 
 from generate_masking_configs import (
+    BASE_CONFIG_FILENAMES,
     CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
     WANDB_PREFIX,
     WANDB_PROJECT,
-    WANDB_SUFFIX,
+    stem_has_version,
 )
 
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 WANDB_GROUP = "ace2-var-masking-cooldown-2026-06-30"
 
-COOLDOWN_SUFFIXES = ("-bestinfcooldown", "-cooldown")
-
-CONFIGS = sorted(
-    path.name
-    for path in RUN_CONFIGS_DIR.glob("*cooldown.yaml")
-    if path.name.startswith(CONFIG_PREFIX)
-)
-
 
 def config_to_job_name(config_filename: str) -> str:
-    # ace-train-config-4deg-nc-sfno-era5-mask10-co2default-cooldown.yaml
+    # ace-train-config-4deg-nc-sfno-era5-mask10-co2default-v1-cooldown.yaml
     # -> ace2-var-mask-nc-sfno-era5-mask10-co2default-v1-cooldown
     suffix = pathlib.Path(config_filename).stem.removeprefix(CONFIG_PREFIX)
-    for cooldown_suffix in COOLDOWN_SUFFIXES:
-        if suffix.endswith(cooldown_suffix):
-            base = suffix.removesuffix(cooldown_suffix)
-            return f"{WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}"
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}-cooldown"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def main() -> None:
@@ -70,15 +60,28 @@ def main() -> None:
         default="urgent",
         help="Beaker job priority (ex: high or urgent).",
     )
+    parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=None,
+        help="Restrict to configs of this baseline version (default: all).",
+    )
     args = parser.parse_args()
 
-    if not CONFIGS:
+    configs = sorted(
+        path.name
+        for path in RUN_CONFIGS_DIR.glob("*cooldown.yaml")
+        if path.name.startswith(CONFIG_PREFIX)
+        and (args.version is None or stem_has_version(path.stem, args.version))
+    )
+    if not configs:
         raise FileNotFoundError(
             f"no cooldown configs in {RUN_CONFIGS_DIR}"
             " — run generate_cooldown_configs.py first"
         )
 
-    for config_filename in CONFIGS:
+    for config_filename in configs:
         config_path = RUN_CONFIGS_DIR / config_filename
         config_text = config_path.read_text()
         if "REPLACE_WITH_BEAKER_DATASET_ID" in config_text:

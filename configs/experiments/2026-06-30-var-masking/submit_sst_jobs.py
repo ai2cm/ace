@@ -22,7 +22,7 @@ import subprocess
 import sys
 
 from generate_eval_configs import TRAINING_RESULT_DATASETS
-from generate_masking_configs import WANDB_PROJECT
+from generate_masking_configs import BASE_CONFIG_FILENAMES, WANDB_PROJECT
 from generate_sst_configs import RUN_CONFIGS_DIR, SST_PERTURBATIONS, sst_config_filename
 
 HERE = pathlib.Path(__file__).parent
@@ -77,9 +77,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--version",
-        choices=["v1", "v2"],
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
         default=None,
-        help="Restrict to runs ending in this version suffix (default: both).",
+        help="Restrict to runs ending in this version suffix (default: all).",
     )
     parser.add_argument(
         "--beaker-workspace",

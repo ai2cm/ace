@@ -16,12 +16,13 @@ import pathlib
 
 import yaml
 from generate_masking_configs import (
+    BASE_CONFIG_FILENAMES,
     CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PREFIX,
     WANDB_PROJECT,
-    WANDB_SUFFIX,
+    stem_has_version,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -45,15 +46,17 @@ else:
 
 
 def source_config_to_run_name(config_filename: str) -> str:
+    """Wandb run name for a training config filename (stem ends in -v1/-v2)."""
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def eval_suite_config_to_run_name(config_filename: str) -> str:
+    """Wandb run name for an eval suite config filename (stem ends in -v1/-v2)."""
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(EVAL_SUITE_CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def source_config_to_eval_suite_config(config_filename: str) -> str:
@@ -263,6 +266,13 @@ def main() -> None:
         help="Only rewrite evaluator configs that already exist.",
     )
     parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=None,
+        help="Restrict to source configs of this baseline version (default: all).",
+    )
+    parser.add_argument(
         "--delete-if-in-wandb",
         action="store_true",
         help=(
@@ -282,6 +292,7 @@ def main() -> None:
         and not p.name.endswith("-finetune.yaml")
         and not p.name.endswith("-cooldown.yaml")
         and not p.name.endswith("-bestinfcooldown.yaml")
+        and (args.version is None or stem_has_version(p.stem, args.version))
     )
 
     for source_path in source_configs:

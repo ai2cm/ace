@@ -24,12 +24,13 @@ import pathlib
 
 import yaml
 from generate_masking_configs import (
+    BASE_CONFIG_FILENAMES,
     CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PREFIX,
     WANDB_PROJECT,
-    WANDB_SUFFIX,
+    stem_has_version,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -38,13 +39,12 @@ BEST_INFERENCE_CHECKPOINT_NAME = "training_checkpoints/best_inference_ckpt.tar"
 DEFAULT_EPOCHS = 8
 DEFAULT_LR = 0.0001
 
-COOLDOWN_SUFFIXES = ("-bestinfcooldown", "-cooldown")
-
 
 def source_config_to_run_name(config_filename: str) -> str:
+    """Wandb run name for a training config filename (stem ends in -v1/-v2)."""
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def _clear_inference_epochs(cfg: dict) -> None:
@@ -86,18 +86,15 @@ def _fetch_wandb_run_names() -> set[str]:
 def _out_path_to_run_name(out_path: pathlib.Path) -> str:
     """Reconstruct the wandb run name for a generated cooldown config.
 
-    Config stem: {CONFIG_PREFIX}{base}{cooldown_suffix}
-    Run name:    {WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}
-    (the version tag sits before the cooldown suffix).
+    Config stem: {CONFIG_PREFIX}{base}-{version}{cooldown_suffix}
+    Run name:    {WANDB_PREFIX}{base}-{version}{cooldown_suffix}
+    (the version tag is already embedded in the source config's stem, which
+    this cooldown config is built from — see generate_cooldown_config).
     """
     stem = out_path.stem
     if CONFIG_PREFIX and stem.startswith(CONFIG_PREFIX):
         stem = stem[len(CONFIG_PREFIX) :]
-    for cooldown_suffix in COOLDOWN_SUFFIXES:
-        if stem.endswith(cooldown_suffix):
-            base = stem[: -len(cooldown_suffix)]
-            return f"{WANDB_PREFIX}{base}{WANDB_SUFFIX}{cooldown_suffix}"
-    return f"{WANDB_PREFIX}{stem}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{stem}"
 
 
 def _write_config(
@@ -210,6 +207,13 @@ def main() -> None:
         help="Only rewrite cooldown configs that already exist.",
     )
     parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=None,
+        help="Restrict to source configs of this baseline version (default: all).",
+    )
+    parser.add_argument(
         "--delete-if-in-wandb",
         action="store_true",
         help=(
@@ -235,6 +239,7 @@ def main() -> None:
         and not p.name.endswith("-cooldown.yaml")
         and not p.name.endswith("-bestinfcooldown.yaml")
         and p.name.startswith(CONFIG_PREFIX)
+        and (args.version is None or stem_has_version(p.stem, args.version))
     )
 
     variants = [

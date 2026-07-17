@@ -4,7 +4,8 @@ Each config in run_configs/ (from generate_masking_configs.py) is submitted via
 run-ace-train.sh, which validates it and calls gantry.
 
 Usage:
-    python submit_mask_jobs.py [--dry-run] [--beaker-workspace WORKSPACE]
+    python submit_mask_jobs.py [--dry-run] [--version {v1,v2}]
+                               [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]
 """
@@ -15,11 +16,12 @@ import pathlib
 import subprocess
 
 from generate_masking_configs import (
+    BASE_CONFIG_FILENAMES,
     CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
     WANDB_PREFIX,
     WANDB_PROJECT,
-    WANDB_SUFFIX,
+    stem_has_version,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -28,10 +30,10 @@ WANDB_GROUP = "ace2-var-masking-2026-06-30"
 
 
 def config_to_job_name(config_filename: str) -> str:
-    # ace-train-config-4deg-nc-sfno-era5-mask10-co2default.yaml
+    # ace-train-config-4deg-nc-sfno-era5-mask10-co2default-v1.yaml
     # -> ace2-var-mask-nc-sfno-era5-mask10-co2default-v1
     suffix = pathlib.Path(config_filename).stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}{WANDB_SUFFIX}"
+    return f"{WANDB_PREFIX}{suffix}"
 
 
 def main() -> None:
@@ -56,9 +58,22 @@ def main() -> None:
         default="urgent",
         help="Beaker job priority (ex: high or urgent).",
     )
+    parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=None,
+        help="Restrict to configs of this baseline version (default: all).",
+    )
     args = parser.parse_args()
 
-    configs = sorted(path.name for path in RUN_CONFIGS_DIR.glob("*.yaml"))
+    configs = sorted(
+        path.name
+        for path in RUN_CONFIGS_DIR.glob("*.yaml")
+        if path.name.startswith(CONFIG_PREFIX)
+        and "-seed" not in path.stem  # seed replicates: see submit_seed_jobs.py
+        and (args.version is None or stem_has_version(path.stem, args.version))
+    )
     if not configs:
         raise FileNotFoundError(
             f"no configs in {RUN_CONFIGS_DIR} — run generate_masking_configs.py first"

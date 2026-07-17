@@ -3,9 +3,11 @@
 For a chosen subset of the var-masking sweep this writes ``n_seeds`` copies of
 each config (default 5), differing only in the top-level ``seed`` field, so the
 same masking scheme can be trained multiple times to estimate run-to-run spread.
-Versioning is ``-v1`` throughout (inherited from ``WANDB_SUFFIX``). The
-``global_mean_removal`` stepper config is kept as in the baseline (no gmr axis
-here, unlike ``generate_masking_configs.py``).
+Each generated config name ends in ``-v1`` or ``-v2`` (``--version`` selects
+which baseline config to source from, default v1; see
+``baseline_configs/versions.md``). The ``global_mean_removal`` stepper config
+is kept as in the baseline (no gmr axis here, unlike
+``generate_masking_configs.py``).
 
 Configs are written into ``run_configs/`` (only ``*-seed*.yaml`` files are
 cleared first, leaving the other experiments' configs untouched). The masking
@@ -25,10 +27,11 @@ from typing import NamedTuple
 
 import yaml
 from generate_masking_configs import (
-    BASE_CONFIG_FILENAME,
+    BASE_CONFIG_FILENAMES,
     BASE_CONFIG_STEM,
     BASELINE_CONFIGS_DIR,
     CO2_OPTIONS,
+    DEFAULT_VERSION,
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PROJECT,
@@ -79,13 +82,14 @@ def _write_config(
 def generate_configs(
     n_seeds: int = DEFAULT_N_SEEDS,
     fetch_wandb: bool = False,
+    version: str = DEFAULT_VERSION,
 ) -> None:
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
     for yaml_path in RUN_CONFIGS_DIR.glob("*-seed*.yaml"):
         yaml_path.unlink()
         print(f"Removed {yaml_path.name}")
 
-    base_config = BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAME
+    base_config = BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAMES[version]
     base = yaml.safe_load(base_config.read_text())
 
     wandb_run_names: set[str] | None = None
@@ -98,7 +102,7 @@ def generate_configs(
         for co2_name, co2_rate in CO2_OPTIONS.items():
             base_name = f"{BASE_CONFIG_STEM}-{group.label}-{co2_name}"
             for seed in range(n_seeds):
-                name = f"{base_name}-seed{seed}"
+                name = f"{base_name}-seed{seed}-{version}"
                 _write_config(
                     base, group.mask_level, co2_rate, seed, name, wandb_run_names
                 )
@@ -113,6 +117,13 @@ def main() -> None:
         help=f"Number of seeds per config (default: {DEFAULT_N_SEEDS}).",
     )
     parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=DEFAULT_VERSION,
+        help=f"Baseline config version to sweep from (default: {DEFAULT_VERSION}).",
+    )
+    parser.add_argument(
         "--delete-if-in-wandb",
         action="store_true",
         help=(
@@ -122,7 +133,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    generate_configs(args.n_seeds, fetch_wandb=args.delete_if_in_wandb)
+    generate_configs(
+        args.n_seeds, fetch_wandb=args.delete_if_in_wandb, version=args.version
+    )
 
 
 if __name__ == "__main__":

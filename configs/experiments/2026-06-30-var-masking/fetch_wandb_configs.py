@@ -5,12 +5,15 @@ beaker result dataset and write it to ``wandb_configs/<run_name>.yaml``.
 
 Usage:
     python fetch_wandb_configs.py [--map PATH] [--out-dir DIR] [--force]
+                                  [--version {v1,v2}]
 """
 
 import argparse
 import json
 import pathlib
 import subprocess
+
+from generate_masking_configs import BASE_CONFIG_FILENAMES, stem_has_version
 
 HERE = pathlib.Path(__file__).parent
 DEFAULT_MAP = HERE / "wandb_to_beaker_map.json"
@@ -48,9 +51,22 @@ def main() -> None:
         action="store_true",
         help="Re-fetch configs that already exist locally.",
     )
+    parser.add_argument(
+        "--version",
+        "-v",
+        choices=sorted(BASE_CONFIG_FILENAMES),
+        default=None,
+        help="Restrict to runs of this baseline version (default: all).",
+    )
     args = parser.parse_args()
 
     run_to_dataset: dict[str, str] = json.loads(args.map.read_text())
+    if args.version is not None:
+        run_to_dataset = {
+            run_name: dataset_id
+            for run_name, dataset_id in run_to_dataset.items()
+            if stem_has_version(run_name, args.version)
+        }
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     for run_name, dataset_id in sorted(run_to_dataset.items()):
