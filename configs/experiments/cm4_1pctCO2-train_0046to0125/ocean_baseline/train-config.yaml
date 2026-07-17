@@ -200,6 +200,7 @@ stepper:
           - 1
           - 1
           norm: instance
+          zonally_periodic_upsample: true
       normalization:
         network:
           global_means_path: /ocean_stats/centering.nc
