@@ -1,4 +1,4 @@
-seed: 0
+seed: 1
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -610,10 +610,7 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
-      global_mean_removal:
-        kind: shared
-        append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 30
+          max_masked_vars: 20
       include_channel_mask_inputs: true

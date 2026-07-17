@@ -6,8 +6,9 @@ same masking scheme can be trained multiple times to estimate run-to-run spread.
 Each generated config name ends in ``-v1`` or ``-v2`` (``--version`` selects
 which baseline config to source from, default v1; see
 ``baseline_configs/versions.md``). The ``global_mean_removal`` stepper config
-is kept as in the baseline (no gmr axis here, unlike
-``generate_masking_configs.py``).
+is kept as in the baseline for v1 (no gmr axis there, unlike
+``generate_masking_configs.py``); v2 sweeps both gmron/gmroff (see
+``gmr_options_for_version``).
 
 Configs are written into ``run_configs/`` (only ``*-seed*.yaml`` files are
 cleared first, leaving the other experiments' configs untouched). The masking
@@ -20,8 +21,9 @@ subset, each crossed with the co2 axis (co2default off / co2bern75 drops
 With the default 5 seeds this is 2 x 2 x 5 = 20 configs for v1:
 mask30-co2bern75, mask30-co2default, mask0-co2bern75, mask0-co2default.
 For v2, global_mean_co2 is not an input channel (see
-``baseline_configs/versions.md``), so the co2 axis is dropped: only
-co2default is generated, 2 x 1 x 5 = 10 configs.
+``baseline_configs/versions.md``), so the co2 axis is dropped, but the gmr
+axis is added instead: 2 x 1 x 2 x 5 = 20 configs: mask30-gmron,
+mask30-gmroff, mask0-gmron, mask0-gmroff (each co2default).
 """
 
 import argparse
@@ -34,6 +36,7 @@ from generate_masking_configs import (
     BASE_CONFIG_STEM,
     BASELINE_CONFIGS_DIR,
     DEFAULT_VERSION,
+    GMR_OPTIONS,
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PROJECT,
@@ -44,7 +47,18 @@ from generate_masking_configs import (
 )
 
 DEFAULT_N_SEEDS = 5
-KEEP_GMR = True  # no gmr axis here; keep global_mean_removal as in baseline
+
+
+def gmr_options_for_version(version: str) -> dict[str, bool]:
+    """GMR_OPTIONS, restricted to keep-baseline-only for v1.
+
+    No gmr axis for v1 (``global_mean_removal`` is kept as in the baseline,
+    as before, with no gmr token in the config name); v2 sweeps both
+    gmron/gmroff, as in ``generate_masking_configs.py``.
+    """
+    if version == "v1":
+        return {"": True}
+    return GMR_OPTIONS
 
 
 class SeedGroup(NamedTuple):
@@ -63,6 +77,7 @@ def _write_config(
     base: dict,
     mask_level: int,
     co2_rate: float | None,
+    keep_gmr: bool,
     seed: int,
     name: str,
     wandb_run_names: set[str] | None = None,
@@ -76,7 +91,7 @@ def _write_config(
             print(f"Skipped {out_path.name} (run exists in wandb)")
         return
     cfg = copy.deepcopy(base)
-    _apply_settings(cfg, mask_level, co2_rate, KEEP_GMR)
+    _apply_settings(cfg, mask_level, co2_rate, keep_gmr)
     cfg["seed"] = seed
     out_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
     print(f"Wrote {out_path.name}")
@@ -102,14 +117,23 @@ def generate_configs(
         print(f"Found {len(wandb_run_names)} existing runs.")
 
     co2_options = co2_options_for_version(version)
+    gmr_options = gmr_options_for_version(version)
     for group in SEED_GROUPS:
         for co2_name, co2_rate in co2_options.items():
-            base_name = f"{BASE_CONFIG_STEM}-{group.label}-{co2_name}"
-            for seed in range(n_seeds):
-                name = f"{base_name}-seed{seed}-{version}"
-                _write_config(
-                    base, group.mask_level, co2_rate, seed, name, wandb_run_names
-                )
+            for gmr_name, keep_gmr in gmr_options.items():
+                gmr_token = f"{gmr_name}-" if gmr_name else ""
+                base_name = f"{BASE_CONFIG_STEM}-{gmr_token}{group.label}-{co2_name}"
+                for seed in range(n_seeds):
+                    name = f"{base_name}-seed{seed}-{version}"
+                    _write_config(
+                        base,
+                        group.mask_level,
+                        co2_rate,
+                        keep_gmr,
+                        seed,
+                        name,
+                        wandb_run_names,
+                    )
 
 
 def main() -> None:
