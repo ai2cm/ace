@@ -267,8 +267,6 @@ stepper:
       - total_frozen_precipitation_rate
       # ocean prognostic
       - sst
-      - ssu
-      - ssv
       - zos
       - so_0
       - so_1
@@ -355,8 +353,6 @@ stepper:
       out_names:
       # ocean prognostic
       - sst
-      - ssu
-      - ssv
       - zos
       - so_0
       - so_1
