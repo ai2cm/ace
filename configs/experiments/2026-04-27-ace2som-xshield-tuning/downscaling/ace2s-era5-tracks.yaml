@@ -1,6 +1,22 @@
-experiment_dir: FILL_IN/output
+experiment_dir: /climate-default/home/annak/2026-07-16-ace2s-era5-tuned-xshield-downscaled-tc-tracks-2023
 model:
-  checkpoint: FILL_IN/checkpoint.tar
+  denoising_expert_configs:
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_low_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 0.005
+      sigma_max: 200.0
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_high_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+      sigma_min: 200.0
+      sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
 data:
   coarse:
   - data_path: /climate-default/home/annak/2026-07-09-ace2s-era5-1step-tuned-xshield-best-inf-ckpt/output_6hourly_predictions_ic0000.zarr
