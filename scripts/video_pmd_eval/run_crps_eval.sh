@@ -29,7 +29,7 @@ else
 fi
 SESSION_NAME="run-crps-eval-${TAG}-$(date +%s)"
 WORKSPACE="ai2/climate-titan"
-CLUSTER="ai2/phobos"
+CLUSTER="ai2/triton"
 PRIORITY="urgent"
 BUDGET="ai2/atec-climate"
 IMAGE="01KS0HKT272A104Y831YXRD949"  # same image the video PMD train/inference jobs use
