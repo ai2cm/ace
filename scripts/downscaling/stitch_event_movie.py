@@ -203,6 +203,13 @@ def oriented(da: xr.DataArray) -> tuple[np.ndarray, tuple[float, float, float, f
     return data, _edge_extent(da)
 
 
+def compute_downscaled_center(patch: xr.DataArray) -> tuple[float, float]:
+    """Return the ``(lon, lat)`` of the PRMSL minimum within a high-res patch."""
+    data = np.asarray(patch.values, dtype=float)
+    iy, ix = np.unravel_index(np.nanargmin(data), data.shape)
+    return float(patch["lon"].values[ix]), float(patch["lat"].values[iy])
+
+
 def compute_color_limits(
     patches: list[xr.DataArray],
     coarse_frames: list[xr.DataArray],
@@ -226,6 +233,7 @@ def render_event(
     cmap: str,
     fps: int,
     output_path: Path,
+    show_downscaled_track: bool = False,
 ):
     patches = [load_patch(path, variable, reduction, sample) for _, path in snapshots]
     times = [when for when, _ in snapshots]
@@ -269,6 +277,19 @@ def render_event(
 
     track_lon = [0.5 * (e[0] + e[1]) for e in extents]
     track_lat = [0.5 * (e[2] + e[3]) for e in extents]
+
+    downscaled_lon = downscaled_lat = None
+    if show_downscaled_track:
+        prmsl_patches = (
+            patches
+            if variable == "PRMSL"
+            else [
+                load_patch(path, "PRMSL", reduction, sample) for _, path in snapshots
+            ]
+        )
+        centers = [compute_downscaled_center(p) for p in prmsl_patches]
+        downscaled_lon = [lon + shift for (lon, _), shift in zip(centers, lon_shifts)]
+        downscaled_lat = [lat for _, lat in centers]
 
     frames = []
     for i, (when, patch) in enumerate(zip(times, patches)):
@@ -316,15 +337,29 @@ def render_event(
             )
         )
         ax.plot(
-            track_lon[: i + 1],
-            track_lat[: i + 1],
+            track_lon[:i],
+            track_lat[:i],
             color="white",
             linewidth=1.0,
             marker="o",
             markersize=2,
             transform=ccrs.PlateCarree(),
             zorder=3,
+            label="Coarse-model track" if show_downscaled_track else None,
         )
+        if show_downscaled_track:
+            ax.plot(
+                downscaled_lon[:i],
+                downscaled_lat[:i],
+                color="magenta",
+                linewidth=1.0,
+                marker="o",
+                markersize=2,
+                transform=ccrs.PlateCarree(),
+                zorder=4,
+                label="Downscaled track",
+            )
+            ax.legend(loc="lower left", fontsize=7, framealpha=0.6)
         ax.coastlines(color="black", linewidth=0.4)
         gl = ax.gridlines(
             draw_labels=True,
@@ -396,6 +431,12 @@ def parse_args():
         default=1.0,
         help="Degrees of coarse data to include beyond the frame edges (default: 1).",
     )
+    parser.add_argument(
+        "--show-downscaled-track",
+        action="store_true",
+        help="Also plot the cyclone track computed from the high-resolution "
+        "downscaled PRMSL minimum, alongside the coarse-model track.",
+    )
     parser.add_argument("--cmap", default="turbo", help="Colormap (default: turbo).")
     parser.add_argument("--fps", type=int, default=4, help="Frames per second.")
     parser.add_argument(
@@ -446,6 +487,7 @@ def main():
                 cmap=args.cmap,
                 fps=args.fps,
                 output_path=output_dir / f"{event_name}_{variable}.{args.format}",
+                show_downscaled_track=args.show_downscaled_track,
             )
 
 

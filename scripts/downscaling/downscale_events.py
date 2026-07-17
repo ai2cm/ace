@@ -204,7 +204,7 @@ def parse_args():
     parser.add_argument(
         "--box-size",
         type=float,
-        default=4.0,
+        default=16,
         help="Side length of the lat/lon bounding box in degrees (default: 4).",
     )
     parser.add_argument(
