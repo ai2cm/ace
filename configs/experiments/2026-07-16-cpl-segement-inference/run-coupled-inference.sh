@@ -45,7 +45,7 @@ gantry run \
     --gpus 1 \
     --shared-memory 50GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- python -I -m fme.coupled.inference $CONFIG_PATH --segments $SEGMENTS
