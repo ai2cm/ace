@@ -124,7 +124,13 @@ def parse_args():
              "for one-off runs not yet in KNOWN_MODELS.",
     )
     parser.add_argument(
-        "--outdir", default=".", help="Where to save the two PNG figures.",
+        "--models", nargs="+", choices=sorted(KNOWN_MODELS), default=None,
+        help="Two or more known models to compare side by side in one run "
+             "(overrides --model/--pred-zarr). E.g. "
+             "--models pcn-v1 bb-subset-cons10.",
+    )
+    parser.add_argument(
+        "--outdir", default=".", help="Where to save the PNG figures.",
     )
     return parser.parse_args()
 
@@ -135,18 +141,7 @@ OUTDIR = ARGS.outdir
 # Label used in plot titles/filenames so different models' outputs don't
 # collide when writing to the same OUTDIR.
 LABEL = ARGS.model if ARGS.pred_zarr is None else "custom"
-
-pred_full = xr.open_zarr(PRED_ZARR)
-truth_full = xr.open_zarr(TRUTH_ZARR)
-# Predictions are on a lat_extent-cropped grid (176 of 180 raw latitudes);
-# align truth to the exact same grid before comparing.
-truth_full = truth_full.sel(
-    latitude=pred_full.latitude, longitude=pred_full.longitude, method="nearest"
-)
-
-lat = pred_full["latitude"].values
-lon = pred_full["longitude"].values
-area_weight = np.cos(np.radians(lat))  # (lat,), broadcasts against (..., lat, lon)
+COMPARE = ARGS.models is not None and len(ARGS.models) > 1
 
 TIME_STEP_HOURS = 3
 N_TIMESTEPS = 9  # clip length; matches config.model.n_timesteps
@@ -154,7 +149,17 @@ CLIP_STRIDE = N_TIMESTEPS - 1
 LEAD_HOURS = [3, 6, 9, 12, 15, 18, 21]
 
 
-def load_window(t0, t1):
+def load_model_data(pred_zarr, truth_raw):
+    pred_full = xr.open_zarr(pred_zarr)
+    # Predictions are on a lat_extent-cropped grid (176 of 180 raw latitudes);
+    # align truth to the exact same grid before comparing.
+    truth_full = truth_raw.sel(
+        latitude=pred_full.latitude, longitude=pred_full.longitude, method="nearest"
+    )
+    return pred_full, truth_full
+
+
+def load_window(pred_full, truth_full, t0, t1):
     """(pred, truth, interior_mask, lead_hour_per_step) for one time window.
 
     Lead-hour-within-clip is computed *locally* to this window (position mod
@@ -168,10 +173,17 @@ def load_window(t0, t1):
     return p, t, interior_mask, lead_hour
 
 
-def main():
-    print(f"Model: {ARGS.model if ARGS.pred_zarr is None else '(explicit path)'}")
-    print(f"Pred zarr: {PRED_ZARR}\n")
-    windows = [(name, *load_window(t0, t1)) for name, t0, t1 in SAMPLE_WINDOWS]
+def compute_model_scores(pred_full, truth_full):
+    """Run the full scoring pipeline for one model's already-opened,
+    truth-aligned datasets. Returns (summary_df, lead_df, crps_map, lat, lon)."""
+    lat = pred_full["latitude"].values
+    lon = pred_full["longitude"].values
+    area_weight = np.cos(np.radians(lat))  # (lat,), broadcasts against (..., lat, lon)
+
+    windows = [
+        (name, *load_window(pred_full, truth_full, t0, t1))
+        for name, t0, t1 in SAMPLE_WINDOWS
+    ]
     for name, p, t, interior_mask, _ in windows:
         print(f"{name:14s} {p.sizes['time']:3d} timesteps, {int(interior_mask.sum()):2d} interior")
 
@@ -187,8 +199,8 @@ def main():
         p = np.concatenate(p_parts, axis=0)
         t = np.concatenate(t_parts, axis=0)
 
-        crps_val = area_weighted_mean(crps_fair(p, t), lat_axis=1)
-        spread, rmse, ratio = spread_skill(p, t, lat_axis=1)
+        crps_val = area_weighted_mean(crps_fair(p, t), area_weight, lat_axis=1)
+        spread, rmse, ratio = spread_skill(p, t, area_weight, lat_axis=1)
 
         rows.append({
             "channel": name,
@@ -201,8 +213,6 @@ def main():
         })
 
     summary = pd.DataFrame(rows).set_index("channel")
-    print("\nOverall (all interior frames, 4 seasonal windows):")
-    print(summary)
 
     # ---- Skill vs. lead time within the 24h interpolation window ----
     lead_rows = []
@@ -219,17 +229,32 @@ def main():
                     "time", "latitude", "longitude").values)
             p = np.concatenate(p_parts, axis=0)
             t = np.concatenate(t_parts, axis=0)
-            crps_val = area_weighted_mean(crps_fair(p, t), lat_axis=1)
-            spread, rmse, ratio = spread_skill(p, t, lat_axis=1)
+            crps_val = area_weighted_mean(crps_fair(p, t), area_weight, lat_axis=1)
+            spread, rmse, ratio = spread_skill(p, t, area_weight, lat_axis=1)
             lead_rows.append({
                 "channel": name, "lead_hour": lead, "n_frames": p.shape[0],
                 "CRPS": crps_val, "spread": spread, "RMSE": rmse, "ratio": ratio,
             })
 
     lead_df = pd.DataFrame(lead_rows)
-    print("\nBy lead time (pooled across 4 seasonal windows):")
-    print(lead_df.round(4).set_index(["channel", "lead_hour"]))
 
+    # ---- Spatial map: CRPS at the hardest lead time (12h), PRMSL ----
+    name = "PRMSL"
+    p_parts, t_parts = [], []
+    for _, p_ds, t_ds, interior_mask, lead_hour_per_step in windows:
+        sel = interior_mask & (lead_hour_per_step == 12)
+        p_parts.append(p_ds[name].isel(time=sel).transpose(
+            "time", "latitude", "longitude", "ensemble").values)
+        t_parts.append(t_ds[name].isel(time=sel).transpose(
+            "time", "latitude", "longitude").values)
+    p = np.concatenate(p_parts, axis=0)
+    t = np.concatenate(t_parts, axis=0)
+    crps_map = crps_fair(p, t).mean(axis=0)  # (lat, lon)
+
+    return summary, lead_df, crps_map, lat, lon
+
+
+def plot_single_model(label, summary, lead_df, crps_map, lat, lon):
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
     for name in CHANNELS:
         sub = lead_df[lead_df["channel"] == name]
@@ -245,35 +270,123 @@ def main():
         ax.set_xticks(LEAD_HOURS)
         ax.axvline(12, color="gray", lw=0.6, alpha=0.5)
         ax.legend(fontsize=7)
-    fig.suptitle(f"{LABEL}: skill by lead time (4 seasonal windows, 2023)")
+    fig.suptitle(f"{label}: skill by lead time (4 seasonal windows, 2023)")
     fig.tight_layout()
-    fig.savefig(f"{OUTDIR}/crps_lead_time_{LABEL}.png", dpi=150)
+    fig.savefig(f"{OUTDIR}/crps_lead_time_{label}.png", dpi=150)
     plt.close(fig)
 
-    # ---- Spatial map: CRPS at the hardest lead time (12h), PRMSL ----
     name = "PRMSL"
-    p_parts, t_parts = [], []
-    for _, p_ds, t_ds, interior_mask, lead_hour_per_step in windows:
-        sel = interior_mask & (lead_hour_per_step == 12)
-        p_parts.append(p_ds[name].isel(time=sel).transpose(
-            "time", "latitude", "longitude", "ensemble").values)
-        t_parts.append(t_ds[name].isel(time=sel).transpose(
-            "time", "latitude", "longitude").values)
-    p = np.concatenate(p_parts, axis=0)
-    t = np.concatenate(t_parts, axis=0)
-    crps_map = crps_fair(p, t).mean(axis=0)  # (lat, lon)
-
     fig, ax = plt.subplots(figsize=(9, 4.2))
     im = ax.pcolormesh(lon, lat, crps_map, cmap="viridis")
     fig.colorbar(im, ax=ax, label=f"CRPS ({UNITS[name]})")
     ax.set_xlabel("longitude (deg E)")
     ax.set_ylabel("latitude")
-    ax.set_title(f"{LABEL}: {name} CRPS at 12h lead (hardest interior frame), 4-season mean")
+    ax.set_title(f"{label}: {name} CRPS at 12h lead (hardest interior frame), 4-season mean")
     fig.tight_layout()
-    fig.savefig(f"{OUTDIR}/crps_map_{LABEL}.png", dpi=150)
+    fig.savefig(f"{OUTDIR}/crps_map_{label}.png", dpi=150)
     plt.close(fig)
 
-    print(f"\nSaved {OUTDIR}/crps_lead_time_{LABEL}.png and {OUTDIR}/crps_map_{LABEL}.png")
+    print(f"\nSaved {OUTDIR}/crps_lead_time_{label}.png and {OUTDIR}/crps_map_{label}.png")
+
+
+def plot_comparison(results):
+    """results: dict label -> (summary_df, lead_df, crps_map, lat, lon)."""
+    labels = list(results)
+    tag = "-".join(labels)
+    linestyles = ["-", "--", ":", "-."]
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    channel_color = {name: colors[i % len(colors)] for i, name in enumerate(CHANNELS)}
+
+    # ---- Combined lead-time plot: color = channel, linestyle = model ----
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+    for li, label in enumerate(labels):
+        _, lead_df, _, _, _ = results[label]
+        ls = linestyles[li % len(linestyles)]
+        for name in CHANNELS:
+            sub = lead_df[lead_df["channel"] == name]
+            leg = f"{name} ({label})"
+            axes[0].plot(sub["lead_hour"], sub["CRPS"], marker="o", ls=ls,
+                         color=channel_color[name], label=leg)
+            axes[1].plot(sub["lead_hour"], sub["ratio"], marker="o", ls=ls,
+                         color=channel_color[name], label=leg)
+    axes[0].set_title("CRPS vs. lead time")
+    axes[0].set_ylabel("CRPS (native units)")
+    axes[1].set_title("Spread/skill ratio vs. lead time")
+    axes[1].set_ylabel("ratio (1.0 = reliable)")
+    axes[1].axhline(1.0, color="gray", lw=0.8, ls="--")
+    for ax in axes:
+        ax.set_xlabel("lead time within 24h window (hr)")
+        ax.set_xticks(LEAD_HOURS)
+        ax.axvline(12, color="gray", lw=0.6, alpha=0.5)
+        ax.legend(fontsize=6, ncol=2)
+    fig.suptitle(f"Model comparison ({' vs. '.join(labels)}): skill by lead time")
+    fig.tight_layout()
+    fig.savefig(f"{OUTDIR}/crps_lead_time_compare_{tag}.png", dpi=150)
+    plt.close(fig)
+
+    # ---- Combined spatial map: one panel per model, shared color scale ----
+    name = "PRMSL"
+    maps = {label: results[label][2] for label in labels}
+    vmin = min(m.min() for m in maps.values())
+    vmax = max(m.max() for m in maps.values())
+    fig, axes = plt.subplots(1, len(labels), figsize=(9 * len(labels), 4.2), squeeze=False)
+    axes = axes[0]
+    im = None
+    for ax, label in zip(axes, labels):
+        _, _, crps_map, lat, lon = results[label]
+        im = ax.pcolormesh(lon, lat, crps_map, cmap="viridis", vmin=vmin, vmax=vmax)
+        ax.set_xlabel("longitude (deg E)")
+        ax.set_ylabel("latitude")
+        ax.set_title(label)
+    fig.colorbar(im, ax=list(axes), label=f"CRPS ({UNITS[name]})")
+    fig.suptitle(f"{name} CRPS at 12h lead (hardest interior frame), 4-season mean")
+    fig.savefig(f"{OUTDIR}/crps_map_compare_{tag}.png", dpi=150)
+    plt.close(fig)
+
+    # ---- Combined report: side-by-side summary table ----
+    combined = pd.concat(
+        {label: results[label][0] for label in labels}, names=["model"]
+    ).reset_index()
+    combined = combined[["model", "channel", "units", "n_frames", "CRPS",
+                          "spread", "RMSE (ens mean)", "spread/skill ratio"]]
+    print(f"\n=== Combined comparison ({' vs. '.join(labels)}) ===")
+    print(combined.set_index(["channel", "model"]).sort_index())
+    csv_path = f"{OUTDIR}/comparison_summary_{tag}.csv"
+    combined.to_csv(csv_path, index=False)
+
+    print(
+        f"\nSaved {OUTDIR}/crps_lead_time_compare_{tag}.png, "
+        f"{OUTDIR}/crps_map_compare_{tag}.png, and {csv_path}"
+    )
+
+
+def main():
+    if COMPARE:
+        labels = ARGS.models
+        paths = {label: KNOWN_MODELS[label] for label in labels}
+    else:
+        labels = [LABEL]
+        paths = {LABEL: PRED_ZARR}
+
+    truth_raw = xr.open_zarr(TRUTH_ZARR)
+
+    results = {}
+    for label in labels:
+        print(f"\n=== {label} ===")
+        print(f"Pred zarr: {paths[label]}")
+        pred_full, truth_full = load_model_data(paths[label], truth_raw)
+        summary, lead_df, crps_map, lat, lon = compute_model_scores(pred_full, truth_full)
+        print("\nOverall (all interior frames, 4 seasonal windows):")
+        print(summary)
+        print("\nBy lead time (pooled across 4 seasonal windows):")
+        print(lead_df.round(4).set_index(["channel", "lead_hour"]))
+        results[label] = (summary, lead_df, crps_map, lat, lon)
+
+    if COMPARE:
+        plot_comparison(results)
+    else:
+        summary, lead_df, crps_map, lat, lon = results[labels[0]]
+        plot_single_model(labels[0], summary, lead_df, crps_map, lat, lon)
 
 
 def crps_fair(ens, truth_arr):
@@ -288,7 +401,7 @@ def crps_fair(ens, truth_arr):
     return term1 - term2
 
 
-def area_weighted_mean(arr, lat_axis):
+def area_weighted_mean(arr, area_weight, lat_axis):
     """Weight by cos(lat) along ``lat_axis`` of an otherwise-arbitrary array."""
     shape = [1] * arr.ndim
     shape[lat_axis] = len(area_weight)
@@ -297,16 +410,16 @@ def area_weighted_mean(arr, lat_axis):
     return np.sum(arr * w) / np.sum(w)
 
 
-def spread_skill(ens, truth_arr, lat_axis, member_axis=-1):
+def spread_skill(ens, truth_arr, area_weight, lat_axis, member_axis=-1):
     """(spread, rmse, ratio), area-weighted along ``lat_axis``, with the
     Fortin et al. (2014) finite-ensemble correction on spread
     (``sqrt((M+1)/M)``) so it's directly comparable to ensemble-mean RMSE for
     a reliable ensemble (ratio approx 1)."""
     M = ens.shape[member_axis]
     ens_mean = ens.mean(axis=member_axis)
-    rmse = np.sqrt(area_weighted_mean((ens_mean - truth_arr) ** 2, lat_axis))
+    rmse = np.sqrt(area_weighted_mean((ens_mean - truth_arr) ** 2, area_weight, lat_axis))
     var = ens.var(axis=member_axis, ddof=1)
-    spread = np.sqrt(area_weighted_mean(var, lat_axis)) * np.sqrt((M + 1) / M)
+    spread = np.sqrt(area_weighted_mean(var, area_weight, lat_axis)) * np.sqrt((M + 1) / M)
     return spread, rmse, spread / rmse
 
 
