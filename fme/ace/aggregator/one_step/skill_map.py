@@ -123,14 +123,21 @@ class SkillMapAggregator:
         dist = Distributed.get_instance()
         r2: TensorDict = {}
         rmse: TensorDict = {}
+        # reduce_mean's all_reduce mutates its argument in place, so reduce a clone
+        # to keep this getter idempotent -- it is called once for the netCDF dataset
+        # and once for the wandb logs, and re-reducing the stored accumulators would
+        # inflate every moment by total_ranks (driving the variance negative -> NaN).
         for name in sorted(self._sq_err_sum.keys()):
-            mse = dist.reduce_mean(self._sq_err_sum[name]) / self._n_batches
+            mse = dist.reduce_mean(self._sq_err_sum[name].clone()) / self._n_batches
             if self._include_rmse:
                 rmse[name] = torch.sqrt(mse)
             if self._include_r2:
-                target_mean = dist.reduce_mean(self._target_sum[name]) / self._n_batches
+                target_mean = (
+                    dist.reduce_mean(self._target_sum[name].clone()) / self._n_batches
+                )
                 target_sq_mean = (
-                    dist.reduce_mean(self._target_sq_sum[name]) / self._n_batches
+                    dist.reduce_mean(self._target_sq_sum[name].clone())
+                    / self._n_batches
                 )
                 target_var = target_sq_mean - target_mean**2
                 r2[name] = torch.where(

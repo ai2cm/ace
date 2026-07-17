@@ -222,6 +222,35 @@ def test_r2_panel_uses_fixed_diverging_scale(monkeypatch):
     assert rmse_call["vmax"] is None
 
 
+def test_getter_idempotent_under_inplace_reduce(monkeypatch):
+    # Under real distributed training, reduce_mean's all_reduce mutates its argument
+    # in place; single-process reduce is a no-op, so simulate the in-place behavior
+    # here. The getter is called once for the netCDF dataset and once for the wandb
+    # logs, so it must be idempotent. Without cloning, the 2nd call re-reduces the
+    # accumulators, inflating the moments by `total_ranks` and driving the variance
+    # negative -> R2 NaN for the large-mean field below.
+    from fme.core.distributed import Distributed
+
+    world_size = 4
+
+    def mutating_reduce_mean(tensor):
+        tensor.mul_(world_size)  # emulate in-place all_reduce over identical ranks
+        return tensor / world_size
+
+    monkeypatch.setattr(Distributed.get_instance(), "reduce_mean", mutating_reduce_mean)
+
+    agg = SkillMapAggregator(DIMS)
+    # large-mean variable: a double-reduce would make Var_target < 0 -> NaN
+    target = 250.0 + _batch(sample=16, nx=3, ny=4)
+    gen = target + 0.1 * _batch(sample=16, nx=3, ny=4)
+    _record(agg, target=target, gen=gen)
+
+    r2_first = agg.get_dataset()["r2-a"].values
+    r2_second = agg.get_dataset()["r2-a"].values
+    np.testing.assert_array_equal(r2_first, r2_second)  # repeated calls agree
+    assert not np.isnan(r2_first).any()  # not corrupted to NaN
+
+
 def test_metric_config_builds_aggregator():
     coords = LatLonCoordinates(lon=torch.arange(4), lat=torch.arange(3))
     ds_info = DatasetInfo(horizontal_coordinates=coords)
