@@ -209,17 +209,6 @@ class Downscaler:
             )
         return base_model
 
-    @property
-    def batch_generator(self):
-        if self.patch.needs_patch_data_generator:
-            return self.data.get_patched_generator(
-                yx_patch_extent=self.model.coarse_shape,
-                overlap=self.patch.coarse_horizontal_overlap,
-                drop_partial_patches=False,
-            )
-        else:
-            return self.data.get_generator()
-
     def save_netcdf_data(self, ds: xr.Dataset):
         if self.dist.is_root():
             # no slashes allowed in netcdf variable names
@@ -231,7 +220,7 @@ class Downscaler:
     def run(self):
         generation_model = self._get_generation_model()
         aggregator: NoTargetAggregator | None = None
-        for i, batch in enumerate(self.batch_generator):
+        for i, batch in enumerate(self.data.get_generator()):
             if aggregator is None:
                 fine_coords = generation_model.get_fine_coords_for_batch(batch)
                 aggregator = NoTargetAggregator(
@@ -249,7 +238,7 @@ class Downscaler:
                 coarse = {k: v.unsqueeze(1) for k, v in batch.data.items()}
                 aggregator.record_batch(prediction, coarse, batch.time)
 
-        # dataset build ensures non-empty batch_generator
+        # dataset build ensures a non-empty generator
         assert aggregator is not None
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()

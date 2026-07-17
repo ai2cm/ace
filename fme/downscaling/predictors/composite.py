@@ -29,16 +29,6 @@ class PatchPredictionConfig:
     coarse_horizontal_overlap: int = 1
 
     @property
-    def needs_patch_data_generator(self):
-        # If final predictions are not composited together, the BatchData is divided
-        # into patches before being passed to the top level no-target generation call.
-        # If final predictions are composited together, the BatchData is divided
-        # into patches within the PatchPredictor's generation method.
-        if self.divide_generation and not self.composite_prediction:
-            return True
-        return False
-
-    @property
     def needs_patch_predictor(self):
         if self.divide_generation and self.composite_prediction:
             return True
