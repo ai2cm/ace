@@ -677,6 +677,10 @@ stepper:
         append_as_input: true
       builder:
         type: NoiseConditionedSFNO
+        # Conditional on the per-source dataset labels ("shield-plus"/"era5")
+        # above; without this the labels are rejected as unconditional-model
+        # inputs ("Labels are not allowed for unconditional models").
+        conditional: true
         config:
           embed_dim: 512
           noise_embed_dim: 32
