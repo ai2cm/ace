@@ -10,7 +10,7 @@ set -e
 
 JOB_NAME="cpl-segmented-inference-repro-471"
 JOB_GROUP="2026-07-16-cpl-segement-inference"
-EXISTING_RESULTS_DATASET="01KX6J96BJ43952QX488G6Z9H3"  # contains checkpoint for inference
+EXISTING_RESULTS_DATASET="01KWW5C2CSBTZT5EQY7KBTC9FD"  # contains checkpoint for inference
 CHECKPOINT_IN_DATASET="training_checkpoints/best_inference_ckpt.tar"
 SEGMENTS=3
 CONFIG_FILENAME="config.yaml"
