@@ -19,7 +19,9 @@ model:
   churn: 0.0
 data:
   coarse:
-  - data_path: /climate-default/home/annak/2026-07-09-ace2s-era5-1step-tuned-xshield-best-inf-ckpt/output_6hourly_predictions_ic0000.zarr
+  - data_path: /climate-default/home/annak/2026-07-09-ace2s-era5-1step-tuned-xshield-best-inf-ckpt
+    file_pattern: output_6hourly_predictions_ic0000.zarr
+    engine: zarr
   batch_size: 1
   num_data_workers: 0
   strict_ensemble: false
