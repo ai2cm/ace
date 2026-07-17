@@ -515,14 +515,12 @@ stepper:
         - USWRFtoa
       next_step_forcing_names:
       - DSWRFtoa
-      - global_mean_co2
       in_names:
       - land_fraction
       - ocean_fraction
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
-      - global_mean_co2
       - PRESsfc
       - surface_temperature
       - TMP2m
@@ -612,7 +610,10 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
+      global_mean_removal:
+        kind: shared
+        append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 0
+          max_masked_vars: 30
       include_channel_mask_inputs: true

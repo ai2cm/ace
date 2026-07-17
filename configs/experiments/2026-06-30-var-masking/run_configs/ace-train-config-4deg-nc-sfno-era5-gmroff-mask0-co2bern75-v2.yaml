@@ -515,14 +515,12 @@ stepper:
         - USWRFtoa
       next_step_forcing_names:
       - DSWRFtoa
-      - global_mean_co2
       in_names:
       - land_fraction
       - ocean_fraction
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
-      - global_mean_co2
       - PRESsfc
       - surface_temperature
       - TMP2m
@@ -614,7 +612,7 @@ stepper:
       - h500
       input_dropout:
         default:
-          max_masked_vars: 10
+          max_masked_vars: 0
         override_groups:
         - variables:
           - global_mean_co2
