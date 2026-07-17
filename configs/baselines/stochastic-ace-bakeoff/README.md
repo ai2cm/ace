@@ -29,10 +29,13 @@ knobs below.
 
 Recovered from Troy's run `nzccs8zd`
 (https://wandb.ai/ai2cm/ace/runs/nzccs8zd): NoiseConditionedSFNO
-(embed_dim 512, 8 layers, spectral_ratio 0.125, isotropic noise),
-residual prediction, EnsembleLoss (n_ensemble 2, n_forward_steps 1),
-shared global-mean removal, dry-air + moisture-budget correction, EMA
-0.999, FusedAdam lr 1e-4, batch_size 8. Trained 80 epochs on
+(embed_dim 512, 8 layers, spectral_ratio 0.125, isotropic noise,
+`clip_latent_global_means` off), residual prediction, EnsembleLoss
+(n_ensemble 2, n_forward_steps 1), shared global-mean removal, dry-air +
+moisture-budget correction, EMA 0.999, FusedAdam lr 1e-4, batch_size 8.
+40 inputs / 51 outputs: the four near-surface fields (TMP2m, Q2m,
+UGRD10m, VGRD10m) are output-only diagnostics, not inputs, and the model
+predicts `total_frozen_precipitation_rate`. Trained 80 epochs on
 `/climate-default/2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr` with
 an `h500: 5` per-channel loss weight. Data is 06Z daily, so every
 inference initial condition is at `T06:00:00`.

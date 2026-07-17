@@ -405,7 +405,6 @@ stepper:
           use_mlp: true
           num_layers: 8
           operator_type: dhconv
-          clip_latent_global_means: true
       normalization:
         network:
           global_means_path: /climate-default/2026-03-19-era5-1deg-8layer-daily-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/centering.nc
@@ -430,6 +429,7 @@ stepper:
         - specific_total_water_7
         - Q2m
         - PRATEsfc
+        - total_frozen_precipitation_rate
         - ULWRFsfc
         - ULWRFtoa
         - DLWRFsfc
@@ -448,10 +448,6 @@ stepper:
       - global_mean_co2
       - PRESsfc
       - surface_temperature
-      - TMP2m
-      - Q2m
-      - UGRD10m
-      - VGRD10m
       - air_temperature_0
       - air_temperature_1
       - air_temperature_2
@@ -487,10 +483,6 @@ stepper:
       out_names:
       - PRESsfc
       - surface_temperature
-      - TMP2m
-      - Q2m
-      - UGRD10m
-      - VGRD10m
       - air_temperature_0
       - air_temperature_1
       - air_temperature_2
@@ -523,6 +515,10 @@ stepper:
       - northward_wind_5
       - northward_wind_6
       - northward_wind_7
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
       - LHTFLsfc
       - SHTFLsfc
       - PRATEsfc
@@ -535,6 +531,7 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
+      - total_frozen_precipitation_rate
       global_mean_removal:
         kind: shared
         append_as_input: true
