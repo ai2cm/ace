@@ -28,8 +28,9 @@ else
     PY_MODEL_ARGS=(--models "${MODELS[@]}")
 fi
 SESSION_NAME="run-crps-eval-${TAG}-$(date +%s)"
-WORKSPACE="ai2/chloeh"
+WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/phobos"
+PRIORITY="urgent"
 BUDGET="ai2/atec-climate"
 IMAGE="01KS0HKT272A104Y831YXRD949"  # same image the video PMD train/inference jobs use
 CPUS=4
@@ -54,6 +55,7 @@ PY_MODEL_ARGS_STR="${PY_MODEL_ARGS[*]}"
 CREATE_OUTPUT=$(beaker session create \
     --bare --detach \
     --cluster "$CLUSTER" \
+    --priority "$PRIORITY" \
     --budget "$BUDGET" \
     --workspace "$WORKSPACE" \
     --image "beaker://$IMAGE" \
