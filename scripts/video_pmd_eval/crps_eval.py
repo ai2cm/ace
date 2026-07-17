@@ -78,6 +78,10 @@ KNOWN_MODELS = {
         "/climate-default/2026-06-25-temporal-diffusion/inference/"
         "global-1degree-24to3-pcn-v1/test-2023-2024-ens32.zarr"
     ),
+    "bb-pcn": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-bb-pcn-global-1degree-24to3-v1/test-2023-2024-ens32.zarr"
+    ),
     "bb-subset-cons0": (
         "/climate-default/2026-06-25-temporal-diffusion/inference/"
         "video-pmd-bb-pcn-subset-cons0-global-1degree-24to3-v1/"
