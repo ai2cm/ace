@@ -170,6 +170,57 @@ class PatchPredictor:
         return prediction
 
 
+def check_input_shape_supported(
+    model_coarse_shape: tuple[int, int],
+    input_shape: tuple[int, int],
+    patch: PatchPredictionConfig,
+    name: str = "",
+) -> None:
+    """
+    Raise if a coarse ``input_shape`` cannot be generated for the given model
+    patch size and patch configuration.
+
+    While models are probably capable of generating any domain size, we haven't
+    tested domains smaller than the model patch size, so we raise an error in
+    that case, and prompt the user to use patching for larger domains because
+    that provides better generations.
+
+    Args:
+        model_coarse_shape: the ``(lat, lon)`` coarse patch size the model was
+            trained on.
+        input_shape: the ``(lat, lon)`` extent of the coarse input to generate on.
+        patch: the patch-prediction configuration.
+        name: optional label used in error messages to identify the caller
+            (e.g. an output or event name).
+
+    Returns None for the supported cases: an exact match (no patching needed), or
+    a larger extent with composite patch prediction configured.
+    """
+    model_shape = tuple(model_coarse_shape)
+    in_shape = tuple(input_shape)
+    suffix = f" for {name}" if name else ""
+    if model_shape == in_shape:
+        # exact match, no patching necessary
+        return
+    if any(expected > actual for expected, actual in zip(model_shape, in_shape)):
+        # we don't support generating regions smaller than the model patch size
+        raise ValueError(
+            f"Model coarse shape {model_shape} is larger than "
+            f"actual input shape {in_shape}{suffix}. "
+            "We do not support generating outputs with a smaller spatial extent"
+            " than the model's trained patch size. Please adjust the spatial extent"
+            " to be at least as large as the model's input patch size."
+        )
+    if not patch.needs_patch_predictor:
+        # larger extent but patching not configured
+        raise ValueError(
+            f"Model coarse shape {model_shape} does not match "
+            f"actual input shape {in_shape}{suffix}, "
+            "and patch prediction is not configured. Generation for larger domains "
+            "requires patch prediction."
+        )
+
+
 def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:
     # input patches should have int start/stop values
     y_max = max(patch.input_slice.y.stop for patch in patches)

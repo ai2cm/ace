@@ -25,6 +25,7 @@ from fme.downscaling.predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
+    check_input_shape_supported,
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -203,6 +204,12 @@ class EvaluatorConfig:
         coarse_lon = dataset.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         model = model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            model.coarse_shape,
+            dataset.coarse_shape,
+            self.patch,
+            name="evaluator",
+        )
         evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
@@ -242,6 +249,12 @@ class EvaluatorConfig:
         coarse_lon = dataset.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         model = model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            model.coarse_shape,
+            dataset.coarse_shape,
+            self.patch,
+            name=f"event {event_config.name}",
+        )
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):

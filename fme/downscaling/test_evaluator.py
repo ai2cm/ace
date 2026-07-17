@@ -216,6 +216,52 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
     assert (experiment_dir / "evaluator_maps_and_metrics.nc").exists()
 
 
+def test_evaluator_raises_when_larger_without_patching(tmp_path):
+    """The default evaluator refuses a region larger than the model patch when
+    patch prediction is not configured."""
+    coarse_shape = (4, 4)
+    downscale_factor = 2
+    fine_shape = (
+        coarse_shape[0] * downscale_factor,
+        coarse_shape[1] * downscale_factor,
+    )
+    paths = global_data_paths_helper(tmp_path)
+    full_fine_coords = LatLonCoordinates(
+        lat=cell_centered_coordinate(0.0, 8.0, coarse_shape[0] * downscale_factor),
+        lon=cell_centered_coordinate(0.0, 360.0, 8 * downscale_factor),
+    )
+    model = _seam_crossing_model_config(fine_shape).build(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=full_fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=full_fine_coords),
+    )
+    experiment_dir = tmp_path / "output"
+    experiment_dir.mkdir()
+    checkpoint_path = experiment_dir / "latest.ckpt"
+    torch.save({"model": model.get_state()}, checkpoint_path)
+
+    config = evaluator.EvaluatorConfig(
+        model=CheckpointModelConfig(checkpoint_path=str(checkpoint_path)),
+        experiment_dir=str(experiment_dir),
+        data=PairedDataLoaderConfig(
+            fine=[XarrayDataConfig(paths.fine)],
+            coarse=[XarrayDataConfig(paths.coarse)],
+            batch_size=2,
+            num_data_workers=0,
+            strict_ensemble=False,
+            # Full extent is 4x8 coarse, larger than the (4, 4) model in lon.
+            lat_extent=ClosedInterval(0.0, 8.0),
+            lon_extent=ClosedInterval(0.0, 360.0),
+        ),
+        logging=LoggingConfig(),
+        n_samples=2,
+        # default patch: no composite patch prediction configured
+    )
+    with pytest.raises(ValueError, match="requires patch prediction"):
+        config._build_default_evaluator()
+
+
 @pytest.mark.parametrize(
     "evaluator_model_config, num_samples",
     [

@@ -225,6 +225,82 @@ def test_predictor_runs_seam_crossing(tmp_path, cls):
         assert value.shape[-2:] == fine_shape
 
 
+def _build_model_and_data_at_extent(tmp_path, lat_extent, lon_extent):
+    """A (4, 4)-patch model plus GriddedData subset to the given extent."""
+    coarse_shape = (4, 4)
+    downscale_factor = 2
+    fine_shape = (
+        coarse_shape[0] * downscale_factor,
+        coarse_shape[1] * downscale_factor,
+    )
+    paths = global_data_paths_helper(tmp_path)
+    full_fine_coords = LatLonCoordinates(
+        lat=cell_centered_coordinate(0.0, 8.0, fine_shape[0]),
+        lon=cell_centered_coordinate(0.0, 360.0, fine_shape[1]),
+    )
+    model = get_model_config(
+        coarse_shape, downscale_factor, use_fine_topography=False
+    ).build(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=full_fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=full_fine_coords),
+    )
+    data = DataLoaderConfig(
+        coarse=[XarrayDataConfig(str(paths.coarse))],
+        batch_size=2,
+        num_data_workers=0,
+        strict_ensemble=False,
+        lat_extent=lat_extent,
+        lon_extent=lon_extent,
+    ).build(
+        requirements=DataRequirements(
+            fine_names=[], coarse_names=["var0", "var1"], n_timesteps=1
+        ),
+    )
+    return model, data
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_predictor_raises_when_domain_too_small(tmp_path, cls):
+    """The predict entrypoints refuse a region smaller than the model patch."""
+    # lat/lon (0, 4)/(0, 90) selects a 2x2 coarse region, smaller than the (4, 4) model.
+    model, data = _build_model_and_data_at_extent(
+        tmp_path, ClosedInterval(0.0, 4.0), ClosedInterval(0.0, 90.0)
+    )
+    kwargs = dict(data=data, model=model, experiment_dir=str(tmp_path), n_samples=2)
+    downscaler = (
+        cls(event_name="evt", **kwargs)
+        if cls is predict.EventDownscaler
+        else cls(**kwargs)
+    )
+    with pytest.raises(ValueError, match="smaller spatial extent"):
+        downscaler._get_generation_model()
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_predictor_raises_when_larger_without_patching(tmp_path, cls):
+    """A region larger than the model patch requires patch prediction."""
+    # Full extent is 4x8 coarse, larger than the (4, 4) model in lon.
+    model, data = _build_model_and_data_at_extent(
+        tmp_path, ClosedInterval(0.0, 8.0), ClosedInterval(0.0, 360.0)
+    )
+    kwargs = dict(
+        data=data,
+        model=model,
+        experiment_dir=str(tmp_path),
+        n_samples=2,
+        patch=PatchPredictionConfig(),  # no patch prediction configured
+    )
+    downscaler = (
+        cls(event_name="evt", **kwargs)
+        if cls is predict.EventDownscaler
+        else cls(**kwargs)
+    )
+    with pytest.raises(ValueError, match="requires patch prediction"):
+        downscaler._get_generation_model()
+
+
 @pytest.mark.medium_duration
 def test_predictor_renaming(
     tmp_path,

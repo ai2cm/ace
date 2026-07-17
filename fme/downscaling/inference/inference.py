@@ -19,6 +19,7 @@ from ..predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
+    check_input_shape_supported,
 )
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
@@ -76,38 +77,21 @@ class Downscaler:
         input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_coords.lon)
-        model_patch_shape = base_model.coarse_shape
-
-        if model_patch_shape == input_shape:
-            # short circuit, no patching necessary
+        check_input_shape_supported(
+            base_model.coarse_shape,
+            input_shape,
+            output.patch,
+            name=f"output {output.name}",
+        )
+        if tuple(base_model.coarse_shape) == tuple(input_shape):
+            # exact match, no patching necessary
             return base_model
-        elif any(
-            expected > actual
-            for expected, actual in zip(model_patch_shape, input_shape)
-        ):
-            # we don't support generating regions smaller than the model patch size
-            raise ValueError(
-                f"Model coarse shape {model_patch_shape} is larger than "
-                f"actual input shape {input_shape} for output {output.name}."
-                "We do not support generating outputs with a smaller spatial extent"
-                " than the model's trained patch size. Please adjust the spatial extent"
-                " to be at least as large as the model's input patch size."
-            )
-        elif output.patch.needs_patch_predictor:
-            # Use a patch predictor
-            logging.info(f"Using PatchPredictor for output: {output.name}")
-            return PatchPredictor(
-                model=base_model,
-                coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
-            )
-        else:
-            # User should enable patching
-            raise ValueError(
-                f"Model coarse shape {model_patch_shape} does not match "
-                f"actual input shape {input_shape} for output {output.name}, "
-                "and patch prediction is not configured. Generation for larger domains "
-                "requires patch prediction."
-            )
+        # larger extent with composite patch prediction configured
+        logging.info(f"Using PatchPredictor for output: {output.name}")
+        return PatchPredictor(
+            model=base_model,
+            coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
+        )
 
     def _on_device_generator(self, loader):
         for loaded_item in loader:

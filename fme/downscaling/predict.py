@@ -29,6 +29,7 @@ from fme.downscaling.predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
+    check_input_shape_supported,
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -114,6 +115,12 @@ class EventDownscaler:
         coarse_lon = self.data.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            base_model.coarse_shape,
+            self.data.shape,
+            self.patch,
+            name=f"event {self.event_name}",
+        )
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
                 base_model,
@@ -188,6 +195,12 @@ class Downscaler:
         coarse_lon = self.data.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            base_model.coarse_shape,
+            self.data.shape,
+            self.patch,
+            name="downscaler output",
+        )
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
                 model=base_model,
