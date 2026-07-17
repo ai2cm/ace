@@ -29,7 +29,11 @@ class TwoTrackSFNOBuilder(ModuleConfig):
     Attributes:
         embed_dim: Total latent width (global + local).
         local_embed_dim: Width of the local latent track. 0 recovers the
-            single-track network exactly.
+            single-track network exactly, but only on the ``legendre-gauss``
+            grid (``local_embed_dim=0`` with ``data_grid='equiangular'`` is
+            rejected in ``__post_init__``; see the note there). Must be 0 if
+            and only if the local track carries no input or output channels
+            (validated in ``build_two_track``).
         noise_embed_dim: Dimension of the noise conditioning channels. 0
             disables noise conditioning.
         noise_type: "gaussian" or "isotropic" noise.
@@ -44,9 +48,9 @@ class TwoTrackSFNOBuilder(ModuleConfig):
     """
 
     embed_dim: int = 256
-    local_embed_dim: int = 0
+    local_embed_dim: int = 256
     filter_type: Literal["linear"] = "linear"
-    noise_embed_dim: int = 256
+    noise_embed_dim: int = 32
     noise_type: Literal["isotropic", "gaussian"] = "gaussian"
     context_pos_embed_dim: int = 0
     label_embed_dim: int = 0
@@ -76,6 +80,21 @@ class TwoTrackSFNOBuilder(ModuleConfig):
         if self.context_pos_embed_dim > 0 and self.pos_embed:
             raise ValueError(
                 "context_pos_embed_dim and pos_embed should not both be set"
+            )
+        if self.local_embed_dim == 0 and self.data_grid == "equiangular":
+            # local_embed_dim=0 is the single-track-equivalent configuration,
+            # used only to warm-start from an old single-track checkpoint. That
+            # byte-for-byte equivalence holds on legendre-gauss but NOT on
+            # equiangular: there the first/last blocks round-trip their spectral
+            # residual, so the two-track block's (full-normed-input) skip differs
+            # from the single-track block's (filter-residual) skip and the loaded
+            # checkpoint silently produces wrong output. Fail loudly instead.
+            raise ValueError(
+                "local_embed_dim=0 (single-track-equivalent) is not backwards "
+                "compatible with data_grid='equiangular': an old single-track "
+                "checkpoint loads without error but does not reproduce its output "
+                "on this grid. Warm-start from a single-track checkpoint only with "
+                "data_grid='legendre-gauss', or use a nonzero local_embed_dim."
             )
         # Validate the network config (embed_dim / local_embed_dim / groups).
         self._net_config()
@@ -127,6 +146,20 @@ class TwoTrackSFNOBuilder(ModuleConfig):
         local_out_channels: int,
         dataset_info: DatasetInfo,
     ) -> torch.nn.Module:
+        # local_embed_dim must be nonzero iff the local track carries channels.
+        has_local_channels = local_in_channels > 0 or local_out_channels > 0
+        if has_local_channels and self.local_embed_dim == 0:
+            raise ValueError(
+                "local_embed_dim must be > 0 when the local track carries any "
+                f"input or output channels (got local_in={local_in_channels}, "
+                f"local_out={local_out_channels}, local_embed_dim=0)."
+            )
+        if not has_local_channels and self.local_embed_dim > 0:
+            raise ValueError(
+                "local_embed_dim must be 0 when the local track carries no input "
+                f"or output channels (got local_embed_dim={self.local_embed_dim}); "
+                "with no local track, use the single-track step instead."
+            )
         n_labels = len(dataset_info.all_labels)
         effective_label_dim = (
             self.label_embed_dim if self.label_embed_dim > 0 else n_labels

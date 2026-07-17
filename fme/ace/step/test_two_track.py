@@ -165,6 +165,47 @@ def test_builder_single_tensor_build_raises():
 
 
 # ---------------------------------------------------------------------------
+# builder: local_embed_dim=0 (single-track-equivalent) is grid-restricted, and
+# local_embed_dim must be nonzero iff the local track carries channels
+# ---------------------------------------------------------------------------
+def test_builder_rejects_zero_local_embed_dim_with_equiangular():
+    # The single-track-equivalent config (local_embed_dim=0) is byte-for-byte
+    # backwards compatible only on legendre-gauss; equiangular is rejected loudly
+    # instead of silently loading a wrong-output checkpoint.
+    with pytest.raises(ValueError, match="equiangular"):
+        _builder(local_embed_dim=0, data_grid="equiangular")
+
+
+def test_builder_allows_zero_local_embed_dim_with_legendre_gauss():
+    builder = _builder(local_embed_dim=0, data_grid="legendre-gauss")
+    assert builder.local_embed_dim == 0
+
+
+def test_build_two_track_requires_nonzero_local_embed_dim_when_local_present():
+    dataset_info = get_dataset_info(img_shape=IMG_SHAPE, device=fme.get_device())
+    with pytest.raises(ValueError, match="local_embed_dim must be > 0"):
+        _builder(local_embed_dim=0).build_two_track(
+            global_in_channels=2,
+            local_in_channels=1,
+            global_out_channels=2,
+            local_out_channels=0,
+            dataset_info=dataset_info,
+        )
+
+
+def test_build_two_track_requires_zero_local_embed_dim_when_no_local():
+    dataset_info = get_dataset_info(img_shape=IMG_SHAPE, device=fme.get_device())
+    with pytest.raises(ValueError, match="local_embed_dim must be 0"):
+        _builder(local_embed_dim=3).build_two_track(
+            global_in_channels=2,
+            local_in_channels=0,
+            global_out_channels=2,
+            local_out_channels=0,
+            dataset_info=dataset_info,
+        )
+
+
+# ---------------------------------------------------------------------------
 # config load round trip
 # ---------------------------------------------------------------------------
 def test_config_state_round_trip():
