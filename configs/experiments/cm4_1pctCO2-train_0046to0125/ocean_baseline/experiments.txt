@@ -1,8 +1,1 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
-
-
-cm4_1pctCO2-train_0046to0125-ocean_baseline|rs0|01KXRJSPD86FY3N6AQWA1E2J94|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pctCO2-train_0046to0125-ocean_baseline|rs1|01KXRJT8JPQQ070BBKQYCN88Y0|training|best_inference_ckpt|normal|--min-runtime 8h
-
-cm4_1pctCO2-train_0046to0125-ocean_baseline|rs2|01KXRJTRD6YPKE90213MENS5XC|training|best_inference_ckpt|normal|--min-runtime 8h
