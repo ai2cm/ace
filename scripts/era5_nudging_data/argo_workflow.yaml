@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: era5-nudging-data-
+spec:
+  entrypoint: process
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: python_script
+    - name: start_datetime
+    - name: end_datetime
+    - name: destination
+    - name: n_workers
+  templates:
+    - name: process
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      container:
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/era5-nudging-data:v2026.07.0
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > process.py
+            {{workflow.parameters.python_script}}
+            EOF
+
+            python process.py \
+              --start-datetime "{{workflow.parameters.start_datetime}}" \
+              --end-datetime "{{workflow.parameters.end_datetime}}" \
+              --destination "{{workflow.parameters.destination}}" \
+              --n-workers "{{workflow.parameters.n_workers}}"
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
