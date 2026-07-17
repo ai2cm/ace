@@ -1,0 +1,4 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+# wandb_id: fill in with the best pretraining seed's run id after checkpoint selection
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs0|ace2-cm4-atmos-noLSM|WANDB_ID_TBD|best_inference_ckpt|train|high|h100|8|600GiB|3|ai2/ace|seed=0

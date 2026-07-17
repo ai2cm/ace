@@ -1,0 +1,230 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 25
+inference:
+  - name: inference_1pct
+    weight: 1.0
+    n_forward_steps: 29200 # exactly 20 noleap years
+    forward_steps_in_memory: 43
+    epochs:
+      start: -1
+      step: -2
+    loader:
+      start_indices:
+        times:
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+          # (validation + training), never entering the 131-140 holdout
+          - '0041-01-01T00:00:00'
+          - '0051-01-01T00:00:00'
+          - '0061-01-01T00:00:00'
+          - '0071-01-01T00:00:00'
+          - '0081-01-01T00:00:00'
+          - '0091-01-01T00:00:00'
+          - '0101-01-01T00:00:00'
+          - '0111-01-01T00:00:00'
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
+            engine: zarr
+          - data_path: /climate-default
+            file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+            engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+  - name: inference_piC
+    weight: 1.0
+    n_forward_steps: 29200 # exactly 20 noleap years
+    forward_steps_in_memory: 43
+    epochs:
+      start: -1
+      step: -2
+    loader:
+      start_indices:
+        times:
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+          # 1-90, never entering the relative-year-91+ holdout. The first IC
+          # is nudged 5 days past the store start to the first valid coupled
+          # timestep (leading all-NaN ffill window in the ocean-sourced
+          # fields ends at the first 5-daily ocean snapshot).
+          - '0151-01-06T00:00:00'
+          - '0161-01-01T00:00:00'
+          - '0171-01-01T00:00:00'
+          - '0181-01-01T00:00:00'
+          - '0191-01-01T00:00:00'
+          - '0201-01-01T00:00:00'
+          - '0211-01-01T00:00:00'
+          - '0221-01-01T00:00:00'
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-sea_ice.zarr
+            engine: zarr
+          - data_path: /climate-default
+            file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+            engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 10
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-01T06:00:00'
+          stop_time: '0126-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-01T06:00:00'
+          stop_time: '0126-01-01T00:00:00'
+validation:
+  - name: val_1pct_early
+    weight: 1.0
+    loader:
+      batch_size: 64
+      num_data_workers: 4
+      prefetch_factor: 4
+      time_buffer: 10
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: '0041-01-01T06:00:00'
+              stop_time: '0046-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+            engine: zarr
+            subset:
+              start_time: '0041-01-01T06:00:00'
+              stop_time: '0046-01-01T00:00:00'
+  - name: val_1pct_late
+    weight: 1.0
+    loader:
+      batch_size: 64
+      num_data_workers: 4
+      prefetch_factor: 4
+      time_buffer: 10
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: '0126-01-01T06:00:00'
+              stop_time: '0131-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+            engine: zarr
+            subset:
+              start_time: '0126-01-01T06:00:00'
+              stop_time: '0131-01-01T00:00:00'
+  - name: val_piC
+    weight: 1.0
+    loader:
+      batch_size: 64
+      num_data_workers: 4
+      prefetch_factor: 4
+      time_buffer: 10
+      dataset:
+        merge:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-sea_ice.zarr
+            engine: zarr
+            subset:
+              start_time: '0236-01-01T06:00:00'
+              stop_time: '0241-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+            engine: zarr
+            subset:
+              start_time: '0236-01-01T06:00:00'
+              stop_time: '0241-01-01T00:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  parameter_init:
+    weights_path: /ckpt.tar
+  n_ensemble: 2
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 12
+        probability: 0.05
+      - steps: 20
+        probability: 0.05
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    weights:
+      air_temperature_0: 0.5
+      air_temperature_1: 0.5
+      eastward_wind_0: 0.5
+      northward_wind_0: 0.5
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      PRATEsfc: 0.5
+      h500: 10
+      TMP850: 5
+      Q2m: 0.5
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
+      PRESsfc: 3
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      residual_prediction: false
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 384
+          noise_embed_dim: 64
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
