@@ -51,6 +51,7 @@
 # testing, so budget accordingly (4 windows ~ a few minutes).
 
 # %%
+import argparse
 import cftime
 import matplotlib
 
@@ -69,10 +70,20 @@ pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 200)
 
 # %%
-PRED_ZARR = (
-    "/climate-default/2026-06-25-temporal-diffusion/inference/"
-    "global-1degree-24to3-pcn-v1/test-2023-2024-ens32.zarr"
-)
+# Known inference outputs, keyed by a short label. Add an entry here for each
+# new test-set inference run rather than duplicating this whole script --
+# `--pred-zarr` also accepts an arbitrary path directly for one-offs.
+KNOWN_MODELS = {
+    "pcn-v1": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "global-1degree-24to3-pcn-v1/test-2023-2024-ens32.zarr"
+    ),
+    "bb-subset-cons10": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-bb-pcn-subset-cons10-global-1degree-24to3-v1/"
+        "test-2023-2024-ens32.zarr"
+    ),
+}
 TRUTH_ZARR = (
     "/climate-default/2026-06-25-temporal-diffusion/"
     "2025-07-25-X-SHiELD-AMIP-FME-3h.zarr"
@@ -99,7 +110,31 @@ SAMPLE_WINDOWS = [
     ("summer (Jul)", cftime.DatetimeJulian(2023, 7, 1), cftime.DatetimeJulian(2023, 7, 4)),
     ("fall (Oct)", cftime.DatetimeJulian(2023, 10, 1), cftime.DatetimeJulian(2023, 10, 4)),
 ]
-OUTDIR = "."  # where to save the two PNG figures
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Video PMD CRPS/spread-skill eval")
+    parser.add_argument(
+        "--model", choices=sorted(KNOWN_MODELS), default="pcn-v1",
+        help="Which known inference output to evaluate.",
+    )
+    parser.add_argument(
+        "--pred-zarr", default=None,
+        help="Explicit path to an inference output zarr, overriding --model "
+             "for one-off runs not yet in KNOWN_MODELS.",
+    )
+    parser.add_argument(
+        "--outdir", default=".", help="Where to save the two PNG figures.",
+    )
+    return parser.parse_args()
+
+
+ARGS = parse_args()
+PRED_ZARR = ARGS.pred_zarr or KNOWN_MODELS[ARGS.model]
+OUTDIR = ARGS.outdir
+# Label used in plot titles/filenames so different models' outputs don't
+# collide when writing to the same OUTDIR.
+LABEL = ARGS.model if ARGS.pred_zarr is None else "custom"
 
 pred_full = xr.open_zarr(PRED_ZARR)
 truth_full = xr.open_zarr(TRUTH_ZARR)
@@ -134,6 +169,8 @@ def load_window(t0, t1):
 
 
 def main():
+    print(f"Model: {ARGS.model if ARGS.pred_zarr is None else '(explicit path)'}")
+    print(f"Pred zarr: {PRED_ZARR}\n")
     windows = [(name, *load_window(t0, t1)) for name, t0, t1 in SAMPLE_WINDOWS]
     for name, p, t, interior_mask, _ in windows:
         print(f"{name:14s} {p.sizes['time']:3d} timesteps, {int(interior_mask.sum()):2d} interior")
@@ -208,9 +245,9 @@ def main():
         ax.set_xticks(LEAD_HOURS)
         ax.axvline(12, color="gray", lw=0.6, alpha=0.5)
         ax.legend(fontsize=7)
-    fig.suptitle("Video PMD test-set ensemble: skill by lead time (4 seasonal windows, 2023)")
+    fig.suptitle(f"{LABEL}: skill by lead time (4 seasonal windows, 2023)")
     fig.tight_layout()
-    fig.savefig(f"{OUTDIR}/crps_lead_time.png", dpi=150)
+    fig.savefig(f"{OUTDIR}/crps_lead_time_{LABEL}.png", dpi=150)
     plt.close(fig)
 
     # ---- Spatial map: CRPS at the hardest lead time (12h), PRMSL ----
@@ -231,12 +268,12 @@ def main():
     fig.colorbar(im, ax=ax, label=f"CRPS ({UNITS[name]})")
     ax.set_xlabel("longitude (deg E)")
     ax.set_ylabel("latitude")
-    ax.set_title(f"{name} CRPS at 12h lead (hardest interior frame), 4-season mean")
+    ax.set_title(f"{LABEL}: {name} CRPS at 12h lead (hardest interior frame), 4-season mean")
     fig.tight_layout()
-    fig.savefig(f"{OUTDIR}/crps_map.png", dpi=150)
+    fig.savefig(f"{OUTDIR}/crps_map_{LABEL}.png", dpi=150)
     plt.close(fig)
 
-    print(f"\nSaved {OUTDIR}/crps_lead_time.png and {OUTDIR}/crps_map.png")
+    print(f"\nSaved {OUTDIR}/crps_lead_time_{LABEL}.png and {OUTDIR}/crps_map_{LABEL}.png")
 
 
 def crps_fair(ens, truth_arr):
