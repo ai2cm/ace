@@ -1,2 +1,4 @@
 
 cm4_1pctCO2-train_0046to0125-atmos_baseline|rs0|01KXRJR4FZSM6SVZW6W81KCTFF|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-train_0046to0125-atmos_baseline|rs1|01KXRJRN4EE77V9N9KR3N14KVA|training|best_inference_ckpt|normal|--min-runtime 8h
