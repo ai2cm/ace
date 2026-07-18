@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 
 import cftime
 import dacite
@@ -57,7 +57,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 def resolve_variable_metadata(
     dataset_metadata: Mapping[str, VariableMetadata],
     stepper_metadata: Mapping[str, VariableMetadata],
-    stepper_all_names: Sequence[str],
+    stepper_all_names: Collection[str],
 ) -> dict[str, VariableMetadata]:
     """
     Resolve variable metadata by merging from the following sources: derived variables,
