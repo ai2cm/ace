@@ -146,10 +146,12 @@ run_training() {
 #       checkpoint dataset 01KVV1FRHHEQKPJV2XM7T5MJ4Y mounted at /weights via the
 #       "# arg: --dataset ..." header in the config).
 #   B1  from-scratch v2-no-residual RH-input-append base (v2 stitched-window
-#       loader + residual_prediction: false; single-step, 120 epochs). Its
-#       fine-tune (B2) is launched once B1 finishes, from a config that mounts
-#       B1's checkpoint dataset.
+#       loader + residual_prediction: false; single-step, 120 epochs).
+#   B2  fine-tune of B1 (same recipe as A1): mounts B1's checkpoint dataset
+#       01KXPDMT8HPMYFH17SJJ54648G at /weights via the config's "# arg:" header.
+#       Launched once B1 finished (2026-07-18, best_val_loss 0.1305).
 # =============================================================================
 
 run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-ft3step.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-ft3step-rs0" 1
 run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append.yaml"       "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-rs0"       1
+run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-ft3step.yaml" "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-ft3step-rs0" 1
