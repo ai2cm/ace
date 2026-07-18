@@ -12,3 +12,5 @@ ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KVBMGDWE3EHZ
 ft-deterministic-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KWWYQ545FC8G3TXEAH8NHYQY|done|best_inference_ckpt_0002|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWWYQ545FC8G3TXEAH8NHYQY/ICx1-400yr-ep2||ai2/climate-titan|b200
 ft-deterministic-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KWWYQ545FC8G3TXEAH8NHYQY|done|best_inference_ckpt_0003|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWWYQ545FC8G3TXEAH8NHYQY/ICx1-400yr-ep3||ai2/climate-titan|b200
 ft-deterministic-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KWWYQ545FC8G3TXEAH8NHYQY|run_inf_ICx1-400yr|ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KWWYQ545FC8G3TXEAH8NHYQY/ICx1-400yr-ep40||ai2/climate-titan|b200
+
+fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KXSQZ1W2MG3WZ9B3V8QFK1AH|training|best_inference_ckpt|normal|--min-runtime 8h
