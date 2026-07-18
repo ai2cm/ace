@@ -50,7 +50,11 @@ build_cluster_args() {
     local CLUSTER="$1"
     local WORKSPACE="${2:-}"
 
+    # Track whether a workspace was explicitly provided before applying defaults,
+    # so cluster-specific defaults only kick in when none was given.
+    local WORKSPACE_PROVIDED=true
     if [[ -z "$WORKSPACE" ]]; then
+        WORKSPACE_PROVIDED=false
         WORKSPACE=ai2/ace
     fi
     if [[ "$CLUSTER" == "a100+h100" ]]; then
@@ -66,9 +70,13 @@ build_cluster_args() {
             --cluster saturn
         )
     elif [[ "$CLUSTER" == "b200" ]]; then
-        WORKSPACE=ai2/climate-titan
+        # Default b200 jobs to the titan workspace, but honor an explicitly
+        # provided workspace (e.g. ai2/ace).
+        if [[ "$WORKSPACE_PROVIDED" != "true" ]]; then
+            WORKSPACE=ai2/climate-titan
+        fi
         CLUSTER_ARGS=(
-            --workspace ai2/climate-titan
+            --workspace "$WORKSPACE"
             --cluster titan
         )
     elif [[ -z "$CLUSTER" || "$CLUSTER" == "h100" ]]; then
