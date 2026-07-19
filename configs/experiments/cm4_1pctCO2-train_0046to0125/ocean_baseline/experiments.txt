@@ -9,3 +9,5 @@ cm4_1pctCO2-train_0046to0125-ocean_baseline|rs2|01KXRKSQNFCK610JC60CYQXQ49|train
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|01KXX9GVZ2Q5101M3SYDGVSMAG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs2|01KXX9HMZHC4ASJGY59YCQA13P|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|01KXXJ1WAGMCYTEZ1TRC0D6K62|training|best_inference_ckpt|normal|--min-runtime 8h
