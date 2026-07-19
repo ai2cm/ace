@@ -410,7 +410,10 @@ def to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
 
 def _get_min_samples(timestep: datetime.timedelta) -> int:
     steps_per_day = datetime.timedelta(days=1) // timestep
-    return 362 * steps_per_day
+    # 350-day threshold keeps years that are complete apart from a small
+    # offset at the rollout start (e.g. an initial condition a few days
+    # into the year), while still excluding genuinely partial years.
+    return 350 * steps_per_day
 
 
 @dataclasses.dataclass
