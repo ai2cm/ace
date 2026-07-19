@@ -278,8 +278,7 @@ stepper:
             type: NoiseConditionedSFNO
             config:
               embed_dim: 384
-              noise_embed_dim: 64
-              noise_type: isotropic
+              noise_embed_dim: 0
               filter_type: linear
               use_mlp: true
               num_layers: 8
@@ -287,7 +286,6 @@ stepper:
               separable: false
               spectral_layers: 3
               spectral_transform: sht
-              affine_norms: true
           corrector:
             corrector_disabled_epochs: 1
             total_energy_budget_correction:
