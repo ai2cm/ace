@@ -124,12 +124,34 @@ def _apply_settings(
     cfg["logging"]["project"] = WANDB_PROJECT
 
 
+def iter_train_configs(version: str) -> list[tuple[str, dict]]:
+    """``(name, config)`` for every masking training run of ``version``.
+
+    Built in memory from the baseline config (no files written), so callers
+    (e.g. generate_eval_configs.py) can enumerate every version's runs without
+    the on-disk configs of that version being present.
+    """
+    base = yaml.safe_load(
+        (BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAMES[version]).read_text()
+    )
+    configs: list[tuple[str, dict]] = []
+    co2_options = co2_options_for_version(version)
+    for mask_level in MASK_LEVELS:
+        for gmr_name, keep_gmr in GMR_OPTIONS.items():
+            for co2_name, co2_rate in co2_options.items():
+                name = (
+                    f"{BASE_CONFIG_STEM}-{gmr_name}-mask{mask_level}-{co2_name}"
+                    f"-{version}"
+                )
+                cfg = copy.deepcopy(base)
+                _apply_settings(cfg, mask_level, co2_rate, keep_gmr)
+                configs.append((name, cfg))
+    return configs
+
+
 def _write_config(
-    base: dict,
     name: str,
-    mask_level: int,
-    co2_rate: float | None,
-    keep_gmr: bool,
+    cfg: dict,
     wandb_run_names: set[str] | None = None,
 ) -> None:
     out_path = RUN_CONFIGS_DIR / f"{name}.yaml"
@@ -140,8 +162,6 @@ def _write_config(
         else:
             print(f"Skipped {out_path.name} (run exists in wandb)")
         return
-    cfg = copy.deepcopy(base)
-    _apply_settings(cfg, mask_level, co2_rate, keep_gmr)
     out_path.write_text(yaml.dump(cfg, default_flow_style=False, sort_keys=False))
     print(f"Wrote {out_path.name}")
 
@@ -152,26 +172,14 @@ def generate_configs(fetch_wandb: bool = False, version: str = DEFAULT_VERSION) 
         yaml_path.unlink()
         print(f"Removed {yaml_path.name}")
 
-    base_config = BASELINE_CONFIGS_DIR / BASE_CONFIG_FILENAMES[version]
-    base = yaml.safe_load(base_config.read_text())
-
     wandb_run_names: set[str] | None = None
     if fetch_wandb:
         print(f"Fetching run names from {WANDB_ENTITY}/{WANDB_PROJECT}...")
         wandb_run_names = _fetch_wandb_run_names(WANDB_PROJECT)
         print(f"Found {len(wandb_run_names)} existing runs.")
 
-    co2_options = co2_options_for_version(version)
-    for mask_level in MASK_LEVELS:
-        for gmr_name, keep_gmr in GMR_OPTIONS.items():
-            for co2_name, co2_rate in co2_options.items():
-                name = (
-                    f"{BASE_CONFIG_STEM}-{gmr_name}-mask{mask_level}-{co2_name}"
-                    f"-{version}"
-                )
-                _write_config(
-                    base, name, mask_level, co2_rate, keep_gmr, wandb_run_names
-                )
+    for name, cfg in iter_train_configs(version):
+        _write_config(name, cfg, wandb_run_names)
 
 
 def main() -> None:

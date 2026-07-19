@@ -1,8 +1,20 @@
 """Generate evaluator suite configs for the var-masking training runs.
 
 Each suite config contains all inline inference entries from the corresponding
-training config in ``run_configs/``.  submit_eval_jobs.py submits one job per
-checkpoint, and that job runs all entries in the suite under one WandB run.
+training config.  submit_eval_jobs.py submits one job per checkpoint, and that
+job runs all entries in the suite under one WandB run.
+
+Training runs are enumerated in memory for every baseline version (default:
+both -v1 and -v2) across both the masking family (generate_masking_configs.py)
+and the seed-replicate family (generate_seed_configs.py), so eval configs are
+produced for all of them in one pass.  This does not depend on the source
+training configs sitting in ``run_configs/``: the generators wipe ``*.yaml`` on
+each run, so v1/v2 and mask/seed never coexist on disk.
+
+An eval config is written for every training run that has finished in wandb
+(i.e. has a Beaker result dataset in the source map).  With ``--delete-if-in
+-wandb``, eval configs whose evaluator runs have themselves already finished are
+deleted instead, leaving only the eval runs not yet finished.
 
 The generated suite configs are written into ``run_configs/`` (alongside the
 training and cooldown configs), where run-ace-eval.sh reads them.
@@ -22,8 +34,11 @@ from generate_masking_configs import (
     WANDB_ENTITY,
     WANDB_PREFIX,
     WANDB_PROJECT,
-    stem_has_version,
+    config_name_to_run_name,
 )
+from generate_masking_configs import iter_train_configs as iter_masking_train_configs
+from generate_seed_configs import DEFAULT_N_SEEDS
+from generate_seed_configs import iter_train_configs as iter_seed_train_configs
 
 HERE = pathlib.Path(__file__).parent
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-"
@@ -43,13 +58,6 @@ if pathlib.Path(DEFAULT_SOURCE_MAP).exists():
         TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
 else:
     TRAINING_RESULT_DATASETS = {}
-
-
-def source_config_to_run_name(config_filename: str) -> str:
-    """Wandb run name for a training config filename (stem ends in -v1/-v2)."""
-    stem = pathlib.Path(config_filename).stem
-    suffix = stem.removeprefix(CONFIG_PREFIX)
-    return f"{WANDB_PREFIX}{suffix}"
 
 
 def eval_suite_config_to_run_name(config_filename: str) -> str:
@@ -194,15 +202,37 @@ def _write_config(
     print(f"Wrote {out_path.name}")
 
 
+def delete_eval_configs_in_wandb(project: str) -> None:
+    """Delete on-disk eval suite configs whose checkpoint runs all exist in wandb.
+
+    Driven off the eval suite config files present in ``RUN_CONFIGS_DIR`` rather
+    than the source training configs, so it covers every version's eval configs
+    (e.g. both -v1 and -v2) regardless of which training configs currently sit in
+    the directory or whether they appear in the beaker map.
+    """
+    wandb_run_names = _fetch_wandb_run_names(project)
+    eval_configs = sorted(RUN_CONFIGS_DIR.glob(f"{EVAL_SUITE_CONFIG_PREFIX}*.yaml"))
+    for out_path in eval_configs:
+        base_run_name = eval_suite_config_to_run_name(out_path.name)
+        expected_runs = {
+            f"{base_run_name}{suffix}" for suffix in CHECKPOINT_RUN_SUFFIXES
+        }
+        if expected_runs - wandb_run_names:
+            continue
+        out_path.unlink()
+        print(f"Deleted {out_path.name} (all runs exist in wandb)")
+
+
 def generate_eval_config(
-    source_path: pathlib.Path,
+    config_name: str,
+    train_cfg: dict,
     source_map: dict[str, str],
     inference_names: list[str] | None,
     checkpoint_path: str,
     existing_only: bool,
     delete_if_in_wandb: bool = False,
 ) -> None:
-    source_run_name = source_config_to_run_name(source_path.name)
+    source_run_name = config_name_to_run_name(config_name)
     source_dataset_id = source_map.get(source_run_name)
     if source_dataset_id is None:
         run_state = _fetch_wandb_run_states(WANDB_PROJECT).get(source_run_name)
@@ -213,20 +243,19 @@ def generate_eval_config(
                 "wandb_to_beaker_map.json"
             )
         print(
-            f"Skipped {source_path.name} (run {source_run_name!r} not "
+            f"Skipped {config_name} (run {source_run_name!r} not "
             f"finished in wandb: state={run_state!r})"
         )
         return
-
-    with source_path.open() as f:
-        train_cfg = yaml.safe_load(f)
 
     cfg = _build_eval_suite_config(
         train_cfg=train_cfg,
         inference_names=inference_names,
         checkpoint_path=checkpoint_path,
     )
-    out_path = RUN_CONFIGS_DIR / source_config_to_eval_suite_config(source_path.name)
+    out_path = RUN_CONFIGS_DIR / source_config_to_eval_suite_config(
+        f"{config_name}.yaml"
+    )
     _write_config(
         cfg,
         out_path,
@@ -273,6 +302,12 @@ def main() -> None:
         help="Restrict to source configs of this baseline version (default: all).",
     )
     parser.add_argument(
+        "--n-seeds",
+        type=int,
+        default=DEFAULT_N_SEEDS,
+        help=f"Number of seeds per seed-config group (default: {DEFAULT_N_SEEDS}).",
+    )
+    parser.add_argument(
         "--delete-if-in-wandb",
         action="store_true",
         help=(
@@ -285,25 +320,32 @@ def main() -> None:
     with open(args.source_map) as f:
         source_map: dict[str, str] = json.load(f)
 
-    source_configs = sorted(
-        p
-        for p in RUN_CONFIGS_DIR.glob("*-mask*.yaml")
-        if p.name.startswith(CONFIG_PREFIX)
-        and not p.name.endswith("-finetune.yaml")
-        and not p.name.endswith("-cooldown.yaml")
-        and not p.name.endswith("-bestinfcooldown.yaml")
-        and (args.version is None or stem_has_version(p.stem, args.version))
-    )
+    if args.delete_if_in_wandb:
+        # Standalone pass over on-disk eval configs so cleanup covers every
+        # version present (both -v1 and -v2), not just the version whose training
+        # configs currently sit in run_configs. Generation below still (re)writes
+        # eval configs for runs not yet finished in wandb.
+        delete_eval_configs_in_wandb(WANDB_PROJECT)
 
-    for source_path in source_configs:
-        generate_eval_config(
-            source_path=source_path,
-            source_map=source_map,
-            inference_names=args.inference_name,
-            checkpoint_path=args.checkpoint_path,
-            existing_only=args.existing_only,
-            delete_if_in_wandb=args.delete_if_in_wandb,
+    # Enumerate every training run in memory (masking + seed families) for the
+    # requested version(s), so eval configs are produced for all of them without
+    # the source training configs needing to sit in run_configs at once (the
+    # generators wipe *.yaml, so v1/v2 and mask/seed never coexist on disk).
+    versions = [args.version] if args.version else sorted(BASE_CONFIG_FILENAMES)
+    for version in versions:
+        train_configs = iter_masking_train_configs(version) + iter_seed_train_configs(
+            version, args.n_seeds
         )
+        for config_name, train_cfg in train_configs:
+            generate_eval_config(
+                config_name=config_name,
+                train_cfg=train_cfg,
+                source_map=source_map,
+                inference_names=args.inference_name,
+                checkpoint_path=args.checkpoint_path,
+                existing_only=args.existing_only,
+                delete_if_in_wandb=args.delete_if_in_wandb,
+            )
 
 
 if __name__ == "__main__":
