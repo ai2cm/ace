@@ -215,6 +215,11 @@ stepper:
     type: single_module
     config:
       residual_prediction: false
+      # merged over the pretrained stepper's corrector (which lacks energy
+      # correction); fine-tuning runs with the energy corrector enabled
+      corrector:
+        total_energy_budget_correction:
+          method: constant_temperature
       builder:
         type: NoiseConditionedSFNO
         config:
