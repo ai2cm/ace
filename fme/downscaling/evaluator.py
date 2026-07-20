@@ -207,7 +207,6 @@ class EvaluatorConfig:
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
-                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:
@@ -247,7 +246,6 @@ class EvaluatorConfig:
         ):
             evaluator_model = PatchPredictor(
                 model=model,
-                coarse_yx_patch_extent=model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         else:

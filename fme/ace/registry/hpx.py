@@ -4,6 +4,7 @@ from typing import Literal
 
 import torch.nn as nn
 
+from fme.ace.models.healpix.healpix_blocks import HEALPixBuildContext
 from fme.ace.models.healpix.healpix_decoder import UNetDecoderConfig
 from fme.ace.models.healpix.healpix_encoder import UNetEncoderConfig
 from fme.ace.models.healpix.healpix_unet import HEALPixUNet
@@ -54,11 +55,57 @@ class HEALPixUNetBuilder(ModuleConfig):
         """
         if len(dataset_info.all_labels) > 0:
             raise ValueError("HEALPixUNet does not support labels")
-        return HEALPixUNet(
-            encoder=self.encoder,
-            decoder=self.decoder,
+        return self._build(
             input_channels=n_in_channels,
             output_channels=n_out_channels,
+        )
+
+    def _build(
+        self,
+        input_channels: int,
+        output_channels: int,
+    ) -> HEALPixUNet:
+        """Build the encoder/decoder modules and assemble the HEALPixUNet.
+
+        Constructs the shared ``HEALPixBuildContext``, validates the
+        encoder/decoder level counts and the ``nside`` sequence, builds the
+        encoder and decoder ``nn.Module``s, and passes the built collaborators
+        plus the runtime scalars into :class:`HEALPixUNet`.
+        """
+        levels = len(self.encoder.n_channels)
+        if len(self.decoder.n_channels) != levels:
+            raise ValueError(
+                "encoder and decoder must have same number of levels; got "
+                f"{levels} vs {len(self.decoder.n_channels)}"
+            )
+        if self.hpx_padding_mode == "isolatitude" and self.nside is None:
+            raise ValueError(
+                'hpx_padding_mode="isolatitude" requires nside (one int per UNet level)'
+            )
+        nside_resolved: tuple[int, ...] | None
+        if self.nside is not None:
+            nside_levels = tuple(int(v) for v in self.nside)
+            if len(nside_levels) != levels:
+                raise ValueError(
+                    f"nside length must match UNet levels; got {len(nside_levels)} "
+                    f"vs {levels}"
+                )
+            if any(v < 1 for v in nside_levels):
+                raise ValueError(f"nside values must be positive; got {nside_levels}")
+            nside_resolved = nside_levels
+        else:
+            nside_resolved = None
+
+        build_ctx = HEALPixBuildContext(
             hpx_padding_mode=self.hpx_padding_mode,
-            nside=self.nside,
+            nside_levels=nside_resolved,
+        )
+        encoder = self.encoder.build(input_channels=input_channels, ctx=build_ctx)
+        decoder = self.decoder.build(output_channels=output_channels, ctx=build_ctx)
+        return HEALPixUNet(
+            encoder=encoder,
+            decoder=decoder,
+            input_channels=input_channels,
+            output_channels=output_channels,
+            nside=nside_resolved,
         )
