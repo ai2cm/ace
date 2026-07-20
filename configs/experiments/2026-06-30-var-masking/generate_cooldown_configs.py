@@ -41,7 +41,7 @@ DEFAULT_LR = 0.0001
 
 
 def source_config_to_run_name(config_filename: str) -> str:
-    """Wandb run name for a training config filename (stem ends in -v1/-v2)."""
+    """Wandb run name for a training config filename (stem ends in -v1/-v2/-v3)."""
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}"

@@ -4,7 +4,7 @@ Each config in run_configs/ (from generate_masking_configs.py) is submitted via
 run-ace-train.sh, which validates it and calls gantry.
 
 Usage:
-    python submit_mask_jobs.py [--dry-run] [--version {v1,v2}]
+    python submit_mask_jobs.py [--dry-run] [--version {v1,v2,v3}]
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]

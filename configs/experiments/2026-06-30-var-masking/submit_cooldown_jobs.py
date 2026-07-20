@@ -4,7 +4,7 @@ Each config produced by generate_cooldown_configs.py (in run_configs/) is
 submitted via run-ace-train.sh, which validates the config and calls gantry.
 
 Usage:
-    python submit_cooldown_jobs.py [--dry-run] [--version {v1,v2}]
+    python submit_cooldown_jobs.py [--dry-run] [--version {v1,v2,v3}]
                                    [--beaker-workspace WORKSPACE]
                                    [--beaker-cluster CLUSTER [CLUSTER ...]]
                                    [--beaker-priority PRIORITY]

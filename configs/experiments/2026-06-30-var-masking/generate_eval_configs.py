@@ -5,11 +5,12 @@ training config.  submit_eval_jobs.py submits one job per checkpoint, and that
 job runs all entries in the suite under one WandB run.
 
 Training runs are enumerated in memory for every baseline version (default:
-both -v1 and -v2) across both the masking family (generate_masking_configs.py)
-and the seed-replicate family (generate_seed_configs.py), so eval configs are
-produced for all of them in one pass.  This does not depend on the source
-training configs sitting in ``run_configs/``: the generators wipe ``*.yaml`` on
-each run, so v1/v2 and mask/seed never coexist on disk.
+all discovered, e.g. -v1, -v2 and -v3) across both the masking family
+(generate_masking_configs.py) and the seed-replicate family
+(generate_seed_configs.py), so eval configs are produced for all of them in one
+pass.  This does not depend on the source training configs sitting in
+``run_configs/``: the generators wipe ``*.yaml`` on each run, so the different
+versions and mask/seed never coexist on disk.
 
 An eval config is written for every training run that has finished in wandb
 (i.e. has a Beaker result dataset in the source map).  With ``--delete-if-in
@@ -61,7 +62,7 @@ else:
 
 
 def eval_suite_config_to_run_name(config_filename: str) -> str:
-    """Wandb run name for an eval suite config filename (stem ends in -v1/-v2)."""
+    """Wandb run name for an eval suite config filename (stem ends in -v1/-v2/-v3)."""
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(EVAL_SUITE_CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}"
@@ -207,7 +208,7 @@ def delete_eval_configs_in_wandb(project: str) -> None:
 
     Driven off the eval suite config files present in ``RUN_CONFIGS_DIR`` rather
     than the source training configs, so it covers every version's eval configs
-    (e.g. both -v1 and -v2) regardless of which training configs currently sit in
+    (e.g. -v1, -v2 and -v3) regardless of which training configs currently sit in
     the directory or whether they appear in the beaker map.
     """
     wandb_run_names = _fetch_wandb_run_names(project)
@@ -322,7 +323,7 @@ def main() -> None:
 
     if args.delete_if_in_wandb:
         # Standalone pass over on-disk eval configs so cleanup covers every
-        # version present (both -v1 and -v2), not just the version whose training
+        # version present (-v1, -v2, -v3), not just the version whose training
         # configs currently sit in run_configs. Generation below still (re)writes
         # eval configs for runs not yet finished in wandb.
         delete_eval_configs_in_wandb(WANDB_PROJECT)
@@ -330,7 +331,7 @@ def main() -> None:
     # Enumerate every training run in memory (masking + seed families) for the
     # requested version(s), so eval configs are produced for all of them without
     # the source training configs needing to sit in run_configs at once (the
-    # generators wipe *.yaml, so v1/v2 and mask/seed never coexist on disk).
+    # generators wipe *.yaml, so versions and mask/seed never coexist on disk).
     versions = [args.version] if args.version else sorted(BASE_CONFIG_FILENAMES)
     for version in versions:
         train_configs = iter_masking_train_configs(version) + iter_seed_train_configs(

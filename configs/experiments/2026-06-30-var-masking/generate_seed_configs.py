@@ -3,11 +3,11 @@
 For a chosen subset of the var-masking sweep this writes ``n_seeds`` copies of
 each config (default 5), differing only in the top-level ``seed`` field, so the
 same masking scheme can be trained multiple times to estimate run-to-run spread.
-Each generated config name ends in ``-v1`` or ``-v2`` (``--version`` selects
-which baseline config to source from, default v1; see
+Each generated config name ends in ``-v1``, ``-v2`` or ``-v3`` (``--version``
+selects which baseline config to source from, default v1; see
 ``baseline_configs/versions.md``). The ``global_mean_removal`` stepper config
 is kept as in the baseline for v1 (no gmr axis there, unlike
-``generate_masking_configs.py``); v2 sweeps both gmron/gmroff (see
+``generate_masking_configs.py``); v2/v3 sweep both gmron/gmroff (see
 ``gmr_options_for_version``).
 
 Configs are written into ``run_configs/`` (only ``*-seed*.yaml`` files are
@@ -20,7 +20,7 @@ subset, each crossed with the co2 axis (co2default off / co2bern75 drops
 
 With the default 5 seeds this is 2 x 2 x 5 = 20 configs for v1:
 mask30-co2bern75, mask30-co2default, mask0-co2bern75, mask0-co2default.
-For v2, global_mean_co2 is not an input channel (see
+For v2/v3, global_mean_co2 is not an input channel (see
 ``baseline_configs/versions.md``), so the co2 axis is dropped, but the gmr
 axis is added instead: 2 x 1 x 2 x 5 = 20 configs: mask30-gmron,
 mask30-gmroff, mask0-gmron, mask0-gmroff (each co2default).
@@ -53,7 +53,7 @@ def gmr_options_for_version(version: str) -> dict[str, bool]:
     """GMR_OPTIONS, restricted to keep-baseline-only for v1.
 
     No gmr axis for v1 (``global_mean_removal`` is kept as in the baseline,
-    as before, with no gmr token in the config name); v2 sweeps both
+    as before, with no gmr token in the config name); v2/v3 sweep both
     gmron/gmroff, as in ``generate_masking_configs.py``.
     """
     if version == "v1":

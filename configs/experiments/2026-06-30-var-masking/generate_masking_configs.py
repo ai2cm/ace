@@ -1,8 +1,11 @@
 """Generate var-masking training configs from the nc-sfno era5 baseline config.
 
-Each generated config name (and thus its wandb run name) ends in ``-v1`` or
-``-v2``, matching the baseline config version it was sourced from (see
-``baseline_configs/versions.md``); ``--version`` selects which (default v1).
+Each generated config name (and thus its wandb run name) ends in ``-v1``,
+``-v2`` or ``-v3``, matching the baseline config version it was sourced from
+(see ``baseline_configs/versions.md``); ``--version`` selects which (default
+v1). Versions are auto-discovered from ``baseline_configs/``, so adding a new
+``ace2-var-mask-nc-sfno-era5-vN.yaml`` there makes ``vN`` a valid ``--version``
+with no code change.
 Full factorial sweep written to ``run_configs/`` (emptied first) over three
 axes:
 
@@ -15,9 +18,9 @@ axes:
 5 x 2 x 2 = 20 configs for v1.
 
 global_mean_co2 is already an input channel in the v1 baseline config
-(in_names + next_step_forcing_names); the co2 axis is meaningless for v2,
-which drops it as an input entirely (see baseline_configs/versions.md), so
-v2 only generates the co2default option: 5 x 2 x 1 = 10 configs.
+(in_names + next_step_forcing_names); the co2 axis is meaningless for v2 and
+v3, which drop it as an input entirely (see baseline_configs/versions.md), so
+those versions only generate the co2default option: 5 x 2 x 1 = 10 configs.
 """
 
 import argparse
@@ -47,7 +50,7 @@ GMR_OPTIONS = {"gmron": True, "gmroff": False}  # True: keep baseline config
 def co2_options_for_version(version: str) -> dict[str, float | None]:
     """CO2_OPTIONS, restricted to co2default for v2+.
 
-    global_mean_co2 is not an input channel in v2 (see
+    global_mean_co2 is not an input channel in v2/v3 (see
     baseline_configs/versions.md), so masking it is meaningless there.
     """
     if version == "v1":
@@ -92,7 +95,8 @@ def stem_has_version(stem: str, version: str) -> bool:
 def config_name_to_run_name(name: str) -> str:
     """Wandb run name for a generated config stem (no .yaml).
 
-    ``name`` already ends in ``-v1``/``-v2``, so no separate suffix is added.
+    ``name`` already ends in ``-v1``/``-v2``/``-v3``, so no separate suffix is
+    added.
     """
     suffix = name.removeprefix(CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}"

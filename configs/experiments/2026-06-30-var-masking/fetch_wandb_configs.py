@@ -5,7 +5,7 @@ beaker result dataset and write it to ``wandb_configs/<run_name>.yaml``.
 
 Usage:
     python fetch_wandb_configs.py [--map PATH] [--out-dir DIR] [--force]
-                                  [--version {v1,v2}]
+                                  [--version {v1,v2,v3}]
 """
 
 import argparse

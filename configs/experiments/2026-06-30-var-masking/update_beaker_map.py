@@ -11,7 +11,7 @@ job's result dataset has no pre_cooldown_ckpt.tar, while the succeeded retry
 writes a *new* result dataset. The map must point at the succeeded job.
 
 Usage:
-    python update_beaker_map.py [--dry-run] [--map PATH] [--version {v1,v2}]
+    python update_beaker_map.py [--dry-run] [--map PATH] [--version {v1,v2,v3}]
 """
 
 import argparse
