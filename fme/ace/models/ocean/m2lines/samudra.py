@@ -6,7 +6,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fme.ace.models.ocean.m2lines.layers import AvgPool, BilinearUpsample, ConvNeXtBlock
+from fme.ace.models.ocean.m2lines.layers import (
+    AvgPool,
+    BilinearUpsample,
+    ConvNeXtBlock,
+    ZonallyPeriodicBilinearUpsample,
+)
 from fme.ace.models.ocean.m2lines.utils import pairwise
 
 
@@ -33,6 +38,11 @@ class Samudra(torch.nn.Module):
         Normalization to use in the network, by default "instance"
         Options are "batch", "layer", "instance", or None
         "layer" normalization normalizes over only the channel dimensions
+    zonally_periodic_upsample : bool, optional
+        If True, use bilinear upsampling that enforces periodicity along the
+        longitude axis in the decoder, removing the lon=0 seam introduced by the
+        default (non-periodic) bilinear upsampling. By default False to preserve
+        the behavior of checkpoints trained without it.
 
     Example:
     --------
@@ -63,6 +73,7 @@ class Samudra(torch.nn.Module):
         norm_kwargs: Mapping[str, Any] | None = None,
         upscale_factor: int = 4,
         checkpoint_strategy: Literal["all", "simple"] | None = None,
+        zonally_periodic_upsample: bool = False,
     ):
         super().__init__()
 
@@ -79,6 +90,12 @@ class Samudra(torch.nn.Module):
         self.N_pad = int((self.last_kernel_size - 1) / 2)
         self.upscale_factor = upscale_factor
         self.checkpoint_strategy = checkpoint_strategy
+        self.zonally_periodic_upsample = zonally_periodic_upsample
+        upsample_cls = (
+            ZonallyPeriodicBilinearUpsample
+            if zonally_periodic_upsample
+            else BilinearUpsample
+        )
 
         ch_width_with_input = (self.input_channels, *self.ch_width)
 
@@ -112,7 +129,7 @@ class Samudra(torch.nn.Module):
                 checkpoint_strategy=self.checkpoint_strategy,
             )
         )
-        layers.append(BilinearUpsample(in_channels=b, out_channels=b))
+        layers.append(upsample_cls(in_channels=b, out_channels=b))
         ch_width_with_input_reversed = ch_width_with_input[::-1]
         dilation_reversed = self.dilation[::-1]
         n_layers_reversed = self.n_layers[::-1]
@@ -130,7 +147,7 @@ class Samudra(torch.nn.Module):
                     checkpoint_strategy=self.checkpoint_strategy,
                 )
             )
-            layers.append(BilinearUpsample(in_channels=b, out_channels=b))
+            layers.append(upsample_cls(in_channels=b, out_channels=b))
         layers.append(
             ConvNeXtBlock(
                 b,
@@ -170,7 +187,9 @@ class Samudra(torch.nn.Module):
                     temp.append(fts)
                     count += 1
             elif count >= self.num_steps:
-                if isinstance(layer, BilinearUpsample):
+                if isinstance(
+                    layer, BilinearUpsample | ZonallyPeriodicBilinearUpsample
+                ):
                     crop = np.array(fts.shape[2:])
                     shape = np.array(
                         temp[int(2 * self.num_steps - count - 1)].shape[2:]

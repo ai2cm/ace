@@ -17,6 +17,7 @@
 
 import dataclasses
 import math
+from collections.abc import Callable
 from typing import Literal, Optional, Sequence, Tuple, Union
 
 import torch
@@ -185,7 +186,7 @@ class TransposedConvUpsampleBlockConfig:
             in_channels=in_channels,
             out_channels=out_channels,
             upsampling=self.stride,
-            activation=self.activation,
+            activation_factory=self.activation.build if self.activation else None,
             hpx_padding_mode=layer_ctx.hpx_padding_mode,
             nside=layer_ctx.nside,
         )
@@ -217,7 +218,7 @@ class SmoothedInterpolateConvBlockConfig:
             dilation=self.dilation,
             scale_factor=self.stride,
             mode=self.upsample_mode,
-            activation=self.activation.build() if self.activation else None,
+            activation_factory=self.activation.build if self.activation else None,
             hpx_padding_mode=layer_ctx.hpx_padding_mode,
             nside=layer_ctx.nside,
             nside_after=layer_ctx.nside_after,
@@ -288,7 +289,7 @@ class BasicConvBlockConfig:
             dilation=dilation,
             n_layers=n_layers_resolved,
             latent_channels=latent_channels,
-            activation=self.activation,
+            activation_factory=self.activation.build if self.activation else None,
             hpx_padding_mode=layer_ctx.hpx_padding_mode,
             nside=layer_ctx.nside,
         )
@@ -324,7 +325,7 @@ class ConvNeXtBlockConfig:
             kernel_size=self.kernel_size,
             dilation=dilation,
             upscale_factor=self.upscale_factor,
-            activation=self.activation,
+            activation_factory=self.activation.build if self.activation else None,
             hpx_padding_mode=layer_ctx.hpx_padding_mode,
             nside=layer_ctx.nside,
         )
@@ -360,7 +361,7 @@ class SymmetricConvNeXtBlockConfig:
             kernel_size=self.kernel_size,
             dilation=dilation,
             upscale_factor=self.upscale_factor,
-            activation=self.activation,
+            activation_factory=self.activation.build if self.activation else None,
             hpx_padding_mode=layer_ctx.hpx_padding_mode,
             nside=layer_ctx.nside,
         )
@@ -398,7 +399,7 @@ class MultiSymmetricConvNeXtBlockConfig:
             dilation=dilation,
             upscale_factor=self.upscale_factor,
             n_layers=n_layers_resolved,
-            activation=self.activation,
+            activation_factory=self.activation.build if self.activation else None,
             hpx_padding_mode=layer_ctx.hpx_padding_mode,
             nside=layer_ctx.nside,
         )
@@ -644,7 +645,7 @@ class TransposedConvUpsample(nn.Module):
         in_channels: int = 3,
         out_channels: int = 1,
         upsampling: int = 2,
-        activation: Optional[CappedGELUConfig] = None,
+        activation_factory: Callable[[], nn.Module] | None = None,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -655,7 +656,8 @@ class TransposedConvUpsample(nn.Module):
             in_channels: The number of input channels.
             out_channels: The number of output channels.
             upsampling: Stride size that will be used for upsampling.
-            activation: ModuleConfig for the activation function used in upsampling.
+            activation_factory: Zero-arg callable returning a fresh activation
+                module, or ``None`` for no activation.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -678,8 +680,8 @@ class TransposedConvUpsample(nn.Module):
                 ),
             )
         )
-        if activation is not None:
-            upsampler.append(activation.build())
+        if activation_factory is not None:
+            upsampler.append(activation_factory())
         self.upsampler = nn.Sequential(*upsampler)
 
     def forward(self, x):
@@ -768,7 +770,7 @@ class SmoothedInterpolateConv(nn.Module):
         dilation: int = 1,
         scale_factor: int = 2,
         mode: str = "nearest",
-        activation: Optional[nn.Module] = None,
+        activation_factory: Callable[[], nn.Module] | None = None,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -783,7 +785,8 @@ class SmoothedInterpolateConv(nn.Module):
             dilation: Convolution dilation (must be 1 for HEALPix resize).
             scale_factor: Interpolation scale factor.
             mode: Interpolation mode for the smoothed upsample step.
-            activation: Optional activation module appended after the conv.
+            activation_factory: Zero-arg callable returning a fresh activation
+                module appended after the conv, or ``None`` for no activation.
             hpx_padding_mode: HEALPix padding backend passed to ``HEALPixLayer``.
             nside: Face height/width before upsampling (isolatitude gather indices).
             nside_after: Face height/width after upsampling for the conv step; required
@@ -844,8 +847,8 @@ class SmoothedInterpolateConv(nn.Module):
             ),
         ]
 
-        if activation is not None:
-            block.append(activation)
+        if activation_factory is not None:
+            block.append(activation_factory())
         self.block = nn.Sequential(*block)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -873,7 +876,7 @@ class BasicConvBlock(nn.Module):
         dilation=1,
         n_layers=1,
         latent_channels=None,
-        activation=None,
+        activation_factory: Callable[[], nn.Module] | None = None,
         hpx_padding_mode="earth2grid",
         nside=None,
     ):
@@ -885,7 +888,8 @@ class BasicConvBlock(nn.Module):
             dilation: Spacing between kernel points, passed to nn.Conv2d.
             n_layers: Number of convolutional layers.
             latent_channels: Number of latent channels.
-            activation: ModuleConfig for activation function to use.
+            activation_factory: Zero-arg callable returning a fresh activation
+                module (one per conv layer), or ``None`` for no activation.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -909,8 +913,8 @@ class BasicConvBlock(nn.Module):
                     ),
                 )
             )
-            if activation is not None:
-                convblock.append(activation.build())
+            if activation_factory is not None:
+                convblock.append(activation_factory())
         self.convblock = nn.Sequential(*convblock)
 
     def forward(self, x):
@@ -945,7 +949,7 @@ class ConvNeXtBlock(nn.Module):
         kernel_size: int = 3,
         dilation: int = 1,
         upscale_factor: int = 4,
-        activation: Optional[CappedGELUConfig] = None,
+        activation_factory: Callable[[], nn.Module] | None = None,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -961,7 +965,8 @@ class ConvNeXtBlock(nn.Module):
             kernel_size: Size of the convolutional kernels.
             dilation: Dilation rate for convolutions.
             upscale_factor: Factor by which to upscale the number of latent channels.
-            activation: Configuration for the activation function used between layers.
+            activation_factory: Zero-arg callable returning a fresh activation
+                module (one per activation site), or ``None`` for no activation.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -997,8 +1002,8 @@ class ConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock.append(activation.build())
+        if activation_factory is not None:
+            convblock.append(activation_factory())
         # 3x3 convolution maintaining increased channels
         convblock.append(
             HEALPixLayer(
@@ -1010,8 +1015,8 @@ class ConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock.append(activation.build())
+        if activation_factory is not None:
+            convblock.append(activation_factory())
         # Linear postprocessing
         convblock.append(
             HEALPixLayer(
@@ -1054,7 +1059,7 @@ class DoubleConvNeXtBlock(nn.Module):
         dilation: int = 1,
         upscale_factor: int = 4,
         latent_channels: int = 1,
-        activation: Optional[CappedGELUConfig] = None,
+        activation_factory: Callable[[], nn.Module] | None = None,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -1070,7 +1075,7 @@ class DoubleConvNeXtBlock(nn.Module):
             dilation: Dilation rate for convolutions (default is 1).
             upscale_factor: Factor by which to upscale the number of latent channels (default is 4).
             latent_channels: Number of latent channels used in the block (default is 1).
-            activation: Configuration for the activation function used between layers (default is None).
+            activation_factory: Zero-arg callable returning a fresh activation module (one per activation site), or ``None`` for no activation.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -1120,8 +1125,8 @@ class DoubleConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock1.append(activation.build())
+        if activation_factory is not None:
+            convblock1.append(activation_factory())
         # 1x1 convolution establishing increased channels
         convblock1.append(
             HEALPixLayer(
@@ -1133,8 +1138,8 @@ class DoubleConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock1.append(activation.build())
+        if activation_factory is not None:
+            convblock1.append(activation_factory())
         # 1x1 convolution returning to latent channels
         convblock1.append(
             HEALPixLayer(
@@ -1146,8 +1151,8 @@ class DoubleConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock1.append(activation.build())
+        if activation_factory is not None:
+            convblock1.append(activation_factory())
         self.convblock1 = nn.Sequential(*convblock1)
 
         # 2nd ConNeXt block, takes the output of the first convnext block
@@ -1163,8 +1168,8 @@ class DoubleConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock2.append(activation.build())
+        if activation_factory is not None:
+            convblock2.append(activation_factory())
         # 1x1 convolution establishing increased channels
         convblock2.append(
             HEALPixLayer(
@@ -1176,8 +1181,8 @@ class DoubleConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock2.append(activation.build())
+        if activation_factory is not None:
+            convblock2.append(activation_factory())
         # 1x1 convolution reducing to output channels
         convblock2.append(
             HEALPixLayer(
@@ -1189,8 +1194,8 @@ class DoubleConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock2.append(activation.build())
+        if activation_factory is not None:
+            convblock2.append(activation_factory())
         self.convblock2 = nn.Sequential(*convblock2)
 
     def forward(self, x):
@@ -1224,7 +1229,7 @@ class SymmetricConvNeXtBlock(nn.Module):
         kernel_size: int = 3,
         dilation: int = 1,
         upscale_factor: int = 4,
-        activation: Optional[CappedGELUConfig] = None,
+        activation_factory: Callable[[], nn.Module] | None = None,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -1240,7 +1245,7 @@ class SymmetricConvNeXtBlock(nn.Module):
             dilation: Dilation rate for convolutions (default is 1).
             upscale_factor: Upscale factor.
             latent_channels: Number of latent channels used in the block (default is 1).
-            activation: Configuration for the activation function used between layers (default is None).
+            activation_factory: Zero-arg callable returning a fresh activation module (one per activation site), or ``None`` for no activation.
             hpx_padding_mode: HEALPix padding backend passed to wrapper.
             nside: Native face height/width for HEALPix padding.
         """
@@ -1275,8 +1280,8 @@ class SymmetricConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock.append(activation.build())
+        if activation_factory is not None:
+            convblock.append(activation_factory())
         # 1x1 convolution establishing increased channels
         convblock.append(
             HEALPixLayer(
@@ -1288,8 +1293,8 @@ class SymmetricConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock.append(activation.build())
+        if activation_factory is not None:
+            convblock.append(activation_factory())
         # 1x1 convolution returning to latent channels
         convblock.append(
             HEALPixLayer(
@@ -1301,8 +1306,8 @@ class SymmetricConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock.append(activation.build())
+        if activation_factory is not None:
+            convblock.append(activation_factory())
         # 3x3 convolution from latent channels to latent channels
         convblock.append(
             HEALPixLayer(
@@ -1314,8 +1319,8 @@ class SymmetricConvNeXtBlock(nn.Module):
                 **healpix_kwargs,
             )
         )
-        if activation is not None:
-            convblock.append(activation.build())
+        if activation_factory is not None:
+            convblock.append(activation_factory())
         self.convblock = nn.Sequential(*convblock)
 
     def forward(self, x):
@@ -1341,7 +1346,7 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
         dilation: int = 1,
         upscale_factor: int = 4,
         n_layers: int = 1,
-        activation: Optional[CappedGELUConfig] = None,
+        activation_factory: Callable[[], nn.Module] | None = None,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -1356,7 +1361,8 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
             dilation: Convolution dilation.
             upscale_factor: Channel upscale factor inside each block.
             n_layers: Number of stacked ``SymmetricConvNeXtBlock`` modules.
-            activation: Optional ``CappedGELUConfig`` between layers.
+            activation_factory: Zero-arg callable returning a fresh activation
+                module per activation site, or ``None`` for no activation.
             hpx_padding_mode: HEALPix padding backend passed to child blocks.
             nside: Native face height/width for HEALPix padding.
         """
@@ -1372,7 +1378,7 @@ class Multi_SymmetricConvNeXtBlock(nn.Module):
                     kernel_size=kernel_size,
                     dilation=dilation,
                     upscale_factor=upscale_factor,
-                    activation=activation,
+                    activation_factory=activation_factory,
                     hpx_padding_mode=hpx_padding_mode,
                     nside=nside,
                 )
