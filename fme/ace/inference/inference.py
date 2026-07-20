@@ -47,6 +47,7 @@ from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
+from fme.core.wandb import WandB
 
 from .evaluator import resolve_variable_metadata
 
@@ -348,7 +349,6 @@ def main(
             with GlobalTimer():
                 return run_inference_from_config(config)
         else:
-            config.configure_logging(log_filename="inference_out.log")
             run_segmented_inference(config, segments)
 
 
@@ -486,6 +486,14 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
             "cannot re-broadcast it consistently. Run with n_ensemble_per_ic=1, "
             "or run a single non-segmented inference for ensemble runs."
         )
+    # Configure top-level logging without a wandb run; each segment owns its run.
+    top_level_logging = dataclasses.replace(config.logging, log_to_wandb=False)
+    top_level_logging.configure_logging(
+        config.experiment_dir,
+        "inference_out.log",
+        config=dataclasses.asdict(config),
+        resumable=False,
+    )
     logging.info(
         f"Starting segmented inference with {segments} segments. "
         f"Saving to {config.experiment_dir}."
@@ -505,6 +513,8 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
             with GlobalTimer():
                 run_inference_from_config(config_copy)
+            # Finish this segment's run so the next segment starts a fresh one.
+            WandB.get_instance().finish()
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path, engine="netcdf4"
         )
