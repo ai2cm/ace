@@ -132,7 +132,6 @@ def test_SpatialCompositePredictor_generate_on_batch(patch_size_coarse):
 
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=downscale_factor),  # type: ignore
-        coarse_extent,
         coarse_horizontal_overlap=1,
     )
     n_samples_generate = 2
@@ -161,7 +160,6 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
     )
     predictor = PatchPredictor(
         DummyModel(coarse_shape=patch_size_coarse, downscale_factor=2),  # type: ignore
-        coarse_extent,
         coarse_horizontal_overlap=1,
     )
     n_samples_generate = 2

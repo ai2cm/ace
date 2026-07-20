@@ -11,7 +11,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
+from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -72,40 +72,40 @@ class CheckpointConfig:
             return NoCheckpoint()
 
 
+def _build_optimizer(
+    optimizer_type: Literal["Adam", "FusedAdam", "AdamW"],
+    parameters: Iterable[torch.nn.Parameter],
+    lr: float,
+    kwargs: Mapping[str, Any],
+) -> torch.optim.Optimizer:
+    if optimizer_type == "FusedAdam":
+        return torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
+    elif optimizer_type == "Adam":
+        return torch.optim.Adam(parameters, lr=lr, **kwargs)
+    elif optimizer_type == "AdamW":
+        return torch.optim.AdamW(parameters, lr=lr, **kwargs)
+    else:
+        raise ValueError(f"Unknown optimizer type: {optimizer_type}")
+
+
 class Optimization(OptimizationABC):
     def __init__(
         self,
-        parameters: Iterable[torch.nn.Parameter],
-        optimizer_type: Literal[
-            "Adam",
-            "FusedAdam",
-            "AdamW",
-        ],
-        lr: float,
-        max_epochs: int,
-        scheduler: SchedulerConfig | SequentialSchedulerConfig,
+        optimizer: torch.optim.Optimizer,
+        scheduler: LRScheduler,
         enable_automatic_mixed_precision: bool,
-        kwargs: Mapping[str, Any],
         use_gradient_accumulation: bool = False,
         get_checkpoint: Callable[
             [int], Checkpoint | NoCheckpoint
         ] = lambda _: NoCheckpoint(),
         max_grad_norm: float | None = None,
     ):
-        if optimizer_type == "FusedAdam":
-            self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
-        elif optimizer_type == "Adam":
-            self.optimizer = torch.optim.Adam(parameters, lr=lr, **kwargs)
-        elif optimizer_type == "AdamW":
-            self.optimizer = torch.optim.AdamW(parameters, lr=lr, **kwargs)
-        else:
-            raise ValueError(f"Unknown optimizer type: {optimizer_type}")
-
+        self.optimizer = optimizer
         if enable_automatic_mixed_precision:
             self.gscaler: torch.amp.GradScaler | None = torch.amp.GradScaler("cuda")
         else:
             self.gscaler = None
-        self.scheduler = scheduler.build(self.optimizer, max_epochs)
+        self.scheduler = scheduler
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
         self._get_checkpoint = get_checkpoint
@@ -350,14 +350,14 @@ class OptimizationConfig:
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
+        optimizer = _build_optimizer(
+            self.optimizer_type, parameters, self.lr, self.kwargs
+        )
+        scheduler = self.scheduler.build(optimizer, max_epochs)
         optimization = Optimization(
-            parameters=parameters,
-            optimizer_type=self.optimizer_type,
-            lr=self.lr,
-            max_epochs=max_epochs,
-            scheduler=self.scheduler,
+            optimizer=optimizer,
+            scheduler=scheduler,
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
-            kwargs=self.kwargs,
             use_gradient_accumulation=self.use_gradient_accumulation,
             get_checkpoint=self.checkpoint.build,
             max_grad_norm=self.max_grad_norm,
