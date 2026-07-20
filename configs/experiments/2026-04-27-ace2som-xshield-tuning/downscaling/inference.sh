@@ -2,10 +2,9 @@
 
 set -e
 
-JOB_NAME="inference-4k-tuned-ace2shield-tropics"
-#JOB_NAME="eval-global-trained-denoising-moe-events"
+JOB_NAME="inference-ace2s-shieldplus-tuned-xshield-downscaled-WUS-winter-2014-2023"
 
-CONFIG_FILENAME="inference-config.yaml"
+CONFIG_FILENAME="ace2s-shieldplus-winter-downscale-WUS-inference.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,11 +16,13 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=2
+NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
 EXISTING_RESULTS_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRGZT4X2QCW2RFH7WN7X8BYA
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRBYGNYJ6FD7PGNF3VVHQ5V1
 wandb_group=""
 
 #--not-preemptible \
@@ -43,12 +44,12 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints  \
-    --weka climate-default:/climate-default \
+    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \    --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
-    --no-conda \
+    --no-python \
     --install "pip install --no-deps ." \
     --allow-dirty \
     -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
