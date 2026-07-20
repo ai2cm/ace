@@ -741,7 +741,15 @@ class BatchData:
         horizontal_dims: list[str] | None = None,
         label_encoding: LabelEncoding | None = None,
         allow_missing_variables: bool = False,
+        label_dropout_rate: float = 0.0,
     ) -> "BatchData":
+        """Collate sampled dataset items into a ``BatchData``.
+
+        ``label_dropout_rate`` is the probability that each sample has its source
+        label withheld (replaced by the empty/all-zeros label), so the model learns
+        an unconditional mode. It has no effect when ``label_encoding is None`` and
+        should be left at 0 on the validation/inference paths.
+        """
         (
             sample_data,
             sample_times,
@@ -764,7 +772,17 @@ class BatchData:
                 raise ValueError("label_encoding must be provided if labels are used.")
             labels = None
         else:
-            labels = label_encoding.encode(list(sample_labels), device="cpu")
+            encoded_labels = list(sample_labels)
+            if label_dropout_rate > 0.0:
+                # cBottle-style label dropout: withhold each dropped sample's label
+                # by replacing it with the empty set, which encodes to an all-zeros
+                # one-hot row (the unconditional state).
+                dropped = torch.rand(len(encoded_labels)) < label_dropout_rate
+                encoded_labels = [
+                    set() if drop else label_set
+                    for drop, label_set in zip(dropped.tolist(), encoded_labels)
+                ]
+            labels = label_encoding.encode(encoded_labels, device="cpu")
         return BatchData.new_on_cpu(
             data=batch_data,
             time=batch_time,
