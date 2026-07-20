@@ -26,6 +26,11 @@
 checkpoint_path: /checkpoint/checkpoints/best.ckpt
 experiment_dir: /results
 output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-bb-pcn-churn20-global-1degree-24to3-v1/smoketest-jan2023-ens32.zarr
+# The two earlier failed attempts (StopIteration, then an NCCL hang) each
+# left partial data at output_path, so the default mode="w-" now refuses to
+# write. True while this run keeps retrying; flip back to False once it's
+# expected to succeed, so a completed store can't be clobbered by accident.
+overwrite: true
 n_ensemble: 32
 ensemble_chunk_size: 1
 use_ema: true
