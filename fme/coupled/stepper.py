@@ -773,7 +773,7 @@ class ComponentStepPrediction:
         realm: Literal["ocean", "atmosphere"],
         data: TensorDict,
         step: int,
-        stepper_state: StepperState | None = None,
+        stepper_state: StepperState | None,
     ):
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
