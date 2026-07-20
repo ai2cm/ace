@@ -2721,26 +2721,6 @@ events:
   lon_extent:
     start: 343.5
     stop: 359.5
-- name: north_atlantic_003_20230926T18
-  n_samples: 8
-  date: 2023-09-26T18:00
-  save_generated_samples: true
-  lat_extent:
-    start: 38.37096
-    stop: 54.37096
-  lon_extent:
-    start: 344.5
-    stop: 360.5
-- name: north_atlantic_003_20230927T00
-  n_samples: 8
-  date: 2023-09-27T00:00
-  save_generated_samples: true
-  lat_extent:
-    start: 39.368183
-    stop: 55.368183
-  lon_extent:
-    start: 344.5
-    stop: 360.5
 - name: north_atlantic_004_20220815T12
   n_samples: 8
   date: 2022-08-15T12:00

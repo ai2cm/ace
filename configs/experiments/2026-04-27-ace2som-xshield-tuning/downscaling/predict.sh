@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="predict-ace2s-era5-tuned-xshield-downscaled-tc-tracks-2023"
+JOB_NAME="predict-ace2s-shieldplus-tuned-xshield-downscaled-tc-tracks-10yr"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="ace2s-era5-tracks.yaml"
+CONFIG_FILENAME="ace2s-shieldplus-tc-tracks-10yr.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
