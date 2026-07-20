@@ -20,7 +20,7 @@ NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-EXISTING_RESULTS_DATASET=01KNM6H3JB1ZNS76HX17AAZRF7
+EXISTING_RESULTS_DATASET=01KTMJ8V4RRRVYGBJKEJA9Y0VM  # air temperature at two meters + PRATEsfc
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRGZT4X2QCW2RFH7WN7X8BYA
 EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRBYGNYJ6FD7PGNF3VVHQ5V1
 wandb_group=""
@@ -44,8 +44,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
-    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET:checkpoints/best.ckpt:/ckpt.tar \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
