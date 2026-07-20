@@ -246,6 +246,7 @@ def compute_model_scores(pred_full, truth_full, inflation_factors=None):
             "n_frames": p.shape[0],
             "CRPS": crps_val,
             "spread": spread,
+            "MSE (ens mean)": rmse ** 2,
             "RMSE (ens mean)": rmse,
             "spread/skill ratio": ratio,
         })
@@ -390,7 +391,8 @@ def plot_comparison(results):
         {label: results[label][0] for label in labels}, names=["model"]
     ).reset_index()
     combined = combined[["model", "channel", "units", "n_frames", "CRPS",
-                          "spread", "RMSE (ens mean)", "spread/skill ratio"]]
+                          "spread", "MSE (ens mean)", "RMSE (ens mean)",
+                          "spread/skill ratio"]]
     print(f"\n=== Combined comparison ({' vs. '.join(labels)}) ===")
     print(combined.set_index(["channel", "model"]).sort_index())
     csv_path = f"{OUTDIR}/comparison_summary_{tag}.csv"
