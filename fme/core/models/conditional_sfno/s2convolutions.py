@@ -39,8 +39,6 @@ def validate_spectral_ratio(
     channels_name: str = "embed_dim",
     num_groups_name: str = "filter_num_groups",
     filter_type: str | None = None,
-    preserves_global_mean: bool = False,
-    global_mean_arg_name: str = "filter_preserves_global_mean",
     local_blocks: bool = False,
 ) -> int:
     """Validate ``spectral_ratio`` and return the resulting spectral channel count.
@@ -60,10 +58,6 @@ def validate_spectral_ratio(
         channels_name: name of ``channels`` to use in error messages.
         num_groups_name: name of ``num_groups`` to use in error messages.
         filter_type: if given, ``spectral_ratio < 1`` requires ``"linear"``.
-        preserves_global_mean: passed by callers but does not gate
-            ``spectral_ratio``; the two are compatible (see
-            ``SpectralConvS2.forward``).
-        global_mean_arg_name: name of the global-mean flag for error messages.
         local_blocks: if True, ``spectral_ratio < 1`` is rejected.
 
     Returns:
@@ -184,8 +178,6 @@ class SpectralConvS2(nn.Module):
             num_groups,
             channels_name="in_channels",
             num_groups_name="num_groups",
-            preserves_global_mean=preserve_global_mean,
-            global_mean_arg_name="preserve_global_mean",
         )
 
         assert in_channels % num_groups == 0

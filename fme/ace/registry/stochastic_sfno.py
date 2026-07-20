@@ -322,7 +322,6 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             self.embed_dim,
             self.filter_num_groups,
             filter_type=self.filter_type,
-            preserves_global_mean=self.filter_preserves_global_mean,
             local_blocks=bool(self.local_blocks),
         )
 
