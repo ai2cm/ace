@@ -2,7 +2,7 @@
 
 set -e
 
-DATE="2026-07-01"
+DATE="2026-07-20"
 WANDB_USERNAME=spencerc_ai2
 CONFIG_FILENAME="ace-som-1000-year-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
