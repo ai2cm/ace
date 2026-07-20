@@ -102,6 +102,10 @@ GCS_PATH_DAILY_FORCING ?= gs://vcm-ml-intermediate/$(DAILY_OUTPUT_ZARR_NAME)
 DAILY_IC_OUTPUT_DIR := $(LOCAL_DATA_DIR)/aimip_ics_daily
 GCS_DAILY_IC_PATH ?= gs://vcm-ml-intermediate/2026-07-20-AIMIP-evaluation-ICs-daily/
 DAILY_IC_TARGET ?= 1978-09-30T06:00:00
+# Source timestamps for the IC members, selected from the daily zarr, so they
+# must fall on its calendar hour (06Z); the six-hourly default members are 00Z
+# and do not exist in the daily zarr.
+DAILY_IC_TIMESTAMPS ?= 1978-09-29T06:00:00 1978-09-30T06:00:00 1978-10-01T06:00:00 1978-10-02T06:00:00 1978-10-03T06:00:00
 DAILY_FORCING_FIRST_STEP ?= 1978-10-01T06:00:00
 DAILY_MODIFIED_FORCING_NAME = 2026-07-20-aimip-era5-1deg-daily-forcing-1978-2024-repeat-first.zarr
 LOCAL_DAILY_MODIFIED_FORCING := $(LOCAL_DATA_DIR)/$(DAILY_MODIFIED_FORCING_NAME)
@@ -126,6 +130,7 @@ $(DAILY_IC_OUTPUT_DIR)/.done: data_dir
 	python create_aimip_ic_datasets.py $(DAILY_IC_OUTPUT_DIR) \
 	  --era5-gcs-data $(DAILY_ERA5_GCS_DATA) \
 	  --target-timestamp $(DAILY_IC_TARGET) \
+	  $(foreach ts,$(DAILY_IC_TIMESTAMPS),--ic-timestamp $(ts)) \
 	  --include-near-surface
 	touch $(DAILY_IC_OUTPUT_DIR)/.done
 
