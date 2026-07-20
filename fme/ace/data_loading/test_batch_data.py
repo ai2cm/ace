@@ -18,7 +18,7 @@ from fme.ace.requirements import InitialConditionRequirements
 from fme.core.corrector.state import CorrectorState
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.labels import BatchLabels
+from fme.core.labels import BatchLabels, LabelEncoding
 from fme.core.random_state import RandomState
 from fme.core.step.step_diagnostics import StepDiagnostics
 from fme.core.stepper_state import StepperState
@@ -309,6 +309,71 @@ def test_from_sample_tuples_raises_on_mismatched_epochs(epoch_1: int, epoch_2: i
 
     with pytest.raises(ValueError, match="same epoch"):
         BatchData.from_sample_tuples([sample1, sample2])
+
+
+def _labeled_sample(label_set: set[str] | None):
+    return (
+        {"x": torch.zeros(2, 3)},
+        xr.DataArray([0, 1]),
+        label_set,
+        0,
+        None,
+    )
+
+
+def test_from_sample_tuples_label_dropout_rate_one_zeros_all_labels():
+    """label_dropout_rate=1.0 withholds every sample's label (all-zeros rows)."""
+    encoding = LabelEncoding(["src_a", "src_b"])
+    samples = [_labeled_sample({"src_a"}), _labeled_sample({"src_b"})]
+    torch.manual_seed(0)
+    batch = BatchData.from_sample_tuples(
+        samples, label_encoding=encoding, label_dropout_rate=1.0
+    )
+    assert batch.labels is not None
+    assert batch.labels.names == ["src_a", "src_b"]
+    torch.testing.assert_close(batch.labels.tensor, torch.zeros(2, 2))
+
+
+def test_from_sample_tuples_label_dropout_rate_zero_preserves_labels():
+    """label_dropout_rate=0.0 leaves the encoded labels unchanged."""
+    encoding = LabelEncoding(["src_a", "src_b"])
+    samples = [_labeled_sample({"src_a"}), _labeled_sample({"src_b"})]
+    batch = BatchData.from_sample_tuples(
+        samples, label_encoding=encoding, label_dropout_rate=0.0
+    )
+    expected = encoding.encode([{"src_a"}, {"src_b"}], device="cpu")
+    assert batch.labels == expected
+
+
+def test_from_sample_tuples_label_dropout_is_per_sample_and_deterministic():
+    """Dropout is drawn per sample; a seeded run zeros exactly the drawn rows."""
+    encoding = LabelEncoding(["src_a", "src_b"])
+    label_sets: list[set[str]] = [{"src_a"}, {"src_a", "src_b"}, {"src_b"}, {"src_a"}]
+    samples = [_labeled_sample(s) for s in label_sets]
+
+    seed = 12345
+    torch.manual_seed(seed)
+    batch = BatchData.from_sample_tuples(
+        samples, label_encoding=encoding, label_dropout_rate=0.5
+    )
+
+    # Replay the same RNG draw to know which rows were withheld.
+    torch.manual_seed(seed)
+    dropped = (torch.rand(len(samples)) < 0.5).tolist()
+    # The seed is chosen so the mask is mixed, exercising the per-sample path.
+    assert any(dropped) and not all(dropped)
+    expected_sets = [set() if d else s for d, s in zip(dropped, label_sets)]
+    expected = encoding.encode(expected_sets, device="cpu")
+    assert batch.labels == expected
+
+
+def test_from_sample_tuples_label_dropout_no_labels_is_noop():
+    """A rate > 0 with no label_encoding must not crash and yields no labels."""
+    samples = [_labeled_sample(None), _labeled_sample(None)]
+    batch = BatchData.from_sample_tuples(
+        samples, label_encoding=None, label_dropout_rate=1.0
+    )
+    assert batch.labels is None
 
 
 @pytest.mark.parametrize(
