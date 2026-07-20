@@ -297,18 +297,25 @@ def test_clip_frozen_precipitation():
     assert _clip_frozen_precipitation({"PRATEsfc": data["PRATEsfc"]}) == {}
 
 
+def _with_frozen_precip_exceeding_total(gen_data: TensorMapping) -> dict:
+    """Return a copy of gen_data where frozen precip strictly exceeds total precip.
+
+    Uses an explicit multiple of ``PRATEsfc`` so the inequality does not depend
+    on random draws (even seeded ones).
+    """
+    return {
+        **gen_data,
+        "total_frozen_precipitation_rate": 2.0 * gen_data["PRATEsfc"] + 1e-6,
+    }
+
+
 def test_moisture_budget_correction_clips_frozen_precipitation():
     torch.manual_seed(0)
     tensor_shape = (1, 5, 5)
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
         tensor_shape
     )
-    # frozen precip exceeds total precip (PRATEsfc ~ 1e-5) before correction
-    gen_data = {
-        **gen_data,
-        "total_frozen_precipitation_rate": 1e-4 + 1e-4 * torch.rand(size=tensor_shape),
-    }
-    assert torch.any(gen_data["total_frozen_precipitation_rate"] > gen_data["PRATEsfc"])
+    gen_data = _with_frozen_precip_exceeding_total(gen_data)
     config = AtmosphereCorrectorConfig(
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction="advection_and_precipitation",
@@ -334,11 +341,7 @@ def test_moisture_budget_correction_no_clip_when_toggle_off():
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
         tensor_shape
     )
-    gen_data = {
-        **gen_data,
-        "total_frozen_precipitation_rate": 1e-4 + 1e-4 * torch.rand(size=tensor_shape),
-    }
-    assert torch.any(gen_data["total_frozen_precipitation_rate"] > gen_data["PRATEsfc"])
+    gen_data = _with_frozen_precip_exceeding_total(gen_data)
     config = AtmosphereCorrectorConfig(
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction="advection_and_precipitation",
@@ -395,12 +398,9 @@ def test_frozen_precipitation_clip_runs_before_energy_correction():
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
     timestep = datetime.timedelta(seconds=3600)
-    # frozen precip greatly exceeds total precip (PRATEsfc ~ 1e-5) so clipping
-    # changes the surface energy flux by a detectable amount.
-    gen_data = {
-        **gen_data,
-        "total_frozen_precipitation_rate": 1e-4 + 1e-4 * torch.rand(size=tensor_shape),
-    }
+    # frozen precip strictly exceeds total precip so clipping changes the surface
+    # energy flux by a detectable amount.
+    gen_data = _with_frozen_precip_exceeding_total(gen_data)
     config = AtmosphereCorrectorConfig(
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction="advection_and_precipitation",
@@ -717,9 +717,7 @@ def _build_full_atmosphere_corrector(tensor_shape):
     )
     # frozen precip exceeds total precip so the moisture budget correction's
     # frozen-precipitation clip has an effect.
-    gen_data["total_frozen_precipitation_rate"] = 1e-4 + 1e-4 * torch.rand(
-        size=tensor_shape
-    )
+    gen_data = _with_frozen_precip_exceeding_total(gen_data)
     ops = LatLonOperations(
         0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
     )
