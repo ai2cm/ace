@@ -58,6 +58,16 @@ data:
   # clips, so with batch_size=8 (2/rank) every rank's DataLoader dropped its
   # under-full batch and started empty -> StopIteration on all ranks.
   batch_size: 4  # global across ranks
+  # REQUIRED for small/custom windows: ContiguousDistributedSampler's
+  # drop_last=False path (the default) does NOT pad ranks to equal size
+  # despite what its docstring claims -- it silently dumps the remainder
+  # clips onto the last rank only (datasets.py:919-921). With an uneven
+  # clip count across the 4 ranks, the DDP-wrapped model's per-forward
+  # collective sync falls out of lock-step once the short ranks finish
+  # their loop early, which is what caused the first attempt at this run to
+  # hang for 30 min and die on an NCCL ALLREDUCE watchdog timeout.
+  # drop_last=True takes the correct, actually-even-splitting code path.
+  drop_last: true
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:
