@@ -141,6 +141,19 @@ def parse_args():
     parser.add_argument(
         "--outdir", default=".", help="Where to save the PNG figures.",
     )
+    parser.add_argument(
+        "--inflate", action="store_true",
+        help="Apply post-hoc ensemble spread inflation, per channel, "
+             "calibrated from each model's own measured overall spread/skill "
+             "ratio (factor = max(1, 1/ratio), so already-calibrated or "
+             "overdispersive channels are left alone). Rescales each "
+             "member's deviation from the ensemble mean -- does not change "
+             "the ensemble mean or its RMSE, only spread/CRPS. This is a "
+             "statistical correction on top of the existing ensemble, not a "
+             "fix to the generative model itself; see COMPARISON_REPORT.md "
+             "for why brownian-bridge noise underdisperses in the first "
+             "place. Output labels/filenames get an '-inflated' suffix.",
+    )
     return parser.parse_args()
 
 
@@ -182,9 +195,23 @@ def load_window(pred_full, truth_full, t0, t1):
     return p, t, interior_mask, lead_hour
 
 
-def compute_model_scores(pred_full, truth_full):
+def inflate_ensemble(ens, factor, member_axis=-1):
+    """Rescale each member's deviation from the ensemble mean by ``factor``
+    (post-hoc spread inflation). Leaves the ensemble mean (and therefore its
+    RMSE against truth) unchanged -- only spread and CRPS are affected."""
+    if factor == 1.0:
+        return ens
+    mean = ens.mean(axis=member_axis, keepdims=True)
+    return mean + factor * (ens - mean)
+
+
+def compute_model_scores(pred_full, truth_full, inflation_factors=None):
     """Run the full scoring pipeline for one model's already-opened,
-    truth-aligned datasets. Returns (summary_df, lead_df, crps_map, lat, lon)."""
+    truth-aligned datasets. Returns (summary_df, lead_df, crps_map, lat, lon).
+
+    ``inflation_factors``: optional {channel: factor} to apply post-hoc
+    spread inflation (see ``inflate_ensemble``) before scoring each channel.
+    """
     lat = pred_full["latitude"].values
     lon = pred_full["longitude"].values
     area_weight = np.cos(np.radians(lat))  # (lat,), broadcasts against (..., lat, lon)
@@ -207,6 +234,8 @@ def compute_model_scores(pred_full, truth_full):
                 "time", "latitude", "longitude").values)
         p = np.concatenate(p_parts, axis=0)
         t = np.concatenate(t_parts, axis=0)
+        if inflation_factors:
+            p = inflate_ensemble(p, inflation_factors.get(name, 1.0))
 
         crps_val = area_weighted_mean(crps_fair(p, t), area_weight, lat_axis=1)
         spread, rmse, ratio = spread_skill(p, t, area_weight, lat_axis=1)
@@ -238,6 +267,8 @@ def compute_model_scores(pred_full, truth_full):
                     "time", "latitude", "longitude").values)
             p = np.concatenate(p_parts, axis=0)
             t = np.concatenate(t_parts, axis=0)
+            if inflation_factors:
+                p = inflate_ensemble(p, inflation_factors.get(name, 1.0))
             crps_val = area_weighted_mean(crps_fair(p, t), area_weight, lat_axis=1)
             spread, rmse, ratio = spread_skill(p, t, area_weight, lat_axis=1)
             lead_rows.append({
@@ -258,6 +289,8 @@ def compute_model_scores(pred_full, truth_full):
             "time", "latitude", "longitude").values)
     p = np.concatenate(p_parts, axis=0)
     t = np.concatenate(t_parts, axis=0)
+    if inflation_factors:
+        p = inflate_ensemble(p, inflation_factors.get(name, 1.0))
     crps_map = crps_fair(p, t).mean(axis=0)  # (lat, lon)
 
     return summary, lead_df, crps_map, lat, lon
@@ -389,13 +422,32 @@ def main():
         print(summary)
         print("\nBy lead time (pooled across 4 seasonal windows):")
         print(lead_df.round(4).set_index(["channel", "lead_hour"]))
-        results[label] = (summary, lead_df, crps_map, lat, lon)
+
+        display_label = label
+        if ARGS.inflate:
+            inflation_factors = {
+                ch: max(1.0, 1.0 / summary.loc[ch, "spread/skill ratio"])
+                for ch in CHANNELS
+            }
+            print(f"\nSpread inflation factors (from this model's own "
+                  f"measured ratio, capped at >=1): {inflation_factors}")
+            summary, lead_df, crps_map, lat, lon = compute_model_scores(
+                pred_full, truth_full, inflation_factors=inflation_factors
+            )
+            print("\n[inflated] Overall (all interior frames, 4 seasonal windows):")
+            print(summary)
+            print("\n[inflated] By lead time (pooled across 4 seasonal windows):")
+            print(lead_df.round(4).set_index(["channel", "lead_hour"]))
+            display_label = f"{label}-inflated"
+
+        results[display_label] = (summary, lead_df, crps_map, lat, lon)
 
     if COMPARE:
         plot_comparison(results)
     else:
-        summary, lead_df, crps_map, lat, lon = results[labels[0]]
-        plot_single_model(labels[0], summary, lead_df, crps_map, lat, lon)
+        display_label = list(results)[0]
+        summary, lead_df, crps_map, lat, lon = results[display_label]
+        plot_single_model(display_label, summary, lead_df, crps_map, lat, lon)
 
 
 def crps_fair(ens, truth_arr):

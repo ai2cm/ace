@@ -9,23 +9,40 @@
 #
 # Prereqs: beaker CLI installed and authenticated (`beaker account whoami`).
 #
-# Run:  bash scripts/video_pmd_eval/run_crps_eval.sh [model ...]
+# Run:  bash scripts/video_pmd_eval/run_crps_eval.sh [--inflate] [model ...]
+#   --inflate: apply post-hoc per-channel ensemble spread inflation (see
+#     crps_eval.py --inflate docstring) -- a statistical correction on top of
+#     the existing ensemble, not a change to the model. Must come first.
 #   model: one or more of crps_eval.py's KNOWN_MODELS keys (default: pcn-v1).
 #     One model  -> single-model report:
 #       bash scripts/video_pmd_eval/run_crps_eval.sh bb-subset-cons10
 #     Two+ models -> side-by-side comparison report/plots:
 #       bash scripts/video_pmd_eval/run_crps_eval.sh pcn-v1 bb-subset-cons10
+#     With inflation:
+#       bash scripts/video_pmd_eval/run_crps_eval.sh --inflate bb-pcn
 set -e
 
+INFLATE=0
+if [ "${1:-}" = "--inflate" ]; then
+    INFLATE=1
+    shift
+fi
 MODELS=("$@")
 if [ ${#MODELS[@]} -eq 0 ]; then
     MODELS=(pcn-v1)
 fi
-TAG=$(IFS=-; echo "${MODELS[*]}")
+if [ "$INFLATE" = "1" ]; then
+    TAG=$(IFS=-; echo "${MODELS[*]/%/-inflated}")
+else
+    TAG=$(IFS=-; echo "${MODELS[*]}")
+fi
 if [ ${#MODELS[@]} -eq 1 ]; then
     PY_MODEL_ARGS=(--model "${MODELS[0]}")
 else
     PY_MODEL_ARGS=(--models "${MODELS[@]}")
+fi
+if [ "$INFLATE" = "1" ]; then
+    PY_MODEL_ARGS+=(--inflate)
 fi
 SESSION_NAME="run-crps-eval-${TAG}-$(date +%s)"
 WORKSPACE="ai2/climate-titan"
