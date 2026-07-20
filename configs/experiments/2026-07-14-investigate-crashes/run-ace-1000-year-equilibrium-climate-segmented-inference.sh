@@ -64,7 +64,7 @@ for seed in {3..4}; do
                 --name $job_name \
                 --description 'Run inference with ACE' \
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-                --workspace ai2/climate-titan \
+                --workspace ai2/ace \
                 --priority high \
                 --cluster ai2/jupiter \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
