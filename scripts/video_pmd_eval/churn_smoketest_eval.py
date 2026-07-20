@@ -1,10 +1,11 @@
-# One-off scoring for the churn=20 smoke test (see
-# ../../configs/experiments/2026-07-20-video-pmd-bb-pcn-churn20-smoketest/).
+# One-off scoring for the churn smoke tests (see
+# ../../configs/experiments/2026-07-20-video-pmd-bb-pcn-churn{5,20}-smoketest/).
 # Compares bb-pcn at churn=0 (the original full-year inference output) vs.
-# churn=20 (the smoke test's 10-day output) on the exact same shared
-# sub-window (2023-01-01..2023-01-04) so the two are directly comparable --
-# crps_eval.py's own 4-season-pooled numbers aren't a clean baseline here
-# since they average over dates the churn=20 run never generated.
+# churn=5 and churn=20 (the smoke tests' 10-day outputs) on the exact same
+# shared sub-window (2023-01-01..2023-01-04) so all three are directly
+# comparable -- crps_eval.py's own 4-season-pooled numbers aren't a clean
+# baseline here since they average over dates the smoke tests never
+# generated.
 import cftime
 import numpy as np
 import pandas as pd
@@ -17,15 +18,22 @@ TRUTH_ZARR = (
     "/climate-default/2026-06-25-temporal-diffusion/"
     "2025-07-25-X-SHiELD-AMIP-FME-3h.zarr"
 )
-CHURN0_ZARR = (
-    "/climate-default/2026-06-25-temporal-diffusion/inference/"
-    "video-pmd-bb-pcn-global-1degree-24to3-v1/test-2023-2024-ens32.zarr"
-)
-CHURN20_ZARR = (
-    "/climate-default/2026-06-25-temporal-diffusion/inference/"
-    "video-pmd-bb-pcn-churn20-global-1degree-24to3-v1/"
-    "smoketest-jan2023-ens32.zarr"
-)
+MODELS = {
+    "churn=0": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-bb-pcn-global-1degree-24to3-v1/test-2023-2024-ens32.zarr"
+    ),
+    "churn=5": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-bb-pcn-churn5-global-1degree-24to3-v1/"
+        "smoketest-jan2023-ens32.zarr"
+    ),
+    "churn=20": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-bb-pcn-churn20-global-1degree-24to3-v1/"
+        "smoketest-jan2023-ens32.zarr"
+    ),
+}
 CHANNELS = [
     "eastward_wind_at_ten_meters",
     "northward_wind_at_ten_meters",
@@ -92,26 +100,25 @@ def score(label, pred_zarr, truth_raw):
         spread, rmse, ratio = spread_skill(p, t, area_weight, lat_axis=1)
         rows.append({
             "channel": name, "units": UNITS[name], "n_frames": p.shape[0],
-            "CRPS": crps_val, "spread": spread, "RMSE (ens mean)": rmse,
-            "spread/skill ratio": ratio,
+            "CRPS": crps_val, "spread": spread, "MSE (ens mean)": rmse ** 2,
+            "RMSE (ens mean)": rmse, "spread/skill ratio": ratio,
         })
     return pd.DataFrame(rows).set_index("channel")
 
 
 def main():
     truth_raw = xr.open_zarr(TRUTH_ZARR)
-    churn0 = score("churn=0", CHURN0_ZARR, truth_raw)
-    churn20 = score("churn=20", CHURN20_ZARR, truth_raw)
+    results = {label: score(label, zarr_path, truth_raw) for label, zarr_path in MODELS.items()}
 
-    print("\n--- churn=0 (bb-pcn as originally run) ---")
-    print(churn0)
-    print("\n--- churn=20 (smoke test) ---")
-    print(churn20)
+    for label, df in results.items():
+        print(f"\n--- {label} ---")
+        print(df)
 
-    combined = pd.concat({"churn=0": churn0, "churn=20": churn20}, names=["model"]).reset_index()
+    combined = pd.concat(results, names=["model"]).reset_index()
     combined = combined[["model", "channel", "units", "n_frames", "CRPS",
-                          "spread", "RMSE (ens mean)", "spread/skill ratio"]]
-    print("\n--- Combined (same 2023-01-01..2023-01-04 window, both models) ---")
+                          "spread", "MSE (ens mean)", "RMSE (ens mean)",
+                          "spread/skill ratio"]]
+    print("\n--- Combined (same 2023-01-01..2023-01-04 window, all models) ---")
     print(combined.set_index(["channel", "model"]).sort_index())
     combined.to_csv("/results/churn_smoketest_comparison.csv", index=False)
     print("\nSaved /results/churn_smoketest_comparison.csv")
