@@ -50,7 +50,6 @@ from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
-from fme.core.random_state import RandomState
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -361,10 +360,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
-        if config.seed is not None:
-            data._initial_condition = data.initial_condition.with_random_state(
-                RandomState.from_seed(config.seed)
-            )
+        data.apply_config_seed(config.seed)
         stepper = config.load_stepper()
         stepper.set_eval()
 
