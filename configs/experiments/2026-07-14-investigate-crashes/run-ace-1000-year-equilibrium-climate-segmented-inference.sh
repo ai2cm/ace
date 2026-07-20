@@ -66,7 +66,6 @@ for seed in {3..4}; do
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
                 --workspace ai2/climate-titan \
                 --priority high \
-                --not-preemptible \
                 --cluster ai2/jupiter \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
