@@ -33,7 +33,7 @@ for model in "${!MODELS[@]}"; do
     dataset_id="${MODELS[$model]}"
     python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
-    job_name="${DATE}-${model}-10-day-AMIP-evaluator-main"
+    job_name="${DATE}-${model}-10-day-AMIP-evaluator-main2"
     gantry run \
         --remote https://github.com/ai2cm/ace \
         --ref ${MAIN_COMMIT} \
@@ -63,33 +63,33 @@ for model in "${!MODELS[@]}"; do
             python -I -m fme.ace.evaluator /tmp/config.yaml \
         "
 
-    job_name="${DATE}-${model}-10-day-AMIP-evaluator-frozen-precip-corrector"
-    gantry run \
-        --remote https://github.com/ai2cm/ace \
-        --ref ${FROZEN_PRECIP_CORRECTOR_COMMIT} \
-        --name $job_name \
-        --description 'Run evaluator with ACE' \
-        --beaker-image "${BEAKER_IMAGE}" \
-        --workspace ai2/climate-titan \
-        --priority urgent \
-        --preemptible \
-        --cluster ai2/titan \
-        --env WANDB_USERNAME=$WANDB_USERNAME \
-        --env WANDB_NAME=$job_name \
-        --env WANDB_JOB_TYPE=inference \
-        --env WANDB_RUN_GROUP= \
-        --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-        --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
-        --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-        --dataset $dataset_id:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
-        --gpus 1 \
-        --shared-memory 20GiB \
-        --weka climate-default:/climate-default \
-        --system-python \
-        --install "pip install --no-deps ." \
-        -- bash -c "\
-            echo '${CONFIG_B64}' | base64 -d > /tmp/config.yaml \
-            && \
-            python -I -m fme.ace.evaluator /tmp/config.yaml \
-        "
+    # job_name="${DATE}-${model}-10-day-AMIP-evaluator-frozen-precip-corrector"
+    # gantry run \
+    #     --remote https://github.com/ai2cm/ace \
+    #     --ref ${FROZEN_PRECIP_CORRECTOR_COMMIT} \
+    #     --name $job_name \
+    #     --description 'Run evaluator with ACE' \
+    #     --beaker-image "${BEAKER_IMAGE}" \
+    #     --workspace ai2/climate-titan \
+    #     --priority urgent \
+    #     --preemptible \
+    #     --cluster ai2/titan \
+    #     --env WANDB_USERNAME=$WANDB_USERNAME \
+    #     --env WANDB_NAME=$job_name \
+    #     --env WANDB_JOB_TYPE=inference \
+    #     --env WANDB_RUN_GROUP= \
+    #     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    #     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    #     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    #     --dataset $dataset_id:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    #     --gpus 1 \
+    #     --shared-memory 20GiB \
+    #     --weka climate-default:/climate-default \
+    #     --system-python \
+    #     --install "pip install --no-deps ." \
+    #     -- bash -c "\
+    #         echo '${CONFIG_B64}' | base64 -d > /tmp/config.yaml \
+    #         && \
+    #         python -I -m fme.ace.evaluator /tmp/config.yaml \
+    #     "
 done

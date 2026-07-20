@@ -23,4 +23,5 @@ data_writer:
   names:
     - PRATEsfc
     - total_frozen_precipitation_rate
+    - total_water_path
 seed: 1
