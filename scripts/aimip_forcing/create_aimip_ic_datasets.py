@@ -26,6 +26,9 @@ PROGNOSTIC_VARIABLES = (
     + [f"eastward_wind_{i}" for i in range(8)]
     + [f"northward_wind_{i}" for i in range(8)]
 )
+# Near-surface prognostics carried by the daily model (e.g. nobgd4ek) but not by
+# the submitted six-hourly model; without them that model cannot initialize.
+NEAR_SURFACE_VARIABLES = ["TMP2m", "Q2m", "UGRD10m", "VGRD10m"]
 
 
 def create_ic(
@@ -62,17 +65,30 @@ def create_ic(
         "Output files are named {target_date}_IC{i}.nc."
     ),
 )
+@click.option(
+    "--include-near-surface/--no-include-near-surface",
+    default=False,
+    help=(
+        "Include the near-surface prognostics (TMP2m, Q2m, UGRD10m, VGRD10m) "
+        "required to initialize the daily model. The source zarr must carry them."
+    ),
+)
 def main(
     local_output_dir: str,
     era5_gcs_data: str,
     target_timestamp: str,
     ic_timestamps: Tuple[str, ...],
+    include_near_surface: bool,
 ):
     logging.basicConfig(level=logging.INFO)
     os.makedirs(local_output_dir, exist_ok=True)
 
+    prognostic_variables = PROGNOSTIC_VARIABLES + (
+        NEAR_SURFACE_VARIABLES if include_near_surface else []
+    )
+
     logging.info(f"Opening ERA5 data from {era5_gcs_data}")
-    era5 = xr.open_zarr(era5_gcs_data)[PROGNOSTIC_VARIABLES]
+    era5 = xr.open_zarr(era5_gcs_data)[prognostic_variables]
 
     target_dt = np.datetime64(target_timestamp)
     target_date = target_timestamp.split("T")[0]
