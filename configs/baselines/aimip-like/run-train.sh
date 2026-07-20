@@ -107,7 +107,7 @@ run_training() {
 
   gantry run \
     --name "$job_name" \
-    --description 'Run ACE training (RH multistep fine-tune)' \
+    --description 'Run ACE training (RH-input no-co2 humidity-trend)' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
     --priority high \
@@ -133,25 +133,28 @@ run_training() {
 }
 
 # =============================================================================
-# Multi-timestep fine-tuning of the RH-input-append model (stability probe)
-# Task:          research/tasks/2026-07-16-multistep-finetune-rh-input-stability.md
-# Investigation: 2026-07-16-multistep-finetune-rh-stability
+# Does a relative-humidity input improve humidity trends in a NO-CO2-INPUT model?
+# Task:   research/tasks/2026-07-20-rh-input-noco2-humidity-trend.md
+# Report: back-references ai2cm/reports rh-input-rollout-stability (PR #44)
 #
-# Fine-tune recipe (both arms): 3 forward steps, optimize on ALL steps
-# (optimize_last_step_only: false), gradient accumulation on, 80 epochs, lr 1e-4,
-# weights-only init from the base run's best_ckpt.tar via
-# stepper_training.parameter_init.
+# All arms drop the explicit CO2 input channel (global_mean_co2 removed from
+# in_names + next_step_forcing_names; the long_46year_constant_co2 rollout is
+# dropped, moot without a CO2 input). v2 no-residual, 4deg daily ERA5-only,
+# fg16 sr0p125. Built on experiment/rh-multistep-finetune (the only branch with
+# the saturation_normalization RH feature).
 #
-#   A1  fine-tune the v1 residual RH-input-append base (wandb xm6dc54c;
-#       checkpoint dataset 01KVV1FRHHEQKPJV2XM7T5MJ4Y mounted at /weights via the
-#       "# arg: --dataset ..." header in the config).
-#   B1  from-scratch v2-no-residual RH-input-append base (v2 stitched-window
-#       loader + residual_prediction: false; single-step, 120 epochs).
-#   B2  fine-tune of B1 (same recipe as A1): mounts B1's checkpoint dataset
-#       01KXPDMT8HPMYFH17SJJ54648G at /weights via the config's "# arg:" header.
-#       Launched once B1 finished (2026-07-18, best_val_loss 0.1305).
+#   A  RH-input no-co2 base (single-step, 120 epochs). Launch now.
+#   C  no-RH no-co2 3-step fine-tune (matched fine-tuned control): weights-only
+#      init from the existing no-co2 no-RH base im4ecamc's best_ckpt.tar
+#      (dataset 01KW0YE54G9NF9YWF000GVPMA8, mounted via the config "# arg:"
+#      header). Launch now.
+#   B  RH-input no-co2 3-step fine-tune of A (same ft recipe). DEFERRED: needs
+#      A's checkpoint dataset; add its config + call and launch once A finishes.
+#
+# Baseline (single-step no-RH no-co2) is the pre-existing run im4ecamc.
+# The clean matched RH-vs-no-RH comparison is B vs C (same branch code, both
+# 3-step fine-tuned); A vs im4ecamc is single-step with a code-version caveat.
 # =============================================================================
 
-run_training "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-ft3step.yaml" "train-4deg-daily-v1-era5-only-fg16-sr0p125-residual-rh-input-append-ft3step-rs0" 1
-run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append.yaml"       "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-rs0"       1
-run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-ft3step.yaml" "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-ft3step-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2.yaml" "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-no-residual-no-co2-ft3step.yaml"                     "train-4deg-daily-v2-era5-only-no-residual-no-co2-ft3step-rs0"                     1
