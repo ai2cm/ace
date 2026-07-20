@@ -12,6 +12,16 @@
 # `rsrch sync` / the experiment record), then:
 #   ./run-inference-ft-exclude-global-mlp.sh            # all 6 jobs
 #   ./run-inference-ft-exclude-global-mlp.sh lr1e-5     # only the lr1e-5 arm
+#
+# CKPT_FILE selects which in-dataset checkpoint to evaluate (default
+# best_inference_ckpt.tar); NAME_SUFFIX disambiguates the beaker/wandb run
+# names and group when evaluating a second checkpoint. The end-of-training
+# eval (the one that shows whether the full fine-tune forgot the extrapolant
+# response) is:
+#   CKPT_FILE=training_checkpoints/ema_ckpt_0120.tar NAME_SUFFIX=-ep120 \
+#     ./run-inference-ft-exclude-global-mlp.sh
+# (best_inference_ckpt landed at epoch 4 for lr1e-4 / epoch 100 for lr1e-5, so
+# it does not answer the end-of-training question for the aggressive arm.)
 
 set -euo pipefail
 
@@ -43,11 +53,13 @@ should_run() {
 }
 # === END GUARDRAILS ==========================================================
 
-JOB_GROUP="finetune-era5-exclude-global-mlp-sst-perts"
+CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
+NAME_SUFFIX="${NAME_SUFFIX:-}"
+JOB_GROUP="finetune-era5-exclude-global-mlp-sst-perts${NAME_SUFFIX}"
 
 # Fine-tune result datasets (best_inference_ckpt.tar). FILL AFTER TRAINING.
-CKPT_LR1E4="TBD"   # beaker result dataset of ft-...-lr1e-4-rs0 (wandb TBD)
-CKPT_LR1E5="TBD"   # beaker result dataset of ft-...-lr1e-5-rs0 (wandb TBD)
+CKPT_LR1E4="01KXPK1RXTK98KBGES4AY8K9KY"   # ft-...-lr1e-4-rs0 result dataset (wandb h05vdqxj, epoch 120)
+CKPT_LR1E5="01KXSA9V4A1SQ1M5R5MBDVJZ8B"   # ft-...-lr1e-5-rs0 result dataset (wandb fizm7uqz, epoch 120)
 
 cd "$REPO_ROOT"
 
@@ -84,7 +96,7 @@ launch_job () {
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset "$CKPT_DATASET":training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --dataset "$CKPT_DATASET":"$CKPT_FILE":/ckpt.tar \
     --gpus 1 \
     --shared-memory 50GiB \
     --allow-dirty \
@@ -96,6 +108,6 @@ launch_job () {
 }
 
 for pert in p0k p2k p4k; do
-  launch_job "ft-4deg-daily-era5-exclude-global-mlp-lr1e-4-$pert" "$SCRIPT_PATH/ace-inference-era5-$pert.yaml" "$CKPT_LR1E4"
-  launch_job "ft-4deg-daily-era5-exclude-global-mlp-lr1e-5-$pert" "$SCRIPT_PATH/ace-inference-era5-$pert.yaml" "$CKPT_LR1E5"
+  launch_job "ft-4deg-daily-era5-exclude-global-mlp-lr1e-4-$pert$NAME_SUFFIX" "$SCRIPT_PATH/ace-inference-era5-$pert.yaml" "$CKPT_LR1E4"
+  launch_job "ft-4deg-daily-era5-exclude-global-mlp-lr1e-5-$pert$NAME_SUFFIX" "$SCRIPT_PATH/ace-inference-era5-$pert.yaml" "$CKPT_LR1E5"
 done
