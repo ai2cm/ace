@@ -7,7 +7,7 @@ import torch
 
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 
 from .build_context import Aggregator
 
@@ -36,7 +36,6 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         coords: Mapping[str, np.ndarray],
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        loss_scaling: TensorMapping | None = None,
     ):
         """
         Args:
@@ -45,8 +44,6 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             coords: Coordinate arrays for writing diagnostics.
             save_diagnostics: Whether to save diagnostics.
             output_dir: Directory to write diagnostics to.
-            loss_scaling: Dictionary of variables and their scaling factors
-                used in loss computation.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -60,7 +57,6 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         self._save_diagnostics = save_diagnostics
         self._coords = coords
         self._aggregators = aggregators
-        self._loss_scaling = loss_scaling or {}
 
     @torch.no_grad()
     def record_batch(
@@ -91,35 +87,8 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
                 logs[f"{label}/{k}"] = v
         logs.pop(f"{label}/mean_norm/loss", None)
-        logging.info(f"Inserting loss-scaled MSE componenets into logs")
-        logs.update(
-            self._get_loss_scaled_mse_components(
-                validation_metrics=logs,
-                label=label,
-            )
-        )
         loss = logs.get(f"{label}/mean/loss")
         return AggregatorSummary(logs=logs, loss=loss)
-
-    def _get_loss_scaled_mse_components(
-        self,
-        validation_metrics: Mapping[str, float],
-        label: str,
-    ):
-        scaled_squared_errors = {}
-
-        for var in self._loss_scaling:
-            rmse_key = f"{label}/mean/weighted_rmse/{var}"
-            if rmse_key in validation_metrics:
-                scaled_squared_errors[var] = (
-                    validation_metrics[rmse_key] / self._loss_scaling[var].item()
-                ) ** 2
-        scaled_squared_errors_sum = sum(scaled_squared_errors.values())
-        fractional_contribs = {
-            f"{label}/mean/mse_fractional_components/{k}": v / scaled_squared_errors_sum
-            for k, v in scaled_squared_errors.items()
-        }
-        return fractional_contribs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):

@@ -21,7 +21,7 @@ from fme.ace.stepper import TrainOutput
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
-from fme.core.typing_ import EnsembleTensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict
 
 from .build_context import (
     Aggregator,
@@ -156,7 +156,6 @@ def build_one_step_aggregator(
     dataset_info: DatasetInfo,
     save_diagnostics: bool = True,
     output_dir: str | None = None,
-    loss_scaling: TensorMapping | None = None,
     channel_mean_names: Sequence[str] | None = None,
     raise_on_unsupported: bool = True,
     include_default_ensemble: bool = True,
@@ -202,7 +201,6 @@ def build_one_step_aggregator(
         coords=dataset_info.horizontal_coordinates.coords,
         save_diagnostics=save_diagnostics,
         output_dir=output_dir,
-        loss_scaling=loss_scaling,
     )
     return OneStepAggregator(
         deterministic_aggregator=deterministic,
@@ -307,7 +305,6 @@ class OneStepAggregatorConfig:
         dataset_info: DatasetInfo,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        loss_scaling: TensorMapping | None = None,
         channel_mean_names: Sequence[str] | None = None,
     ) -> OneStepAggregator:
         return build_one_step_aggregator(
@@ -315,7 +312,6 @@ class OneStepAggregatorConfig:
             dataset_info=dataset_info,
             save_diagnostics=save_diagnostics,
             output_dir=output_dir,
-            loss_scaling=loss_scaling,
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
             include_default_ensemble=False,
@@ -368,7 +364,6 @@ class LegacyFlagOneStepAggregatorConfig:
         dataset_info: DatasetInfo,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        loss_scaling: TensorMapping | None = None,
         channel_mean_names: Sequence[str] | None = None,
     ) -> OneStepAggregator:
         return build_one_step_aggregator(
@@ -376,7 +371,6 @@ class LegacyFlagOneStepAggregatorConfig:
             dataset_info=dataset_info,
             save_diagnostics=save_diagnostics,
             output_dir=output_dir,
-            loss_scaling=loss_scaling,
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
         )
