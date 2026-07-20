@@ -24,6 +24,8 @@ from fme.downscaling.noise import (
     LogUniformNoiseDistribution,
     NoiseDistribution,
     brownian_bridge_mixing_matrix,
+    ou_mixing_matrix,
+    rbf_mixing_matrix,
     uniform_frame_times,
 )
 from fme.downscaling.requirements import DataRequirements
@@ -104,8 +106,21 @@ class VideoDiffusionModelConfig:
     # Channels modeled in log space via log1p(x*scale); maps channel to scale.
     log_transform_channels: dict[str, float] | None = None
     # Temporal correlation of the residual noise: "independent" (per-frame white
-    # noise, default) or "brownian_bridge" (endpoint-pinned time-correlated noise).
+    # noise, default), "brownian_bridge" (endpoint-pinned time-correlated noise,
+    # same kernel for every channel), or "per_channel" (a different kernel per
+    # channel, via per_channel_noise_kernel/per_channel_kernel_length_scale below
+    # -- e.g. matching each channel to whichever of bridge/OU/RBF best fits its
+    # real temporal correlation, see toy/process_residual_bridge_report.md).
     temporal_noise_correlation: str = "independent"
+    # Required iff temporal_noise_correlation == "per_channel": maps every
+    # out_names entry to "independent", "brownian_bridge", "ou", or "rbf".
+    per_channel_noise_kernel: dict[str, str] | None = None
+    # Required iff per_channel_noise_kernel has any "ou"/"rbf" entries: maps
+    # those channels to their kernel length scale, in the same normalized
+    # [0, 1]-over-the-full-window units as uniform_frame_times (i.e. hours /
+    # total_window_hours, NOT raw hours -- e.g. an empirically-fit 12.9h OU
+    # length scale over a 24h window is 12.9/24 = 0.5375 here).
+    per_channel_kernel_length_scale: dict[str, float] | None = None
     # Fraction of training batches trained on a random subset of interior frames
     # (the two endpoints are always kept) instead of the full uniform grid, so the
     # model learns to answer variable query sets and stays consistent across them.
@@ -183,10 +198,59 @@ class VideoDiffusionModelConfig:
                     f"model_channels*{m}={self.model_channels * m} not divisible "
                     f"by n_heads={self.n_heads}."
                 )
-        if self.temporal_noise_correlation not in ("independent", "brownian_bridge"):
+        if self.temporal_noise_correlation not in (
+            "independent", "brownian_bridge", "per_channel"
+        ):
             raise ValueError(
-                "temporal_noise_correlation must be 'independent' or "
-                f"'brownian_bridge', got {self.temporal_noise_correlation}."
+                "temporal_noise_correlation must be 'independent', "
+                f"'brownian_bridge', or 'per_channel', got "
+                f"{self.temporal_noise_correlation}."
+            )
+        if self.temporal_noise_correlation == "per_channel":
+            if self.per_channel_noise_kernel is None:
+                raise ValueError(
+                    "temporal_noise_correlation == 'per_channel' requires "
+                    "per_channel_noise_kernel."
+                )
+            missing = set(self.out_names) - set(self.per_channel_noise_kernel)
+            extra = set(self.per_channel_noise_kernel) - set(self.out_names)
+            if missing or extra:
+                raise ValueError(
+                    "per_channel_noise_kernel must specify exactly out_names: "
+                    f"missing {sorted(missing)}, unexpected {sorted(extra)}."
+                )
+            bad_kernels = {
+                k for k in self.per_channel_noise_kernel.values()
+                if k not in ("independent", "brownian_bridge", "ou", "rbf")
+            }
+            if bad_kernels:
+                raise ValueError(
+                    "per_channel_noise_kernel values must be 'independent', "
+                    f"'brownian_bridge', 'ou', or 'rbf', got {sorted(bad_kernels)}."
+                )
+            needs_length_scale = {
+                name for name, k in self.per_channel_noise_kernel.items()
+                if k in ("ou", "rbf")
+            }
+            have_length_scale = set(self.per_channel_kernel_length_scale or {})
+            missing_ell = needs_length_scale - have_length_scale
+            if missing_ell:
+                raise ValueError(
+                    "per_channel_kernel_length_scale missing entries for "
+                    f"ou/rbf channels: {sorted(missing_ell)}."
+                )
+            bad_ell = {
+                name: ell for name, ell in (self.per_channel_kernel_length_scale or {}).items()
+                if ell <= 0.0
+            }
+            if bad_ell:
+                raise ValueError(
+                    f"per_channel_kernel_length_scale must be > 0, got {bad_ell}."
+                )
+        elif self.per_channel_noise_kernel is not None:
+            raise ValueError(
+                "per_channel_noise_kernel is only used when "
+                "temporal_noise_correlation == 'per_channel'."
             )
         if not 0.0 <= self.subset_augmentation_prob <= 1.0:
             raise ValueError(
@@ -345,6 +409,53 @@ class VideoDiffusionModelConfig:
         return VideoDiffusionModel(self, module, normalizer, self.out_names)
 
 
+def _channel_mixing_matrix(
+    tau: torch.Tensor, kernel: str, length_scale: float | None
+) -> torch.Tensor:
+    """``(T, T)`` mixing matrix for one channel's chosen kernel -- the
+    per-channel building block for ``temporal_noise_correlation ==
+    'per_channel'``. ``"independent"`` embeds an identity in the interior
+    block (endpoints still zero), giving unmixed white noise for that
+    channel while still stacking cleanly into a per-channel tensor.
+    """
+    if kernel == "independent":
+        n_timesteps = tau.shape[0]
+        n_interior = n_timesteps - 2
+        mixing = torch.zeros(
+            n_timesteps, n_timesteps, dtype=torch.float32, device=tau.device
+        )
+        mixing[1 : 1 + n_interior, 1 : 1 + n_interior] = torch.eye(
+            n_interior, device=tau.device
+        )
+        return mixing
+    if kernel == "brownian_bridge":
+        return brownian_bridge_mixing_matrix(tau)
+    if kernel == "ou":
+        assert length_scale is not None
+        return ou_mixing_matrix(tau, length_scale)
+    if kernel == "rbf":
+        assert length_scale is not None
+        return rbf_mixing_matrix(tau, length_scale)
+    raise ValueError(f"Unknown per-channel noise kernel {kernel!r}")
+
+
+def _per_channel_mixing_tensor(
+    tau: torch.Tensor,
+    out_names: list[str],
+    kernel_map: dict[str, str],
+    length_scale_map: dict[str, float] | None,
+) -> torch.Tensor:
+    """``(C, T, T)`` stacked per-channel mixing matrices, ordered by
+    ``out_names`` -- each channel's own kernel/length-scale choice."""
+    mats = [
+        _channel_mixing_matrix(
+            tau, kernel_map[name], (length_scale_map or {}).get(name)
+        )
+        for name in out_names
+    ]
+    return torch.stack(mats, dim=0)
+
+
 class VideoDiffusionModel:
     def __init__(
         self,
@@ -368,9 +479,18 @@ class VideoDiffusionModel:
         self._full_tau = uniform_frame_times(config.n_timesteps)
         self._marginal_consistency_weight = config.marginal_consistency_weight
         self._bridge_noise = config.temporal_noise_correlation == "brownian_bridge"
+        self._per_channel_noise = config.temporal_noise_correlation == "per_channel"
         if self._bridge_noise:
             self._noise_mixing: torch.Tensor | None = brownian_bridge_mixing_matrix(
                 self._full_tau
+            ).to(get_device())
+        elif self._per_channel_noise:
+            assert config.per_channel_noise_kernel is not None  # validated in __post_init__
+            self._noise_mixing = _per_channel_mixing_tensor(
+                self._full_tau,
+                out_names,
+                config.per_channel_noise_kernel,
+                config.per_channel_kernel_length_scale,
             ).to(get_device())
         else:
             self._noise_mixing = None
@@ -383,11 +503,13 @@ class VideoDiffusionModel:
         self, like: torch.Tensor, mixing: torch.Tensor | None = None
     ) -> torch.Tensor:
         """White noise shaped like ``like`` (B, C, T, H, W), temporally correlated
-        with ``mixing`` when given (Brownian-bridge kernel), else independent.
+        with ``mixing`` when given (bridge/OU/RBF kernel, shared or per-channel),
+        else independent.
 
-        ``mixing`` defaults to the full-grid bridge matrix; pass a subset matrix
+        ``mixing`` defaults to the full-grid mixing tensor; pass a subset matrix
         for a subset of frames, or ``None`` stays independent (mixing is ``None``
-        in independent mode regardless).
+        in independent mode regardless). ``mixing`` is either ``(T, T)`` (same
+        kernel for every channel) or ``(C, T, T)`` (per-channel kernels).
         """
         noise = randn_like(like)
         if mixing is None:
@@ -395,6 +517,8 @@ class VideoDiffusionModel:
         if mixing is None:
             return noise
         mixing = mixing.to(device=noise.device, dtype=noise.dtype)
+        if mixing.ndim == 3:
+            return torch.einsum("cti,bcihw->bcthw", mixing, noise)
         return torch.einsum("ti,bcihw->bcthw", mixing, noise)
 
     def _tau_for_indices(self, idx: torch.Tensor | None) -> torch.Tensor | None:
@@ -406,14 +530,24 @@ class VideoDiffusionModel:
         return self._full_tau.to(idx.device).index_select(0, idx)
 
     def _mixing_for_indices(self, idx: torch.Tensor | None) -> torch.Tensor | None:
-        """Bridge mixing matrix for a subset of frames -- the full-window bridge
-        restricted to ``idx``. ``None`` for independent noise or the full grid.
+        """Mixing tensor for a subset of frames -- the full-window kernel(s)
+        restricted to ``idx`` (re-derived at just those frame times, which
+        equals the true marginal -- see brownian_bridge_mixing_matrix's
+        docstring). ``None`` for independent noise or the full grid.
         """
-        if not self._bridge_noise:
+        if not (self._bridge_noise or self._per_channel_noise):
             return None
         if idx is None:
             return self._noise_mixing
         tau = self._full_tau.index_select(0, idx.cpu())
+        if self._per_channel_noise:
+            assert self.config.per_channel_noise_kernel is not None
+            return _per_channel_mixing_tensor(
+                tau,
+                self.out_names,
+                self.config.per_channel_noise_kernel,
+                self.config.per_channel_kernel_length_scale,
+            ).to(get_device())
         return brownian_bridge_mixing_matrix(tau).to(get_device())
 
     def _synced_generator(self, device: torch.device) -> torch.Generator:
@@ -817,6 +951,8 @@ def _video_edm_sample(
         if noise_mixing is None:
             return noise
         mixing = noise_mixing.to(device=noise.device, dtype=noise.dtype)
+        if mixing.ndim == 3:
+            return torch.einsum("cti,bcihw->bcthw", mixing, noise)
         return torch.einsum("ti,bcihw->bcthw", mixing, noise)
 
     x = latents.to(compute_dtype) * t[0] * mask
