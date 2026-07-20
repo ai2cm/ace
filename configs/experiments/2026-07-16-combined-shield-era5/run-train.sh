@@ -142,8 +142,7 @@ run_training() {
 }
 
 # Launch targets: the 4 label-off / label-on-dropout-0 arms of the combined
-# SHiELD+ + ERA5 training matrix (arms A, B, F, G). Arms C/D/E (label dropout
-# 10/50/90%) launch later, once the label-masking feature lands.
+# SHiELD+ + ERA5 training matrix (arms A, B, F, G).
 #   A: no labels, pooled (ERA5+SHiELD) stats — no-label base control
 run_training "train-4deg-daily-combined-shield-era5-nolabel-pooled.yaml"      "combined-shield-era5-nolabel-pooled-rs0"      1
 #   B: labels on (shield-plus / era5), pooled stats — plain labelled anchor
@@ -152,3 +151,14 @@ run_training "train-4deg-daily-combined-shield-era5-label-pooled.yaml"        "c
 run_training "train-4deg-daily-combined-shield-era5-nolabel-era5stats.yaml"   "combined-shield-era5-nolabel-era5stats-rs0"   1
 #   G: no labels, SHiELD-only stats — normalization sensitivity
 run_training "train-4deg-daily-combined-shield-era5-nolabel-shieldstats.yaml" "combined-shield-era5-nolabel-shieldstats-rs0" 1
+
+# label-embed2 arms: learned 2-dim label embedding (label_embed_dim: 2) on the
+# pooled-stats labelled recipe (arm B), sweeping cBottle-style label dropout.
+#   B': dropout 0.00 — no-dropout anchor for the embed-2 sweep
+run_training "train-4deg-daily-combined-shield-era5-label-embed2-drop0.yaml"  "combined-shield-era5-label-embed2-drop0-rs0"  1
+#   C: dropout 0.10
+run_training "train-4deg-daily-combined-shield-era5-label-embed2-drop10.yaml" "combined-shield-era5-label-embed2-drop10-rs0" 1
+#   D: dropout 0.50
+run_training "train-4deg-daily-combined-shield-era5-label-embed2-drop50.yaml" "combined-shield-era5-label-embed2-drop50-rs0" 1
+#   E: dropout 0.90
+run_training "train-4deg-daily-combined-shield-era5-label-embed2-drop90.yaml" "combined-shield-era5-label-embed2-drop90-rs0" 1
