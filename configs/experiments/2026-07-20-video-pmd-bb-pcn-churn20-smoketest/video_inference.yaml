@@ -6,12 +6,17 @@
 #   - model.churn: 0.0 -> 20.0 (Karras EDM stochastic sampler S_churn; the
 #     mixing-matrix-aware churn_noise() path in _video_edm_sample already
 #     supports this, it's just never been exercised with churn>0 so far).
-#   - data restricted to a single 3-day window (2023-01-01..2023-01-04,
-#     matching crps_eval.py's "winter (Jan)" SAMPLE_WINDOWS entry) instead of
-#     the full test year, purely to keep this validation run cheap (~8 min
-#     vs. ~16.5h for the full year at 4 GPUs, per the sibling config's
-#     timing note). If this looks promising, follow up with the full 4-season
-#     or full-year run.
+#   - data restricted to a 10-day window (2023-01-01..2023-01-11, covering
+#     crps_eval.py's "winter (Jan)" SAMPLE_WINDOWS 3-day window plus margin)
+#     instead of the full test year, purely to keep this validation run
+#     cheap (~O(30 min) vs. ~16.5h for the full year at 4 GPUs, per the
+#     sibling config's timing note). If this looks promising, follow up
+#     with the full 4-season or full-year run.
+#   - batch_size: 8 -> 4 (global across 4 ranks, so 1 clip/rank/batch
+#     instead of 2) -- with only ~3 total clips in a 3-day window, 2/rank
+#     underflowed drop_last and StopIteration'd every rank on the first
+#     attempt at this run; widening to 10 days (~10 clips) plus a smaller
+#     batch gives comfortable margin.
 # See crps_eval_results_pcn-v1-bb-pcn-bb-subset-cons0-bb-subset-cons10/
 # COMPARISON_REPORT.md ("Why does brownian-bridge noise reduce spread?") for
 # why churn is the theoretically correct lever here: with churn=0, the
@@ -39,15 +44,20 @@ data:
       engine: zarr
       subset:
         start_time: "2023-01-01"
-        stop_time: "2023-01-04"
+        stop_time: "2023-01-11"
   coarse:
     - data_path: /climate-default/2026-06-25-temporal-diffusion
       file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
       engine: zarr
       subset:
         start_time: "2023-01-01"
-        stop_time: "2023-01-04"
-  batch_size: 8  # global across ranks
+        stop_time: "2023-01-11"
+  # 4 (not 8) so each of the 4 ranks needs only 1 clip/batch -- a 10-day
+  # window gives ~10 tumbling 24h clips, comfortable margin over the
+  # per-rank minimum. The original 3-day window only yielded ~3 total
+  # clips, so with batch_size=8 (2/rank) every rank's DataLoader dropped its
+  # under-full batch and started empty -> StopIteration on all ranks.
+  batch_size: 4  # global across ranks
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:

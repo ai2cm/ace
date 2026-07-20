@@ -1,8 +1,8 @@
 #!/bin/bash
 # Cheap validation smoke test: does nonzero EDM churn (S_churn=20) restore
-# ensemble spread for the brownian-bridge noise scheme? Single 3-day window
-# (2023-01-01..2023-01-04), 32-member ensemble, 4x B200 DDP -- should take
-# ~O(10 min), not the ~16.5h a full-year run would.
+# ensemble spread for the brownian-bridge noise scheme? 10-day window
+# (2023-01-01..2023-01-11), 32-member ensemble, 4x B200 DDP -- should take
+# ~O(30 min), not the ~16.5h a full-year run would.
 #
 # Checkpoint dataset (same as bb-pcn's own inference run):
 #   01KWDBKFBCWGKCAJD5B49H4TND
