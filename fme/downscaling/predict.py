@@ -117,7 +117,6 @@ class EventDownscaler:
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
                 base_model,
-                self.data.shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         return base_model
@@ -191,7 +190,6 @@ class Downscaler:
         if self.patch.needs_patch_predictor:
             return PatchPredictor(
                 model=base_model,
-                coarse_yx_patch_extent=base_model.coarse_shape,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
             )
         return base_model
