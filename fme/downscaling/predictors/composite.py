@@ -49,6 +49,8 @@ class PatchPredictor:
     """
     Model prediction wrapper for generating a full-extent prediction
     by dividing the input into a grid of patches.
+
+    Patch size is inferred from the model's coarse_shape used in training.
     """
 
     def __init__(
