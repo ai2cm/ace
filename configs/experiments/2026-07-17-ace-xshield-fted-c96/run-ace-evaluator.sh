@@ -28,7 +28,7 @@ run_eval() {
     --description 'Run ACE2-ERA5 evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
+    --priority high \
     --not-preemptible \
     --cluster ai2/titan \
     --cluster ai2/saturn \
@@ -43,7 +43,7 @@ run_eval() {
     --gpus 1 \
     --shared-memory 200GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --allow-dirty \
     --install "pip install --no-deps ." \
