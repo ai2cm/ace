@@ -10,3 +10,5 @@ BK-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic|rs0|
 BK-v20260602-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic|rs1|01KWG0GV4Q70XY9JA0JCH00RZ3|training|best_inference_ckpt|normal|--min-runtime 8h
 
 BK-v20260717-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic|rs0|01KY0MXMWWD03VW499HDKQMC36|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260717-ACE2S-E3SMv3-piControl-105yr-n384-bs8-equal-loss-deterministic|rs1|01KY0MXXSAAWG3TF5AQH3Q1G83|training|best_inference_ckpt|normal|--min-runtime 8h
