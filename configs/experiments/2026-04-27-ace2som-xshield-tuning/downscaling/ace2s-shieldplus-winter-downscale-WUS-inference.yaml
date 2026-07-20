@@ -3,10 +3,9 @@ model:
   checkpoint_path: /ckpt.tar
 data:
   coarse:
-  - merge:
-    - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
-      file_pattern: output_6hourly_predictions_ic0000.zarr
-      engine: zarr
+  - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
+    file_pattern: output_6hourly_predictions_ic0000.zarr
+    engine: zarr
   batch_size: 16
   num_data_workers: 2
   strict_ensemble: false
