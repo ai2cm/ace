@@ -22,3 +22,5 @@ BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-multi-step-FT-from-PM|rs0|01K
 BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-multi-step-FT-best-val-ckpt|rs0|01KVXMMWH5Z2G1NY7X6RRB9P70|training|best_inference_ckpt|normal|--min-runtime 8h
 
 BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-equal-loss-multi-step-FT-best-val-ckpt|rs0|01KVXMN91A26V2HSCTGR0S007S|training|best_inference_ckpt|normal|--min-runtime 8h
+
+BK-v20260717-ACE2S-E3SMv3-piControl-100yr-n384-bs8-equal-loss-pretrain|rs0|01KY0B6RT4SWQMHV3D59MZ41B2|training|best_inference_ckpt|normal|--min-runtime 8h
