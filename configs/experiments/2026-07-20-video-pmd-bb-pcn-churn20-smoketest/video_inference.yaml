@@ -1,0 +1,119 @@
+# Cheap validation smoke test: does nonzero EDM churn restore ensemble spread
+# for the brownian-bridge noise scheme? Same checkpoint as
+# ../2026-07-17-video-pmd-bb-pcn-test-inference/ (video-pmd-bb-pcn-global-
+# 1degree-24to3-v1, Beaker dataset 01KWDBKFBCWGKCAJD5B49H4TND), with two
+# changes only:
+#   - model.churn: 0.0 -> 20.0 (Karras EDM stochastic sampler S_churn; the
+#     mixing-matrix-aware churn_noise() path in _video_edm_sample already
+#     supports this, it's just never been exercised with churn>0 so far).
+#   - data restricted to a single 3-day window (2023-01-01..2023-01-04,
+#     matching crps_eval.py's "winter (Jan)" SAMPLE_WINDOWS entry) instead of
+#     the full test year, purely to keep this validation run cheap (~8 min
+#     vs. ~16.5h for the full year at 4 GPUs, per the sibling config's
+#     timing note). If this looks promising, follow up with the full 4-season
+#     or full-year run.
+# See crps_eval_results_pcn-v1-bb-pcn-bb-subset-cons0-bb-subset-cons10/
+# COMPARISON_REPORT.md ("Why does brownian-bridge noise reduce spread?") for
+# why churn is the theoretically correct lever here: with churn=0, the
+# initial noise draw is the sole source of ensemble stochasticity, and
+# Brownian-bridge-correlated noise has strictly lower joint entropy than
+# independent noise at the same marginal variance.
+checkpoint_path: /checkpoint/checkpoints/best.ckpt
+experiment_dir: /results
+output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-bb-pcn-churn20-global-1degree-24to3-v1/smoketest-jan2023-ens32.zarr
+n_ensemble: 32
+ensemble_chunk_size: 1
+use_ema: true
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-temporal-interp
+  name: video-pmd-bb-pcn-churn20-smoketest
+  entity: ai2cm
+data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2023-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2023-01-04"
+  batch_size: 8  # global across ranks
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 20.0
+  num_diffusion_generation_steps: 50
+  temporal_noise_correlation: brownian_bridge
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+  normalization:  # train-only, global domain -- must match training exactly
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
