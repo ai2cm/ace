@@ -31,6 +31,10 @@ from fme.core.step.global_mean_removal import (
     extra_channel_source_field,
 )
 from fme.core.step.output import StepOutput
+from fme.core.step.saturation_normalization import (
+    SaturationNormalization,
+    SaturationNormalizationState,
+)
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -600,6 +604,7 @@ def step_with_adjustments(
     prognostic_names: list[str],
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
+    saturation_normalization: SaturationNormalization | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
 ) -> StepOutput:
@@ -629,6 +634,13 @@ def step_with_adjustments(
             before the normalizer and ``inverse_transform`` after
             denormalization but before the corrector/ocean/prescribed steps,
             so those adjustments operate in physical space.
+        saturation_normalization: Optional transform that expresses humidity
+            fields in a relative-humidity-like ``q / q_sat`` space. When
+            provided, ``forward_transform`` is applied to the (post-GMR)
+            network input before normalization, and ``inverse_transform`` maps
+            the denormalized output back to ``q`` before the global-mean-removal
+            inverse and the corrector/ocean/prescribed steps. Default ``None``
+            leaves behavior byte-identical to omitting it.
         data_mask: Per-variable boolean masks passed to
             ``global_mean_removal.forward_transform``.
         stepper_state: Per-sample state carried across step calls. The
@@ -645,21 +657,33 @@ def step_with_adjustments(
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
     gmr_state: GlobalMeanRemovalState | None = None
+    network_input: TensorMapping = input
     if global_mean_removal is not None:
         network_input, gmr_state = global_mean_removal.forward_transform(
             input, data_mask
         )
-        input_norm = normalizer.normalize(network_input)
+    sat_state: SaturationNormalizationState | None = None
+    if saturation_normalization is not None:
+        # q_sat is computed from the raw (pre-GMR) input; the RH-like values are
+        # written into the post-GMR network input (humidity fields are forbidden
+        # from overlapping GMR, so they are unchanged by it).
+        network_input, sat_state = saturation_normalization.forward_transform(
+            input, network_input
+        )
+    input_norm = normalizer.normalize(network_input)
+    if global_mean_removal is not None:
+        assert gmr_state is not None
         # Synthetic GMR channels are produced in normalized space; merge
         # them in after normalization so the network sees a single uniform
         # input dict.
         input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
-    else:
-        input_norm = normalizer.normalize(input)
     output_norm = network_calls(input_norm)
     if residual_prediction:
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
+    if saturation_normalization is not None:
+        assert sat_state is not None
+        output = saturation_normalization.inverse_transform(output, sat_state)
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)

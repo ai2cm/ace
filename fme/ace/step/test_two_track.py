@@ -8,8 +8,13 @@ import yaml
 import fme
 from fme.ace.registry.two_track_sfno import TwoTrackSFNOBuilder
 from fme.ace.step.two_track import TwoTrackStep, TwoTrackStepConfig
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.normalizer import NetworkAndLossNormalizationConfig
 from fme.core.step.args import StepArgs
+from fme.core.step.saturation_normalization import (
+    SaturationNormalizationConfig,
+    _relative_humidity_name,
+)
 from fme.core.step.step import StepSelector
 from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
 
@@ -286,3 +291,201 @@ def test_example_baseline_state_round_trip_matches_output():
         out2 = step2.step(args=args).output
     for name in out1:
         torch.testing.assert_close(out1[name], out2[name])
+
+
+# ---------------------------------------------------------------------------
+# saturation_normalization: derived RH channels route to the local track
+# ---------------------------------------------------------------------------
+# A hybrid sigma-pressure coordinate with 2 layers (3 interfaces), so
+# saturation q_sat resolves at levels 0 and 1.
+_SAT_AK = torch.tensor([0.0, 0.0, 0.0])
+_SAT_BK = torch.tensor([0.0, 0.5, 1.0])
+
+
+def _sat_vertical_coordinate() -> HybridSigmaPressureCoordinate:
+    return HybridSigmaPressureCoordinate(ak=_SAT_AK.clone(), bk=_SAT_BK.clone())
+
+
+def _sat_dataset_info():
+    return get_dataset_info(
+        img_shape=IMG_SHAPE,
+        vertical_coordinate=_sat_vertical_coordinate(),
+        device=fme.get_device(),
+    )
+
+
+def _sat_config(**overrides) -> TwoTrackStepConfig:
+    # Global track carries humidity + temperature + surface pressure (so q_sat
+    # resolves); a single local field exercises the local-segment ordering.
+    global_names = [
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "air_temperature_0",
+        "air_temperature_1",
+        "PRESsfc",
+    ]
+    names = global_names + ["l_in", "l_out"]
+    base = TwoTrackStepConfig(
+        builder=_builder(),
+        global_in_names=list(global_names),
+        local_in_names=["l_in"],
+        global_out_names=list(global_names),
+        local_out_names=["l_out"],
+        normalization=trivial_network_and_loss_normalization(names),
+    )
+    if overrides:
+        base = dataclasses.replace(base, **overrides)
+    return base
+
+
+def _sat_get_step(config: TwoTrackStepConfig) -> TwoTrackStep:
+    selector = StepSelector(type="two_track", config=dataclasses.asdict(config))
+    step = selector.get_step(_sat_dataset_info(), lambda _: None)
+    assert isinstance(step, TwoTrackStep)
+    return step
+
+
+def _sat_input(names, n_samples=2):
+    device = fme.get_device()
+    data = {}
+    for name in names:
+        if name.startswith("air_temperature"):
+            data[name] = torch.full((n_samples, *IMG_SHAPE), 285.0, device=device)
+        elif name == "PRESsfc":
+            data[name] = torch.full((n_samples, *IMG_SHAPE), 1.0e5, device=device)
+        elif name.startswith("specific_total_water"):
+            data[name] = torch.full((n_samples, *IMG_SHAPE), 0.005, device=device)
+        else:
+            data[name] = torch.rand(n_samples, *IMG_SHAPE, device=device)
+    return data
+
+
+def test_saturation_append_routes_derived_rh_to_local_track():
+    rh0, rh1 = _relative_humidity_name(0), _relative_humidity_name(1)
+    config = _sat_config(
+        saturation_normalization=[
+            SaturationNormalizationConfig(
+                names=["specific_total_water_*"], input="append", prediction=False
+            )
+        ]
+    )
+    n_global_in = len(config.global_in_names)
+    step = _sat_get_step(config)
+    # global segment (the first n_global_in packed names) is unchanged: the
+    # derived RH channels are appended after the local inputs, never before the
+    # split point the network uses to separate global from local.
+    assert step.in_packer.names[:n_global_in] == config.global_in_names
+    local_segment = step.in_packer.names[n_global_in:]
+    assert local_segment == ["l_in", rh0, rh1]
+    # local input channel count grew by the number of derived RH levels
+    assert len(local_segment) == len(config.local_in_names) + 2
+    # the raw q inputs stay on the (global) input side alongside the derived RH
+    assert "specific_total_water_0" in step.in_packer.names
+    assert "specific_total_water_1" in step.in_packer.names
+    # derived RH channels are never predicted on the output side
+    assert rh0 not in step.out_packer.names
+    assert rh1 not in step.out_packer.names
+    # identity normalizer statistics for the derived channels
+    for rh in (rh0, rh1):
+        torch.testing.assert_close(step.normalizer.means[rh].cpu(), torch.tensor(0.0))
+        torch.testing.assert_close(step.normalizer.stds[rh].cpu(), torch.tensor(1.0))
+
+
+def test_saturation_append_step_runs_end_to_end_in_q_space():
+    rh0, rh1 = _relative_humidity_name(0), _relative_humidity_name(1)
+    config = _sat_config(
+        saturation_normalization=[
+            SaturationNormalizationConfig(
+                names=["specific_total_water_*"], input="append"
+            )
+        ]
+    )
+    torch.manual_seed(0)
+    step = _sat_get_step(config)
+    output = step.step(
+        args=StepArgs(
+            input=_sat_input(step.input_names),
+            next_step_input_data=_sat_input(step.next_step_input_names),
+            labels=None,
+        ),
+    ).output
+    # public output is physical q; the derived RH channels stay internal
+    assert set(output) == set(config.out_names)
+    assert rh0 not in output
+    assert rh1 not in output
+    for name in config.out_names:
+        assert output[name].shape == (2, *IMG_SHAPE)
+        assert torch.isfinite(output[name]).all()
+
+
+def test_saturation_none_matches_plain_two_track_packers():
+    # saturation_normalization absent leaves the packers (and therefore the
+    # network sizing) byte-identical to the plain two-track step.
+    plain = _sat_get_step(_sat_config())
+    assert plain.in_packer.names == _sat_config().in_names
+    assert plain.out_packer.names == _sat_config().out_names
+
+
+def test_saturation_replace_input_is_rejected():
+    with pytest.raises(ValueError, match="input='replace' is not"):
+        _sat_get_step(
+            _sat_config(
+                saturation_normalization=[
+                    SaturationNormalizationConfig(
+                        names=["specific_total_water_*"], input="replace"
+                    )
+                ]
+            )
+        )
+
+
+def test_saturation_prediction_is_rejected():
+    with pytest.raises(ValueError, match="prediction=True is not"):
+        _sat_get_step(
+            _sat_config(
+                saturation_normalization=[
+                    SaturationNormalizationConfig(
+                        names=["specific_total_water_*"],
+                        input="append",
+                        prediction=True,
+                    )
+                ]
+            )
+        )
+
+
+def test_saturation_residual_prediction_coherence_is_validated():
+    # residual_prediction requires a prognostic field predicted in RH to be fed
+    # in RH too; prediction=True with input='append' is incoherent and rejected
+    # in __post_init__ (before the step-level replace/prediction guards).
+    with pytest.raises(ValueError, match="residual_prediction"):
+        _sat_config(
+            residual_prediction=True,
+            saturation_normalization=[
+                SaturationNormalizationConfig(
+                    names=["specific_total_water_*"],
+                    prediction=True,
+                    input="append",
+                )
+            ],
+        )
+
+
+def test_saturation_config_state_round_trip():
+    config = _sat_config(
+        saturation_normalization=[
+            SaturationNormalizationConfig(
+                names=["specific_total_water_*"], input="append", prediction=False
+            )
+        ]
+    )
+    restored = TwoTrackStepConfig.from_state(config.get_state())
+    assert restored.saturation_normalization is not None
+    assert len(restored.saturation_normalization) == 1
+    entry = restored.saturation_normalization[0]
+    assert entry.names == ["specific_total_water_*"]
+    assert entry.input == "append"
+    assert entry.prediction is False
+    # a rebuilt step from the restored config routes RH to the local track
+    step = _sat_get_step(restored)
+    assert _relative_humidity_name(0) in step.in_packer.names

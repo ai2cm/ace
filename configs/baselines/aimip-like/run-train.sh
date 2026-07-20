@@ -148,3 +148,5 @@ run_training "train-4deg-daily-v2-era5-only-noresid-noclip-noco2.yaml" "train-4d
 run_training "train-4deg-daily-v2-era5-only-noresid-noclip-notnorm.yaml" "train-4deg-daily-v2-era5-only-noresid-noclip-notnorm-rs0" 1
 run_training "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack.yaml" "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack-rs0" 1
 run_training "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack-noco2.yaml" "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack-noco2-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack-rh.yaml" "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack-rh-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack-rh-noco2.yaml" "train-4deg-daily-v2-era5-only-noresid-noclip-twotrack-rh-noco2-rs0" 1
