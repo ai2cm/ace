@@ -1,0 +1,177 @@
+# Eval-only run (max_epochs=0, evaluate_before_training): 2010-start variant of
+# the 46-yr trend rollout for the straight-fine-tune TL control pair. Loads the
+# modern arm's end-of-training EMA checkpoint (ema_ckpt_0120.tar) at /ckpt.tar
+# and rolls out 2010-01-01 -> late 2024 (5475 daily steps), the remainder of the
+# long_46year window. Fine-tune training data ends 2013, so 2014+ is
+# out-of-sample: tests whether the modern arm projects accurately on a shorter
+# rollout (fig2b of the response-sweep report, ai2cm/reports#46).
+seed: 0
+experiment_dir: /results
+save_checkpoint: false
+checkpoint_every_n_batches: 5000
+validate_using_ema: false
+ema_checkpoint_save_epochs:
+  start: 1
+  step: 5
+max_epochs: 0
+ema:
+  decay: 0.999
+inference:
+- name: long_2010on
+  weight: 1.0
+  epochs:
+    start: 0
+    step: 5
+  n_forward_steps: 5475
+  forward_steps_in_memory: 73
+  n_ensemble_per_ic: 1
+  loader:
+    start_indices:
+      times:
+      - '2010-01-01T00:00:00'
+      - '2010-01-02T00:00:00'
+      - '2010-01-03T00:00:00'
+      - '2010-01-04T00:00:00'
+      - '2010-01-05T00:00:00'
+      - '2010-01-06T00:00:00'
+      - '2010-01-07T00:00:00'
+      - '2010-01-08T00:00:00'
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+    num_data_workers: 8
+  aggregator:
+    step_means: []
+    ensembles: []
+    mean_denorm:
+      enabled: false
+      target: denorm
+    mean_norm:
+      enabled: false
+      target: norm
+    zonal_mean:
+      enabled: false
+    time_mean_denorm:
+      target: denorm
+      variables: &id001
+      - PRATEsfc
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - h500
+      - TMP850
+      - PRESsfc
+      - surface_temperature
+      - ULWRFsfc
+      - DLWRFsfc
+      - USWRFsfc
+      - DSWRFsfc
+      - ULWRFtoa
+      - USWRFtoa
+      - LHTFLsfc
+      - SHTFLsfc
+      - tendency_of_total_water_path_due_to_advection
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_3
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_3
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_3
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_3
+      - northward_wind_7
+      - total_water_path
+    time_mean_norm:
+      target: norm
+      variables: *id001
+    annual:
+      variables: *id001
+    power_spectrum:
+      variables: *id001
+    histogram:
+      enabled: true
+    trend:
+      enabled: true
+      variables:
+      - TMP2m
+      - surface_temperature
+      - PRATEsfc
+      - h500
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 4
+  time_buffer: 8
+  time_buffer_pool_size: 32
+  dataset:
+    strict: false
+    concat:
+    - data_path: /climate-default
+      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1979-01-01'
+        stop_time: '1993-12-31'
+    - data_path: /climate-default
+      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1995-01-01'
+        stop_time: '2013-12-31'
+validation:
+  loader:
+    batch_size: 32
+    num_data_workers: 8
+    prefetch_factor: 2
+    time_buffer: 16
+    dataset:
+      strict: false
+      concat:
+      - data_path: /climate-default
+        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '1994-01-01'
+          stop_time: '1994-12-31'
+      - data_path: /climate-default
+        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2014-01-01'
+          stop_time: '2014-12-31'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  use_gradient_accumulation: true
+  kwargs:
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 1
+  optimize_last_step_only: true
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+  parameter_init:
+    weights_path: /ckpt.tar
+stepper:
+  checkpoint_path: /ckpt.tar
+evaluate_before_training: true
