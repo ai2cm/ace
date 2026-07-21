@@ -1499,10 +1499,11 @@ def test_predict_threads_random_state_alongside_corrector_state():
     n_steps = 2
     input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
     forcing_data.data = {}
+    random_state = RandomState.from_seed(0)
     ic = PrognosticState(
         dataclasses.replace(
             input_data.as_batch_data(),
-            stepper_state=StepperState(random_state=RandomState.from_seed(0)),
+            stepper_state=StepperState(random_state=random_state),
         )
     )
 
@@ -1511,7 +1512,10 @@ def test_predict_threads_random_state_alongside_corrector_state():
     assert terminal is not None
     # Both sub-states are present on the returned state.
     assert terminal.corrector_state is not None
-    assert terminal.random_state is not None
+    # The exact RandomState instance is threaded through unchanged: the generator
+    # advances in place and the device/ensemble helpers return self, so identity
+    # (not just presence) holds across the step that rebuilds StepperState.
+    assert terminal.random_state is random_state
 
 
 def test_predict_generator_yields_detached_stepoutput():
@@ -2931,3 +2935,72 @@ def test_predict_with_data_mask_zeros_masked_forcing():
     output, _ = stepper.predict(input_data, forcing_data)
     ic_a = input_data.as_batch_data().data["a"][:, 0]
     torch.testing.assert_close(output.data["a"][:, 0], ic_a)
+
+
+def test_predict_attaches_step_diagnostics():
+    stepper = _get_stepper(["a"], ["a"])
+    assert isinstance(stepper._step_obj, SingleModuleStep)
+    offset = 1.0
+    stepper._step_obj._corrector = CorrectionSequence(
+        [ConstantOffsetCorrection("a", offset)]
+    )
+    n_steps = 3
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    output, _ = stepper.predict(input_data, forcing_data)
+    assert output.step_diagnostics is not None
+    assert set(output.step_diagnostics.delta) == {"a"}
+    delta = output.step_diagnostics.delta["a"]
+    # forward-step aligned with the prediction data
+    assert delta.shape == output.data["a"].shape
+    # the constant-offset correction contributes exactly `offset` each step,
+    # in physical (denormalized) units
+    torch.testing.assert_close(delta, torch.full_like(delta, offset))
+    # prediction values are unaffected by carrying the diagnostics:
+    # each step adds 1 (module) + offset (correction)
+    torch.testing.assert_close(
+        output.data["a"][:, -1],
+        input_data.as_batch_data().data["a"][:, 0] + n_steps * (1.0 + offset),
+    )
+
+
+def test_predict_without_corrector_has_no_step_diagnostics():
+    stepper = _get_stepper(["a"], ["a"])
+    n_steps = 2
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    output, _ = stepper.predict(input_data, forcing_data)
+    assert output.step_diagnostics is None
+
+
+def test_step_masks_corrector_diagnostics():
+    # with a NaN-fill output masker built from the dataset's mask provider,
+    # the carried delta must be NaN exactly where the output is masked and
+    # unchanged on-mask
+    mask = torch.ones(5, 5, device=DEVICE)
+    mask[0, 0] = 0.0
+    config = _get_stepper_config(["a"], ["a"])
+    dataset_info = get_dataset_info(
+        img_shape=(5, 5),
+        spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
+        device=DEVICE,
+    )
+    stepper = config.get_stepper(dataset_info)
+    assert isinstance(stepper._step_obj, SingleModuleStep)
+    offset = 2.0
+    stepper._step_obj._corrector = CorrectionSequence(
+        [ConstantOffsetCorrection("a", offset)]
+    )
+    # a single forward step: the masked (NaN) output would otherwise trip the
+    # stepper's input-NaN guard when fed back as the next step's input
+    n_steps = 1
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
+    forcing_data.data = {}
+    output, _ = stepper.predict(input_data, forcing_data)
+    assert output.step_diagnostics is not None
+    delta = output.step_diagnostics.delta["a"]
+    output_nan = torch.isnan(output.data["a"])
+    torch.testing.assert_close(torch.isnan(delta), output_nan)
+    assert torch.isnan(delta[..., 0, 0]).all()
+    on_mask = delta[~torch.isnan(delta)]
+    torch.testing.assert_close(on_mask, torch.full_like(on_mask, offset))
