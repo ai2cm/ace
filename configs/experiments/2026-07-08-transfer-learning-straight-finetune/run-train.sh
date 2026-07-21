@@ -168,3 +168,10 @@ run_training "train-4deg-daily-era5-finetune-reproduction.yaml" "train-4deg-dail
 
 # --- modern (v2 + tnorm) arm, seed 0 (1 GPU) ---
 run_training "train-4deg-daily-era5-finetune-modern.yaml" "train-4deg-daily-era5-finetune-modern-rs0" 1
+
+# --- modern NO-RESIDUAL ablation arm, seed 0 (1 GPU) ---
+# Residual-prediction ablation of the modern arm: identical config but
+# residual_prediction: false. Corrects the original (mismatched) modern arm,
+# which fine-tuned a residual model from the no-residual donor jnlquua6.
+# research: tasks/2026-07-21-launch-the-no-residual-modern-recipe-straight-fine-tune-arm-residual-ablation.
+run_training "train-4deg-daily-era5-finetune-modern-no-residual.yaml" "train-4deg-daily-era5-finetune-modern-no-residual-rs0" 1
