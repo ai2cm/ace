@@ -3,6 +3,8 @@ model:
   checkpoint_path: /ckpt.tar
   rename:
     air_temperature_at_two_meters: TMP2m
+    northward_wind_at_ten_meters: VGRD10m
+    eastward_wind_at_ten_meters: UGRD10m
 data:
   coarse:
   - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
