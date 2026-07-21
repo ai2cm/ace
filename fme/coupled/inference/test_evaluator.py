@@ -385,6 +385,25 @@ def test_apply_coupled_overrides_rejects_non_prescribed_override(override):
         )
 
 
+def test_apply_coupled_overrides_rejects_ocean_supplied_prescribed_collision():
+    """An override prescribing an atmosphere name the ocean supplies must fail
+    when the override is applied, not at the first coupled step."""
+    config = get_stepper_config(
+        ocean_in_names=["o_exog", "exog", "sst", "a_diag", "sfc_temp"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["exog", "ocean_frac", "sfc_temp"],
+        atmosphere_out_names=["a_diag", "sfc_temp"],
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+    )
+    override = StepperOverrideConfig(prescribed_prognostic_names=["sfc_temp"])
+    with pytest.raises(ValueError, match="overlap ocean-supplied"):
+        apply_coupled_stepper_config_inference_overrides(
+            config, ocean_override=None, atmosphere_override=override
+        )
+
+
 def test_evaluator_rejects_top_level_override_with_standalone_checkpoint():
     standalone = StandaloneComponentCheckpointsConfig(
         ocean=StandaloneComponentConfig(timedelta="2D", path="ocean.pt"),

@@ -1676,40 +1676,25 @@ def test__get_atmosphere_forcings_includes_prescribed_prognostic_tensors():
     torch.testing.assert_close(new_atmos_forcings["a_prog"], atmos_data["a_prog"])
 
 
-def test__get_atmosphere_forcings_raises_on_ocean_supplied_prescribed_collision():
-    "Prescribing an atmosphere name the ocean also supplies must fail loudly."
+def test_config_raises_on_ocean_supplied_prescribed_collision():
+    "Prescribing an atmosphere name the ocean also supplies must fail at config build."
     ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
     ocean_out_names = ["sst"]
     atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
     atmos_out_names = ["a_diag", "sfc_temp"]
-    config = get_stepper_config(
-        ocean_in_names=ocean_in_names,
-        ocean_out_names=ocean_out_names,
-        atmosphere_in_names=atmos_in_names,
-        atmosphere_out_names=atmos_out_names,
-        sst_name_in_ocean_data="sst",
-        sfc_temp_name_in_atmosphere_data="sfc_temp",
-        ocean_fraction_name="ocean_frac",
-        # sfc_temp is supplied to the atmosphere from the ocean SST; prescribing
-        # it would be silently overwritten.
-        atmosphere_prescribed_prognostic_names=["sfc_temp"],
-    )
-    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
-    vertical_coord.atmosphere = NullVerticalCoordinate()
-    vertical_coord.ocean = NullVerticalCoordinate()
-    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
-    coupler = config.get_stepper(dataset_info)
-    n_atmos = coupler.n_inner_steps + 1
-    atmos_shape = (1, n_atmos, N_LAT, N_LON)
-    ocean_shape = (1, 1, N_LAT, N_LON)
-    atmos_data = {
-        "exog": torch.rand(*atmos_shape, device=fme.get_device()),
-        "ocean_frac": torch.rand(*atmos_shape, device=fme.get_device()),
-        "sfc_temp": torch.rand(*atmos_shape, device=fme.get_device()),
-    }
-    ocean_ic = {"sst": torch.rand(*ocean_shape, device=fme.get_device())}
     with pytest.raises(ValueError, match="overlap ocean-supplied"):
-        coupler._get_atmosphere_forcings(atmos_data, ocean_ic)
+        get_stepper_config(
+            ocean_in_names=ocean_in_names,
+            ocean_out_names=ocean_out_names,
+            atmosphere_in_names=atmos_in_names,
+            atmosphere_out_names=atmos_out_names,
+            sst_name_in_ocean_data="sst",
+            sfc_temp_name_in_atmosphere_data="sfc_temp",
+            ocean_fraction_name="ocean_frac",
+            # sfc_temp is supplied to the atmosphere from the ocean SST;
+            # prescribing it would be silently overwritten.
+            atmosphere_prescribed_prognostic_names=["sfc_temp"],
+        )
 
 
 def test__get_ocean_forcings_includes_prescribed_prognostic_tensors():

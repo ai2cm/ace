@@ -90,6 +90,9 @@ def apply_coupled_stepper_config_inference_overrides(
         apply_stepper_override_to_stepper_config(
             coupled_config.atmosphere.stepper, atmosphere_override
         )
+    # overrides may have changed prescribed_prognostic_names after
+    # CoupledStepperConfig.__post_init__ validated them
+    coupled_config.validate_prescribed_prognostic_names()
 
 
 @dataclasses.dataclass
@@ -248,6 +251,9 @@ def load_stepper(
         apply_stepper_override(stepper.atmosphere, atmosphere_stepper_override)
     if ocean_stepper_override is not None:
         apply_stepper_override(stepper.ocean, ocean_stepper_override)
+    # overrides may have changed prescribed_prognostic_names after
+    # CoupledStepperConfig.__post_init__ validated them
+    stepper.config.validate_prescribed_prognostic_names()
     return stepper
 
 

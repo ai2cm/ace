@@ -366,6 +366,44 @@ class CoupledStepperConfig:
                 self.ocean_fraction_prediction.land_fraction_name
             )
 
+        self.validate_prescribed_prognostic_names()
+
+    def _ocean_supplied_atmosphere_names(self) -> set[str]:
+        """Names written onto the atmosphere forcings from the ocean component
+        in ``CoupledStepper._get_atmosphere_forcings``, known statically from
+        this config.
+        """
+        names = set(self._ocean_to_atmosphere_forcing_names)
+        # the ocean SST is renamed to the atmosphere's surface temperature name
+        names.discard(self.sst_name)
+        names.add(self.surface_temperature_name)
+        names.add(self.ocean_fraction_name)
+        if self.ocean_fraction_prediction is not None:
+            names.add(
+                self.ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
+                or self.ocean_fraction_prediction.sea_ice_fraction_name
+            )
+        return names
+
+    def validate_prescribed_prognostic_names(self) -> None:
+        """Raise if a prescribed atmosphere prognostic read from the forcing
+        data would be silently overwritten by an ocean-supplied field of the
+        same name in ``CoupledStepper._get_atmosphere_forcings``.
+
+        Called at construction, and again after inference-time overrides
+        mutate the component step configs (the only supported coupled override
+        is ``prescribed_prognostic_names``). No ocean-side check is needed:
+        atmosphere-supplied ocean forcings are input-only names, which cannot
+        be prognostic and therefore cannot be prescribed.
+        """
+        prescribed = self.atmosphere.stepper.get_prescribed_prognostic_names()
+        clobbered = sorted(set(prescribed) & self._ocean_supplied_atmosphere_names())
+        if clobbered:
+            raise ValueError(
+                "Atmosphere prescribed_prognostic_names overlap ocean-supplied "
+                f"forcings and would be overwritten: {clobbered}."
+            )
+
     @property
     def timestep(self) -> datetime.timedelta:
         # the "coupled timestep" is the same as the ocean's
@@ -869,6 +907,10 @@ class CoupledStepper:
         ] = self.predict_paired
 
     @property
+    def config(self) -> CoupledStepperConfig:
+        return self._config
+
+    @property
     def modules(self) -> nn.ModuleList:
         return nn.ModuleList([*self.atmosphere.modules, *self.ocean.modules])
 
@@ -1050,16 +1092,10 @@ class CoupledStepper:
         forcings_from_ocean = self._forcings_from_ocean_with_ocean_fraction(
             forcings_from_ocean, forcing_data
         )
-        # A prescribed atmosphere prognostic read from atmos_data would be
-        # silently overwritten by an ocean-supplied field of the same name in
-        # the update below; fail loudly instead.
-        prescribed = self._config.atmosphere.stepper.get_prescribed_prognostic_names()
-        clobbered = sorted(set(prescribed) & set(forcings_from_ocean))
-        if clobbered:
-            raise ValueError(
-                "Atmosphere prescribed_prognostic_names overlap ocean-supplied "
-                f"forcings and would be overwritten: {clobbered}."
-            )
+        # A prescribed atmosphere prognostic colliding with an ocean-supplied
+        # field is rejected by
+        # CoupledStepperConfig.validate_prescribed_prognostic_names, which runs
+        # at construction and after inference-time overrides.
         # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
         return forcing_data
