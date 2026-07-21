@@ -1807,15 +1807,6 @@ class TrainStepper(
             initial_condition, forcing, compute_derived_variables
         )
 
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        """
-        Effective loss scalings used to normalize outputs before computing loss.
-        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i.
-        """
-        return self._loss_obj.effective_loss_scaling
-
     def seed_eval(self, seed: int) -> None:
         self._loss_schedule.seed_eval(seed)
 
