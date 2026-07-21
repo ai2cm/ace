@@ -2,6 +2,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fme.ace.aggregator.one_step.main import (
+    OneStepAggregatorConfig,
+    OneStepSnapshotMetricConfig,
+)
 from fme.ace.data_loading.inference import InferenceInitialConditionIndices
 from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
@@ -318,6 +322,32 @@ def test_validation_zero_weight_accepted():
 def test_validation_default_weight_is_one():
     config = _make_validation_config()
     assert config.weight == 1.0
+
+
+def test_validation_default_aggregator_config():
+    config = _make_validation_config()
+    assert isinstance(config.aggregator, OneStepAggregatorConfig)
+
+
+def test_build_aggregator_factory_passes_config():
+    aggregator_config = OneStepAggregatorConfig(
+        snapshot=OneStepSnapshotMetricConfig(enabled=False)
+    )
+    config = InlineValidationConfig(
+        loader=MagicMock(spec=CoupledDataLoaderConfig),
+        aggregator=aggregator_config,
+    )
+    with patch("fme.coupled.train.train_config.OneStepAggregator") as mock_aggregator:
+        factory = config.build_aggregator_factory(
+            name="val",
+            dataset_info=MagicMock(),
+            loss_scaling=MagicMock(),
+            save_per_epoch_diagnostics=False,
+            output_dir="/tmp/out",
+        )
+        factory()
+    _, kwargs = mock_aggregator.call_args
+    assert kwargs["config"] is aggregator_config
 
 
 def test_validation_single_config_gives_list(tmp_path):

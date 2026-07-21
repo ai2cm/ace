@@ -37,7 +37,7 @@ class StepOutput:
         aligned with the forward steps the outputs correspond to. How the
         per-step diagnostics compose into a series stays encapsulated here;
         callers attach the returned container and consumers read it through
-        ``StepDiagnostics.to_dataset``.
+        ``StepDiagnostics.to_datasets``.
 
         Args:
             outputs: One ``StepOutput`` per forward step, in step order.
