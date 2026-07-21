@@ -15,6 +15,8 @@ from fme.core.loss import (
     LossConfig,
     LossOutput,
     LpLoss,
+    SpectralWhitening,
+    SpectralWhiteningConfig,
     StandardLoss,
     StepLossConfig,
     VariableWeightingLoss,
@@ -843,3 +845,155 @@ class TestLossOutputScale:
         )
         scaled = loss.scale(0.0)
         torch.testing.assert_close(scaled.total(), torch.tensor(0.0))
+
+
+def test_spectral_whitening_config_invalid_kind_raises():
+    with pytest.raises(NotImplementedError):
+        SpectralWhiteningConfig(kind="bogus")  # type: ignore[arg-type]
+
+
+def test_spectral_whitening_config_build_disabled_by_default():
+    """kind='none' (default) builds no operator; 'per_sample' builds one."""
+    assert SpectralWhiteningConfig().build() is None
+    assert isinstance(
+        SpectralWhiteningConfig(kind="per_sample").build(), SpectralWhitening
+    )
+
+
+def test_energy_score_whitening_disabled_matches_default():
+    """The default (no whitening config) leaves the energy score unchanged."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_lat, n_lon = 16, 32
+    pred = torch.randn(8, 2, 3, n_lat, n_lon, device=DEVICE)
+    target = torch.randn(8, 1, 3, n_lat, n_lon, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
+    default = _components_total(EnergyScoreLoss(sht=sht)(pred, target))
+    disabled = _components_total(
+        EnergyScoreLoss(
+            sht=sht, whitening=SpectralWhiteningConfig(kind="none").build()
+        )(pred, target)
+    )
+    torch.testing.assert_close(default, disabled)
+
+
+def _valid_mask(n_l, n_m, device):
+    l_idx = torch.arange(n_l, device=device).unsqueeze(-1)
+    m_idx = torch.arange(n_m, device=device).unsqueeze(0)
+    return (m_idx <= l_idx).float()
+
+
+def test_spectral_whitening_white_target_is_noop():
+    """A white-spectrum target (equal per-mode amplitude) -> uniform factor 1."""
+    DEVICE = get_device()
+    n_l = n_m = 10
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    y_hat = (valid.to(torch.cfloat))[None, None]  # (B=1, ens=1, L, M)
+    factor = SpectralWhitening().factor(y_hat)
+    torch.testing.assert_close(factor, torch.ones_like(factor), rtol=1e-5, atol=1e-5)
+
+
+def test_spectral_whitening_boosts_small_scales_for_red_spectrum():
+    """A red target spectrum -> factor increases with degree l (boosts small scales)."""
+    DEVICE = get_device()
+    n_l = n_m = 16
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).unsqueeze(-1)
+    y_hat = (amp * valid).to(torch.cfloat)[None, None]  # (1, 1, L, M)
+    factor = SpectralWhitening().factor(y_hat).reshape(-1)  # (L,)
+    assert torch.all(factor[1:] >= factor[:-1] - 1e-5)  # non-decreasing in l
+    assert factor[-1] > 2.0 * factor[0]  # substantial small-scale boost
+
+
+def test_spectral_whitening_preserves_amplitude_weighted_mass():
+    """The reweight is magnitude-preserving: sum_lm w*|y| is unchanged."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_l = n_m = 12
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (torch.rand(n_l, n_m, device=DEVICE) + 0.1) * valid
+    y_hat = amp.to(torch.cfloat)[None, None].repeat(3, 1, 1, 1)  # (3, 1, L, M)
+    factor = SpectralWhitening().factor(y_hat)  # (3, L, 1)
+    redundancy = 2.0 * torch.ones(n_l, n_m, device=DEVICE)
+    redundancy[:, 0] = 1.0
+    w = redundancy * valid
+    amp_mode = y_hat.squeeze(1).abs()  # (3, L, M)
+    mass_base = (w * amp_mode).sum(dim=(-2, -1))
+    mass_white = (w * amp_mode * factor).sum(dim=(-2, -1))
+    torch.testing.assert_close(mass_white, mass_base, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize("exponent", [0.0, -0.5, 1.5])
+def test_spectral_whitening_config_exponent_out_of_range_raises(exponent):
+    with pytest.raises(ValueError):
+        SpectralWhiteningConfig(kind="per_sample", exponent=exponent)
+
+
+@pytest.mark.parametrize("field", ["exponent", "eps_frac"])
+def test_spectral_whitening_config_knob_requires_per_sample(field):
+    """Setting a whitening knob with whitening off is a config error, not a
+    silent no-op -- symmetric across exponent and eps_frac."""
+    with pytest.raises(ValueError):
+        SpectralWhiteningConfig(kind="none", **{field: 0.5})
+
+
+def test_spectral_whitening_config_per_sample_defaults_to_stable_knee():
+    """Enabling whitening without knobs resolves to the validated defaults
+    (gamma=0.5, eps_frac=0.02), not to unstable full whitening."""
+    config = SpectralWhiteningConfig(kind="per_sample")
+    assert config.exponent == 0.5
+    assert config.eps_frac == 0.02
+
+
+def test_spectral_whitening_exponent_partial_interpolates():
+    """gamma=0.5 gives a smaller small-scale boost than full whitening (gamma=1),
+    while staying above the no-whitening uniform factor and magnitude-preserving."""
+    DEVICE = get_device()
+    n_l = n_m = 16
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).unsqueeze(-1)
+    y_hat = (amp * valid).to(torch.cfloat)[None, None]  # (1, 1, L, M)
+    full = SpectralWhitening(exponent=1.0).factor(y_hat).reshape(-1)
+    partial = SpectralWhitening(exponent=0.5).factor(y_hat).reshape(-1)
+    # still boosts small scales, but less aggressively than full whitening
+    assert partial[-1] > partial[0]
+    assert 1.0 < partial[-1] / partial[0] < full[-1] / full[0]
+    # magnitude preservation holds for the partial exponent too
+    redundancy = 2.0 * torch.ones(n_l, n_m, device=DEVICE)
+    redundancy[:, 0] = 1.0
+    w = redundancy * valid
+    amp_mode = y_hat.squeeze(1).squeeze(0).abs()  # (L, M)
+    mass_base = (w * amp_mode).sum()
+    mass_partial = (w * amp_mode * partial.unsqueeze(-1)).sum()
+    torch.testing.assert_close(mass_partial, mass_base, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "whitening",
+    [
+        {"kind": "per_sample"},
+        {"kind": "per_sample", "exponent": 0.5},
+        SpectralWhiteningConfig(kind="per_sample", exponent=0.5),
+    ],
+)
+def test_ensemble_loss_with_whitening_builds_and_runs(whitening):
+    """EnsembleLoss accepts energy_score_whitening as a config dict (from YAML)
+    or a SpectralWhiteningConfig, and runs finite."""
+    DEVICE = get_device()
+    n_lat, n_lon = 8, 16
+    config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            "crps_weight": 0.9,
+            "energy_score_weight": 0.1,
+            "energy_score_whitening": whitening,
+        },
+    )
+    loss = config.build(
+        gridded_operations=LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE))
+    )
+    x = torch.rand(4, 2, 3, n_lat, n_lon, device=DEVICE)
+    y = torch.rand(4, 1, 3, n_lat, n_lon, device=DEVICE)
+    out = loss(x, y)
+    assert all(isinstance(c, LossComponent) for c in out)
+    assert torch.isfinite(_components_total(out))

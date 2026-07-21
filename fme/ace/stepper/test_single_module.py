@@ -1499,10 +1499,11 @@ def test_predict_threads_random_state_alongside_corrector_state():
     n_steps = 2
     input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
     forcing_data.data = {}
+    random_state = RandomState.from_seed(0)
     ic = PrognosticState(
         dataclasses.replace(
             input_data.as_batch_data(),
-            stepper_state=StepperState(random_state=RandomState.from_seed(0)),
+            stepper_state=StepperState(random_state=random_state),
         )
     )
 
@@ -1511,7 +1512,10 @@ def test_predict_threads_random_state_alongside_corrector_state():
     assert terminal is not None
     # Both sub-states are present on the returned state.
     assert terminal.corrector_state is not None
-    assert terminal.random_state is not None
+    # The exact RandomState instance is threaded through unchanged: the generator
+    # advances in place and the device/ensemble helpers return self, so identity
+    # (not just presence) holds across the step that rebuilds StepperState.
+    assert terminal.random_state is random_state
 
 
 def test_predict_generator_yields_detached_stepoutput():

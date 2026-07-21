@@ -14,6 +14,7 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
+from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import StepperOverrideConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
@@ -95,13 +96,17 @@ class CoupledInitialConditionConfig:
         return CoupledPrognosticState(
             ocean_data=get_initial_condition(
                 ds=ocean,
-                prognostic_names=ocean_prognostic_names,
-                n_ensemble=n_ensemble_per_ic,
+                requirements=InitialConditionRequirements(
+                    prognostic_names=ocean_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
             ),
             atmosphere_data=get_initial_condition(
                 ds=atmos,
-                prognostic_names=atmosphere_prognostic_names,
-                n_ensemble=n_ensemble_per_ic,
+                requirements=InitialConditionRequirements(
+                    prognostic_names=atmosphere_prognostic_names,
+                    n_ensemble=n_ensemble_per_ic,
+                ),
             ),
         )
 
