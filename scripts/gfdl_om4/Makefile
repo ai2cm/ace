@@ -123,10 +123,14 @@ push_dataflow: build_dataflow
 enter:
 	docker run --rm -v $$(pwd):/gfdl_om4 -w /gfdl_om4 --entrypoint "/bin/bash" -it $(IMAGE_NAME)
 
+# Production sources have a static footprint, so the wetmask conform step
+# must be a no-op in production launches too; a source that needs actual
+# conforming is a deliberate opt-in (drop the flag by invoking
+# run-dataflow.sh directly).
 dataflow:
 	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
-		./run-dataflow.sh DataflowRunner $(CONFIG)
+		./run-dataflow.sh DataflowRunner $(CONFIG) --max-conformed-cells 0
 
 dataflow_picontrol_1deg:
 	$(MAKE) dataflow CONFIG=configs/om4-picontrol-1deg.yaml

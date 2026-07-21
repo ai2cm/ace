@@ -131,31 +131,32 @@ def _center_has_valid_v_face(valid: np.ndarray) -> np.ndarray:
 def _scan_structural(da: xr.DataArray, time_dim: str) -> tuple[np.ndarray, np.ndarray]:
     """One pass over ``da``'s full time axis, in batches.
 
-    Returns (valid, structural_zero) boolean arrays over the non-time dims:
-    faces finite at every step, and faces exactly 0.0 at every step. Errors
-    if the finite pattern varies in time (the masks and the center footprint
-    are static, so a time-varying face validity would make them wrong).
+    Returns (valid, structural_zero) boolean arrays over the non-time dims
+    (in ``da``'s dimension order): faces finite at every step, and faces
+    exactly 0.0 at every step. Errors if the finite pattern varies in time
+    (the masks and the center footprint are static, so a time-varying face
+    validity would make them wrong).
     """
-    finite_all = None
-    finite_any = None
-    zero_all = None
+    finite_all: xr.DataArray | None = None
+    finite_any: xr.DataArray | None = None
+    zero_all: xr.DataArray | None = None
     n_steps = da.sizes[time_dim]
     for start in range(0, n_steps, TIME_BATCH):
-        batch = da.isel({time_dim: slice(start, start + TIME_BATCH)}).load().values
+        batch = da.isel({time_dim: slice(start, start + TIME_BATCH)}).load()
         finite = np.isfinite(batch)
         zero = finite & (batch == 0.0)
         finite_all = (
-            finite.all(axis=0)
+            finite.all(time_dim)
             if finite_all is None
-            else (finite_all & finite.all(axis=0))
+            else (finite_all & finite.all(time_dim))
         )
         finite_any = (
-            finite.any(axis=0)
+            finite.any(time_dim)
             if finite_any is None
-            else (finite_any | finite.any(axis=0))
+            else (finite_any | finite.any(time_dim))
         )
         zero_all = (
-            zero.all(axis=0) if zero_all is None else (zero_all & zero.all(axis=0))
+            zero.all(time_dim) if zero_all is None else (zero_all & zero.all(time_dim))
         )
         logger.info(
             "  %s: scanned steps %d..%d of %d",
@@ -171,7 +172,7 @@ def _scan_structural(da: xr.DataArray, time_dim: str) -> tuple[np.ndarray, np.nd
             f"{da.name}: valid-face pattern varies in time at {varying} faces; "
             "a static face mask artifact cannot represent this source"
         )
-    return finite_all, zero_all
+    return finite_all.values, zero_all.values
 
 
 def generate_face_masks(

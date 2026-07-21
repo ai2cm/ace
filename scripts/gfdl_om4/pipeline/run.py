@@ -21,13 +21,17 @@ Masking conventions of the output store:
   time-varying field equals the masks exactly at every timestep: training
   assumes NaN exactly where ``mask_k == 0`` (a finite target at a masked
   cell NaNs the loss; a NaN target at an unmasked cell NaNs metrics).
-  The source footprint drifts slightly from the reference-time wetmask
-  (z*-remapped bottom slivers dry/re-wet with sea level at a handful of
-  sub-surface cells), so each chunk is conformed to the wetmask before
-  regridding: values at cells wet at time t but outside the wetmask are
-  dropped, and cells inside the wetmask that are instantaneously dry are
-  filled from the level above (the water immediately overlying the
-  vacated sliver). See _conform_to_wetmask.
+  To guarantee this, each chunk passes through _conform_to_wetmask before
+  regridding, which asserts the source's valid-data footprint equals the
+  wetmask and repairs any small drift: cells wet at time t but outside
+  the wetmask are dropped, and wetmask cells that are instantaneously dry
+  are filled from the level above (the water immediately overlying the
+  vacated sliver). Such drift — z*-remapped bottom slivers drying and
+  re-wetting with sea level at a handful of sub-surface cells — was
+  observed in earlier trial sources; the production sources have shown
+  none, and the smoke-test and production launch targets pin the conform
+  step to a no-op with --max-conformed-cells 0, so in practice it acts
+  as a strict per-chunk footprint check.
 - Rotated C-grid pairs are interpolated to tracer centers dropping invalid
   (land) faces from the average; a wet center whose faces on an axis are
   all land is a wall for that axis, where the model's resolved normal

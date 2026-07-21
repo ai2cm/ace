@@ -107,7 +107,12 @@ python -m pipeline.run --config configs/om4-picontrol-1deg.yaml \
    config being launched) against the exact configs to be launched.
 2. **Launch** — build and push the worker image, then launch on Google
    Cloud Dataflow (the config's output path is used as-is, and the run
-   aborts if a store already exists there):
+   aborts if a store already exists there). Like the smoke tests, the
+   launch targets pass `--max-conformed-cells 0`: the production sources
+   have a static footprint, so any wetmask conforming is a failure, not
+   something to repair silently. A source that genuinely needs the
+   conform step's fill-from-above repair is a deliberate opt-in (invoke
+   `run-dataflow.sh` directly without the flag):
 
    ```
    make push_dataflow

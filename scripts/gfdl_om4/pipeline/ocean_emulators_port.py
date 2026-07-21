@@ -1,4 +1,4 @@
-"""Regridding utilities ported from the ai2cm fork of ocean_emulators
+"""Regridding utilities ported from the ai2cm fork of m2lines/ocean_emulators
 (github.com/ai2cm/ocean_emulators), so this pipeline has no dependency on
 that repository.
 
@@ -78,7 +78,7 @@ def rotate_vectors(
 
 
 def _interpolate_right_to_center(
-    da: xr.DataArray, dim: str, center_dim: str, periodic: bool
+    right: xr.DataArray, dim: str, center_dim: str, periodic: bool
 ) -> xr.DataArray:
     """Average a field from staggered "right" positions (MOM6 ``xq``/``yq``,
     each point on the right/north edge of the like-indexed tracer cell) onto
@@ -87,14 +87,19 @@ def _interpolate_right_to_center(
     Center i sits between staggered points i-1 and i. Land points (NaN)
     drop out of the average instead of being filled with zeros, so coastal
     values are means of ocean neighbors only. Cells with no valid neighbor
-    come out NaN. Along a periodic dimension the first center wraps around;
-    otherwise the edge center uses its single in-domain neighbor.
+    come out NaN. Along a periodic dimension the first center wraps around.
+    In the non-periodic case ``shift`` supplies a row of NaNs as the first
+    center's missing "left" neighbor, so it uses its single in-domain
+    neighbor — natural for MOM6, whose southern boundary is Antarctica:
+    land, and therefore all-NaN there anyway.
     """
-    if da.sizes[dim] != da[dim].size:
+    if right.sizes[dim] != right[dim].size:
         raise ValueError(f"Expected coordinate for staggered dim {dim}")
-    left = da.roll({dim: 1}, roll_coords=False) if periodic else da.shift({dim: 1})
-    total = left.fillna(0.0) + da.fillna(0.0)
-    count = left.notnull().astype(da.dtype) + da.notnull().astype(da.dtype)
+    left = (
+        right.roll({dim: 1}, roll_coords=False) if periodic else right.shift({dim: 1})
+    )
+    total = left.fillna(0.0) + right.fillna(0.0)
+    count = left.notnull().astype(right.dtype) + right.notnull().astype(right.dtype)
     interpolated = (total / count.where(count > 0)).drop_vars(dim)
     return interpolated.rename({dim: center_dim})
 
