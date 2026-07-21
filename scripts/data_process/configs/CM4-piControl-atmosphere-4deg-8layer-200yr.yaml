@@ -1,12 +1,12 @@
 runs:
-  2025-03-21-CM4-piControl-atmosphere-land-4deg-8layer-200yr: gs://vcm-ml-raw-flexible-retention/2024-11-01-CM4-piControl/regridded-zarrs/gaussian_grid_45_by_90/pre-industrial-control
+  2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr: gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-piControl-and-1pctCO2/regridded-zarrs/gaussian_grid_45_by_90/piControl
 data_output_directory: gs://vcm-ml-intermediate
 stats:
-  output_directory: gs://vcm-ml-intermediate/2025-03-21-CM4-piControl-atmosphere-land-4deg-8layer-200yr-stats
+  output_directory: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr-stats
   start_date: "0151-01-01T06:00:00"
   end_date: "0351-01-01T00:00:00"
   data_type: CM4
-  beaker_dataset: 2025-03-21-CM4-piControl-atmosphere-land-4deg-8layer-200yr
+  beaker_dataset: 2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr
 dataset_computation:
   sharding:
     time_dim: 3600
@@ -81,12 +81,13 @@ dataset_computation:
       - total_vapor_sensible_heat_flux
       - downward_longwave_radiative_flux
       - net_surface_longwave_radiative_flux
+    full_state_soil.zarr:
       # below are vertically resolved soil layer variables -- need to be coarsened
       - total_moisture_content_of_soil_layer
       - temperature_of_soil_layer
     land_static.zarr:
       - land_fraction
-    ice_6hourly.zarr:
+    ice_6hourly_snap.zarr:
       - sea_ice_fraction
     scalar.zarr:
       - carbon_dioxide
