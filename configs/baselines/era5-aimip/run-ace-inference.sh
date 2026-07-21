@@ -36,12 +36,12 @@ launch_job () {
         --task-name $JOB_NAME \
         --description 'Run ACE2-ERA5 inference' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2cm/ace \
+        --workspace ai2/ace \
         --priority high \
         --not-preemptible \
         --cluster ai2/jupiter-cirrascale-2 \
         --cluster ai2/titan-cirrascale \
-        --env WANDB_USERNAME=$BEAKER_USERNAME \
+        --env WANDB_USERNAME=mcgibbon \
         --env WANDB_NAME=$JOB_NAME \
         --env WANDB_JOB_TYPE=inference \
         --env WANDB_RUN_GROUP=$JOB_GROUP \
@@ -52,7 +52,7 @@ launch_job () {
         --gpus 1 \
         --shared-memory 50GiB \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
+        --budget ai2/atec-climate \
         --system-python \
         --install "pip install --no-deps ." \
         -- bash -c "sed 's/_r[0-9]i/_r${IC}i/g' ${TEMPLATE_CONFIG} > /tmp/ic-config.yaml && python -I -m fme.ace.inference /tmp/ic-config.yaml --override ${OVERRIDE}"
@@ -63,8 +63,8 @@ launch_job () {
 # use 5 different initial conditions files
 for IC in {1..5}; do
     JOB_NAME="${JOB_NAME_BASE}-IC${IC}"
-    IC_PATH="/climate-default/2025-09-12-aimip-evaluation/aimip-evaluation-ics-v3/1978-09-30_IC$(( IC - 1 )).nc" # files are 0-indexed
-    OUTPUT_PATH="/climate-default/2025-11-25-ace-aimip-inference-results/${JOB_NAME}"
+    IC_PATH="/climate-default/2026-07-20-aimip-evaluation-daily/aimip-evaluation-ics-daily/1978-09-30_IC$(( IC - 1 )).nc" # files are 0-indexed
+    OUTPUT_PATH="/climate-default/2026-07-20-ace-aimip-nobgd4ek-inference-results/${JOB_NAME}"
     OVERRIDE="initial_condition.path=${IC_PATH} experiment_dir=${OUTPUT_PATH}"
     echo "Launching job $JOB_NAME with override: $OVERRIDE"
     launch_job "$JOB_NAME" "$AIMIP_INFERENCE_BASE_CONFIG_PATH" "$IC" "$OVERRIDE"
@@ -78,8 +78,8 @@ for PERTURBATION in p2k p4k; do
     esac
     for IC in {1..5}; do
         JOB_NAME="${JOB_NAME_BASE}-${PERTURBATION}-IC${IC}"
-        IC_PATH="/climate-default/2025-09-12-aimip-evaluation/aimip-evaluation-ics-v3/1978-09-30_IC$(( IC - 1 )).nc" # files are 0-indexed
-        OUTPUT_PATH="/climate-default/2025-11-25-ace-aimip-inference-results/${JOB_NAME}"
+        IC_PATH="/climate-default/2026-07-20-aimip-evaluation-daily/aimip-evaluation-ics-daily/1978-09-30_IC$(( IC - 1 )).nc" # files are 0-indexed
+        OUTPUT_PATH="/climate-default/2026-07-20-ace-aimip-nobgd4ek-inference-results/${JOB_NAME}"
         OVERRIDE="initial_condition.path=${IC_PATH} experiment_dir=${OUTPUT_PATH}"
         echo "Launching job: $JOB_NAME with perturbation: $PERTURBATION and IC: $IC"
         launch_job "$JOB_NAME" "$TEMPLATE_CONFIG" "$IC" "$OVERRIDE"

@@ -17,7 +17,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ta_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -33,7 +33,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: hus_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -49,7 +49,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: hus_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -65,7 +65,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ua_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -81,7 +81,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ua_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -97,7 +97,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: va_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -113,7 +113,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: va_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -129,7 +129,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ps_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -138,7 +138,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ps_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -147,7 +147,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ts_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -156,7 +156,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ts_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -165,7 +165,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: tas_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -174,7 +174,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: tas_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -183,7 +183,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: huss_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -192,7 +192,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: huss_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -201,7 +201,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: uas_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -210,7 +210,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: uas_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -219,7 +219,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: vas_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -228,7 +228,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: vas_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -237,7 +237,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: pr_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_19781001-19791231
     names:
@@ -246,7 +246,7 @@ data_writer:
       start_time: '1978-10-01T00:00:00'
       stop_time: '1979-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: pr_day_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_20240101-20241231
     names:
@@ -255,7 +255,7 @@ data_writer:
       start_time: '2024-01-01T00:00:00'
       stop_time: '2024-12-31T18:00:00'
     time_coarsen:
-      coarsen_factor: 4
+      coarsen_factor: 1
     save_reference: false
   - label: ta_Amon_ACE2-ERA5_aimip-p2k_r1i1p1f1_gn_197810-202412
     names:
@@ -353,16 +353,16 @@ data_writer:
     save_reference: false
 experiment_dir: /results
 forward_steps_in_memory: 40
-n_forward_steps: 67576
+n_forward_steps: 16894
 initial_condition:
-  path: /climate-default/2025-09-12-aimip-evaluation/aimip-evaluation-ics-v3/1978-09-30_IC0.nc
+  path: /climate-default/2026-07-20-aimip-evaluation-daily/aimip-evaluation-ics-daily/1978-09-30_IC0.nc
   start_indices:
     times:
-    - '1978-09-30T18:00:00'
+    - '1978-09-30T06:00:00'
 forcing_loader:
   dataset:
-    data_path: /climate-default/2025-09-12-aimip-evaluation
-    file_pattern: aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
+    data_path: /climate-default/2026-07-20-aimip-evaluation-daily
+    file_pattern: 2026-07-20-aimip-era5-1deg-daily-forcing-1978-2024-repeat-first.zarr
     engine: zarr
   num_data_workers: 8
   perturbations:
