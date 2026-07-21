@@ -24,6 +24,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -1206,6 +1207,8 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    ocean_prescribed_prognostic_names: list[str] | None = None,
+    atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
@@ -1228,6 +1231,9 @@ def get_stepper_config(
     if ocean_builder is None:
         ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
 
+    ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
+    atmosphere_prescribed = list(atmosphere_prescribed_prognostic_names or [])
+
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta=atmosphere_timedelta,
@@ -1239,6 +1245,7 @@ def get_stepper_config(
                             builder=atmosphere_builder,
                             in_names=atmosphere_in_names,
                             out_names=atmosphere_out_names,
+                            prescribed_prognostic_names=atmosphere_prescribed,
                             normalization=trivial_network_and_loss_normalization(
                                 atmos_norm_names
                             ),
@@ -1263,6 +1270,7 @@ def get_stepper_config(
                             in_names=ocean_in_names,
                             out_names=ocean_out_names,
                             next_step_forcing_names=next_step_forcing_names,
+                            prescribed_prognostic_names=ocean_prescribed,
                             normalization=trivial_network_and_loss_normalization(
                                 ocean_norm_names
                             ),
@@ -1585,6 +1593,149 @@ def test__get_ocean_forcings():
     )
 
 
+def test_ocean_forcing_window_names_include_prescribed_prognostics():
+    "Prescribed ocean prognostics (e.g. SST, layer T) must appear in forcing window."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_prescribed_prognostic_names=["sst", "thetao_18"],
+    )
+    assert set(config.ocean_forcing_window_names) == (
+        set(config.ocean_forcing_exogenous_names)
+        - set(config.shared_forcing_exogenous_names)
+        | {"sst", "thetao_18"}
+    )
+    reqs = config.get_forcing_window_data_requirements(1)
+    assert "thetao_18" in reqs.ocean_requirements.names
+    assert "sst" in reqs.ocean_requirements.names
+
+
+def test_atmosphere_forcing_window_names_include_prescribed_prognostics():
+    "Prescribed atmosphere prognostics must appear in the atmosphere forcing window."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp", "a_prog"]
+    atmos_out_names = ["a_diag", "sfc_temp", "a_prog"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_prescribed_prognostic_names=["a_prog"],
+    )
+    assert set(config.atmosphere_forcing_window_names) == (
+        set(config.atmosphere_forcing_exogenous_names) | {"a_prog"}
+    )
+    reqs = config.get_forcing_window_data_requirements(1)
+    assert "a_prog" in reqs.atmosphere_requirements.names
+
+
+def test__get_atmosphere_forcings_includes_prescribed_prognostic_tensors():
+    torch.manual_seed(1)
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp", "a_prog"]
+    atmos_out_names = ["a_diag", "sfc_temp", "a_prog"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_prescribed_prognostic_names=["a_prog"],
+    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    n_atmos = coupler.n_inner_steps + 1
+    atmos_shape = (1, n_atmos, N_LAT, N_LON)
+    ocean_shape = (1, 1, N_LAT, N_LON)
+    atmos_data = {
+        "exog": torch.rand(*atmos_shape, device=fme.get_device()),
+        "ocean_frac": torch.rand(*atmos_shape, device=fme.get_device()),
+        "a_prog": torch.rand(*atmos_shape, device=fme.get_device()),
+    }
+    ocean_ic = {"sst": torch.rand(*ocean_shape, device=fme.get_device())}
+    new_atmos_forcings = coupler._get_atmosphere_forcings(atmos_data, ocean_ic)
+    torch.testing.assert_close(new_atmos_forcings["a_prog"], atmos_data["a_prog"])
+
+
+def test_config_raises_on_ocean_supplied_prescribed_collision():
+    "Prescribing an atmosphere name the ocean also supplies must fail at config build."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    with pytest.raises(ValueError, match="overlap ocean-supplied"):
+        get_stepper_config(
+            ocean_in_names=ocean_in_names,
+            ocean_out_names=ocean_out_names,
+            atmosphere_in_names=atmos_in_names,
+            atmosphere_out_names=atmos_out_names,
+            sst_name_in_ocean_data="sst",
+            sfc_temp_name_in_atmosphere_data="sfc_temp",
+            ocean_fraction_name="ocean_frac",
+            # sfc_temp is supplied to the atmosphere from the ocean SST;
+            # prescribing it would be silently overwritten.
+            atmosphere_prescribed_prognostic_names=["sfc_temp"],
+        )
+
+
+def test__get_ocean_forcings_includes_prescribed_prognostic_tensors():
+    torch.manual_seed(1)
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_prescribed_prognostic_names=["thetao_18"],
+    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    ocean_shape = (1, 2, N_LAT, N_LON)
+    atmos_shape = (1, 2, N_LAT, N_LON)
+    ocean_data = {
+        "o_exog": torch.rand(*ocean_shape, device=fme.get_device()),
+        "sst": torch.rand(*ocean_shape, device=fme.get_device()),
+        "thetao_18": torch.rand(*ocean_shape, device=fme.get_device()),
+    }
+    atmos_gen = {
+        "a_diag": torch.rand(*atmos_shape, device=fme.get_device()),
+        "sfc_temp": torch.rand(*atmos_shape, device=fme.get_device()),
+    }
+    atmos_forcings = {"exog": torch.rand(*atmos_shape, device=fme.get_device())}
+    new_ocean_forcings = coupler._get_ocean_forcings(
+        ocean_data, atmos_gen, atmos_forcings
+    )
+    torch.testing.assert_close(new_ocean_forcings["thetao_18"], ocean_data["thetao_18"])
+
+
 def test_predict_paired():
     ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag"]
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag"]
@@ -1725,6 +1876,76 @@ def test_predict_paired():
     torch.testing.assert_close(
         paired_data.ocean_data.prediction["o_diag"].select(dim=1, index=1),
         o_diag1,
+    )
+
+
+def test_predict_paired_threads_stepper_state():
+    """Stepper state attached to the initial condition must survive the coupled
+    rollout into the final prognostic state, so restarts can carry it.
+
+    Each component's state has to pass through the SST prescription and the
+    per-coupled-step initial-condition rebuild, so a two-coupled-step rollout
+    exercises every hand-off point.
+    """
+    ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag"]
+    ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag"]
+    atmos_in_names = ["a_prog", "a_sfc_temp", "ocean_frac", "o_prog"]
+    atmos_out_names = ["a_prog", "a_sfc_temp", "a_diag"]
+
+    class Ocean(torch.nn.Module):
+        def forward(self, x):
+            return torch.concat([x[:, :1], x[:, :1], x[:, :1]], dim=1)
+
+    class Atmos(torch.nn.Module):
+        def forward(self, x):
+            return torch.concat([x[:, :1], x[:, 1:2], x[:, :1]], dim=1)
+
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=3,
+        sst_name_in_ocean_data="o_sfc_temp",
+        sfc_temp_name_in_atmosphere_data="a_sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_builder=ModuleSelector(type="prebuilt", config={"module": Ocean()}),
+        atmosphere_builder=ModuleSelector(type="prebuilt", config={"module": Atmos()}),
+    )
+    data = coupled_data.data
+
+    atmos_prognostic = data.atmosphere_data.get_start(
+        coupler.atmosphere.prognostic_names, n_ic_timesteps=1
+    ).with_random_state(RandomState.from_seed(0))
+    ocean_prognostic = data.ocean_data.get_start(
+        coupler.ocean.prognostic_names, n_ic_timesteps=1
+    ).with_random_state(RandomState.from_seed(1))
+    ic = CoupledPrognosticState(
+        atmosphere_data=atmos_prognostic, ocean_data=ocean_prognostic
+    )
+
+    _, prognostic_state = coupler.predict_paired(
+        initial_condition=ic,
+        forcing=data,
+    )
+
+    atmos_state = prognostic_state.atmosphere_data.as_batch_data().stepper_state
+    ocean_state = prognostic_state.ocean_data.as_batch_data().stepper_state
+    assert atmos_state is not None
+    assert atmos_state.random_state is not None
+    assert ocean_state is not None
+    assert ocean_state.random_state is not None
+    # the deterministic test modules never draw from the generators, so the
+    # states must be exactly the seeded initial states, not reseeded ones
+    torch.testing.assert_close(
+        atmos_state.random_state.generator.get_state(),
+        RandomState.from_seed(0).generator.get_state(),
+    )
+    torch.testing.assert_close(
+        ocean_state.random_state.generator.get_state(),
+        RandomState.from_seed(1).generator.get_state(),
     )
 
 

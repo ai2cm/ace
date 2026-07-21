@@ -46,6 +46,7 @@ from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.step.output import StepOutput
+from fme.core.stepper_state import StepperState
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingHistory, TrainingJob
@@ -314,6 +315,7 @@ class CoupledStepperConfig:
             self._atmosphere_forcing_exogenous_names = (
                 unfiltered_atmosphere_forcing_names
             )
+
         self._shared_forcing_exogenous_names = list(
             set(self._ocean_forcing_exogenous_names).intersection(
                 self._atmosphere_forcing_exogenous_names
@@ -364,6 +366,44 @@ class CoupledStepperConfig:
                 self.ocean_fraction_prediction.land_fraction_name
             )
 
+        self.validate_prescribed_prognostic_names()
+
+    def _ocean_supplied_atmosphere_names(self) -> set[str]:
+        """Names written onto the atmosphere forcings from the ocean component
+        in ``CoupledStepper._get_atmosphere_forcings``, known statically from
+        this config.
+        """
+        names = set(self._ocean_to_atmosphere_forcing_names)
+        # the ocean SST is renamed to the atmosphere's surface temperature name
+        names.discard(self.sst_name)
+        names.add(self.surface_temperature_name)
+        names.add(self.ocean_fraction_name)
+        if self.ocean_fraction_prediction is not None:
+            names.add(
+                self.ocean_fraction_prediction.sea_ice_fraction_name_in_atmosphere
+                or self.ocean_fraction_prediction.sea_ice_fraction_name
+            )
+        return names
+
+    def validate_prescribed_prognostic_names(self) -> None:
+        """Raise if a prescribed atmosphere prognostic read from the forcing
+        data would be silently overwritten by an ocean-supplied field of the
+        same name in ``CoupledStepper._get_atmosphere_forcings``.
+
+        Called at construction, and again after inference-time overrides
+        mutate the component step configs (the only supported coupled override
+        is ``prescribed_prognostic_names``). No ocean-side check is needed:
+        atmosphere-supplied ocean forcings are input-only names, which cannot
+        be prognostic and therefore cannot be prescribed.
+        """
+        prescribed = self.atmosphere.stepper.get_prescribed_prognostic_names()
+        clobbered = sorted(set(prescribed) & self._ocean_supplied_atmosphere_names())
+        if clobbered:
+            raise ValueError(
+                "Atmosphere prescribed_prognostic_names overlap ocean-supplied "
+                f"forcings and would be overwritten: {clobbered}."
+            )
+
     @property
     def timestep(self) -> datetime.timedelta:
         # the "coupled timestep" is the same as the ocean's
@@ -410,6 +450,43 @@ class CoupledStepperConfig:
     def atmosphere_forcing_exogenous_names(self) -> list[str]:
         """Atmosphere forcing variables that are not outputs of the ocean."""
         return self._atmosphere_forcing_exogenous_names
+
+    @property
+    def atmosphere_forcing_window_names(self) -> list[str]:
+        """Atmosphere variables required in forcing windows for predict (includes
+        next-step inputs such as prescribed prognostics).
+
+        Computed from the current atmosphere step config, so inference-time
+        overrides (e.g. ``prescribed_prognostic_names``) are reflected without
+        a separate refresh step. The forcing window is the exogenous forcings
+        plus any prescribed prognostic variables (outputs overwritten from
+        forcing). We do not union the full ``next_step_input_names``: SST, ocean
+        fraction, etc. are supplied from ``ocean_ic`` inside
+        ``_get_atmosphere_forcings``, not from ``atmos_window.data``.
+        """
+        prescribed_atmosphere = (
+            self.atmosphere.stepper.get_prescribed_prognostic_names()
+        )
+        return list(
+            set(self._atmosphere_forcing_exogenous_names).union(prescribed_atmosphere)
+        )
+
+    @property
+    def ocean_forcing_window_names(self) -> list[str]:
+        """Ocean variables required in forcing windows for predict (exogenous
+        fields not shared with the atmosphere, plus prescribed prognostic
+        overwrites such as SST or layer temperatures).
+
+        Computed from the current ocean step config, so inference-time overrides
+        are reflected automatically. Shared exogenous names are taken from the
+        atmosphere branch, not from ``ocean_data``.
+        """
+        prescribed_ocean = self.ocean.stepper.get_prescribed_prognostic_names()
+        return list(
+            set(self._ocean_forcing_exogenous_names)
+            .difference(set(self._shared_forcing_exogenous_names))
+            .union(prescribed_ocean)
+        )
 
     @property
     def shared_forcing_exogenous_names(self) -> list[str]:
@@ -571,19 +648,15 @@ class CoupledStepperConfig:
     def get_forcing_window_data_requirements(
         self, n_coupled_steps: int
     ) -> CoupledDataRequirements:
-        ocean_forcing_names = list(
-            set(self.ocean_forcing_exogenous_names).difference(
-                self.shared_forcing_exogenous_names
-            )
-        )
         return CoupledDataRequirements(
             ocean_timestep=self.ocean_timestep,
             ocean_requirements=DataRequirements(
-                ocean_forcing_names, n_timesteps=n_coupled_steps + 1
+                names=self.ocean_forcing_window_names,
+                n_timesteps=n_coupled_steps + 1,
             ),
             atmosphere_timestep=self.atmosphere_timestep,
             atmosphere_requirements=DataRequirements(
-                names=self.atmosphere_forcing_exogenous_names,
+                names=self.atmosphere_forcing_window_names,
                 n_timesteps=n_coupled_steps * self.n_inner_steps + 1,
             ),
         )
@@ -772,10 +845,12 @@ class ComponentStepPrediction:
         realm: Literal["ocean", "atmosphere"],
         data: TensorDict,
         step: int,
+        stepper_state: StepperState | None,
     ):
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
         self._step = step
+        self._stepper_state = stepper_state
 
     @property
     def realm(self) -> Literal["ocean", "atmosphere"]:
@@ -788,6 +863,10 @@ class ComponentStepPrediction:
     @property
     def step(self) -> int:
         return self._step
+
+    @property
+    def stepper_state(self) -> StepperState | None:
+        return self._stepper_state
 
 
 class CoupledStepper:
@@ -813,6 +892,11 @@ class CoupledStepper:
         self.ocean = ocean
         self.atmosphere = atmosphere
         self._config = config
+        # Alias each component's nested StepperConfig to the loaded Stepper's
+        # own config so forcing-window names (computed from CoupledStepperConfig)
+        # reflect any inference-time overrides applied to the component steppers.
+        config.ocean.stepper = ocean.config
+        config.atmosphere.stepper = atmosphere.config
         self._dataset_info = dataset_info
         self._ocean_spatial_mask_provider = dataset_info.ocean_spatial_mask_provider
 
@@ -821,6 +905,10 @@ class CoupledStepper:
             CoupledBatchData,
             CoupledPairedData,
         ] = self.predict_paired
+
+    @property
+    def config(self) -> CoupledStepperConfig:
+        return self._config
 
     @property
     def modules(self) -> nn.ModuleList:
@@ -876,6 +964,14 @@ class CoupledStepper:
         return self._config.atmosphere_forcing_exogenous_names
 
     @property
+    def _atmosphere_forcing_window_names(self) -> list[str]:
+        return self._config.atmosphere_forcing_window_names
+
+    @property
+    def _ocean_forcing_window_names(self) -> list[str]:
+        return self._config.ocean_forcing_window_names
+
+    @property
     def _shared_forcing_exogenous_names(self) -> list[str]:
         return self._config.shared_forcing_exogenous_names
 
@@ -917,6 +1013,7 @@ class CoupledStepper:
                 data=atmos_ic_data,
                 time=forcing_ic_batch.time,
                 labels=forcing_ic_batch.labels,
+                stepper_state=atmos_ic_state.as_batch_data().stepper_state,
             )
         )
 
@@ -977,10 +1074,8 @@ class CoupledStepper:
         time_dim = self.atmosphere.TIME_DIM
         sizes = [-1] * len(next(iter(atmos_data.values())).shape)
         sizes[time_dim] = self.n_inner_steps + 1
-        # exogenous forcings are used as is
-        forcing_data = {
-            k: atmos_data[k] for k in self._atmosphere_forcing_exogenous_names
-        }
+        # Exogenous and next-step forcing fields (e.g. prescribed prognostics)
+        forcing_data = {k: atmos_data[k] for k in self._atmosphere_forcing_window_names}
         # forcings from ocean are constant during the fast atmosphere steps
         # NOTE: only n_ic_timesteps = 1 is currently supported
         assert next(iter(ocean_ic.values())).shape[self.ocean.TIME_DIM] == 1
@@ -997,6 +1092,10 @@ class CoupledStepper:
         forcings_from_ocean = self._forcings_from_ocean_with_ocean_fraction(
             forcings_from_ocean, forcing_data
         )
+        # A prescribed atmosphere prognostic colliding with an ocean-supplied
+        # field is rejected by
+        # CoupledStepperConfig.validate_prescribed_prognostic_names, which runs
+        # at construction and after inference-time overrides.
         # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
         return forcing_data
@@ -1021,13 +1120,9 @@ class CoupledStepper:
         assert (
             next(iter(ocean_data.values())).shape[time_dim] == self.n_ic_timesteps + 1
         )
-        # get n_ic_timesteps of ocean exogenous forcings
-        forcing_data = {
-            k: ocean_data[k]
-            for k in set(self._ocean_forcing_exogenous_names).difference(
-                self._shared_forcing_exogenous_names
-            )
-        }
+        # Ocean-only exogenous forcings plus prescribed prognostic time series
+        # (e.g. thetao_18) from the forcing window batch.
+        forcing_data = {k: ocean_data[k] for k in self._ocean_forcing_window_names}
         # get time-averaged forcings from atmosphere
         forcings_from_atmosphere = {
             **{
@@ -1112,15 +1207,19 @@ class CoupledStepper:
                 optimizer,
             )
             atmos_steps = []
+            atmos_stepper_state: StepperState | None = None
 
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                atmos_step = next(atmos_generator).output
+                atmos_result = next(atmos_generator)
+                atmos_step = atmos_result.output
+                atmos_stepper_state = atmos_result.stepper_state
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
                     step=atmos_step_num,
+                    stepper_state=atmos_stepper_state,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
@@ -1147,7 +1246,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
+            ocean_result = next(
                 iter(
                     self.ocean.get_prediction_generator(
                         ocean_ic_state,
@@ -1156,11 +1255,13 @@ class CoupledStepper:
                         optimizer=optimizer,
                     )
                 )
-            ).output
+            )
+            ocean_step = ocean_result.output
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
                 step=i_outer,
+                stepper_state=ocean_result.stepper_state,
             )
 
             # prepare ic states for next coupled step
@@ -1175,6 +1276,7 @@ class CoupledStepper:
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
+                    stepper_state=atmos_stepper_state,
                 )
             )
             ocean_ic_data = {
@@ -1185,6 +1287,7 @@ class CoupledStepper:
                     data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
+                    stepper_state=ocean_result.stepper_state,
                 )
             )
 
@@ -1195,7 +1298,7 @@ class CoupledStepper:
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
             [
-                StepOutput(output=x.data, stepper_state=None)
+                StepOutput(output=x.data, stepper_state=x.stepper_state)
                 for x in output_list
                 if x.realm == "atmosphere"
             ],
@@ -1206,7 +1309,7 @@ class CoupledStepper:
         )
         ocean_data = process_prediction_generator_list(
             [
-                StepOutput(output=x.data, stepper_state=None)
+                StepOutput(output=x.data, stepper_state=x.stepper_state)
                 for x in output_list
                 if x.realm == "ocean"
             ],
@@ -2188,6 +2291,4 @@ class CoupledTrainStepper(
 def load_coupled_stepper(checkpoint_path: str | pathlib.Path) -> CoupledStepper:
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    stepper = CoupledStepper.from_state(checkpoint["stepper"])
-
-    return stepper
+    return CoupledStepper.from_state(checkpoint["stepper"])
