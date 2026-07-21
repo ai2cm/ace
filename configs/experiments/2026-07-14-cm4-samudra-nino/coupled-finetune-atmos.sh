@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Coupled (SamudrACE) fine-tuning of the atmosphere on CM4 1pctCO2, with the
-# ocean (Samudra + Nino3.4 readout head) frozen.
+# Coupled (SamudrACE) joint fine-tuning of atmosphere + ocean on CM4 1pctCO2,
+# following the UFS/ERA5 coupled fine-tuning recipe.
 #
 # Atmosphere weights: jamesd's uncoupled condSFNO fine-tune
 #   (experiment 01KHZG19J8SFKZ3PDYCCEZNH1X -> result dataset below).
@@ -44,7 +44,7 @@ python -m fme.coupled.validate_config --config_type train $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
-    --description "Coupled FT: condSFNO atmosphere + frozen nino-head Samudra ocean (CM4 1pctCO2)" \
+    --description "Coupled FT: condSFNO atmosphere + nino-head Samudra ocean, joint (CM4 1pctCO2)" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/climate-titan \
     --priority urgent \

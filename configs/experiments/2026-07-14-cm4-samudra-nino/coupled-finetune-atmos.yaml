@@ -1,13 +1,14 @@
-# Coupled (SamudrACE) fine-tuning of the ATMOSPHERE on CM4 1pctCO2.
+# Coupled (SamudrACE) joint fine-tuning of atmosphere + ocean on CM4 1pctCO2.
+# Recipe follows the UFS/ERA5 coupled fine-tuning config (both components
+# trained with EnsembleLoss, stochastic per-component n_steps schedules,
+# optimize_last_step_only, low LR with warmup).
 #
 # - Atmosphere: NoiseConditionedSFNO initialized from jamesd's uncoupled FT run
 #   (beaker experiment 01KHZG19J8SFKZ3PDYCCEZNH1X, result dataset
-#   01KJ70WK2NH4T2T4AVAAPYFSHA), trained with EnsembleLoss (CRPS + energy
-#   score), stochastic n_steps schedule, optimize_last_step_only.
-# - Ocean: Samudra with Nino3.4 readout head (n_vector_outputs=12), FROZEN,
+#   01KJ70WK2NH4T2T4AVAAPYFSHA).
+# - Ocean: Samudra with Nino3.4 readout head (n_vector_outputs=12),
 #   initialized from our nino-head training run (beaker dataset
-#   01KXKZ85HTDSGGXWD2DPW2QRFW). To also fine-tune the ocean, remove the
-#   "frozen" parameter block and set ocean n_steps/loss_weight > 0.
+#   01KXKZ85HTDSGGXWD2DPW2QRFW).
 #
 # Mounts expected (see coupled-finetune-atmos.sh):
 #   /atmos_ckpt.tar  atmosphere checkpoint (best_inference_ckpt.tar)
@@ -15,19 +16,25 @@
 #   /atmos_stats     atmosphere normalization stats (coupled_atmosphere subdir)
 #   /ocean_stats     ocean stats INCLUDING nino34_lead_* (ocean/ subdir)
 #   /climate-default weka datasets (ocean, atmosphere, nino-leads zarrs)
+seed: 0
 experiment_dir: /results
 save_checkpoint: true
+save_best_inference_epoch_checkpoints: false
+checkpoint_every_n_batches: 100
+checkpoint_save_epochs: null
+log_train_every_n_batches: 10
+train_evaluation_samples: 32
 validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
 max_epochs: 25
 inference:
-  # 1440 ocean (5-day) steps ~ 20 years; 8 ICs must be divisible by n GPUs.
-  n_coupled_steps: 1440
-  coupled_steps_in_memory: 8
+  # 1460 ocean (5-day) steps ~ 20 years; ICs must be divisible by n GPUs.
+  n_coupled_steps: 1460
+  coupled_steps_in_memory: 2
   loader:
-    num_data_workers: 1
+    num_data_workers: 4
     dataset:
       ocean:
         merge:
@@ -67,10 +74,11 @@ logging:
   log_to_file: true
   project: ace-samudra-coupled-cm4
   entity: ai2cm
+  metrics_log_dir: /results/metrics
 train_loader:
-  batch_size: 16
+  batch_size: 8
   num_data_workers: 4
-  prefetch_factor: 1
+  prefetch_factor: 2
   dataset:
     ocean:
       merge:
@@ -110,8 +118,8 @@ train_loader:
 validation:
   loader:
     batch_size: 16
-    num_data_workers: 4
-    prefetch_factor: 1
+    num_data_workers: 2
+    prefetch_factor: 2
     dataset:
       ocean:
         merge:
@@ -150,7 +158,7 @@ validation:
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
+  lr: 1.0e-05
   optimizer_type: AdamW
   kwargs:
     fused: true
@@ -162,45 +170,57 @@ optimization:
       kwargs:
         start_factor: 0.01
         end_factor: 1
-        total_iters: 2000
+        total_iters: 3000
     - type: ConstantLR
       step_each_iteration: true
-    milestones: [2000]
+    milestones:
+    - 3000
 stepper_training:
-  # 2 coupled steps = 2 ocean (5-day) steps = 40 atmosphere (6h) steps. The
-  # 40-step atmosphere outcome spans the second coupled step, so the atmosphere
-  # sees ocean-generated SST during training.
-  n_coupled_steps: 2
+  # 4 coupled steps = 4 ocean (5-day) steps = 80 atmosphere (6h) steps. Both
+  # components are trained jointly with stochastic rollout schedules (UFS/ERA5
+  # coupled fine-tuning recipe); the 21/41-step atmosphere outcomes cross ocean
+  # coupling boundaries so the atmosphere sees ocean-generated SST.
+  n_coupled_steps: 4
   n_ensemble: 2
   ocean:
-    # Frozen: forward-only, no loss. To fine-tune jointly, set n_steps: 2,
-    # loss_weight: 1.0, and remove the frozen parameter block below.
-    n_steps: 0
-    loss:
-      type: MSE
     parameter_init:
       weights_path: /ocean_ckpt.tar
-      parameters:
-      - frozen:
-          include:
-          - '*'
-  atmosphere:
-    # Same stochastic schedule as the uncoupled atmosphere fine-tune, with the
-    # 20-step outcome extended to 40 to cross the ocean coupling boundary.
+    loss_weight: 1.0
     n_steps:
       outcomes:
-      - steps: 1
-        probability: 0.6
-      - steps: 2
-        probability: 0.2
-      - steps: 4
+      - steps: 0
         probability: 0.1
-      - steps: 20
-        probability: 0.05
-      - steps: 40
+      - steps: 1
+        probability: 0.3
+      - steps: 2
+        probability: 0.3
+      - steps: 4
+        probability: 0.3
+    optimize_last_step_only: true
+    loss:
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+  atmosphere:
+    parameter_init:
+      weights_path: /atmos_ckpt.tar
+    loss_weight: 1.0
+    n_steps:
+      outcomes:
+      - steps: 0
+        probability: 0.025
+      - steps: 1
+        probability: 0.29
+      - steps: 2
+        probability: 0.29
+      - steps: 4
+        probability: 0.29
+      - steps: 21
+        probability: 0.1
+      - steps: 41
         probability: 0.05
     optimize_last_step_only: true
-    loss_weight: 1.0
     loss:
       type: EnsembleLoss
       weights:
@@ -228,8 +248,6 @@ stepper_training:
       kwargs:
         crps_weight: 0.9
         energy_score_weight: 0.1
-    parameter_init:
-      weights_path: /atmos_ckpt.tar
 stepper:
   ocean_fraction_prediction:
     sea_ice_fraction_name: ocean_sea_ice_fraction
@@ -497,6 +515,25 @@ stepper:
           - uo_16
           - uo_17
           - uo_18
+          - vo_0
+          - vo_1
+          - vo_2
+          - vo_3
+          - vo_4
+          - vo_5
+          - vo_6
+          - vo_7
+          - vo_8
+          - vo_9
+          - vo_10
+          - vo_11
+          - vo_12
+          - vo_13
+          - vo_14
+          - vo_15
+          - vo_16
+          - vo_17
+          - vo_18
           - ocean_sea_ice_fraction
           - sea_ice_volume
           - hfds_total_area

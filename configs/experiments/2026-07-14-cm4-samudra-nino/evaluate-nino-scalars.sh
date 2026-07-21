@@ -25,8 +25,8 @@ gantry run \
     --task-name "$JOB_NAME" \
     --description "60 out-of-sample one-step Samudra Nino3.4 scalar forecasts" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/climate-titan \
-    --priority urgent \
+    --workspace ai2/ace \
+    --priority high \
     --preemptible \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \

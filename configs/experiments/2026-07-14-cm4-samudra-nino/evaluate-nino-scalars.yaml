@@ -49,3 +49,4 @@ aggregator:
   log_histograms: false
   log_global_mean_time_series: false
   log_global_mean_norm_time_series: false
+  log_step_means: []
