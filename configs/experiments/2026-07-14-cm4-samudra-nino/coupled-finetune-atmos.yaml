@@ -1,0 +1,675 @@
+# Coupled (SamudrACE) fine-tuning of the ATMOSPHERE on CM4 1pctCO2.
+#
+# - Atmosphere: NoiseConditionedSFNO initialized from jamesd's uncoupled FT run
+#   (beaker experiment 01KHZG19J8SFKZ3PDYCCEZNH1X, result dataset
+#   01KJ70WK2NH4T2T4AVAAPYFSHA), trained with EnsembleLoss (CRPS + energy
+#   score), stochastic n_steps schedule, optimize_last_step_only.
+# - Ocean: Samudra with Nino3.4 readout head (n_vector_outputs=12), FROZEN,
+#   initialized from our nino-head training run (beaker dataset
+#   01KXKZ85HTDSGGXWD2DPW2QRFW). To also fine-tune the ocean, remove the
+#   "frozen" parameter block and set ocean n_steps/loss_weight > 0.
+#
+# Mounts expected (see coupled-finetune-atmos.sh):
+#   /atmos_ckpt.tar  atmosphere checkpoint (best_inference_ckpt.tar)
+#   /ocean_ckpt.tar  ocean checkpoint (best_inference_ckpt.tar)
+#   /atmos_stats     atmosphere normalization stats (coupled_atmosphere subdir)
+#   /ocean_stats     ocean stats INCLUDING nino34_lead_* (ocean/ subdir)
+#   /climate-default weka datasets (ocean, atmosphere, nino-leads zarrs)
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 25
+inference:
+  # 1440 ocean (5-day) steps ~ 20 years; 8 ICs must be divisible by n GPUs.
+  n_coupled_steps: 1440
+  coupled_steps_in_memory: 8
+  loader:
+    num_data_workers: 1
+    dataset:
+      ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
+          engine: zarr
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+    start_indices:
+      times:
+      - '0251-01-03T12:00:00'
+      - '0262-06-22T12:00:00'
+      - '0273-12-09T12:00:00'
+      - '0285-05-28T12:00:00'
+      - '0296-11-14T12:00:00'
+      - '0308-05-03T12:00:00'
+      - '0319-10-20T12:00:00'
+      - '0331-04-08T12:00:00'
+  aggregator:
+    log_zonal_mean_images: false
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 4
+  prefetch_factor: 1
+  dataset:
+    ocean:
+      merge:
+      # train stop_time trimmed to 0349 to avoid the nino-leads NaN tail
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0256-01-03T12:00:00'
+          stop_time: '0349-01-01T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+        engine: zarr
+        subset:
+          start_time: '0256-01-03T12:00:00'
+          stop_time: '0349-01-01T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
+        engine: zarr
+        subset:
+          start_time: '0256-01-03T12:00:00'
+          stop_time: '0349-01-01T12:00:00'
+    atmosphere:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+        engine: zarr
+        subset:
+          start_time: '0256-01-03T12:00:00'
+          stop_time: '0349-01-01T12:00:00'
+      - data_path: /climate-default
+        file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+        subset:
+          start_time: '0256-01-03T12:00:00'
+          stop_time: '0349-01-01T12:00:00'
+validation:
+  loader:
+    batch_size: 16
+    num_data_workers: 4
+    prefetch_factor: 1
+    dataset:
+      ocean:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+      atmosphere:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-sea_ice.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+        - data_path: /climate-default
+          file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0251-01-03T12:00:00'
+            stop_time: '0255-12-29T12:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+  scheduler:
+    schedulers:
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.01
+        end_factor: 1
+        total_iters: 2000
+    - type: ConstantLR
+      step_each_iteration: true
+    milestones: [2000]
+stepper_training:
+  # 2 coupled steps = 2 ocean (5-day) steps = 40 atmosphere (6h) steps. The
+  # 40-step atmosphere outcome spans the second coupled step, so the atmosphere
+  # sees ocean-generated SST during training.
+  n_coupled_steps: 2
+  n_ensemble: 2
+  ocean:
+    # Frozen: forward-only, no loss. To fine-tune jointly, set n_steps: 2,
+    # loss_weight: 1.0, and remove the frozen parameter block below.
+    n_steps: 0
+    loss:
+      type: MSE
+    parameter_init:
+      weights_path: /ocean_ckpt.tar
+      parameters:
+      - frozen:
+          include:
+          - '*'
+  atmosphere:
+    # Same stochastic schedule as the uncoupled atmosphere fine-tune, with the
+    # 20-step outcome extended to 40 to cross the ocean coupling boundary.
+    n_steps:
+      outcomes:
+      - steps: 1
+        probability: 0.6
+      - steps: 2
+        probability: 0.2
+      - steps: 4
+        probability: 0.1
+      - steps: 20
+        probability: 0.05
+      - steps: 40
+        probability: 0.05
+    optimize_last_step_only: true
+    loss_weight: 1.0
+    loss:
+      type: EnsembleLoss
+      weights:
+        air_temperature_0: 0.5
+        air_temperature_1: 0.5
+        eastward_wind_0: 0.5
+        northward_wind_0: 0.5
+        specific_total_water_0: 0.5
+        specific_total_water_1: 0.25
+        specific_total_water_2: 0.5
+        PRATEsfc: 0.5
+        h500: 10
+        TMP850: 5
+        Q2m: 0.5
+        TMP2m: 10
+        UGRD10m: 2.5
+        VGRD10m: 2.5
+        DLWRFsfc: 2
+        ULWRFsfc: 5
+        USWRFsfc: 2
+        DSWRFsfc: 2
+        USWRFtoa: 2
+        tendency_of_total_water_path_due_to_advection: 0.5
+        PRESsfc: 3
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+    parameter_init:
+      weights_path: /atmos_ckpt.tar
+stepper:
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+  sst_name: sst
+  ocean:
+    timedelta: 5D
+    # Ocean stepper copied from train-cm4-1pct-samudra-nino.yaml (must match
+    # the checkpoint at /ocean_ckpt.tar exactly).
+    stepper:
+      input_masking:
+        mask_value: 0
+        fill_value: 0.0
+        exclude_names_and_prefixes:
+        - land_fraction
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
+      # nino34_lead_* are broadcast scalar readouts, not spatial fields; exclude
+      # them from land (output) masking.
+      output_masking_exclude_names:
+      - nino34_lead_01
+      - nino34_lead_02
+      - nino34_lead_03
+      - nino34_lead_04
+      - nino34_lead_05
+      - nino34_lead_06
+      - nino34_lead_07
+      - nino34_lead_08
+      - nino34_lead_09
+      - nino34_lead_10
+      - nino34_lead_11
+      - nino34_lead_12
+      step:
+        type: single_module
+        config:
+          builder:
+            type: Samudra
+            config:
+              ch_width:
+              - 200
+              - 250
+              - 300
+              - 400
+              dilation:
+              - 1
+              - 2
+              - 4
+              - 8
+              n_layers:
+              - 1
+              - 1
+              - 1
+              - 1
+              norm: instance
+              n_vector_outputs: 12
+          normalization:
+            network:
+              global_means_path: /ocean_stats/ocean/centering.nc
+              global_stds_path: /ocean_stats/ocean/scaling-full-field.nc
+          corrector:
+            type: ocean_corrector
+            config:
+              force_positive_names:
+              - so_0
+              - so_1
+              - so_2
+              - so_3
+              - so_4
+              - so_5
+              - so_6
+              - so_7
+              - so_8
+              - so_9
+              - so_10
+              - so_11
+              - so_12
+              - so_13
+              - so_14
+              - so_15
+              - so_16
+              - so_17
+              - so_18
+              - sea_ice_volume
+              sea_ice_fraction_correction:
+                sea_ice_fraction_name: ocean_sea_ice_fraction
+                land_fraction_name: land_fraction
+                remove_negative_ocean_fraction: false
+                zero_where_ice_free_names:
+                - sea_ice_volume
+          next_step_forcing_names:
+          - DLWRFsfc
+          - DSWRFsfc
+          - ULWRFsfc
+          - USWRFsfc
+          - LHTFLsfc
+          - SHTFLsfc
+          - PRATEsfc
+          - eastward_surface_wind_stress
+          - northward_surface_wind_stress
+          - total_frozen_precipitation_rate
+          in_names:
+          - land_fraction
+          - sea_surface_fraction
+          - deptho
+          - DLWRFsfc
+          - DSWRFsfc
+          - ULWRFsfc
+          - USWRFsfc
+          - LHTFLsfc
+          - SHTFLsfc
+          - PRATEsfc
+          - eastward_surface_wind_stress
+          - northward_surface_wind_stress
+          - total_frozen_precipitation_rate
+          - sst
+          - ssu
+          - ssv
+          - zos
+          - so_0
+          - so_1
+          - so_2
+          - so_3
+          - so_4
+          - so_5
+          - so_6
+          - so_7
+          - so_8
+          - so_9
+          - so_10
+          - so_11
+          - so_12
+          - so_13
+          - so_14
+          - so_15
+          - so_16
+          - so_17
+          - so_18
+          - thetao_0
+          - thetao_1
+          - thetao_2
+          - thetao_3
+          - thetao_4
+          - thetao_5
+          - thetao_6
+          - thetao_7
+          - thetao_8
+          - thetao_9
+          - thetao_10
+          - thetao_11
+          - thetao_12
+          - thetao_13
+          - thetao_14
+          - thetao_15
+          - thetao_16
+          - thetao_17
+          - thetao_18
+          - uo_0
+          - uo_1
+          - uo_2
+          - uo_3
+          - uo_4
+          - uo_5
+          - uo_6
+          - uo_7
+          - uo_8
+          - uo_9
+          - uo_10
+          - uo_11
+          - uo_12
+          - uo_13
+          - uo_14
+          - uo_15
+          - uo_16
+          - uo_17
+          - uo_18
+          - vo_0
+          - vo_1
+          - vo_2
+          - vo_3
+          - vo_4
+          - vo_5
+          - vo_6
+          - vo_7
+          - vo_8
+          - vo_9
+          - vo_10
+          - vo_11
+          - vo_12
+          - vo_13
+          - vo_14
+          - vo_15
+          - vo_16
+          - vo_17
+          - vo_18
+          - ocean_sea_ice_fraction
+          - sea_ice_volume
+          out_names:
+          - sst
+          - ssu
+          - ssv
+          - zos
+          - so_0
+          - so_1
+          - so_2
+          - so_3
+          - so_4
+          - so_5
+          - so_6
+          - so_7
+          - so_8
+          - so_9
+          - so_10
+          - so_11
+          - so_12
+          - so_13
+          - so_14
+          - so_15
+          - so_16
+          - so_17
+          - so_18
+          - thetao_0
+          - thetao_1
+          - thetao_2
+          - thetao_3
+          - thetao_4
+          - thetao_5
+          - thetao_6
+          - thetao_7
+          - thetao_8
+          - thetao_9
+          - thetao_10
+          - thetao_11
+          - thetao_12
+          - thetao_13
+          - thetao_14
+          - thetao_15
+          - thetao_16
+          - thetao_17
+          - thetao_18
+          - uo_0
+          - uo_1
+          - uo_2
+          - uo_3
+          - uo_4
+          - uo_5
+          - uo_6
+          - uo_7
+          - uo_8
+          - uo_9
+          - uo_10
+          - uo_11
+          - uo_12
+          - uo_13
+          - uo_14
+          - uo_15
+          - uo_16
+          - uo_17
+          - uo_18
+          - ocean_sea_ice_fraction
+          - sea_ice_volume
+          - hfds_total_area
+          - tauuo
+          - tauvo
+          - wfo
+          # Nino3.4 lead vector (MLP readout head; LAST, exactly
+          # n_vector_outputs=12)
+          - nino34_lead_01
+          - nino34_lead_02
+          - nino34_lead_03
+          - nino34_lead_04
+          - nino34_lead_05
+          - nino34_lead_06
+          - nino34_lead_07
+          - nino34_lead_08
+          - nino34_lead_09
+          - nino34_lead_10
+          - nino34_lead_11
+          - nino34_lead_12
+  atmosphere:
+    timedelta: 6h
+    # Atmosphere stepper copied from jamesd's uncoupled condSFNO fine-tune
+    # config (must match the checkpoint at /atmos_ckpt.tar exactly).
+    stepper:
+      step:
+        type: single_module
+        config:
+          residual_prediction: false
+          builder:
+            type: NoiseConditionedSFNO
+            config:
+              embed_dim: 384
+              noise_embed_dim: 64
+              filter_type: linear
+              use_mlp: true
+              num_layers: 8
+              operator_type: dhconv
+              separable: false
+              spectral_layers: 3
+              spectral_transform: sht
+              noise_type: isotropic
+          normalization:
+            network:
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-full-field.nc
+            residual:
+              global_means_path: /atmos_stats/centering.nc
+              global_stds_path: /atmos_stats/scaling-residual.nc
+          ocean:
+            surface_temperature_name: surface_temperature
+            ocean_fraction_name: ocean_fraction
+            interpolate: true
+          corrector:
+            conserve_dry_air: true
+            moisture_budget_correction: advection_and_precipitation
+            force_positive_names:
+            - specific_total_water_0
+            - specific_total_water_1
+            - specific_total_water_2
+            - specific_total_water_3
+            - specific_total_water_4
+            - specific_total_water_5
+            - specific_total_water_6
+            - specific_total_water_7
+            - Q2m
+            - PRATEsfc
+            - ULWRFsfc
+            - ULWRFtoa
+            - DLWRFsfc
+            - DSWRFsfc
+            - USWRFsfc
+            - USWRFtoa
+            - total_frozen_precipitation_rate
+            total_energy_budget_correction:
+              method: constant_temperature
+          next_step_forcing_names:
+          - DSWRFtoa
+          - carbon_dioxide
+          in_names:
+          - land_fraction
+          - lake_fraction
+          - ocean_fraction
+          - sea_ice_fraction
+          - DSWRFtoa
+          - HGTsfc
+          - PRESsfc
+          - surface_temperature
+          - air_temperature_0
+          - air_temperature_1
+          - air_temperature_2
+          - air_temperature_3
+          - air_temperature_4
+          - air_temperature_5
+          - air_temperature_6
+          - air_temperature_7
+          - specific_total_water_0
+          - specific_total_water_1
+          - specific_total_water_2
+          - specific_total_water_3
+          - specific_total_water_4
+          - specific_total_water_5
+          - specific_total_water_6
+          - specific_total_water_7
+          - eastward_wind_0
+          - eastward_wind_1
+          - eastward_wind_2
+          - eastward_wind_3
+          - eastward_wind_4
+          - eastward_wind_5
+          - eastward_wind_6
+          - eastward_wind_7
+          - northward_wind_0
+          - northward_wind_1
+          - northward_wind_2
+          - northward_wind_3
+          - northward_wind_4
+          - northward_wind_5
+          - northward_wind_6
+          - northward_wind_7
+          - carbon_dioxide
+          out_names:
+          - PRESsfc
+          - surface_temperature
+          - air_temperature_0
+          - air_temperature_1
+          - air_temperature_2
+          - air_temperature_3
+          - air_temperature_4
+          - air_temperature_5
+          - air_temperature_6
+          - air_temperature_7
+          - specific_total_water_0
+          - specific_total_water_1
+          - specific_total_water_2
+          - specific_total_water_3
+          - specific_total_water_4
+          - specific_total_water_5
+          - specific_total_water_6
+          - specific_total_water_7
+          - eastward_wind_0
+          - eastward_wind_1
+          - eastward_wind_2
+          - eastward_wind_3
+          - eastward_wind_4
+          - eastward_wind_5
+          - eastward_wind_6
+          - eastward_wind_7
+          - northward_wind_0
+          - northward_wind_1
+          - northward_wind_2
+          - northward_wind_3
+          - northward_wind_4
+          - northward_wind_5
+          - northward_wind_6
+          - northward_wind_7
+          - LHTFLsfc
+          - SHTFLsfc
+          - PRATEsfc
+          - ULWRFsfc
+          - ULWRFtoa
+          - DLWRFsfc
+          - DSWRFsfc
+          - USWRFsfc
+          - USWRFtoa
+          - tendency_of_total_water_path_due_to_advection
+          - TMP850
+          - h500
+          - total_frozen_precipitation_rate
+          - TMP2m
+          - Q2m
+          - UGRD10m
+          - VGRD10m
+          - eastward_surface_wind_stress
+          - northward_surface_wind_stress
+seed: 0
