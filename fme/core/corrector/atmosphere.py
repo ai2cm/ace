@@ -299,14 +299,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
               advective tendency as the budget residual,
               ensuring column budget closure.
 
-            Whenever this correction is enabled and the frozen precipitation rate
-            (``total_frozen_precipitation_rate``) is predicted, it is additionally
-            clipped to be less than or equal to the -- possibly corrected -- total
-            precipitation rate (``PRATEsfc``) in each grid cell, since frozen
-            precipitation is a component of total precipitation. This clip runs
-            before any ``total_energy_budget_correction``, since frozen
-            precipitation contributes to the surface energy flux via the latent
-            heat of freezing.
         force_positive_names: Names of fields that should be forced to be greater
             than or equal to zero. This is useful for fields like precipitation.
         total_energy_budget_correction: If not None, force the generated data to
