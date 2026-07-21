@@ -17,7 +17,7 @@ outputs:
 - name: WUS_winter_2015
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -32,7 +32,7 @@ outputs:
 - name: WUS_winter_2016
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -47,7 +47,7 @@ outputs:
 - name: WUS_winter_2017
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -62,7 +62,7 @@ outputs:
 - name: WUS_winter_2018
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -77,7 +77,7 @@ outputs:
 - name: WUS_winter_2019
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -92,7 +92,7 @@ outputs:
 - name: WUS_winter_2020
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -107,7 +107,7 @@ outputs:
 - name: WUS_winter_2021
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -122,7 +122,7 @@ outputs:
 - name: WUS_winter_2022
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
@@ -137,7 +137,7 @@ outputs:
 - name: WUS_winter_2023
   save_vars:
   - PRATEsfc
-  - air_temperature_at_two_meters
+  - TMP2m
   n_ens: 1
   max_samples_per_gpu: 32
   time_range:
