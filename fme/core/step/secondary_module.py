@@ -235,6 +235,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
     def get_step(
         self,
         dataset_info: DatasetInfo,
