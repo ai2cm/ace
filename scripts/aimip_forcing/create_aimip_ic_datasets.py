@@ -36,8 +36,11 @@ def create_ic(
     ic_timestamp: str,
     target_timestamp: np.datetime64,
 ) -> xr.Dataset:
-    ic = era5.sel(time=ic_timestamp)
-    return ic.assign_coords(time=target_timestamp)
+    # Select with a single-element list so `time` stays a length-1 dimension
+    # (not a scalar coordinate): the inference initial-condition loader requires
+    # a time dimension and prognostic variables shaped (n_samples, lat, lon).
+    ic = era5.sel(time=[ic_timestamp])
+    return ic.assign_coords(time=[target_timestamp])
 
 
 @click.command()
