@@ -1,4 +1,3 @@
-# arg: --dataset 01KW0YE54G9NF9YWF000GVPMA8:/weights
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -7,7 +6,7 @@ validate_using_ema: true
 ema_checkpoint_save_epochs:
   start: 5
   step: 5
-max_epochs: 80
+max_epochs: 120
 ema:
   decay: 0.999
 train_aggregator:
@@ -391,10 +390,8 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
-  n_forward_steps: 3
-  optimize_last_step_only: false
-  parameter_init:
-    weights_path: /weights/training_checkpoints/best_ckpt.tar
+  n_forward_steps: 1
+  optimize_last_step_only: true
   loss:
     type: EnsembleLoss
     kwargs:

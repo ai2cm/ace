@@ -144,17 +144,21 @@ run_training() {
 # the saturation_normalization RH feature).
 #
 #   A  RH-input no-co2 base (single-step, 120 epochs). Launch now.
-#   C  no-RH no-co2 3-step fine-tune (matched fine-tuned control): weights-only
-#      init from the existing no-co2 no-RH base im4ecamc's best_ckpt.tar
-#      (dataset 01KW0YE54G9NF9YWF000GVPMA8, mounted via the config "# arg:"
-#      header). Launch now.
+#   D  no-RH no-co2 base (single-step, 120 epochs) on THIS branch's code, the
+#      matched single-step no-RH control and the fine-tune source for C. Launch
+#      now. (Replaces the pre-existing im4ecamc as the control: im4ecamc's
+#      checkpoint, saved on old commit d9faa91, can't be deserialized by this
+#      code -- corrector-union + derived_forcings/input_masking schema drift --
+#      so parameter_init can't init from it. Its config recipe is reused here.)
 #   B  RH-input no-co2 3-step fine-tune of A (same ft recipe). DEFERRED: needs
 #      A's checkpoint dataset; add its config + call and launch once A finishes.
+#   C  no-RH no-co2 3-step fine-tune of D (matched fine-tuned control). DEFERRED:
+#      needs D's checkpoint dataset; launch once D finishes.
 #
-# Baseline (single-step no-RH no-co2) is the pre-existing run im4ecamc.
-# The clean matched RH-vs-no-RH comparison is B vs C (same branch code, both
-# 3-step fine-tuned); A vs im4ecamc is single-step with a code-version caveat.
+# The clean matched comparisons are all on this branch's code: A vs D
+# (single-step) and B vs C (3-step fine-tuned). im4ecamc is kept only as an
+# interim, code-caveated single-step reference until D finishes.
 # =============================================================================
 
 run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2.yaml" "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2-rs0" 1
-run_training "train-4deg-daily-v2-era5-only-no-residual-no-co2-ft3step.yaml"                     "train-4deg-daily-v2-era5-only-no-residual-no-co2-ft3step-rs0"                     1
+run_training "train-4deg-daily-v2-era5-only-no-residual-no-co2.yaml"                             "train-4deg-daily-v2-era5-only-no-residual-no-co2-rerun-rs0"                       1
