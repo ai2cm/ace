@@ -1,5 +1,5 @@
 # arg: --dataset andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019:/statsdata
-# arg: --dataset 01KXFPAQCKXB365G02KE4SG1GJ:/weights
+# arg: --dataset PRETRAINED_ERA5_BEAKER_DATASET_ID:/weights
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
