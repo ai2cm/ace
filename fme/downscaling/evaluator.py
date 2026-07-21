@@ -202,7 +202,9 @@ class EvaluatorConfig:
             name="evaluator",
         )
         evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
-        if self.patch.needs_patch_predictor:
+        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
+            dataset.coarse_shape[1] > model.coarse_shape[1]
+        ):
             evaluator_model = PatchPredictor(
                 model,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,

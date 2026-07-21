@@ -121,12 +121,12 @@ class EventDownscaler:
             self.patch,
             name=f"event {self.event_name}",
         )
-        if self.patch.needs_patch_predictor:
-            return PatchPredictor(
-                base_model,
-                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-            )
-        return base_model
+        if base_model.coarse_shape == self.data.shape:
+            return base_model
+        return PatchPredictor(
+            base_model,
+            coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+        )
 
     def run(self):
         logging.info(f"Running {self.event_name} event downscaling...")

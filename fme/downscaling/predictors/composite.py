@@ -20,6 +20,10 @@ class PatchPredictionConfig:
             input data extent for generation.
         composite_prediction: if True, recombines the smaller prediction
             regions into the original full region as a single sample.
+            Both divide_generation and composite_prediction must be
+            True or both False. Previously, divide_generation=True and
+            composite_prediction=False were allowed; this is no longer
+            supported.
         coarse_horizontal_overlap: number of pixels to overlap in the
             coarse data.
     """
@@ -171,17 +175,16 @@ def check_input_shape_supported(
     patch: PatchPredictionConfig,
     name: str = "",
 ) -> None:
-    in_shape = tuple(input_shape)
     suffix = f" for {name}" if name else ""
-    if model_coarse_shape == in_shape:
+    if model_coarse_shape == input_shape:
         return
     if any(
         model_input_size > data_input_size
-        for model_input_size, data_input_size in zip(model_coarse_shape, in_shape)
+        for model_input_size, data_input_size in zip(model_coarse_shape, input_shape)
     ):
         raise ValueError(
             f"Model coarse shape {model_coarse_shape} is larger than "
-            f"actual input shape {in_shape}{suffix}. "
+            f"actual input shape {input_shape}{suffix}. "
             "We do not support generating outputs with a smaller spatial extent"
             " than the model's trained patch size. Please adjust the spatial extent"
             " to be at least as large as the model's input patch size "
@@ -191,8 +194,8 @@ def check_input_shape_supported(
     # as the models predict very biased results for out-of-sample input shapes.
     if not patch.needs_patch_predictor:
         raise ValueError(
-            f"Input datashape {in_shape}{suffix} is larger than the model input patch "
-            f"size {model_coarse_shape} and patch prediction is not configured. "
+            f"Input datashape {input_shape}{suffix} is larger than the model input "
+            f"patch size {model_coarse_shape} and patch prediction is not configured. "
             "Generation for larger domains requires patch prediction configured with "
             "composite_prediction=True and divide_generation=True."
         )

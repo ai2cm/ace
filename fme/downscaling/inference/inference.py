@@ -83,7 +83,7 @@ class Downscaler:
             output.patch,
             name=f"output {output.name}",
         )
-        if output.patch.needs_patch_predictor is False:
+        if base_model.coarse_shape == input_shape:
             return base_model
 
         logging.info(f"Using PatchPredictor for output: {output.name}")

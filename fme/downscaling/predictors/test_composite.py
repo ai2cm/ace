@@ -199,3 +199,20 @@ def test_SpatialCompositePredictor_generate_on_batch_no_target(patch_size_coarse
         coarse_batch_data, n_samples=n_samples_generate
     )
     assert prediction["x"].shape == (batch_size, n_samples_generate, 8, 8)
+
+
+@pytest.mark.parametrize(
+    "divide_generation, composite_prediction, error_submessage",
+    [
+        (True, False, "divide_generation=True requires composite_prediction=True."),
+        (False, True, "composite_prediction=True requires divide_generation=True."),
+    ],
+)
+def test_PatchPredictionConfig_disallowed_configs(
+    divide_generation, composite_prediction, error_submessage
+):
+    with pytest.raises(ValueError, match=error_submessage):
+        PatchPredictionConfig(
+            divide_generation=divide_generation,
+            composite_prediction=composite_prediction,
+        )
