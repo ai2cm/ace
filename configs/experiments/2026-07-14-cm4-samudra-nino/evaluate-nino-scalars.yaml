@@ -1,0 +1,51 @@
+# Evaluate the direct Nino3.4 readout using many independent one-step forecasts
+# in the held-out 0251-0255 validation period.
+experiment_dir: /results/raw
+n_forward_steps: 1
+forward_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  # 60 ICs separated by 6 x 5-day samples: approximately monthly coverage of
+  # the full five-year held-out period.
+  start_indices:
+    n_initial_conditions: 60
+    first: 0
+    interval: 6
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-10-21-cm4-1pctCO2-140yr-no-smoothing-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  names:
+  - nino34_lead_01
+  - nino34_lead_02
+  - nino34_lead_03
+  - nino34_lead_04
+  - nino34_lead_05
+  - nino34_lead_06
+  - nino34_lead_07
+  - nino34_lead_08
+  - nino34_lead_09
+  - nino34_lead_10
+  - nino34_lead_11
+  - nino34_lead_12
+aggregator:
+  log_histograms: false
+  log_global_mean_time_series: false
+  log_global_mean_norm_time_series: false
