@@ -83,10 +83,9 @@ class Downscaler:
             output.patch,
             name=f"output {output.name}",
         )
-        if tuple(base_model.coarse_shape) == tuple(input_shape):
-            # exact match, no patching necessary
+        if output.patch.needs_patch_predictor is False:
             return base_model
-        # larger extent with composite patch prediction configured
+
         logging.info(f"Using PatchPredictor for output: {output.name}")
         return PatchPredictor(
             model=base_model,

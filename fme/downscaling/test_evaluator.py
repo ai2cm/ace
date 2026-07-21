@@ -227,12 +227,10 @@ def test_evaluator_raises_when_larger_without_patching(tmp_path):
     model_config = unittest.mock.MagicMock()
     built_model = model_config.build.return_value
     built_model.coarse_shape = (4, 4)
-    # with_rolled_lon is a no-op here; return the same model.
-    built_model.with_rolled_lon.return_value = built_model
+    built_model.with_rolled_lon.return_value = built_model  # same model, no roll
 
     data_config = unittest.mock.MagicMock()
     dataset = data_config.build.return_value
-    # Full extent is 4x8 coarse, larger than the (4, 4) model in lon.
     dataset.coarse_shape = (4, 8)
 
     config = evaluator.EvaluatorConfig(
@@ -241,7 +239,6 @@ def test_evaluator_raises_when_larger_without_patching(tmp_path):
         data=data_config,
         logging=LoggingConfig(),
         n_samples=2,
-        # default patch: no composite patch prediction configured
     )
     with pytest.raises(ValueError, match="requires patch prediction"):
         config._build_default_evaluator()
