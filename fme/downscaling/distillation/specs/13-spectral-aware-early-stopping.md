@@ -57,6 +57,33 @@ In `best_student_callback.py` (`fme/downscaling/distillation/best_student_callba
    threaded into the callback ctor. Default **off** (patience `None`) to preserve
    current behavior for backward compat; opt-in per run.
 
+## Restart persistence (fix alongside the new selector)
+
+The existing selectors' running minima (`self._best_crps`, `self._best_tail_score`,
+`best_student_callback.py:362-365`) are plain in-memory attrs initialized to `inf` with
+**no `state_dict`/`load_state_dict`**; the catch-all `__getattr__` (line ~552) swallows any
+state hook. So on **restart/resume the running-min resets to `inf`**, the first
+post-restart validation is saved unconditionally as "new best," and the saved
+`best_student.ckpt` / `best_student_tail.ckpt` become the **min since the last restart, not
+the global min**. Confirmed on the node-restarted gamma runs `2yhjonz9` / `34rg7wii`
+(`val/crps_best` and `val/tail_best_score` jump upward at the restart step; gamma0p5
+`tail_best` 0.0032→0.082, ~20× worse). The new `_best_spec` running-min would inherit the
+same bug.
+
+**Priority:** low — these jobs are not currently preemptible; the observed reset was a
+one-off node restart. But cheap to fix and prevents a silent bad-checkpoint deployment on
+any future restart, so do it with this spec.
+
+**Requirement:** persist `{_best_crps, _best_tail_score, _best_spec}` (plus the patience
+counter / validations-since-improvement) across restart, restoring them on resume so
+selection continues against the global running-min. Verify the mechanism FastGen's
+`Trainer`/checkpointer actually uses for callback state (it may call `state_dict()` /
+`load_state_dict()` — currently no-op'd by `__getattr__`; if so, implement real ones and
+confirm they're invoked, otherwise persist via a small sidecar file next to the ckpt in the
+ACE adapter). Add a test: simulate a resume (reconstruct the callback, load state) and
+assert a post-restart validation *worse* than the pre-restart best does **not** overwrite
+the saved ckpt.
+
 ## ★ Open question — how to actually stop the FastGen loop (verify FIRST)
 
 The training loop is FastGen's `Trainer` (an **unmodified** NVlabs clone — per
@@ -116,6 +143,9 @@ match the existing `--val-*` callback-arg plumbing).
   `spec_patience` non-improving validations.
 - Backward compat: patience `None` + no `best_spec_checkpoint_path` → behavior
   byte-identical to today (no new checkpoint, no stop).
+- Restart persistence: after a simulated resume (reconstruct the callback, restore state),
+  a post-restart validation *worse* than the pre-restart best does **not** overwrite the
+  saved ckpt, and the patience counter continues rather than resetting.
 
 ## Acceptance criteria
 
@@ -124,6 +154,8 @@ match the existing `--val-*` callback-arg plumbing).
   `spec_mae_mean`.
 - The three selectors (`crps`, `tail`, `spec`) coexist; teacher/other paths unchanged.
 - FastGen (`Fastgen/`) is untouched; the stop mechanism lives in the ACE adapter.
+- All selector running-minima + the patience counter survive a restart (resume continues
+  against the global running-min, not a fresh `inf`).
 
 ## Out of scope
 
