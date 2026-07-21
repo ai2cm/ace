@@ -30,8 +30,11 @@ ema:
   decay: 0.999
 max_epochs: 25
 inference:
-  # 1460 ocean (5-day) steps ~ 20 years; ICs must be divisible by n GPUs.
-  n_coupled_steps: 1460
+  # 1440 ocean (5-day) steps (~20 years). Must satisfy
+  # max_IC_index + n_coupled_steps <= dataset length (10219); the last IC
+  # 0331-04-08 is at index 8779, so 1460 overshoots and 1440 fits exactly.
+  # Number of ICs must be divisible by n GPUs.
+  n_coupled_steps: 1440
   coupled_steps_in_memory: 2
   loader:
     num_data_workers: 4
