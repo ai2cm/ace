@@ -72,7 +72,7 @@ class PatchPredictor:
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
 
     @property
-    def coarse_shape(self):
+    def coarse_shape(self) -> tuple[int, int]:
         return self.coarse_yx_patch_extent
 
     @property
@@ -171,28 +171,28 @@ def check_input_shape_supported(
     patch: PatchPredictionConfig,
     name: str = "",
 ) -> None:
-    model_shape = tuple(model_coarse_shape)
     in_shape = tuple(input_shape)
     suffix = f" for {name}" if name else ""
-    if model_shape == in_shape:
+    if model_coarse_shape == in_shape:
         return
     if any(
         model_input_size > data_input_size
-        for model_input_size, data_input_size in zip(model_shape, in_shape)
+        for model_input_size, data_input_size in zip(model_coarse_shape, in_shape)
     ):
         raise ValueError(
-            f"Model coarse shape {model_shape} is larger than "
+            f"Model coarse shape {model_coarse_shape} is larger than "
             f"actual input shape {in_shape}{suffix}. "
             "We do not support generating outputs with a smaller spatial extent"
             " than the model's trained patch size. Please adjust the spatial extent"
-            f" to be at least as large as the model's input patch size {model_shape}."
+            " to be at least as large as the model's input patch size "
+            f"{model_coarse_shape}."
         )
     # If data shape is larger than model input shape, currently require patch prediction
     # as the models predict very biased results for out-of-sample input shapes.
     if not patch.needs_patch_predictor:
         raise ValueError(
             f"Input datashape {in_shape}{suffix} is larger than the model input patch "
-            f"size {model_shape} and patch prediction is not configured. "
+            f"size {model_coarse_shape} and patch prediction is not configured. "
             "Generation for larger domains requires patch prediction configured with "
             "composite_prediction=True and divide_generation=True."
         )
