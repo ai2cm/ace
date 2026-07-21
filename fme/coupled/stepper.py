@@ -46,6 +46,7 @@ from fme.core.ocean import OceanConfig
 from fme.core.ocean_data import OCEAN_FIELD_NAME_PREFIXES, OceanData
 from fme.core.optimization import NullOptimization
 from fme.core.step.output import StepOutput
+from fme.core.stepper_state import StepperState
 from fme.core.tensors import add_ensemble_dim, unfold_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingHistory, TrainingJob
@@ -772,10 +773,12 @@ class ComponentStepPrediction:
         realm: Literal["ocean", "atmosphere"],
         data: TensorDict,
         step: int,
+        stepper_state: StepperState | None,
     ):
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
         self._step = step
+        self._stepper_state = stepper_state
 
     @property
     def realm(self) -> Literal["ocean", "atmosphere"]:
@@ -788,6 +791,10 @@ class ComponentStepPrediction:
     @property
     def step(self) -> int:
         return self._step
+
+    @property
+    def stepper_state(self) -> StepperState | None:
+        return self._stepper_state
 
 
 class CoupledStepper:
@@ -917,6 +924,7 @@ class CoupledStepper:
                 data=atmos_ic_data,
                 time=forcing_ic_batch.time,
                 labels=forcing_ic_batch.labels,
+                stepper_state=atmos_ic_state.as_batch_data().stepper_state,
             )
         )
 
@@ -1112,15 +1120,19 @@ class CoupledStepper:
                 optimizer,
             )
             atmos_steps = []
+            atmos_stepper_state: StepperState | None = None
 
             # predict and yield atmosphere steps
             for i_inner in range(self.n_inner_steps):
                 atmos_step_num = i_outer * self.n_inner_steps + i_inner
-                atmos_step = next(atmos_generator).output
+                atmos_result = next(atmos_generator)
+                atmos_step = atmos_result.output
+                atmos_stepper_state = atmos_result.stepper_state
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
                     step=atmos_step_num,
+                    stepper_state=atmos_stepper_state,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
@@ -1147,7 +1159,7 @@ class CoupledStepper:
                 labels=ocean_window.labels,
             )
             # predict and yield a single ocean step
-            ocean_step = next(
+            ocean_result = next(
                 iter(
                     self.ocean.get_prediction_generator(
                         ocean_ic_state,
@@ -1156,11 +1168,13 @@ class CoupledStepper:
                         optimizer=optimizer,
                     )
                 )
-            ).output
+            )
+            ocean_step = ocean_result.output
             yield ComponentStepPrediction(
                 realm="ocean",
                 data=ocean_step,
                 step=i_outer,
+                stepper_state=ocean_result.stepper_state,
             )
 
             # prepare ic states for next coupled step
@@ -1175,6 +1189,7 @@ class CoupledStepper:
                         time=slice(-self.atmosphere.n_ic_timesteps, None)
                     ),
                     labels=atmos_window.labels,
+                    stepper_state=atmos_stepper_state,
                 )
             )
             ocean_ic_data = {
@@ -1185,6 +1200,7 @@ class CoupledStepper:
                     data=optimizer.detach_if_using_gradient_accumulation(ocean_ic_data),
                     time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
                     labels=ocean_window.labels,
+                    stepper_state=ocean_result.stepper_state,
                 )
             )
 
@@ -1195,7 +1211,7 @@ class CoupledStepper:
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
             [
-                StepOutput(output=x.data, stepper_state=None)
+                StepOutput(output=x.data, stepper_state=x.stepper_state)
                 for x in output_list
                 if x.realm == "atmosphere"
             ],
@@ -1206,7 +1222,7 @@ class CoupledStepper:
         )
         ocean_data = process_prediction_generator_list(
             [
-                StepOutput(output=x.data, stepper_state=None)
+                StepOutput(output=x.data, stepper_state=x.stepper_state)
                 for x in output_list
                 if x.realm == "ocean"
             ],

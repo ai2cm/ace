@@ -24,6 +24,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
@@ -1725,6 +1726,76 @@ def test_predict_paired():
     torch.testing.assert_close(
         paired_data.ocean_data.prediction["o_diag"].select(dim=1, index=1),
         o_diag1,
+    )
+
+
+def test_predict_paired_threads_stepper_state():
+    """Stepper state attached to the initial condition must survive the coupled
+    rollout into the final prognostic state, so restarts can carry it.
+
+    Each component's state has to pass through the SST prescription and the
+    per-coupled-step initial-condition rebuild, so a two-coupled-step rollout
+    exercises every hand-off point.
+    """
+    ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag"]
+    ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag"]
+    atmos_in_names = ["a_prog", "a_sfc_temp", "ocean_frac", "o_prog"]
+    atmos_out_names = ["a_prog", "a_sfc_temp", "a_diag"]
+
+    class Ocean(torch.nn.Module):
+        def forward(self, x):
+            return torch.concat([x[:, :1], x[:, :1], x[:, :1]], dim=1)
+
+    class Atmos(torch.nn.Module):
+        def forward(self, x):
+            return torch.concat([x[:, :1], x[:, 1:2], x[:, :1]], dim=1)
+
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=3,
+        sst_name_in_ocean_data="o_sfc_temp",
+        sfc_temp_name_in_atmosphere_data="a_sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_builder=ModuleSelector(type="prebuilt", config={"module": Ocean()}),
+        atmosphere_builder=ModuleSelector(type="prebuilt", config={"module": Atmos()}),
+    )
+    data = coupled_data.data
+
+    atmos_prognostic = data.atmosphere_data.get_start(
+        coupler.atmosphere.prognostic_names, n_ic_timesteps=1
+    ).with_random_state(RandomState.from_seed(0))
+    ocean_prognostic = data.ocean_data.get_start(
+        coupler.ocean.prognostic_names, n_ic_timesteps=1
+    ).with_random_state(RandomState.from_seed(1))
+    ic = CoupledPrognosticState(
+        atmosphere_data=atmos_prognostic, ocean_data=ocean_prognostic
+    )
+
+    _, prognostic_state = coupler.predict_paired(
+        initial_condition=ic,
+        forcing=data,
+    )
+
+    atmos_state = prognostic_state.atmosphere_data.as_batch_data().stepper_state
+    ocean_state = prognostic_state.ocean_data.as_batch_data().stepper_state
+    assert atmos_state is not None
+    assert atmos_state.random_state is not None
+    assert ocean_state is not None
+    assert ocean_state.random_state is not None
+    # the deterministic test modules never draw from the generators, so the
+    # states must be exactly the seeded initial states, not reseeded ones
+    torch.testing.assert_close(
+        atmos_state.random_state.generator.get_state(),
+        RandomState.from_seed(0).generator.get_state(),
+    )
+    torch.testing.assert_close(
+        ocean_state.random_state.generator.get_state(),
+        RandomState.from_seed(1).generator.get_state(),
     )
 
 
