@@ -1,6 +1,8 @@
 experiment_dir: /climate-default/home/annak/2026-07-20-WUS-winter-2014-2023
 model:
   checkpoint_path: /ckpt.tar
+  rename:
+    air_temperature_at_two_meters: TMP2m
 data:
   coarse:
   - data_path: /climate-default/home/annak/2026-07-06-ace2s-shieldplus-tuned-xshield
