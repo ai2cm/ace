@@ -1,4 +1,5 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
 ft-ocn-upsample-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|ace-samudra-coupled-e3smv3|3188f025|best_inference_ckpt|done|high|b200|4|800GiB|3|ai2/climate-titan|seed=0 max_epochs=5
-fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|ace-samudra-coupled-e3smv3|dcs4dysr|best_inference_ckpt|train|high|b200|4|800GiB|3|ai2/ace|seed=0 max_epochs=5|01KWPN4DMJKRVY3MA570969PCW
+fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|ace-samudra-coupled-e3smv3|dcs4dysr|best_inference_ckpt|done|high|b200|4|800GiB|3|ai2/ace|seed=0 max_epochs=5|01KWPN4DMJKRVY3MA570969PCW
+fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15-cpl-ep-27|rs0|ace-samudra-coupled-e3smv3|dcs4dysr|best_inference_ckpt|train|high|b200|4|800GiB|3|ai2/ace|seed=0 max_epochs=20|01KWW5C2CSBTZT5EQY7KBTC9FD
