@@ -26,3 +26,5 @@ fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KY5GS
 fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|01KY5PVNZXCD3Z9REZBZNFQYK7|training|best_inference_ckpt|normal|--min-runtime 8h
 
 fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KY5PW2JNZMC4YBYBPNG2T4D8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KY5PZC23Q4YXRRZ6DY6CHC3S|training|best_inference_ckpt|normal|--min-runtime 8h
