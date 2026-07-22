@@ -58,6 +58,7 @@ for case in "${CASES[@]}"; do
         forcing_loader.dataset.overwrite.constant.global_mean_co2=$co2_concentration \
         initial_condition.path=$initial_condition_path \
         initial_condition.start_indices.list=[0] \
+        initial_condition.engine=netcdf4 \
         n_forward_steps=$spin_up_steps \
         experiment_dir=$gcs_root/spin-up \
         logging.log_to_wandb=false \
