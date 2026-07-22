@@ -39,7 +39,7 @@ run_inference() {
     --gpus 1 \
     --shared-memory 40GiB \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
     -- python -I -m fme.ace.inference "$CONFIG_PATH"
