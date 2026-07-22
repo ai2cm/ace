@@ -48,6 +48,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 for case in "${CASES[@]}"; do
     IFS="," read model climate seed step_to_start_logging ic_dataset_id example_name <<< $case
     co2_concentration=${CO2_CONCENTRATIONS[$climate]}
+    dataset_id=${MODELS[$model]}
     initial_condition_segment=$(printf "%04d" $((step_to_start_logging / SEGMENT_LENGTH)))
     spin_up_steps=$((step_to_start_logging % SEGMENT_LENGTH))
     initial_condition_path="/spun_up_initial_condition.nc"
