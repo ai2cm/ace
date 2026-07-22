@@ -36,7 +36,7 @@ declare -A MODELS=( \
 GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-07-14-crash-investigation"
 SEGMENT_LENGTH=182621
 CASES=( \
-    # "full-energy-conserving-rs0,2xCO2,4,176821,01KY2Y1KHDG38PB98DKDN0ZDHQ,example-0003" \
+    "full-energy-conserving-rs0,2xCO2,4,176821,01KY2Y1KHDG38PB98DKDN0ZDHQ,example-0003" \
     "full-energy-conserving-rs0,3xCO2,3,398052,01KY02N19VKSX3NHQEA0W9AK5M,example-0004" \
     "full-energy-conserving-rs0,3xCO2,4,267230,01KY2Y1K2YZP8JHXP09Y63F5T1,example-0005" \
     "full-energy-conserving-rs0,4xCO2,4,537921,01KY02N8ZMGTVRP5EWVGTEZJZ5,example-0006" \
@@ -85,7 +85,7 @@ for case in "${CASES[@]}"; do
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority high \
-        --cluster ai2/titan \
+        --cluster ai2/jupiter \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
         --env WANDB_JOB_TYPE=inference \
