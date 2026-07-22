@@ -48,39 +48,35 @@ def compact(input_dir: Path, output_dir: Path) -> xr.Dataset:
         mae = np.abs(error).mean("sample")
         correlation = xr.corr(pred, truth, dim="sample")
 
-        result = (
-            xr.Dataset(
-                data_vars={
-                    "prediction": pred,
-                    "target": truth,
-                    "error": error,
-                    "rmse": rmse,
-                    "mae": mae,
-                    "correlation": correlation,
-                },
-                coords={
-                    "forecast": ("sample", np.arange(pred.sizes["sample"])),
-                    "init_time": ("sample", prediction["init_time"].values),
-                    "valid_time": (
-                        "sample",
-                        prediction["valid_time"].isel(time=0).values,
-                    ),
-                },
-                attrs={
-                    "description": (
-                        "Direct Nino3.4 scalar forecasts from one 5-day Samudra "
-                        "step over held-out CM4 1pctCO2 years 0251-0255."
-                    ),
-                    "checkpoint_dataset": "01KXKZ85HTDSGGXWD2DPW2QRFW",
-                    "readout_definition": (
-                        "nino34_lead_01..12 predicted simultaneously by the MLP "
-                        "readout head; values are linear-detrended monthly indices."
-                    ),
-                },
-            )
-            .swap_dims({"sample": "forecast"})
-            .drop_vars("sample")
-        )
+        result = xr.Dataset(
+            data_vars={
+                "prediction": pred,
+                "target": truth,
+                "error": error,
+                "rmse": rmse,
+                "mae": mae,
+                "correlation": correlation,
+            },
+            coords={
+                "forecast": ("sample", np.arange(pred.sizes["sample"])),
+                "init_time": ("sample", prediction["init_time"].values),
+                "valid_time": (
+                    "sample",
+                    prediction["valid_time"].isel(time=0).values,
+                ),
+            },
+            attrs={
+                "description": (
+                    "Direct Nino3.4 scalar forecasts from one 5-day Samudra "
+                    "step over held-out CM4 1pctCO2 years 0251-0255."
+                ),
+                "checkpoint_dataset": "01KXKZ85HTDSGGXWD2DPW2QRFW",
+                "readout_definition": (
+                    "nino34_lead_01..12 predicted simultaneously by the MLP "
+                    "readout head; values are linear-detrended monthly indices."
+                ),
+            },
+        ).swap_dims({"sample": "forecast"})
     finally:
         prediction.close()
         target.close()
