@@ -147,7 +147,7 @@ def iter_train_configs(
         # not crossed with the sweep above or each other (see module docstring).
         _co2_name, co2_rate = next(iter(co2_options.items()))
         for arm in TARGETED_ARMS:
-            base_name = f"{BASE_CONFIG_STEM}-gmron-{arm.label}-mask{TARGETED_MASK_LEVEL}"
+            base_name = f"{BASE_CONFIG_STEM}-{arm.label}-mask{TARGETED_MASK_LEVEL}"
             for seed in range(n_seeds):
                 name = f"{base_name}-seed{seed}-{version}"
                 cfg = copy.deepcopy(base)
