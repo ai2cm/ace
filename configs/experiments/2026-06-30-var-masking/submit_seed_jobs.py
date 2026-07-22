@@ -4,7 +4,7 @@ Each ``*-seed*.yaml`` config in run_configs/ (from generate_seed_configs.py) is
 submitted via run-ace-train.sh, which validates it and calls gantry.
 
 Usage:
-    python submit_seed_jobs.py [--dry-run] [--version {v1,v2,v3}]
+    python submit_seed_jobs.py [--dry-run] [--version {v1,v2,v3,v4}]
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]

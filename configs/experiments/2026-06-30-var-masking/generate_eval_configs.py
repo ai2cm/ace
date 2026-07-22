@@ -5,7 +5,7 @@ training config.  submit_eval_jobs.py submits one job per checkpoint, and that
 job runs all entries in the suite under one WandB run.
 
 Training runs are enumerated in memory for every baseline version (default:
-all discovered, e.g. -v1, -v2 and -v3) across both the masking family
+all discovered, e.g. -v1, -v2, -v3 and -v4) across both the masking family
 (generate_masking_configs.py) and the seed-replicate family
 (generate_seed_configs.py), so eval configs are produced for all of them in one
 pass.  This does not depend on the source training configs sitting in
@@ -62,7 +62,7 @@ else:
 
 
 def eval_suite_config_to_run_name(config_filename: str) -> str:
-    """Wandb run name for an eval suite config filename (stem ends in -v1/-v2/-v3)."""
+    """Wandb run name for an eval suite config filename (stem ends in -v1/-v2/-v3/-v4)."""
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(EVAL_SUITE_CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}"
@@ -208,8 +208,8 @@ def delete_eval_configs_in_wandb(project: str) -> None:
 
     Driven off the eval suite config files present in ``RUN_CONFIGS_DIR`` rather
     than the source training configs, so it covers every version's eval configs
-    (e.g. -v1, -v2 and -v3) regardless of which training configs currently sit in
-    the directory or whether they appear in the beaker map.
+    (e.g. -v1, -v2, -v3 and -v4) regardless of which training configs currently
+    sit in the directory or whether they appear in the beaker map.
     """
     wandb_run_names = _fetch_wandb_run_names(project)
     eval_configs = sorted(RUN_CONFIGS_DIR.glob(f"{EVAL_SUITE_CONFIG_PREFIX}*.yaml"))
@@ -323,8 +323,8 @@ def main() -> None:
 
     if args.delete_if_in_wandb:
         # Standalone pass over on-disk eval configs so cleanup covers every
-        # version present (-v1, -v2, -v3), not just the version whose training
-        # configs currently sit in run_configs. Generation below still (re)writes
+        # version present (-v1, -v2, -v3, -v4), not just the version whose
+        # training configs currently sit in run_configs. Generation below still (re)writes
         # eval configs for runs not yet finished in wandb.
         delete_eval_configs_in_wandb(WANDB_PROJECT)
 

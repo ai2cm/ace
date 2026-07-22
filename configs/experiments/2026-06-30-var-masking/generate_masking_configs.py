@@ -1,11 +1,11 @@
 """Generate var-masking training configs from the nc-sfno era5 baseline config.
 
 Each generated config name (and thus its wandb run name) ends in ``-v1``,
-``-v2`` or ``-v3``, matching the baseline config version it was sourced from
-(see ``baseline_configs/versions.md``); ``--version`` selects which (default
-v1). Versions are auto-discovered from ``baseline_configs/``, so adding a new
-``ace2-var-mask-nc-sfno-era5-vN.yaml`` there makes ``vN`` a valid ``--version``
-with no code change.
+``-v2``, ``-v3`` or ``-v4``, matching the baseline config version it was
+sourced from (see ``baseline_configs/versions.md``); ``--version`` selects
+which (default v1). Versions are auto-discovered from ``baseline_configs/``,
+so adding a new ``ace2-var-mask-nc-sfno-era5-vN.yaml`` there makes ``vN`` a
+valid ``--version`` with no code change.
 Full factorial sweep written to ``run_configs/`` (emptied first) over three
 axes:
 
@@ -18,9 +18,10 @@ axes:
 5 x 2 x 2 = 20 configs for v1.
 
 global_mean_co2 is already an input channel in the v1 baseline config
-(in_names + next_step_forcing_names); the co2 axis is meaningless for v2 and
-v3, which drop it as an input entirely (see baseline_configs/versions.md), so
-those versions only generate the co2default option: 5 x 2 x 1 = 10 configs.
+(in_names + next_step_forcing_names); the co2 axis is meaningless for v2,
+v3 and v4, which drop it as an input entirely (see
+baseline_configs/versions.md), so those versions only generate the co2default
+option: 5 x 2 x 1 = 10 configs.
 """
 
 import argparse
@@ -41,6 +42,7 @@ BASE_CONFIG_STEM = "ace-train-config-4deg-nc-sfno-era5"
 
 CO2_FIELD = "global_mean_co2"
 GMR_FIELD = "global_mean_removal"
+SPECTRAL_BAND_FIELDS = ("filter_num_groups", "spectral_ratio")
 
 MASK_LEVELS = [0, 5, 10, 20, 30]  # uniform default max_masked_vars
 CO2_OPTIONS = {"co2default": None, "co2bern75": 0.75}
@@ -126,6 +128,20 @@ def _apply_settings(
     if not keep_gmr:
         del step_cfg[GMR_FIELD]
     cfg["logging"]["project"] = WANDB_PROJECT
+
+
+def _apply_spectral_band(cfg: dict, keep_band: bool) -> None:
+    """Keep or drop the band-limited SFNO backbone knobs (``filter_num_
+    groups``, ``spectral_ratio``) from the builder config. Dropping them
+    falls back to the model's defaults (full-spectrum backbone, as in v3;
+    see ``baseline_configs/versions.md``). No-op if ``keep_band`` (the
+    baseline already has them, e.g. v4).
+    """
+    if keep_band:
+        return
+    builder_cfg = cfg["stepper"]["step"]["config"]["builder"]["config"]
+    for field in SPECTRAL_BAND_FIELDS:
+        builder_cfg.pop(field, None)
 
 
 def iter_train_configs(version: str) -> list[tuple[str, dict]]:

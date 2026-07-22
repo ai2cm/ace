@@ -29,3 +29,18 @@ from v2 only in the baseline model/data setup, copied through unchanged:
 - **Validation scoring**: the validation weight moves off `10year_insample`
   onto a new `aimip_checkpoint` inference entry (8 ICs in 2009, 1825 steps,
   denorm/norm means enabled).
+
+## v4 — `ace2-var-mask-nc-sfno-era5-v4.yaml`
+
+Recommended baseline for the paper. Identical to v3 (AIMIP protocol: no co2
+input, 1979–2008 training window, `aimip_checkpoint` validation), **except the
+band-limited SFNO backbone is restored**: `builder` re-adds
+`filter_num_groups: 16` and `spectral_ratio: 0.125` (which v3 had dropped).
+
+Rationale: in the VarMasking8 comparison this backbone trained to a lower
+validation floor with a monotone (non-overfitting) curve and gave the
+strongest, most seed-stable out-of-sample `air_temperature_7` gains from
+masking, whereas v3's full-spectrum backbone showed only marginal gains. Co2 is
+not an input, so generation drops the co2 axis (as v2/v3): 5 × 2 = 10 configs
+(mask level × gmron/gmroff). See the config's own header comment for the seed
+and variation plan.

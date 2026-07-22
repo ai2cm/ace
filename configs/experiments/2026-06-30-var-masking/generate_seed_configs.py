@@ -3,11 +3,11 @@
 For a chosen subset of the var-masking sweep this writes ``n_seeds`` copies of
 each config (default 5), differing only in the top-level ``seed`` field, so the
 same masking scheme can be trained multiple times to estimate run-to-run spread.
-Each generated config name ends in ``-v1``, ``-v2`` or ``-v3`` (``--version``
-selects which baseline config to source from, default v1; see
+Each generated config name ends in ``-v1``, ``-v2``, ``-v3`` or ``-v4``
+(``--version`` selects which baseline config to source from, default v1; see
 ``baseline_configs/versions.md``). The ``global_mean_removal`` stepper config
-is kept as in the baseline for v1 (no gmr axis there, unlike
-``generate_masking_configs.py``); v2/v3 sweep both gmron/gmroff (see
+is kept as in the baseline (GMR fixed on, no gmr token) for v1 and v4, unlike
+``generate_masking_configs.py``; v2/v3 sweep both gmron/gmroff (see
 ``gmr_options_for_version``).
 
 Configs are written into ``run_configs/`` (only ``*-seed*.yaml`` files are
@@ -24,6 +24,17 @@ For v2/v3, global_mean_co2 is not an input channel (see
 ``baseline_configs/versions.md``), so the co2 axis is dropped, but the gmr
 axis is added instead: 2 x 1 x 2 x 5 = 20 configs: mask30-gmron,
 mask30-gmroff, mask0-gmron, mask0-gmroff (each co2default).
+
+For v4, global_mean_co2 is likewise not a native input and stays that way
+(no co2-input axis: every v4 config has co2 excluded, matching the baseline),
+and GMR is fixed on (no gmr axis, see ``gmr_options_for_version``). A
+spectral-band axis is added instead (``spectral_band_options_for_version``):
+``specband`` keeps the v4 baseline's band-limited SFNO backbone knobs
+(``filter_num_groups``, ``spectral_ratio``); ``fullspec`` removes them,
+falling back to the model defaults (full-spectrum backbone, as in v3; see
+``baseline_configs/versions.md``). This is 2 x 1 x 2 x 5 = 20 configs:
+mask20-specband, mask20-fullspec, mask0-specband, mask0-fullspec (each
+co2default, GMR-on).
 """
 
 import argparse
@@ -41,6 +52,7 @@ from generate_masking_configs import (
     WANDB_ENTITY,
     WANDB_PROJECT,
     _apply_settings,
+    _apply_spectral_band,
     _fetch_wandb_run_names,
     co2_options_for_version,
     config_name_to_run_name,
@@ -48,17 +60,35 @@ from generate_masking_configs import (
 
 DEFAULT_N_SEEDS = 5
 
+# Whether to keep the band-limited SFNO backbone knobs, keyed by config/job
+# name token.
+SPECTRAL_BAND_OPTIONS = {"specband": True, "fullspec": False}
+
 
 def gmr_options_for_version(version: str) -> dict[str, bool]:
-    """GMR_OPTIONS, restricted to keep-baseline-only for v1.
+    """GMR_OPTIONS, restricted to keep-baseline-only (GMR fixed on) for v1/v4.
 
-    No gmr axis for v1 (``global_mean_removal`` is kept as in the baseline,
-    as before, with no gmr token in the config name); v2/v3 sweep both
+    No gmr axis for v1 or v4 (``global_mean_removal`` is kept on, as in the
+    baseline, with no gmr token in the config name); v2/v3 sweep both
     gmron/gmroff, as in ``generate_masking_configs.py``.
     """
-    if version == "v1":
+    if version in ("v1", "v4"):
         return {"": True}
     return GMR_OPTIONS
+
+
+def spectral_band_options_for_version(version: str) -> dict[str, bool]:
+    """SPECTRAL_BAND_OPTIONS, restricted to a no-op single option except v4.
+
+    v4's baseline restores the band-limited backbone (see
+    ``baseline_configs/versions.md``); this axis sweeps keeping it
+    (``specband``) against removing it (``fullspec``, falling back to model
+    defaults, as in v3). Other versions keep the config name and builder
+    config unchanged.
+    """
+    if version == "v4":
+        return SPECTRAL_BAND_OPTIONS
+    return {"": True}
 
 
 class SeedGroup(NamedTuple):
@@ -88,17 +118,24 @@ def iter_train_configs(
     configs: list[tuple[str, dict]] = []
     co2_options = co2_options_for_version(version)
     gmr_options = gmr_options_for_version(version)
+    spectral_band_options = spectral_band_options_for_version(version)
     for group in SEED_GROUPS:
         for co2_name, co2_rate in co2_options.items():
             for gmr_name, keep_gmr in gmr_options.items():
-                gmr_token = f"{gmr_name}-" if gmr_name else ""
-                base_name = f"{BASE_CONFIG_STEM}-{gmr_token}{group.label}-{co2_name}"
-                for seed in range(n_seeds):
-                    name = f"{base_name}-seed{seed}-{version}"
-                    cfg = copy.deepcopy(base)
-                    _apply_settings(cfg, group.mask_level, co2_rate, keep_gmr)
-                    cfg["seed"] = seed
-                    configs.append((name, cfg))
+                for band_name, keep_band in spectral_band_options.items():
+                    gmr_token = f"{gmr_name}-" if gmr_name else ""
+                    band_token = f"{band_name}-" if band_name else ""
+                    base_name = (
+                        f"{BASE_CONFIG_STEM}-{gmr_token}{band_token}"
+                        f"{group.label}-{co2_name}"
+                    )
+                    for seed in range(n_seeds):
+                        name = f"{base_name}-seed{seed}-{version}"
+                        cfg = copy.deepcopy(base)
+                        _apply_spectral_band(cfg, keep_band)
+                        _apply_settings(cfg, group.mask_level, co2_rate, keep_gmr)
+                        cfg["seed"] = seed
+                        configs.append((name, cfg))
     return configs
 
 
