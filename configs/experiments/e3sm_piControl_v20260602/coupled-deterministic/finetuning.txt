@@ -1,3 +1,4 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
 fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-z2wg2p4a|rs0|ace-samudra-coupled-e3smv3|wzz216jj|best_inference_ckpt|train|high|b200|4|800GiB|3|ai2/ace|seed=0 max_epochs=5
+fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|ace-samudra-coupled-e3smv3|nw85ffgx|best_inference_ckpt|train|high|b200|4|800GiB|3|ai2/ace|seed=0 max_epochs=20
