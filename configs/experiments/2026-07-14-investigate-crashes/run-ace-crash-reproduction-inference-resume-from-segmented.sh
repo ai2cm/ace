@@ -47,6 +47,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 for case in "${CASES[@]}"; do
     IFS="," read model climate seed step_to_start_logging ic_dataset_id example_name <<< $case
+    co2_concentration=${CO2_CONCENTRATIONS[$climate]}
     initial_condition_segment=$(printf "%04d" $((step_to_start_logging / SEGMENT_LENGTH)))
     spin_up_steps=$((step_to_start_logging % SEGMENT_LENGTH))
     initial_condition_path="/spun_up_initial_condition.nc"
@@ -103,61 +104,4 @@ for case in "${CASES[@]}"; do
             && \
             python -I -m fme.ace.inference $CONFIG_PATH --override $main_overrides \
         "
-done
-
-for model in "${!MODELS[@]}"; do
-    dataset_id="${MODELS[$model]}"
-
-    for climate in "${!INITIAL_CONDITION_DATASETS[@]}"; do
-        co2_concentration=${CO2_CONCENTRATIONS[$climate]}
-        initial_condition_path="${INITIAL_CONDITION_DATASETS[$climate]}"
-        spin_up_overrides="\
-            forcing_loader.dataset.overwrite.constant.global_mean_co2=$co2_concentration \
-            initial_condition.path=$initial_condition_path \
-            initial_condition.start_indices.times=[$INITIAL_CONDITION_TIME] \
-            n_forward_steps=303226 \
-            experiment_dir=$GCS_ROOT/spin-up \
-            logging.log_to_wandb=false \
-            data_writer.files=[] \
-            seed=2 \
-        "
-        main_overrides="\
-            forcing_loader.dataset.overwrite.constant.global_mean_co2=$co2_concentration \
-            initial_condition.path=$GCS_ROOT/spin-up/restart.nc \
-            initial_condition.start_indices.list=[0] \
-            initial_condition.engine=netcdf4 \
-            n_forward_steps=1460 \
-            experiment_dir=$GCS_ROOT/main \
-            seed=2 \
-        "
-
-        python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
-        python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $main_overrides
-
-        job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-output-around-crash-main"
-        gantry run \
-            --name $job_name \
-            --description 'Run inference with ACE' \
-            --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-            --workspace ai2/climate-titan \
-            --priority urgent \
-            --cluster ai2/titan \
-            --env WANDB_USERNAME=$WANDB_USERNAME \
-            --env WANDB_NAME=$job_name \
-            --env WANDB_JOB_TYPE=inference \
-            --env WANDB_RUN_GROUP= \
-            --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-            --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
-            --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-            --dataset $dataset_id:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
-            --gpus 1 \
-            --shared-memory 20GiB \
-            --weka climate-default:/climate-default \
-            --system-python \
-            --min-runtime 8h \
-            --install "pip install --no-deps ." \
-            -- /bin/bash -c "\
-                python -I -m fme.ace.inference $CONFIG_PATH --override $main_overrides \
-            "
-    done
 done
