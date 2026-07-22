@@ -1,25 +1,32 @@
-# Test-set inference for video-pmd-5ch-per-channel-kernel-global-1degree-
-# 24to3-v1: 32-member ensemble infilling of the held-out test period
-# (2023-01-01 .. 2024-01-04), using the EMA weights from
-# checkpoints/latest.ckpt (Beaker dataset 01KY0SRVAY199HM7TM8M9TXEVX, from
-# training experiment 01KY0SRVASWEECEGZHXF67E141, which completed cleanly --
-# exitCode 0, 200 epochs, no preemption). Deliberately latest.ckpt, not
-# best.ckpt: validation/loss stopped improving (no new "Saving best
-# checkpoint") after epoch ~92 and stayed flat through completion at epoch
-# 200, so best.ckpt is a stale ~epoch-92 snapshot -- latest.ckpt is the
-# fully-trained final-epoch weights. Same _save_checkpoint format for both
-# (module + ema state dicts), so use_ema: true works identically either way.
+# Test-set inference for video-pmd-5ch-flat-global-1degree-24to3-v1:
+# 32-member ensemble infilling of the held-out test period (2023-01-01 ..
+# 2024-01-04), using the EMA weights from checkpoints/latest.ckpt (Beaker
+# dataset 01KY0V8ZNN763G59S8QBY4304B, from training experiment
+# 01KY0SQW5SFS5KEYZR94T6WDTZ). Note: this experiment's FIRST job attempt
+# (01KY0SQW9WRDQP4YE5NYD0693A) was preempted after ~4 min and produced no
+# usable checkpoint -- Beaker auto-retried under the same experiment ID, and
+# the SECOND job (01KY0V8ZS0130PRZA0HZQ99H2P) completed cleanly, exitCode 0,
+# 200 epochs, no further preemption. Use the second job's result dataset
+# (above), not the first's (01KY0SQW5YD34ABY98Y74DSVFE, near-empty).
+#
+# Deliberately latest.ckpt, not best.ckpt, for consistency with the
+# per-channel-kernel inference config (see its own header) even though this
+# run's validation kept improving later into training (last "Saving best
+# checkpoint" before epoch 151 of 200, vs. epoch ~92 of 200 for
+# per-channel-kernel) -- latest.ckpt is still the fully-trained final-epoch
+# weights either way. Same _save_checkpoint format for both files (module +
+# ema state dicts), so use_ema: true works identically.
+#
 # model:/data: are pasted verbatim from
-# ../2026-07-20-video-pmd-5ch-per-channel-kernel/video_train.yaml's model:/
-# test_data: blocks -- do not hand-edit them out of sync with that file.
+# ../2026-07-20-video-pmd-5ch-flat/video_train.yaml's model:/test_data:
+# blocks -- do not hand-edit them out of sync with that file.
 #
 # 5 channels (adds air_temperature_at_two_meters to the earlier 4-channel
-# models), per-channel OU noise kernel (see the training config's own header
-# for the per-channel kernel-choice rationale and the RBF->OU fallback for
-# PRMSL/T2m).
+# models), flat/independent noise (the un-correlated baseline for the
+# per-channel-kernel isolation grid).
 checkpoint_path: /checkpoint/checkpoints/latest.ckpt
 experiment_dir: /results
-output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-5ch-per-channel-kernel-global-1degree-24to3-v1/test-2023-2024-ens32.zarr
+output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-5ch-flat-global-1degree-24to3-v1/test-2023-2024-ens32.zarr
 n_ensemble: 32
 # Known-safe value from the pcn-v1 inference run (int32 grouped-conv overflow
 # at higher effective batch -- same architecture family here).
@@ -30,7 +37,7 @@ logging:
   log_to_wandb: false
   log_to_file: true
   project: ace-temporal-interp
-  name: video-pmd-5ch-per-channel-kernel-global-1degree-24to3-v1-test-inference
+  name: video-pmd-5ch-flat-global-1degree-24to3-v1-test-inference
   entity: ai2cm
 data:
   n_timesteps: 9
@@ -71,19 +78,7 @@ model:
   sigma_max: 150.0
   churn: 0.0
   num_diffusion_generation_steps: 50
-  temporal_noise_correlation: per_channel
-  per_channel_noise_kernel:
-    eastward_wind_at_ten_meters: ou
-    northward_wind_at_ten_meters: ou
-    PRMSL: ou
-    PRATEsfc: ou
-    air_temperature_at_two_meters: ou
-  per_channel_kernel_length_scale:
-    eastward_wind_at_ten_meters: 0.5375      # 12.9h / 24h
-    northward_wind_at_ten_meters: 0.558333   # 13.4h / 24h
-    PRMSL: 0.804167                          # 19.3h / 24h
-    PRATEsfc: 0.329167                       # 7.9h / 24h
-    air_temperature_at_two_meters: 0.475     # 11.4h / 24h
+  temporal_noise_correlation: independent
   log_transform_channels:
     PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
   training_noise_distributions:
