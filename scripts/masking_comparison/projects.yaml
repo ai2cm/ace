@@ -1,0 +1,17 @@
+# wandb projects to fetch run configs for.
+# Each entry has:
+#   name:        wandb project name (folder name for its configs)
+#   description: free-text note about the project (optional)
+# Note: runs were best inference checkpoints for noise-conditioned SFNO models.
+#
+wandb_projects:
+- name: VarMasking3
+  description: val/mean/loss plateaud or tapered off after around 80 epochs. Mask40 and mask10 jobs showed improved long_46year/annual/air_temperature_7 results.
+- name: VarMasking4
+  description: mask10, mask0.11, and mask20 showed improved results over baseline on long_46year/annual/air_temperature_7. mask20 did best in-sample, while being under-biased in out-of-sample (2014-2024) period. mask0.11 and mask10 did well out-of-sample but were over-biased in out-of-sample (2014-2024) period.
+- name: VarMasking6
+  description: This was testing  a comparison between same or different sample masks, but we still saw mask10 achieve great out-of-sample performance on long_46year/annual/air_temperature_7. However, mask20 seemed a bit worse in-sample and under-biased overall on long_46year/annual/air_temperature_7.
+- name: VarMaskingERA5
+  description: long_46year/annual/air_temperature_7 showed great results for mask10 (co2default and co2bern90) and for mask40 (co2bern90) over the baseline. Moderate gains on long_46year_constant_co2/annual/air_temperature_7.
+- name: VarMasking8
+  description: long_46year/annual/air_temperature_7 great results for GMR ON and CO2 input (-v1) with masking. Less convincing with GMR off. Same story when looking at long_46ytear_constant_co2/annual/air_temperature_7. Switching to seeded runs shows same story, but baseline is highly stochastic. When switching to no co2 input (-v2), masking hurts long_46year/annual/air_temperature_7 on single-seed runs, but 5 seed ensemble results are better with masking. Switching to AIMIP style config (no co2, different validation, different training window, different model, -v3), masking gains on long_46year/annual/air_temperature_7 are much more marginal.
