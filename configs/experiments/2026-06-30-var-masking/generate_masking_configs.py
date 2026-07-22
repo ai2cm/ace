@@ -42,7 +42,6 @@ BASE_CONFIG_STEM = "ace-train-config-4deg-nc-sfno-era5"
 
 CO2_FIELD = "global_mean_co2"
 GMR_FIELD = "global_mean_removal"
-SPECTRAL_BAND_FIELDS = ("filter_num_groups", "spectral_ratio")
 
 MASK_LEVELS = [0, 5, 10, 20, 30]  # uniform default max_masked_vars
 CO2_OPTIONS = {"co2default": None, "co2bern75": 0.75}
@@ -113,14 +112,28 @@ def _fetch_wandb_run_names(project: str) -> set[str]:
 
 
 def _apply_settings(
-    cfg: dict, mask_level: int, co2_rate: float | None, keep_gmr: bool
+    cfg: dict,
+    mask_level: int,
+    co2_rate: float | None,
+    keep_gmr: bool,
+    extra_override_groups: list[dict] | None = None,
 ) -> None:
+    """Set the uniform ``default`` masking pool (``mask_level``) plus any
+    ``override_groups`` entries: the co2 bernoulli group (if ``co2_rate`` is
+    given) and/or caller-supplied ``extra_override_groups`` (e.g. a targeted
+    group pulling one channel out of the uniform pool into its own rule; see
+    ``generate_seed_configs.py``'s clock50 arm). Groups are disjoint pools, so
+    both can be set at once.
+    """
     default: dict = {"max_masked_vars": mask_level}
     dropout: dict = {"default": default}
+    override_groups: list[dict] = []
     if co2_rate is not None:
-        dropout["override_groups"] = [
-            {"variables": [CO2_FIELD], "masking": {"rate": co2_rate}}
-        ]
+        override_groups.append({"variables": [CO2_FIELD], "masking": {"rate": co2_rate}})
+    if extra_override_groups:
+        override_groups.extend(extra_override_groups)
+    if override_groups:
+        dropout["override_groups"] = override_groups
 
     step_cfg = cfg["stepper"]["step"]["config"]
     step_cfg["input_dropout"] = dropout
@@ -128,20 +141,6 @@ def _apply_settings(
     if not keep_gmr:
         del step_cfg[GMR_FIELD]
     cfg["logging"]["project"] = WANDB_PROJECT
-
-
-def _apply_spectral_band(cfg: dict, keep_band: bool) -> None:
-    """Keep or drop the band-limited SFNO backbone knobs (``filter_num_
-    groups``, ``spectral_ratio``) from the builder config. Dropping them
-    falls back to the model's defaults (full-spectrum backbone, as in v3;
-    see ``baseline_configs/versions.md``). No-op if ``keep_band`` (the
-    baseline already has them, e.g. v4).
-    """
-    if keep_band:
-        return
-    builder_cfg = cfg["stepper"]["step"]["config"]["builder"]["config"]
-    for field in SPECTRAL_BAND_FIELDS:
-        builder_cfg.pop(field, None)
 
 
 def iter_train_configs(version: str) -> list[tuple[str, dict]]:

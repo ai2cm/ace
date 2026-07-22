@@ -44,3 +44,12 @@ masking, whereas v3's full-spectrum backbone showed only marginal gains. Co2 is
 not an input, so generation drops the co2 axis (as v2/v3): 5 × 2 = 10 configs
 (mask level × gmron/gmroff). See the config's own header comment for the seed
 and variation plan.
+
+`generate_seed_configs.py`'s v4 seed sweep additionally fixes GMR on (no gmr
+axis) and adds a `clock50` arm on top of the uniform sweep: a targeted-masking
+config that pulls the GMR global-mean channel (`__gmr_extra__surface_temperature`)
+out of the uniform pool into its own `override_groups` entry, dropped as a
+unit w.p. 0.5 each step, while the remaining channels keep the ordinary
+uniform-up-to-20 scheme — concentrating masking budget on the channel
+suspected of carrying the trend shortcut. Gated to GMR-on + v4's single co2
+setting; see that module's docstring for the exact config count and naming.

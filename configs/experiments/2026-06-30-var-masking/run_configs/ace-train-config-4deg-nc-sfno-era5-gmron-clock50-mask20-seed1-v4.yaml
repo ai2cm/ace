@@ -1,4 +1,4 @@
-seed: 3
+seed: 1
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -514,6 +514,8 @@ stepper:
         config:
           embed_dim: 512
           noise_embed_dim: 32
+          spectral_ratio: 0.125
+          filter_num_groups: 16
           noise_type: isotropic
           filter_type: linear
           affine_norms: true
@@ -655,4 +657,9 @@ stepper:
       input_dropout:
         default:
           max_masked_vars: 20
+        override_groups:
+        - variables:
+          - __gmr_extra__surface_temperature
+          masking:
+            rate: 0.5
       include_channel_mask_inputs: true
