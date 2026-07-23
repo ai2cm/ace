@@ -10,11 +10,16 @@ Central planning + outcomes log for distilled downscaling students. Process:
 
 ## ⚡ At a glance  <!-- keep this current: the daily check-in view -->
 
-_Last updated: 2026-07-14._
+_Last updated: 2026-07-23._
 
 ### 🔴 In flight — check for updates, finish write-ups when done
 
-_None._ (`band_gamma` sweep closed 2026-07-14 — see below.)
+- **f-distill step-count sweep** (launched 2026-07-23) — native **1-step**
+  (`01KY8F8DJG89CNVV89257V0B72`) + native **4-step** (`01KY8F8M3BD7NG1QQDNQJJ8KVW`),
+  spectral W=1e-2, **early-stop patience=10** (spec-13, first sweep to use it). Baseline =
+  2-step `i26sidsm`. Finds the quality-vs-NFE knee. First runs launched after plumbing the
+  early-stop flags through the launcher ([`1440599`](https://github.com/ai2cm/ace/commit/144059904)).
+  ([write-up](reports/2026-07-13-fdistill-step-count-sweep-TBD.md))
 
 _Recently closed:_
 - `2yhjonz9` (band_gamma=0.5) + `34rg7wii` (band_gamma=1) → ➕ **mild positive; monotonic
@@ -59,6 +64,8 @@ Every launched run gets a row. `verdict`: ✅ win · ➕ mild positive · ➖ fl
 
 | wandb | date | experiment name | beaker | commit | method / knobs | state | verdict | report |
 |---|---|---|---|---|---|---|---|---|
+| `xklvoz0n` | 2026-07-23 | …-prate-1step | `01KY8F8DJG89CNVV89257V0B72` | [`26a887f`](https://github.com/ai2cm/ace/commit/26a887f9c) | fdistill, spectral W=1e-2, **student-steps=1**, early-stop patience=10 | running | ⏳ running | [report](reports/2026-07-13-fdistill-step-count-sweep-TBD.md) |
+| `850hcj6i` | 2026-07-23 | …-prate-4step | `01KY8F8M3BD7NG1QQDNQJJ8KVW` | [`26a887f`](https://github.com/ai2cm/ace/commit/26a887f9c) | fdistill, spectral W=1e-2, **student-steps=4**, early-stop patience=10 | running | ⏳ running | [report](reports/2026-07-13-fdistill-step-count-sweep-TBD.md) |
 | `f7z93y0a` | 2026-07-07 | …-prate-baseline | `01KWX5CVJQ2BP53VH95WKPVPED` | [`26868ca`](https://github.com/ai2cm/ace/commit/26868ca) | fdistill, no spectral (reference) | crashed@29510 | ➖ baseline | [report](reports/2026-07-07-prate-baseline-f7z93y0a.md) |
 | `i26sidsm` | 2026-07-08 | …-prate-spectral-fix | `01KX00N9SE3ZVQFHQJ54XS0TAP` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, gan=1e-3 | crashed@27820 | ✅ win (mid-train ckpt) | [report](reports/2026-07-08-prate-spectral-fix-i26sidsm.md) |
 | `6dotglmg` | 2026-07-09 | …-prate-spectral-lowgan-fix | `01KX4DRYQ0RSQEWRY5F6QBP9BY` | [`e29f797`](https://github.com/ai2cm/ace/commit/e29f797) | fdistill, spectral W=1e-2, **gan=3e-4** | crashed@14040 | ➖ inconclusive (mild tail gain; crashed before late-drift regime) | [report](reports/2026-07-09-prate-spectral-lowgan-fix-6dotglmg.md) |

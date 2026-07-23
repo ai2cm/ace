@@ -74,8 +74,8 @@ net forward per step at train time. Consequences:
 
 | arm | wandb | beaker | state |
 |---|---|---|---|
-| 1step | `TBD` | `TBD` | not launched |
-| 4step | `TBD` | `TBD` | not launched |
+| 1step | `xklvoz0n` | `01KY8F8DJG89CNVV89257V0B72` | running 2026-07-23 (iter 1, `student_sample_steps=1 early_stop_patience=10`) |
+| 4step | `850hcj6i` | `01KY8F8M3BD7NG1QQDNQJJ8KVW` | running 2026-07-23 (iter 1, `student_sample_steps=4 early_stop_patience=10`) |
 
 ## Decision criteria
 
