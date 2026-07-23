@@ -65,13 +65,23 @@ v5 also adds an sst axis (``sst_options_for_version``): ``sston`` pins
 ``override_groups`` entry (which also removes it from the uniform pool), while
 the tokenless option keeps it in the uniform pool. ``sston`` is skipped at
 mask0, where it would be a no-op. This is 2 (gmr) x 5 = 10 mask0 configs plus
-2 (gmr) x 2 (sst) x 5 = 20 mask20 configs, a v5 grand total of 30:
+2 (gmr) x 2 (sst) x 5 = 20 mask20 configs, i.e. 30:
 gmron/gmroff x mask0, gmron/gmroff x mask20, gmron/gmroff x mask20-sston.
+
+v5 also adds a ``clock50`` arm (from ``TARGETED_ARMS``): at mask20, the GMR
+sentinel channel (``__gmr_extra__surface_temperature``) is pulled into its own
+``override_groups`` entry and masked at rate 0.5 on top of the uniform pool.
+It is GMR-on only — ``gmroff`` removes ``global_mean_removal``, so the sentinel
+channel is never packed and the arm is impossible there (masking it would fail
+config validation, cf. the ``sston``-at-mask0 skip) — and is not crossed with
+the sst axis. This adds 1 (gmron) x 5 = 5 configs (gmron x mask20-clock50), a
+v5 grand total of 35.
 """
 
 import argparse
 import copy
-from typing import NamedTuple, Sequence
+from collections.abc import Sequence
+from typing import NamedTuple
 
 import yaml
 from generate_masking_configs import (
@@ -162,6 +172,7 @@ SEED_GROUPS = [
     SeedGroup("mask20", 20),
 ]
 
+
 class TargetedArm(NamedTuple):
     label: str
     channels: Sequence[str]
@@ -170,10 +181,15 @@ class TargetedArm(NamedTuple):
 
 TARGETED_MASK_LEVEL = 20  # uniform max_masked_vars for the non-targeted channels
 
+# The GMR-sentinel targeted arm (masks the shared global-mean guard channel,
+# __gmr_extra__surface_temperature, at rate 0.5 on top of the uniform pool).
+# Used by v4's TARGETED_ARMS and, GMR-on only, by v5 (see iter_train_configs).
+CLOCK_ARM = TargetedArm("clock50", ["__gmr_extra__surface_temperature"], 0.5)
+
 # v4-only targeted-masking arms: each pulls its channels out of the uniform
 # pool into their own override_groups entry (see TARGETED_MASK_LEVEL).
 TARGETED_ARMS = [
-    TargetedArm("clock50", ["__gmr_extra__surface_temperature"], 0.5),
+    CLOCK_ARM,
     TargetedArm("sst25", ["surface_temperature", "TMP2m"], 0.25),
 ]
 
@@ -205,9 +221,7 @@ def iter_train_configs(
                             # uniform pool is a no-op; skip the duplicate run.
                             continue
                         gmr_token = f"{gmr_name}-" if gmr_name else ""
-                        co2_input_token = (
-                            f"{co2_input_name}-" if co2_input_name else ""
-                        )
+                        co2_input_token = f"{co2_input_name}-" if co2_input_name else ""
                         # v4/v5 have only one (meaningless) co2 option, drop
                         # token.
                         co2_token = "" if version in ("v4", "v5") else f"-{co2_name}"
@@ -268,6 +282,36 @@ def iter_train_configs(
                     )
                     cfg["seed"] = seed
                     configs.append((name, cfg))
+
+    if version == "v5":
+        # v5 clock50 arm: on top of the uniform mask20 pool, pull the GMR
+        # sentinel channel (__gmr_extra__surface_temperature) into its own
+        # group masked at rate 0.5. GMR-on only: gmroff removes
+        # global_mean_removal, so the sentinel channel is never packed and the
+        # arm is impossible there (cf. the sston-at-mask0 skip above). Not
+        # crossed with the sst axis. v5 has no co2 input (co2out).
+        gmron_name = next(name for name, keep in GMR_OPTIONS.items() if keep)
+        for seed in range(n_seeds):
+            name = (
+                f"{BASE_CONFIG_STEM}-{gmron_name}-mask{TARGETED_MASK_LEVEL}"
+                f"-{CLOCK_ARM.label}-seed{seed}-{version}"
+            )
+            cfg = copy.deepcopy(base)
+            _apply_co2_input(cfg, include_co2=False)
+            _apply_settings(
+                cfg,
+                TARGETED_MASK_LEVEL,
+                co2_rate=None,
+                keep_gmr=True,
+                extra_override_groups=[
+                    {
+                        "variables": list(CLOCK_ARM.channels),
+                        "masking": {"rate": CLOCK_ARM.rate},
+                    }
+                ],
+            )
+            cfg["seed"] = seed
+            configs.append((name, cfg))
     return configs
 
 
