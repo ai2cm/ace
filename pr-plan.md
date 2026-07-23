@@ -1,11 +1,11 @@
 # Make evaluating all forward steps configurable per inline-validation entry
 
-Adds `evaluate_all_steps: bool = False` to `InlineValidationConfig` and plumbs it through the
-shared validation loop, so ACE validation defaults to rolling out only the stochastically-sampled
-step count per batch. `PerStepLossAggregator` is reworked to reduce count-weighted sums with an
-agreed-on key universe, so ranks with mismatched `loss_step_N` key sets neither hang nor corrupt
-means. The stepper itself already implements both behaviors (`train_on_batch(evaluate_all_steps=...)`);
-no stepper code changes.
+Adds `evaluate_all_steps: bool = False` to both the ACE and coupled `InlineValidationConfig`
+and plumbs it through the shared validation loop, so inline validation defaults to rolling out
+only the stochastically-sampled step count per batch. `PerStepLossAggregator` is reworked to
+reduce count-weighted sums with an agreed-on key universe, so ranks with mismatched
+`loss_step_N` key sets neither hang nor corrupt means. Both steppers already implement both
+behaviors (`train_on_batch(evaluate_all_steps=...)`); no stepper code changes.
 
 ---
 
@@ -38,7 +38,8 @@ counts. New scheme:
   skipped. Non-step keys get the same sum/count treatment keyed by name.
 - Family names and non-step key names are assumed rank-symmetric (as today — every rank that
   records batches produces the same families); the delta this PR must handle is per-step key sets
-  differing across ranks within a family.
+  differing across ranks within a family. This robustness is live for both trainers, since the
+  coupled sampled default also produces sparse per-step key sets.
 - Count-weighting is unconditional (no legacy path). Reported values shift slightly vs. today's
   unweighted mean-of-rank-means whenever ranks have unequal batch counts — including existing
   deterministic runs; negligible vs. batch noise. Chosen over preserving the old definition to
@@ -66,7 +67,7 @@ def run_validation(
 ```python
 @dataclasses.dataclass
 class ValidationTask(Generic[BD, TO]):
-    evaluate_all_steps: bool = True  # NEW — default keeps coupled train_config call sites untouched
+    evaluate_all_steps: bool = True  # NEW — both trainers pass explicitly; dense-by-default at the generic layer
 
 def build_validation_callback(...) -> ValidationCallback:  # CHANGED — passes task.evaluate_all_steps to run_validation
     ...
@@ -105,6 +106,24 @@ def _get_validate_stepper_callback(...) -> ValidateStepper:  # CHANGED — LR tu
 - No `__post_init__` validation added (nothing invalid to reject). A fixed-integer step-count
   mode was considered and dropped as speculative; a later widening to `bool | int` stays
   config-compatible.
+
+## `fme/coupled/train/train_config.py` (modified)
+
+```python
+@dataclasses.dataclass
+class InlineValidationConfig:
+    evaluate_all_steps: bool = False  # NEW — mirrors the ACE field; False evaluates only the steps the coupled loss samples for the batch, True rolls out the full window with dense per-realm per-step metrics
+
+def _get_validation_callback(...) -> ValidationCallback:  # CHANGED — forwards each entry's evaluate_all_steps into its ValidationTask
+    ...
+
+def _get_validate_stepper_callback(...) -> ValidateStepper:  # CHANGED — LR tuning forwards each entry's flag to run_validation_loop
+    ...
+```
+
+Same rationale and default as the ACE field. The coupled sampled-eval path already exists
+(`CoupledTrainStepper.train_on_batch(evaluate_all_steps=False)` computes `loss/{realm}_step_{k}`
+only for sampled steps, seeded via `seed_eval`), so this is config plumbing only.
 
 ---
 
@@ -160,5 +179,20 @@ def test_validation_callback_per_entry_evaluate_all_steps():
     # GOAL: highest-seam test — run the validation callback end-to-end with a sampled
     # schedule and two entries (one sampled, one all-steps); assert sparse vs. dense
     # per-step metrics per entry and an unchanged weighted validation loss.
+    ...
+```
+
+## `fme/coupled/train/test_train_config.py` (modified)
+
+```python
+def test_inline_validation_config_evaluate_all_steps_default():
+    # GOAL: config round-trip — YAML omitting the field parses with
+    # evaluate_all_steps=False; explicit true/false parse through.
+    ...
+
+def test_validation_callback_per_entry_evaluate_all_steps():
+    # GOAL: entry flag reaches the coupled validation loop — with stochastic
+    # per-component n_steps, a sampled entry yields sparse loss/{realm}_step_{k}
+    # metrics and an all-steps entry yields dense ones.
     ...
 ```
