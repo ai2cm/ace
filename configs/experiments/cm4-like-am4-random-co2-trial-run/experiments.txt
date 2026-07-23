@@ -1,0 +1,6 @@
+group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace
+
+
+cm4_like_am4_random_co2-trial_run|rs0|01KBPFAZBZ7F1M9W50Q6R70DBG|training|best_inference_ckpt|normal|--not-preemptible
+
+cm4_like_am4_random_co2-trial_run|rs0|01KBQEGY826AEGHSVJF8HW02QY|training|best_inference_ckpt|normal|--not-preemptible

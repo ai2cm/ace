@@ -1,0 +1,13 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+SamudrACE_piControl_ablation-traindata_20yrs|rs0|||train|high|a100+h100|4|300GiB|3||max_epochs=580 resume_results.resume_wandb=true|01KFT0XJHW4TCXZWK6J2468W62
+
+SamudrACE_piControl_ablation-traindata_20yrs|rs1|||train|high|a100+h100|4|300GiB|3||max_epochs=580 resume_results.resume_wandb=true|01KFSW4QS014HE59RHRNEXG4N8
+
+SamudrACE_piControl_ablation-traindata_20yrs|rs2|||train|high|a100+h100|4|300GiB|3||max_epochs=580 resume_results.resume_wandb=true|01KFT6H3KHPW4CF6CYNKKWVTTZ
+
+SamudrACE_piControl_ablation-traindata_40yrs|rs0|||train|high|a100+h100|4|300GiB|3||max_epochs=580 resume_results.resume_wandb=true|01KFVET6781JCSY6AWC1RNXE03
+
+SamudrACE_piControl_ablation-traindata_40yrs|rs1|||train|high|a100+h100|4|300GiB|3||max_epochs=580 resume_results.resume_wandb=true|01KFW8CCDC5TRKHK90BP6QBDA2
+
+SamudrACE_piControl_ablation-traindata_40yrs|rs2|||train|high|a100+h100|4|300GiB|3||max_epochs=580 resume_results.resume_wandb=true|01KFW6CW3Q2QMCA22BMWHM4Z33

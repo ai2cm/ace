@@ -1,0 +1,3 @@
+group|tag|exper_id|status|ckpt_type|priority|premptible_flag|override|results_dataset|workspace
+ft-1y8prir2-20ep-cosine_annealing||01JZHQJXBGRW367AXKJFG1BCR0|skip|best_inference_ckpt|normal|--not-preemptible|||ai2/ace
+ft-xsowtml8-20ep-cosine_annealing||01JZTQ0VSBDTYN6WVDD4KR9V9W|skip|best_inference_ckpt|normal|--not-preemptible

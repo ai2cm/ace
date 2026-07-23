@@ -1,0 +1,2 @@
+group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|existing_results_dataset
+fto-no_smoothing-484ss1vq-2aw6z7n3-wuLR-ncs4-20ep|ace-samudra-coupled-cm4|9r07dbti|train|high||8|800GiB|2||

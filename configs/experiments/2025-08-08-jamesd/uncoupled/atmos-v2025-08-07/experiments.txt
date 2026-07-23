@@ -1,0 +1,4 @@
+group|exper_id|status|ckpt_type|priority|premptible_flag
+v2025-08-07-ts_uncoupled-rs1|01K2652M7FP3AFRN8FMCMM4T9B|run_ICx1|best_inference_ckpt|normal|--not-preemptible
+v2025-08-07-ts_uncoupled-rs1|01K2652M7FP3AFRN8FMCMM4T9B|run_ICx1|best_ckpt|normal|--not-preemptible
+v2025-08-07-ts_uncoupled-rs1-finetune||01K2H2DX7K6D25HWZRW82TMCVN|training|best_inference_ckpt|normal|--not-preemptible

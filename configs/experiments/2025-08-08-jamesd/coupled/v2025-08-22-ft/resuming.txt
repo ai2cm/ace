@@ -1,0 +1,2 @@
+group|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+ft-v2025-08-22-const_lr_20ep-ncs1-oloss_w0p1|ace-samudra-coupled-cm4|sad8rguj|train|urgent|ceres|8|800GiB|3||max_epochs=20 resume_results.resume_wandb=False

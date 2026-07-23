@@ -796,12 +796,16 @@ class ValidationTask(Generic[BD, TO]):
             preserving the existing per-epoch construction semantics.
         weight: Contribution weight for the combined validation loss. Zero means
             the task runs but does not contribute to the metric.
+        evaluate_all_steps: Whether the stepper evaluates every forward step
+            in the data window, or only the steps it would evaluate for the
+            batch during training.
     """
 
     name: str
     data: GriddedDataABC[BD]
     aggregator_factory: Callable[[], AggregatorABC[TO]]
     weight: float = 0.0
+    evaluate_all_steps: bool = True
 
 
 def build_validation_callback(
@@ -823,6 +827,7 @@ def build_validation_callback(
                 label=task.name,
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
+                evaluate_all_steps=task.evaluate_all_steps,
             )
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:

@@ -1,0 +1,4 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+SamudrACE_piControl_ablation-traindata_80yrs|rs1|train|high|a100+h100|4|400GiB|3||seed=1
+SamudrACE_piControl_ablation-traindata_80yrs|rs2|train|high|a100+h100|4|400GiB|3||seed=2

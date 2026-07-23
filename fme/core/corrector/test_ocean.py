@@ -385,14 +385,14 @@ def test_ocean_heat_content_correction(hfds_type):
     )
     timestep = datetime.timedelta(seconds=5 * 24 * 3600)
     nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
-    mask = torch.ones(nsamples, nlat, nlon, nlevels)
-    mask[:, 0, 0, 0] = 0.0
-    mask[:, 0, 0, 1] = 0.0
-    mask[:, 0, 1, 1] = 0.0
+    mask = torch.ones(nlat, nlon, nlevels)
+    mask[0, 0, 0] = 0.0
+    mask[0, 0, 1] = 0.0
+    mask[0, 1, 1] = 0.0
     masks = {
-        "mask_0": mask[:, :, :, 0],
-        "mask_1": mask[:, :, :, 1],
-        "mask_2d": mask[:, :, :, 0],
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
     }
     spatial_mask_provider = SpatialMaskProvider(masks)
     ops = LatLonOperations(torch.ones(size=[3, 3]), spatial_mask_provider)
@@ -400,7 +400,7 @@ def test_ocean_heat_content_correction(hfds_type):
     idepth = torch.tensor([2.5, 10, 20])
     depth_coordinate = DepthCoordinate(idepth, mask)
 
-    sea_surface_fraction = mask[:, :, :, 0]
+    sea_surface_fraction = mask[:, :, 0]
 
     input_data_dict = {
         "thetao_0": torch.ones(nsamples, nlat, nlon),

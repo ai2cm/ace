@@ -386,6 +386,8 @@ def run_inference_from_config(config: InferenceConfig):
             ocean_fraction_name=stepper.ocean_fraction_name,
             label_override=config.labels,
         )
+        stepper.backfill_deptho(data.dataset_info.vertical_coordinate)
+
         # Broadcast the initial condition across ensemble members only after the
         # forcing loader is built, mirroring the evaluator path. The forcing then
         # has one window per initial condition (n_ensemble=1) and predict_paired

@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|preemptible|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset
+
+coupled_standalone_components-x8tjinoj_23fb16x5|||run_ICx1|best_inference_ckpt|high|--not-preemptible||01JX4DEKY2A13D6Y95T53DSVCQ|||01JX4DEKY2A13D6Y95T53DSVCQ|01JXXESTVASYBEKBM1VAWCRV87

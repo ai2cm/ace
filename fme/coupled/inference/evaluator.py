@@ -479,6 +479,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         dataset_info=stepper.training_dataset_info,
     )
     stepper.set_eval()
+    stepper.ocean.backfill_deptho(data.ocean_properties.vertical_coordinate)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))

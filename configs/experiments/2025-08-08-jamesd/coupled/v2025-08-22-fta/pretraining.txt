@@ -1,0 +1,2 @@
+group|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override
+fta-v2025-08-22-cos_lr_20ep|ace-samudra-cm4|ntslj27c|best_inference_ckpt|ace2-cm4-atmos-noLSM|ud6gm418|best_ckpt|train|high|ceres|8|800GiB|0

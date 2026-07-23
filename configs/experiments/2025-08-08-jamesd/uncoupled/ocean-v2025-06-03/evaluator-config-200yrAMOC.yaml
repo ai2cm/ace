@@ -1,0 +1,50 @@
+experiment_dir: /results
+n_forward_steps: 14598
+forward_steps_in_memory: 18
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names:
+    - zos
+    - vo_0
+    - vo_1
+    - vo_2
+    - vo_3
+    - vo_4
+    - vo_5
+    - vo_6
+    - vo_7
+    - vo_8
+    - vo_9
+    - vo_10
+    - vo_11
+    - vo_12
+    - vo_13
+    - vo_14
+    - vo_15
+    - vo_16
+    - vo_17
+    - vo_18
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-06-03-cm4-piControl-200yr-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3/data.zarr
+      engine: zarr
+  num_data_workers: 1
