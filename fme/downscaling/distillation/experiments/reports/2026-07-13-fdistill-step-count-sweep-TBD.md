@@ -46,15 +46,26 @@ net forward per step at train time. Consequences:
 | `i26sidsm` (existing) | 2 | — | **baseline** | — |
 | **4step** | 4 | from teacher (scratch) | more-NFE candidate | #2 |
 
-- **Launch:**
+- **Launch** (commit [`1440599`](https://github.com/ai2cm/ace/commit/144059904), which
+  plumbs the spec-13 early-stop flags through the launcher):
   ```
   conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.sh \
-      fdistill --suffix 1step --spectral-weight 1e-2 --student-steps 1
+      fdistill --suffix 1step --spectral-weight 1e-2 --student-steps 1 \
+      --early-stop-patience 10
   conda run -n fme bash configs/experiments/2026-05-18-distillation-with-val/run.sh \
-      fdistill --suffix 4step --spectral-weight 1e-2 --student-steps 4
+      fdistill --suffix 4step --spectral-weight 1e-2 --student-steps 4 \
+      --early-stop-patience 10
   ```
 - Everything else matches `i26sidsm` (W=1e-2, `band_gamma=0`, gan=1e-3, single-model
-  PRATEsfc teacher); only `--student-steps` differs.
+  PRATEsfc teacher); `--student-steps` differs, plus **early stopping is newly enabled**.
+- **Early stopping (spec-13, new this sweep):** `--early-stop-patience 10`
+  (`--spec-patience-window` left at default 5) halts each run ~10 validations (~5k steps)
+  after its rolling-median `val/spec_mae_mean` optimum, and writes `best_student_spec.ckpt`
+  at that optimum. The baseline `i26sidsm` predates spec-13 — it ran to a manual cancel and
+  its comparison checkpoint was hand-picked at the best-sustained spectrum. So the fair
+  cross-arm comparison is **each arm's `best_student_spec.ckpt`** (and `i26sidsm`'s
+  hand-picked best-sustained), not raw last-step values. This removes the checkpoint-
+  selection trap that confounded every prior arm.
 - **Note (1-step + spectral):** `fdistill_kl_spike.py` comments that `STUDENT_STEPS=1`
   historically paired with a higher GAN weight / different LR (`:102–112`). Keep gan=1e-3
   for a clean step-only delta first; revisit if the 1-step run is GAN-unstable.
