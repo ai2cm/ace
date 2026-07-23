@@ -7,10 +7,12 @@ import dacite
 import torch
 
 import fme
+from fme.ace.stepper import StepperOverrideConfig, apply_stepper_override
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import (
     load_stepper_config_with_override as load_single_stepper_config,
 )
+from fme.ace.stepper.single_module import apply_stepper_override_to_stepper_config
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
@@ -39,6 +41,60 @@ from fme.coupled.stepper import (
 )
 
 
+def _validate_coupled_component_override(
+    override: StepperOverrideConfig | None,
+) -> None:
+    """Restrict coupled inference overrides to ``prescribed_prognostic_names``.
+
+    ``CoupledStepperConfig`` caches cross-component forcing-name sets and
+    validates component compatibility at construction. Only
+    ``prescribed_prognostic_names`` is recomputed on demand; an ``ocean``,
+    ``multi_call`` or ``derived_forcings`` override applied afterward would leave
+    those caches stale, so reject them rather than silently use stale values.
+    """
+    if override is None:
+        return
+    unsupported = [
+        name
+        for name, value in (
+            ("ocean", override.ocean),
+            ("multi_call", override.multi_call),
+            ("derived_forcings", override.derived_forcings),
+        )
+        if value != "keep"
+    ]
+    if unsupported:
+        raise ValueError(
+            "Coupled inference overrides only support prescribed_prognostic_names, "
+            f"but got unsupported override(s): {sorted(unsupported)}."
+        )
+
+
+def apply_coupled_stepper_config_inference_overrides(
+    coupled_config: CoupledStepperConfig,
+    ocean_override: StepperOverrideConfig | None,
+    atmosphere_override: StepperOverrideConfig | None,
+) -> None:
+    """Mutate ``coupled_config`` in place for inference overrides.
+
+    Forcing-window names are computed on demand from the (now mutated) component
+    step configs, so no explicit refresh is needed.
+    """
+    _validate_coupled_component_override(ocean_override)
+    _validate_coupled_component_override(atmosphere_override)
+    if ocean_override is not None:
+        apply_stepper_override_to_stepper_config(
+            coupled_config.ocean.stepper, ocean_override
+        )
+    if atmosphere_override is not None:
+        apply_stepper_override_to_stepper_config(
+            coupled_config.atmosphere.stepper, atmosphere_override
+        )
+    # overrides may have changed prescribed_prognostic_names after
+    # CoupledStepperConfig.__post_init__ validated them
+    coupled_config.validate_prescribed_prognostic_names()
+
+
 @dataclasses.dataclass
 class StandaloneComponentConfig:
     """
@@ -63,6 +119,9 @@ class StandaloneComponentCheckpointsConfig:
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.
         sst_name: Name of the sea surface temperature field in the ocean data.
+        ocean_stepper_override: Optional overrides when loading the ocean Stepper.
+        atmosphere_stepper_override: Optional overrides when loading the atmosphere
+            Stepper (e.g. prescribed_prognostic_names for inference).
 
     """
 
@@ -70,24 +129,32 @@ class StandaloneComponentCheckpointsConfig:
     atmosphere: StandaloneComponentConfig
     sst_name: str = "sst"
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
+    ocean_stepper_override: StepperOverrideConfig | None = None
+    atmosphere_stepper_override: StepperOverrideConfig | None = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
             ocean=ComponentConfig(
                 timedelta=self.ocean.timedelta,
-                stepper=load_single_stepper_config(self.ocean.path),
+                stepper=load_single_stepper_config(
+                    self.ocean.path, self.ocean_stepper_override
+                ),
             ),
             atmosphere=ComponentConfig(
                 timedelta=self.atmosphere.timedelta,
-                stepper=load_single_stepper_config(self.atmosphere.path),
+                stepper=load_single_stepper_config(
+                    self.atmosphere.path, self.atmosphere_stepper_override
+                ),
             ),
             sst_name=self.sst_name,
             ocean_fraction_prediction=self.ocean_fraction_prediction,
         )
 
     def load_stepper(self) -> CoupledStepper:
-        ocean = load_single_stepper(self.ocean.path)
-        atmosphere = load_single_stepper(self.atmosphere.path)
+        ocean = load_single_stepper(self.ocean.path, self.ocean_stepper_override)
+        atmosphere = load_single_stepper(
+            self.atmosphere.path, self.atmosphere_stepper_override
+        )
         dataset_info = CoupledDatasetInfo(
             ocean=ocean.training_dataset_info,
             atmosphere=atmosphere.training_dataset_info,
@@ -103,12 +170,20 @@ class StandaloneComponentCheckpointsConfig:
 
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
+    ocean_stepper_override: StepperOverrideConfig | None = None,
+    atmosphere_stepper_override: StepperOverrideConfig | None = None,
 ) -> CoupledStepperConfig:
     """Load a coupled stepper configuration.
 
     Args:
         checkpoint_path: The path to the serialized CoupledStepper checkpoint, or a
             StandaloneComponentCheckpointsConfig.
+        ocean_stepper_override: When ``checkpoint_path`` is a single coupled checkpoint
+            file, optional overrides merged into the ocean ``StepperConfig`` **before**
+            computing forcing-window requirements (e.g. ``prescribed_prognostic_names``
+            for a checkpoint that was saved without them). Ignored for
+            ``StandaloneComponentCheckpointsConfig`` (use overrides on that object).
+        atmosphere_stepper_override: Same for the atmosphere component.
 
     Returns:
         The CoupledStepperConfig from the serialized checkpoint or constructed from the
@@ -127,18 +202,30 @@ def load_stepper_config(
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     config = CoupledStepperConfig.from_state(checkpoint["stepper"]["config"])
-
+    apply_coupled_stepper_config_inference_overrides(
+        config,
+        ocean_override=ocean_stepper_override,
+        atmosphere_override=atmosphere_stepper_override,
+    )
     return config
 
 
 def load_stepper(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
+    ocean_stepper_override: StepperOverrideConfig | None = None,
+    atmosphere_stepper_override: StepperOverrideConfig | None = None,
 ) -> CoupledStepper:
     """Load a coupled stepper.
 
     Args:
         checkpoint_path: The path to the serialized CoupledStepper checkpoint, or a
             StandaloneComponentCheckpointsConfig.
+        ocean_stepper_override: When loading a single coupled checkpoint, optional
+            overrides for the ocean Stepper (ignored for
+            StandaloneComponentCheckpointsConfig).
+        atmosphere_stepper_override: When loading a single coupled checkpoint, optional
+            overrides for the atmosphere Stepper (ignored for
+            StandaloneComponentCheckpointsConfig).
 
     Returns:
         The CoupledStepper serialized in the checkpoint or constructed from the
@@ -154,12 +241,47 @@ def load_stepper(
         )
         return checkpoint_path.load_stepper()
 
-    return load_coupled_stepper(checkpoint_path)
+    stepper = load_coupled_stepper(checkpoint_path)
+    _validate_coupled_component_override(ocean_stepper_override)
+    _validate_coupled_component_override(atmosphere_stepper_override)
+    # Overrides mutate each component Stepper's config, which the CoupledStepper
+    # aliases as its nested CoupledStepperConfig component config, so forcing
+    # windows (computed on demand) reflect the overrides automatically.
+    if atmosphere_stepper_override is not None:
+        apply_stepper_override(stepper.atmosphere, atmosphere_stepper_override)
+    if ocean_stepper_override is not None:
+        apply_stepper_override(stepper.ocean, ocean_stepper_override)
+    # overrides may have changed prescribed_prognostic_names after
+    # CoupledStepperConfig.__post_init__ validated them
+    stepper.config.validate_prescribed_prognostic_names()
+    return stepper
 
 
 def _validate_coupled_steps_config(n_coupled_steps: int, coupled_steps_in_memory: int):
     if n_coupled_steps % coupled_steps_in_memory:
         raise ValueError("n_coupled_steps must be divisible by coupled_steps_in_memory")
+
+
+def _validate_stepper_overrides(
+    checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
+    ocean_stepper_override: StepperOverrideConfig | None,
+    atmosphere_stepper_override: StepperOverrideConfig | None,
+) -> None:
+    """Reject top-level stepper overrides for standalone component checkpoints.
+
+    The top-level ``ocean_stepper_override`` / ``atmosphere_stepper_override`` only
+    apply when loading a single coupled checkpoint. A
+    ``StandaloneComponentCheckpointsConfig`` carries its own per-component overrides,
+    so top-level ones would be silently ignored; raise instead.
+    """
+    if isinstance(checkpoint_path, StandaloneComponentCheckpointsConfig) and (
+        ocean_stepper_override is not None or atmosphere_stepper_override is not None
+    ):
+        raise ValueError(
+            "ocean_stepper_override / atmosphere_stepper_override are only "
+            "supported when loading a single coupled checkpoint. Set overrides on "
+            "the StandaloneComponentCheckpointsConfig components instead."
+        )
 
 
 @dataclasses.dataclass
@@ -182,6 +304,12 @@ class InferenceEvaluatorConfig:
         prediction_loader: Configuration for prediction data to evaluate. If given,
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
+        ocean_stepper_override: Optional overrides when loading a **single** coupled
+            checkpoint (not ``StandaloneComponentCheckpointsConfig``), applied to the
+            ocean ``Stepper`` and to ``CoupledStepperConfig`` used for forcing windows
+            (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
+        atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
+            when loading a single coupled checkpoint.
     """
 
     experiment_dir: str
@@ -197,10 +325,17 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     prediction_loader: InferenceDataLoaderConfig | None = None
+    ocean_stepper_override: StepperOverrideConfig | None = None
+    atmosphere_stepper_override: StepperOverrideConfig | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
             self.n_coupled_steps, self.coupled_steps_in_memory
+        )
+        _validate_stepper_overrides(
+            self.checkpoint_path,
+            self.ocean_stepper_override,
+            self.atmosphere_stepper_override,
         )
 
     def configure_logging(self, log_filename: str):
@@ -210,10 +345,18 @@ class InferenceEvaluatorConfig:
         )
 
     def load_stepper(self) -> CoupledStepper:
-        return load_stepper(self.checkpoint_path)
+        return load_stepper(
+            self.checkpoint_path,
+            ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
+        )
 
     def load_stepper_config(self) -> CoupledStepperConfig:
-        return load_stepper_config(self.checkpoint_path)
+        return load_stepper_config(
+            self.checkpoint_path,
+            ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
+        )
 
     def get_data_writer(
         self,

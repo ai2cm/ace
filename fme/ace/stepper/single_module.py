@@ -744,6 +744,9 @@ class StepperConfig:
         """
         self.step.replace_prescribed_prognostic_names(names)
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self.step.get_prescribed_prognostic_names()
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1031,6 +1034,9 @@ class Stepper:
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
+
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self._config.get_prescribed_prognostic_names()
 
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
@@ -1968,32 +1974,38 @@ def load_stepper(
         The stepper serialized in the checkpoint, with appropriate options
         overridden.
     """
-    if override_config is None:
-        override_config = StepperOverrideConfig()
-
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
+    apply_stepper_override(stepper, override_config)
+    return stepper
 
+
+def apply_stepper_override(
+    stepper: Stepper, override_config: StepperOverrideConfig | None = None
+) -> None:
+    """Apply optional inference-time overrides to a loaded stepper.
+
+    Used by load_stepper and by coupled inference when loading component steppers.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
     if override_config.ocean != "keep":
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
         )
         stepper.replace_ocean(override_config.ocean)
-
     if override_config.multi_call != "keep":
         logging.info(
             "Overriding training multi_call configuration with a new "
             "multi_call configuration."
         )
         stepper.replace_multi_call(override_config.multi_call)
-
     if override_config.derived_forcings != "keep":
         logging.info(
             "Overriding training derived_forcings configuration with a new "
             "derived_forcings configuration."
         )
         stepper.replace_derived_forcings(override_config.derived_forcings)
-
     if override_config.prescribed_prognostic_names != "keep":
         logging.info(
             "Overriding prescribed_prognostic_names with %s.",
@@ -2002,4 +2014,42 @@ def load_stepper(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
-    return stepper
+
+
+def apply_stepper_override_to_stepper_config(
+    stepper_config: StepperConfig,
+    override_config: StepperOverrideConfig | None = None,
+) -> None:
+    """Apply optional inference-time overrides to a ``StepperConfig``.
+
+    Mirrors :func:`apply_stepper_override` for a config that is not backed by a
+    built ``Stepper`` (e.g. when computing data requirements before loading
+    weights). A ``multi_call`` override is rejected because replacing it needs
+    the serialized step state, which only a full ``Stepper`` carries.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
+    if override_config.ocean != "keep":
+        logging.info(
+            "Overriding training ocean configuration with a new ocean configuration."
+        )
+        stepper_config.replace_ocean(override_config.ocean)
+    if override_config.multi_call != "keep":
+        raise ValueError(
+            "StepperOverrideConfig.multi_call cannot be applied to a StepperConfig "
+            "without a built Stepper; load the full Stepper to override multi_call."
+        )
+    if override_config.derived_forcings != "keep":
+        logging.info(
+            "Overriding training derived_forcings configuration with a new "
+            "derived_forcings configuration."
+        )
+        stepper_config.replace_derived_forcings(override_config.derived_forcings)
+    if override_config.prescribed_prognostic_names != "keep":
+        logging.info(
+            "Overriding prescribed_prognostic_names with %s.",
+            override_config.prescribed_prognostic_names,
+        )
+        stepper_config.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )

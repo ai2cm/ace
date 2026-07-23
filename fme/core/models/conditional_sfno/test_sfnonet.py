@@ -284,7 +284,9 @@ def test_block_speed():
     )
 
 
-def _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean, bias=False):
+def _make_spectral_conv(
+    nlat, nlon, embed_dim, preserve_global_mean, bias=False, spectral_ratio=1.0
+):
     dist = Distributed.get_instance()
     modes_lat = nlat
     modes_lon = nlon // 2 + 1
@@ -301,6 +303,7 @@ def _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean, bias=False)
         embed_dim,
         bias=bias,
         preserve_global_mean=preserve_global_mean,
+        spectral_ratio=spectral_ratio,
     )
     return conv, sht
 
@@ -322,6 +325,31 @@ def test_filter_preserves_global_mean():
     torch.testing.assert_close(
         out_spectral[:, :, 0, :], x_spectral[:, :, 0, :], atol=1e-5, rtol=1e-5
     )
+
+
+def test_filter_preserves_global_mean_with_spectral_ratio():
+    """With spectral_ratio < 1, preserve_global_mean still bypasses the l=0
+    per-mode weight: its output is discarded, so mutating it does not change the
+    forward output and it receives no gradient."""
+    torch.manual_seed(0)
+    nlat, nlon, embed_dim = 16, 32, 8
+    device = get_device()
+    conv, _ = _make_spectral_conv(
+        nlat, nlon, embed_dim, preserve_global_mean=True, spectral_ratio=0.5
+    )
+    conv = conv.to(device)
+    assert conv.spectral_channels == embed_dim // 2
+
+    x = torch.randn(2, embed_dim, nlat, nlon, device=device)
+    with torch.no_grad():
+        baseline, _ = conv(x)
+        conv.weight[:, 0] += 10.0  # l=0 row of the per-mode weight
+        perturbed, _ = conv(x)
+    torch.testing.assert_close(perturbed, baseline, atol=1e-5, rtol=1e-5)
+
+    conv(x)[0].sum().backward()
+    assert torch.all(conv.weight.grad[:, 0] == 0)
+    assert not torch.all(conv.weight.grad[:, 1:] == 0)
 
 
 def test_sfnonet_spectral_ratio_end_to_end():
@@ -377,15 +405,17 @@ def test_sfnonet_spectral_ratio_rejects_non_linear_filter():
         )
 
 
-def test_sfnonet_spectral_ratio_rejects_preserve_global_mean():
-    with pytest.raises(NotImplementedError, match="filter_preserves_global_mean"):
-        SFNONetConfig(
-            embed_dim=16,
-            num_layers=2,
-            filter_type="linear",
-            spectral_ratio=0.5,
-            filter_preserves_global_mean=True,
-        )
+def test_sfnonet_spectral_ratio_allows_preserve_global_mean():
+    # spectral_ratio < 1 and filter_preserves_global_mean are now compatible:
+    # the l=0 coefficient is restored in full-channel grid space, outside the
+    # reduced-channel bottleneck.
+    SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        spectral_ratio=0.5,
+        filter_preserves_global_mean=True,
+    )
 
 
 def test_sfnonet_spectral_ratio_rejects_local_blocks():
@@ -409,6 +439,88 @@ def test_sfnonet_spectral_ratio_rejects_indivisible_groups():
             spectral_ratio=0.25,
             filter_num_groups=4,
         )
+
+
+def test_sfnonet_spectral_ratio_preserve_global_mean_end_to_end():
+    """Combined spectral_ratio < 1 and filter_preserves_global_mean: the model
+    builds, forwards, and backpropagates through the reduced-channel projections
+    while the l=0 per-mode weight stays bypassed."""
+    torch.manual_seed(0)
+    input_channels = 2
+    output_channels = 3
+    embed_dim = 16
+    img_shape = (9, 18)
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=embed_dim,
+        num_layers=2,
+        filter_type="linear",
+        spectral_ratio=0.5,
+        filter_preserves_global_mean=True,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(2, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
+    assert output.shape == (2, output_channels, *img_shape)
+    output.sum().backward()
+    for block in model.blocks:
+        spectral_conv = block.filter.filter
+        assert spectral_conv._preserve_global_mean
+        assert spectral_conv.spectral_channels == embed_dim // 2
+        assert spectral_conv.weight.grad is not None
+        # l=0 per-mode weight is bypassed; the other modes still train.
+        assert torch.all(spectral_conv.weight.grad[:, 0] == 0)
+        assert not torch.all(spectral_conv.weight.grad[:, 1:] == 0)
+        assert spectral_conv.pre_proj.weight.grad is not None
+        assert spectral_conv.post_proj.weight.grad is not None
+
+
+@pytest.mark.parallel
+def test_sfnonet_spectral_ratio_preserve_global_mean_spatial_parallel():
+    """spectral_ratio < 1 with filter_preserves_global_mean builds and forwards
+    under spatial parallelism: the l=0 passthrough is a spectral-domain copy on
+    the l_start == 0 rank, distributed exactly like the spectral_ratio == 1
+    path, so it needs no full-grid quadrature and no rejection."""
+    torch.manual_seed(0)
+    dist = Distributed.get_instance()
+    if dist.world_size == dist.total_data_parallel_ranks:
+        pytest.skip("no spatial parallelism in this configuration")
+    embed_dim = 16
+    img_shape = (8, 16)  # divides evenly across spatial ranks
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=embed_dim,
+        num_layers=2,
+        filter_type="linear",
+        spectral_ratio=0.5,
+        filter_preserves_global_mean=True,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params, img_shape=img_shape, in_chans=2, out_chans=2
+    ).to(device)
+    x_global = torch.randn(2, 2, *img_shape, device=device)
+    h_slice, w_slice = dist.get_local_slices(img_shape)
+    x_local = x_global[..., h_slice, w_slice]
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x_local, context)
+    assert output.shape == (2, 2, *x_local.shape[-2:])
+    output.sum().backward()
 
 
 def test_filter_preserves_global_mean_allows_grad():
