@@ -1,4 +1,4 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
-cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
-cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs1|train|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
-cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs2|train|high|h100|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs0|train|high|h100|1|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs1|train|high|h100|1|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs2|train|high|h100|1|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
