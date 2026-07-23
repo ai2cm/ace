@@ -408,12 +408,16 @@ def to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
     return xr.Dataset(data_vars, coords={"valid_time": time})
 
 
-def _get_min_samples(timestep: datetime.timedelta) -> int:
-    steps_per_day = datetime.timedelta(days=1) // timestep
-    # 350-day threshold keeps years that are complete apart from a small
-    # offset at the rollout start (e.g. an initial condition a few days
-    # into the year), while still excluding genuinely partial years.
-    return 350 * steps_per_day
+# A year is kept in the annual mean series only if it holds more samples than
+# this many days' worth. 350 leaves ~15 days of slack below a full year so that
+# a rollout whose initial condition is offset a few days into a year keeps its
+# first year, while genuinely partial (e.g. mid-year-start) years are dropped.
+MIN_COMPLETE_YEAR_DAYS = 350
+
+
+def _get_min_samples(timestep: datetime.timedelta) -> float:
+    steps_per_day = datetime.timedelta(days=1) / timestep
+    return MIN_COMPLETE_YEAR_DAYS * steps_per_day
 
 
 @dataclasses.dataclass
