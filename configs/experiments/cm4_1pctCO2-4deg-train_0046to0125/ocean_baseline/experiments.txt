@@ -2,3 +2,5 @@
 cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs0|01KY8K6PF3X1BEE3CK4RRN9P7G|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs1|01KY8K6Z5V9F21G24Q1ANXH7WB|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs2|01KY8K78H16X4CBSNTZ4Q23SVG|training|best_inference_ckpt|normal|--min-runtime 8h
