@@ -7,7 +7,7 @@ Each generated config name ends in ``-v1``, ``-v2``, ``-v3`` or ``-v4``
 (``--version`` selects which baseline config to source from, default v1; see
 ``baseline_configs/versions.md``). The ``global_mean_removal`` stepper config
 is kept as in the baseline (GMR fixed on, no gmr token) for v1 and v4, unlike
-``generate_masking_configs.py``; v2/v3 sweep both gmron/gmroff (see
+``generate_masking_configs.py``; v2/v3/v5 sweep both gmron/gmroff (see
 ``gmr_options_for_version``).
 
 Configs are written into ``run_configs/`` (only ``*-seed*.yaml`` files are
@@ -56,6 +56,17 @@ entry: ``co2in`` restores ``global_mean_co2`` as a network input
 ``co2out`` matches the v4 baseline (no co2 input). This doubles both: the mask
 sweep becomes 2 x 2 x 5 = 20 configs, each targeted arm becomes 2 x 5 = 10
 configs, for a v4 grand total of 20 + 10 * len(TARGETED_ARMS).
+
+v5 is the mask0/mask20 sweep only (no ``TARGETED_ARMS``), crossed with the gmr
+axis (gmron/gmroff) instead of the co2-input axis: every v5 config trains
+without ``global_mean_co2`` as an input, with no co2 token in the config name.
+v5 also adds an sst axis (``sst_options_for_version``): ``sston`` pins
+``surface_temperature`` to never masked via a rate-0 Bernoulli
+``override_groups`` entry (which also removes it from the uniform pool), while
+the tokenless option keeps it in the uniform pool. ``sston`` is skipped at
+mask0, where it would be a no-op. This is 2 (gmr) x 5 = 10 mask0 configs plus
+2 (gmr) x 2 (sst) x 5 = 20 mask20 configs, a v5 grand total of 30:
+gmron/gmroff x mask0, gmron/gmroff x mask20, gmron/gmroff x mask20-sston.
 """
 
 import argparse
@@ -86,7 +97,7 @@ def gmr_options_for_version(version: str) -> dict[str, bool]:
     """GMR_OPTIONS, restricted to keep-baseline-only (GMR fixed on) for v1/v4.
 
     No gmr axis for v1 or v4 (``global_mean_removal`` is kept on, as in the
-    baseline, with no gmr token in the config name); v2/v3 sweep both
+    baseline, with no gmr token in the config name); v2/v3/v5 sweep both
     gmron/gmroff, as in ``generate_masking_configs.py``.
     """
     if version in ("v1", "v4"):
@@ -105,12 +116,39 @@ def co2_input_options_for_version(version: str) -> dict[str, bool]:
     v4's baseline drops ``global_mean_co2`` as an input (see
     ``baseline_configs/versions.md``); this axis re-adds it for an ablation
     (``co2in``) alongside the baseline (``co2out``), compounding with the
-    mask sweep and every ``TARGETED_ARMS`` entry. Other versions keep the
-    config name and network input unchanged.
+    mask sweep and every ``TARGETED_ARMS`` entry. v5 has no co2 input either,
+    but drops the ablation: a single tokenless ``co2out`` option (no co2
+    input). Other versions keep the config name and network input unchanged.
     """
     if version == "v4":
         return CO2_INPUT_OPTIONS
+    if version == "v5":
+        return {"": False}
     return {"": True}
+
+
+# The prescribed-SST input channel (also the ocean module's
+# ocean.surface_temperature_name).
+SST_FIELD = "surface_temperature"
+
+# Bernoulli rate for an override_groups entry pulling SST out of the uniform
+# pool, keyed by config/job name token. ``sston``: rate 0, SST never masked.
+SST_OPTIONS: dict[str, float | None] = {"": None, "sston": 0.0}
+
+
+def sst_options_for_version(version: str) -> dict[str, float | None]:
+    """SST_OPTIONS, restricted to the no-op (SST in uniform pool) except v5.
+
+    v5 adds an ``sston`` ablation: ``surface_temperature`` is moved into its
+    own ``override_groups`` entry with Bernoulli rate 0, so it is never masked
+    (a rate-0 Bernoulli group never fires, and grouped channels leave the
+    uniform pool). The tokenless option keeps SST in the uniform pool, as in
+    the baseline. Redundant combinations (``sston`` at mask0, where nothing is
+    masked anyway) are skipped in ``iter_train_configs``.
+    """
+    if version == "v5":
+        return SST_OPTIONS
+    return {"": None}
 
 
 class SeedGroup(NamedTuple):
@@ -156,25 +194,49 @@ def iter_train_configs(
     co2_options = co2_options_for_version(version)
     gmr_options = gmr_options_for_version(version)
     co2_input_options = co2_input_options_for_version(version)
+    sst_options = sst_options_for_version(version)
     for group in SEED_GROUPS:
         for co2_name, co2_rate in co2_options.items():
             for gmr_name, keep_gmr in gmr_options.items():
                 for co2_input_name, include_co2_input in co2_input_options.items():
-                    gmr_token = f"{gmr_name}-" if gmr_name else ""
-                    co2_input_token = f"{co2_input_name}-" if co2_input_name else ""
-                    # v4 has only one (meaningless) co2 option, so drop the token.
-                    co2_token = "" if version == "v4" else f"-{co2_name}"
-                    base_name = (
-                        f"{BASE_CONFIG_STEM}-{gmr_token}{co2_input_token}"
-                        f"{group.label}{co2_token}"
-                    )
-                    for seed in range(n_seeds):
-                        name = f"{base_name}-seed{seed}-{version}"
-                        cfg = copy.deepcopy(base)
-                        _apply_co2_input(cfg, include_co2_input)
-                        _apply_settings(cfg, group.mask_level, co2_rate, keep_gmr)
-                        cfg["seed"] = seed
-                        configs.append((name, cfg))
+                    for sst_name, sst_rate in sst_options.items():
+                        if sst_rate is not None and group.mask_level == 0:
+                            # mask0 masks nothing, so pulling SST out of the
+                            # uniform pool is a no-op; skip the duplicate run.
+                            continue
+                        gmr_token = f"{gmr_name}-" if gmr_name else ""
+                        co2_input_token = (
+                            f"{co2_input_name}-" if co2_input_name else ""
+                        )
+                        # v4/v5 have only one (meaningless) co2 option, drop
+                        # token.
+                        co2_token = "" if version in ("v4", "v5") else f"-{co2_name}"
+                        sst_token = f"-{sst_name}" if sst_name else ""
+                        base_name = (
+                            f"{BASE_CONFIG_STEM}-{gmr_token}{co2_input_token}"
+                            f"{group.label}{co2_token}{sst_token}"
+                        )
+                        extra_override_groups = None
+                        if sst_rate is not None:
+                            extra_override_groups = [
+                                {
+                                    "variables": [SST_FIELD],
+                                    "masking": {"rate": sst_rate},
+                                }
+                            ]
+                        for seed in range(n_seeds):
+                            name = f"{base_name}-seed{seed}-{version}"
+                            cfg = copy.deepcopy(base)
+                            _apply_co2_input(cfg, include_co2_input)
+                            _apply_settings(
+                                cfg,
+                                group.mask_level,
+                                co2_rate,
+                                keep_gmr,
+                                extra_override_groups=extra_override_groups,
+                            )
+                            cfg["seed"] = seed
+                            configs.append((name, cfg))
 
     if version == "v4":
         # Targeted arms: fixed GMR-on, v4's single (co2default) co2 setting,
@@ -249,9 +311,11 @@ def generate_configs(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--seeds",
         "--n-seeds",
         type=int,
         default=DEFAULT_N_SEEDS,
+        dest="n_seeds",
         help=f"Number of seeds per config (default: {DEFAULT_N_SEEDS}).",
     )
     parser.add_argument(

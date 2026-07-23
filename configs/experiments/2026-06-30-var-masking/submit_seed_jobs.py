@@ -28,6 +28,24 @@ HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 WANDB_GROUP = "ace2-var-masking-seeds-2026-06-30"
 
+# v5 sources the 1-degree, native 6-hourly baseline (see
+# baseline_configs/versions.md); its larger grid, batch, and heavier model need
+# more GPUs and shared memory than the 4-degree v1-v4 defaults in
+# run-ace-train.sh (N_GPUS=2, 100GiB).
+V5_N_GPUS = "8"
+V5_SHARED_MEMORY = "400GiB"
+
+
+def resource_env_for_config(config_filename: str) -> dict[str, str]:
+    """Per-config N_GPUS / shared-memory overrides for run-ace-train.sh.
+
+    v5 is 1-degree and needs the 8-GPU, 400GiB baseline footprint; v1-v4 keep
+    the script defaults.
+    """
+    if stem_has_version(pathlib.Path(config_filename).stem, "v5"):
+        return {"N_GPUS": V5_N_GPUS, "BEAKER_SHARED_MEMORY": V5_SHARED_MEMORY}
+    return {}
+
 
 def config_to_job_name(config_filename: str) -> str:
     # ace-train-config-4deg-nc-sfno-era5-mask10-co2default-seed0-v1.yaml
@@ -85,7 +103,11 @@ def main() -> None:
     }
     for config_filename in configs:
         job_name = config_to_job_name(config_filename)
-        env = {**base_env, "WANDB_PROJECT": WANDB_PROJECT}
+        env = {
+            **base_env,
+            "WANDB_PROJECT": WANDB_PROJECT,
+            **resource_env_for_config(config_filename),
+        }
         cmd = [str(RUN_SCRIPT), config_filename, job_name, WANDB_GROUP]
         print(f"Submitting ({WANDB_PROJECT}):", " ".join(cmd))
         if not args.dry_run:

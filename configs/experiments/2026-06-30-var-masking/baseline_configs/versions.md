@@ -50,7 +50,11 @@ aggregator `step_means`/`ensembles` lead time) is multiplied by 4 to keep the
 same calendar coverage. `stepper_training.n_forward_steps` stays at 1, so v5
 trains a native 6-hourly-timestep model rather than a daily one.
 
-Batch size, worker count, and model hyperparameters are copied through
-unchanged from v4 and have not been re-tuned for the larger grid or memory
-footprint.
+Batch size (16 train / 128 val), worker count (16), and learning rate
+(0.0001) match the 1-degree ERA5 baselines (`configs/baselines/era5`) and the
+`aimip-base-troy`/`aimip-base-brian` configs. Model hyperparameters are copied
+through unchanged from v4 and have not been re-tuned for the larger grid or
+memory footprint. The submission overrides for the 1-degree footprint
+(`N_GPUS=8`, `--shared-memory 400GiB`) live in `submit_seed_jobs.py`, not the
+config.
 
