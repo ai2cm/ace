@@ -48,7 +48,7 @@ class StaticSpatialMaskingConfig:
 
     Parameters:
         mask_value: Value of the mask variable in masked regions. Either 0 or 1.
-        fill_value: A float fill value to use outside of masked regions. Can also be
+        fill_value: A float fill value to use inside of masked regions. Can also be
             "mean", in which case the normalizer means are used as channel-specific
             fill values.
         exclude_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
