@@ -393,6 +393,108 @@ def test_annual_aggregator():
     assert isinstance(logs["test/a"], plt.Figure)
 
 
+FIVE_DAILY_TIMESTEP = datetime.timedelta(days=5)
+
+
+def _get_kept_years(
+    start: cftime.DatetimeNoLeap,
+    timestep: datetime.timedelta,
+    n_time: int,
+) -> list[int]:
+    """Record a single-sample rollout of random data starting at ``start`` and
+    return the years retained in the annual mean series."""
+    n_lat, n_lon = 2, 2
+    agg = GlobalMeanAnnualAggregator(
+        ops=LatLonOperations(torch.ones(n_lat, n_lon).to(fme.get_device())),
+        timestep=timestep,
+    )
+    data = {"a": torch.randn(1, n_time, n_lat, n_lon, device=get_device())}
+    time = xr.DataArray(
+        [[start + i * timestep for i in range(n_time)]],
+        dims=["sample", "time"],
+    )
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=None,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
+    ds = agg.get_gathered_means()
+    assert ds is not None
+    return list(ds["year"].values)
+
+
+def test_annual_aggregator_drops_trailing_final_instant_year_five_daily():
+    # 73 five-day steps span a noleap year, so sample 146 lands exactly on
+    # 2002-01-01: the trailing year holds a single sample and must be dropped.
+    years = _get_kept_years(
+        cftime.DatetimeNoLeap(2000, 1, 1), FIVE_DAILY_TIMESTEP, n_time=147
+    )
+    assert years == [2000, 2001]
+
+
+def test_annual_aggregator_drops_partial_midyear_start_five_daily():
+    # a rollout genuinely starting in July covers only ~184 days of its first
+    # year, which must be dropped.
+    years = _get_kept_years(
+        cftime.DatetimeNoLeap(2000, 7, 1), FIVE_DAILY_TIMESTEP, n_time=37 + 73
+    )
+    assert years == [2001]
+
+
+def test_annual_aggregator_keeps_nudged_start_year_six_hourly():
+    # a rollout starting a few days into the year (e.g. a nudged initial
+    # condition) covers 360 of 365 days of its first year, which is kept.
+    years = _get_kept_years(
+        cftime.DatetimeNoLeap(2000, 1, 6), TIMESTEP, n_time=360 * 4 + 1460
+    )
+    assert years == [2000, 2001]
+
+
+def test_annual_aggregator_drops_february_start_year_six_hourly():
+    # a start well past the nudging allowance covers only 334 days of its
+    # first year, which must still be dropped.
+    years = _get_kept_years(
+        cftime.DatetimeNoLeap(2000, 2, 1), TIMESTEP, n_time=334 * 4 + 1460
+    )
+    assert years == [2001]
+
+
+def test_paired_annual_aggregator_drops_trailing_final_instant_year_five_daily():
+    # both target and prediction series must apply the same completeness rule
+    n_lat, n_lon = 2, 2
+    n_time = 147
+    agg = PairedGlobalMeanAnnualAggregator(
+        ops=LatLonOperations(torch.ones(n_lat, n_lon).to(fme.get_device())),
+        timestep=FIVE_DAILY_TIMESTEP,
+    )
+    data = {"a": torch.randn(1, n_time, n_lat, n_lon, device=get_device())}
+    target = {"a": torch.randn(1, n_time, n_lat, n_lon, device=get_device())}
+    time = xr.DataArray(
+        [
+            [
+                cftime.DatetimeNoLeap(2000, 1, 1) + i * FIVE_DAILY_TIMESTEP
+                for i in range(n_time)
+            ]
+        ],
+        dims=["sample", "time"],
+    )
+    batch = InferenceBatchData(
+        prediction=data,
+        prediction_norm={},
+        target=target,
+        target_norm=None,
+        time=time,
+        i_time_start=0,
+    )
+    agg.record_batch(batch)
+    ds = agg.get_dataset()
+    assert list(ds["year"].values) == [2000, 2001]
+
+
 def test_annual_aggregator_with_nans():
     torch.manual_seed(0)
     n_lat = 4
