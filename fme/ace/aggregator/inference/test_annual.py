@@ -445,9 +445,10 @@ def test_annual_aggregator_drops_partial_midyear_start_five_daily():
     assert years == [2001]
 
 
-def test_annual_aggregator_keeps_nudged_start_year_six_hourly():
-    # a rollout starting a few days into the year (e.g. a nudged initial
-    # condition) covers 360 of 365 days of its first year, which is kept.
+def test_annual_aggregator_keeps_offset_start_year_six_hourly():
+    # a rollout starting a few days into the year (e.g. an initial condition
+    # offset to skip leading invalid data) covers 360 of 365 days of its
+    # first year, which is kept.
     years = _get_kept_years(
         cftime.DatetimeNoLeap(2000, 1, 6), TIMESTEP, n_time=360 * 4 + 1460
     )
@@ -455,7 +456,7 @@ def test_annual_aggregator_keeps_nudged_start_year_six_hourly():
 
 
 def test_annual_aggregator_drops_february_start_year_six_hourly():
-    # a start well past the nudging allowance covers only 334 days of its
+    # a start well past the offset allowance covers only 334 days of its
     # first year, which must still be dropped.
     years = _get_kept_years(
         cftime.DatetimeNoLeap(2000, 2, 1), TIMESTEP, n_time=334 * 4 + 1460
