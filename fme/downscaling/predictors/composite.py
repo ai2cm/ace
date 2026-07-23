@@ -20,6 +20,10 @@ class PatchPredictionConfig:
             input data extent for generation.
         composite_prediction: if True, recombines the smaller prediction
             regions into the original full region as a single sample.
+            Both divide_generation and composite_prediction must be
+            True or both False. Previously, divide_generation=True and
+            composite_prediction=False were allowed; this is no longer
+            supported.
         coarse_horizontal_overlap: number of pixels to overlap in the
             coarse data.
     """
@@ -28,15 +32,15 @@ class PatchPredictionConfig:
     composite_prediction: bool = False
     coarse_horizontal_overlap: int = 1
 
-    @property
-    def needs_patch_data_generator(self):
-        # If final predictions are not composited together, the BatchData is divided
-        # into patches before being passed to the top level no-target generation call.
-        # If final predictions are composited together, the BatchData is divided
-        # into patches within the PatchPredictor's generation method.
+    def __post_init__(self):
         if self.divide_generation and not self.composite_prediction:
-            return True
-        return False
+            raise ValueError(
+                "divide_generation=True requires composite_prediction=True."
+            )
+        if not self.divide_generation and self.composite_prediction:
+            raise ValueError(
+                "composite_prediction=True requires divide_generation=True."
+            )
 
     @property
     def needs_patch_predictor(self):
@@ -72,7 +76,7 @@ class PatchPredictor:
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
 
     @property
-    def coarse_shape(self):
+    def coarse_shape(self) -> tuple[int, int]:
         return self.coarse_yx_patch_extent
 
     @property
@@ -163,6 +167,38 @@ class PatchPredictor:
         prediction = composite_patch_predictions(predictions, fine_patches)
 
         return prediction
+
+
+def check_input_shape_supported(
+    model_coarse_shape: tuple[int, int],
+    input_shape: tuple[int, int],
+    patch: PatchPredictionConfig,
+    name: str = "",
+) -> None:
+    suffix = f" for {name}" if name else ""
+    if model_coarse_shape == input_shape:
+        return
+    if any(
+        model_input_size > data_input_size
+        for model_input_size, data_input_size in zip(model_coarse_shape, input_shape)
+    ):
+        raise ValueError(
+            f"Model coarse shape {model_coarse_shape} is larger than "
+            f"actual input shape {input_shape}{suffix}. "
+            "We do not support generating outputs with a smaller spatial extent"
+            " than the model's trained patch size. Please adjust the spatial extent"
+            " to be at least as large as the model's input patch size "
+            f"{model_coarse_shape}."
+        )
+    # If data shape is larger than model input shape, currently require patch prediction
+    # as the models predict very biased results for out-of-sample input shapes.
+    if not patch.needs_patch_predictor:
+        raise ValueError(
+            f"Input datashape {input_shape}{suffix} is larger than the model input "
+            f"patch size {model_coarse_shape} and patch prediction is not configured. "
+            "Generation for larger domains requires patch prediction configured with "
+            "composite_prediction=True and divide_generation=True."
+        )
 
 
 def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:
