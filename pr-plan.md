@@ -51,7 +51,7 @@ counts. New scheme:
 ```python
 def run_validation_loop(
     ...,
-    evaluate_all_steps: bool = True,  # NEW — passed to stepper.train_on_batch; default keeps coupled trainer and LR tuning byte-identical
+    evaluate_all_steps: bool = True,  # NEW — passed to stepper.train_on_batch; all callers pass explicitly, default is dense-by-default for the generic layer
 ) -> None:
     ...
 
