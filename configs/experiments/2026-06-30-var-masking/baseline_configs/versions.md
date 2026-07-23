@@ -37,3 +37,20 @@ input, 1979–2008 training window, `aimip_checkpoint` validation), **except the
 band-limited SFNO backbone is restored**: `builder` re-adds
 `filter_num_groups: 16` and `spectral_ratio: 0.125` (which v3 had dropped).
 
+## v5 — `ace2-var-mask-nc-sfno-era5-v5.yaml`
+
+Identical to v4, except data paths point at the 1-degree, native 6-hourly
+ERA5 dataset (`2026-03-19-era5-1deg-8layer-1940-2025.zarr`, the newest
+6-hourly 1-degree drop available) instead of the 4-degree daily-averaged
+one. Same 8 vertical layers, so variable lists are unchanged.
+
+Cadence goes from 1 step/day to 4 steps/day, so every step-counted field
+that encodes a real-world span (`n_forward_steps`, `forward_steps_in_memory`,
+aggregator `step_means`/`ensembles` lead time) is multiplied by 4 to keep the
+same calendar coverage. `stepper_training.n_forward_steps` stays at 1, so v5
+trains a native 6-hourly-timestep model rather than a daily one.
+
+Batch size, worker count, and model hyperparameters are copied through
+unchanged from v4 and have not been re-tuned for the larger grid or memory
+footprint.
+
