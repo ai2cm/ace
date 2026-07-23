@@ -324,7 +324,7 @@ def generation_config(tmp_path, loader_config, checkpointed_model_config):  # no
         experiment_dir=str(output_dir),
         outputs=[region_config, event_config],
         logging=LoggingConfig(log_to_screen=True, log_to_wandb=False),
-        patch=PatchPredictionConfig(divide_generation=True),
+        patch=PatchPredictionConfig(divide_generation=True, composite_prediction=True),
     )
 
 
