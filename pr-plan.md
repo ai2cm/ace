@@ -1,8 +1,10 @@
 # Make evaluating all forward steps configurable per inline-validation entry
 
-Adds `evaluate_all_steps: bool = False` to both the ACE and coupled `InlineValidationConfig`
-and plumbs it through the shared validation loop, so inline validation defaults to rolling out
-only the stochastically-sampled step count per batch. `PerStepLossAggregator` is reworked to
+Adds `evaluate_all_steps: bool = True` to both the ACE and coupled `InlineValidationConfig`
+and plumbs it through the shared validation loop. The default keeps the current full-window
+rollout; setting `false` per entry evaluates only the steps the train stepper itself would
+sample for the batch, restoring training-commensurate validation cost under long-tailed step
+schedules. `PerStepLossAggregator` is reworked to
 reduce count-weighted sums with an agreed-on key universe, so ranks with mismatched
 `loss_step_N` key sets neither hang nor corrupt means. Both steppers already implement both
 behaviors (`train_on_batch(evaluate_all_steps=...)`); no stepper code changes.
@@ -38,8 +40,8 @@ counts. New scheme:
   skipped. Non-step keys get the same sum/count treatment keyed by name.
 - Family names and non-step key names are assumed rank-symmetric (as today — every rank that
   records batches produces the same families); the delta this PR must handle is per-step key sets
-  differing across ranks within a family. This robustness is live for both trainers, since the
-  coupled sampled default also produces sparse per-step key sets.
+  differing across ranks within a family. This robustness is live for both trainers, since
+  coupled sampled evaluation also produces sparse per-step key sets.
 - Count-weighting is unconditional (no legacy path). Reported values shift slightly vs. today's
   unweighted mean-of-rank-means whenever ranks have unequal batch counts — including existing
   deterministic runs; negligible vs. batch noise. Chosen over preserving the old definition to
@@ -51,7 +53,7 @@ counts. New scheme:
 ```python
 def run_validation_loop(
     ...,
-    evaluate_all_steps: bool = True,  # NEW — passed to stepper.train_on_batch; all callers pass explicitly, default is dense-by-default for the generic layer
+    evaluate_all_steps: bool = True,  # NEW — passed to stepper.train_on_batch; all callers pass explicitly. Default is conservative: the generic layer never silently drops metrics; callers make a conscious choice to override
 ) -> None:
     ...
 
@@ -82,7 +84,7 @@ flag to inline validation.
 ```python
 @dataclasses.dataclass
 class InlineValidationConfig:
-    evaluate_all_steps: bool = False  # NEW — False evaluates only the steps the train stepper samples for the batch (the stochastically-sampled count under a schedule, the fixed count otherwise); True rolls out the full data window with dense per-step metrics
+    evaluate_all_steps: bool = True  # NEW — True (default) rolls out the full data window with dense per-step metrics; False evaluates only the steps the train stepper would evaluate for the batch (the stochastically-sampled count under a schedule, the fixed count otherwise)
 
 def _get_validation_callback(...) -> ValidationCallback:  # CHANGED — forwards each entry's evaluate_all_steps into its ValidationTask
     ...
@@ -91,17 +93,29 @@ def _get_validate_stepper_callback(...) -> ValidateStepper:  # CHANGED — LR tu
     ...
 ```
 
-- Default `False` restores the pre-existing sampled-rollout behavior: with a long-tailed step
-  schedule (e.g. sampled from {1, 2, 4, 12, 20}) the validation window is sized to the schedule
-  max, so evaluating every step makes validation ~×13–16 slower than training-commensurate cost.
-  Users who monitor long-lead metrics opt in per entry. The default flip and the count-weighting
-  change are called out in the PR description/changelog, not in docstrings or runtime logging.
-- Under the default, `loss_step_N` at different leads aggregates over different numbers of
-  batches (unbiased but noisier at long leads); interpreting them in light of the step-sampling
-  probabilities is documented as the user's responsibility.
+- Default `True` preserves current behavior: no run's metrics change by default, and the default
+  is coherent with fixed-integer `n_forward_steps` (where `False` behaves identically). A `False`
+  default (auto-restoring sampled rollout) was considered — it would spare stochastic-schedule
+  users the surprise of slow validation — and rejected in review: it silently changes metrics and
+  their uncertainty for existing configs. The cost win is opt-in: with a long-tailed step schedule
+  (e.g. sampled from {1, 2, 4, 12, 20}) the validation window is sized to the schedule max, so
+  evaluating every step makes validation ~×13–16 slower than training-commensurate cost; set
+  `evaluate_all_steps: false` per entry to recover it.
+- Naming: the bool encodes a policy, not an outcome — `False` = "evaluate what training would
+  evaluate for this batch", `True` = "evaluate the full window regardless". An
+  `evaluate_n_steps: "sampled" | "all" | int` spelling was rejected: the `int` handling is tricky
+  for little added value, and `"sampled"` is a misnomer under fixed-integer `n_forward_steps`.
+  The field docstring states this policy reading.
+- Under `False`, `loss_step_N` at different leads aggregates over different numbers of batches:
+  with `p = P(steps ≤ N)` under the schedule and `B` total validation batches, `loss_step_N`
+  averages ~`B·(1−p)` batches — unbiased but noisier at long leads, and since `seed_eval(seed=0)`
+  makes per-batch step draws consistent from epoch to epoch, a lead with `B·(1−p)` ≲ 1 may never
+  be logged at all (larger validation batch sizes shrink `B`, making this more likely). This
+  interpretation guidance goes in the field's docstring; there is no runtime logging or
+  reweighting.
 - Per-batch step sampling during validation is already driven by `stepper.seed_eval(seed=0)` in
   `run_validation_loop` with a rank-shared seed: all ranks draw the same step count per batch
-  index, and each epoch evaluates a comparable set of step counts. Key-set mismatch across ranks
+  index, and each epoch evaluates the same set of step counts. Key-set mismatch across ranks
   arises only from unequal batch counts.
 - No `__post_init__` validation added (nothing invalid to reject). A fixed-integer step-count
   mode was considered and dropped as speculative; a later widening to `bool | int` stays
@@ -112,7 +126,7 @@ def _get_validate_stepper_callback(...) -> ValidateStepper:  # CHANGED — LR tu
 ```python
 @dataclasses.dataclass
 class InlineValidationConfig:
-    evaluate_all_steps: bool = False  # NEW — mirrors the ACE field; False evaluates only the steps the coupled loss samples for the batch, True rolls out the full window with dense per-realm per-step metrics
+    evaluate_all_steps: bool = True  # NEW — mirrors the ACE field; True (default) rolls out the full window with dense per-realm per-step metrics, False evaluates only the steps the coupled loss samples for the batch
 
 def _get_validation_callback(...) -> ValidationCallback:  # CHANGED — forwards each entry's evaluate_all_steps into its ValidationTask
     ...
@@ -172,7 +186,7 @@ def test_run_validation_loop_evaluate_all_steps_passthrough():
 ```python
 def test_inline_validation_config_evaluate_all_steps_default():
     # GOAL: config round-trip — YAML omitting the field parses with
-    # evaluate_all_steps=False; explicit true/false parse through.
+    # evaluate_all_steps=True; explicit true/false parse through.
     ...
 
 def test_validation_callback_per_entry_evaluate_all_steps():
@@ -187,7 +201,7 @@ def test_validation_callback_per_entry_evaluate_all_steps():
 ```python
 def test_inline_validation_config_evaluate_all_steps_default():
     # GOAL: config round-trip — YAML omitting the field parses with
-    # evaluate_all_steps=False; explicit true/false parse through.
+    # evaluate_all_steps=True; explicit true/false parse through.
     ...
 
 def test_validation_callback_per_entry_evaluate_all_steps():
