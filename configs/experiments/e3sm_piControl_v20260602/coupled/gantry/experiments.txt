@@ -37,13 +37,11 @@ fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KXVPBN5
 
 fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0AV17XTJEKMSMAZJ5R8V93|training|best_inference_ckpt|normal|--min-runtime 8h
 
-fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|training|best_inference_ckpt|normal|--min-runtime 8h
+fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_ICx1-105yr|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY0JAC3GAG0P0BRKJ0QZ4Z8E/ICx1-105yr||ai2/climate-titan|b200
+fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_inf_ICx1-500yr|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY0JAC3GAG0P0BRKJ0QZ4Z8E/ICx1-500yr||ai2/climate-titan|b200
 
 fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15-cpl-ep-27|rs0|01KY5Q8XV9JEQBBFBMEJ0EF0K4|training|best_inference_ckpt|normal|--min-runtime 8h
 
 fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-l6ktf4nj-early|rs0|01KY5QHB4FF8YCS9233Q2NJ4NZ|training|best_inference_ckpt|normal|--min-runtime 8h
-
-fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_inf_ICx1-400yr|best_inference_ckpt_0002|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY46SWJA4RANVM39J1CT61V7/epoch2/ICx1-105yr|01KY46SWJA4RANVM39J1CT61V7|ai2/climate-titan|b200
-fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_inf_ICx1-400yr|best_inference_ckpt_0003|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY46SWJA4RANVM39J1CT61V7/epoch3/ICx1-105yr|01KY46SWJA4RANVM39J1CT61V7|ai2/climate-titan|b200
-fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_inf_ICx1-400yr|best_inference_ckpt_0004|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY46SWJA4RANVM39J1CT61V7/epoch4/ICx1-105yr|01KY46SWJA4RANVM39J1CT61V7|ai2/climate-titan|b200
-fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_inf_ICx1-400yr|best_inference_ckpt_0012|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY46SWJA4RANVM39J1CT61V7/epoch12/ICx1-105yr|01KY46SWJA4RANVM39J1CT61V7|ai2/climate-titan|b200
+fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|done|best_inference_ckpt_0004|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY46SWJA4RANVM39J1CT61V7/epoch4/ICx1-105yr|01KY46SWJA4RANVM39J1CT61V7|ai2/climate-titan|b200
+fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_inf_ICx1-400yr|best_inference_ckpt_0017|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY4ETX8F8J88E8M0X0KWCWMF/epoch17/ICx1-105yr|01KY4ETX8F8J88E8M0X0KWCWMF|ai2/climate-titan|b200
