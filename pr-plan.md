@@ -28,23 +28,32 @@ Today `get_logs` calls `dist.reduce_mean` once per locally-observed key: ranks w
 sets issue different collective sequences (hang), and the mean-of-rank-means ignores per-rank
 counts. New scheme:
 
-- Keys are grouped into step families by the suffix pattern `^(?P<family>.*)_step_(?P<step>\d+)$`
-  (plain ACE keys `loss_step_N` → family `loss`; coupled keys `loss/{realm}_step_{k}` → family
-  `loss/{realm}`), plus non-step keys (e.g. coupled `loss/ocean`).
-- Within a family, a rank's observed steps are contiguous from 0 (a batch evaluated for k steps
-  always yields steps 0..k−1) — stated in a comment and enforced cheaply at `get_logs` time. One
-  `reduce_max` on the rank's max observed step (−1 if none) yields the family's global step
-  universe `range(global_max + 1)`.
-- Per family: build dense sum and count vectors of length `global_max + 1` (zeros where the rank
-  never saw the step), one `reduce_sum` each; mean = sum/count; steps with global count 0 are
-  skipped. Non-step keys get the same sum/count treatment keyed by name.
-- Family names and non-step key names are assumed rank-symmetric (as today — every rank that
-  records batches produces the same families); the delta this PR must handle is per-step key sets
-  differing across ranks within a family. This robustness is live for both trainers, since
-  coupled sampled evaluation also produces sparse per-step key sets.
+- Ranks first agree on the global key universe: each rank `gather_object`s its sorted local key
+  list to global rank 0, which unions and sorts them and `scatter_object`s the result back. Even
+  a rank with no recorded batches issues the same collective sequence, so nothing hangs. (This
+  replaces a step-family/`reduce_max` scheme from an earlier draft of this plan: gathering the
+  keys directly needs no contiguity assumption and handles arbitrary key shapes — plain
+  `loss_step_N`, coupled `loss/{realm}_step_{k}`, and non-step keys — uniformly.)
+- Over that universe, build dense sum and count vectors (zeros where the rank never saw the
+  key), one `reduce_sum` each; mean = sum/count; keys with global count 0 are skipped. This
+  robustness is live for both trainers, since coupled sampled evaluation also produces sparse
+  per-step key sets. Fixing the gather/scatter path surfaced a latent bug:
+  `ModelTorchDistributed.scatter_object` scattered from `_data_rank == 0` (true on every spatial
+  rank) instead of global rank 0, deadlocking under spatial parallelism; it now matches
+  `gather_object`.
 - Count-weighting is unconditional (no legacy path). Reported values shift slightly vs. today's
   unweighted mean-of-rank-means whenever ranks have unequal batch counts — including existing
-  deterministic runs; negligible vs. batch noise. Chosen over preserving the old definition to
+  deterministic runs. Worst case for existing (`evaluate_all_steps=True`) runs: the shift is
+  bounded by the between-rank spread of per-key means times how far the count weights deviate
+  from uniform — with the usual near-equal per-rank batch counts (equal or off by one) that
+  deviation is ~R/(2B) (R ranks, B total batches). Concretely: R=8, B=100 (per-rank counts 12
+  or 13) gives weight deviation 0.02; with per-batch loss noise of 10% of the loss value, rank
+  means spread ≈ ±3%, so the shift is ≤ ~0.2% of the loss value vs. the metric's own
+  batch-sampling noise of 10%/√100 = 1% — ~5× below the noise floor, as an upper bound. Even
+  the degenerate extreme (2 ranks, 3 batches: weights 1/3, 2/3 vs 1/2, 1/2 → at most 1/6 of the
+  between-rank difference) gives ≈ 2.3% shift against a 5.8% noise floor. (Under
+  `evaluate_all_steps=false` per-key counts are arbitrarily uneven, but there is no old value to
+  compare — the previous code would hang.) Chosen over preserving the old definition to
   avoid a validation-only fork: the same aggregator serves training-side `loss_step_N` logs, and
   `get_logs` calls are already rank-symmetric there.
 
