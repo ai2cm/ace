@@ -165,6 +165,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         self.loaded_state: dict[str, Any] | None = None
         self.train_batches_seen: list[int] = []
         self.validation_batches_seen: list[int] = []
+        self.validation_evaluate_all_steps_seen: list[bool] = []
 
     def get_state(self) -> dict[str, Any]:
         return {**self._state, "modules": self._modules.state_dict()}
@@ -210,6 +211,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         optimization.step_weights()
         if isinstance(optimization, NullOptimization):
             self.validation_batches_seen.append(batch.i)
+            self.validation_evaluate_all_steps_seen.append(evaluate_all_steps)
         else:
             self.train_batches_seen.append(batch.i)
         return TrainOutput()
@@ -1601,7 +1603,7 @@ class TestBuildValidationCallback:
     """
 
     @staticmethod
-    def _make_task(name, weight=1.0, aggregator=None):
+    def _make_task(name, weight=1.0, aggregator=None, evaluate_all_steps=True):
         data = unittest.mock.MagicMock()
         if aggregator is None:
             aggregator = unittest.mock.MagicMock()
@@ -1610,6 +1612,7 @@ class TestBuildValidationCallback:
             data=data,
             aggregator_factory=lambda: aggregator,
             weight=weight,
+            evaluate_all_steps=evaluate_all_steps,
         )
 
     @staticmethod
@@ -1712,6 +1715,27 @@ class TestBuildValidationCallback:
         )
         for task in tasks:
             task.data.set_epoch.assert_called_once_with(7)
+
+    def test_per_task_evaluate_all_steps_passed_to_run_validation(self):
+        tasks = [
+            self._make_task("a"),
+            self._make_task("b", evaluate_all_steps=False),
+        ]
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.2),
+            ],
+        ) as mock_run_validation:
+            callback = build_validation_callback(tasks=tasks, stepper=stepper)
+            callback(epoch=1)
+        flags = [
+            call.kwargs["evaluate_all_steps"]
+            for call in mock_run_validation.call_args_list
+        ]
+        assert flags == [True, False]
 
     def test_aggregator_factory_called_per_invocation(self):
         factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())
