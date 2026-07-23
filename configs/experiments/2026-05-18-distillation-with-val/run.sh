@@ -51,6 +51,14 @@
 #   --spectral-min-wavenumber: exclude wavenumbers below this index from the
 #                spectral loss (ACE_SPECTRAL_MIN_WAVENUMBER; default 0 = all), so
 #                it does not spend budget on large scales f-distill already gets.
+#   --early-stop-patience: stop training after this many consecutive validations
+#                with no improvement in the spectral selector's rolling-median
+#                val/spec_mae_mean (ACE_EARLY_STOP_PATIENCE; default 0/unset =
+#                off, run to max_iter). The best_student_spec.ckpt selector is
+#                always active regardless; this only adds the training halt.
+#   --spec-patience-window: window (in validations) of the rolling median used by
+#                the spectral selector and its early-stop improvement check
+#                (ACE_SPEC_PATIENCE_WINDOW; default 5).
 
 set -e
 
@@ -68,6 +76,8 @@ DISC_FEATURE_DEPTH=""
 SPECTRAL_WEIGHT=""
 SPECTRAL_BAND_GAMMA=""
 SPECTRAL_MIN_WAVENUMBER=""
+EARLY_STOP_PATIENCE=""
+SPEC_PATIENCE_WINDOW=""
 FROZEN_LO_DATASET=""
 FROZEN_LO_PATH="best_student.ckpt"
 while [[ $# -gt 0 ]]; do
@@ -122,6 +132,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --spectral-min-wavenumber)
             SPECTRAL_MIN_WAVENUMBER="${2:?--spectral-min-wavenumber requires a value}"
+            shift 2
+            ;;
+        --early-stop-patience)
+            EARLY_STOP_PATIENCE="${2:?--early-stop-patience requires a value}"
+            shift 2
+            ;;
+        --spec-patience-window)
+            SPEC_PATIENCE_WINDOW="${2:?--spec-patience-window requires a value}"
             shift 2
             ;;
         *)
@@ -278,6 +296,17 @@ if [[ -n "$SPECTRAL_BAND_GAMMA" ]]; then
 fi
 if [[ -n "$SPECTRAL_MIN_WAVENUMBER" ]]; then
     TEACHER_ENV_FLAGS+=(--env ACE_SPECTRAL_MIN_WAVENUMBER=$SPECTRAL_MIN_WAVENUMBER)
+fi
+
+# Optional spectral-aware early stopping (spec-13), read by fastgen_train as
+# ACE_EARLY_STOP_PATIENCE / ACE_SPEC_PATIENCE_WINDOW.  Patience 0/unset leaves
+# training running to max_iter; the best_student_spec.ckpt selector is active
+# regardless.
+if [[ -n "$EARLY_STOP_PATIENCE" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_EARLY_STOP_PATIENCE=$EARLY_STOP_PATIENCE)
+fi
+if [[ -n "$SPEC_PATIENCE_WINDOW" ]]; then
+    TEACHER_ENV_FLAGS+=(--env ACE_SPEC_PATIENCE_WINDOW=$SPEC_PATIENCE_WINDOW)
 fi
 
 # Frozen Lo student for hi_cascade validation (expert 1): mount the dataset
