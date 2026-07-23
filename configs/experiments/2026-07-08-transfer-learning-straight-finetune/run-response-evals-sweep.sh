@@ -8,12 +8,16 @@
 #     perturbation inference (fme.ace.inference).
 #   - future-scenario response: 46-yr trend rollout (eval-only fme.ace.train,
 #     eval-trend-4deg-daily-finetune-sweep.yaml).
-# 36 jobs total (6 epochs × 2 arms × [p0k + p4k + trend]).
+# 54 jobs total (6 epochs × 3 arms × [p0k + p4k + trend]): the original
+# reproduction + modern control pair, plus the corrected no-residual modern arm
+# (donor jnlquua6 fine-tuned no-residual, wandb m1210gk0) that supersedes the
+# invalid modern arm. Filter to `no-residual` to launch only that third arm.
 #
 # research: tasks/2026-07-08-transfer-learning-straight-finetune-controls.md
+#          tasks/2026-07-21-launch-the-no-residual-modern-recipe-straight-fine-tune-arm-residual-ablation.md
 #
 # Usage (run FROM this configs directory):
-#   ./run-response-evals-sweep.sh                        # all 36 jobs
+#   ./run-response-evals-sweep.sh                        # all 54 jobs
 #   ./run-response-evals-sweep.sh reproduction-p4k-ep060 # one canary
 #   ./run-response-evals-sweep.sh ep020 ep120            # substring OR filter
 
@@ -50,6 +54,7 @@ EPOCHS=(020 040 060 080 100 120)
 declare -A CKPT=(
   [reproduction]="01KXPP4WPXNVWRFZCJRG4EJKEA"
   [modern]="01KXPDRE4HDDPT4JQCFQ87YN21"
+  [no-residual]="01KY2T41ARVW0EZ7SS267THKB9"
 )
 
 cd "$REPO_ROOT"
@@ -95,7 +100,7 @@ launch () {   # launch <job_name> <ckpt_dataset> <ema_epoch> <entrypoint...>
     -- "$@"
 }
 
-for arm in reproduction modern; do
+for arm in reproduction modern no-residual; do
   ds="${CKPT[$arm]}"
   for ep in "${EPOCHS[@]}"; do
     launch "sweep-era5-finetune-$arm-p0k-ep$ep" "$ds" "$ep" \
