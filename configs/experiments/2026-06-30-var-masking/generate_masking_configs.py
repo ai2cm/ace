@@ -143,6 +143,26 @@ def _apply_settings(
     cfg["logging"]["project"] = WANDB_PROJECT
 
 
+def _apply_co2_input(cfg: dict, include_co2: bool) -> None:
+    """Add/remove ``global_mean_co2`` as a network input (``in_names`` +
+    ``next_step_forcing_names``). No-op if the baseline already matches
+    ``include_co2`` (e.g. v1, which always has it as an input).
+    """
+    step_cfg = cfg["stepper"]["step"]["config"]
+    in_names = step_cfg["in_names"]
+    forcing_names = step_cfg.setdefault("next_step_forcing_names", [])
+    if include_co2:
+        if CO2_FIELD not in in_names:
+            in_names.append(CO2_FIELD)
+        if CO2_FIELD not in forcing_names:
+            forcing_names.append(CO2_FIELD)
+    else:
+        if CO2_FIELD in in_names:
+            in_names.remove(CO2_FIELD)
+        if CO2_FIELD in forcing_names:
+            forcing_names.remove(CO2_FIELD)
+
+
 def iter_train_configs(version: str) -> list[tuple[str, dict]]:
     """``(name, config)`` for every masking training run of ``version``.
 

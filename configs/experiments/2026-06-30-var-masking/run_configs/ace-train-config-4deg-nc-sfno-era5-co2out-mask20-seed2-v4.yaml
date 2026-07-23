@@ -657,10 +657,4 @@ stepper:
       input_dropout:
         default:
           max_masked_vars: 20
-        override_groups:
-        - variables:
-          - surface_temperature
-          - TMP2m
-          masking:
-            rate: 0.25
       include_channel_mask_inputs: true

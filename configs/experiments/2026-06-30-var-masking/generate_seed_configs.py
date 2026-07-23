@@ -47,8 +47,15 @@ spreading it thin over the full uniform pool:
   prescribed field (``ocean.surface_temperature_name``); this arm doesn't
   special-case that interaction, only the GMR-guard one traced for clock50.
 
-Each arm is fixed at GMR-on and v4's single co2 setting (co2default): 5
-configs (one per seed) per arm, for a v4 total of 10 + 5 * len(TARGETED_ARMS).
+Each arm is fixed at GMR-on and v4's single co2 setting (co2default).
+
+For v4 only, a co2-input axis (``co2_input_options_for_version``) compounds
+with everything above — the mask0/mask20 sweep and every ``TARGETED_ARMS``
+entry: ``co2in`` restores ``global_mean_co2`` as a network input
+(``_apply_co2_input``, adding it to ``in_names`` + ``next_step_forcing_names``);
+``co2out`` matches the v4 baseline (no co2 input). This doubles both: the mask
+sweep becomes 2 x 2 x 5 = 20 configs, each targeted arm becomes 2 x 5 = 10
+configs, for a v4 grand total of 20 + 10 * len(TARGETED_ARMS).
 """
 
 import argparse
@@ -65,6 +72,7 @@ from generate_masking_configs import (
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PROJECT,
+    _apply_co2_input,
     _apply_settings,
     _fetch_wandb_run_names,
     co2_options_for_version,
@@ -84,6 +92,25 @@ def gmr_options_for_version(version: str) -> dict[str, bool]:
     if version in ("v1", "v4"):
         return {"": True}
     return GMR_OPTIONS
+
+
+# Whether to re-add global_mean_co2 as a network input, keyed by config/job
+# name token.
+CO2_INPUT_OPTIONS = {"co2in": True, "co2out": False}
+
+
+def co2_input_options_for_version(version: str) -> dict[str, bool]:
+    """CO2_INPUT_OPTIONS, restricted to a no-op single option except for v4.
+
+    v4's baseline drops ``global_mean_co2`` as an input (see
+    ``baseline_configs/versions.md``); this axis re-adds it for an ablation
+    (``co2in``) alongside the baseline (``co2out``), compounding with the
+    mask sweep and every ``TARGETED_ARMS`` entry. Other versions keep the
+    config name and network input unchanged.
+    """
+    if version == "v4":
+        return CO2_INPUT_OPTIONS
+    return {"": True}
 
 
 class SeedGroup(NamedTuple):
@@ -128,40 +155,57 @@ def iter_train_configs(
     configs: list[tuple[str, dict]] = []
     co2_options = co2_options_for_version(version)
     gmr_options = gmr_options_for_version(version)
+    co2_input_options = co2_input_options_for_version(version)
     for group in SEED_GROUPS:
         for co2_name, co2_rate in co2_options.items():
             for gmr_name, keep_gmr in gmr_options.items():
-                gmr_token = f"{gmr_name}-" if gmr_name else ""
-                # v4 has only one (meaningless) co2 option, so drop the token.
-                co2_token = "" if version == "v4" else f"-{co2_name}"
-                base_name = f"{BASE_CONFIG_STEM}-{gmr_token}{group.label}{co2_token}"
+                for co2_input_name, include_co2_input in co2_input_options.items():
+                    gmr_token = f"{gmr_name}-" if gmr_name else ""
+                    co2_input_token = f"{co2_input_name}-" if co2_input_name else ""
+                    # v4 has only one (meaningless) co2 option, so drop the token.
+                    co2_token = "" if version == "v4" else f"-{co2_name}"
+                    base_name = (
+                        f"{BASE_CONFIG_STEM}-{gmr_token}{co2_input_token}"
+                        f"{group.label}{co2_token}"
+                    )
+                    for seed in range(n_seeds):
+                        name = f"{base_name}-seed{seed}-{version}"
+                        cfg = copy.deepcopy(base)
+                        _apply_co2_input(cfg, include_co2_input)
+                        _apply_settings(cfg, group.mask_level, co2_rate, keep_gmr)
+                        cfg["seed"] = seed
+                        configs.append((name, cfg))
+
+    if version == "v4":
+        # Targeted arms: fixed GMR-on, v4's single (co2default) co2 setting,
+        # crossed with the co2-input axis; not crossed with the sweep above
+        # or each other (see module docstring).
+        _co2_name, co2_rate = next(iter(co2_options.items()))
+        for arm in TARGETED_ARMS:
+            for co2_input_name, include_co2_input in co2_input_options.items():
+                co2_input_token = f"{co2_input_name}-" if co2_input_name else ""
+                base_name = (
+                    f"{BASE_CONFIG_STEM}-{co2_input_token}{arm.label}"
+                    f"-mask{TARGETED_MASK_LEVEL}"
+                )
                 for seed in range(n_seeds):
                     name = f"{base_name}-seed{seed}-{version}"
                     cfg = copy.deepcopy(base)
-                    _apply_settings(cfg, group.mask_level, co2_rate, keep_gmr)
+                    _apply_co2_input(cfg, include_co2_input)
+                    _apply_settings(
+                        cfg,
+                        TARGETED_MASK_LEVEL,
+                        co2_rate,
+                        keep_gmr=True,
+                        extra_override_groups=[
+                            {
+                                "variables": list(arm.channels),
+                                "masking": {"rate": arm.rate},
+                            }
+                        ],
+                    )
                     cfg["seed"] = seed
                     configs.append((name, cfg))
-
-    if version == "v4":
-        # Targeted arms: fixed GMR-on, v4's single (co2default) co2 setting;
-        # not crossed with the sweep above or each other (see module docstring).
-        _co2_name, co2_rate = next(iter(co2_options.items()))
-        for arm in TARGETED_ARMS:
-            base_name = f"{BASE_CONFIG_STEM}-{arm.label}-mask{TARGETED_MASK_LEVEL}"
-            for seed in range(n_seeds):
-                name = f"{base_name}-seed{seed}-{version}"
-                cfg = copy.deepcopy(base)
-                _apply_settings(
-                    cfg,
-                    TARGETED_MASK_LEVEL,
-                    co2_rate,
-                    keep_gmr=True,
-                    extra_override_groups=[
-                        {"variables": list(arm.channels), "masking": {"rate": arm.rate}}
-                    ],
-                )
-                cfg["seed"] = seed
-                configs.append((name, cfg))
     return configs
 
 
