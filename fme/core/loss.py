@@ -660,6 +660,70 @@ class CRPSLoss(torch.nn.Module):
         return [StandardLoss(get_crps(x, y, alpha=self.alpha))]
 
 
+class SpectralPowerCRPSLoss(torch.nn.Module):
+    """
+    Compute the CRPS of the per-degree log spectral power.
+
+    For each ensemble member and the target, the per-degree angular power
+    ``P_l = mean over valid orders m (real-SHT redundancy-weighted) of
+    |c_lm|^2`` is computed from the spherical-harmonic coefficients, and the
+    members' ``log P_l`` is scored against the target's with (almost-)fair
+    CRPS over the ensemble dimension. The term is phase-free: per-sample
+    spatial phase noise does not enter, so it provides a high-SNR gradient
+    toward correct per-scale amplitude even at degrees where the per-mode
+    signal is noise-dominated (a red spectrum starves those modes' energy
+    score gradients). Scoring log power makes the term scale-equitable across
+    the (red) spectrum. Returns a ``(B, C, L)`` tensor. When ``whitening`` is
+    given, the per-degree power CRPS is reweighted with the same operator the
+    energy score uses (:class:`SpectralWhitening`, computed from the detached
+    target spectrum), so whitening applies to this term too.
+    """
+
+    def __init__(
+        self,
+        sht: Callable[[torch.Tensor], torch.Tensor],
+        alpha: float = 1.0,
+        whitening: SpectralWhitening | None = None,
+    ):
+        super().__init__()
+        self.sht = sht
+        self.alpha = alpha
+        self._whitening = whitening
+        self.mode_area_weights: torch.Tensor | None = None
+
+    def _log_power(self, coeffs: torch.Tensor) -> torch.Tensor:
+        """(..., L, M) complex coefficients -> (..., L) log mean power over
+        valid orders (m <= l), with the real-SHT m>0 redundancy factor.
+        """
+        n_l, n_m = coeffs.shape[-2], coeffs.shape[-1]
+        real_dtype = coeffs.abs().dtype
+        if self.mode_area_weights is None:
+            l_idx = torch.arange(n_l, device=coeffs.device).unsqueeze(-1)
+            m_idx = torch.arange(n_m, device=coeffs.device).unsqueeze(0)
+            valid = (m_idx <= l_idx).to(real_dtype)  # (L, M)
+            redundancy = 2.0 * torch.ones(
+                n_l, n_m, device=coeffs.device, dtype=real_dtype
+            )
+            redundancy[:, 0] = 1.0
+            self.mode_area_weights = redundancy * valid  # (L, M)
+        w = self.mode_area_weights
+        tiny = torch.finfo(real_dtype).tiny
+        meanpow_l = (coeffs.abs() ** 2 * w).sum(dim=-1) / w.sum(dim=-1).clamp_min(tiny)
+        return torch.log(meanpow_l.clamp_min(tiny))
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        x_log_power = self._log_power(self.sht(x))  # (B, E, C, L)
+        y_hat = self.sht(y)  # (B, 1, C, L, M)
+        y_log_power = self._log_power(y_hat)  # (B, 1, C, L)
+        crps = get_crps(x_log_power, y_log_power, alpha=self.alpha)  # (B, C, L)
+        if self._whitening is not None:
+            # Same per-degree, magnitude-preserving reweight the energy score
+            # uses (SpectralWhitening.factor, computed from the detached target
+            # spectrum), applied to the per-degree power CRPS. factor -> (B,C,L,1).
+            crps = crps * self._whitening.factor(y_hat).squeeze(-1)  # (B, C, L)
+        return [StandardLoss(crps)]
+
+
 class FiniteDifferenceCRPSLoss(torch.nn.Module):
     """
     Computes the CRPS of the x and y finite differences of the input tensors,
@@ -725,6 +789,7 @@ class EnsembleLoss(torch.nn.Module):
         finite_difference_crps_weight: float = 0.0,
         finite_difference_crps_levels: int = 1,
         almost_fair_crps_alpha: float = 1.0,
+        spectral_power_crps_weight: float = 0.0,
         energy_score_whitening: SpectralWhitening | None = None,
     ):
         super().__init__()
@@ -737,6 +802,11 @@ class EnsembleLoss(torch.nn.Module):
             raise ValueError(
                 "finite_difference_crps_weight must be non-negative, "
                 f"got {finite_difference_crps_weight}"
+            )
+        if spectral_power_crps_weight < 0:
+            raise ValueError(
+                "spectral_power_crps_weight must be non-negative, "
+                f"got {spectral_power_crps_weight}"
             )
         if crps_weight + energy_score_weight == 0:
             raise ValueError(
@@ -757,6 +827,17 @@ class EnsembleLoss(torch.nn.Module):
             sht=sht,
             whitening=energy_score_whitening,
         )
+        if spectral_power_crps_weight > 0:
+            self.spectral_power_crps_loss: SpectralPowerCRPSLoss | None = (
+                SpectralPowerCRPSLoss(
+                    sht=sht,
+                    alpha=almost_fair_crps_alpha,
+                    whitening=energy_score_whitening,
+                )
+            )
+        else:
+            self.spectral_power_crps_loss = None
+        self.spectral_power_crps_weight = spectral_power_crps_weight
 
         self.crps_weight = crps_weight
         self.diff_crps_weight = finite_difference_crps_weight
@@ -777,6 +858,9 @@ class EnsembleLoss(torch.nn.Module):
         if self.diff_crps_loss is not None:
             for c in self.diff_crps_loss(gen_norm, target_norm):
                 components.append(type(c)(c.loss * self.diff_crps_weight))
+        if self.spectral_power_crps_loss is not None:
+            for c in self.spectral_power_crps_loss(gen_norm, target_norm):
+                components.append(type(c)(c.loss * self.spectral_power_crps_weight))
         return components
 
 
