@@ -1,6 +1,6 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
 
 # status "pretraining" = pretraining still running; flip the selected seed(s) to "train" after checkpoint selection
-cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs0|ace2-cm4-atmos-noLSM|8sqw34my|best_inference_ckpt|pretraining|high|h100|8|600GiB|3|ai2/ace|seed=0
-cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs1|ace2-cm4-atmos-noLSM|62eredft|best_inference_ckpt|train|high|b200|4|600GiB|3|ai2/ace|seed=1
-cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs2|ace2-cm4-atmos-noLSM|jwvec4k3|best_inference_ckpt|pretraining|high|h100|8|600GiB|3|ai2/ace|seed=2
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs0|ace2-cm4-atmos-noLSM|8sqw34my|best_inference_ckpt|train|high|b200|4|600GiB|3|ai2/ace|seed=0
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs1|ace2-cm4-atmos-noLSM|62eredft|best_inference_ckpt|training|high|b200|4|600GiB|3|ai2/ace|seed=1
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs2|ace2-cm4-atmos-noLSM|jwvec4k3|best_inference_ckpt|train|high|b200|4|600GiB|3|ai2/ace|seed=2

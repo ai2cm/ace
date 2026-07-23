@@ -94,6 +94,7 @@ train_loader:
         stop_time: '0126-01-01T00:00:00'
 validation:
   - name: val_1pct_early
+    evaluate_all_steps: false
     weight: 1.0
     loader:
       batch_size: 16
@@ -113,6 +114,7 @@ validation:
             start_time: '0041-01-06T00:00:00'
             stop_time: '0046-01-01T00:00:00'
   - name: val_1pct_late
+    evaluate_all_steps: false
     weight: 1.0
     loader:
       batch_size: 16
@@ -132,6 +134,7 @@ validation:
             start_time: '0126-01-06T00:00:00'
             stop_time: '0131-01-01T00:00:00'
   - name: val_piC
+    evaluate_all_steps: false
     weight: 1.0
     loader:
       batch_size: 16
