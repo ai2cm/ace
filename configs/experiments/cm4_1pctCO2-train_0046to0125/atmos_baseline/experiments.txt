@@ -14,3 +14,5 @@ cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs1|01KXY7J32BKW7M3BT5821092GQ|tr
 cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs1|01KXY7RGKGQ0Y4RKZ8WPJFJ822|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs0|01KY8H72B6ZSA7EVPV8V68XBJE|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|rs2|01KY8H7JPZ2BXJJZEYV8GZESQG|training|best_inference_ckpt|normal|--min-runtime 8h
