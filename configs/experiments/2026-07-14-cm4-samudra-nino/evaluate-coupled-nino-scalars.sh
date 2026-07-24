@@ -14,8 +14,9 @@ SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 CONFIG_PATH="${SCRIPT_PATH}/${CONFIG_FILENAME}"
 COMPACT_SCRIPT="${SCRIPT_PATH}/compact_nino_scalar_forecasts.py"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
-# Split 60 ICs across ranks; keep n_initial_conditions divisible by N_GPUS.
-N_GPUS=4
+# Single GPU: raw netCDF writers are not multi-rank safe (all ranks open the
+# same /results path). Matches evaluate-nino-scalars.sh.
+N_GPUS=1
 
 cd "$REPO_ROOT"
 
@@ -46,7 +47,7 @@ gantry run \
     --system-python \
     --install "pip install --no-deps ." \
     -- bash -c \
-        "torchrun --nproc_per_node $N_GPUS -m fme.coupled.evaluator '$CONFIG_PATH' && \
+        "python -m fme.coupled.evaluator '$CONFIG_PATH' && \
          python '$COMPACT_SCRIPT' \
            --input-dir /results/raw/ocean \
            --output-dir /results/nino_scalar_forecasts \
