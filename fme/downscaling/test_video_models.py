@@ -15,12 +15,16 @@ from fme.downscaling.data.datasets import (
     VideoBatchItem,
 )
 from fme.downscaling.data.time_encoding import compute_calendar_features
+from fme.downscaling.metrics_and_maths import interpolate as interpolate_2d
 from fme.downscaling.modules.video_modules import FIRBlur, TemporalAttention
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
 )
-from fme.downscaling.video_models import VideoDiffusionModelConfig
+from fme.downscaling.video_models import (
+    VideoDiffusionModelConfig,
+    _upsample_coarse_clip,
+)
 
 OUT_NAMES = ["var0", "var1"]
 
@@ -48,6 +52,51 @@ def _paired_batch(batch_size, n_times, height, width):
     clip = VideoBatchData.from_sequence(items)
     # coarse is unused by the temporal-only model; reuse the fine clip.
     return PairedVideoBatchData(fine=clip, coarse=clip)
+
+
+def _spatial_paired_batch(
+    batch_size, n_times, fine_height, fine_width, downscale_factor
+):
+    """Fine/coarse pair at genuinely different spatial resolutions (coarse is
+    independent random data, not a downsampled copy of fine)."""
+    fine_items = [
+        _video_item(n_times, fine_height, fine_width) for _ in range(batch_size)
+    ]
+    coarse_items = [
+        _video_item(
+            n_times, fine_height // downscale_factor, fine_width // downscale_factor
+        )
+        for _ in range(batch_size)
+    ]
+    fine = VideoBatchData.from_sequence(fine_items)
+    coarse = VideoBatchData.from_sequence(coarse_items)
+    return PairedVideoBatchData(fine=fine, coarse=coarse)
+
+
+def test_upsample_coarse_clip_groups_channels_by_frame():
+    # Regression: coarse is (B, C, T, H, W) -- C and T are not adjacent in
+    # memory, so a naive reshape to (B*T, C, H, W) would interleave channels
+    # from different timesteps instead of grouping each frame's own channels.
+    # Distinct values per (channel, timestep) make that scrambling detectable:
+    # if frames were mixed up, some output frame would fail to match the
+    # independently-computed per-frame upsample below.
+    batch, channels, n_times, height, width = 2, 3, 4, 2, 2
+    factor = 2
+    coarse = torch.arange(
+        batch * channels * n_times * height * width, dtype=torch.float32
+    ).reshape(batch, channels, n_times, height, width)
+
+    fine_hw = (height * factor, width * factor)
+    result = _upsample_coarse_clip(coarse, fine_hw)
+    assert result.shape == (batch, channels, n_times, *fine_hw)
+
+    for b in range(batch):
+        for t in range(n_times):
+            frame = coarse[b, :, t]  # (C, H, W): this frame's own channels
+            expected = interpolate_2d(frame.unsqueeze(0), factor).squeeze(0)
+            assert torch.allclose(result[b, :, t], expected, atol=1e-5), (
+                f"frame mismatch at batch={b}, time={t}"
+            )
 
 
 def _model(n_times, temporal_noise_correlation="independent", **config_kwargs):
@@ -165,6 +214,98 @@ def test_generate_pins_observed_endpoints(temporal_noise_correlation):
     for s in range(3):
         assert torch.allclose(out[:, s, 0], truth[:, 0], atol=1e-4)
         assert torch.allclose(out[:, s, -1], truth[:, -1], atol=1e-4)
+
+
+def test_spatial_downscaling_disabled_by_default():
+    n_times = 5
+    model = _model(n_times)
+    assert model.config.coarse_normalization is None
+    assert model.coarse_normalizer is None
+    # noisy residual (C) + endpoint values (C) + mask (1) + log-sigma (C) = 3C+1
+    n_channels = len(OUT_NAMES)
+    expected_in_channels = 3 * n_channels + 1
+    net = model.module.module.model
+    in_conv = net.in_conv.conv
+    assert in_conv.in_channels == expected_in_channels + net.calendar.out_channels
+
+
+def _spatial_model(n_times, **config_kwargs):
+    return _model(
+        n_times,
+        coarse_normalization=NormalizationConfig(
+            means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+        ),
+        **config_kwargs,
+    )
+
+
+def test_spatial_downscaling_widens_input_channels():
+    n_times = 5
+    model = _spatial_model(n_times)
+    n_channels = len(OUT_NAMES)
+    # adds a 4th block of C channels (upsampled coarse clip) vs. the temporal-only 3C+1
+    expected_in_channels = 4 * n_channels + 1
+    net = model.module.module.model
+    in_conv = net.in_conv.conv
+    assert in_conv.in_channels == expected_in_channels + net.calendar.out_channels
+
+
+def test_spatial_downscaling_train_on_batch_runs_and_backprops():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _spatial_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.loss.requires_grad
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert outputs.prediction["var0"].shape == (2, n_times, fine_height, fine_width)
+
+
+def test_spatial_downscaling_generate_pins_observed_endpoints():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _spatial_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    generated = model.generate(batch, n_samples=3)
+    out = generated["var0"]
+    assert out.shape == (2, 3, n_times, fine_height, fine_width)
+    assert torch.isfinite(out).all()
+
+    truth = batch.fine.data["var0"]
+    for s in range(3):
+        assert torch.allclose(out[:, s, 0], truth[:, 0], atol=1e-4)
+        assert torch.allclose(out[:, s, -1], truth[:, -1], atol=1e-4)
+
+
+def test_spatial_downscaling_rejects_non_integer_scale_factor():
+    n_times = 5
+    model = _spatial_model(n_times)
+    # fine (8, 8) is not an integer multiple of coarse (3, 3)
+    batch = _spatial_paired_batch(
+        batch_size=2, n_times=n_times, fine_height=8, fine_width=8, downscale_factor=2
+    )
+    bad_coarse_items = [_video_item(n_times, 3, 3) for _ in range(2)]
+    batch = PairedVideoBatchData(
+        fine=batch.fine, coarse=VideoBatchData.from_sequence(bad_coarse_items)
+    )
+    with pytest.raises(ValueError, match="integer multiple"):
+        model.train_on_batch(batch, NullOptimization())
 
 
 def test_train_on_batch_runs_with_brownian_bridge_noise():

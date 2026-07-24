@@ -1,7 +1,15 @@
-"""Endpoint-conditioned video interpolation diffusion (temporal-only).
+"""Endpoint-conditioned video interpolation diffusion, with optional spatial
+downscaling.
 
-Diffuses the residual over a temporal linear interpolation of observed endpoints;
-only interior frames are denoised. Operates on the fine clip only.
+Diffuses the residual over a per-frame baseline; only interior frames are
+denoised. By default (``coarse_normalization`` unset) the baseline is the
+temporal linear interpolation of the observed fine endpoints, and ``batch.coarse``
+is ignored (temporal-only, prior behavior). When ``coarse_normalization`` is
+set, the model also conditions on a coarser-resolution clip of the same frames
+(``batch.coarse``), and the baseline becomes that clip bicubic-upsampled to the
+fine grid, bias-corrected so it still exactly reproduces the true fine
+endpoints -- combining CorrDiff-style spatial residual diffusion with the
+endpoint-conditioned temporal residual.
 """
 
 import dataclasses
@@ -17,6 +25,7 @@ from fme.core.packer import Packer
 from fme.core.rand import randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import PairedVideoBatchData
+from fme.downscaling.metrics_and_maths import interpolate
 from fme.downscaling.models import ModelOutputs
 from fme.downscaling.modules.video_modules import VideoEDMPrecond, VideoUNet
 from fme.downscaling.noise import (
@@ -64,6 +73,41 @@ def _linear_interp_endpoints(
     return (1 - w) * x0 + w * xT
 
 
+def _upsample_coarse_clip(
+    coarse: torch.Tensor, fine_hw: tuple[int, int]
+) -> torch.Tensor:
+    """Bicubic-upsample a ``(B, C, T, Hc, Wc)`` coarse clip to the fine ``(H, W)``,
+    frame by frame (reuses the same 2D interpolation as the spatial-only
+    ``DiffusionModel`` in ``models.py``, so the two spatial-downscaling paths
+    match exactly).
+    """
+    batch, channels, n_times, height, width = coarse.shape
+    if (height, width) == tuple(fine_hw):
+        return coarse
+    fine_h, fine_w = fine_hw
+    if (
+        fine_h % height != 0
+        or fine_w % width != 0
+        or fine_h // height != fine_w // width
+    ):
+        raise ValueError(
+            f"Fine shape {fine_hw} must be an integer multiple of the coarse "
+            f"shape {(height, width)} with equal lat/lon scale factor."
+        )
+    scale_factor = fine_h // height
+    # coarse is (B, C, T, H, W): C and T are not adjacent in memory, so a plain
+    # reshape to (B*T, C, H, W) would interleave channels from different
+    # timesteps instead of grouping each frame's own channels. Move T next to
+    # B first so the merge is meaningful, then move it back afterwards.
+    flat = coarse.permute(0, 2, 1, 3, 4).reshape(
+        batch * n_times, channels, height, width
+    )
+    upsampled = interpolate(flat, scale_factor)
+    return upsampled.reshape(batch, n_times, channels, fine_h, fine_w).permute(
+        0, 2, 1, 3, 4
+    )
+
+
 @dataclasses.dataclass
 class VideoDiffusionModelConfig:
     """Configuration for the temporal-interpolation video diffusion model."""
@@ -71,6 +115,15 @@ class VideoDiffusionModelConfig:
     out_names: list[str]
     n_timesteps: int
     normalization: NormalizationConfig | None = None
+    # Optional spatial downscaling. When set, the model additionally
+    # conditions on a coarser-resolution clip of the same out_names/frames
+    # (``batch.coarse``, bicubic-upsampled per frame to the fine grid -- see
+    # ``_upsample_coarse_clip``) and predicts the residual against that
+    # upsampled coarse field (bias-corrected by the endpoint residual, see
+    # ``VideoDiffusionModel.train_on_batch``) instead of the pure temporal
+    # baseline. None (default) reproduces the exact prior temporal-only
+    # behavior, where ``batch.coarse`` is ignored entirely.
+    coarse_normalization: NormalizationConfig | None = None
     sigma_min: float = 0.002
     sigma_max: float = 80.0
     churn: float = 0.0
@@ -349,7 +402,9 @@ class VideoDiffusionModelConfig:
 
     @property
     def data_requirements(self) -> "DataRequirements":
-        # Temporal-only: fine == coarse; clip length comes from the data config.
+        # fine and coarse share out_names; coarse may be a lower spatial
+        # resolution of the same variables (see coarse_normalization).
+        # Clip length comes from the data config.
         return DataRequirements(
             fine_names=self.out_names,
             coarse_names=self.out_names,
@@ -358,7 +413,9 @@ class VideoDiffusionModelConfig:
         )
 
     def build(
-        self, normalizer: StandardNormalizer | None = None
+        self,
+        normalizer: StandardNormalizer | None = None,
+        coarse_normalizer: StandardNormalizer | None = None,
     ) -> "VideoDiffusionModel":
         if normalizer is None:
             if self.normalization is None:
@@ -367,10 +424,15 @@ class VideoDiffusionModelConfig:
                     "must be provided."
                 )
             normalizer = self.normalization.build(self.out_names)
+        if coarse_normalizer is None and self.coarse_normalization is not None:
+            coarse_normalizer = self.coarse_normalization.build(self.out_names)
 
         n_channels = len(self.out_names)
-        # noisy residual (C) + endpoint values (C) + mask (1) + log-sigma (C)
+        # noisy residual (C) + endpoint values (C) + mask (1) + log-sigma (C),
+        # plus the upsampled coarse clip (C) when spatial downscaling is enabled.
         in_channels = 3 * n_channels + 1
+        if coarse_normalizer is not None:
+            in_channels += n_channels
         if self.backbone == "songunet":
             from fme.downscaling.modules.video_song_unet import VideoSongUNet
 
@@ -406,7 +468,13 @@ class VideoDiffusionModelConfig:
                 noise_embedding_type=self.noise_embedding_type,
             )
         module = VideoEDMPrecond(net, sigma_data=self.sigma_data_tensor(get_device()))
-        return VideoDiffusionModel(self, module, normalizer, self.out_names)
+        return VideoDiffusionModel(
+            self,
+            module,
+            normalizer,
+            self.out_names,
+            coarse_normalizer=coarse_normalizer,
+        )
 
 
 def _channel_mixing_matrix(
@@ -463,6 +531,7 @@ class VideoDiffusionModel:
         module: torch.nn.Module,
         normalizer: StandardNormalizer,
         out_names: list[str],
+        coarse_normalizer: StandardNormalizer | None = None,
     ):
         self.config = config
         # (1, C, 1, 1, 1) so it broadcasts against the per-channel sigma tensor.
@@ -470,6 +539,10 @@ class VideoDiffusionModel:
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(module.to(get_device()))
         self.normalizer = normalizer
+        # Set iff config.coarse_normalization is set: enables the spatial
+        # (coarse-conditioned) path in train_on_batch/generate. None keeps the
+        # original temporal-only behavior, ignoring batch.coarse entirely.
+        self.coarse_normalizer = coarse_normalizer
         self.out_names = out_names
         self.packer = Packer(out_names)
         self.n_timesteps = config.n_timesteps
@@ -642,14 +715,16 @@ class VideoDiffusionModel:
             raise ValueError(f"frames must be strictly increasing, got {list(frames)}.")
         return idx.to(device)
 
-    def _pack_normalized(self, data: TensorMapping) -> torch.Tensor:
+    def _pack_normalized(
+        self, data: TensorMapping, normalizer: StandardNormalizer | None = None
+    ) -> torch.Tensor:
         selected = {
             k: torch.log1p(data[k].clamp(min=0.0) * scale)
             if (scale := self.log_transform_channels.get(k))
             else data[k]
             for k in self.out_names
         }
-        normalized = self.normalizer.normalize(selected)
+        normalized = (normalizer or self.normalizer).normalize(selected)
         return self.packer.pack(normalized, axis=CHANNEL_AXIS)
 
     def _denormalize_invert(self, packed: torch.Tensor) -> TensorDict:
@@ -665,15 +740,23 @@ class VideoDiffusionModel:
         }
 
     def _conditioning(
-        self, clip: torch.Tensor, interior_mask: torch.Tensor
+        self,
+        clip: torch.Tensor,
+        interior_mask: torch.Tensor,
+        coarse_upsampled: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Observed-endpoint values + a binary observed mask channel."""
+        """Observed-endpoint values + a binary observed mask channel, plus the
+        upsampled coarse clip (all frames) when spatial downscaling is enabled.
+        """
         observed = 1.0 - interior_mask
         observed_values = clip * observed
         mask_channel = observed.expand(
             clip.shape[0], 1, -1, clip.shape[-2], clip.shape[-1]
         )
-        return torch.cat([observed_values, mask_channel], dim=CHANNEL_AXIS)
+        parts = [observed_values, mask_channel]
+        if coarse_upsampled is not None:
+            parts.append(coarse_upsampled)
+        return torch.cat(parts, dim=CHANNEL_AXIS)
 
     def _calendar_inputs(self, batch_fine):
         lon = batch_fine.latlon_coordinates.lon
@@ -685,10 +768,45 @@ class VideoDiffusionModel:
             lon.to(get_device()),
         )
 
+    def _upsample_coarse_for_batch(
+        self, batch: PairedVideoBatchData, fine_hw: tuple[int, int]
+    ) -> torch.Tensor | None:
+        """Normalized, fine-resolution-upsampled coarse clip (all frames), or
+        ``None`` when spatial downscaling is disabled (``coarse_normalizer``
+        unset). Full ``n_timesteps`` length; caller subsets to match ``clip``.
+        """
+        if self.coarse_normalizer is None:
+            return None
+        coarse_clip = self._pack_normalized(batch.coarse.data, self.coarse_normalizer)
+        return _upsample_coarse_clip(coarse_clip, fine_hw)
+
+    def _spatiotemporal_baseline(
+        self,
+        clip: torch.Tensor,
+        coarse_upsampled: torch.Tensor | None,
+        tau: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Per-frame baseline used to form the diffused residual.
+
+        Without spatial downscaling this is the pure temporal linear
+        interpolation of the observed endpoints (prior behavior). With it, the
+        baseline is the upsampled coarse field at every frame, bias-corrected
+        by linearly interpolating the *endpoint* residual (fine - upsampled
+        coarse) across the clip -- so it still exactly reproduces the true
+        fine endpoints (required for pinning), while using the real coarse
+        observation (not a temporal guess) at interior frames.
+        """
+        if coarse_upsampled is None:
+            return _linear_interp_endpoints(clip, tau)
+        return coarse_upsampled + _linear_interp_endpoints(
+            clip - coarse_upsampled, tau
+        )
+
     def train_on_batch(self, batch: PairedVideoBatchData, optimizer) -> ModelOutputs:
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
         day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+        coarse_upsampled = self._upsample_coarse_for_batch(batch, clip.shape[-2:])
 
         # Optionally train on a random subset of interior frames (endpoints kept)
         # so the model learns to answer variable query sets; the bridge noise and
@@ -698,14 +816,16 @@ class VideoDiffusionModel:
             clip = clip.index_select(2, idx)
             day_of_year = day_of_year.index_select(1, idx)
             second_of_day = second_of_day.index_select(1, idx)
+            if coarse_upsampled is not None:
+                coarse_upsampled = coarse_upsampled.index_select(2, idx)
         batch_size, _, n_times, _, _ = clip.shape
         tau = self._tau_for_indices(idx)
 
-        baseline = _linear_interp_endpoints(clip, tau)
+        baseline = self._spatiotemporal_baseline(clip, coarse_upsampled, tau)
         residual = clip - baseline  # ~0 at endpoints by construction
 
         interior = _interior_mask(n_times, clip.device)
-        condition = self._conditioning(clip, interior)
+        condition = self._conditioning(clip, interior, coarse_upsampled)
         mixing = self._mixing_for_indices(idx)
 
         sigma = self.config.sample_training_noise(batch_size, clip.device)
@@ -832,16 +952,19 @@ class VideoDiffusionModel:
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
         day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+        coarse_upsampled = self._upsample_coarse_for_batch(batch, clip.shape[-2:])
         idx = self._validate_frames(frames, clip.shape[2], clip.device)
         if idx is not None:
             clip = clip.index_select(2, idx)
             day_of_year = day_of_year.index_select(1, idx)
             second_of_day = second_of_day.index_select(1, idx)
+            if coarse_upsampled is not None:
+                coarse_upsampled = coarse_upsampled.index_select(2, idx)
         batch_size, n_channels, n_times, height, width = clip.shape
         tau = self._tau_for_indices(idx)
-        baseline = _linear_interp_endpoints(clip, tau)
+        baseline = self._spatiotemporal_baseline(clip, coarse_upsampled, tau)
         interior = _interior_mask(n_times, clip.device)
-        condition = self._conditioning(clip, interior)
+        condition = self._conditioning(clip, interior, coarse_upsampled)
         mixing = self._mixing_for_indices(idx)
 
         def repeat(t):
