@@ -193,10 +193,14 @@ stepper:
           - 300
           - 400
           dilation:
+          # capped at 4 (was 8) for the 4deg 45x90 grid: the deepest scale's
+          # bottleneck feature map is only 5 cells wide in longitude, so a
+          # dilation-8 zonally-periodic (circular) pad (N_pad=8) wraps past the
+          # full width. N_pad=4 <= 5 fits. Forks the recipe from the 1deg port.
           - 1
           - 2
           - 4
-          - 8
+          - 4
           n_layers:
           - 1
           - 1
