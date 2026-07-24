@@ -190,6 +190,26 @@ def test_stepper_step_schedule():
     assert schedule.has_sampler
 
 
+def test_stepper_step_probabilities_requires_epoch():
+    stepper = _init_train_stepper(
+        n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=2, probability=0.5),
+            ]
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    with pytest.raises(EpochNotProvidedError):
+        stepper._loss_schedule.init_for_epoch(None)
+
+
+def test_stepper_step_int_does_not_require_epoch():
+    stepper = _init_train_stepper(n_forward_steps=2, loss=StepLossConfig(type="MSE"))
+    stepper._loss_schedule.init_for_epoch(None)
+    assert not stepper._loss_schedule.has_sampler
+
+
 def test_seed_eval_does_not_corrupt_training_sampler():
     stepper = _init_train_stepper(
         n_forward_steps=TimeLengthProbabilities(

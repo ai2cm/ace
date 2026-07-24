@@ -148,6 +148,28 @@ Same rationale and default as the ACE field. The coupled sampled-eval path alrea
 (`CoupledTrainStepper.train_on_batch(evaluate_all_steps=False)` computes `loss/{realm}_step_{k}`
 only for sampled steps, seeded via `seed_eval`), so this is config plumbing only.
 
+## `fme/ace/stepper/loss_schedule.py` + `fme/ace/stepper/time_length_probabilities.py` (modified)
+
+```python
+@dataclasses.dataclass
+class TimeLengthSchedule:
+    @property
+    def is_constant(self) -> bool:  # NEW — no milestones and a fixed (or single-outcome) step count
+        ...
+
+class LossSchedule:
+    def init_for_epoch(self, epoch: int | None) -> None:  # CHANGED — raises EpochNotProvidedError for ANY non-constant schedule when epoch is None (previously only milestone schedules)
+        ...
+```
+
+Defensive raise added in review: with a plain-probabilities schedule, `init_for_epoch(None)`
+previously early-returned without building samplers, so a batch carrying `epoch=None` silently
+evaluated every data step — under `evaluate_all_steps: false` that means no cost saving and
+nothing raises. Real loaders stamp the epoch, so nothing legitimate hits this; the raise turns
+the silent path into a hard failure. Constant schedules (fixed-int `n_forward_steps`, no
+milestones) still accept `epoch=None`, where the fallback (evaluate the full window) is
+identical to the sampled behavior anyway.
+
 ---
 
 ## Tests
@@ -166,6 +188,29 @@ def test_per_step_loss_aggregator_mismatched_ranks():
     # different loss_step_N key sets.
     # PARAMETERIZE: (a) ranks with different max steps; (b) one rank records no
     # batches at all; (c) unequal record counts for a shared step.
+    ...
+```
+
+## `fme/ace/stepper/test_single_module.py` (schedule guard tests, modified)
+
+```python
+def test_stepper_step_probabilities_requires_epoch():
+    # GOAL: a plain-probabilities schedule raises EpochNotProvidedError on
+    # init_for_epoch(None) instead of silently evaluating densely.
+    ...
+
+def test_stepper_step_int_does_not_require_epoch():
+    # GOAL: a constant (fixed-int) schedule still accepts epoch=None.
+    ...
+```
+
+## `fme/core/distributed/parallel_tests/test_scatter_object.py` (new)
+
+```python
+@pytest.mark.parallel
+def test_scatter_object_scatters_from_global_root():
+    # GOAL: pin the global-root contract of scatter_object that
+    # PerStepLossAggregator.get_logs depends on (mirrors test_gather_object).
     ...
 ```
 
