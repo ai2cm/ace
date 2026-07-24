@@ -1,10 +1,12 @@
 import copy
 import dataclasses
+import datetime
 import logging
 import os
 from collections.abc import Sequence
 from typing import Literal
 
+import cftime
 import dacite
 import torch
 import xarray as xr
@@ -15,7 +17,11 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
+from fme.ace.inference.inference import (
+    InitialConditionConfig,
+    _get_segment_label,
+    get_initial_condition,
+)
 from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import StepperOverrideConfig
 from fme.core.cli import prepare_config, prepare_directory
@@ -278,18 +284,39 @@ def main(
             run_segmented_inference(config, segments)
 
 
+def _get_initialization_time_and_timestep(
+    config: InferenceConfig,
+) -> tuple[cftime.datetime, datetime.timedelta]:
+    # Loading the stepper is expensive, but it is necessary to get the coupled
+    # timestep and prognostic names. We only call this function once before the
+    # segmented loop starts to minimize the overhead.
+    stepper = config.load_stepper()
+    initial_condition = config.initial_condition.get_initial_condition(
+        ocean_prognostic_names=stepper.config.ocean.stepper.prognostic_names,
+        atmosphere_prognostic_names=stepper.config.atmosphere.stepper.prognostic_names,
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
+    )
+    # Coupled steps are anchored to the ocean, so label segments by the ocean
+    # initial condition's start time.
+    initialization_time = (
+        initial_condition.ocean_data.as_batch_data().time.isel(sample=0).item()
+    )
+    # The coupled ("outer") timestep is the ocean timestep.
+    return initialization_time, stepper.config.timestep
+
+
 def run_segmented_inference(config: InferenceConfig, segments: int):
     """Run coupled inference in multiple segments.
 
     Each segment runs ``config.n_coupled_steps`` coupled steps, writing its
-    outputs to a ``segment_{n:04d}`` subdirectory of the experiment directory.
-    A segment is complete when both its ocean and atmosphere restart files
-    exist; they are written last, after all other segment outputs. Completed
-    segments are skipped, so an interrupted run resumes at the first incomplete
-    segment when invoked again with the same configuration. Each segment after
-    the first initializes from the previous segment's restart files, which sit
-    at a coupled step boundary and therefore satisfy the ocean-anchored initial
-    condition timing.
+    outputs to a subdirectory of the experiment directory labeled by the start
+    time of its first (or only) ensemble member. A segment is complete when both
+    its ocean and atmosphere restart files exist; they are written last, after
+    all other segment outputs. Completed segments are skipped, so an interrupted
+    run resumes at the first incomplete segment when invoked again with the same
+    configuration. Each segment after the first initializes from the previous
+    segment's restart files, which sit at a coupled step boundary and therefore
+    satisfy the ocean-anchored initial condition timing.
 
     Args:
         config: inference configuration to be used for each individual segment.
@@ -312,8 +339,17 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
     )
     config_copy = copy.deepcopy(config)
     original_wandb_name = os.environ.get("WANDB_NAME")
+
+    initialization_time, timestep = _get_initialization_time_and_timestep(config)
+    n_coupled_steps = config.n_coupled_steps
+
     for segment in range(segments):
-        segment_label = f"segment_{segment:04d}"
+        segment_label = _get_segment_label(
+            initialization_time,
+            timestep,
+            segment,
+            n_coupled_steps,
+        )
         segment_dir = os.path.join(config.experiment_dir, segment_label)
         ocean_restart_path = os.path.join(
             segment_dir, OCEAN_OUTPUT_DIR_NAME, "restart.nc"

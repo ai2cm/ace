@@ -1,6 +1,8 @@
 """Tests for the segmented coupled inference entrypoint."""
 
+import contextlib
 import dataclasses
+import datetime
 import os
 import pathlib
 import tempfile
@@ -57,6 +59,38 @@ def _get_mock_config(experiment_dir: str) -> InferenceConfig:
     )
 
 
+# Fixed anchor used by the unit tests below: the mock config carries a
+# placeholder checkpoint/IC, so we stub out the (expensive, stepper-loading)
+# _get_initialization_time_and_timestep with a known start time and coupled
+# timestep. With n_coupled_steps=3 and a 2-day timestep, segments start 6 days
+# apart.
+_MOCK_INITIALIZATION_TIME = cftime.DatetimeProlepticGregorian(1970, 1, 1)
+_MOCK_TIMESTEP = datetime.timedelta(days=2)
+_MOCK_SEGMENT_LABELS = [
+    "segment_19700101T00",
+    "segment_19700107T00",
+    "segment_19700113T00",
+]
+
+
+@contextlib.contextmanager
+def _mock_segmented_dependencies():
+    """Mock the two functions run_segmented_inference calls into: the per-segment
+    inference run, and the one-time initialization-time/timestep lookup that
+    otherwise loads a real stepper and initial condition."""
+    mock = unittest.mock.MagicMock(side_effect=_run_inference_from_config_mock)
+    with (
+        unittest.mock.patch(
+            "fme.coupled.inference.inference.run_inference_from_config", new=mock
+        ),
+        unittest.mock.patch(
+            "fme.coupled.inference.inference._get_initialization_time_and_timestep",
+            return_value=(_MOCK_INITIALIZATION_TIME, _MOCK_TIMESTEP),
+        ),
+    ):
+        yield mock
+
+
 def _restart_paths(segment_dir: str) -> tuple[str, str]:
     return (
         os.path.join(segment_dir, OCEAN_OUTPUT_DIR_NAME, "restart.nc"),
@@ -79,21 +113,18 @@ def _run_inference_from_config_mock(config: InferenceConfig):
 
 
 def test_run_segmented_inference(tmp_path, monkeypatch):
-    mock = unittest.mock.MagicMock(side_effect=_run_inference_from_config_mock)
     config = _get_mock_config(str(tmp_path))
 
-    with unittest.mock.patch(
-        "fme.coupled.inference.inference.run_inference_from_config", new=mock
-    ):
+    with _mock_segmented_dependencies() as mock:
         # run a single segment
         monkeypatch.setenv("WANDB_NAME", "run_name")
         run_segmented_inference(config, 1)
-        segment_dir = os.path.join(config.experiment_dir, "segment_0000")
+        segment_dir = os.path.join(config.experiment_dir, _MOCK_SEGMENT_LABELS[0])
         for restart_path in _restart_paths(segment_dir):
             assert os.path.exists(restart_path)
         assert mock.call_count == 1
         with open(os.path.join(segment_dir, "wandb_name_env_var")) as f:
-            assert f.read() == "run_name-segment_0000"
+            assert f.read() == f"run_name-{_MOCK_SEGMENT_LABELS[0]}"
 
         # rerun the same segment and ensure run_inference_from_config isn't
         # called again
@@ -106,16 +137,16 @@ def test_run_segmented_inference(tmp_path, monkeypatch):
         monkeypatch.setenv("WANDB_NAME", "run_name")
         run_segmented_inference(config, 3)
         assert mock.call_count == 3
-        for i in range(3):
-            segment_dir = os.path.join(config.experiment_dir, f"segment_{i:04d}")
+        for label in _MOCK_SEGMENT_LABELS:
+            segment_dir = os.path.join(config.experiment_dir, label)
             for restart_path in _restart_paths(segment_dir):
                 assert os.path.exists(restart_path)
         for i in range(1, 3):
-            segment_dir = os.path.join(config.experiment_dir, f"segment_{i:04d}")
+            segment_dir = os.path.join(config.experiment_dir, _MOCK_SEGMENT_LABELS[i])
             with open(os.path.join(segment_dir, "wandb_name_env_var")) as f:
-                assert f.read() == f"run_name-segment_{i:04d}"
+                assert f.read() == f"run_name-{_MOCK_SEGMENT_LABELS[i]}"
             previous_segment_dir = os.path.join(
-                config.experiment_dir, f"segment_{i - 1:04d}"
+                config.experiment_dir, _MOCK_SEGMENT_LABELS[i - 1]
             )
             with open(os.path.join(segment_dir, "ic_paths")) as f:
                 assert f.read().splitlines() == list(
@@ -126,17 +157,14 @@ def test_run_segmented_inference(tmp_path, monkeypatch):
 def test_run_segmented_inference_reruns_partial_segment(tmp_path):
     """A segment with only one of its two restart files is incomplete and must
     be re-run."""
-    mock = unittest.mock.MagicMock(side_effect=_run_inference_from_config_mock)
     config = _get_mock_config(str(tmp_path))
-    segment_dir = os.path.join(config.experiment_dir, "segment_0000")
+    segment_dir = os.path.join(config.experiment_dir, _MOCK_SEGMENT_LABELS[0])
     ocean_restart_path, _ = _restart_paths(segment_dir)
     os.makedirs(os.path.dirname(ocean_restart_path))
     with open(ocean_restart_path, "w") as f:
         f.write("mock restart file")
 
-    with unittest.mock.patch(
-        "fme.coupled.inference.inference.run_inference_from_config", new=mock
-    ):
+    with _mock_segmented_dependencies() as mock:
         run_segmented_inference(config, 1)
     assert mock.call_count == 1
 
@@ -304,15 +332,18 @@ def test_inference_segmented_entrypoint():
         # both segments run in a single invocation
         main(yaml_config=str(config_filename), segments=2)
 
-        # re-invoke and ensure completed segments are not re-run
+        # re-invoke and ensure completed segments are not re-run. Ocean data
+        # starts at 1970-01-01 with a 2-day ocean timestep, so with
+        # n_coupled_steps=2 the segments start 4 days apart.
+        segment_labels = ["segment_19700101T00", "segment_19700105T00"]
         prediction_filenames = [
             os.path.join(
                 segmented_dir,
-                f"segment_{segment:04d}",
+                label,
                 OCEAN_OUTPUT_DIR_NAME,
                 "autoregressive_predictions.nc",
             )
-            for segment in range(2)
+            for label in segment_labels
         ]
         mtimes = [os.path.getmtime(filename) for filename in prediction_filenames]
         main(yaml_config=str(config_filename), segments=2)
@@ -334,7 +365,7 @@ def test_inference_segmented_entrypoint():
         ]:
             ds_segment_1 = xr.open_dataset(
                 segmented_dir
-                / "segment_0001"
+                / segment_labels[1]
                 / component_dir
                 / "autoregressive_predictions.nc",
                 decode_timedelta=False,
