@@ -31,3 +31,5 @@ fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KY5PW
 fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KY5PZC23Q4YXRRZ6DY6CHC3S|run_inf_ICx1-400yr|best_inference_ckpt_0001|high|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY5PZC2EMMDS5GR2RXE229ZF/ICx1-400yr-ep1|01KY5PZC2EMMDS5GR2RXE229ZF|ai2/ace|b200
 fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KY5PZC23Q4YXRRZ6DY6CHC3S|run_inf_ICx1-400yr|best_inference_ckpt_0002|high|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY5PZC2EMMDS5GR2RXE229ZF/ICx1-400yr-ep2|01KY5PZC2EMMDS5GR2RXE229ZF|ai2/ace|b200
 fix-ak-ft-determinisitc-v20260602-E3SMv3-piControl-zltomfxg-m95gvjw6|rs0|01KY5PZC23Q4YXRRZ6DY6CHC3S|run_inf_ICx1-400yr|best_inference_ckpt_0003|high|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KY5PZC2EMMDS5GR2RXE229ZF/ICx1-400yr-ep3|01KY5PZC2EMMDS5GR2RXE229ZF|ai2/ace|b200
+
+ft-deterministic-v20260717-E3SMv3-piControl-zltomfxg-srq4ynv8|rs0|01KYB7WR9YD7N56991380PT2EK|training|best_inference_ckpt|normal|--min-runtime 8h
