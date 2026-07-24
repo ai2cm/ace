@@ -45,9 +45,7 @@ import logging
 from typing import Sequence
 
 import apache_beam as beam
-import cftime as _cftime
 import numpy as np
-import pandas as pd
 import xarray as xr
 import xarray_beam as xbeam
 import xesmf as xe
@@ -109,12 +107,6 @@ STRESS_RENAME = {
     "tauy": "northward_surface_wind_stress",
 }
 
-# MOM6 variables that are dropped entirely
-OCEAN_DROP = ["LwLatSens", "pbo"]
-
-# MOM6 surface variables to retain
-OCEAN_SURFACE_VARS = ["SSH", "taux", "tauy"]
-
 # FV3 atmosphere forcing variables → output names
 ATMO_FORCING_VARS = {
     "dlwrf_ave": "DLWRFsfc",
@@ -128,8 +120,9 @@ ATMO_FORCING_VARS = {
 
 # FV3 bucket-accumulated frozen precip variables — converted to a rate
 # in the pipeline.  We use the bucket variants (frozrb/tsnowpb) rather
-# than the total accumulators (frozr/tsnowp) to keep values small.
-# Bucket resets (every fhzero=6h) are detected and handled.
+# than the total accumulators (frozr/tsnowp): the bucket empties every
+# output step, so each value is the 3h accumulation and a simple
+# division by dt yields the rate (see _process_atmo_chunk).
 FROZEN_PRECIP_ACCUM_VARS = ["frozrb", "tsnowpb"]
 
 # Sea-ice variables from FV3
@@ -138,6 +131,16 @@ ICE_VARS = {"icec": "ocean_sea_ice_fraction", "icetk": "HI"}
 # Raw MOM6 flux components used for deriving wfo and hfds, dropped after use
 WFO_COMPONENTS = ["evap", "lprec", "fprec", "lrunoff"]
 HFDS_COMPONENTS = ["SW", "LW", "latent", "sensible", "Heat_PmE"]
+
+# All MOM6 variables loaded from the store (source names; renamed by
+# _clean_ocean_dataset after opening)
+OCEAN_LOAD_VARS = (
+    ["temp", "so", "uo", "vo"]  # 3-D, vertically coarsened per-level
+    + ["ho", "depth"]  # layer thickness + bathymetry
+    + ["SSH", "taux", "tauy"]  # surface
+    + WFO_COMPONENTS
+    + HFDS_COMPONENTS
+)
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +294,10 @@ def _compute_ocean_vertical_coarsening(
 # ---------------------------------------------------------------------------
 
 
-def _build_3d_mask(
-    ds: xr.Dataset, vdim: str, time_idx: int = 0
-) -> tuple[xr.DataArray, xr.DataArray]:
+def _build_3d_mask(ds: xr.Dataset, vdim: str) -> tuple[xr.DataArray, xr.DataArray]:
     """Build 3-D and 2-D masks from the NaN pattern of a reference variable.
 
+    Expects a single-timestep dataset (time already selected).
     Returns (mask_3d, mask_2d) where 1 = ocean, 0 = land.
     """
     ref_var = next(
@@ -306,8 +308,6 @@ def _build_3d_mask(
         raise ValueError("Cannot build mask: no 3-D ocean variable found")
 
     ref_slice = ds[ref_var]
-    if "time" in ref_slice.dims:
-        ref_slice = ref_slice.isel(time=time_idx)
     mask_3d = (~np.isnan(ref_slice.values)).astype(np.float32)
     mask_3d = xr.DataArray(mask_3d, dims=ref_slice.dims, coords=ref_slice.coords)
 
@@ -319,22 +319,17 @@ def _build_3d_mask(
 def _build_per_level_masks(
     mask_3d: xr.DataArray,
     vdim: str,
-    vertical_coarsening_indices: Sequence[Sequence[int]] | None,
+    vertical_coarsening_indices: Sequence[Sequence[int]],
 ) -> dict[str, xr.DataArray]:
     """Build per-level mask variables from a 3-D mask.
 
-    With coarsening indices, each level mask is the max over the group.
-    Without, each level mask is the raw slice.
+    Each coarsened level's mask is the max over its group of native
+    levels (ocean wherever any native level in the group is ocean).
     """
     masks = {}
-    if vertical_coarsening_indices:
-        for i, (start, end) in enumerate(vertical_coarsening_indices):
-            level_mask = mask_3d.isel({vdim: slice(start, end)}).max(dim=vdim)
-            masks[f"mask_{i}"] = level_mask.astype(np.float32)
-    else:
-        n_levels = mask_3d.sizes[vdim]
-        for i in range(n_levels):
-            masks[f"mask_{i}"] = mask_3d.isel({vdim: i}).astype(np.float32)
+    for i, (start, end) in enumerate(vertical_coarsening_indices):
+        level_mask = mask_3d.isel({vdim: slice(start, end)}).max(dim=vdim)
+        masks[f"mask_{i}"] = level_mask.astype(np.float32)
     return masks
 
 
@@ -360,17 +355,12 @@ def _compute_nn_fill_indices(
     fill_map: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 
     for name in list(ds.data_vars):
-        if name.startswith("mask_") or name.startswith("idepth_"):
-            continue
-        if name in ("land_fraction", "sea_surface_fraction"):
-            continue
+        # Vertically coarsened per-level fields legitimately have NaN
+        # over ocean below the sea floor; they are not filled.
         if any(name.startswith(p) for p in level_prefixes):
             continue
-        v = ds[name]
-        if "time" not in v.dims:
-            continue
 
-        sample = v.isel(time=0).values
+        sample = ds[name].isel(time=0).values
         need_fill = np.isnan(sample) & ocean
         if not need_fill.any():
             continue
@@ -422,25 +412,15 @@ def _make_zarr_store(url: str, read_only: bool = True):
 
 
 def _match_time_type(dt, reference_time):
-    """Convert *dt* to match the type of *reference_time*.
+    """Convert *dt* to the cftime subclass of *reference_time*.
 
-    CLI arguments are parsed as ``datetime.datetime`` but the zarr stores
-    use cftime objects.  This converts so that ``xr.sel(time=slice(...))``
-    works correctly.
+    The stores are opened with ``use_cftime=True``, so *reference_time*
+    is always a cftime object, while *dt* may be a ``datetime.datetime``
+    from the CLI (or already a cftime object).  Converting makes
+    ``xr.sel(time=slice(...))`` work correctly.
     """
-    if isinstance(reference_time, _cftime.datetime):
-        # Match the exact cftime subclass used in the dataset
-        cf_cls = type(reference_time)
-        if isinstance(dt, cf_cls):
-            return dt
-        if isinstance(dt, (pd.Timestamp, datetime.datetime)):
-            return cf_cls(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-        if isinstance(dt, _cftime.datetime):
-            return cf_cls(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-    # numpy datetime64 / pd.Timestamp index — just use pd.Timestamp
-    if isinstance(dt, (pd.Timestamp, datetime.datetime)):
-        return pd.Timestamp(dt)
-    return dt
+    cf_cls = type(reference_time)
+    return cf_cls(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
 
 
 def _open_ufs_zarr(url: str) -> xr.Dataset:
@@ -512,30 +492,20 @@ def open_atmo(variables: list[str], start_time, end_time) -> xr.Dataset:
 def _clean_ocean_dataset(ds: xr.Dataset) -> xr.Dataset:
     """Clean UFS MOM6 ocean dataset right after opening.
 
-    Normalizes vertical dimensions, drops unused variables, renames
-    to standard names, and removes stray non-dimension coordinates.
-    This runs once at the front of the pipeline so that every downstream
-    function receives a consistently shaped dataset.
+    Normalizes vertical dimensions, renames to standard names, and
+    removes stray non-dimension coordinates.  This runs once at the
+    front of the pipeline so that every downstream function receives a
+    consistently shaped dataset.
     """
     # MOM6's layer thickness 'ho' lives on the 'zl' dimension while all
     # tracer variables (thetao, so, …) use 'z_l'.  Move ho onto z_l so
     # that the rest of the pipeline only has to deal with one vertical dim.
-    if "zl" in ds.dims and "ho" in ds and "zl" in ds["ho"].dims:
-        ho = ds["ho"].rename({"zl": VDIM})
-        ho = ho.assign_coords({VDIM: ds[VDIM].values})
-        ds = ds.drop_vars("ho")
-        ds["ho"] = ho
-        ds = ds.drop_dims("zl", errors="ignore")
+    ho = ds["ho"].rename({"zl": VDIM}).assign_coords({VDIM: ds[VDIM].values})
+    ds = ds.drop_vars("ho")
+    ds["ho"] = ho
+    ds = ds.drop_dims("zl", errors="ignore")
 
-    ds = ds.drop_vars(
-        [v for v in OCEAN_DROP if v in ds] + ["landsea_mask"],
-        errors="ignore",
-    )
-
-    rename_map = {k: v for k, v in OCEAN_RENAME.items() if k in ds}
-    rename_map.update({k: v for k, v in STRESS_RENAME.items() if k in ds})
-    if rename_map:
-        ds = ds.rename(rename_map)
+    ds = ds.rename({**OCEAN_RENAME, **STRESS_RENAME})
 
     # Drop stray non-dimension coordinates (cftime, ftime, etc.) that
     # pollute downstream merge/coarsen steps.
@@ -977,30 +947,25 @@ def _extract_invariant_fields(
     # Conservatively regridding this binary mask gives fractional
     # sea_surface_fraction at coastal cells (e.g., 0.7 if 70% of the
     # 0.25° source cells within a 1° target cell are ocean).
-    native_mask_3d, native_mask_2d = _build_3d_mask(ds_ocean_1t, VDIM)
+    _, native_mask_2d = _build_3d_mask(ds_ocean_1t, VDIM)
+    native_mask_ds = xr.Dataset({"mask_2d": native_mask_2d})
+    frac_ds = _regrid_dataset(
+        native_mask_ds,
+        output_grid,
+        source_grid_ocean,
+        skipna=False,
+        na_thres=1.0,
+    )
+    sea_fraction = frac_ds["mask_2d"].clip(0, 1).astype(np.float32)
 
-    if output_grid:
-        # Regrid native binary mask → fractional ocean coverage
-        native_mask_ds = xr.Dataset({"mask_2d": native_mask_2d})
-        frac_ds = _regrid_dataset(
-            native_mask_ds,
-            output_grid,
-            source_grid_ocean,
-            skipna=False,
-            na_thres=1.0,
-        )
-        sea_fraction = frac_ds["mask_2d"].clip(0, 1).astype(np.float32)
-
-        # Regrid ocean data for building binary masks from NaN pattern
-        ds_ocean_1t = _regrid_dataset(
-            ds_ocean_1t,
-            output_grid,
-            source_grid_ocean,
-            skipna=True,
-            na_thres=1.0,
-        )
-    else:
-        sea_fraction = native_mask_2d
+    # Regrid ocean data for building binary masks from NaN pattern
+    ds_ocean_1t = _regrid_dataset(
+        ds_ocean_1t,
+        output_grid,
+        source_grid_ocean,
+        skipna=True,
+        na_thres=1.0,
+    )
 
     # Binary masks for NaN insertion (from regridded NaN pattern)
     mask_3d, mask_2d = _build_3d_mask(ds_ocean_1t, VDIM)
@@ -1064,7 +1029,7 @@ def _make_template(
     # extracted from the un-filled data (the fill pattern depends only
     # on the static ocean mask, so it is computed once here and passed
     # to every Beam worker), then apply the fill.
-    ocean_per_output = max(1, time_coarsen_factor)
+    ocean_per_output = time_coarsen_factor
     ds_ocean_small = ds_ocean.isel(time=slice(0, ocean_per_output)).load()
     processed_ocean = _process_ocean_chunk(
         ds_ocean_small,
@@ -1191,6 +1156,7 @@ def main():
         vert_indices = DEFAULT_VERTICAL_COARSENING_INDICES
 
     time_coarsen_factor = args.time_coarsen_factor
+    assert time_coarsen_factor >= 1, "time_coarsen_factor must be >= 1"
 
     # Validate chunk/shard divisibility
     msg = (
@@ -1212,25 +1178,7 @@ def main():
     # --- Open source datasets ---
     logging.info("Opening datasets")
 
-    # Determine which ocean variables to load (use source names, not
-    # post-rename names — the MOM6 store has "temp" not "thetao")
-    ocean_source_3d = list(OCEAN_RENAME.keys()) + [
-        v for v in VARS_3D if v not in OCEAN_RENAME.values()
-    ]
-    ocean_surface = list(OCEAN_SURFACE_VARS)
-    ocean_stress = list(STRESS_RENAME.keys())
-    ocean_flux_vars = WFO_COMPONENTS + HFDS_COMPONENTS
-    ocean_load_vars = (
-        ocean_source_3d
-        + ["ho", "depth"]
-        + ocean_surface
-        + ocean_stress
-        + ocean_flux_vars
-    )
-    # Deduplicate
-    ocean_load_vars = list(dict.fromkeys(ocean_load_vars))
-
-    ds_ocean = open_ocean(ocean_load_vars, start_time, end_time)
+    ds_ocean = open_ocean(OCEAN_LOAD_VARS, start_time, end_time)
     # Truncate to a multiple of process_time_chunksize so every chunk has
     # exactly the same number of timesteps (avoids coarsen failures).
     n_ocean = ds_ocean.sizes["time"]

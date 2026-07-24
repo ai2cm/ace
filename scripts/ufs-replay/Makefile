@@ -8,7 +8,8 @@ DATASET_NAME ?= ufs-replay-ocean-1deg-19level-1994-2023
 # Ocean (MOM6): 1993-12-31 18:00 to 2023-12-31 00:00
 # Atmo  (FV3):  1993-12-31 18:00 to 2023-10-13 03:00
 # Use the overlap: 1994-01-01 to 2023-10-12 (atmo is the binding constraint)
-# Start at 00Z so daily groups are (00,06,12,18) → centered at 12Z.
+# Start at 00Z so daily groups are (00,06,12,18); these center-labeled 6h
+# averages cover 21Z(-1d)–21Z, so the daily-mean label lands at 09Z.
 START_TIME=1994-01-01T00:00:00
 END_TIME=2023-10-12T18:00:00
 OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/$(DATE)-$(DATASET_NAME).zarr
