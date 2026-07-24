@@ -28,6 +28,7 @@ def run_validation_loop(
     validate_using_ema: bool = False,
     compute_derived_variables: bool = True,
     log_progress: bool = False,
+    evaluate_all_steps: bool = True,
 ) -> None:
     """Run the core validation loop: iterate batches and record to aggregator.
 
@@ -43,6 +44,9 @@ def run_validation_loop(
         validate_using_ema: Whether to use EMA parameters during validation.
         compute_derived_variables: Whether to compute derived variables.
         log_progress: Whether to log per-batch progress messages.
+        evaluate_all_steps: Whether the stepper evaluates every forward step
+            in the data window, or only the steps it would evaluate for the
+            batch during training.
     """
     timer = GlobalTimer.get_instance()
     stepper.set_eval()
@@ -62,7 +66,7 @@ def run_validation_loop(
                 batch,
                 optimization=no_opt,
                 compute_derived_variables=compute_derived_variables,
-                evaluate_all_steps=True,
+                evaluate_all_steps=evaluate_all_steps,
             )
             with timer.context("aggregator"):
                 aggregator.record_batch(batch=stepped)
@@ -90,6 +94,7 @@ def run_validation(
     ema: EMATracker | None = None,
     validate_using_ema: bool = False,
     log_progress: bool = False,
+    evaluate_all_steps: bool = True,
 ) -> AggregatorSummary:
     """Run validation loop for a train stepper and validation dataset.
 
@@ -107,6 +112,9 @@ def run_validation(
         ema: The EMA tracker, or None if EMA is not used.
         validate_using_ema: Whether to use EMA parameters during validation.
         log_progress: Whether to log per-batch progress messages.
+        evaluate_all_steps: Whether the stepper evaluates every forward step
+            in the data window, or only the steps it would evaluate for the
+            batch during training.
 
     Returns:
         Summary containing validation metrics and the loss scalar.
@@ -126,6 +134,7 @@ def run_validation(
         validate_using_ema=validate_using_ema,
         compute_derived_variables=compute_derived_variables,
         log_progress=log_progress,
+        evaluate_all_steps=evaluate_all_steps,
     )
 
     logging.info("Flushing validation diagnostics")

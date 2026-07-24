@@ -68,7 +68,10 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.test_registry import ConstantOffsetCorrection
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
+from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
+from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.validation import run_validation_loop
 from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
@@ -187,6 +190,26 @@ def test_stepper_step_schedule():
     assert schedule.has_sampler
 
 
+def test_stepper_step_probabilities_requires_epoch():
+    stepper = _init_train_stepper(
+        n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=2, probability=0.5),
+            ]
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    with pytest.raises(EpochNotProvidedError):
+        stepper._loss_schedule.init_for_epoch(None)
+
+
+def test_stepper_step_int_does_not_require_epoch():
+    stepper = _init_train_stepper(n_forward_steps=2, loss=StepLossConfig(type="MSE"))
+    stepper._loss_schedule.init_for_epoch(None)
+    assert not stepper._loss_schedule.has_sampler
+
+
 def test_seed_eval_does_not_corrupt_training_sampler():
     stepper = _init_train_stepper(
         n_forward_steps=TimeLengthProbabilities(
@@ -210,6 +233,142 @@ def test_seed_eval_does_not_corrupt_training_sampler():
     schedule._train_sampler.seed_rng(42)
     train_samples_after = [schedule._train_sampler.sample() for _ in range(20)]
     assert train_samples_before == train_samples_after
+
+
+def _sampled_schedule_train_stepper() -> TrainStepper:
+    config = _get_stepper_config(["a", "b"], ["a", "b"])
+    return _get_train_stepper(
+        config,
+        loss=StepLossConfig(type="MSE"),
+        n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=4, probability=0.5),
+            ]
+        ),
+    )
+
+
+def test_train_on_batch_evaluate_all_steps_with_schedule():
+    torch.manual_seed(0)
+    n_data_steps = 4
+    batches = [
+        get_data(["a", "b"], n_samples=2, n_time=n_data_steps + 1).data
+        for _ in range(12)
+    ]
+
+    def run(evaluate_all_steps: bool):
+        stepper = _sampled_schedule_train_stepper()
+        stepper.set_eval()
+        stepper._loss_schedule.init_for_epoch(0)
+        stepper.seed_eval(seed=0)
+        losses = []
+        key_sets = []
+        for batch in batches:
+            stepped = stepper.train_on_batch(
+                data=batch,
+                optimization=NullOptimization(),
+                evaluate_all_steps=evaluate_all_steps,
+            )
+            losses.append(float(stepped.metrics["loss"]))
+            key_sets.append({k for k in stepped.metrics if k.startswith("loss_step_")})
+        return losses, key_sets
+
+    sampled_losses, sampled_key_sets = run(evaluate_all_steps=False)
+    dense_losses, dense_key_sets = run(evaluate_all_steps=True)
+
+    # evaluate_all_steps=True: every batch logs a metric for every data step
+    all_steps = {f"loss_step_{step}" for step in range(n_data_steps)}
+    assert all(keys == all_steps for keys in dense_key_sets)
+    # evaluate_all_steps=False: each batch logs only its sampled contiguous
+    # step range, and both schedule outcomes occur across batches
+    assert {len(keys) for keys in sampled_key_sets} == {1, n_data_steps}
+    for keys in sampled_key_sets:
+        assert keys == {f"loss_step_{step}" for step in range(len(keys))}
+    # only sampled steps count toward the accumulated loss under both flag
+    # values: with identical seeded draws, per-batch losses are flag-invariant
+    assert sampled_losses == pytest.approx(dense_losses)
+
+
+class _BatchListData(GriddedDataABC[BatchData]):
+    """Minimal validation data serving a fixed list of batches."""
+
+    def __init__(self, batches: list[BatchData]):
+        self._batches = batches
+
+    @property
+    def loader(self):
+        return self._batches
+
+    @property
+    def n_samples(self) -> int:
+        return len(self._batches)
+
+    @property
+    def n_batches(self) -> int:
+        return len(self._batches)
+
+    @property
+    def batch_size(self) -> int:
+        return 1
+
+    def set_epoch(self, epoch: int):
+        pass
+
+    def alternate_shuffle(self):
+        pass
+
+    def subset_loader(self, start_batch=None, stop_batch=None):
+        return self._batches[slice(start_batch, stop_batch)]
+
+    def log_info(self, name: str):
+        pass
+
+
+class _PerStepKeyAggregator(AggregatorABC[TrainOutput]):
+    """Records which per-step loss metrics each validation batch produced."""
+
+    def __init__(self):
+        self.key_sets: list[set[str]] = []
+
+    def record_batch(self, batch: TrainOutput):
+        self.key_sets.append({k for k in batch.metrics if k.startswith("loss_step_")})
+
+    def get_summary(self, label: str) -> AggregatorSummary:
+        return AggregatorSummary(logs={}, loss=None)
+
+    def flush_diagnostics(self, subdir: str | None):
+        pass
+
+
+@pytest.mark.parametrize("evaluate_all_steps", [False, True])
+def test_run_validation_loop_evaluate_all_steps_with_schedule(evaluate_all_steps):
+    torch.manual_seed(0)
+    n_data_steps = 4
+    valid_data = _BatchListData(
+        [
+            get_data(["a", "b"], n_samples=2, n_time=n_data_steps + 1).data
+            for _ in range(20)
+        ]
+    )
+    stepper = _sampled_schedule_train_stepper()
+    aggregator = _PerStepKeyAggregator()
+
+    run_validation_loop(
+        stepper=stepper,
+        valid_data=valid_data,
+        aggregator=aggregator,
+        compute_derived_variables=False,
+        evaluate_all_steps=evaluate_all_steps,
+    )
+
+    all_steps = {f"loss_step_{step}" for step in range(n_data_steps)}
+    if evaluate_all_steps:
+        assert all(keys == all_steps for keys in aggregator.key_sets)
+    else:
+        assert {len(keys) for keys in aggregator.key_sets} == {1, n_data_steps}
+        for keys in aggregator.key_sets:
+            assert keys == {f"loss_step_{step}" for step in range(len(keys))}
 
 
 def test_train_on_batch_normalizer_changes_only_norm_data():

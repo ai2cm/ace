@@ -1,6 +1,7 @@
 import dataclasses
 from unittest.mock import MagicMock, patch
 
+import dacite
 import pytest
 
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
@@ -34,12 +35,13 @@ from fme.core.typing_ import Slice
 
 
 def _make_validation_config(
-    name: str | None = None, weight: float = 1.0
+    name: str | None = None, weight: float = 1.0, evaluate_all_steps: bool = True
 ) -> InlineValidationConfig:
     return InlineValidationConfig(
         loader=DataLoaderConfig(dataset=XarrayDataConfig(data_path=""), batch_size=1),
         name=name,
         weight=weight,
+        evaluate_all_steps=evaluate_all_steps,
     )
 
 
@@ -324,6 +326,21 @@ def test_empty_validation_raises(tmp_path):
         _make_train_config(tmp_path, [], validation=[])
 
 
+def test_inline_validation_config_evaluate_all_steps_default():
+    base = {"loader": {"dataset": {"data_path": ""}, "batch_size": 1}}
+    config = dacite.from_dict(
+        InlineValidationConfig, base, config=dacite.Config(strict=True)
+    )
+    assert config.evaluate_all_steps is True
+    for value in (True, False):
+        config = dacite.from_dict(
+            InlineValidationConfig,
+            {**base, "evaluate_all_steps": value},
+            config=dacite.Config(strict=True),
+        )
+        assert config.evaluate_all_steps is value
+
+
 class TestGetValidationCallback:
     """Smoke test for `_get_validation_callback` wiring.
 
@@ -357,6 +374,39 @@ class TestGetValidationCallback:
             )
             _, loss = callback(epoch=1)
         assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_per_entry_evaluate_all_steps_wired_to_tasks(self):
+        entries = [
+            (_make_validation_config(name="a"), MagicMock(), "a"),
+            (
+                _make_validation_config(name="b", evaluate_all_steps=False),
+                MagicMock(),
+                "b",
+            ),
+        ]
+        stepper = MagicMock()
+        with patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[
+                AggregatorSummary(logs={}, loss=0.1),
+                AggregatorSummary(logs={}, loss=0.2),
+            ],
+        ) as mock_run_validation:
+            callback = _get_validation_callback(
+                validation_entries=entries,
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                loss_scaling=None,
+                loss_names=None,
+                save_per_epoch_diagnostics=False,
+                output_dir="/tmp/out",
+            )
+            callback(epoch=1)
+        flags = [
+            call.kwargs["evaluate_all_steps"]
+            for call in mock_run_validation.call_args_list
+        ]
+        assert flags == [True, False]
 
 
 class TestGetInferenceCallback:

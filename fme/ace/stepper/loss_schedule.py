@@ -33,7 +33,7 @@ class LossSchedule:
         if (
             epoch is None
             and self._schedule is not None
-            and len(self._schedule.milestones) > 0
+            and not self._schedule.is_constant
         ):
             raise EpochNotProvidedError(
                 "current configuration requires epoch to be provided "

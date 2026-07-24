@@ -6,7 +6,13 @@ from fme.core.loss import ChannelLossInfo
 
 
 class PerStepLossAggregator:
-    """Accumulates per-step loss metrics across batches and produces means."""
+    """Accumulates per-step loss metrics across batches and produces means.
+
+    Ranks may record different key sets — e.g. sparse ``loss_step_N`` keys
+    when the stepper evaluates a per-batch sampled step count, unequal batch
+    counts per rank, or a rank that records no batches at all — so the
+    distributed reduction must not depend on locally-observed keys.
+    """
 
     def __init__(self):
         self._sums: dict[str, torch.Tensor] = {}
@@ -23,12 +29,33 @@ class PerStepLossAggregator:
 
     def get_logs(self, label: str) -> dict[str, float]:
         dist = Distributed.get_instance()
+        # Every rank must issue an identical sequence of collective calls, so
+        # first agree on the global key universe, then reduce dense sum and
+        # count vectors over it. Means are count-weighted: ranks contribute in
+        # proportion to how many batches they recorded for each key, and keys
+        # with a global count of zero are skipped.
+        gathered = dist.gather_object(sorted(self._sums.keys()))
+        universe: list[str] | None = None
+        if gathered is not None:
+            universe = sorted(set().union(*gathered))
+        keys: list[str] = dist.scatter_object(universe)
+        if len(keys) == 0:
+            return {}
+        device = get_device()
+        sums = torch.zeros(len(keys), device=device)
+        counts = torch.zeros(len(keys), device=device)
+        for i, key in enumerate(keys):
+            if key in self._sums:
+                sums[i] = self._sums[key].to(device)
+                counts[i] = self._counts[key]
+        sums = dist.reduce_sum(sums)
+        counts = dist.reduce_sum(counts)
         logs: dict[str, float] = {}
-        for key in sorted(self._sums.keys()):
-            count = self._counts[key]
-            logs[f"{label}/mean/{key}"] = float(
-                dist.reduce_mean(self._sums[key] / count).cpu().numpy()
-            )
+        for key, key_sum, key_count in zip(
+            keys, sums.cpu().tolist(), counts.cpu().tolist()
+        ):
+            if key_count > 0:
+                logs[f"{label}/mean/{key}"] = key_sum / key_count
         return logs
 
 

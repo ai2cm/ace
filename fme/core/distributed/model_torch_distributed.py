@@ -302,7 +302,7 @@ class ModelTorchDistributed(DistributedBackend):
 
     def scatter_object(self, obj: T | None) -> T:
         """Scatter a picklable object from the root process to all processes."""
-        if self._data_rank == 0:
+        if self._rank == 0:
             if obj is None:
                 raise ValueError("Root process must provide an object to scatter")
             object_list = [obj for _ in range(self.total_ranks)]
