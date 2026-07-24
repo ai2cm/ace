@@ -14,15 +14,28 @@ This pipeline follows the same runner/infrastructure pattern as `scripts/era5/`.
 
 ## Pipeline Steps
 
-1. Read MOM6 ocean variables (3-D + surface + layer thickness `ho`)
-2. Read FV3 atmosphere forcing and sea-ice variables
-3. Average 3-hourly FV3 atmosphere to 6-hourly ocean cadence
-4. Regrid ocean and atmosphere to Gaussian grid (F90 = 1°) via xESMF
-5. Thickness-weighted vertical coarsening (75 → 19 levels matching CM4)
-6. Split 3-D fields into per-level 2-D variables
-7. Derive additional variables (SST, ssu/ssv, deptho, wfo, hfds, etc.)
-8. Insert NaN on land, nearest-neighbour fill residual coastal NaN
-9. Coarsen in time (6-hourly → daily)
+The ocean and atmosphere are processed in two independent Beam streams
+(mirroring the multi-stream setup of `scripts/era5/`) that write to the same
+output zarr store.  The 3-hourly atmosphere times are validated up front to
+exactly interleave the 6-hourly ocean times, so the streams align purely by
+integer chunk offsets — no per-chunk time matching is needed.
+
+Ocean stream (6-hourly MOM6 chunks):
+
+1. Regrid to Gaussian grid (F90 = 1°) via xESMF
+2. Thickness-weighted (`ho`) vertical coarsening (75 → 19 levels matching
+   CM4), splitting 3-D fields into per-level 2-D variables
+3. Derive additional variables (sst, ssu/ssv, wfo, hfds, etc.)
+4. Coarsen in time (6-hourly → daily)
+5. Insert NaN on land, nearest-neighbour fill residual coastal NaN
+
+Atmosphere stream (3-hourly FV3 chunks):
+
+1. Derive frozen precipitation rate from bucket accumulations
+2. Average 3-hourly fields to the 6-hourly ocean cadence
+3. Regrid to Gaussian grid via xESMF
+4. Coarsen in time (6-hourly → daily)
+5. Mask sea-ice variables to the ocean
 
 ## Quick Start
 
@@ -72,7 +85,7 @@ make ufs_replay_dataflow_test_run
 | Aspect | ERA5 | UFS Replay |
 |--------|------|------------|
 | Source | ARCO-ERA5 (0.25°) | NOAA UFS replay (0.25°) |
-| Streams | 4 parallel (flux, surface, pressure, model) | 1 merged (ocean + atmo per chunk) |
+| Streams | 4 parallel (flux, surface, pressure, model) | 2 parallel (ocean, atmosphere) |
 | Vertical | Pressure-weighted (137→8 layers) | Thickness-weighted (75→19 levels) |
 | Time step | 6-hourly output | 6-hourly → daily |
 | Runner | Dataflow / DirectRunner | Dataflow / DirectRunner |

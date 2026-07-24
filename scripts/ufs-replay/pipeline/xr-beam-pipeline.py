@@ -3,17 +3,29 @@ xarray-beam pipeline for the UFS GEFSv13 replay ocean (MOM6) + atmosphere
 (FV3) dataset.  Produces a training-ready zarr store for SamudrACE-type
 models, matching the runner/infrastructure pattern of ``scripts/era5/``.
 
-Pipeline steps (applied per time-chunk by each Beam worker):
+The ocean and atmosphere are processed in two independent Beam streams
+(one per source dataset, mirroring ``scripts/era5/``) that write to the
+same output zarr store.  Because the 3-hourly atmosphere times are
+validated up front to exactly interleave the 6-hourly ocean times, the
+streams align purely by integer chunk offsets — no per-chunk time
+matching is needed.
 
-  1. Read MOM6 ocean variables (3-D + surface + layer thickness ``ho``).
-  2. Read FV3 atmosphere forcing and sea-ice variables.
-  3. Average 3-hourly FV3 atmosphere to 6-hourly ocean cadence.
-  4. Regrid ocean and atmosphere to a Gaussian grid via xESMF.
-  5. Apply thickness-weighted vertical coarsening (``ho``-weighted).
-  6. Split 3-D fields into per-level 2-D variables.
-  7. Derive additional variables (SST, ssu/ssv, deptho, wfo, hfds, etc.).
-  8. Insert NaN on land, nearest-neighbour fill residual coastal NaN.
-  9. Optionally coarsen in time (e.g. 6-hourly → daily).
+Ocean stream (per 6-hourly MOM6 time-chunk):
+
+  1. Regrid to a Gaussian grid via xESMF.
+  2. Apply thickness-weighted vertical coarsening (``ho``-weighted) and
+     split 3-D fields into per-level 2-D variables.
+  3. Derive additional variables (sst, ssu/ssv, wfo, hfds, etc.).
+  4. Coarsen in time (e.g. 6-hourly → daily).
+  5. Insert NaN on land, nearest-neighbour fill residual coastal NaN.
+
+Atmosphere stream (per 3-hourly FV3 time-chunk):
+
+  1. Derive the frozen precipitation rate from bucket accumulations.
+  2. Average 3-hourly fields to the 6-hourly ocean cadence.
+  3. Regrid to a Gaussian grid via xESMF.
+  4. Coarsen in time (e.g. 6-hourly → daily).
+  5. Mask sea-ice variables to the ocean.
 
 Data sources::
 
@@ -275,7 +287,7 @@ def _compute_ocean_vertical_coarsening(
 
 
 # ---------------------------------------------------------------------------
-# Mask helpers (shared by _process_chunk and _extract_invariant_fields)
+# Mask helpers (used by _extract_invariant_fields)
 # ---------------------------------------------------------------------------
 
 
@@ -324,17 +336,6 @@ def _build_per_level_masks(
         for i in range(n_levels):
             masks[f"mask_{i}"] = mask_3d.isel({vdim: i}).astype(np.float32)
     return masks
-
-
-def _build_land_sea_fractions(
-    mask_2d: xr.DataArray,
-) -> dict[str, xr.DataArray]:
-    """Derive land_fraction and sea_surface_fraction from mask_2d."""
-    land_frac = (1.0 - mask_2d).astype(np.float32)
-    land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
-    ssf = mask_2d.astype(np.float32)
-    ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
-    return {"land_fraction": land_frac, "sea_surface_fraction": ssf}
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +499,13 @@ def open_atmo(variables: list[str], start_time, end_time) -> xr.Dataset:
     logging.info("Atmo time slice: %s to %s", t0, t1)
     ds = ds.sel(time=slice(t0, t1))
     logging.info("Atmo after time slice: %d timesteps", ds.sizes["time"])
+
+    # Drop stray non-dimension coordinates (cftime, ftime, etc.) that
+    # pollute downstream coarsen steps and the output encoding.
+    keep_coords = {"time", "lat", "lon"}
+    stray = [c for c in ds.coords if c not in keep_coords and c not in ds.dims]
+    if stray:
+        ds = ds.drop_vars(stray)
     return ds
 
 
@@ -539,306 +547,59 @@ def _clean_ocean_dataset(ds: xr.Dataset) -> xr.Dataset:
     return ds
 
 
+def _validate_time_alignment(ocean_times, atmo_times) -> None:
+    """Check that the atmosphere times exactly interleave the ocean times.
+
+    The 6-hourly ocean fields are averages centered on their labels,
+    while the 3-hourly FV3 interval-average fields are labeled at the
+    END of their averaging window, so ocean time T is covered by the
+    atmosphere pair (T, T+3h).  Verifying this correspondence once up
+    front lets the two Beam streams align purely by integer chunk
+    offsets, with no per-chunk time matching.
+    """
+    if len(atmo_times) != 2 * len(ocean_times):
+        raise ValueError(
+            f"Expected exactly {2 * len(ocean_times)} atmosphere timesteps "
+            f"(2 per ocean timestep), got {len(atmo_times)}."
+        )
+    step = datetime.timedelta(hours=ATMO_TIME_STEP)
+    for i, ocean_time in enumerate(ocean_times):
+        if (
+            atmo_times[2 * i] != ocean_time
+            or atmo_times[2 * i + 1] != ocean_time + step
+        ):
+            raise ValueError(
+                f"Atmosphere times ({atmo_times[2 * i]}, {atmo_times[2 * i + 1]}) "
+                f"do not cover ocean time {ocean_time}; expected "
+                f"({ocean_time}, {ocean_time + step})."
+            )
+
+
 # ---------------------------------------------------------------------------
 # Per-chunk processing (called by each Beam worker)
 # ---------------------------------------------------------------------------
 
+# Source grids are built lazily and cached per worker
+_SOURCE_GRID_CACHE = {}
 
-def _process_chunk(
-    ds_ocean: xr.Dataset,
-    ds_atmo: xr.Dataset,
-    output_grid: str,
-    vertical_coarsening_indices: Sequence[Sequence[int]],
-    time_coarsen_factor: int,
-    source_grid_ocean: xr.Dataset,
-    source_grid_atmo: xr.Dataset,
-    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
-    mask_3d: xr.DataArray | None = None,
-    sea_fraction: xr.DataArray | None = None,
-) -> xr.Dataset:
-    """Process one time-chunk of ocean + atmosphere data.
 
-    This is the core function that each Beam worker executes.  It receives
-    loaded (in-memory) xarray Datasets for a small number of timesteps
-    and returns the fully processed output Dataset.
+def _get_source_grid(ds: xr.Dataset) -> xr.Dataset:
+    """Build and cache a source grid descriptor."""
+    key = (len(ds["lat"]), len(ds["lon"]))
+    if key not in _SOURCE_GRID_CACHE:
+        _SOURCE_GRID_CACHE[key] = _make_source_grid(ds)
+    return _SOURCE_GRID_CACHE[key]
+
+
+def _finalize_chunk(ds: xr.Dataset) -> xr.Dataset:
+    """Final cleanup shared by the ocean and atmosphere streams.
+
+    Drops non-output dimensions and stray coordinates, casts to float32,
+    and drops scalar and time-invariant variables — xarray-beam's
+    ConsolidateChunks requires all variables to share the same
+    dimensions, and the invariant fields are written once during
+    template creation rather than streamed through the pipeline.
     """
-    xr.set_options(keep_attrs=True)
-
-    # Separate ho for independent regridding (thickness-weighted
-    # coarsening needs ho regridded without NaN-masking influence
-    # from tracer fields that have deeper NaN patterns).
-    ho_ds = None
-    if "ho" in ds_ocean:
-        ho_ds = ds_ocean[["ho"]]
-        ds_ocean = ds_ocean.drop_vars("ho")
-
-    # --- Horizontal regridding ---
-    if output_grid:
-        ds_ocean = _regrid_dataset(
-            ds_ocean,
-            output_grid,
-            source_grid_ocean,
-            skipna=True,
-            na_thres=1.0,
-        )
-        if ho_ds is not None:
-            ho_ds = _regrid_dataset(
-                ho_ds,
-                output_grid,
-                source_grid_ocean,
-                skipna=True,
-                na_thres=1.0,
-            )
-            ho_ds = ho_ds.assign_coords(
-                lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
-            )
-
-    # Use precomputed mask (invariant across chunks) or build if not provided
-    if mask_3d is None:
-        mask_3d, mask_2d = _build_3d_mask(ds_ocean, VDIM, time_idx=0)
-    else:
-        mask_2d = mask_3d.isel({VDIM: 0}).astype(np.float32)
-        mask_2d.attrs = {"long_name": "ocean mask", "units": "0 if land, 1 if ocean"}
-
-    # --- Vertical coarsening ---
-    vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
-
-    if ho_ds is None or "ho" not in ho_ds:
-        raise ValueError("'ho' is required for thickness-weighted coarsening")
-    ds_ocean["ho"] = ho_ds["ho"]
-    indices_as_tuples = [tuple(pair) for pair in vertical_coarsening_indices]
-    ds_levels = _compute_ocean_vertical_coarsening(
-        ds_ocean,
-        vars_3d_present,
-        indices_as_tuples,
-        VDIM,
-    )
-
-    # Add per-level masks, surface mask, and land/sea fractions.
-    level_masks = _build_per_level_masks(mask_3d, VDIM, vertical_coarsening_indices)
-    for name, mask_da in level_masks.items():
-        ds_levels[name] = mask_da
-    ds_levels["mask_2d"] = mask_2d
-
-    # Use precomputed fractional sea_fraction (from conservatively
-    # regridded native mask) or fall back to binary mask_2d.
-    if sea_fraction is not None:
-        ssf = sea_fraction.astype(np.float32)
-        ssf.attrs = {"long_name": "sea surface fraction", "units": "fraction"}
-        land_frac = (1.0 - sea_fraction).astype(np.float32)
-        land_frac.attrs = {"long_name": "land fraction", "units": "fraction"}
-        ds_levels["sea_surface_fraction"] = ssf
-        ds_levels["land_fraction"] = land_frac
-    else:
-        ds_levels.update(_build_land_sea_fractions(mask_2d))
-
-    # Collect 2-D ocean variables
-    ocean_2d_names = [
-        n
-        for n in ds_ocean.data_vars
-        if VDIM not in ds_ocean[n].dims and n not in vars_3d_present and n != "ho"
-    ]
-    ds_ocean_2d = ds_ocean[ocean_2d_names]
-
-    # --- Derived variables ---
-    # SST in Kelvin
-    if "thetao_0" in ds_levels:
-        sst_K = ds_levels["thetao_0"] + 273.15
-        sst_K.attrs = {"long_name": "Sea surface temperature", "units": "K"}
-        ds_levels["sst"] = sst_K
-    if "zos" in ds_ocean_2d:
-        ds_ocean_2d["zos"].attrs.setdefault("long_name", "Sea Surface Height")
-
-    # Surface velocity aliases
-    if "uo_0" in ds_levels:
-        ssu = ds_levels["uo_0"]
-        ssu.attrs = {"long_name": "Sea surface x-velocity", "units": "m/s"}
-        ds_levels["ssu"] = ssu
-    if "vo_0" in ds_levels:
-        ssv = ds_levels["vo_0"]
-        ssv.attrs = {"long_name": "Sea surface y-velocity", "units": "m/s"}
-        ds_levels["ssv"] = ssv
-
-    # deptho from MOM6 "depth" (time-invariant)
-    if "depth" in ds_ocean_2d:
-        ds_ocean_2d["deptho"] = ds_ocean_2d["depth"]
-        ds_ocean_2d["deptho"].attrs = {
-            "long_name": "Sea Floor Depth Below Geoid",
-            "units": "m",
-        }
-        ds_ocean_2d = ds_ocean_2d.drop_vars("depth")
-
-    # Stress aliases
-    if "eastward_surface_wind_stress" in ds_ocean_2d:
-        tauuo = ds_ocean_2d["eastward_surface_wind_stress"]
-        tauuo.attrs = {"long_name": "Surface Downward X Stress", "units": "N/m2"}
-        ds_ocean_2d["tauuo"] = tauuo
-    if "northward_surface_wind_stress" in ds_ocean_2d:
-        tauvo = ds_ocean_2d["northward_surface_wind_stress"]
-        tauvo.attrs = {"long_name": "Surface Downward Y Stress", "units": "N/m2"}
-        ds_ocean_2d["tauvo"] = tauvo
-
-    # wfo: water flux = evap + lprec + fprec + lrunoff
-    if all(v in ds_ocean_2d for v in WFO_COMPONENTS):
-        wfo = sum(ds_ocean_2d[c] for c in WFO_COMPONENTS)
-        wfo.attrs = {
-            "long_name": "Water Flux Into Sea Water",
-            "units": "kg/(m2 s)",
-        }
-        ds_ocean_2d["wfo"] = wfo
-
-    # hfds: net surface heat flux
-    if all(v in ds_ocean_2d for v in HFDS_COMPONENTS):
-        hfds = sum(ds_ocean_2d[c] for c in HFDS_COMPONENTS)
-        hfds.attrs = {
-            "long_name": "Downward Heat Flux at Sea Water Surface",
-            "units": "W/m2",
-        }
-        ds_ocean_2d["hfds"] = hfds
-
-    # Drop raw flux components
-    ds_ocean_2d = ds_ocean_2d.drop_vars(
-        [v for v in WFO_COMPONENTS + HFDS_COMPONENTS if v in ds_ocean_2d],
-        errors="ignore",
-    )
-
-    # --- Atmosphere processing ---
-    # Average 3-hourly → 6-hourly, then regrid
-    ocean_times = ds_ocean.time
-    ds_atmo_6h = _average_atmo_chunk(ds_atmo, ocean_times)
-
-    if output_grid:
-        ds_atmo_6h = _regrid_dataset(
-            ds_atmo_6h,
-            output_grid,
-            source_grid_atmo,
-            skipna=True,
-            na_thres=1.0,
-        )
-        ds_atmo_6h = ds_atmo_6h.assign_coords(
-            lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
-        )
-
-    # Restrict to common times
-    common_times = sorted(set(ds_ocean.time.values) & set(ds_atmo_6h.time.values))
-    ds_atmo_6h = ds_atmo_6h.sel(time=common_times)
-    ds_ocean_2d = ds_ocean_2d.sel(time=common_times)
-    ds_levels = ds_levels.sel(time=common_times)
-
-    # Time coarsening
-    if time_coarsen_factor > 1:
-        n_times = ds_ocean_2d.sizes["time"]
-        if n_times < time_coarsen_factor:
-            raise ValueError(
-                f"Chunk has {n_times} timesteps after time intersection, "
-                f"but time_coarsen_factor={time_coarsen_factor}. "
-                f"Ensure process_time_chunksize is a multiple of "
-                f"time_coarsen_factor and that the time range is aligned."
-            )
-        # coarsen().mean() also averages the time coordinate.  The ocean 6h
-        # fields are center-labeled (00Z, 06Z, 12Z, 18Z) covering
-        # 21Z(-1d)–21Z, so the daily-mean label lands naturally at 09Z.
-        # All three datasets share identical times here, so their coarsened
-        # labels match and the downstream merge aligns.
-        ds_atmo_6h = ds_atmo_6h.coarsen(
-            time=time_coarsen_factor, boundary="trim"
-        ).mean()
-        ds_ocean_2d = ds_ocean_2d.coarsen(
-            time=time_coarsen_factor, boundary="trim"
-        ).mean()
-        ds_levels = ds_levels.coarsen(time=time_coarsen_factor, boundary="trim").mean()
-
-    # Extract forcing and ice variables
-    forcing_names = [k for k in ATMO_FORCING_VARS if k in ds_atmo_6h]
-    ds_forcing = ds_atmo_6h[forcing_names].rename(
-        {k: ATMO_FORCING_VARS[k] for k in forcing_names}
-    )
-    ice_names = [k for k in ICE_VARS if k in ds_atmo_6h]
-    ds_ice = ds_atmo_6h[ice_names].rename({k: ICE_VARS[k] for k in ice_names})
-
-    # Derived atmo variables (already have their final names)
-    derived_atmo_names = [
-        v for v in ["total_frozen_precipitation_rate"] if v in ds_atmo_6h
-    ]
-    ds_derived_atmo = ds_atmo_6h[derived_atmo_names] if derived_atmo_names else None
-
-    # --- Merge ---
-    keep_coords = {"time", "lat", "lon"}
-    to_merge = [ds_ocean_2d, ds_levels, ds_forcing, ds_ice]
-    if ds_derived_atmo is not None:
-        to_merge.append(ds_derived_atmo)
-
-    cleaned = []
-    for d in to_merge:
-        stray = [c for c in d.coords if c not in keep_coords and c not in d.dims]
-        cleaned.append(d.drop_vars(stray) if stray else d)
-    ds = xr.merge(cleaned, join="inner")
-
-    # --- Insert NaN on land ---
-    # Atmospheric forcing variables are valid globally (FV3 is a global
-    # model) and must NOT be masked — downstream training configs rely
-    # on having values everywhere including over land.
-    atmo_skip = set(ATMO_FORCING_VARS.values())
-    atmo_skip.add("total_frozen_precipitation_rate")
-    skip_mask = {"land_fraction", "sea_surface_fraction"} | atmo_skip
-    for name in list(ds.data_vars):
-        if name.startswith("mask_") or name.startswith("idepth_"):
-            continue
-        if name in skip_mask:
-            continue
-        v = ds[name]
-        if "lat" not in v.dims or "lon" not in v.dims:
-            continue
-        if "time" in v.dims:
-            level_match = name.rsplit("_", 1)
-            if len(level_match) == 2 and level_match[1].isdigit():
-                level_idx = int(level_match[1])
-                mask_name = f"mask_{level_idx}"
-                if mask_name in ds:
-                    ds[name] = v.where(ds[mask_name] > 0)
-                    continue
-        ds[name] = v.where(ds["mask_2d"] > 0)
-
-    # Sea ice special handling
-    if "ocean_sea_ice_fraction" in ds:
-        ds["ocean_sea_ice_fraction"] = ds["ocean_sea_ice_fraction"].where(
-            ds["mask_2d"] > 0, np.nan
-        )
-    if "HI" in ds:
-        ds["HI"] = ds["HI"].where(ds["mask_2d"] > 0, np.nan)
-        if "ocean_sea_ice_fraction" in ds:
-            ds["HI"] = ds["HI"].where(ds["ocean_sea_ice_fraction"] > 0, 0.0)
-        # Re-apply NaN on land — the ice-free zeroing above converts land
-        # from NaN to 0.0 (because NaN > 0 is False), but ACE's output
-        # masker expects NaN on land to match the target NaN pattern.
-        ds["HI"] = ds["HI"].where(ds["mask_2d"] > 0, np.nan)
-
-    # Derived post-masking variables
-    if "HI" in ds:
-        siv = ds["HI"]
-        siv.attrs = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
-        ds["sea_ice_volume"] = siv
-    if "hfds" in ds and "sea_surface_fraction" in ds:
-        ds["hfds_total_area"] = ds["hfds"] * ds["sea_surface_fraction"]
-        ds["hfds_total_area"].attrs = {
-            "long_name": "heat flux into sea water scaled by sea surface fraction",
-            "units": "W/m2",
-        }
-
-    # --- NN fill ---
-    if nn_fill_map is not None:
-        ds = _apply_nn_fill(ds, nn_fill_map)
-    else:
-        mask_2d_arr = ds["mask_2d"].values if "mask_2d" in ds else mask_2d.values
-        nn_fill_map = _compute_nn_fill_indices(ds, mask_2d_arr)
-        ds = _apply_nn_fill(ds, nn_fill_map)
-
-    # --- Clean up ---
-    # Drop raw MOM6 flux components that were only needed for deriving
-    # wfo/hfds/deptho but leaked into the merged dataset.
-    _raw_vars_to_drop = WFO_COMPONENTS + HFDS_COMPONENTS + ["depth"]
-    ds = ds.drop_vars([v for v in _raw_vars_to_drop if v in ds], errors="ignore")
-
     keep_dims = {"time", "lat", "lon"}
     drop_dims = [d for d in ds.dims if d not in keep_dims]
     if drop_dims:
@@ -849,45 +610,220 @@ def _process_chunk(
         if ds[name].dtype not in (np.float32, np.int32):
             ds[name] = ds[name].astype(np.float32)
 
-    # xarray-beam's ConsolidateChunks requires all variables to share
-    # the same dimensions.  Drop scalar and time-invariant spatial
-    # variables — they are written once during template creation.
-    TIME_INVARIANT_SPATIAL = {
-        "mask_2d",
-        "land_fraction",
-        "sea_surface_fraction",
-        "deptho",
-    }
-    TIME_INVARIANT_SPATIAL.update(
-        name for name in ds.data_vars if name.startswith("mask_")
-    )
-    invariant_to_drop = [
-        name
-        for name in ds.data_vars
-        if ds[name].dims == ()
-        or ("lat" not in ds[name].dims and "lon" not in ds[name].dims)
-        or name in TIME_INVARIANT_SPATIAL
+    time_varying = [
+        name for name in ds.data_vars if set(ds[name].dims) == {"time", "lat", "lon"}
     ]
-    if invariant_to_drop:
-        ds = ds.drop_vars(invariant_to_drop)
-
-    return ds
+    return ds[time_varying]
 
 
-def _average_atmo_chunk(
-    ds_atmo: xr.Dataset,
-    ocean_times: xr.DataArray,
+# ---------------------------------------------------------------------------
+# Ocean stream (6-hourly MOM6 data)
+# ---------------------------------------------------------------------------
+
+
+def _process_ocean_chunk(
+    ds_ocean: xr.Dataset,
+    output_grid: str,
+    vertical_coarsening_indices: Sequence[Sequence[int]],
+    time_coarsen_factor: int,
+    source_grid_ocean: xr.Dataset,
+    invariant_ds: xr.Dataset,
+    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
 ) -> xr.Dataset:
-    """Average 3-hourly atmosphere data to 6-hourly ocean cadence.
+    """Process one time-chunk of ocean data.
 
-    Expects *ds_atmo* to already be sliced to the relevant time range
-    (with ±buffer) and loaded into memory.
+    Receives a loaded (in-memory) Dataset for a small number of
+    timesteps, plus the precomputed invariant fields (masks, fractions)
+    and NN-fill indices, and returns the processed output Dataset.
     """
-    if ds_atmo.sizes["time"] == 0:
-        raise ValueError(
-            "Atmosphere dataset has 0 timesteps — check that the atmo zarr "
-            "time range overlaps the ocean range and that calendars match."
-        )
+    xr.set_options(keep_attrs=True)
+
+    # "depth" is only needed for the invariant deptho field, which is
+    # produced during template creation.
+    ds_ocean = ds_ocean.drop_vars("depth", errors="ignore")
+
+    # Separate ho for independent regridding (thickness-weighted
+    # coarsening needs ho regridded without NaN-masking influence
+    # from tracer fields that have deeper NaN patterns).
+    if "ho" not in ds_ocean:
+        raise ValueError("'ho' is required for thickness-weighted coarsening")
+    ho_ds = ds_ocean[["ho"]]
+    ds_ocean = ds_ocean.drop_vars("ho")
+
+    # --- Horizontal regridding ---
+    ds_ocean = _regrid_dataset(
+        ds_ocean,
+        output_grid,
+        source_grid_ocean,
+        skipna=True,
+        na_thres=1.0,
+    )
+    ho_ds = _regrid_dataset(
+        ho_ds,
+        output_grid,
+        source_grid_ocean,
+        skipna=True,
+        na_thres=1.0,
+    )
+    ds_ocean["ho"] = ho_ds["ho"].assign_coords(
+        lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
+    )
+
+    # --- Vertical coarsening ---
+    vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
+    indices_as_tuples = [tuple(pair) for pair in vertical_coarsening_indices]
+    ds = _compute_ocean_vertical_coarsening(
+        ds_ocean,
+        vars_3d_present,
+        indices_as_tuples,
+        VDIM,
+    )
+
+    # --- Derived variables ---
+    # SST in Kelvin
+    if "thetao_0" in ds:
+        sst_K = ds["thetao_0"] + 273.15
+        sst_K.attrs = {"long_name": "Sea surface temperature", "units": "K"}
+        ds["sst"] = sst_K
+    if "zos" in ds:
+        ds["zos"].attrs.setdefault("long_name", "Sea Surface Height")
+
+    # Surface velocity aliases
+    if "uo_0" in ds:
+        ssu = ds["uo_0"]
+        ssu.attrs = {"long_name": "Sea surface x-velocity", "units": "m/s"}
+        ds["ssu"] = ssu
+    if "vo_0" in ds:
+        ssv = ds["vo_0"]
+        ssv.attrs = {"long_name": "Sea surface y-velocity", "units": "m/s"}
+        ds["ssv"] = ssv
+
+    # Stress aliases
+    if "eastward_surface_wind_stress" in ds:
+        tauuo = ds["eastward_surface_wind_stress"]
+        tauuo.attrs = {"long_name": "Surface Downward X Stress", "units": "N/m2"}
+        ds["tauuo"] = tauuo
+    if "northward_surface_wind_stress" in ds:
+        tauvo = ds["northward_surface_wind_stress"]
+        tauvo.attrs = {"long_name": "Surface Downward Y Stress", "units": "N/m2"}
+        ds["tauvo"] = tauvo
+
+    # wfo: water flux = evap + lprec + fprec + lrunoff
+    if all(v in ds for v in WFO_COMPONENTS):
+        wfo = sum(ds[c] for c in WFO_COMPONENTS)
+        wfo.attrs = {
+            "long_name": "Water Flux Into Sea Water",
+            "units": "kg/(m2 s)",
+        }
+        ds["wfo"] = wfo
+
+    # hfds: net surface heat flux
+    if all(v in ds for v in HFDS_COMPONENTS):
+        hfds = sum(ds[c] for c in HFDS_COMPONENTS)
+        hfds.attrs = {
+            "long_name": "Downward Heat Flux at Sea Water Surface",
+            "units": "W/m2",
+        }
+        ds["hfds"] = hfds
+
+    # Drop raw flux components
+    ds = ds.drop_vars(
+        [v for v in WFO_COMPONENTS + HFDS_COMPONENTS if v in ds],
+        errors="ignore",
+    )
+
+    # --- Time coarsening ---
+    # coarsen().mean() also averages the time coordinate.  The ocean 6h
+    # fields are center-labeled (00Z, 06Z, 12Z, 18Z) covering
+    # 21Z(-1d)–21Z, so the daily-mean label lands naturally at 09Z.
+    # The atmosphere stream produces identical labels (see
+    # _process_atmo_chunk), so both streams share one output time
+    # coordinate.
+    if time_coarsen_factor > 1:
+        ds = ds.coarsen(time=time_coarsen_factor, boundary="trim").mean()
+
+    # --- Insert NaN on land ---
+    # Vertically coarsened per-level fields use the matching per-level
+    # mask; everything else uses the surface mask.
+    for name in list(ds.data_vars):
+        level = name.rsplit("_", 1)[-1]
+        mask_name = f"mask_{level}" if level.isdigit() else "mask_2d"
+        ds[name] = ds[name].where(invariant_ds[mask_name] > 0)
+
+    # Derived post-masking variables
+    if "hfds" in ds:
+        ds["hfds_total_area"] = ds["hfds"] * invariant_ds["sea_surface_fraction"]
+        ds["hfds_total_area"].attrs = {
+            "long_name": "heat flux into sea water scaled by sea surface fraction",
+            "units": "W/m2",
+        }
+
+    # --- NN fill for residual coastal NaN ---
+    if nn_fill_map:
+        ds = _apply_nn_fill(ds, nn_fill_map)
+
+    return _finalize_chunk(ds)
+
+
+def process_ocean_chunk(
+    key,
+    ds_ocean_chunk,
+    output_grid=DEFAULT_OUTPUT_GRID,
+    vertical_coarsening_indices=None,
+    time_coarsen_factor=1,
+    invariant_ds=None,
+    nn_fill_map=None,
+):
+    """Beam-compatible ocean stream function: (key, ds) → (new_key, output_ds).
+
+    Called by ``beam.MapTuple`` for each time-chunk of ocean data.  Each
+    output timestep consumes ``time_coarsen_factor`` 6-hourly ocean
+    timesteps, so the output time offset is the input offset divided by
+    that factor.
+    """
+    if vertical_coarsening_indices is None:
+        vertical_coarsening_indices = DEFAULT_VERTICAL_COARSENING_INDICES
+
+    logging.info("Processing ocean chunk at key=%s", key)
+    ds_ocean_chunk = ds_ocean_chunk.load()
+
+    output = _process_ocean_chunk(
+        ds_ocean_chunk,
+        output_grid,
+        vertical_coarsening_indices,
+        time_coarsen_factor,
+        _get_source_grid(ds_ocean_chunk),
+        invariant_ds,
+        nn_fill_map,
+    )
+
+    new_key = key.replace(
+        offsets={"time": key.offsets["time"] // time_coarsen_factor},
+        vars=frozenset(output.keys()),
+    )
+    return new_key, output
+
+
+# ---------------------------------------------------------------------------
+# Atmosphere stream (3-hourly FV3 data)
+# ---------------------------------------------------------------------------
+
+
+def _process_atmo_chunk(
+    ds_atmo: xr.Dataset,
+    output_grid: str,
+    time_coarsen_factor: int,
+    source_grid_atmo: xr.Dataset,
+    invariant_ds: xr.Dataset,
+    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
+) -> xr.Dataset:
+    """Process one time-chunk of atmosphere data.
+
+    Receives a loaded (in-memory) Dataset whose 3-hourly times pairwise
+    cover the 6-hourly ocean times of the corresponding output chunk
+    (validated up front by ``_validate_time_alignment``).
+    """
+    xr.set_options(keep_attrs=True)
 
     # Derive frozen precipitation rate from bucket-accumulated fields
     # (frozrb = graupel, tsnowpb = snow).  The bucket empties every
@@ -905,125 +841,94 @@ def _average_atmo_chunk(
         ds_atmo = ds_atmo.drop_vars(accum_vars)
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
-    # Average consecutive pairs of 3h snapshots → 6h.  coarsen is
-    # preferred over resample because the atmo data is regularly spaced
-    # and coarsen always produces equal-sized groups (resample can create
-    # uneven bins at boundaries).  Label with the first timestamp of
-    # each pair so that the result aligns with ocean times.
-    atmo_times_orig = ds_atmo.time.values
-    ds_atmo_6h = ds_atmo.coarsen(time=2, boundary="trim").mean()
-    ds_atmo_6h = ds_atmo_6h.assign_coords(time=atmo_times_orig[::2])
+    # Average consecutive pairs of 3h fields → 6h, labeled with the
+    # first timestamp of each pair.  The FV3 interval-average fields are
+    # labeled at the END of their 3h averaging window, so the pair
+    # (T, T+3h) covers T-3h through T+3h — exactly the window of the
+    # center-labeled 6h ocean average at T.  coarsen is preferred over
+    # resample because the atmo data is regularly spaced and coarsen
+    # always produces equal-sized groups (resample can create uneven
+    # bins at boundaries).
+    atmo_times = ds_atmo.time.values
+    ds = ds_atmo.coarsen(time=2, boundary="trim").mean()
+    ds = ds.assign_coords(time=atmo_times[::2])
 
-    common_times = sorted(set(ds_atmo_6h.time.values) & set(ocean_times.values))
-
-    if not common_times:
-        raise ValueError(
-            f"No overlapping times between averaged atmosphere and ocean. "
-            f"Atmo 6h times: {ds_atmo_6h.time.values[:5]}..., "
-            f"Ocean times: {ocean_times.values[:5]}..."
-        )
-
-    return ds_atmo_6h.sel(time=common_times)
-
-
-# ---------------------------------------------------------------------------
-# Beam-compatible process function
-# ---------------------------------------------------------------------------
-
-# Source grids are built lazily and cached per worker
-_SOURCE_GRID_CACHE = {}
-
-
-def _get_source_grids(ds_ocean: xr.Dataset, ds_atmo: xr.Dataset):
-    """Build and cache source grid descriptors."""
-    ocean_key = (len(ds_ocean["lat"]), len(ds_ocean["lon"]))
-    atmo_key = (len(ds_atmo["lat"]), len(ds_atmo["lon"]))
-    if ocean_key not in _SOURCE_GRID_CACHE:
-        _SOURCE_GRID_CACHE[ocean_key] = _make_source_grid(ds_ocean)
-    if atmo_key not in _SOURCE_GRID_CACHE:
-        _SOURCE_GRID_CACHE[atmo_key] = _make_source_grid(ds_atmo)
-    return _SOURCE_GRID_CACHE[ocean_key], _SOURCE_GRID_CACHE[atmo_key]
-
-
-def process_ocean_chunk(
-    key,
-    ds_ocean_chunk,
-    ds_atmo=None,
-    atmo_isel_map=None,
-    output_grid=DEFAULT_OUTPUT_GRID,
-    vertical_coarsening_indices=None,
-    time_coarsen_factor=1,
-    nn_fill_map=None,
-    mask_3d=None,
-    sea_fraction=None,
-):
-    """Beam-compatible processing function: (key, ds) → (new_key, output_ds).
-
-    Called by ``beam.MapTuple`` for each time-chunk of ocean data.
-    Loads the corresponding atmosphere data for the same time range.
-    """
-    if atmo_isel_map is None:
-        atmo_isel_map = {}
-    if vertical_coarsening_indices is None:
-        vertical_coarsening_indices = DEFAULT_VERTICAL_COARSENING_INDICES
-
-    logging.info("Processing ocean chunk at key=%s", key)
-
-    # Load the corresponding atmosphere time range using pre-computed
-    # integer index mapping (avoids cftime serialization/matching issues).
-    ocean_time_offset = key.offsets["time"]
-    if ocean_time_offset in atmo_isel_map:
-        atmo_slice = atmo_isel_map[ocean_time_offset]
-        ds_atmo_chunk = ds_atmo.isel(time=atmo_slice).load()
-    else:
-        logging.warning(
-            "No atmo_isel_map entry for ocean offset=%d, falling back to "
-            "time-based selection",
-            ocean_time_offset,
-        )
-        ocean_start = ds_ocean_chunk.time.values[0]
-        ocean_end = ds_ocean_chunk.time.values[-1]
-        atmo_ref = ds_atmo.time.values[0]
-        atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(
-            hours=6
-        )
-        atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
-        ds_atmo_chunk = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
-
-    logging.info(
-        "Atmo chunk: %d timesteps for ocean offset=%d",
-        ds_atmo_chunk.sizes["time"],
-        ocean_time_offset,
+    # --- Horizontal regridding ---
+    ds = _regrid_dataset(
+        ds,
+        output_grid,
+        source_grid_atmo,
+        skipna=True,
+        na_thres=1.0,
     )
+    ds = ds.assign_coords(lat=invariant_ds.lat.values, lon=invariant_ds.lon.values)
 
-    # Load ocean chunk
-    ds_ocean_chunk = ds_ocean_chunk.load()
+    # --- Time coarsening ---
+    # The 6h labels above equal the ocean times, so coarsening averages
+    # the same label groups as the ocean stream and both streams emit
+    # identical output time coordinates.
+    if time_coarsen_factor > 1:
+        ds = ds.coarsen(time=time_coarsen_factor, boundary="trim").mean()
 
-    # Build source grids (cached per worker)
-    src_ocean, src_atmo = _get_source_grids(ds_ocean_chunk, ds_atmo_chunk)
+    # Rename to output names
+    rename_map = {**ATMO_FORCING_VARS, **ICE_VARS}
+    ds = ds.rename({k: v for k, v in rename_map.items() if k in ds})
 
-    output = _process_chunk(
-        ds_ocean_chunk,
+    # Sea-ice variables are only meaningful over the ocean.  The
+    # atmospheric forcing variables are valid globally (FV3 is a global
+    # model) and must NOT be masked — downstream training configs rely
+    # on having values everywhere including over land.
+    mask_2d = invariant_ds["mask_2d"]
+    if "ocean_sea_ice_fraction" in ds:
+        ds["ocean_sea_ice_fraction"] = ds["ocean_sea_ice_fraction"].where(mask_2d > 0)
+    if "HI" in ds:
+        ds["HI"] = ds["HI"].where(mask_2d > 0)
+        if "ocean_sea_ice_fraction" in ds:
+            ds["HI"] = ds["HI"].where(ds["ocean_sea_ice_fraction"] > 0, 0.0)
+        # Re-apply NaN on land — the ice-free zeroing above converts land
+        # from NaN to 0.0 (because NaN > 0 is False), but ACE's output
+        # masker expects NaN on land to match the target NaN pattern.
+        ds["HI"] = ds["HI"].where(mask_2d > 0)
+        siv = ds["HI"]
+        siv.attrs = {"long_name": "Sea Ice Volume Per Area", "units": "m"}
+        ds["sea_ice_volume"] = siv
+
+    # --- NN fill for residual coastal NaN ---
+    if nn_fill_map:
+        ds = _apply_nn_fill(ds, nn_fill_map)
+
+    return _finalize_chunk(ds)
+
+
+def process_atmo_chunk(
+    key,
+    ds_atmo_chunk,
+    output_grid=DEFAULT_OUTPUT_GRID,
+    time_coarsen_factor=1,
+    invariant_ds=None,
+    nn_fill_map=None,
+):
+    """Beam-compatible atmosphere stream function: (key, ds) → (new_key, output_ds).
+
+    Called by ``beam.MapTuple`` for each time-chunk of atmosphere data.
+    Each output timestep consumes ``2 * time_coarsen_factor`` 3-hourly
+    atmosphere timesteps (pair-averaging to 6-hourly, then coarsening),
+    so the output time offset is the input offset divided by that.
+    """
+    logging.info("Processing atmo chunk at key=%s", key)
+    ds_atmo_chunk = ds_atmo_chunk.load()
+
+    output = _process_atmo_chunk(
         ds_atmo_chunk,
         output_grid,
-        vertical_coarsening_indices,
         time_coarsen_factor,
-        src_ocean,
-        src_atmo,
-        nn_fill_map=nn_fill_map,
-        mask_3d=mask_3d,
-        sea_fraction=sea_fraction,
+        _get_source_grid(ds_atmo_chunk),
+        invariant_ds,
+        nn_fill_map,
     )
 
-    # Update key for output dimensions
-    # Time coarsening changes the offset mapping
-    if time_coarsen_factor > 1:
-        output_time_offset = key.offsets["time"] // time_coarsen_factor
-    else:
-        output_time_offset = key.offsets["time"]
-
     new_key = key.replace(
-        offsets={"time": output_time_offset},
+        offsets={"time": key.offsets["time"] // (2 * time_coarsen_factor)},
         vars=frozenset(output.keys()),
     )
     return new_key, output
@@ -1039,14 +944,14 @@ def _extract_invariant_fields(
     output_grid: str,
     vertical_coarsening_indices: Sequence[Sequence[int]],
     source_grid_ocean: xr.Dataset,
-) -> tuple[xr.Dataset, xr.DataArray, xr.DataArray]:
+) -> xr.Dataset:
     """Extract time-invariant fields from the ocean data.
 
-    Returns (invariant_ds, mask_3d, sea_fraction) where invariant_ds
-    contains scalar fields (idepth_*) and 2-D spatial fields (mask_*,
-    land_fraction, sea_surface_fraction, deptho) without a time dimension.
-    These are written once to the zarr store during template creation,
-    not streamed through the Beam pipeline.
+    Returns a Dataset containing scalar fields (idepth_*) and 2-D
+    spatial fields (mask_*, land_fraction, sea_surface_fraction, deptho)
+    without a time dimension.  These are written once to the zarr store
+    during template creation, not streamed through the Beam pipeline,
+    and are also passed to every Beam worker for masking.
     """
     invariant = {}
 
@@ -1117,7 +1022,9 @@ def _extract_invariant_fields(
         deptho.attrs = {"long_name": "Sea Floor Depth Below Geoid", "units": "m"}
         invariant["deptho"] = deptho
 
-    return xr.Dataset(invariant), mask_3d, sea_fraction
+    # Drop stray scalar coordinates (e.g. z_l left over from the isel in
+    # _build_3d_mask) so they don't leak into the output via the template.
+    return xr.Dataset(invariant).reset_coords(drop=True)
 
 
 def _make_template(
@@ -1129,70 +1036,62 @@ def _make_template(
     output_time: list,
 ) -> tuple[
     xr.Dataset,
+    xr.Dataset,
     dict[str, tuple[np.ndarray, np.ndarray]],
-    xr.DataArray,
-    xr.DataArray,
+    dict[str, tuple[np.ndarray, np.ndarray]],
 ]:
-    """Eagerly process one ocean timestep to build the output zarr template.
+    """Eagerly process one output timestep to build the output zarr template.
 
-    Returns (template, nn_fill_map, mask_3d, sea_fraction) where
-    nn_fill_map, mask_3d, and sea_fraction are precomputed invariant
-    data to be reused by every Beam worker.
+    Returns (template, invariant_ds, ocean_nn_fill_map, atmo_nn_fill_map)
+    where the invariant fields and per-stream NN-fill indices are
+    precomputed data to be reused by every Beam worker.
     """
-    logging.info("Building template from first timestep")
+    logging.info("Building template from first output timestep")
 
     # Extract scalar (idepth_*) and 2-D spatial (mask_*, land_fraction,
     # etc.) invariant fields — all without a time dimension.
     src_ocean = _make_source_grid(ds_ocean.isel(time=0).load())
-    invariant, mask_3d, sea_fraction = _extract_invariant_fields(
+    invariant_ds = _extract_invariant_fields(
         ds_ocean,
         output_grid,
         vertical_coarsening_indices,
         src_ocean,
-    )
-    invariant = invariant.drop_encoding()
+    ).drop_encoding()
+    mask_2d_arr = invariant_ds["mask_2d"].values
 
-    # Process one chunk to get the time-varying variable schema.
-    # _process_chunk drops invariant fields, which is what we want
-    # for the template (they're added separately below).
+    # Process one chunk of each stream to get the time-varying variable
+    # schema.  Process WITHOUT NN fill so the fill indices can be
+    # extracted from the un-filled data (the fill pattern depends only
+    # on the static ocean mask, so it is computed once here and passed
+    # to every Beam worker), then apply the fill.
     ocean_per_output = max(1, time_coarsen_factor)
     ds_ocean_small = ds_ocean.isel(time=slice(0, ocean_per_output)).load()
-    ocean_start = ds_ocean_small.time.values[0]
-    ocean_end = ds_ocean_small.time.values[-1]
-    atmo_ref = ds_atmo.time.values[0]
-    atmo_start = _match_time_type(ocean_start, atmo_ref) - datetime.timedelta(hours=6)
-    atmo_end = _match_time_type(ocean_end, atmo_ref) + datetime.timedelta(hours=3)
-    ds_atmo_small = ds_atmo.sel(time=slice(atmo_start, atmo_end)).load()
-    src_atmo = _make_source_grid(ds_atmo_small)
-
-    # First pass: process WITHOUT NN-fill so we can extract fill indices
-    # from the un-filled data.  Then apply fill and continue.
-    processed = _process_chunk(
+    processed_ocean = _process_ocean_chunk(
         ds_ocean_small,
-        ds_atmo_small,
         output_grid,
         vertical_coarsening_indices,
         time_coarsen_factor,
         src_ocean,
-        src_atmo,
-        nn_fill_map={},  # empty map → no fill applied, no fallback
-        mask_3d=mask_3d,
-        sea_fraction=sea_fraction,
-    )
-    processed = processed.drop_encoding()
+        invariant_ds,
+        nn_fill_map=None,
+    ).drop_encoding()
+    ocean_nn_fill_map = _compute_nn_fill_indices(processed_ocean, mask_2d_arr)
+    processed_ocean = _apply_nn_fill(processed_ocean, ocean_nn_fill_map)
 
-    # Precompute NN-fill indices from the UN-FILLED template chunk.
-    # The fill pattern depends only on the static ocean mask, so we
-    # compute it once here and pass to every Beam worker.
-    mask_2d_arr = (
-        invariant["mask_2d"].values
-        if "mask_2d" in invariant
-        else processed["mask_2d"].values
-    )
-    nn_fill_map = _compute_nn_fill_indices(processed, mask_2d_arr)
+    # Atmosphere sample: two 3-hourly timesteps per 6-hourly ocean timestep.
+    ds_atmo_small = ds_atmo.isel(time=slice(0, 2 * ocean_per_output)).load()
+    processed_atmo = _process_atmo_chunk(
+        ds_atmo_small,
+        output_grid,
+        time_coarsen_factor,
+        _make_source_grid(ds_atmo_small),
+        invariant_ds,
+        nn_fill_map=None,
+    ).drop_encoding()
+    atmo_nn_fill_map = _compute_nn_fill_indices(processed_atmo, mask_2d_arr)
+    processed_atmo = _apply_nn_fill(processed_atmo, atmo_nn_fill_map)
 
-    # Now apply NN fill to the template data
-    processed = _apply_nn_fill(processed, nn_fill_map)
+    processed = xr.merge([processed_ocean, processed_atmo])
 
     # Squeeze out the single-timestep time dim, then re-expand with the
     # full output time coordinate (same pattern as ERA5 pipeline).
@@ -1201,11 +1100,11 @@ def _make_template(
     template = template.expand_dims(dim={"time": output_time}, axis=0)
 
     # Add invariant fields to template (written once, no time dimension)
-    for name in invariant.data_vars:
+    for name in invariant_ds.data_vars:
         if name not in template:
-            template[name] = invariant[name]
+            template[name] = invariant_ds[name]
 
-    return template, nn_fill_map, mask_3d, sea_fraction
+    return template, invariant_ds, ocean_nn_fill_map, atmo_nn_fill_map
 
 
 # ---------------------------------------------------------------------------
@@ -1264,11 +1163,6 @@ def _get_parser():
             "JSON-encoded list of [start,end) pairs for vertical coarsening. "
             "Default uses the built-in 75→19 level mapping."
         ),
-    )
-    parser.add_argument(
-        "--check_data_validity",
-        action="store_true",
-        help="Check for unexpected NaN values before processing.",
     )
     return parser
 
@@ -1354,59 +1248,28 @@ def main():
     ds_ocean = _clean_ocean_dataset(ds_ocean)
     logging.info("Ocean dataset: %s", dict(ds_ocean.sizes))
 
-    # Atmosphere: need 3-hourly data spanning the full ocean range + buffer
-    atmo_start = start_time - datetime.timedelta(hours=6)
-    atmo_end_padded = end_time + datetime.timedelta(hours=3)
+    # Atmosphere: 3-hourly data covering the same interval as the ocean.
+    # Ocean time T (a center-labeled 6h average) is covered by the
+    # end-labeled 3h atmosphere fields at T and T+3h, so the atmosphere
+    # range extends one atmosphere timestep past the last ocean time.
+    ocean_times = ds_ocean.time.values
     atmo_load_vars = (
         list(ATMO_FORCING_VARS.keys())
         + list(ICE_VARS.keys())
         + FROZEN_PRECIP_ACCUM_VARS
     )
-    ds_atmo = open_atmo(atmo_load_vars, atmo_start, atmo_end_padded)
+    atmo_end = ocean_times[-1] + datetime.timedelta(hours=ATMO_TIME_STEP)
+    ds_atmo = open_atmo(atmo_load_vars, ocean_times[0], atmo_end)
     logging.info("Atmo dataset: %s", dict(ds_atmo.sizes))
 
-    # Pre-compute integer index mapping from ocean chunk offset → atmo
-    # time slice so workers can select by position.
-    ocean_times_arr = ds_ocean.time.values
-    atmo_times_arr = ds_atmo.time.values
-    atmo_isel_map = {}  # ocean_time_offset → slice(start, end)
-    pcs = args.process_time_chunksize
-    for chunk_idx in range(len(ocean_times_arr) // pcs):
-        ocean_offset = chunk_idx * pcs
-        ocean_chunk_start = ocean_times_arr[ocean_offset]
-        ocean_chunk_end = ocean_times_arr[ocean_offset + pcs - 1]
-        # Atmo window: 6h before first ocean time to 3h after last
-        a_start = ocean_chunk_start - datetime.timedelta(hours=6)
-        a_end = ocean_chunk_end + datetime.timedelta(hours=3)
-        idx_start = None
-        idx_end = None
-        for i, t in enumerate(atmo_times_arr):
-            if t >= a_start:
-                if idx_start is None:
-                    idx_start = i
-                if t <= a_end:
-                    idx_end = i
-        if idx_start is not None and idx_end is not None:
-            atmo_isel_map[ocean_offset] = slice(idx_start, idx_end + 1)
-        else:
-            logging.warning(
-                "Could not find atmo indices for ocean offset=%d "
-                "(ocean %s to %s, atmo window %s to %s)",
-                ocean_offset,
-                ocean_chunk_start,
-                ocean_chunk_end,
-                a_start,
-                a_end,
-            )
-    logging.info(
-        "Built atmo_isel_map with %d entries for %d ocean chunks",
-        len(atmo_isel_map),
-        len(ocean_times_arr) // pcs,
-    )
+    # With aligned times, the two Beam streams correspond purely by
+    # integer chunk offsets: ocean offset i and atmosphere offset 2*i
+    # contribute to output offset i // time_coarsen_factor.
+    _validate_time_alignment(ocean_times, ds_atmo.time.values)
 
     # --- Output time coordinate ---
     # Let xarray's coarsen().mean() average the time coordinate, matching
-    # exactly what _process_chunk does per chunk (daily-mean label at 09Z).
+    # exactly what both streams do per chunk (daily-mean label at 09Z).
     if time_coarsen_factor > 1:
         output_time = list(
             ds_ocean["time"]
@@ -1426,7 +1289,7 @@ def main():
 
     # --- Build template ---
     logging.info("Generating template")
-    template, nn_fill_map, mask_3d, sea_fraction = _make_template(
+    template, invariant_ds, ocean_nn_fill_map, atmo_nn_fill_map = _make_template(
         ds_ocean,
         ds_atmo,
         args.output_grid,
@@ -1442,23 +1305,50 @@ def main():
         PipelineOptions(pipeline_args).get_all_options(),
     )
 
+    # Each atmosphere chunk holds the 3-hourly timesteps covering one
+    # ocean chunk (2 per 6-hourly ocean timestep).
+    atmo_process_chunks = {"time": 2 * args.process_time_chunksize}
+
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
+        # Stream 1: ocean (6-hourly MOM6)
         (
             p
-            | xbeam.DatasetToChunks(ds_ocean, chunks=process_chunks)
+            | "ocean_DatasetToChunks"
+            >> xbeam.DatasetToChunks(ds_ocean, chunks=process_chunks)
             | beam.MapTuple(
                 process_ocean_chunk,
-                ds_atmo=ds_atmo,
-                atmo_isel_map=atmo_isel_map,
                 output_grid=args.output_grid,
                 vertical_coarsening_indices=vert_indices,
                 time_coarsen_factor=time_coarsen_factor,
-                nn_fill_map=nn_fill_map,
-                mask_3d=mask_3d,
-                sea_fraction=sea_fraction,
+                invariant_ds=invariant_ds,
+                nn_fill_map=ocean_nn_fill_map,
             )
-            | xbeam.ConsolidateChunks(output_shards)
-            | xbeam.ChunksToZarr(
+            | "ocean_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
+            | "ocean_to_zarr"
+            >> xbeam.ChunksToZarr(
+                output_store,
+                template,
+                zarr_chunks=output_chunks,
+                zarr_shards=output_shards,
+                zarr_format=3,
+            )
+        )
+
+        # Stream 2: atmosphere (3-hourly FV3)
+        (
+            p
+            | "atmo_DatasetToChunks"
+            >> xbeam.DatasetToChunks(ds_atmo, chunks=atmo_process_chunks)
+            | beam.MapTuple(
+                process_atmo_chunk,
+                output_grid=args.output_grid,
+                time_coarsen_factor=time_coarsen_factor,
+                invariant_ds=invariant_ds,
+                nn_fill_map=atmo_nn_fill_map,
+            )
+            | "atmo_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
+            | "atmo_to_zarr"
+            >> xbeam.ChunksToZarr(
                 output_store,
                 template,
                 zarr_chunks=output_chunks,
