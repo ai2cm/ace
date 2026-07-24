@@ -1,15 +1,23 @@
 """Endpoint-conditioned video interpolation diffusion, with optional spatial
 downscaling.
 
-Diffuses the residual over a per-frame baseline; only interior frames are
-denoised. By default (``coarse_normalization`` unset) the baseline is the
-temporal linear interpolation of the observed fine endpoints, and ``batch.coarse``
-is ignored (temporal-only, prior behavior). When ``coarse_normalization`` is
-set, the model also conditions on a coarser-resolution clip of the same frames
-(``batch.coarse``), and the baseline becomes that clip bicubic-upsampled to the
-fine grid, bias-corrected so it still exactly reproduces the true fine
-endpoints -- combining CorrDiff-style spatial residual diffusion with the
-endpoint-conditioned temporal residual.
+Diffuses the residual over a per-frame baseline. By default
+(``coarse_normalization`` unset) the baseline is the temporal linear
+interpolation of the observed fine endpoints, ``batch.coarse`` is ignored,
+and only interior frames are denoised -- the two endpoints are pinned exactly
+to their true fine values (temporal-only, prior behavior).
+
+When ``coarse_normalization`` is set, the model also conditions on a
+coarser-resolution clip of the same frames (``batch.coarse``), and the
+baseline becomes that clip bicubic-upsampled to the fine grid:
+- ``endpoints_observed=True`` (default): bias-corrected so it still exactly
+  reproduces the true fine endpoints -- combining CorrDiff-style spatial
+  residual diffusion with the endpoint-conditioned temporal residual.
+- ``endpoints_observed=False``: pure coarse-to-fine mode. No frame has
+  fine-resolution truth available (e.g. deploying on a continuously-running
+  coarse emulator with no sparse high-res anchors): the baseline is exactly
+  ``upsample(coarse)`` with no fine value entering it, nothing is pinned, and
+  every frame -- including the former "endpoints" -- is diffused.
 """
 
 import dataclasses
@@ -20,6 +28,7 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.rand import randn_like
@@ -27,26 +36,35 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.data import PairedVideoBatchData
 from fme.downscaling.metrics_and_maths import interpolate
 from fme.downscaling.models import ModelOutputs
+from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.video_modules import VideoEDMPrecond, VideoUNet
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
     NoiseDistribution,
     brownian_bridge_mixing_matrix,
+    condition_with_noise_for_training,
     ou_mixing_matrix,
     rbf_mixing_matrix,
     uniform_frame_times,
 )
 from fme.downscaling.requirements import DataRequirements
+from fme.downscaling.samplers import stochastic_sampler as edm_sampler
 
 CHANNEL_AXIS = 1
 
 
-def _interior_mask(n_times: int, device: torch.device) -> torch.Tensor:
-    """(1, 1, T, 1, 1) mask: 1 on interior frames, 0 on observed endpoints."""
+def _interior_mask(
+    n_times: int, device: torch.device, endpoints_observed: bool = True
+) -> torch.Tensor:
+    """(1, 1, T, 1, 1) mask: 1 on generated frames, 0 on pinned observed
+    endpoints. With ``endpoints_observed=False`` no frame is pinned (all
+    ones) -- every frame is generated, matching the pure coarse-to-fine mode.
+    """
     mask = torch.ones(n_times, device=device)
-    mask[0] = 0.0
-    mask[-1] = 0.0
+    if endpoints_observed:
+        mask[0] = 0.0
+        mask[-1] = 0.0
     return mask.reshape(1, 1, n_times, 1, 1)
 
 
@@ -108,6 +126,93 @@ def _upsample_coarse_clip(
     )
 
 
+def _fold_endpoint_frames(clip: torch.Tensor) -> torch.Tensor:
+    """``(B, C, T, H, W) -> (B*2, C, H, W)``: the two endpoint frames (index 0
+    and -1), folded into the batch dim for a 2D per-frame network call. T and
+    C are not adjacent in memory (same reasoning as ``_upsample_coarse_clip``),
+    so permute before reshape rather than a naive ``.reshape``.
+    """
+    batch, channels, _, height, width = clip.shape
+    endpoints = clip[:, :, [0, -1]]  # (B, C, 2, H, W)
+    return endpoints.permute(0, 2, 1, 3, 4).reshape(batch * 2, channels, height, width)
+
+
+def _unfold_endpoint_frames(folded: torch.Tensor, batch: int) -> torch.Tensor:
+    """Inverse of ``_fold_endpoint_frames``: ``(B*2, C, H, W) -> (B, C, 2, H, W)``."""
+    _, channels, height, width = folded.shape
+    return folded.reshape(batch, 2, channels, height, width).permute(0, 2, 1, 3, 4)
+
+
+@dataclasses.dataclass
+class EndpointSuperResolutionConfig:
+    """Stage A of the two-stage spatiotemporal model: a HiRO-style 2D
+    residual-diffusion super-resolution network that generates fine-resolution
+    endpoint estimates from the coarse endpoint frames alone. Its output feeds
+    into the video-diffusion (stage B) endpoint pinning machinery in place of
+    real fine-resolution ground truth -- see ``endpoints_observed``'s
+    docstring for why. Reuses the same 2D EDM registry, preconditioning, and
+    sampler as the spatial-only ``DiffusionModel`` in ``models.py``.
+
+    Parameters:
+        module: 2D network registry selector (``unet_diffusion_song`` or
+            ``unet_diffusion_song_v2``, same as ``DiffusionModelConfig.module``).
+        loss: Loss configuration for stage A's own denoising loss.
+        training_noise_distribution: Noise distribution for stage A's
+            training-time noise conditioning.
+        coarse_shape: ``[lat, lon]`` of the FINE-resolution patch/domain this
+            model will train on (i.e. the same H, W the video model itself
+            sees -- NOT the coarse-resolution shape, despite the field name
+            matching ``DiffusionModuleRegistrySelector.build``'s
+            ``coarse_shape`` argument). Passed through with
+            ``downscale_factor=1`` since stage A's input is already the
+            coarse endpoint upsampled to fine resolution (reusing stage B's
+            own ``coarse_upsampled``, not re-interpolating). Required because
+            the underlying SongUNet backbone bakes a fixed-size positional
+            embedding buffer into its weights at construction time
+            (``physicsnemo_unets_v1/unets.py``) -- keep this in sync with
+            whatever fine patch size ``coarse_patch_extent_lat/lon``
+            (scaled by the fine/coarse downscale factor) actually produces.
+        sigma_min: Min noise level for stage A generation.
+        sigma_max: Max noise level for stage A generation.
+        churn: Stochasticity during stage A generation.
+        num_diffusion_generation_steps: Number of diffusion steps for stage A
+            generation (independent of stage B's own schedule).
+        loss_weight: Multiplies stage A's loss before summing into the
+            combined total loss.
+    """
+
+    module: DiffusionModuleRegistrySelector
+    loss: LossConfig
+    training_noise_distribution: (
+        LogNormalNoiseDistribution | LogUniformNoiseDistribution
+    )
+    coarse_shape: list[int]
+    sigma_min: float = 0.002
+    sigma_max: float = 80.0
+    churn: float = 0.0
+    num_diffusion_generation_steps: int = 18
+    loss_weight: float = 1.0
+
+    def __post_init__(self):
+        if len(self.coarse_shape) != 2:
+            raise ValueError(
+                f"coarse_shape must be [lat, lon], got {self.coarse_shape}."
+            )
+        if self.loss_weight < 0.0:
+            raise ValueError(f"loss_weight must be >= 0, got {self.loss_weight}.")
+
+    def build(self, n_channels: int) -> "torch.nn.Module":
+        # sigma_data hardcoded to 1.0: standard-score-normalized data, matching
+        # DiffusionModelConfig's own convention (see models.py).
+        return self.module.build(
+            n_in_channels=n_channels,
+            n_out_channels=n_channels,
+            coarse_shape=tuple(self.coarse_shape),
+            downscale_factor=1,
+            sigma_data=1.0,
+        )
+
+
 @dataclasses.dataclass
 class VideoDiffusionModelConfig:
     """Configuration for the temporal-interpolation video diffusion model."""
@@ -124,6 +229,33 @@ class VideoDiffusionModelConfig:
     # baseline. None (default) reproduces the exact prior temporal-only
     # behavior, where ``batch.coarse`` is ignored entirely.
     coarse_normalization: NormalizationConfig | None = None
+    # Whether the two endpoint frames are real fine-resolution ground truth
+    # (default, matches all prior behavior): they're pinned exactly in the
+    # output and their true values are fed into the conditioning/baseline.
+    # Set to False for pure coarse-to-fine downscaling where NO frame ever
+    # has fine-resolution truth available (e.g. deploying on a continuously-
+    # running coarse emulator with no sparse high-res anchors) -- every frame
+    # is then diffused against a pure ``upsample(coarse)`` baseline, with no
+    # fine value of any kind entering the conditioning. Requires
+    # ``coarse_normalization`` to be set (it's the only conditioning source
+    # left) and is incompatible with subset_augmentation_prob/
+    # marginal_consistency_weight > 0 or a brownian_bridge noise kernel (all
+    # three assume a fixed pinned endpoint, which no longer exists).
+    endpoints_observed: bool = True
+    # Two-stage mode: when set, ``endpoints_observed`` must be True and
+    # ``coarse_normalization`` must be set. Instead of pinning to real fine
+    # ground truth (which isn't available in the pure coarse-to-fine
+    # deployment scenario), a HiRO-style 2D super-resolution sub-model
+    # (stage A, see EndpointSuperResolutionConfig) generates a fine-resolution
+    # estimate of the two endpoints from the coarse endpoint frames alone,
+    # and THAT estimate is pinned/fed into the video-diffusion (stage B)
+    # conditioning -- restoring a meaningful pinned endpoint (so
+    # brownian_bridge noise, subset training, and marginal-consistency loss
+    # are valid again) without depending on real fine truth as input. Stage
+    # A is trained by its own denoising loss (supervised against true fine
+    # endpoints) with NO gradient from stage B's loss flowing back into it
+    # (detached at the handoff) -- see VideoDiffusionModel._endpoint_super_resolution.
+    endpoint_super_resolution: EndpointSuperResolutionConfig | None = None
     sigma_min: float = 0.002
     sigma_max: float = 80.0
     churn: float = 0.0
@@ -333,6 +465,50 @@ class VideoDiffusionModelConfig:
                     f"subset_min_interior + 3 (got n_timesteps={self.n_timesteps}, "
                     f"subset_min_interior={self.subset_min_interior})."
                 )
+        if not self.endpoints_observed:
+            if self.coarse_normalization is None:
+                raise ValueError(
+                    "endpoints_observed=False requires coarse_normalization to "
+                    "be set -- it's the only conditioning source left once no "
+                    "frame has fine-resolution truth."
+                )
+            if self.subset_augmentation_prob > 0.0:
+                raise ValueError(
+                    "endpoints_observed=False is incompatible with "
+                    "subset_augmentation_prob > 0: subset training assumes a "
+                    "fixed pinned endpoint, which doesn't exist here."
+                )
+            if self.marginal_consistency_weight > 0.0:
+                raise ValueError(
+                    "endpoints_observed=False is incompatible with "
+                    "marginal_consistency_weight > 0: the consistency pass "
+                    "assumes a fixed pinned endpoint, which doesn't exist here."
+                )
+            bridge_kernels = (
+                {self.temporal_noise_correlation}
+                if self.temporal_noise_correlation != "per_channel"
+                else set((self.per_channel_noise_kernel or {}).values())
+            )
+            if "brownian_bridge" in bridge_kernels:
+                raise ValueError(
+                    "endpoints_observed=False is incompatible with "
+                    "brownian_bridge noise (per-channel or shared): its "
+                    "endpoint-pinned covariance assumes a fixed pinned "
+                    "endpoint, which doesn't exist here."
+                )
+        if self.endpoint_super_resolution is not None:
+            if not self.endpoints_observed:
+                raise ValueError(
+                    "endpoint_super_resolution requires endpoints_observed=True "
+                    "-- it generates the pinned endpoint value, it doesn't "
+                    "remove pinning."
+                )
+            if self.coarse_normalization is None:
+                raise ValueError(
+                    "endpoint_super_resolution requires coarse_normalization "
+                    "to be set -- stage A super-resolves the coarse endpoint "
+                    "frames."
+                )
         if self.backbone not in ("simple", "songunet"):
             raise ValueError(
                 f"backbone must be 'simple' or 'songunet', got {self.backbone}."
@@ -428,9 +604,14 @@ class VideoDiffusionModelConfig:
             coarse_normalizer = self.coarse_normalization.build(self.out_names)
 
         n_channels = len(self.out_names)
-        # noisy residual (C) + endpoint values (C) + mask (1) + log-sigma (C),
-        # plus the upsampled coarse clip (C) when spatial downscaling is enabled.
-        in_channels = 3 * n_channels + 1
+        # noisy residual (C) + log-sigma (C), plus conditioning:
+        #  - endpoint values (C) + observed mask (1), only if endpoints_observed
+        #  - upsampled coarse clip (C), only if spatial downscaling is enabled
+        # endpoints_observed=False requires coarse_normalizer set (validated in
+        # __post_init__), so in_channels is always well-defined.
+        in_channels = 2 * n_channels
+        if self.endpoints_observed:
+            in_channels += n_channels + 1
         if coarse_normalizer is not None:
             in_channels += n_channels
         if self.backbone == "songunet":
@@ -468,12 +649,16 @@ class VideoDiffusionModelConfig:
                 noise_embedding_type=self.noise_embedding_type,
             )
         module = VideoEDMPrecond(net, sigma_data=self.sigma_data_tensor(get_device()))
+        endpoint_sr_module = None
+        if self.endpoint_super_resolution is not None:
+            endpoint_sr_module = self.endpoint_super_resolution.build(n_channels)
         return VideoDiffusionModel(
             self,
             module,
             normalizer,
             self.out_names,
             coarse_normalizer=coarse_normalizer,
+            endpoint_sr_module=endpoint_sr_module,
         )
 
 
@@ -532,6 +717,7 @@ class VideoDiffusionModel:
         normalizer: StandardNormalizer,
         out_names: list[str],
         coarse_normalizer: StandardNormalizer | None = None,
+        endpoint_sr_module: torch.nn.Module | None = None,
     ):
         self.config = config
         # (1, C, 1, 1, 1) so it broadcasts against the per-channel sigma tensor.
@@ -543,6 +729,24 @@ class VideoDiffusionModel:
         # (coarse-conditioned) path in train_on_batch/generate. None keeps the
         # original temporal-only behavior, ignoring batch.coarse entirely.
         self.coarse_normalizer = coarse_normalizer
+        # False: no frame is pinned to fine-resolution truth -- every frame is
+        # diffused against a pure upsample(coarse) baseline (see
+        # VideoDiffusionModelConfig.endpoints_observed's docstring).
+        self.endpoints_observed = config.endpoints_observed
+        # Set iff config.endpoint_super_resolution is set: stage A, a 2D EDM
+        # network that generates the pinned endpoint value instead of reading
+        # it from batch.fine -- see _endpoint_super_resolution.
+        self.endpoint_sr_config = config.endpoint_super_resolution
+        self.endpoint_sr_module = (
+            dist.wrap_module(endpoint_sr_module.to(get_device()))
+            if endpoint_sr_module is not None
+            else None
+        )
+        self.endpoint_sr_loss = (
+            self.endpoint_sr_config.loss.build(gridded_operations=None)
+            if self.endpoint_sr_config is not None
+            else None
+        )
         self.out_names = out_names
         self.packer = Packer(out_names)
         self.n_timesteps = config.n_timesteps
@@ -570,7 +774,10 @@ class VideoDiffusionModel:
 
     @property
     def modules(self) -> torch.nn.ModuleList:
-        return torch.nn.ModuleList([self.module])
+        modules = [self.module]
+        if self.endpoint_sr_module is not None:
+            modules.append(self.endpoint_sr_module)
+        return torch.nn.ModuleList(modules)
 
     def _sample_residual_noise(
         self, like: torch.Tensor, mixing: torch.Tensor | None = None
@@ -745,15 +952,19 @@ class VideoDiffusionModel:
         interior_mask: torch.Tensor,
         coarse_upsampled: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Observed-endpoint values + a binary observed mask channel, plus the
-        upsampled coarse clip (all frames) when spatial downscaling is enabled.
+        """Observed-endpoint values + a binary observed mask channel (only
+        when ``self.endpoints_observed``; no fine value of any kind enters
+        the conditioning otherwise), plus the upsampled coarse clip (all
+        frames) when spatial downscaling is enabled.
         """
-        observed = 1.0 - interior_mask
-        observed_values = clip * observed
-        mask_channel = observed.expand(
-            clip.shape[0], 1, -1, clip.shape[-2], clip.shape[-1]
-        )
-        parts = [observed_values, mask_channel]
+        parts = []
+        if self.endpoints_observed:
+            observed = 1.0 - interior_mask
+            observed_values = clip * observed
+            mask_channel = observed.expand(
+                clip.shape[0], 1, -1, clip.shape[-2], clip.shape[-1]
+            )
+            parts.extend([observed_values, mask_channel])
         if coarse_upsampled is not None:
             parts.append(coarse_upsampled)
         return torch.cat(parts, dim=CHANNEL_AXIS)
@@ -788,19 +999,91 @@ class VideoDiffusionModel:
     ) -> torch.Tensor:
         """Per-frame baseline used to form the diffused residual.
 
-        Without spatial downscaling this is the pure temporal linear
-        interpolation of the observed endpoints (prior behavior). With it, the
-        baseline is the upsampled coarse field at every frame, bias-corrected
-        by linearly interpolating the *endpoint* residual (fine - upsampled
-        coarse) across the clip -- so it still exactly reproduces the true
-        fine endpoints (required for pinning), while using the real coarse
-        observation (not a temporal guess) at interior frames.
+        Three cases:
+        - No spatial downscaling: the pure temporal linear interpolation of
+          the observed endpoints (prior behavior).
+        - Spatial downscaling + endpoints_observed: the upsampled coarse
+          field at every frame, bias-corrected by linearly interpolating the
+          *endpoint* residual (fine - upsampled coarse) across the clip -- so
+          it still exactly reproduces the true fine endpoints (required for
+          pinning), while using the real coarse observation (not a temporal
+          guess) at interior frames.
+        - Spatial downscaling, endpoints_observed=False: pure
+          upsample(coarse) at every frame, with NO use of ``clip`` (the fine
+          truth) at all -- there's nothing to bias-correct against or pin to.
         """
         if coarse_upsampled is None:
             return _linear_interp_endpoints(clip, tau)
+        if not self.endpoints_observed:
+            return coarse_upsampled
         return coarse_upsampled + _linear_interp_endpoints(
             clip - coarse_upsampled, tau
         )
+
+    def _endpoint_super_resolution(
+        self,
+        clip: torch.Tensor,
+        coarse_upsampled: torch.Tensor,
+        training: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Stage A: HiRO-style 2D residual-diffusion super-resolution of the
+        two endpoint frames from the coarse conditioning alone.
+
+        Returns ``(anchor_clip, loss_a)``: ``anchor_clip`` is ``clip`` with
+        the two endpoint frame slots (index 0 and -1) replaced by stage A's
+        generated fine-resolution estimate -- everything downstream
+        (``_conditioning``, ``_spatiotemporal_baseline``) is called with
+        ``anchor_clip`` in place of ``clip``, so the existing
+        ``endpoints_observed=True`` pinning machinery is unchanged, it's just
+        pinned to a generated value instead of real fine truth. ``loss_a`` is
+        stage A's own denoising loss (supervised against the TRUE fine
+        endpoints in ``clip``) when ``training=True``, else ``None``.
+
+        The generated estimate is detached before being folded into
+        ``anchor_clip`` (regardless of ``training``): stage B's loss does not
+        backprop into stage A's weights, matching the "one model call, two
+        independently-supervised losses" design -- see
+        ``VideoDiffusionModelConfig.endpoint_super_resolution``'s docstring.
+        """
+        assert self.endpoint_sr_module is not None
+        assert self.endpoint_sr_config is not None
+        batch = clip.shape[0]
+        coarse_endpoints = _fold_endpoint_frames(coarse_upsampled)  # (B*2, C, H, W)
+
+        loss_a: torch.Tensor | None = None
+        if training:
+            true_fine_endpoints = _fold_endpoint_frames(clip)
+            target_residual = true_fine_endpoints - coarse_endpoints
+            conditioned = condition_with_noise_for_training(
+                target_residual,
+                self.endpoint_sr_config.training_noise_distribution,
+                sigma_data=1.0,
+            )
+            denoised_residual = self.endpoint_sr_module(
+                conditioned.latents, coarse_endpoints, conditioned.sigma
+            )
+            assert self.endpoint_sr_loss is not None
+            [loss_component] = self.endpoint_sr_loss(
+                denoised_residual, target_residual
+            )
+            loss_a = torch.mean(conditioned.weight * loss_component.loss)
+            sr_residual = denoised_residual.detach()
+        else:
+            latents = torch.randn_like(coarse_endpoints)
+            sr_residual, _ = edm_sampler(
+                self.endpoint_sr_module,
+                latents,
+                coarse_endpoints,
+                num_steps=self.endpoint_sr_config.num_diffusion_generation_steps,
+                sigma_min=self.endpoint_sr_config.sigma_min,
+                sigma_max=self.endpoint_sr_config.sigma_max,
+                S_churn=self.endpoint_sr_config.churn,
+            )
+
+        sr_endpoints = _unfold_endpoint_frames(coarse_endpoints + sr_residual, batch)
+        anchor_clip = clip.clone()
+        anchor_clip[:, :, [0, -1]] = sr_endpoints
+        return anchor_clip, loss_a
 
     def train_on_batch(self, batch: PairedVideoBatchData, optimizer) -> ModelOutputs:
         fine = batch.fine
@@ -821,11 +1104,24 @@ class VideoDiffusionModel:
         batch_size, _, n_times, _, _ = clip.shape
         tau = self._tau_for_indices(idx)
 
-        baseline = self._spatiotemporal_baseline(clip, coarse_upsampled, tau)
-        residual = clip - baseline  # ~0 at endpoints by construction
+        # Stage A (optional): generate the pinned endpoint value instead of
+        # reading it from clip. anchor_clip == clip except at the two
+        # endpoint slots; residual below still uses true clip (GT
+        # supervision for stage B is unaffected).
+        endpoint_sr_loss: torch.Tensor | None = None
+        if self.endpoint_sr_module is not None:
+            assert coarse_upsampled is not None  # validated in __post_init__
+            anchor_clip, endpoint_sr_loss = self._endpoint_super_resolution(
+                clip, coarse_upsampled, training=True
+            )
+        else:
+            anchor_clip = clip
 
-        interior = _interior_mask(n_times, clip.device)
-        condition = self._conditioning(clip, interior, coarse_upsampled)
+        baseline = self._spatiotemporal_baseline(anchor_clip, coarse_upsampled, tau)
+        residual = clip - baseline  # ~0 at endpoints by construction (if observed)
+
+        interior = _interior_mask(n_times, clip.device, self.endpoints_observed)
+        condition = self._conditioning(anchor_clip, interior, coarse_upsampled)
         mixing = self._mixing_for_indices(idx)
 
         sigma = self.config.sample_training_noise(batch_size, clip.device)
@@ -890,6 +1186,12 @@ class VideoDiffusionModel:
                 loss + dsm_sub + self._marginal_consistency_weight * marginal_loss
             )
 
+        if endpoint_sr_loss is not None:
+            assert self.endpoint_sr_config is not None
+            total_loss = (
+                total_loss + self.endpoint_sr_config.loss_weight * endpoint_sr_loss
+            )
+
         optimizer.accumulate_loss(total_loss)
         optimizer.step_weights()
 
@@ -931,6 +1233,9 @@ class VideoDiffusionModel:
                 else sigma.squeeze(-1).squeeze(-1).squeeze(-1)
             ),
             per_sample_channel_loss=per_sample_channel_loss,
+            endpoint_sr_loss=(
+                None if endpoint_sr_loss is None else endpoint_sr_loss.detach()
+            ),
         )
 
     @torch.no_grad()
@@ -940,12 +1245,15 @@ class VideoDiffusionModel:
         n_samples: int = 1,
         frames: list[int] | None = None,
     ) -> TensorDict:
-        """Generate the interior frames conditioned on the observed endpoints.
+        """Generate the interior frames conditioned on the observed endpoints
+        (or, with ``self.endpoints_observed=False``, generate every frame
+        from the coarse conditioning alone -- see the module docstring).
 
         ``frames`` optionally restricts generation to a subset of frame indices
         into the full ``n_timesteps`` grid; it must start at 0 and end at
-        ``n_timesteps - 1`` (the observed endpoints) and be strictly increasing.
-        The returned clips then contain only those frames. The baseline and the
+        ``n_timesteps - 1`` (the query grid's boundary indices, regardless of
+        whether those frames are pinned) and be strictly increasing. The
+        returned clips then contain only those frames. The baseline and the
         bridge noise use the subset's true times, so a subset draws from the
         exact marginal of the full-window process. Defaults to the full grid.
         """
@@ -962,9 +1270,22 @@ class VideoDiffusionModel:
                 coarse_upsampled = coarse_upsampled.index_select(2, idx)
         batch_size, n_channels, n_times, height, width = clip.shape
         tau = self._tau_for_indices(idx)
-        baseline = self._spatiotemporal_baseline(clip, coarse_upsampled, tau)
-        interior = _interior_mask(n_times, clip.device)
-        condition = self._conditioning(clip, interior, coarse_upsampled)
+
+        # Stage A (optional): generate the pinned endpoint value instead of
+        # reading it from clip. Computed once (not per ensemble sample) and
+        # shared across all n_samples, same as a real observed endpoint
+        # would be -- the repeat() calls below broadcast it to the ensemble.
+        if self.endpoint_sr_module is not None:
+            assert coarse_upsampled is not None  # validated in __post_init__
+            anchor_clip, _ = self._endpoint_super_resolution(
+                clip, coarse_upsampled, training=False
+            )
+        else:
+            anchor_clip = clip
+
+        baseline = self._spatiotemporal_baseline(anchor_clip, coarse_upsampled, tau)
+        interior = _interior_mask(n_times, clip.device, self.endpoints_observed)
+        condition = self._conditioning(anchor_clip, interior, coarse_upsampled)
         mixing = self._mixing_for_indices(idx)
 
         def repeat(t):
@@ -1012,10 +1333,13 @@ class VideoDiffusionModel:
         }
 
     def get_state(self) -> Mapping[str, Any]:
-        return {
+        state: dict[str, Any] = {
             "config": dataclasses.asdict(self.config),
             "module": self.module.state_dict(),
         }
+        if self.endpoint_sr_module is not None:
+            state["endpoint_sr_module"] = self.endpoint_sr_module.state_dict()
+        return state
 
 
 def _video_edm_sample(

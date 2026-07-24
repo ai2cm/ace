@@ -26,7 +26,7 @@
 # Run:  bash configs/experiments/2026-07-24-video-pmd-spatiotemporal-25km-100km/run.sh
 set -e
 
-JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-per-channel-kernel-subset-cons0-v1"
+JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v1"
 CONFIG_FILENAME="video_train.yaml"
 WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/titan"
@@ -42,7 +42,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run \
     --name "$JOB_NAME" \
-    --description 'Spatiotemporal video PMD: stage-1 temporal infilling + stage-2 spatial downscaling (25km/100km), 5 channels, global, patch-trained. 8x GPU DDP on titan (GCS-direct).' \
+    --description 'Spatiotemporal video PMD: stage-1 temporal infilling + stage-2 spatial downscaling (25km/100km), 5 channels, flat/independent noise, no subset training, global, patch-trained. 8x GPU DDP on titan (GCS-direct).' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \

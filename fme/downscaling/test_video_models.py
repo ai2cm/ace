@@ -6,6 +6,7 @@ import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.rand import set_seed
@@ -16,12 +17,14 @@ from fme.downscaling.data.datasets import (
 )
 from fme.downscaling.data.time_encoding import compute_calendar_features
 from fme.downscaling.metrics_and_maths import interpolate as interpolate_2d
+from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.video_modules import FIRBlur, TemporalAttention
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
 )
 from fme.downscaling.video_models import (
+    EndpointSuperResolutionConfig,
     VideoDiffusionModelConfig,
     _upsample_coarse_clip,
 )
@@ -293,6 +296,112 @@ def test_spatial_downscaling_generate_pins_observed_endpoints():
         assert torch.allclose(out[:, s, -1], truth[:, -1], atol=1e-4)
 
 
+def _pure_coarse_to_fine_model(n_times, **config_kwargs):
+    return _spatial_model(n_times, endpoints_observed=False, **config_kwargs)
+
+
+def test_pure_coarse_to_fine_requires_coarse_normalization():
+    with pytest.raises(ValueError, match="requires coarse_normalization"):
+        _model(5, endpoints_observed=False)
+
+
+def test_pure_coarse_to_fine_rejects_subset_augmentation():
+    with pytest.raises(ValueError, match="subset_augmentation_prob > 0"):
+        _pure_coarse_to_fine_model(5, subset_augmentation_prob=0.5)
+
+
+def test_pure_coarse_to_fine_rejects_marginal_consistency():
+    with pytest.raises(ValueError, match="marginal_consistency_weight > 0"):
+        _pure_coarse_to_fine_model(5, marginal_consistency_weight=1.0)
+
+
+def test_pure_coarse_to_fine_rejects_brownian_bridge():
+    with pytest.raises(ValueError, match="brownian_bridge noise"):
+        _pure_coarse_to_fine_model(5, temporal_noise_correlation="brownian_bridge")
+
+
+def test_pure_coarse_to_fine_rejects_per_channel_brownian_bridge():
+    with pytest.raises(ValueError, match="brownian_bridge noise"):
+        _pure_coarse_to_fine_model(
+            5,
+            temporal_noise_correlation="per_channel",
+            per_channel_noise_kernel={"var0": "brownian_bridge", "var1": "independent"},
+        )
+
+
+def test_pure_coarse_to_fine_narrows_input_channels():
+    n_times = 5
+    model = _pure_coarse_to_fine_model(n_times)
+    n_channels = len(OUT_NAMES)
+    # noisy residual (C) + coarse condition (C) + log-sigma (C) = 3C; no
+    # endpoint-values/mask block since no frame is ever pinned.
+    expected_in_channels = 3 * n_channels
+    net = model.module.module.model
+    in_conv = net.in_conv.conv
+    assert in_conv.in_channels == expected_in_channels + net.calendar.out_channels
+
+
+def test_pure_coarse_to_fine_baseline_ignores_fine_values():
+    n_times = 5
+    model = _pure_coarse_to_fine_model(n_times)
+    coarse_upsampled = torch.randn(2, len(OUT_NAMES), n_times, 4, 4)
+    tau = model._tau_for_indices(None)
+    zeros_clip = torch.zeros(2, len(OUT_NAMES), n_times, 4, 4)
+    random_clip = torch.randn(2, len(OUT_NAMES), n_times, 4, 4)
+
+    baseline_a = model._spatiotemporal_baseline(zeros_clip, coarse_upsampled, tau)
+    baseline_b = model._spatiotemporal_baseline(random_clip, coarse_upsampled, tau)
+    # baseline must not depend on the fine clip at all -- there's no fine
+    # truth of any kind to bias-correct against or pin to.
+    assert torch.equal(baseline_a, coarse_upsampled)
+    assert torch.equal(baseline_b, coarse_upsampled)
+
+
+def test_pure_coarse_to_fine_train_on_batch_runs_and_backprops():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _pure_coarse_to_fine_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.loss.requires_grad
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert outputs.prediction["var0"].shape == (2, n_times, fine_height, fine_width)
+
+
+def test_pure_coarse_to_fine_generate_runs_and_does_not_pin_endpoints():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _pure_coarse_to_fine_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    generated = model.generate(batch, n_samples=3)
+    out = generated["var0"]
+    assert out.shape == (2, 3, n_times, fine_height, fine_width)
+    assert torch.isfinite(out).all()
+
+    # unlike the endpoints_observed=True case, endpoints are NOT pinned to
+    # the true fine value -- every sample independently diffuses them, so
+    # they won't match ground truth (or each other) exactly.
+    truth = batch.fine.data["var0"]
+    assert not torch.allclose(out[:, 0, 0], truth[:, 0], atol=1e-4)
+    assert not torch.allclose(out[:, 0, 0], out[:, 1, 0], atol=1e-4)
+
+
 def test_spatial_downscaling_rejects_non_integer_scale_factor():
     n_times = 5
     model = _spatial_model(n_times)
@@ -306,6 +415,150 @@ def test_spatial_downscaling_rejects_non_integer_scale_factor():
     )
     with pytest.raises(ValueError, match="integer multiple"):
         model.train_on_batch(batch, NullOptimization())
+
+
+def _endpoint_sr_config(fine_hw, **kwargs):
+    return EndpointSuperResolutionConfig(
+        module=DiffusionModuleRegistrySelector(
+            type="unet_diffusion_song",
+            config={
+                "model_channels": 8,
+                "channel_mult": [1, 1],
+                "num_blocks": 1,
+                "attn_resolutions": [],
+            },
+        ),
+        loss=LossConfig(),
+        training_noise_distribution=LogNormalNoiseDistribution(p_mean=-1.2, p_std=1.2),
+        coarse_shape=list(fine_hw),
+        num_diffusion_generation_steps=2,
+        **kwargs,
+    )
+
+
+def _two_stage_model(n_times, fine_hw=(8, 8), sr_kwargs=None, **config_kwargs):
+    return _spatial_model(
+        n_times,
+        endpoint_super_resolution=_endpoint_sr_config(fine_hw, **(sr_kwargs or {})),
+        **config_kwargs,
+    )
+
+
+def test_endpoint_super_resolution_coarse_shape_validation():
+    with pytest.raises(ValueError, match=r"\[lat, lon\]"):
+        _endpoint_sr_config((8, 8, 8))
+
+
+def test_endpoint_super_resolution_requires_endpoints_observed():
+    with pytest.raises(ValueError, match="requires endpoints_observed=True"):
+        _two_stage_model(5, endpoints_observed=False)
+
+
+def test_endpoint_super_resolution_requires_coarse_normalization():
+    with pytest.raises(ValueError, match="requires coarse_normalization"):
+        _model(5, endpoint_super_resolution=_endpoint_sr_config((8, 8)))
+
+
+def test_endpoint_super_resolution_builds_stage_a_module():
+    model = _two_stage_model(5)
+    assert model.endpoint_sr_module is not None
+    assert len(model.modules) == 2
+
+
+def test_endpoint_super_resolution_disabled_by_default_has_one_module():
+    model = _spatial_model(5)
+    assert model.endpoint_sr_module is None
+    assert len(model.modules) == 1
+
+
+def test_endpoint_super_resolution_train_on_batch_runs_and_backprops():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_stage_model(n_times, fine_hw=(fine_height, fine_width))
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.endpoint_sr_loss is not None
+    assert torch.isfinite(outputs.endpoint_sr_loss)
+    outputs.loss.backward()
+
+    stage_b_grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    stage_a_grads = [
+        p.grad for p in model.endpoint_sr_module.parameters() if p.grad is not None
+    ]
+    assert len(stage_b_grads) > 0
+    assert len(stage_a_grads) > 0
+    assert all(torch.isfinite(g).all() for g in stage_b_grads + stage_a_grads)
+
+
+def test_endpoint_super_resolution_detaches_from_stage_b_loss():
+    # loss_weight=0.0 isolates total_loss to stage B's own loss only; since
+    # the SR endpoint is detached before feeding into stage B, backward
+    # through that loss alone must give stage A's params zero (or no) grad.
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_stage_model(
+        n_times, fine_hw=(fine_height, fine_width), sr_kwargs={"loss_weight": 0.0}
+    )
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    outputs.loss.backward()
+    stage_a_grads = [p.grad for p in model.endpoint_sr_module.parameters()]
+    assert all(g is None or torch.all(g == 0) for g in stage_a_grads)
+
+
+def test_endpoint_super_resolution_generate_runs():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_stage_model(n_times, fine_hw=(fine_height, fine_width))
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    generated = model.generate(batch, n_samples=2)
+    out = generated["var0"]
+    assert out.shape == (2, 2, n_times, fine_height, fine_width)
+    assert torch.isfinite(out).all()
+
+
+def test_endpoint_super_resolution_composes_with_brownian_bridge_noise():
+    # The whole point of stage A: a meaningfully pinned (generated, not raw
+    # fine truth) endpoint restores brownian_bridge's validity even in the
+    # spatial-downscaling setting where no real fine truth is available.
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_stage_model(
+        n_times,
+        fine_hw=(fine_height, fine_width),
+        temporal_noise_correlation="brownian_bridge",
+    )
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
 
 
 def test_train_on_batch_runs_with_brownian_bridge_noise():

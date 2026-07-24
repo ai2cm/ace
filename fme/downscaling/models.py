@@ -49,6 +49,9 @@ class ModelOutputs:
     per_sample_channel_loss: TensorDict = dataclasses.field(default_factory=dict)
     # Optional marginal-consistency term (video PMD), for logging only.
     marginal_consistency_loss: torch.Tensor | None = None
+    # Optional stage-A (endpoint super-resolution) denoising loss, for
+    # logging only -- already included (weighted) in `loss`.
+    endpoint_sr_loss: torch.Tensor | None = None
 
 
 def _rename_normalizer(

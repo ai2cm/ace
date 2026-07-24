@@ -1,10 +1,32 @@
-# Stage 2: spatiotemporal video PMD -- endpoint-conditioned temporal
-# infilling (stage 1, see ../2026-07-20-video-pmd-5ch-per-channel-kernel-subset-cons0/)
-# PLUS spatial downscaling in the same diffusion pass. Interior frames are
-# only known at coarse (100km) resolution; the model infills them at fine
-# (25km) resolution using the two observed fine endpoints and the full-clip
-# coarse conditioning (see VideoDiffusionModel's coarse_normalization path in
-# fme/downscaling/video_models.py).
+# Stage 2: spatiotemporal video PMD, TWO-STAGE mode (per user request
+# 2026-07-24). NO real fine-resolution (25km) truth is available as model
+# input at either training or deployment time for the "endpoint" frames --
+# only the coarse (100km) trajectory is assumed continuously available (e.g.
+# from ACE2S). Instead of disabling endpoint pinning entirely (the
+# endpoints_observed=false approach this file used previously -- see git
+# history), a HiRO-style 2D residual-diffusion super-resolution sub-model
+# ("stage A", model.endpoint_super_resolution) generates a fine-resolution
+# estimate of the two endpoint frames from the coarse endpoint frames alone;
+# THAT estimate is what gets pinned into the video-diffusion ("stage B")
+# conditioning/baseline -- restoring a meaningful pinned endpoint so
+# brownian_bridge noise / subset training / marginal-consistency loss are
+# valid again, without depending on real fine truth as input. Stage A is
+# supervised by its own denoising loss against the TRUE fine endpoints
+# (available during training/validation, just not fed forward as input), with
+# NO gradient from stage B's loss flowing back into it (detached at the
+# handoff -- each stage is trained primarily by its own loss). Both stages'
+# losses are computed and backpropagated in one `train_on_batch` call -- see
+# VideoDiffusionModelConfig.endpoint_super_resolution's docstring in
+# fme/downscaling/video_models.py.
+#
+# Still deliberately the flat/simple baseline for stage B, per the earlier
+# user request: flat per-channel noise (temporal_noise_correlation:
+# independent -- no cross-time correlation kernel; sigma_data/sigma_min/
+# sigma_max/training noise distributions still differ per channel, that's
+# just per-channel magnitude scaling, unrelated to "flat"), and no subset
+# training / no marginal-consistency loss for THIS config (both are now
+# actually compatible again thanks to stage A's pinning, but starting simple
+# and adding them back later once this two-stage design is validated).
 #
 # Data: gs://vcm-ml-intermediate/2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr
 # (same underlying X-SHiELD AMIP simulation as the "as before" 5-channel
@@ -12,11 +34,6 @@
 # gs://vcm-ml-scratch/andrep/2025-07-25-X-SHiELD-AMIP-FME-3h.zarr, verified
 # 2026-07-24 -- just now split into a genuinely paired fine/coarse dataset).
 # downscale_factor = 720/180 = 1440/360 = 4.
-#
-# All temporal hyperparameters (architecture, per-channel OU noise kernel,
-# subset training, sigma bounds, train/val/test date split) are copied as-is
-# from the stage-1 config above -- only the spatial-downscaling additions are
-# new (model.coarse_normalization, fine/coarse data paths, coarse_patch_extent).
 #
 # ---- THINGS TO TUNE BEFORE A FULL RUN (see run.sh comments too) ----
 # - coarse_patch_extent_lat/lon: set to a 2x2 quadrant split of the
@@ -30,15 +47,33 @@
 #   If it OOMs, the fix is a smaller coarse_patch_extent (e.g. 32, giving
 #   128px fine patches and ~55 patches/raw batch instead of 4 -- see git
 #   history of this file for that version and its sample_with_replacement
-#   sizing), not a different domain crop.
+#   sizing), not a different domain crop. NOTE: model.endpoint_super_resolution.coarse_shape
+#   below MUST be kept in sync with this (it's [coarse_patch_extent_lat,
+#   coarse_patch_extent_lon] * downscale_factor = [352, 720]) -- the
+#   underlying SongUNet backbone bakes a fixed-size positional embedding into
+#   its weights at construction time, so this can't just be inferred at
+#   runtime the way stage B's shape-agnostic architecture can.
+# - model.endpoint_super_resolution's architecture (model_channels: 64,
+#   channel_mult: [1,2,2,2]) and generation schedule (sigma_min/max,
+#   num_diffusion_generation_steps) are copied from the one real precedent
+#   for this exact downscale factor in this repo
+#   (../../baselines/downscaling/train-conus-100km-to-25km-augusta.yaml,
+#   100km->25km, factor 4) -- a reasonable starting point, not tuned for our
+#   5-channel/global-domain case specifically. attn_resolutions left empty
+#   (unlike that CONUS config's [16], which isn't a valid resolution in OUR
+#   pyramid -- 352/176/88/44 for a 352px fine patch -- SongUNet requires an
+#   exact match) matching this repo's actual *global* HiRO baseline instead
+#   (../../baselines/downscaling-hiro-global/train.yaml), which is the
+#   closer precedent for a global (not regional) domain anyway, and cheaper
+#   given the unverified memory situation.
 # - sigma_data_by_channel / training_noise_distributions / sigma_min|max_by_channel
-#   below are carried over from the temporal-only (stage 1) residual scale.
-#   The stage-2 residual (fine - upsampled-coarse, bias-corrected) has a
-#   different characteristic scale, especially for PRATEsfc (100km->25km adds
-#   real sub-grid spatial variance on top of the temporal gap). Recompute
-#   with a stage-2-aware version of toy/compute_residual_std.py before
-#   trusting these for a long run; they're a reasonable starting point, not a
-#   tuned value.
+#   below (stage B's) are carried over from the temporal-only (stage 1)
+#   residual scale. That residual was ~0 at the two endpoints (pinned, as it
+#   is again here via stage A), so the *interior* residual scale those values
+#   were tuned for should still be a reasonable proxy -- better than in the
+#   endpoints_observed=false version of this file, but still not recomputed
+#   for the actual two-stage setup. Recompute with a two-stage-aware version
+#   of toy/compute_residual_std.py before trusting these for a long run.
 experiment_dir: /results
 max_epochs: 200
 validate_using_ema: true
@@ -53,7 +88,7 @@ logging:
   log_to_wandb: true
   log_to_file: true
   project: ace-temporal-interp
-  name: global-25km-100km-spatiotemporal-5ch-per-channel-kernel-subset-cons0-v1
+  name: global-25km-100km-spatiotemporal-twostage-5ch-flat-v1
   entity: ai2cm
 optimization:
   lr: 0.0001
@@ -155,29 +190,37 @@ model:
   sigma_max: 150.0
   churn: 0.0
   num_diffusion_generation_steps: 50
-  temporal_noise_correlation: per_channel
-  per_channel_noise_kernel:
-    eastward_wind_at_ten_meters: ou
-    northward_wind_at_ten_meters: ou
-    PRMSL: ou
-    PRATEsfc: ou
-    air_temperature_at_two_meters: ou
-  per_channel_kernel_length_scale:
-    eastward_wind_at_ten_meters: 0.5375      # 12.9h / 24h
-    northward_wind_at_ten_meters: 0.558333   # 13.4h / 24h
-    PRMSL: 0.804167                          # 19.3h / 24h
-    PRATEsfc: 0.329167                       # 7.9h / 24h
-    air_temperature_at_two_meters: 0.475     # 11.4h / 24h
-  # Subset training: half the batches train on a random subset of interior
-  # frames (endpoints always kept), so the model learns to answer variable
-  # query sets. Matches the stage-1 subset-cons0 config's values exactly.
-  subset_augmentation_prob: 0.5
-  subset_min_interior: 1
-  # No marginal-consistency loss for this run, matching the stage-1
-  # subset-cons0 config it's based on (an active ablation arm there; carried
-  # over unchanged since this config's purpose is adding spatial
-  # downscaling, not re-deciding that ablation).
-  marginal_consistency_weight: 0.0
+  # True (the default; explicit here for clarity): the two endpoint frames
+  # ARE pinned in stage B's output -- but to stage A's generated estimate,
+  # not real fine truth (there is none) -- see endpoint_super_resolution
+  # below and the header comment.
+  endpoints_observed: true
+  # Stage A: HiRO-style 2D endpoint super-resolution -- see header comment
+  # for the architecture/schedule provenance and the coarse_shape coupling
+  # to coarse_patch_extent_lat/lon above.
+  endpoint_super_resolution:
+    module:
+      type: unet_diffusion_song
+      config:
+        model_channels: 64
+        channel_mult: [1, 2, 2, 2]
+        attn_resolutions: []
+    loss:
+      type: MSE
+    training_noise_distribution:
+      p_mean: -1.2
+      p_std: 1.8
+    coarse_shape: [352, 720]  # fine patch size = coarse_patch_extent_lat/lon * downscale_factor(4)
+    sigma_min: 0.002
+    sigma_max: 150.0
+    churn: 0.0
+    num_diffusion_generation_steps: 18
+    loss_weight: 1.0
+  # Flat/independent noise (no temporal correlation) -- see header comment.
+  # subset_augmentation_prob and marginal_consistency_weight are left at
+  # their 0.0 defaults (matches the earlier "no subset training" request;
+  # both are compatible with endpoint_super_resolution if you want them back).
+  temporal_noise_correlation: independent
   log_transform_channels:
     PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
   training_noise_distributions:

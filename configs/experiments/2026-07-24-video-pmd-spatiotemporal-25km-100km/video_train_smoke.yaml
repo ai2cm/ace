@@ -1,8 +1,9 @@
 # CPU smoke config (tiny + capped) for video_train.yaml: verifies the
 # spatiotemporal (fine 25km / coarse 100km) data loading, patch tiling, and
-# model wiring actually run end-to-end against the real GCS data, before
-# spending real GPU/cluster budget. Does NOT validate architecture/patch-size
-# choices for a real training run -- see video_train.yaml's "things to tune".
+# two-stage (endpoint-SR + video diffusion) model wiring actually run
+# end-to-end against the real GCS data, before spending real GPU/cluster
+# budget. Does NOT validate architecture/patch-size choices for a real
+# training run -- see video_train.yaml's "things to tune".
 #
 # Run (needs `gcloud auth login` / application-default credentials for the
 # gs://vcm-ml-intermediate bucket):
@@ -21,7 +22,7 @@ logging:
   log_to_wandb: false
   log_to_file: false
   project: ace-temporal-interp
-  name: global-25km-100km-spatiotemporal-5ch-smoke
+  name: global-25km-100km-spatiotemporal-twostage-5ch-smoke
   entity: ai2cm
 optimization:
   lr: 0.0001
@@ -81,6 +82,21 @@ validation_data:
     stop: 60
 model:
   n_timesteps: 9
+  endpoint_super_resolution:  # tiny stage-A net, matches video_train.yaml's two-stage design
+    module:
+      type: unet_diffusion_song
+      config:
+        model_channels: 8
+        channel_mult: [1, 1]
+        num_blocks: 1
+        attn_resolutions: []
+    loss:
+      type: MSE
+    training_noise_distribution:
+      p_mean: -1.2
+      p_std: 1.8
+    coarse_shape: [32, 32]  # coarse_patch_extent_lat/lon (8) * downscale_factor (4)
+    num_diffusion_generation_steps: 2
   model_channels: 16
   n_heads: 2
   num_freqs: 3

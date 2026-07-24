@@ -75,17 +75,17 @@ def _video_comparison_figure(gt, pred, name: str, example_idx: int):
 def _save_checkpoint(trainer: "VideoTrainer", path: str) -> None:
     temporary_location = os.path.join(os.path.dirname(path), f".{uuid.uuid4()}.tmp")
     try:
-        torch.save(
-            {
-                "module": trainer.model.module.state_dict(),
-                "ema": trainer.ema.get_state(),
-                "optimization": trainer.optimization.get_state(),
-                "num_batches_seen": trainer.num_batches_seen,
-                "startEpoch": trainer.startEpoch,
-                "best_valid_loss": trainer.best_valid_loss,
-            },
-            temporary_location,
-        )
+        state: dict = {
+            "module": trainer.model.module.state_dict(),
+            "ema": trainer.ema.get_state(),
+            "optimization": trainer.optimization.get_state(),
+            "num_batches_seen": trainer.num_batches_seen,
+            "startEpoch": trainer.startEpoch,
+            "best_valid_loss": trainer.best_valid_loss,
+        }
+        if trainer.model.endpoint_sr_module is not None:
+            state["endpoint_sr_module"] = trainer.model.endpoint_sr_module.state_dict()
+        torch.save(state, temporary_location)
         os.replace(temporary_location, path)
     finally:
         if os.path.exists(temporary_location):
@@ -97,6 +97,17 @@ def restore_checkpoint(trainer: "VideoTrainer") -> None:
         trainer.epoch_checkpoint_path, map_location="cpu", weights_only=False
     )
     trainer.model.module.load_state_dict(checkpoint["module"])
+    if trainer.model.endpoint_sr_module is not None:
+        if "endpoint_sr_module" not in checkpoint:
+            raise ValueError(
+                "Model config has endpoint_super_resolution set, but the "
+                "checkpoint being resumed from has no 'endpoint_sr_module' "
+                "state -- it was trained without stage A. Refusing to resume "
+                "silently with a freshly-initialized stage-A network."
+            )
+        trainer.model.endpoint_sr_module.load_state_dict(
+            checkpoint["endpoint_sr_module"]
+        )
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
@@ -203,8 +214,10 @@ class VideoTrainerConfig:
             else None
         )
         model = self.model.build()
+        # model.modules includes endpoint_sr_module too, when the config has
+        # endpoint_super_resolution set -- both nets share one optimizer/step.
         optimization = self.optimization.build(
-            modules=[model.module], max_epochs=self.max_epochs
+            modules=model.modules, max_epochs=self.max_epochs
         )
         return VideoTrainer(
             model, optimization, train_data, validation_data, self, test_data
@@ -300,7 +313,7 @@ class VideoTrainer:
         return data.get_generator()
 
     def train_one_epoch(self) -> None:
-        self.model.module.train()
+        self.model.modules.train()
         wandb = WandB.get_instance()
         loss_vs_noise = (
             LossVsNoiseAggregator() if self.config.log_loss_vs_noise else None
@@ -346,7 +359,7 @@ class VideoTrainer:
 
     @torch.no_grad()
     def valid_one_epoch(self) -> dict[str, float]:
-        self.model.module.eval()
+        self.model.modules.eval()
         total_loss = 0.0
         total_gen_mae = 0.0
         loss_vs_noise = (
@@ -412,7 +425,7 @@ class VideoTrainer:
             return
         dist = Distributed.get_instance()
         wandb = WandB.get_instance()
-        self.model.module.eval()
+        self.model.modules.eval()
         with self._validation_context():
             validation_batch_generator = self._get_batch_generator(
                 self.validation_data, random_offset=False, shuffle=False
@@ -444,7 +457,7 @@ class VideoTrainer:
             return
         dist = Distributed.get_instance()
         wandb = WandB.get_instance()
-        self.model.module.eval()
+        self.model.modules.eval()
         names = self.model.out_names
         interior = slice(1, self.model.n_timesteps - 1)
         # per channel: [sum|err_model|, sum err_model^2, sum|err_linear|, count]
