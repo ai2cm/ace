@@ -26,6 +26,7 @@ from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
+    _get_segment_label,
     get_initial_condition,
     main,
     run_segmented_inference,
@@ -310,6 +311,24 @@ def test_run_segmented_inference_custom_segment_label_format(tmp_path):
             segment_dir = os.path.join(config.experiment_dir, label)
             assert os.path.exists(os.path.join(segment_dir, "restart.nc"))
         assert mock.call_count == 2
+
+
+def test_get_segment_label_raises_on_collision():
+    initialization_time = cftime.DatetimeProlepticGregorian(2000, 1, 1, 6)
+    timestep = datetime.timedelta(minutes=15)
+    n_forward_steps = 3  # segments start 45min apart
+
+    # hour-precision format is too coarse to distinguish 45min-apart segments
+    with pytest.raises(ValueError, match="same label"):
+        _get_segment_label(
+            initialization_time, timestep, 1, n_forward_steps, "%Y%m%dT%H"
+        )
+
+    # minute-precision format distinguishes them fine
+    label = _get_segment_label(
+        initialization_time, timestep, 1, n_forward_steps, "%Y%m%dT%H%M"
+    )
+    assert label == "20000101T0645"
 
 
 def save_noise_conditioned_stepper(

@@ -495,8 +495,24 @@ def _get_segment_label(
     n_forward_steps: int,
     segment_label_format: str,
 ) -> str:
-    segment_start_time = initialization_time + timestep * segment * n_forward_steps
-    return segment_start_time.strftime(segment_label_format)
+    segment_length = n_forward_steps * timestep
+    current_start_time = initialization_time + segment * segment_length
+    current_label = current_start_time.strftime(segment_label_format)
+
+    if segment > 0:
+        previous_start_time = initialization_time + (segment - 1) * segment_length
+        previous_label = previous_start_time.strftime(segment_label_format)
+        if previous_label == current_label:
+            raise ValueError(
+                f"Consecutive segments have the same label ({previous_label!r} "
+                f"and {current_label!r}), meaning the current segment would "
+                f"overwrite the previous segment. Please use a more precise "
+                f"--segment-label-format than the current one "
+                f"({segment_label_format!r}) when submitting your segmented "
+                f"run to avoid this error."
+            )
+
+    return current_label
 
 
 def run_segmented_inference(
