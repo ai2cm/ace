@@ -24,9 +24,21 @@ def _format_time(values: np.ndarray) -> list[str]:
     return [str(value) for value in values]
 
 
-def compact(input_dir: Path, output_dir: Path) -> xr.Dataset:
+def compact(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    checkpoint_dataset: str = "01KXKZ85HTDSGGXWD2DPW2QRFW",
+    description: str | None = None,
+) -> xr.Dataset:
     prediction = xr.open_dataset(input_dir / "autoregressive_predictions.nc")
     target = xr.open_dataset(input_dir / "autoregressive_target.nc")
+
+    if description is None:
+        description = (
+            "Direct Nino3.4 scalar forecasts from one 5-day Samudra "
+            "step over held-out CM4 1pctCO2 years matching the OOS IC set."
+        )
 
     try:
         pred = xr.concat(
@@ -66,11 +78,8 @@ def compact(input_dir: Path, output_dir: Path) -> xr.Dataset:
                 ),
             },
             attrs={
-                "description": (
-                    "Direct Nino3.4 scalar forecasts from one 5-day Samudra "
-                    "step over held-out CM4 1pctCO2 years 0251-0255."
-                ),
-                "checkpoint_dataset": "01KXKZ85HTDSGGXWD2DPW2QRFW",
+                "description": description,
+                "checkpoint_dataset": checkpoint_dataset,
                 "readout_definition": (
                     "nino34_lead_01..12 predicted simultaneously by the MLP "
                     "readout head; values are linear-detrended monthly indices."
@@ -156,8 +165,23 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--checkpoint-dataset",
+        default="01KXKZ85HTDSGGXWD2DPW2QRFW",
+        help="Beaker dataset id recorded in output attrs.",
+    )
+    parser.add_argument(
+        "--description",
+        default=None,
+        help="Optional description recorded in output attrs.",
+    )
     args = parser.parse_args()
-    result = compact(args.input_dir, args.output_dir)
+    result = compact(
+        args.input_dir,
+        args.output_dir,
+        checkpoint_dataset=args.checkpoint_dataset,
+        description=args.description,
+    )
     print(result[["rmse", "mae", "correlation"]])
 
 
