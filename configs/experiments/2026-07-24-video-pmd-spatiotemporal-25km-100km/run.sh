@@ -44,7 +44,7 @@ gantry run \
     --name "$JOB_NAME" \
     --description 'Spatiotemporal video PMD: stage-1 temporal infilling + stage-2 spatial downscaling (25km/100km), 5 channels, global, patch-trained. 8x GPU DDP on titan (GCS-direct).' \
     --workspace "$WORKSPACE" \
-    --priority high \
+    --priority urgent \
     --cluster "$CLUSTER" \
     --beaker-image "$DEPS_ONLY_IMAGE" \
     --gpus "$N_GPUS" \
