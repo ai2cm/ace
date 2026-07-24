@@ -1,8 +1,11 @@
+import pytest
+
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.ema import EMAConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.core.dataset.xarray import XarrayDataConfig
+from fme.downscaling.data import RegionSamplingConfig
 from fme.downscaling.data.config import PairedDataLoaderConfig
 from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.test_utils import data_paths_helper
@@ -24,6 +27,86 @@ def _data_config(paths):
         lon_extent=ClosedInterval(0, 8),
         n_timesteps=N_TIMESTEPS,
     )
+
+
+def _spatial_data_config(paths):
+    # genuinely coarser than fine (8x8 vs 16x16, see data_paths_helper), full
+    # domain -- for spatial-downscaling + patch-training tests.
+    return PairedDataLoaderConfig(
+        fine=[XarrayDataConfig(paths.fine)],
+        coarse=[XarrayDataConfig(paths.coarse)],
+        batch_size=2,
+        num_data_workers=0,
+        strict_ensemble=False,
+        lat_extent=ClosedInterval(0, 8),
+        lon_extent=ClosedInterval(0, 8),
+        n_timesteps=N_TIMESTEPS,
+    )
+
+
+def _spatial_model():
+    norm = NormalizationConfig(
+        means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+    )
+    return VideoDiffusionModelConfig(
+        out_names=OUT_NAMES,
+        n_timesteps=N_TIMESTEPS,
+        normalization=norm,
+        coarse_normalization=norm,
+        model_channels=16,
+        n_heads=2,
+        num_freqs=3,
+        num_diffusion_generation_steps=4,
+    )
+
+
+def _patch_trainer_config(tmp_path, **config_kwargs):
+    paths = data_paths_helper(tmp_path, num_timesteps=18)
+    return VideoTrainerConfig(
+        model=_spatial_model(),
+        optimization=OptimizationConfig(lr=1e-3),
+        train_data=_spatial_data_config(paths),
+        validation_data=_spatial_data_config(paths),
+        max_epochs=1,
+        experiment_dir=str(tmp_path / "exp"),
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_wandb=False, log_to_file=False
+        ),
+        save_checkpoints=False,
+        generate_n_samples=1,
+        **config_kwargs,
+    )
+
+
+def test_video_trainer_patch_training_runs(tmp_path):
+    # 8x8 coarse domain split into 4x4 coarse patches -> 2x2 = 4 patches per
+    # loaded batch, each an (8x8 fine, downscale_factor=2) clip.
+    config = _patch_trainer_config(
+        tmp_path, coarse_patch_extent_lat=4, coarse_patch_extent_lon=4
+    )
+    trainer = config.build()
+    assert trainer.patch_data
+    trainer.train()
+    assert trainer.startEpoch == 1
+    assert trainer.num_batches_seen > 0
+
+
+def test_video_trainer_without_patch_extent_is_unpatched(tmp_path):
+    config = _patch_trainer_config(tmp_path)
+    trainer = config.build()
+    assert not trainer.patch_data
+
+
+def test_video_trainer_patch_extent_requires_both(tmp_path):
+    with pytest.raises(ValueError, match="Either none or both"):
+        _patch_trainer_config(tmp_path, coarse_patch_extent_lat=4)
+
+
+def test_video_trainer_region_sampling_requires_patch_extent(tmp_path):
+    with pytest.raises(ValueError, match="region_sampling requires"):
+        _patch_trainer_config(
+            tmp_path, region_sampling=RegionSamplingConfig(weight=2.0)
+        )
 
 
 def _trainer_config(tmp_path):

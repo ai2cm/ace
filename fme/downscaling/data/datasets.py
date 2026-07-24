@@ -741,6 +741,9 @@ class VideoBatchData:
     day_of_year: torch.Tensor
     second_of_day: torch.Tensor
 
+    def __post_init__(self):
+        self.is_patched = False
+
     @classmethod
     def from_sequence(
         cls,
@@ -768,6 +771,39 @@ class VideoBatchData:
 
     def __len__(self):
         return self.day_of_year.shape[0]
+
+    def latlon_slice(self, lat_slice: slice, lon_slice: slice) -> "VideoBatchData":
+        # data is (batch, T, H, W); day_of_year/second_of_day/lon-independent
+        # calendar features are (batch, T) and unaffected by a spatial slice.
+        sliced_data = {k: v[..., lat_slice, lon_slice] for k, v in self.data.items()}
+        sliced_latlon = BatchedLatLonCoordinates(
+            lat=self.latlon_coordinates.lat[..., lat_slice],
+            lon=self.latlon_coordinates.lon[..., lon_slice],
+            dims=self.latlon_coordinates.dims,
+        )
+        return VideoBatchData(
+            data=sliced_data,
+            time=self.time,
+            latlon_coordinates=sliced_latlon,
+            day_of_year=self.day_of_year,
+            second_of_day=self.second_of_day,
+        )
+
+    def apply_patch(
+        self, patch: Patch, type: Literal["input", "output"]
+    ) -> "VideoBatchData":
+        if self.is_patched:
+            raise ValueError("Patching previously patched data is not supported.")
+        use_slice = patch.input_slice if type == "input" else patch.output_slice
+        data = self.latlon_slice(lat_slice=use_slice.y, lon_slice=use_slice.x)
+        data.is_patched = True
+        return data
+
+    def generate_from_patches(
+        self, patches: list[Patch], patch_type: Literal["input", "output"] = "input"
+    ) -> Iterator["VideoBatchData"]:
+        for patch in patches:
+            yield self.apply_patch(patch, patch_type)
 
 
 class VideoFineCoarsePairedDataset(torch.utils.data.Dataset):
@@ -853,6 +889,16 @@ class PairedVideoBatchData:
     def __len__(self):
         return len(self.fine)
 
+    def generate_from_patches(
+        self,
+        coarse_patches: list[Patch],
+        fine_patches: list[Patch],
+    ) -> Iterator["PairedVideoBatchData"]:
+        coarse_gen = self.coarse.generate_from_patches(coarse_patches)
+        fine_gen = self.fine.generate_from_patches(fine_patches)
+        for coarse_batch, fine_batch in zip(coarse_gen, fine_gen):
+            yield PairedVideoBatchData(fine=fine_batch, coarse=coarse_batch)
+
 
 @dataclasses.dataclass
 class PairedVideoGriddedData:
@@ -876,6 +922,31 @@ class PairedVideoGriddedData:
 
     def get_generator(self) -> Iterator["PairedVideoBatchData"]:
         yield from self.loader
+
+    def get_patched_generator(
+        self,
+        coarse_yx_patch_extent: tuple[int, int],
+        overlap: int = 0,
+        drop_partial_patches: bool = True,
+        random_offset: bool = False,
+        shuffle: bool = False,
+        region_sampling: "RegionSamplingConfig | None" = None,
+    ) -> Iterator["PairedVideoBatchData"]:
+        patched_generator = patched_batch_gen_from_paired_video_loader(
+            self.loader,
+            coarse_yx_extent=self.coarse_shape,
+            coarse_yx_patch_extent=coarse_yx_patch_extent,
+            downscale_factor=self.downscale_factor,
+            coarse_overlap=overlap,
+            drop_partial_patches=drop_partial_patches,
+            random_offset=random_offset,
+            shuffle=shuffle,
+            region_sampling=region_sampling,
+        )
+        return cast(
+            Iterator[PairedVideoBatchData],
+            patched_generator,
+        )
 
 
 class ContiguousDistributedSampler(DistributedSampler):
@@ -1062,6 +1133,45 @@ def patched_batch_gen_from_paired_loader(
     shuffle: bool = False,
     region_sampling: RegionSamplingConfig | None = None,
 ) -> Iterator[PairedBatchData]:
+    for batch in loader:
+        coarse_patches, fine_patches = _get_paired_patches(
+            coarse_yx_extent=coarse_yx_extent,
+            coarse_yx_patch_extent=coarse_yx_patch_extent,
+            coarse_overlap=coarse_overlap,
+            downscale_factor=downscale_factor,
+            random_offset=random_offset,
+            shuffle=shuffle,
+            drop_partial_patches=drop_partial_patches,
+        )
+        if region_sampling is not None:
+            assert fine_patches is not None  # for type checking
+            coarse_lats = batch.coarse.latlon_coordinates.lat[
+                0
+            ]  # dims are [batch, lat/lon]
+            coarse_lons = batch.coarse.latlon_coordinates.lon[0]
+            indices = _sample_indices_with_region_sampling(
+                coarse_patches, coarse_lats, coarse_lons, region_sampling
+            )
+            coarse_patches = [coarse_patches[i] for i in indices]
+            fine_patches = [fine_patches[i] for i in indices]
+        yield from batch.generate_from_patches(coarse_patches, fine_patches)
+
+
+def patched_batch_gen_from_paired_video_loader(
+    loader: DataLoader[PairedVideoBatchData],
+    coarse_yx_extent: tuple[int, int],
+    coarse_yx_patch_extent: tuple[int, int],
+    downscale_factor: int,
+    coarse_overlap: int = 0,
+    drop_partial_patches: bool = True,
+    random_offset: bool = False,
+    shuffle: bool = False,
+    region_sampling: RegionSamplingConfig | None = None,
+) -> Iterator[PairedVideoBatchData]:
+    """Video analog of ``patched_batch_gen_from_paired_loader``: each loaded
+    (batch, T, H, W) clip batch is carved into multiple smaller-domain clip
+    batches in memory (the time axis is untouched by patching).
+    """
     for batch in loader:
         coarse_patches, fine_patches = _get_paired_patches(
             coarse_yx_extent=coarse_yx_extent,

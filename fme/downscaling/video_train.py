@@ -23,7 +23,12 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.main import LossVsNoiseAggregator
-from fme.downscaling.data import PairedDataLoaderConfig, PairedVideoBatchData
+from fme.downscaling.data import (
+    PairedDataLoaderConfig,
+    PairedVideoBatchData,
+    PairedVideoGriddedData,
+    RegionSamplingConfig,
+)
 from fme.downscaling.video_models import (
     VideoDiffusionModelConfig,
     _linear_interp_endpoints,
@@ -101,7 +106,26 @@ def restore_checkpoint(trainer: "VideoTrainer") -> None:
 
 @dataclasses.dataclass
 class VideoTrainerConfig:
-    """Configuration for the video diffusion Trainer."""
+    """Configuration for the video diffusion Trainer.
+
+    Parameters:
+        coarse_patch_extent_lat: If set together with
+            ``coarse_patch_extent_lon``, training/validation/test iterate over
+            spatial patches of the given coarse extent (carved in memory out
+            of each loaded full-domain clip batch -- see
+            ``PairedVideoGriddedData.get_patched_generator``) rather than the
+            full ``lat_extent``/``lon_extent`` domain. The clip length (T) is
+            unaffected. Mirrors ``TrainerConfig``'s patch training for the
+            spatial-only 2D model (see HiRO's
+            ``configs/baselines/downscaling-hiro-global/train.yaml``), needed
+            because a full global clip at fine (e.g. 25km) resolution does not
+            fit in memory.
+        coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
+        region_sampling: Optional config to oversample patches whose center
+            falls within a specified lat/lon region during training only
+            (validation/test patches are unchanged so metrics stay
+            comparable). Requires both patch extents to be set.
+    """
 
     model: VideoDiffusionModelConfig
     optimization: OptimizationConfig
@@ -127,6 +151,9 @@ class VideoTrainerConfig:
     max_val_batches: int | None = None
     max_test_batches: int | None = None
     log_loss_vs_noise: bool = False
+    coarse_patch_extent_lat: int | None = None
+    coarse_patch_extent_lon: int | None = None
+    region_sampling: RegionSamplingConfig | None = None
 
     def __post_init__(self):
         datasets = [
@@ -141,6 +168,24 @@ class VideoTrainerConfig:
                     f"{name}.n_timesteps ({data.n_timesteps}) must equal "
                     f"model.n_timesteps ({self.model.n_timesteps})."
                 )
+        if (
+            self.coarse_patch_extent_lat is not None
+            and self.coarse_patch_extent_lon is None
+        ) or (
+            self.coarse_patch_extent_lat is None
+            and self.coarse_patch_extent_lon is not None
+        ):
+            raise ValueError(
+                "Either none or both of coarse_patch_extent_lat and "
+                "coarse_patch_extent_lon must be set."
+            )
+        if self.region_sampling is not None and (
+            self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None
+        ):
+            raise ValueError(
+                "region_sampling requires both coarse_patch_extent_lat "
+                "and coarse_patch_extent_lon to be set."
+            )
 
     @property
     def checkpoint_dir(self) -> str:
@@ -189,6 +234,9 @@ class VideoTrainer:
         self.startEpoch = 0
         self.segment_epochs = config.segment_epochs
         self.best_valid_loss = float("inf")
+        self.patch_data = bool(
+            config.coarse_patch_extent_lat and config.coarse_patch_extent_lon
+        )
 
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
@@ -228,6 +276,29 @@ class VideoTrainer:
         else:
             yield
 
+    def _get_batch_generator(
+        self,
+        data: PairedVideoGriddedData,
+        random_offset: bool,
+        shuffle: bool,
+        region_sampling: RegionSamplingConfig | None = None,
+    ):
+        if self.patch_data:
+            assert self.config.coarse_patch_extent_lat is not None
+            assert self.config.coarse_patch_extent_lon is not None
+            return data.get_patched_generator(
+                coarse_yx_patch_extent=(
+                    self.config.coarse_patch_extent_lat,
+                    self.config.coarse_patch_extent_lon,
+                ),
+                overlap=0,
+                drop_partial_patches=True,
+                random_offset=random_offset,
+                shuffle=shuffle,
+                region_sampling=region_sampling,
+            )
+        return data.get_generator()
+
     def train_one_epoch(self) -> None:
         self.model.module.train()
         wandb = WandB.get_instance()
@@ -237,7 +308,13 @@ class VideoTrainer:
         batch: PairedVideoBatchData
         epoch_loss = 0.0
         n_batches = 0
-        for i, batch in enumerate(self.train_data.loader):
+        train_batch_generator = self._get_batch_generator(
+            self.train_data,
+            random_offset=True,
+            shuffle=True,
+            region_sampling=self.config.region_sampling,
+        )
+        for i, batch in enumerate(train_batch_generator):
             if (
                 self.config.max_train_batches is not None
                 and i >= self.config.max_train_batches
@@ -277,7 +354,10 @@ class VideoTrainer:
         )
         n_batches = 0
         with self._validation_context():
-            for j, batch in enumerate(self.validation_data.loader):
+            validation_batch_generator = self._get_batch_generator(
+                self.validation_data, random_offset=False, shuffle=False
+            )
+            for j, batch in enumerate(validation_batch_generator):
                 if (
                     self.config.max_val_batches is not None
                     and j >= self.config.max_val_batches
@@ -334,7 +414,10 @@ class VideoTrainer:
         wandb = WandB.get_instance()
         self.model.module.eval()
         with self._validation_context():
-            batch = next(iter(self.validation_data.loader))
+            validation_batch_generator = self._get_batch_generator(
+                self.validation_data, random_offset=False, shuffle=False
+            )
+            batch = next(iter(validation_batch_generator))
             generated = self.model.generate(batch, n_samples=1)
         logs: dict = {}
         if dist.is_root() and wandb.enabled:
@@ -368,7 +451,11 @@ class VideoTrainer:
         acc = torch.zeros(len(names), 4, device=get_device())
         viz = None
         with self._validation_context():
-            for b, batch in enumerate(self.test_data.loader):
+            assert self.test_data is not None
+            test_batch_generator = self._get_batch_generator(
+                self.test_data, random_offset=False, shuffle=False
+            )
+            for b, batch in enumerate(test_batch_generator):
                 if (
                     self.config.max_test_batches is not None
                     and b >= self.config.max_test_batches

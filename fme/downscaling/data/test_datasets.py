@@ -20,9 +20,12 @@ from fme.downscaling.data.datasets import (
     LatLonCoordinates,
     PairedBatchData,
     PairedBatchItem,
+    PairedVideoBatchData,
     RegionSamplingConfig,
+    VideoBatchData,
     _sample_indices_with_region_sampling,
     patched_batch_gen_from_paired_loader,
+    patched_batch_gen_from_paired_video_loader,
 )
 from fme.downscaling.data.patching import Patch, _HorizontalSlice
 from fme.downscaling.data.utils import BatchedLatLonCoordinates, ClosedInterval
@@ -528,6 +531,165 @@ def test_batch_data_apply_patch_already_patched_raises():
     (patched,) = list(batch.generate_from_patches([patch]))
     with pytest.raises(ValueError, match="previously patched"):
         list(patched.generate_from_patches([patch]))
+
+
+def _make_video_batch_data_for_patching(batch_size=2, n_times=3):
+    """Create a 2x3x4x4 VideoBatchData with known arange values for patch
+    testing (analogous to _make_batch_data_for_patching plus a time axis)."""
+    n_lat, n_lon = 4, 4
+    lat = torch.arange(n_lat, dtype=torch.float32)
+    lon = torch.arange(n_lon, dtype=torch.float32)
+    data = {
+        "x": torch.arange(
+            batch_size * n_times * n_lat * n_lon, dtype=torch.float32
+        ).reshape(batch_size, n_times, n_lat, n_lon)
+    }
+    time = xr.DataArray(list(range(batch_size)), dims=["batch"])
+    latlon_coordinates = BatchedLatLonCoordinates(
+        lat=lat.unsqueeze(0).expand(batch_size, -1).clone(),
+        lon=lon.unsqueeze(0).expand(batch_size, -1).clone(),
+    )
+    day_of_year = torch.rand(batch_size, n_times)
+    second_of_day = torch.rand(batch_size, n_times)
+    return VideoBatchData(
+        data=data,
+        time=time,
+        latlon_coordinates=latlon_coordinates,
+        day_of_year=day_of_year,
+        second_of_day=second_of_day,
+    )
+
+
+def test_video_batch_data_generate_from_patches():
+    batch = _make_video_batch_data_for_patching()
+    patches = [
+        Patch(
+            input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        ),
+        Patch(
+            input_slice=_HorizontalSlice(y=slice(0, 2), x=slice(2, 3)),
+            output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+        ),
+    ]
+    generated = list(batch.generate_from_patches(patches))
+
+    assert len(generated) == 2
+
+    # Patch 0: rows 1-2, all columns, all times
+    expected_lat = torch.tensor([[1.0, 2.0], [1.0, 2.0]])
+    expected_lon = torch.tensor([[0.0, 1.0, 2.0, 3.0], [0.0, 1.0, 2.0, 3.0]])
+    assert torch.equal(generated[0].latlon_coordinates.lat, expected_lat)
+    assert torch.equal(generated[0].latlon_coordinates.lon, expected_lon)
+    assert torch.equal(generated[0].data["x"], batch.data["x"][:, :, 1:3, :])
+
+    # Patch 1: rows 0-1, column 2, all times
+    expected_lat = torch.tensor([[0.0, 1.0], [0.0, 1.0]])
+    expected_lon = torch.tensor([[2.0], [2.0]])
+    assert torch.equal(generated[1].latlon_coordinates.lat, expected_lat)
+    assert torch.equal(generated[1].latlon_coordinates.lon, expected_lon)
+    assert torch.equal(generated[1].data["x"], batch.data["x"][:, :, 0:2, 2:3])
+
+    # time-axis-only features are untouched by spatial patching
+    for g in generated:
+        assert torch.equal(g.day_of_year, batch.day_of_year)
+        assert torch.equal(g.second_of_day, batch.second_of_day)
+
+
+def test_video_batch_data_apply_patch_already_patched_raises():
+    batch = _make_video_batch_data_for_patching()
+    patch = Patch(
+        input_slice=_HorizontalSlice(y=slice(1, 3), x=slice(None)),
+        output_slice=_HorizontalSlice(y=slice(None), x=slice(None)),
+    )
+    (patched,) = list(batch.generate_from_patches([patch]))
+    with pytest.raises(ValueError, match="previously patched"):
+        list(patched.generate_from_patches([patch]))
+
+
+def _make_paired_video_batch(
+    n_lat=12, n_lon=8, batch_size=2, downscale_factor=1, n_times=3
+) -> PairedVideoBatchData:
+    lat_coarse = torch.linspace(-66.0, 70.0, n_lat)
+    lon_coarse = torch.linspace(0.0, 360.0, n_lon)
+    time = xr.DataArray(list(range(batch_size)), dims=["batch"])
+    day_of_year = torch.rand(batch_size, n_times)
+    second_of_day = torch.rand(batch_size, n_times)
+    coarse = VideoBatchData(
+        data={"x": torch.zeros(batch_size, n_times, n_lat, n_lon)},
+        time=time,
+        latlon_coordinates=BatchedLatLonCoordinates(
+            lat=lat_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
+            lon=lon_coarse.unsqueeze(0).expand(batch_size, -1).clone(),
+        ),
+        day_of_year=day_of_year,
+        second_of_day=second_of_day,
+    )
+    n_lat_fine = n_lat * downscale_factor
+    n_lon_fine = n_lon * downscale_factor
+    lat_fine = torch.linspace(-66.0, 70.0, n_lat_fine)
+    lon_fine = torch.linspace(0.0, 360.0, n_lon_fine)
+    fine = VideoBatchData(
+        data={"x": torch.zeros(batch_size, n_times, n_lat_fine, n_lon_fine)},
+        time=time,
+        latlon_coordinates=BatchedLatLonCoordinates(
+            lat=lat_fine.unsqueeze(0).expand(batch_size, -1).clone(),
+            lon=lon_fine.unsqueeze(0).expand(batch_size, -1).clone(),
+        ),
+        day_of_year=day_of_year,
+        second_of_day=second_of_day,
+    )
+    return PairedVideoBatchData(fine=fine, coarse=coarse)
+
+
+def test_patched_batch_gen_from_paired_video_loader_no_oversampling():
+    n_lat, n_lon, n_times = 12, 8, 3
+    batch = _make_paired_video_batch(n_lat=n_lat, n_lon=n_lon, n_times=n_times)
+
+    yielded = list(
+        patched_batch_gen_from_paired_video_loader(
+            loader=[batch],
+            coarse_yx_extent=(n_lat, n_lon),
+            coarse_yx_patch_extent=(4, n_lon),
+            downscale_factor=1,
+            random_offset=False,
+            shuffle=False,
+            drop_partial_patches=True,
+        )
+    )
+    # 3 lat slices x 1 lon slice = 3 patches
+    assert len(yielded) == 3
+    for patch_batch in yielded:
+        assert patch_batch.fine.data["x"].shape == (2, n_times, 4, n_lon)
+        assert patch_batch.coarse.data["x"].shape == (2, n_times, 4, n_lon)
+
+
+def test_patched_batch_gen_from_paired_video_loader_with_downscale_factor():
+    n_lat, n_lon, n_times, factor = 12, 8, 3, 2
+    batch = _make_paired_video_batch(
+        n_lat=n_lat, n_lon=n_lon, n_times=n_times, downscale_factor=factor
+    )
+
+    yielded = list(
+        patched_batch_gen_from_paired_video_loader(
+            loader=[batch],
+            coarse_yx_extent=(n_lat, n_lon),
+            coarse_yx_patch_extent=(4, n_lon),
+            downscale_factor=factor,
+            random_offset=False,
+            shuffle=False,
+            drop_partial_patches=True,
+        )
+    )
+    assert len(yielded) == 3
+    for patch_batch in yielded:
+        assert patch_batch.coarse.data["x"].shape == (2, n_times, 4, n_lon)
+        assert patch_batch.fine.data["x"].shape == (
+            2,
+            n_times,
+            4 * factor,
+            n_lon * factor,
+        )
 
 
 def test_region_sampling_config_error_on_negative():
