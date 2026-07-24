@@ -5,4 +5,5 @@ BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-multi-step-FT-from-PM|rs0|ace
 BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-multi-step-FT-best-val-ckpt|rs0|ace-eamv3|tu6kkzxd|best_ckpt|skip|high|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.builder.config.embed_dim=384
 BK-v20260602-ACE2S-E3SMv3-piControl-100yr-n384-bs8-equal-loss-multi-step-FT-best-val-ckpt|rs0|ace-eamv3|bvigdtwp|best_ckpt|skip|high|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.builder.config.embed_dim=384
 
-BK-v20260717-ACE2S-E3SMv3-piControl-100yr-n384-bs8-equal-loss-multi-step-FT|rs0|ace-eamv3|ftqiadrr|best_inference_ckpt|train|high|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.builder.config.embed_dim=384
+BK-v20260717-ACE2S-E3SMv3-piControl-100yr-n384-bs8-equal-loss-multi-step-FT|rs1|ace-eamv3|ftqiadrr|best_ckpt|train|high|titan|4|600GiB|1|ai2/climate-titan|seed=1 stepper.step.config.builder.config.embed_dim=384
+BK-v20260717-ACE2S-E3SMv3-piControl-100yr-n384-bs8-equal-loss-multi-step-FT|rs0|ace-eamv3|kt5kggjr|best_ckpt|train|urgent|titan|4|600GiB|1|ai2/climate-titan|seed=0 stepper.step.config.builder.config.embed_dim=384
