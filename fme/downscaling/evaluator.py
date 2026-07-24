@@ -25,6 +25,7 @@ from fme.downscaling.predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
+    check_input_shape_supported,
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -37,31 +38,22 @@ class Evaluator:
         model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
-        patch_data: bool = False,
     ) -> None:
         self.data = data
         self.model = model
         self.experiment_dir = experiment_dir
         self.n_samples = n_samples
         self.dist = Distributed.get_instance()
-        self.patch_data = patch_data
 
     def run(self):
         aggregator = GenerationAggregator(
             self.data.dims,
             self.model.downscale_factor,
-            include_positional_comparisons=False if self.patch_data else True,
+            include_positional_comparisons=True,
             percentiles=[99.99, 99.9999],
         )
 
-        if self.patch_data:
-            batch_generator = self.data.get_patched_generator(
-                coarse_yx_patch_extent=self.model.coarse_shape,
-            )
-        else:
-            batch_generator = self.data.get_generator()
-
-        for i, batch in enumerate(batch_generator):
+        for i, batch in enumerate(self.data.get_generator()):
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
@@ -203,8 +195,16 @@ class EvaluatorConfig:
         coarse_lon = dataset.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         model = model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            model.coarse_shape,
+            dataset.coarse_shape,
+            self.patch,
+            name="evaluator",
+        )
         evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
-        if self.patch.divide_generation and self.patch.composite_prediction:
+        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
+            dataset.coarse_shape[1] > model.coarse_shape[1]
+        ):
             evaluator_model = PatchPredictor(
                 model,
                 coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
@@ -212,19 +212,11 @@ class EvaluatorConfig:
         else:
             evaluator_model = model
 
-        if self.patch.divide_generation and not self.patch.composite_prediction:
-            # Subdivide evaluation into patches, do not composite them together
-            # No maps will be saved for this configuration.
-            patch_data = True
-        else:
-            patch_data = False
-
         return Evaluator(
             data=dataset,
             model=evaluator_model,
             experiment_dir=self.experiment_dir,
             n_samples=self.n_samples,
-            patch_data=patch_data,
         )
 
     def _build_event_evaluator(
@@ -241,6 +233,12 @@ class EvaluatorConfig:
         coarse_lon = dataset.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         model = model.with_rolled_lon(coarse_lon)
+        check_input_shape_supported(
+            model.coarse_shape,
+            dataset.coarse_shape,
+            self.patch,
+            name=f"event {event_config.name}",
+        )
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):

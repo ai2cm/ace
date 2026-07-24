@@ -124,7 +124,14 @@ class ZeroGlobalMeanMoistureAdvection:
 
 @dataclasses.dataclass
 class MoistureBudgetCorrection:
-    """Correction that closes the moisture budget via the configured terms."""
+    """Correction that closes the moisture budget via the configured terms.
+
+    When ``clip_frozen_precipitation`` is True, after closing the moisture budget
+    the frozen precipitation rate (``total_frozen_precipitation_rate``) is clipped
+    to the -- possibly corrected -- total precipitation rate when frozen
+    precipitation is predicted, since frozen precipitation is a component of total
+    precipitation and cannot exceed it.
+    """
 
     area_weighted_mean: AreaWeightedMean
     vertical_coordinate: HasAtmosphereVerticalIntegral | None
@@ -135,6 +142,7 @@ class MoistureBudgetCorrection:
         "advection_and_precipitation",
         "advection_and_evaporation",
     ]
+    clip_frozen_precipitation: bool = False
 
     def __call__(
         self,
@@ -161,6 +169,12 @@ class MoistureBudgetCorrection:
             timestep_seconds=self.timestep_seconds,
             terms_to_modify=self.terms_to_modify,
         )
+        if self.clip_frozen_precipitation:
+            # Clip frozen precipitation against the (possibly corrected) total
+            # precipitation rate. Done here, after the budget correction, so the
+            # ceiling is the final precipitation rate.
+            frozen_clip = _clip_frozen_precipitation({**gen_data, **corrected})
+            corrected = {**corrected, **frozen_clip}
         return corrected, corrector_state
 
 
@@ -294,6 +308,16 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             clamp with a straight-through estimator: the forward value is still
             clamped to be non-negative, but gradient flows as if the clamp had
             not happened, so clamped-negative cells still get a learning signal.
+        clip_frozen_precipitation: If True, and ``moisture_budget_correction`` is
+            enabled and the frozen precipitation rate
+            (``total_frozen_precipitation_rate``) is predicted, clip it to be less
+            than or equal to the -- possibly corrected -- total precipitation rate
+            (``PRATEsfc``) in each grid cell, since frozen precipitation is a
+            component of total precipitation. The clip runs as part of the
+            moisture budget correction, before any ``total_energy_budget_correction``,
+            since frozen precipitation contributes to the surface energy flux via
+            the latent heat of freezing. Defaults to False so that previously
+            trained checkpoints, which did not apply this clip, are unaffected.
     """
 
     conserve_dry_air: bool = False
@@ -310,6 +334,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
+    clip_frozen_precipitation: bool = False
 
     def _get_corrector(
         self,
@@ -356,6 +381,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     vertical_coordinate,
                     timestep_seconds,
                     self.moisture_budget_correction,
+                    clip_frozen_precipitation=self.clip_frozen_precipitation,
                 )
             )
         if self.total_energy_budget_correction is not None:
@@ -460,6 +486,31 @@ def _force_zero_global_mean_moisture_advection(
     gen.set_tendency_of_total_water_path_due_to_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
+    )
+    return gen.modified_data
+
+
+def _clip_frozen_precipitation(gen_data: TensorMapping) -> TensorDict:
+    """
+    Clip the frozen precipitation rate to be at most the total precipitation rate.
+
+    Frozen precipitation is a component of total precipitation, so its rate cannot
+    physically exceed the total precipitation rate. This clips
+    ``total_frozen_precipitation_rate`` to ``min(total_frozen_precipitation_rate,
+    PRATEsfc)`` in each grid cell.
+
+    If the frozen precipitation rate is not among the generated fields (i.e. it is
+    not predicted), this is a no-op and returns an empty mapping.
+
+    Args:
+        gen_data: The generated data, which must contain the total precipitation
+            rate when the frozen precipitation rate is predicted.
+    """
+    if "total_frozen_precipitation_rate" not in gen_data:
+        return {}
+    gen = AtmosphereData(gen_data)
+    gen.set_frozen_precipitation_rate(
+        torch.minimum(gen.frozen_precipitation_rate, gen.precipitation_rate)
     )
     return gen.modified_data
 
