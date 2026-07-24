@@ -8,6 +8,8 @@ from . import prebuilt as _prebuilt
 from . import sfno as _sfno
 from . import stochastic_sfno as _sfno_crps
 from . import swin_transformer as _swin
+from . import two_track_sfno as _two_track_sfno
 from .registry import ModuleSelector
 
 del _prebuilt, _sfno, _m2lines, _landnet, _localnet, _sfno_crps, _mlp, _swin
+del _two_track_sfno
