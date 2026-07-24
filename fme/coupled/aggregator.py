@@ -54,7 +54,6 @@ from fme.coupled.data_loading.batch_data import (
 )
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
-from fme.coupled.typing_ import CoupledTensorMapping
 
 
 class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
@@ -98,7 +97,6 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
     def __init__(
         self,
         dataset_info: CoupledDatasetInfo,
-        loss_scaling: CoupledTensorMapping,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -112,8 +110,6 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             save_diagnostics: Whether to save diagnostics to disk.
             output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
-            loss_scaling: Optional coupled mapping of variables and their
-                scaling factors used in loss computation for the stepper.
             ocean_channel_mean_names: Names to include in ocean channel-mean metrics.
             atmosphere_channel_mean_names: Names to include in atmosphere channel-mean
                 metrics.
@@ -136,7 +132,6 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                     if output_dir is not None
                     else None
                 ),
-                loss_scaling=loss_scaling.ocean,
                 channel_mean_names=ocean_channel_mean_names,
             ),
             "atmosphere": config.build(
@@ -147,7 +142,6 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                     if output_dir is not None
                     else None
                 ),
-                loss_scaling=loss_scaling.atmosphere,
                 channel_mean_names=atmosphere_channel_mean_names,
             ),
         }
