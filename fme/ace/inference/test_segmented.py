@@ -295,24 +295,6 @@ def test_run_segmented_inference(tmp_path):
         assert mock.call_count == 3
 
 
-def test_run_segmented_inference_custom_segment_label_format(tmp_path):
-    mock = unittest.mock.MagicMock(side_effect=_run_inference_from_config_mock)
-    config = _mock_config_with_real_checkpoint_and_ic(
-        tmp_path, timestep=datetime.timedelta(minutes=15)
-    )
-
-    # n_forward_steps=3, timestep=15min: segments start 45min apart, which the
-    # default "%Y%m%dT%H" format would fold onto the same "T06" label.
-    with unittest.mock.patch(
-        "fme.ace.inference.inference.run_inference_from_config", new=mock
-    ):
-        run_segmented_inference(config, 2, segment_label_format="%Y%m%dT%H%M")
-        for label in ["20000101T0600", "20000101T0645"]:
-            segment_dir = os.path.join(config.experiment_dir, label)
-            assert os.path.exists(os.path.join(segment_dir, "restart.nc"))
-        assert mock.call_count == 2
-
-
 def test_get_segment_label_raises_on_collision():
     initialization_time = cftime.DatetimeProlepticGregorian(2000, 1, 1, 6)
     timestep = datetime.timedelta(minutes=15)
@@ -320,15 +302,7 @@ def test_get_segment_label_raises_on_collision():
 
     # hour-precision format is too coarse to distinguish 45min-apart segments
     with pytest.raises(ValueError, match="same label"):
-        _get_segment_label(
-            initialization_time, timestep, 1, n_forward_steps, "%Y%m%dT%H"
-        )
-
-    # minute-precision format distinguishes them fine
-    label = _get_segment_label(
-        initialization_time, timestep, 1, n_forward_steps, "%Y%m%dT%H%M"
-    )
-    assert label == "20000101T0645"
+        _get_segment_label(initialization_time, timestep, 1, n_forward_steps)
 
 
 def save_noise_conditioned_stepper(
