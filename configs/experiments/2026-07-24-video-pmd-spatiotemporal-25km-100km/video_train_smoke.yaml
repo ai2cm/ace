@@ -1,0 +1,144 @@
+# CPU smoke config (tiny + capped) for video_train.yaml: verifies the
+# spatiotemporal (fine 25km / coarse 100km) data loading, patch tiling, and
+# model wiring actually run end-to-end against the real GCS data, before
+# spending real GPU/cluster budget. Does NOT validate architecture/patch-size
+# choices for a real training run -- see video_train.yaml's "things to tune".
+#
+# Run (needs `gcloud auth login` / application-default credentials for the
+# gs://vcm-ml-intermediate bucket):
+#   FME_FORCE_CPU=1 python -m fme.downscaling.video_train \
+#     configs/experiments/2026-07-24-video-pmd-spatiotemporal-25km-100km/video_train_smoke.yaml
+experiment_dir: /tmp/video_pmd_spatiotemporal_smoke
+max_epochs: 1
+max_train_batches: 2
+max_val_batches: 2
+validate_using_ema: true
+validate_interval: 1
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: false
+  project: ace-temporal-interp
+  name: global-25km-100km-spatiotemporal-5ch-smoke
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.99
+coarse_patch_extent_lat: 8
+coarse_patch_extent_lon: 8
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2013-01-10"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2013-01-10"
+  batch_size: 2
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 30
+  lon_extent:
+    start: 0
+    stop: 60
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-01-10"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-01-10"
+  batch_size: 2
+  num_data_workers: 0
+  strict_ensemble: false
+  lat_extent:
+    start: 0
+    stop: 30
+  lon_extent:
+    start: 0
+    stop: 60
+model:
+  n_timesteps: 9
+  model_channels: 16
+  n_heads: 2
+  num_freqs: 3
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 4
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.2
+      p_std: 1.8
+    northward_wind_at_ten_meters:
+      p_mean: -1.2
+      p_std: 1.8
+    PRMSL:
+      p_mean: -1.2
+      p_std: 1.8
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+    air_temperature_at_two_meters:
+      p_mean: -1.2
+      p_std: 1.8
+  log_transform_channels:
+    PRATEsfc: 86400.0
+  sigma_min_by_channel:
+    PRATEsfc: 0.002
+  sigma_max_by_channel:
+    PRATEsfc: 125.0
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363

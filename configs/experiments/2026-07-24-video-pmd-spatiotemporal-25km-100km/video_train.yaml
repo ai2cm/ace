@@ -1,0 +1,250 @@
+# Stage 2: spatiotemporal video PMD -- endpoint-conditioned temporal
+# infilling (stage 1, see ../2026-07-20-video-pmd-5ch-per-channel-kernel-subset-cons0/)
+# PLUS spatial downscaling in the same diffusion pass. Interior frames are
+# only known at coarse (100km) resolution; the model infills them at fine
+# (25km) resolution using the two observed fine endpoints and the full-clip
+# coarse conditioning (see VideoDiffusionModel's coarse_normalization path in
+# fme/downscaling/video_models.py).
+#
+# Data: gs://vcm-ml-intermediate/2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr
+# (same underlying X-SHiELD AMIP simulation as the "as before" 5-channel
+# configs -- the 100km store is byte-identical to
+# gs://vcm-ml-scratch/andrep/2025-07-25-X-SHiELD-AMIP-FME-3h.zarr, verified
+# 2026-07-24 -- just now split into a genuinely paired fine/coarse dataset).
+# downscale_factor = 720/180 = 1440/360 = 4.
+#
+# All temporal hyperparameters (architecture, per-channel OU noise kernel,
+# subset training, sigma bounds, train/val/test date split) are copied as-is
+# from the stage-1 config above -- only the spatial-downscaling additions are
+# new (model.coarse_normalization, fine/coarse data paths, coarse_patch_extent).
+#
+# ---- THINGS TO TUNE BEFORE A FULL RUN (see run.sh comments too) ----
+# - coarse_patch_extent_lat/lon: set to a 2x2 quadrant split of the
+#   -88..88/0..360 domain's 176x360 coarse crop (88, 180 -- divides evenly,
+#   no partial-patch drop). Each patch is therefore 1/4 of the global fine
+#   grid (352x720 fine pixels x T=9 x up to 256 channels at the widest U-Net
+#   level) -- NOT a small memory-safe tile. This is much closer in size to
+#   the un-patched full-global case (which motivated patching in the first
+#   place) than to a conservatively-small patch, and its GPU memory
+#   footprint is UNVERIFIED (no GPU access when this config was written).
+#   If it OOMs, the fix is a smaller coarse_patch_extent (e.g. 32, giving
+#   128px fine patches and ~55 patches/raw batch instead of 4 -- see git
+#   history of this file for that version and its sample_with_replacement
+#   sizing), not a different domain crop.
+# - sigma_data_by_channel / training_noise_distributions / sigma_min|max_by_channel
+#   below are carried over from the temporal-only (stage 1) residual scale.
+#   The stage-2 residual (fine - upsampled-coarse, bias-corrected) has a
+#   different characteristic scale, especially for PRATEsfc (100km->25km adds
+#   real sub-grid spatial variance on top of the temporal gap). Recompute
+#   with a stage-2-aware version of toy/compute_residual_std.py before
+#   trusting these for a long run; they're a reasonable starting point, not a
+#   tuned value.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20
+max_test_batches: 50
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-25km-100km-spatiotemporal-5ch-per-channel-kernel-subset-cons0-v1
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+coarse_patch_extent_lat: 88
+coarse_patch_extent_lon: 180
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 8  # global across ranks -- see "things to tune" above
+  # No sample_with_replacement cap: with only 4 patches/raw batch (2x2 split),
+  # one epoch over the full train loader is ~410 raw batches x 4 = ~1640
+  # steps -- only 4x stage-1's un-patched ~410 steps/epoch, not the ~55x
+  # blowup a fine-grained patch grid would give. Add a cap here if that's
+  # still too slow once you've measured wall-clock/epoch.
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 8
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 8
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  temporal_noise_correlation: per_channel
+  per_channel_noise_kernel:
+    eastward_wind_at_ten_meters: ou
+    northward_wind_at_ten_meters: ou
+    PRMSL: ou
+    PRATEsfc: ou
+    air_temperature_at_two_meters: ou
+  per_channel_kernel_length_scale:
+    eastward_wind_at_ten_meters: 0.5375      # 12.9h / 24h
+    northward_wind_at_ten_meters: 0.558333   # 13.4h / 24h
+    PRMSL: 0.804167                          # 19.3h / 24h
+    PRATEsfc: 0.329167                       # 7.9h / 24h
+    air_temperature_at_two_meters: 0.475     # 11.4h / 24h
+  # Subset training: half the batches train on a random subset of interior
+  # frames (endpoints always kept), so the model learns to answer variable
+  # query sets. Matches the stage-1 subset-cons0 config's values exactly.
+  subset_augmentation_prob: 0.5
+  subset_min_interior: 1
+  # No marginal-consistency loss for this run, matching the stage-1
+  # subset-cons0 config it's based on (an active ablation arm there; carried
+  # over unchanged since this config's purpose is adding spatial
+  # downscaling, not re-deciding that ablation).
+  marginal_consistency_weight: 0.0
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+    air_temperature_at_two_meters:
+      p_mean: -1.96
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+    air_temperature_at_two_meters: 0.1403
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+    air_temperature_at_two_meters: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+    air_temperature_at_two_meters: 22.4
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # fine (25km), train-only, global domain -- toy/compute_norm_stats_25km.py
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074   # log1p(PRATEsfc * 86400) space, matching log_transform_channels
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:  # coarse (100km), train-only, global domain -- reused verbatim
+    # from the stage-1 config above: verified 2026-07-24 that the new 100km
+    # store is byte-identical to the dataset those stats were computed from.
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
