@@ -181,8 +181,8 @@ def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
         wandb.configure(log_to_wandb=True)
         main(make_config(run_dir, 3), 2)
         assert [run["name"] for run in wandb.runs] == [
-            "myrun-20000101T06",
-            "myrun-20000102T00",
+            "myrun-segment_20000101T06",
+            "myrun-segment_20000102T00",
         ]
         assert len({run["id"] for run in wandb.runs}) == 2  # distinct runs
         # a single 6-step run should reproduce the two 3-step segments
@@ -194,7 +194,7 @@ def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
         ).drop_vars(["init_time", "time"])  # per-segment init_time differs
 
     xr.testing.assert_equal(
-        _predictions(run_dir / "20000102T00"),
+        _predictions(run_dir / "segment_20000102T00"),
         _predictions(single_dir).isel(time=slice(3, None)),
     )
 
@@ -269,9 +269,9 @@ def test_run_segmented_inference(tmp_path):
 
     # n_forward_steps=3, TIMESTEP=6h: segment start times step by 18h.
     segment_labels = [
-        "20000101T06",
-        "20000102T00",
-        "20000102T18",
+        "segment_20000101T06",
+        "segment_20000102T00",
+        "segment_20000102T18",
     ]
 
     with unittest.mock.patch(
@@ -463,7 +463,7 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
     # The second segment (steps 4-6) must match the single run's steps 4-6. Drop
     # the time coordinates, which differ by construction (per-segment init_time).
     ds_segment_1 = xr.open_dataset(
-        two_seg_dir / "20000102T00" / "autoregressive_predictions.nc",
+        two_seg_dir / "segment_20000102T00" / "autoregressive_predictions.nc",
         decode_timedelta=False,
     ).drop_vars(["init_time", "time"])
     ds_single = xr.open_dataset(
@@ -478,7 +478,7 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
     two_seg_seed1_dir = tmp_path / "two_segments_seed1"
     run(make_config(str(two_seg_seed1_dir), n_forward_steps=3, seed=1), segments=2)
     ds_segment_1_seed1 = xr.open_dataset(
-        two_seg_seed1_dir / "20000102T00" / "autoregressive_predictions.nc",
+        two_seg_seed1_dir / "segment_20000102T00" / "autoregressive_predictions.nc",
         decode_timedelta=False,
     ).drop_vars(["init_time", "time"])
     assert not np.allclose(

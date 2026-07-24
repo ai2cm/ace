@@ -55,8 +55,9 @@ StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampLis
 
 # Truncated to hour precision: segment start times in existing runs have always
 # been at least 6h apart, so finer precision would just add visual noise. Pass a
-# more precise segment_label_format (e.g. "%Y%m%dT%H%M%S") if that stops holding.
-DEFAULT_SEGMENT_LABEL_FORMAT = "%Y%m%dT%H"
+# more precise segment_label_format (e.g. "segment_%Y%m%dT%H%M%S") if that stops
+# holding.
+DEFAULT_SEGMENT_LABEL_FORMAT = "segment_%Y%m%dT%H"
 
 
 @dataclasses.dataclass
@@ -515,8 +516,8 @@ def run_segmented_inference(
             member—into its directory/wandb-run label. Defaults to hour precision,
             which is truncated (not rounded), so distinct segment start times that
             share an hour would collide; pass a more precise format
-            (e.g. ``"%Y%m%dT%H%M%S"``) if that's a concern for your timestep or
-            initial condition time.
+            (e.g. ``"segment_%Y%m%dT%H%M%S"``) if that's a concern for your timestep
+            or initial condition time.
 
     Note:
         This is useful when running very long simulations or when saving a large
