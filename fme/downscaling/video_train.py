@@ -81,7 +81,7 @@ def _save_checkpoint(trainer: "VideoTrainer", path: str) -> None:
             "optimization": trainer.optimization.get_state(),
             "num_batches_seen": trainer.num_batches_seen,
             "startEpoch": trainer.startEpoch,
-            "best_valid_loss": trainer.best_valid_loss,
+            "best_valid_metric": trainer.best_valid_metric,
         }
         if trainer.model.endpoint_sr_module is not None:
             state["endpoint_sr_module"] = trainer.model.endpoint_sr_module.state_dict()
@@ -111,7 +111,7 @@ def restore_checkpoint(trainer: "VideoTrainer") -> None:
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
-    trainer.best_valid_loss = checkpoint["best_valid_loss"]
+    trainer.best_valid_metric = checkpoint["best_valid_metric"]
     trainer.ema = EMATracker.from_state(checkpoint["ema"], trainer.model.modules)
 
 
@@ -213,7 +213,13 @@ class VideoTrainerConfig:
             if self.test_data is not None
             else None
         )
-        model = self.model.build()
+        # full_fine_coords/downscale_factor enable generate_on_batch_no_target
+        # later (e.g. real deployment inference on coarse-only data); harmless
+        # to always pass since PairedVideoGriddedData always has them.
+        model = self.model.build(
+            full_fine_coords=train_data.fine_coords,
+            downscale_factor=train_data.downscale_factor,
+        )
         # model.modules includes endpoint_sr_module too, when the config has
         # endpoint_super_resolution set -- both nets share one optimizer/step.
         optimization = self.optimization.build(
@@ -246,7 +252,7 @@ class VideoTrainer:
         self.num_batches_seen = 0
         self.startEpoch = 0
         self.segment_epochs = config.segment_epochs
-        self.best_valid_loss = float("inf")
+        self.best_valid_metric = float("inf")
         self.patch_data = bool(
             config.coarse_patch_extent_lat and config.coarse_patch_extent_lon
         )
@@ -528,9 +534,13 @@ class VideoTrainer:
         context = (
             self._ema_context if self.validate_using_ema else contextlib.nullcontext
         )
-        if summary["validation/loss"] < self.best_valid_loss:
+        # Tracks the actual generation error (ensemble-mean MAE over generated
+        # interior frames vs. truth), not the DSM/noise-prediction training
+        # loss -- the loss is dominated by noise-level weighting and doesn't
+        # directly reflect generation quality the way the MAE does.
+        if summary["validation/interior_mae"] < self.best_valid_metric:
             logging.info("Saving best checkpoint")
-            self.best_valid_loss = summary["validation/loss"]
+            self.best_valid_metric = summary["validation/interior_mae"]
             with context():
                 _save_checkpoint(self, self.best_checkpoint_path)
 

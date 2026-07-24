@@ -26,6 +26,7 @@ from typing import Any
 
 import torch
 
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.loss import LossConfig
@@ -33,7 +34,12 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.rand import randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.data import PairedVideoBatchData
+from fme.downscaling.data import (
+    BatchedLatLonCoordinates,
+    PairedVideoBatchData,
+    VideoBatchData,
+    adjust_fine_coord_range,
+)
 from fme.downscaling.metrics_and_maths import interpolate
 from fme.downscaling.models import ModelOutputs
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -592,7 +598,25 @@ class VideoDiffusionModelConfig:
         self,
         normalizer: StandardNormalizer | None = None,
         coarse_normalizer: StandardNormalizer | None = None,
+        full_fine_coords: LatLonCoordinates | None = None,
+        downscale_factor: int | None = None,
     ) -> "VideoDiffusionModel":
+        """
+        Args:
+            normalizer: Prebuilt normalizer; built from ``normalization`` if
+                not given.
+            coarse_normalizer: Prebuilt coarse normalizer; built from
+                ``coarse_normalization`` if not given.
+            full_fine_coords: The full fine-resolution domain coordinates
+                (e.g. ``PairedVideoGriddedData.fine_coords``). Optional --
+                only needed for ``VideoDiffusionModel.generate_on_batch_no_target``,
+                which derives the output grid for a coarse-only batch from
+                this plus ``downscale_factor`` (mirrors
+                ``DiffusionModelConfig.build``'s same-named argument).
+            downscale_factor: The coarse-to-fine downscale factor (e.g.
+                ``PairedVideoGriddedData.downscale_factor``). Same
+                optionality/purpose as ``full_fine_coords``.
+        """
         if normalizer is None:
             if self.normalization is None:
                 raise ValueError(
@@ -659,6 +683,8 @@ class VideoDiffusionModelConfig:
             self.out_names,
             coarse_normalizer=coarse_normalizer,
             endpoint_sr_module=endpoint_sr_module,
+            full_fine_coords=full_fine_coords,
+            downscale_factor=downscale_factor,
         )
 
 
@@ -718,6 +744,8 @@ class VideoDiffusionModel:
         out_names: list[str],
         coarse_normalizer: StandardNormalizer | None = None,
         endpoint_sr_module: torch.nn.Module | None = None,
+        full_fine_coords: LatLonCoordinates | None = None,
+        downscale_factor: int | None = None,
     ):
         self.config = config
         # (1, C, 1, 1, 1) so it broadcasts against the per-channel sigma tensor.
@@ -747,6 +775,13 @@ class VideoDiffusionModel:
             if self.endpoint_sr_config is not None
             else None
         )
+        # Canonical fine-resolution output grid + coarse-to-fine ratio; both
+        # optional (None unless the caller supplied them at build time), only
+        # required by generate_on_batch_no_target.
+        self.full_fine_coords = (
+            full_fine_coords.to(get_device()) if full_fine_coords is not None else None
+        )
+        self.downscale_factor = downscale_factor
         self.out_names = out_names
         self.packer = Packer(out_names)
         self.n_timesteps = config.n_timesteps
@@ -1331,6 +1366,101 @@ class VideoDiffusionModel:
             k: v.reshape(batch_size, n_samples, *v.shape[1:])
             for k, v in generated.items()
         }
+
+    def get_fine_coords_for_batch(self, coarse: VideoBatchData) -> LatLonCoordinates:
+        """Fine-resolution coordinates matching the spatial extent of a
+        coarse-only batch, derived from ``self.full_fine_coords`` -- the
+        video analog of ``DiffusionModel.get_fine_coords_for_batch`` in
+        ``models.py`` (same ``adjust_fine_coord_range`` utility).
+        """
+        if self.full_fine_coords is None or self.downscale_factor is None:
+            raise ValueError(
+                "get_fine_coords_for_batch requires the model to have been "
+                "built with full_fine_coords and downscale_factor -- see "
+                "VideoDiffusionModelConfig.build."
+            )
+        coarse_lat = coarse.latlon_coordinates.lat[0]
+        coarse_lon = coarse.latlon_coordinates.lon[0]
+        fine_lat_interval = adjust_fine_coord_range(
+            coarse.lat_interval,
+            full_coarse_coord=coarse_lat,
+            full_fine_coord=self.full_fine_coords.lat,
+            downscale_factor=self.downscale_factor,
+        )
+        fine_lon_interval = adjust_fine_coord_range(
+            coarse.lon_interval,
+            full_coarse_coord=coarse_lon,
+            full_fine_coord=self.full_fine_coords.lon,
+            downscale_factor=self.downscale_factor,
+        )
+        return LatLonCoordinates(
+            lat=fine_lat_interval.subset_of(self.full_fine_coords.lat),
+            lon=fine_lon_interval.subset_of(self.full_fine_coords.lon),
+        )
+
+    @torch.no_grad()
+    def generate_on_batch_no_target(
+        self,
+        coarse: VideoBatchData,
+        n_samples: int = 1,
+        frames: list[int] | None = None,
+    ) -> TensorDict:
+        """Generate from coarse data ALONE -- no fine-resolution truth of any
+        kind, not even for the "endpoint" frames (the video analog of
+        ``DiffusionModel.generate_on_batch_no_target`` in ``models.py``).
+
+        Only valid when no real fine-resolution value is ever required as
+        input: ``endpoints_observed=False`` (pure coarse-to-fine), or
+        ``endpoint_super_resolution`` set (stage A generates the endpoint
+        estimate instead). With plain ``endpoints_observed=True`` and no
+        stage A, the model fundamentally needs real fine endpoint values as
+        conditioning, which this method -- by construction -- doesn't have.
+
+        Implementation note: rather than duplicating ``generate``'s logic,
+        this builds a zero-filled placeholder ``fine`` ``VideoBatchData`` with
+        the correct shape/coordinates/calendar metadata (derived from
+        ``coarse`` plus ``get_fine_coords_for_batch``) and delegates to
+        ``generate``. This is safe because in both supported modes,
+        ``generate`` never actually reads the fine data's *values* at any
+        frame it isn't given as real input: interior frames are masked to
+        zero before entering the conditioning tensor and are never read by
+        the baseline; endpoint frames are either not read at all
+        (endpoints_observed=False) or overwritten by stage A before anything
+        reads them (endpoint_super_resolution).
+        """
+        if self.endpoints_observed and self.endpoint_sr_module is None:
+            raise ValueError(
+                "generate_on_batch_no_target requires endpoints_observed=False "
+                "or endpoint_super_resolution to be set -- with plain "
+                "endpoints_observed=True the model needs real fine-resolution "
+                "endpoint values as input, which this method doesn't have."
+            )
+        fine_coords = self.get_fine_coords_for_batch(coarse)
+        fine_hw = (len(fine_coords.lat), len(fine_coords.lon))
+        example = next(iter(coarse.data.values()))
+        batch_size, n_times = example.shape[0], example.shape[1]
+        dummy_fine_data = {
+            name: torch.zeros(
+                batch_size,
+                n_times,
+                *fine_hw,
+                dtype=example.dtype,
+                device=example.device,
+            )
+            for name in self.out_names
+        }
+        dummy_fine = VideoBatchData(
+            data=dummy_fine_data,
+            time=coarse.time,
+            latlon_coordinates=BatchedLatLonCoordinates(
+                lat=fine_coords.lat.unsqueeze(0).expand(batch_size, -1).clone(),
+                lon=fine_coords.lon.unsqueeze(0).expand(batch_size, -1).clone(),
+            ),
+            day_of_year=coarse.day_of_year,
+            second_of_day=coarse.second_of_day,
+        )
+        pseudo_batch = PairedVideoBatchData(fine=dummy_fine, coarse=coarse)
+        return self.generate(pseudo_batch, n_samples=n_samples, frames=frames)
 
     def get_state(self) -> Mapping[str, Any]:
         state: dict[str, Any] = {

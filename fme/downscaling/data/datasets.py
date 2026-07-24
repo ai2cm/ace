@@ -772,6 +772,16 @@ class VideoBatchData:
     def __len__(self):
         return self.day_of_year.shape[0]
 
+    @property
+    def lat_interval(self) -> ClosedInterval:
+        lat = self.latlon_coordinates.lat[0]  # all batch members identical; use first
+        return ClosedInterval(lat.min().item(), lat.max().item())
+
+    @property
+    def lon_interval(self) -> ClosedInterval:
+        lon = self.latlon_coordinates.lon[0]  # all batch members identical; use first
+        return ClosedInterval(lon.min().item(), lon.max().item())
+
     def latlon_slice(self, lat_slice: slice, lon_slice: slice) -> "VideoBatchData":
         # data is (batch, T, H, W); day_of_year/second_of_day/lon-independent
         # calendar features are (batch, T) and unaffected by a spatial slice.

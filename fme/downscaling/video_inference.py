@@ -94,7 +94,7 @@ def load_video_model(
     logger.info(
         f"Loaded checkpoint {checkpoint_path} "
         f"(epoch {ckpt.get('startEpoch')}, "
-        f"best_valid_loss {ckpt.get('best_valid_loss')})"
+        f"best_valid_metric {ckpt.get('best_valid_metric')})"
     )
     return model
 

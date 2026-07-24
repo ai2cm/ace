@@ -36,23 +36,37 @@
 # downscale_factor = 720/180 = 1440/360 = 4.
 #
 # ---- THINGS TO TUNE BEFORE A FULL RUN (see run.sh comments too) ----
-# - coarse_patch_extent_lat/lon: set to a 2x2 quadrant split of the
-#   -88..88/0..360 domain's 176x360 coarse crop (88, 180 -- divides evenly,
-#   no partial-patch drop). Each patch is therefore 1/4 of the global fine
-#   grid (352x720 fine pixels x T=9 x up to 256 channels at the widest U-Net
-#   level) -- NOT a small memory-safe tile. This is much closer in size to
-#   the un-patched full-global case (which motivated patching in the first
-#   place) than to a conservatively-small patch, and its GPU memory
-#   footprint is UNVERIFIED (no GPU access when this config was written).
-#   If it OOMs, the fix is a smaller coarse_patch_extent (e.g. 32, giving
-#   128px fine patches and ~55 patches/raw batch instead of 4 -- see git
-#   history of this file for that version and its sample_with_replacement
-#   sizing), not a different domain crop. NOTE: model.endpoint_super_resolution.coarse_shape
-#   below MUST be kept in sync with this (it's [coarse_patch_extent_lat,
-#   coarse_patch_extent_lon] * downscale_factor = [352, 720]) -- the
-#   underlying SongUNet backbone bakes a fixed-size positional embedding into
-#   its weights at construction time, so this can't just be inferred at
-#   runtime the way stage B's shape-agnostic architecture can.
+# - coarse_patch_extent_lat/lon: a 2x2 quadrant split (88, 180 -- 352x720
+#   fine-pixel patches) was tried first and CONFIRMED to OOM on real 8x GPU
+#   hardware (job 01KYATGZR00EJ7V49TZ17EWB61, 2026-07-24: CUDA OOM inside the
+#   video U-Net's conv forward, ~178GiB GPU already ~177.8GiB in use at
+#   failure time -- i.e. essentially the whole card, not a borderline case).
+#   That job's batch_size (global 8 / 8 GPUs = 1 raw sample/GPU/fetch, before
+#   patch splitting) was already effectively minimal, so batch_size/
+#   num_data_workers are not the lever here -- reducing num_data_workers only
+#   affects host-side CPU data-loading parallelism, not GPU memory, and
+#   batch_size has no room left to shrink. Patch pixel count is what drives
+#   activation memory, so switched to a 4(lat) x 5(lon) grid instead (44, 72
+#   -- still divides 176x360 evenly, no partial-patch drop): 176x288
+#   fine-pixel patches, 1/5 the pixel count of the 2x2 split (not a clean 4x4
+#   because the video U-Net's 4 downsampling levels (channel_mult:
+#   [1,2,2,2,2]) require each patch dimension divisible by 16 after the x4
+#   upscale -- 90*4=360 is NOT (360/16=22.5, unlike the original 720/16=45),
+#   72*4=288 IS (288/16=18), so lon uses a 5-way split, not 4-way, to
+#   preserve that divisibility rather than risk a shape-mismatch crash).
+#   If this STILL OOMs, drop further while preserving divisibility-by-16 on
+#   both fine dimensions (e.g. 22/36 for an 8x10 split, 88x144 fine patches)
+#   rather than touching batch_size/num_data_workers again.
+#   (Also: run.sh now requests 4 GPUs, not the 8 the failed job used --
+#   batch_size below was halved to 4 to match, keeping the same 1
+#   sample/GPU/step as before rather than doubling per-GPU memory pressure
+#   on top of the patch-size change above.) NOTE:
+#   model.endpoint_super_resolution.coarse_shape below MUST be kept in sync
+#   with this (it's [coarse_patch_extent_lat, coarse_patch_extent_lon] *
+#   downscale_factor = [176, 288]) -- the underlying SongUNet backbone bakes
+#   a fixed-size positional embedding into its weights at construction time,
+#   so this can't just be inferred at runtime the way stage B's shape-agnostic
+#   architecture can.
 # - model.endpoint_super_resolution's architecture (model_channels: 64,
 #   channel_mult: [1,2,2,2]) and generation schedule (sigma_min/max,
 #   num_diffusion_generation_steps) are copied from the one real precedent
@@ -61,11 +75,12 @@
 #   100km->25km, factor 4) -- a reasonable starting point, not tuned for our
 #   5-channel/global-domain case specifically. attn_resolutions left empty
 #   (unlike that CONUS config's [16], which isn't a valid resolution in OUR
-#   pyramid -- 352/176/88/44 for a 352px fine patch -- SongUNet requires an
-#   exact match) matching this repo's actual *global* HiRO baseline instead
+#   pyramid -- 176/88/44/22 for a 176px (lat) fine patch -- SongUNet requires
+#   an exact match, matched against img_shape_y i.e. the lat dimension only)
+#   matching this repo's actual *global* HiRO baseline instead
 #   (../../baselines/downscaling-hiro-global/train.yaml), which is the
 #   closer precedent for a global (not regional) domain anyway, and cheaper
-#   given the unverified memory situation.
+#   given the GPU memory constraints confirmed above.
 # - sigma_data_by_channel / training_noise_distributions / sigma_min|max_by_channel
 #   below (stage B's) are carried over from the temporal-only (stage 1)
 #   residual scale. That residual was ~0 at the two endpoints (pinned, as it
@@ -94,8 +109,8 @@ optimization:
   lr: 0.0001
 ema:
   decay: 0.9999
-coarse_patch_extent_lat: 88
-coarse_patch_extent_lon: 180
+coarse_patch_extent_lat: 44
+coarse_patch_extent_lon: 72
 train_data:
   n_timesteps: 9
   fine:
@@ -112,12 +127,11 @@ train_data:
       subset:
         start_time: "2013-01-02"
         stop_time: "2021-12-31"
-  batch_size: 8  # global across ranks -- see "things to tune" above
-  # No sample_with_replacement cap: with only 4 patches/raw batch (2x2 split),
-  # one epoch over the full train loader is ~410 raw batches x 4 = ~1640
-  # steps -- only 4x stage-1's un-patched ~410 steps/epoch, not the ~55x
-  # blowup a fine-grained patch grid would give. Add a cap here if that's
-  # still too slow once you've measured wall-clock/epoch.
+  batch_size: 4  # global across ranks (4 GPUs x 1 sample/GPU) -- see "things to tune" above
+  # No sample_with_replacement cap: with 20 patches/raw batch (4x5 grid),
+  # one epoch over the full train loader is ~820 raw batches x 20 = ~16400
+  # steps. Add a cap here if that's too slow once you've measured
+  # wall-clock/epoch.
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:
@@ -142,7 +156,7 @@ validation_data:
       subset:
         start_time: "2022-01-01"
         stop_time: "2022-12-31"
-  batch_size: 8
+  batch_size: 4
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:
@@ -167,7 +181,7 @@ test_data:
       subset:
         start_time: "2023-01-01"
         stop_time: "2024-01-04"
-  batch_size: 8
+  batch_size: 4
   num_data_workers: 4
   strict_ensemble: false
   lat_extent:
@@ -210,7 +224,7 @@ model:
     training_noise_distribution:
       p_mean: -1.2
       p_std: 1.8
-    coarse_shape: [352, 720]  # fine patch size = coarse_patch_extent_lat/lon * downscale_factor(4)
+    coarse_shape: [176, 288]  # fine patch size = coarse_patch_extent_lat/lon * downscale_factor(4)
     sigma_min: 0.002
     sigma_max: 150.0
     churn: 0.0

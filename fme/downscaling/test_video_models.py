@@ -103,6 +103,10 @@ def test_upsample_coarse_clip_groups_channels_by_frame():
 
 
 def _model(n_times, temporal_noise_correlation="independent", **config_kwargs):
+    # full_fine_coords/downscale_factor are .build() args, not config fields --
+    # pulled out of config_kwargs so callers can pass them through uniformly.
+    full_fine_coords = config_kwargs.pop("full_fine_coords", None)
+    downscale_factor = config_kwargs.pop("downscale_factor", None)
     config = VideoDiffusionModelConfig(
         out_names=OUT_NAMES,
         n_timesteps=n_times,
@@ -116,7 +120,9 @@ def _model(n_times, temporal_noise_correlation="independent", **config_kwargs):
         temporal_noise_correlation=temporal_noise_correlation,
         **config_kwargs,
     )
-    return config.build()
+    return config.build(
+        full_fine_coords=full_fine_coords, downscale_factor=downscale_factor
+    )
 
 
 def test_train_on_batch_runs_and_backprops():
@@ -559,6 +565,117 @@ def test_endpoint_super_resolution_composes_with_brownian_bridge_noise():
     grads = [p.grad for p in model.module.parameters() if p.grad is not None]
     assert len(grads) > 0
     assert all(torch.isfinite(g).all() for g in grads)
+
+
+def _midpoint_grid(n, width):
+    """Genuinely nested cell-center grid (matches real lat/lon convention):
+    n cells of the given width, centers at width/2, 3*width/2, ... -- unlike
+    torch.linspace, subdividing by an exact factor gives an exact nested
+    subset relationship, which adjust_fine_coord_range depends on."""
+    return torch.arange(n, dtype=torch.float32) * width + width / 2
+
+
+def _nested_coords(n_coarse_full, factor, coarse_slice, coarse_width=5.0):
+    """A genuinely nested (full_coarse, full_fine, batch's own coarse subset)
+    triple for get_fine_coords_for_batch/generate_on_batch_no_target tests."""
+    full_coarse = _midpoint_grid(n_coarse_full, coarse_width)
+    full_fine = _midpoint_grid(n_coarse_full * factor, coarse_width / factor)
+    coarse_coord = full_coarse[coarse_slice]
+    expected_fine = full_fine[coarse_slice.start * factor : coarse_slice.stop * factor]
+    return full_fine, coarse_coord, expected_fine
+
+
+def _no_target_model_and_batch(
+    n_times=5, factor=4, n_coarse_full=20, coarse_slice=slice(5, 13)
+):
+    full_fine, coarse_coord, expected_fine = _nested_coords(
+        n_coarse_full, factor, coarse_slice
+    )
+    fine_h = fine_w = len(coarse_coord) * factor
+    model = _two_stage_model(
+        n_times,
+        fine_hw=(fine_h, fine_w),
+        full_fine_coords=LatLonCoordinates(lat=full_fine, lon=full_fine),
+        downscale_factor=factor,
+    )
+
+    def _coarse_item(n_t):
+        data = {
+            v: torch.rand(n_t, len(coarse_coord), len(coarse_coord)) for v in OUT_NAMES
+        }
+        time = _times(n_t)
+        coords = LatLonCoordinates(lat=coarse_coord, lon=coarse_coord)
+        doy, sod = compute_calendar_features(time)
+        return VideoBatchItem(data, time, coords, doy, sod)
+
+    coarse = VideoBatchData.from_sequence([_coarse_item(n_times) for _ in range(2)])
+    return model, coarse, expected_fine, (fine_h, fine_w)
+
+
+def test_get_fine_coords_for_batch_requires_full_fine_coords():
+    model = _spatial_model(
+        5, endpoints_observed=False
+    )  # no full_fine_coords/downscale_factor
+    coarse = _spatial_paired_batch(
+        batch_size=2, n_times=5, fine_height=8, fine_width=8, downscale_factor=2
+    ).coarse
+    with pytest.raises(ValueError, match="built with full_fine_coords"):
+        model.get_fine_coords_for_batch(coarse)
+
+
+def test_get_fine_coords_for_batch_derives_nested_grid():
+    model, coarse, expected_fine, _ = _no_target_model_and_batch()
+    fine_coords = model.get_fine_coords_for_batch(coarse)
+    assert torch.allclose(fine_coords.lat, expected_fine)
+    assert torch.allclose(fine_coords.lon, expected_fine)
+
+
+def test_generate_on_batch_no_target_requires_valid_mode():
+    # plain endpoints_observed=True, no endpoint_super_resolution: the model
+    # fundamentally needs real fine endpoint values, so this must refuse.
+    model = _model(
+        5,
+        coarse_normalization=NormalizationConfig(
+            means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
+        ),
+    )
+    with pytest.raises(ValueError, match="requires endpoints_observed=False"):
+        model.generate_on_batch_no_target(coarse=None)
+
+
+def test_generate_on_batch_no_target_runs_with_endpoint_super_resolution():
+    model, coarse, _, (fine_h, fine_w) = _no_target_model_and_batch()
+    generated = model.generate_on_batch_no_target(coarse, n_samples=2)
+    out = generated["var0"]
+    assert out.shape == (2, 2, 5, fine_h, fine_w)
+    assert torch.isfinite(out).all()
+
+
+def test_generate_on_batch_no_target_runs_with_pure_coarse_to_fine():
+    n_times, factor, n_coarse_full = 5, 4, 20
+    coarse_slice = slice(5, 13)
+    full_fine, coarse_coord, _ = _nested_coords(n_coarse_full, factor, coarse_slice)
+    fine_h = fine_w = len(coarse_coord) * factor
+    model = _pure_coarse_to_fine_model(
+        n_times,
+        full_fine_coords=LatLonCoordinates(lat=full_fine, lon=full_fine),
+        downscale_factor=factor,
+    )
+
+    def _coarse_item(n_t):
+        data = {
+            v: torch.rand(n_t, len(coarse_coord), len(coarse_coord)) for v in OUT_NAMES
+        }
+        time = _times(n_t)
+        coords = LatLonCoordinates(lat=coarse_coord, lon=coarse_coord)
+        doy, sod = compute_calendar_features(time)
+        return VideoBatchItem(data, time, coords, doy, sod)
+
+    coarse = VideoBatchData.from_sequence([_coarse_item(n_times) for _ in range(2)])
+    generated = model.generate_on_batch_no_target(coarse, n_samples=2)
+    out = generated["var0"]
+    assert out.shape == (2, 2, n_times, fine_h, fine_w)
+    assert torch.isfinite(out).all()
 
 
 def test_train_on_batch_runs_with_brownian_bridge_noise():

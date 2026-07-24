@@ -147,10 +147,10 @@ def test_video_trainer_runs_and_checkpoints(tmp_path):
     assert len(trainer.train_data.loader) > 0
     trainer.train()
 
-    # ran all epochs, recorded a finite best validation loss, wrote checkpoints
+    # ran all epochs, recorded a finite best validation metric, wrote checkpoints
     assert trainer.startEpoch == 2
     assert trainer.num_batches_seen > 0
-    assert trainer.best_valid_loss < float("inf")
+    assert trainer.best_valid_metric < float("inf")
     import os
 
     assert os.path.isfile(os.path.join(config.checkpoint_dir, "latest.ckpt"))
@@ -169,4 +169,4 @@ def test_video_trainer_resume(tmp_path):
     restore_checkpoint(resumed)
     assert resumed.num_batches_seen == seen
     assert resumed.startEpoch == epoch
-    assert resumed.best_valid_loss == trainer.best_valid_loss
+    assert resumed.best_valid_metric == trainer.best_valid_metric
