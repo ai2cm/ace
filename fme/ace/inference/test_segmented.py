@@ -26,6 +26,7 @@ from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
+    _get_segment_label,
     get_initial_condition,
     main,
     run_segmented_inference,
@@ -172,7 +173,7 @@ def _segmented_config_factory(tmp_path: pathlib.Path, *, log_to_wandb: bool):
 
 def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
     """End-to-end: a segmented run reproduces the equivalent single run, and each
-    segment gets its own wandb run named ``<base>-segment_NNNN`` (issue #471)."""
+    segment gets its own wandb run named ``<base>-<start time>`` (issue #471)."""
     make_config = _segmented_config_factory(tmp_path, log_to_wandb=True)
     run_dir = tmp_path / "segmented_run"
     single_dir = tmp_path / "non_segmented_run"
@@ -181,8 +182,8 @@ def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
         wandb.configure(log_to_wandb=True)
         main(make_config(run_dir, 3), 2)
         assert [run["name"] for run in wandb.runs] == [
-            "myrun-segment_0000",
-            "myrun-segment_0001",
+            "myrun-segment_20000101T06",
+            "myrun-segment_20000102T00",
         ]
         assert len({run["id"] for run in wandb.runs}) == 2  # distinct runs
         # a single 6-step run should reproduce the two 3-step segments
@@ -194,7 +195,7 @@ def test_inference_segmented_entrypoint(tmp_path, monkeypatch):
         ).drop_vars(["init_time", "time"])  # per-segment init_time differs
 
     xr.testing.assert_equal(
-        _predictions(run_dir / "segment_0001"),
+        _predictions(run_dir / "segment_20000102T00"),
         _predictions(single_dir).isel(time=slice(3, None)),
     )
 
@@ -224,17 +225,61 @@ def _get_mock_config(experiment_dir: str) -> fme.ace.InferenceConfig:
     )
 
 
+def _mock_config_with_real_checkpoint_and_ic(
+    tmp_path: pathlib.Path, timestep: datetime.timedelta = TIMESTEP
+) -> fme.ace.InferenceConfig:
+    """A mock config (see _get_mock_config) with a real stepper checkpoint and
+    initial condition standing in for the placeholder ones, since
+    _get_initialization_time_and_timestep loads both to compute each segment's
+    timestamped directory label (anchored to the first, or only, ensemble
+    member's start time)."""
+    stepper_path = tmp_path / "stepper"
+    save_stepper(
+        stepper_path,
+        in_names=["prog"],
+        out_names=["prog"],
+        mean=0.0,
+        std=1.0,
+        data_shape=[4, 8],
+        timestep=timestep,
+    )
+    ic_path = tmp_path / "ic.nc"
+    ic = xr.Dataset(
+        {
+            "prog": xr.DataArray(
+                np.zeros((1, 4, 8), dtype=np.float32), dims=["sample", "lat", "lon"]
+            )
+        }
+    )
+    ic["time"] = xr.DataArray(
+        [cftime.DatetimeProlepticGregorian(2000, 1, 1, 6)], dims=["sample"]
+    )
+    ic.to_netcdf(ic_path)
+
+    config = _get_mock_config(str(tmp_path))
+    config.checkpoint_path = str(stepper_path)
+    config.initial_condition = InitialConditionConfig(path=str(ic_path))
+    return config
+
+
 def test_run_segmented_inference(tmp_path):
     """The loop runs missing segments and skips those whose restart already
     exists, without re-running completed segments."""
     mock = unittest.mock.MagicMock(side_effect=_run_inference_from_config_mock)
-    config = _get_mock_config(str(tmp_path))
+    config = _mock_config_with_real_checkpoint_and_ic(tmp_path)
+
+    # n_forward_steps=3, TIMESTEP=6h: segment start times step by 18h.
+    segment_labels = [
+        "segment_20000101T06",
+        "segment_20000102T00",
+        "segment_20000102T18",
+    ]
 
     with unittest.mock.patch(
         "fme.ace.inference.inference.run_inference_from_config", new=mock
     ):
         run_segmented_inference(config, 1)
-        segment_dir = os.path.join(config.experiment_dir, "segment_0000")
+        segment_dir = os.path.join(config.experiment_dir, segment_labels[0])
         assert os.path.exists(os.path.join(segment_dir, "restart.nc"))
         assert mock.call_count == 1
 
@@ -244,10 +289,46 @@ def test_run_segmented_inference(tmp_path):
 
         # extending to three segments runs exactly the two missing segments
         run_segmented_inference(config, 3)
-        for i in range(3):
-            segment_dir = os.path.join(config.experiment_dir, f"segment_{i:04d}")
+        for label in segment_labels:
+            segment_dir = os.path.join(config.experiment_dir, label)
             assert os.path.exists(os.path.join(segment_dir, "restart.nc"))
         assert mock.call_count == 3
+
+
+def test_run_segmented_inference_custom_segment_label_format(tmp_path):
+    mock = unittest.mock.MagicMock(side_effect=_run_inference_from_config_mock)
+    config = _mock_config_with_real_checkpoint_and_ic(
+        tmp_path, timestep=datetime.timedelta(minutes=15)
+    )
+
+    # n_forward_steps=3, timestep=15min: segments start 45min apart, which the
+    # default "%Y%m%dT%H" format would fold onto the same "T06" label.
+    with unittest.mock.patch(
+        "fme.ace.inference.inference.run_inference_from_config", new=mock
+    ):
+        run_segmented_inference(config, 2, segment_label_format="%Y%m%dT%H%M")
+        for label in ["20000101T0600", "20000101T0645"]:
+            segment_dir = os.path.join(config.experiment_dir, label)
+            assert os.path.exists(os.path.join(segment_dir, "restart.nc"))
+        assert mock.call_count == 2
+
+
+def test_get_segment_label_raises_on_collision():
+    initialization_time = cftime.DatetimeProlepticGregorian(2000, 1, 1, 6)
+    timestep = datetime.timedelta(minutes=15)
+    n_forward_steps = 3  # segments start 45min apart
+
+    # hour-precision format is too coarse to distinguish 45min-apart segments
+    with pytest.raises(ValueError, match="same label"):
+        _get_segment_label(
+            initialization_time, timestep, 1, n_forward_steps, "%Y%m%dT%H"
+        )
+
+    # minute-precision format distinguishes them fine
+    label = _get_segment_label(
+        initialization_time, timestep, 1, n_forward_steps, "%Y%m%dT%H%M"
+    )
+    assert label == "20000101T0645"
 
 
 def save_noise_conditioned_stepper(
@@ -401,7 +482,7 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
     # The second segment (steps 4-6) must match the single run's steps 4-6. Drop
     # the time coordinates, which differ by construction (per-segment init_time).
     ds_segment_1 = xr.open_dataset(
-        two_seg_dir / "segment_0001" / "autoregressive_predictions.nc",
+        two_seg_dir / "segment_20000102T00" / "autoregressive_predictions.nc",
         decode_timedelta=False,
     ).drop_vars(["init_time", "time"])
     ds_single = xr.open_dataset(
@@ -416,7 +497,7 @@ def test_segmented_stochastic_inference_matches_single_run(tmp_path):
     two_seg_seed1_dir = tmp_path / "two_segments_seed1"
     run(make_config(str(two_seg_seed1_dir), n_forward_steps=3, seed=1), segments=2)
     ds_segment_1_seed1 = xr.open_dataset(
-        two_seg_seed1_dir / "segment_0001" / "autoregressive_predictions.nc",
+        two_seg_seed1_dir / "segment_20000102T00" / "autoregressive_predictions.nc",
         decode_timedelta=False,
     ).drop_vars(["init_time", "time"])
     assert not np.allclose(
