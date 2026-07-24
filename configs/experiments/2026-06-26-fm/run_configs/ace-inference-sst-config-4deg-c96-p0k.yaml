@@ -1,0 +1,28 @@
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+experiment_dir: /results
+n_forward_steps: 15683
+forward_steps_in_memory: 73
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+initial_condition:
+  path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  engine: zarr
+  start_indices:
+    times:
+    - '1979-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
+    file_pattern: ic_0001.zarr
+    engine: zarr
+  num_data_workers: 4
+  perturbations:
+    sst:
+    - type: constant
+      config:
+        amplitude: 0.0
+logging:
+  project: FM
+  entity: ai2cm
