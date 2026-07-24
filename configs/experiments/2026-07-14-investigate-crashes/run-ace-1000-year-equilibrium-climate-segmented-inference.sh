@@ -43,7 +43,7 @@ declare -A MODELS=( \
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-for seed in {3..4}; do
+for seed in {1..1}; do
     for model in "${!MODELS[@]}"; do
         dataset_id="${MODELS[$model]}"
 
@@ -66,7 +66,7 @@ for seed in {3..4}; do
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
                 --workspace ai2/ace \
                 --priority high \
-                --cluster ai2/jupiter \
+                --cluster ai2/titan \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
                 --env WANDB_JOB_TYPE=inference \
