@@ -24,7 +24,7 @@ inference:
       dataset:
         merge:
           - data_path: /climate-default
-            file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+            file_pattern: 2026-07-17-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
             engine: zarr
           - data_path: /climate-default
             file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
@@ -53,7 +53,7 @@ inference:
       dataset:
         merge:
           - data_path: /climate-default
-            file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+            file_pattern: 2026-07-17-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
             engine: zarr
           - data_path: /climate-default
             file_pattern: 2026-06-02-E3SMv3-piControl-atmosphere-105yr-6H.zarr
@@ -75,7 +75,7 @@ train_loader:
   dataset:
     merge:
       - data_path: /climate-default
-        file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+        file_pattern: 2026-07-17-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
         engine: zarr
         subset:
           start_time: '0425-01-03T12:00:00'
@@ -95,7 +95,7 @@ validation:
     dataset:
       merge:
         - data_path: /climate-default
-          file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
+          file_pattern: 2026-07-17-E3SMv3-piControl-105yr-coupled-sea_ice.zarr
           engine: zarr
           subset:
             start_time: '0515-01-01T06:00:00'
