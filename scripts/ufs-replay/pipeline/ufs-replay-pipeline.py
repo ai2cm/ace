@@ -33,7 +33,7 @@ Data sources::
 
 Usage::
 
-    python xr-beam-pipeline.py <output_path> <start_time> <end_time> \\
+    python ufs-replay-pipeline.py <output_path> <start_time> <end_time> \\
         --output_grid F90 --runner DirectRunner
 
 See ``run-dataflow.sh`` and the ``Makefile`` for production invocations.

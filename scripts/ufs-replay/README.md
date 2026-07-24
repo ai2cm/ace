@@ -48,7 +48,7 @@ make ufs_replay_direct_test_run
 
 # Or run directly with Python
 cd pipeline
-python3 xr-beam-pipeline.py \
+python3 ufs-replay-pipeline.py \
     gs://vcm-ml-scratch/test.zarr \
     2023-12-01T06:00:00 \
     2023-12-31T18:00:00 \

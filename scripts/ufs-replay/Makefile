@@ -74,7 +74,7 @@ ufs_replay_local_debug:
 	rm -rf $(OUTPUT_PATH_LOCAL)
 	cd pipeline && \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
-		python xr-beam-pipeline.py \
+		python ufs-replay-pipeline.py \
 		$(OUTPUT_PATH_LOCAL) \
 		$(START_TIME_LOCAL) \
 		$(END_TIME_LOCAL) \

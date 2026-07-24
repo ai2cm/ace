@@ -46,7 +46,7 @@ DATAFLOW_ARGS=(
 )
 
 if [ "$RUNNER" = "DataflowRunner" ]; then
-    python xr-beam-pipeline.py "${COMMON_ARGS[@]}" "${EXTRA_FLAGS[@]}" "${DATAFLOW_ARGS[@]}"
+    python ufs-replay-pipeline.py "${COMMON_ARGS[@]}" "${EXTRA_FLAGS[@]}" "${DATAFLOW_ARGS[@]}"
 else
-    python xr-beam-pipeline.py "${COMMON_ARGS[@]}" "${EXTRA_FLAGS[@]}" "${DIRECT_ARGS[@]}"
+    python ufs-replay-pipeline.py "${COMMON_ARGS[@]}" "${EXTRA_FLAGS[@]}" "${DIRECT_ARGS[@]}"
 fi
