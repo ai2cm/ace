@@ -1,4 +1,4 @@
-seed: 1
+seed: 0
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -17,8 +17,8 @@ inference:
   epochs:
     start: 0
     step: 10
-  n_forward_steps: 3652
-  forward_steps_in_memory: 73
+  n_forward_steps: 14608
+  forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
   loader:
     start_indices:
@@ -33,12 +33,12 @@ inference:
       - '2015-01-08T00:00:00'
     dataset:
       data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
     num_data_workers: 4
   aggregator:
     step_means:
-    - step: 5
+    - step: 20
       target: denorm
       name: day_5
       variables: &id001
@@ -93,7 +93,7 @@ inference:
       - northward_wind_6
       - northward_wind_7
       - total_water_path
-    - step: 5
+    - step: 20
       target: norm
       name: day_5_norm
       variables: *id001
@@ -115,8 +115,8 @@ inference:
   epochs:
     start: 0
     step: 10
-  n_forward_steps: 3652
-  forward_steps_in_memory: 73
+  n_forward_steps: 14608
+  forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
   loader:
     start_indices:
@@ -131,16 +131,16 @@ inference:
       - '1995-01-08T00:00:00'
     dataset:
       data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
     num_data_workers: 4
   aggregator:
     step_means:
-    - step: 5
+    - step: 20
       target: denorm
       name: day_5
       variables: *id001
-    - step: 5
+    - step: 20
       target: norm
       name: day_5_norm
       variables: *id001
@@ -162,8 +162,8 @@ inference:
   epochs:
     start: 0
     step: 1
-  n_forward_steps: 1825
-  forward_steps_in_memory: 73
+  n_forward_steps: 7300
+  forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
   loader:
     start_indices:
@@ -178,16 +178,16 @@ inference:
       - '2009-11-15T00:00:00'
     dataset:
       data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
     num_data_workers: 4
   aggregator:
     step_means:
-    - step: 5
+    - step: 20
       target: denorm
       name: day_5
       variables: *id001
-    - step: 5
+    - step: 20
       target: norm
       name: day_5_norm
       variables: *id001
@@ -209,8 +209,8 @@ inference:
   epochs:
     start: 0
     step: 10
-  n_forward_steps: 5
-  forward_steps_in_memory: 5
+  n_forward_steps: 20
+  forward_steps_in_memory: 20
   n_ensemble_per_ic: 8
   loader:
     start_indices:
@@ -225,21 +225,21 @@ inference:
       - '2024-06-08T00:00:00'
     dataset:
       data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
     num_data_workers: 4
   aggregator:
     step_means:
-    - step: 5
+    - step: 20
       target: denorm
       name: day_5
       variables: *id001
-    - step: 5
+    - step: 20
       target: norm
       name: day_5_norm
       variables: *id001
     ensembles:
-    - step: 5
+    - step: 20
       name: day_5_ensemble
     mean_denorm:
       enabled: false
@@ -270,8 +270,8 @@ inference:
   epochs:
     start: 0
     step: 10
-  n_forward_steps: 5
-  forward_steps_in_memory: 5
+  n_forward_steps: 20
+  forward_steps_in_memory: 20
   n_ensemble_per_ic: 8
   loader:
     start_indices:
@@ -286,21 +286,21 @@ inference:
       - '1994-06-08T00:00:00'
     dataset:
       data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
     num_data_workers: 4
   aggregator:
     step_means:
-    - step: 5
+    - step: 20
       target: denorm
       name: day_5
       variables: *id001
-    - step: 5
+    - step: 20
       target: norm
       name: day_5_norm
       variables: *id001
     ensembles:
-    - step: 5
+    - step: 20
       name: day_5_ensemble
     mean_denorm:
       enabled: false
@@ -331,8 +331,8 @@ inference:
   epochs:
     start: 0
     step: 10
-  n_forward_steps: 16794
-  forward_steps_in_memory: 73
+  n_forward_steps: 67176
+  forward_steps_in_memory: 40
   n_ensemble_per_ic: 1
   loader:
     start_indices:
@@ -347,58 +347,9 @@ inference:
       - '1979-01-08T00:00:00'
     dataset:
       data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
     num_data_workers: 4
-  aggregator:
-    step_means: []
-    ensembles: []
-    mean_denorm:
-      enabled: false
-      target: denorm
-    mean_norm:
-      enabled: false
-      target: norm
-    zonal_mean:
-      enabled: false
-    time_mean_denorm:
-      target: denorm
-      variables: *id001
-    time_mean_norm:
-      target: norm
-      variables: *id001
-    annual:
-      variables: *id001
-    power_spectrum:
-      variables: *id001
-    histogram:
-      enabled: true
-- name: long_46year_constant_co2
-  weight: 0.0
-  epochs:
-    start: 0
-    step: 10
-  n_forward_steps: 16794
-  forward_steps_in_memory: 73
-  n_ensemble_per_ic: 1
-  loader:
-    start_indices:
-      times:
-      - '1979-01-01T00:00:00'
-      - '1979-01-02T00:00:00'
-      - '1979-01-03T00:00:00'
-      - '1979-01-04T00:00:00'
-      - '1979-01-05T00:00:00'
-      - '1979-01-06T00:00:00'
-      - '1979-01-07T00:00:00'
-      - '1979-01-08T00:00:00'
-    dataset:
-      data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
-      engine: zarr
-    num_data_workers: 4
-    persistence_names:
-    - global_mean_co2
   aggregator:
     step_means: []
     ensembles: []
@@ -438,31 +389,31 @@ train_loader:
     strict: false
     concat:
     - data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
       subset:
         start_time: '1979-01-01'
         stop_time: '1986-03-31'
     - data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
       subset:
         start_time: '1986-04-01'
         stop_time: '1993-07-31'
     - data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
       subset:
         start_time: '1993-08-01'
         stop_time: '1993-12-31'
     - data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
       subset:
         start_time: '1994-01-01'
         stop_time: '1999-12-31'
     - data_path: /climate-default
-      file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+      file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
       engine: zarr
       subset:
         start_time: '2000-01-01'
@@ -477,13 +428,13 @@ validation:
       strict: false
       concat:
       - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
         subset:
           start_time: '1994-01-01'
           stop_time: '1994-12-31'
       - data_path: /climate-default
-        file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+        file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
         subset:
           start_time: '2014-01-01'
@@ -524,11 +475,11 @@ stepper:
           clip_latent_global_means: false
       normalization:
         network:
-          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-full-field.nc
+          global_means_path: /climate-default/2026-03-19-era5-1deg-8layer-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/centering.nc
+          global_stds_path: /climate-default/2026-03-19-era5-1deg-8layer-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/centering.nc
-          global_stds_path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/scaling-residual.nc
+          global_means_path: /climate-default/2026-03-19-era5-1deg-8layer-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/centering.nc
+          global_stds_path: /climate-default/2026-03-19-era5-1deg-8layer-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
@@ -649,15 +600,7 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
-      global_mean_removal:
-        kind: shared
-        append_as_input: true
       input_dropout:
         default:
           max_masked_vars: 20
-        override_groups:
-        - variables:
-          - __gmr_extra__surface_temperature
-          masking:
-            rate: 0.5
       include_channel_mask_inputs: true
