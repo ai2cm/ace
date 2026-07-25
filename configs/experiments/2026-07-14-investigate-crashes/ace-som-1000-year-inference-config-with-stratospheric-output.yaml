@@ -9,6 +9,7 @@ data_writer:
         - eastward_wind_0
         - northward_wind_0
         - specific_total_water_0
+        - PRESsfc
       format:
         name: zarr
         chunks:
