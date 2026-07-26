@@ -1,4 +1,4 @@
-seed: 0
+seed: 4
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -606,9 +606,4 @@ stepper:
       input_dropout:
         default:
           max_masked_vars: 20
-        override_groups:
-        - variables:
-          - surface_temperature
-          masking:
-            rate: 0.0
       include_channel_mask_inputs: true
