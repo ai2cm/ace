@@ -40,7 +40,9 @@ CASES=( \
     # "full-energy-conserving-rs0,3xCO2,3,397322,01KY02N19VKSX3NHQEA0W9AK5M,ai2/jupiter,example-0004" \
     # "full-energy-conserving-rs0,3xCO2,4,266500,01KY2Y1K2YZP8JHXP09Y63F5T1,ai2/jupiter,example-0005" \
     # "full-energy-conserving-rs0,4xCO2,4,537191,01KY02N8ZMGTVRP5EWVGTEZJZ5,ai2/jupiter,example-0006" \
-    "full-energy-conserving-rs0,4xCO2,1,402639,01KYAXJJR5201C4935274E1B40,ai2/titan,example-0007" \
+    # "full-energy-conserving-rs0,4xCO2,1,402639,01KYAXJJR5201C4935274E1B40,ai2/titan,example-0007" \
+    "full-energy-conserving-rs0,3xCO2,0,142667,01KYCH3N3V8F4YFQ2C1QA3JFY1,ai2/titan,example-0008" \
+    "full-energy-conserving-rs0,4xCO2,0,1036857,01KYCH2XPEV24YNTXPTVNZAJJJ,ai2/titan,example-0009" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
