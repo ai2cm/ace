@@ -24,6 +24,16 @@
 #   also commit + push your code: gantry runs your pushed git commit.
 #
 # Run:  bash configs/experiments/2026-07-24-video-pmd-spatiotemporal-25km-100km/run.sh
+#
+# Diagnostics-only env vars (2026-07-25): the previous attempt hung on an
+# NCCL ALLREDUCE for 30min (rank3 desynced from ranks 0/1/2) with no stack
+# trace, since the flight recorder was off. TORCH_NCCL_TRACE_BUFFER_SIZE /
+# TORCH_DISTRIBUTED_DEBUG=DETAIL just make a repeat hang debuggable -- they
+# don't change what's computed, so they don't affect training results, only
+# add a small constant overhead per collective op (DETAIL adds
+# consistency-checking logging; the trace buffer is a small ring buffer of
+# recent collective ops). Safe to leave on; remove once the hang is
+# understood/resolved if you want to shave off the (minor) overhead.
 set -e
 
 JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v1"
@@ -53,6 +63,8 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY="$WANDB_SECRET" \
+    --env TORCH_NCCL_TRACE_BUFFER_SIZE=2000 \
+    --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.downscaling.video_train "$CONFIG_PATH"

@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 from collections.abc import Hashable, MutableMapping, Sequence
 from typing import Literal
+from urllib.parse import urlparse
 
 import numpy as np
 import torch
@@ -94,6 +95,19 @@ def _broadcast_array_to_tensor(
     return torch.broadcast_to(tensor, shape)
 
 
+def _gs_timeout_storage_options(path: str) -> dict:
+    """GCS reads have no default timeout: a connection stalled by network
+    trouble or throttling under heavy concurrent load (many DataLoader
+    workers x ranks) hangs forever instead of failing, which surfaces only
+    as a distributed-training NCCL collective timeout (~30min later) with no
+    indication of what actually got stuck. Bound it so a stuck read raises a
+    normal (fast, clearly-attributable) exception instead.
+    """
+    if urlparse(str(path)).scheme == "gs":
+        return {"requests_timeout": 60, "timeout": 60}
+    return {}
+
+
 async def _get_item(group, name, selection):
     async_array = await group.getitem(name)
     if len(async_array.shape) != len(selection):
@@ -111,7 +125,10 @@ async def _get_item(group, name, selection):
 
 
 async def _get_items(url, names, selection):
-    async_group = await zarr.api.asynchronous.open(store=url)
+    storage_options = _gs_timeout_storage_options(url)
+    async_group = await zarr.api.asynchronous.open(
+        store=url, storage_options=storage_options or None
+    )
     coroutines = []
     for name in names:
         coroutines.append(_get_item(async_group, name, selection))

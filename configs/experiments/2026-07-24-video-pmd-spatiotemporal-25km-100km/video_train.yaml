@@ -60,7 +60,26 @@
 #   (Also: run.sh now requests 4 GPUs, not the 8 the failed job used --
 #   batch_size below was halved to 4 to match, keeping the same 1
 #   sample/GPU/step as before rather than doubling per-GPU memory pressure
-#   on top of the patch-size change above.) NOTE:
+#   on top of the patch-size change above.)
+# - num_data_workers: 4 -> 2 (2026-07-26). After the OOM fix above, two
+#   separate 4-GPU retries (jobs 01KYAYFKP4HK8X03E37ZJKQ2HH,
+#   01KYE90PN4FR0M333AKZBNVQY0) each got ~2h/~9950-9975 training steps in,
+#   then hung on an NCCL collective for 30min with no application-level
+#   error, killed by the watchdog. Both hangs landed in nearly the same
+#   step-count window; replicating DistributedSampler's exact shuffle
+#   (seed=0, epoch=0 -- set_epoch() is never called, so every fresh run
+#   reshuffles identically) and reading the 24 candidate clip-start dates
+#   that land there directly from GCS found nothing anomalous (all fast,
+#   clean, no NaNs) -- so it's likely NOT one bad chunk, more likely
+#   resource exhaustion under sustained concurrent load (4 GPUs x 4 workers
+#   = 16 concurrent async GCS readers x 2 stores x 5 channels) hitting a
+#   GCS QPS/connection-pool limit that gcsfs doesn't surface as an error by
+#   default (see also the new GCS request timeout in
+#   fme/core/dataset/utils.py, added the same day for the same reason: a
+#   stalled read should fail fast with a clear exception, not hang
+#   silently until the NCCL watchdog notices 30min later). Halving workers
+#   reduces concurrent GCS pressure; unverified whether this alone is
+#   sufficient, hence pairing it with the timeout fix. NOTE:
 #   model.endpoint_super_resolution.coarse_shape below MUST be kept in sync
 #   with this (it's [coarse_patch_extent_lat, coarse_patch_extent_lon] *
 #   downscale_factor = [176, 288]) -- the underlying SongUNet backbone bakes
@@ -132,7 +151,7 @@ train_data:
   # one epoch over the full train loader is ~820 raw batches x 20 = ~16400
   # steps. Add a cap here if that's too slow once you've measured
   # wall-clock/epoch.
-  num_data_workers: 4
+  num_data_workers: 2
   strict_ensemble: false
   lat_extent:
     start: -88
@@ -157,7 +176,7 @@ validation_data:
         start_time: "2022-01-01"
         stop_time: "2022-12-31"
   batch_size: 4
-  num_data_workers: 4
+  num_data_workers: 2
   strict_ensemble: false
   lat_extent:
     start: -88
@@ -182,7 +201,7 @@ test_data:
         start_time: "2023-01-01"
         stop_time: "2024-01-04"
   batch_size: 4
-  num_data_workers: 4
+  num_data_workers: 2
   strict_ensemble: false
   lat_extent:
     start: -88
