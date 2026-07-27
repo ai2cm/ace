@@ -311,7 +311,23 @@ class VideoTrainer:
                     self.config.coarse_patch_extent_lon,
                 ),
                 overlap=0,
-                drop_partial_patches=True,
+                # False, not True: get_offset() draws its random_offset from
+                # plain `random.randint`, unsynced across DDP ranks, so with
+                # drop_partial_patches=True the number of patches per raw
+                # batch varies per rank per draw (confirmed empirically:
+                # 12/15/16/20 patches over repeated offset draws for this
+                # domain, vs. exactly 20 always when False). That desyncs
+                # ranks' per-epoch step counts and eventually deadlocks/
+                # crashes DDP's collectives once the drift is large enough
+                # (observed: "Detected mismatch between collectives on
+                # ranks" / silent NCCL hangs before that error was surfaced).
+                # False is safe here: patches are always read via the
+                # "input" slice (never the boundary-trimmed "output" slice,
+                # that's only for stitching inference output), which is
+                # always exactly coarse_yx_patch_extent wide regardless of
+                # offset -- so this only changes whether the boundary patch
+                # is included, never any patch's shape.
+                drop_partial_patches=False,
                 random_offset=random_offset,
                 shuffle=shuffle,
                 region_sampling=region_sampling,

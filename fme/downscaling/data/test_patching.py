@@ -91,6 +91,73 @@ def test_get_patches_with_offset():
     assert offset_patches[0].output_slice.y == slice(None, None)
 
 
+def test_get_patches_count_with_random_offset_and_drop_partial():
+    """A domain that divides the patch extent evenly at offset 0 (e.g. video
+    training's coarse_patch_extent) still loses a boundary patch for any
+    nonzero offset when drop_partial_patches=True. Since get_offset() draws
+    from unsynced per-process `random`, DDP ranks calling this with
+    random_offset=True get inconsistent per-rank patch counts (and hence
+    per-epoch step counts) -- this eventually desyncs and deadlocks/crashes
+    DDP's collectives (observed in production: "Detected mismatch between
+    collectives on ranks" / silent NCCL hangs before that message was
+    surfaced). drop_partial_patches=False must keep the count constant
+    regardless of offset, which is why video_train.py's patched training
+    generator uses False, not True.
+    """
+    yx_extent = (8, 8)
+    yx_patch_extent = (4, 4)  # divides evenly at offset 0: exactly 2x2 patches
+
+    drop_counts = {
+        len(
+            get_patches(
+                yx_extent=yx_extent,
+                yx_patch_extent=yx_patch_extent,
+                overlap=0,
+                drop_partial_patches=True,
+                y_offset=y_off,
+                x_offset=x_off,
+            )
+        )
+        for y_off in range(4)
+        for x_off in range(4)
+    }
+    assert drop_counts == {1, 2, 4}  # varies with offset -- the bug
+
+    keep_counts = {
+        len(
+            get_patches(
+                yx_extent=yx_extent,
+                yx_patch_extent=yx_patch_extent,
+                overlap=0,
+                drop_partial_patches=False,
+                y_offset=y_off,
+                x_offset=x_off,
+            )
+        )
+        for y_off in range(4)
+        for x_off in range(4)
+    }
+    assert keep_counts == {4}  # constant regardless of offset -- the fix
+
+    # And every patch's *input* slice (what training actually reads -- see
+    # generate_from_patches' patch_type="input" default) stays exactly
+    # patch-extent-sized even when its output slice gets trimmed, so the
+    # fix doesn't change any patch's shape, only whether it's included.
+    for y_off in range(4):
+        for x_off in range(4):
+            for patch in get_patches(
+                yx_extent=yx_extent,
+                yx_patch_extent=yx_patch_extent,
+                overlap=0,
+                drop_partial_patches=False,
+                y_offset=y_off,
+                x_offset=x_off,
+            ):
+                y_slice, x_slice = patch.input_slice.y, patch.input_slice.x
+                assert y_slice.stop - y_slice.start == yx_patch_extent[0]
+                assert x_slice.stop - x_slice.start == yx_patch_extent[1]
+
+
 def _mock_data_loader(
     n_batches, coarse_y_size, coarse_x_size, downscale_factor, batch_size
 ):
