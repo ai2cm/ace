@@ -1,0 +1,317 @@
+# Stage 2: spatiotemporal video PMD, TWO-STAGE mode, OU per-channel noise
+# kernel variant. Identical to ../2026-07-24-video-pmd-spatiotemporal-25km-100km/
+# (same two-stage architecture, same data, same patch/GPU/worker/timeout
+# fixes -- see that config's header for the full history) EXCEPT
+# temporal_noise_correlation: independent -> per_channel with an OU kernel
+# for every channel, matching the temporal-only precedent at
+# ../2026-07-20-video-pmd-5ch-per-channel-kernel/video_train.yaml.
+#
+# Per-channel kernel choice: OU for every channel (same as the temporal-only
+# precedent). u10/v10/PRATEsfc were OU's best fit outright there (per
+# toy/process_residual_bridge_report.md). PRMSL and T2m's best fit was RBF,
+# but RBF's determinant there is ~1e-16 / ~1e-11 -- effectively
+# rank-deficient/numerically degenerate as a mixing matrix -- so both fall
+# back to their own second-best fit, OU. Length scales
+# (per_channel_kernel_length_scale, in normalized-tau units = hours / 24h
+# window) are carried over unchanged from that precedent: u10 12.9h, v10
+# 13.4h, PRMSL 19.3h, PRATEsfc 7.9h, T2m 11.4h. These were fit on the
+# temporal-only (stage 1) residual, not recomputed for the two-stage
+# spatiotemporal residual -- same caveat as the sigma_data_by_channel /
+# training_noise_distributions / sigma_min|max_by_channel values below,
+# which are unchanged from the flat config for the same reason (see its
+# header).
+#
+# subset_augmentation_prob and marginal_consistency_weight are left at 0.0,
+# same as the flat config -- this variant isolates the noise-kernel change
+# only, not subset training (matches the temporal-only precedent's model 2,
+# not model 3's "+subset" variant).
+#
+# ---- THINGS TO TUNE BEFORE A FULL RUN (see run.sh comments too) ----
+# - coarse_patch_extent_lat/lon: a 2x2 quadrant split (88, 180 -- 352x720
+#   fine-pixel patches) was tried first and CONFIRMED to OOM on real 8x GPU
+#   hardware (job 01KYATGZR00EJ7V49TZ17EWB61, 2026-07-24: CUDA OOM inside the
+#   video U-Net's conv forward, ~178GiB GPU already ~177.8GiB in use at
+#   failure time -- i.e. essentially the whole card, not a borderline case).
+#   That job's batch_size (global 8 / 8 GPUs = 1 raw sample/GPU/fetch, before
+#   patch splitting) was already effectively minimal, so batch_size/
+#   num_data_workers are not the lever here -- reducing num_data_workers only
+#   affects host-side CPU data-loading parallelism, not GPU memory, and
+#   batch_size has no room left to shrink. Patch pixel count is what drives
+#   activation memory, so switched to a 4(lat) x 5(lon) grid instead (44, 72
+#   -- still divides 176x360 evenly, no partial-patch drop): 176x288
+#   fine-pixel patches, 1/5 the pixel count of the 2x2 split (not a clean 4x4
+#   because the video U-Net's 4 downsampling levels (channel_mult:
+#   [1,2,2,2,2]) require each patch dimension divisible by 16 after the x4
+#   upscale -- 90*4=360 is NOT (360/16=22.5, unlike the original 720/16=45),
+#   72*4=288 IS (288/16=18), so lon uses a 5-way split, not 4-way, to
+#   preserve that divisibility rather than risk a shape-mismatch crash).
+#   If this STILL OOMs, drop further while preserving divisibility-by-16 on
+#   both fine dimensions (e.g. 22/36 for an 8x10 split, 88x144 fine patches)
+#   rather than touching batch_size/num_data_workers again.
+#   (Also: run.sh requests 4 GPUs -- batch_size below is 4 to match, keeping
+#   1 sample/GPU/step.) NOTE: model.endpoint_super_resolution.coarse_shape
+#   below MUST be kept in sync with this (it's [coarse_patch_extent_lat,
+#   coarse_patch_extent_lon] * downscale_factor = [176, 288]) -- the
+#   underlying SongUNet backbone bakes a fixed-size positional embedding
+#   into its weights at construction time, so this can't just be inferred
+#   at runtime the way stage B's shape-agnostic architecture can.
+# - num_data_workers: 2 + a 60s GCS request timeout (fme/core/dataset/utils.py)
+#   were both added 2026-07-26 while chasing what turned out to be an
+#   unrelated bug (see next bullet) -- left in as reasonable defensive
+#   defaults, not proven necessary on their own.
+# - The actual root cause of repeated 4-GPU failures (jobs
+#   01KYAYFKP4HK8X03E37ZJKQ2HH, 01KYE90PN4FR0M333AKZBNVQY0,
+#   01KYG4A9KAJ6FQ1BVK8R34ZZHB, 2026-07-25/26): video_train.py's patched
+#   training generator used random_offset=True with drop_partial_patches=True.
+#   get_offset() draws that offset from plain `random.randint`, unsynced
+#   across DDP ranks, so the number of patches per raw batch varied per rank
+#   per draw (12/15/16/20 for this domain, vs. a constant 20 at offset
+#   (0,0), a ~0.03% chance) -- ranks accumulated different per-epoch step
+#   counts and eventually desynced, crashing DDP's collectives ("Detected
+#   mismatch between collectives on ranks" once TORCH_DISTRIBUTED_DEBUG=DETAIL
+#   was enabled; silent 30min NCCL hangs before that). Fixed in
+#   video_train.py (drop_partial_patches=False, which keeps patch count
+#   constant regardless of offset without changing any patch's shape) --
+#   see that fix's commit for the full analysis and a regression test in
+#   fme/downscaling/data/test_patching.py.
+# - model.endpoint_super_resolution's architecture (model_channels: 64,
+#   channel_mult: [1,2,2,2]) and generation schedule (sigma_min/max,
+#   num_diffusion_generation_steps) are copied from the one real precedent
+#   for this exact downscale factor in this repo
+#   (../../baselines/downscaling/train-conus-100km-to-25km-augusta.yaml,
+#   100km->25km, factor 4) -- a reasonable starting point, not tuned for our
+#   5-channel/global-domain case specifically. attn_resolutions left empty
+#   (unlike that CONUS config's [16], which isn't a valid resolution in OUR
+#   pyramid -- 176/88/44/22 for a 176px (lat) fine patch -- SongUNet requires
+#   an exact match, matched against img_shape_y i.e. the lat dimension only)
+#   matching this repo's actual *global* HiRO baseline instead
+#   (../../baselines/downscaling-hiro-global/train.yaml), which is the
+#   closer precedent for a global (not regional) domain anyway, and cheaper
+#   given the GPU memory constraints confirmed above.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20
+max_test_batches: 50
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-25km-100km-spatiotemporal-twostage-5ch-ou-v1
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+coarse_patch_extent_lat: 44
+coarse_patch_extent_lon: 72
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 4  # global across ranks (4 GPUs x 1 sample/GPU) -- see "things to tune" above
+  # No sample_with_replacement cap: with 20 patches/raw batch (4x5 grid),
+  # one epoch over the full train loader is ~820 raw batches x 20 = ~16400
+  # steps. Add a cap here if that's too slow once you've measured
+  # wall-clock/epoch.
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  # True (the default; explicit here for clarity): the two endpoint frames
+  # ARE pinned in stage B's output -- but to stage A's generated estimate,
+  # not real fine truth (there is none) -- see endpoint_super_resolution
+  # below and the header comment.
+  endpoints_observed: true
+  # Stage A: HiRO-style 2D endpoint super-resolution -- see header comment
+  # for the architecture/schedule provenance and the coarse_shape coupling
+  # to coarse_patch_extent_lat/lon above.
+  endpoint_super_resolution:
+    module:
+      type: unet_diffusion_song
+      config:
+        model_channels: 64
+        channel_mult: [1, 2, 2, 2]
+        attn_resolutions: []
+    loss:
+      type: MSE
+    training_noise_distribution:
+      p_mean: -1.2
+      p_std: 1.8
+    coarse_shape: [176, 288]  # fine patch size = coarse_patch_extent_lat/lon * downscale_factor(4)
+    sigma_min: 0.002
+    sigma_max: 150.0
+    churn: 0.0
+    num_diffusion_generation_steps: 18
+    loss_weight: 1.0
+  # OU per-channel noise kernel -- see header comment for provenance.
+  # subset_augmentation_prob and marginal_consistency_weight are left at
+  # their 0.0 defaults (isolates the noise-kernel change only).
+  temporal_noise_correlation: per_channel
+  per_channel_noise_kernel:
+    eastward_wind_at_ten_meters: ou
+    northward_wind_at_ten_meters: ou
+    PRMSL: ou
+    PRATEsfc: ou
+    air_temperature_at_two_meters: ou
+  per_channel_kernel_length_scale:
+    eastward_wind_at_ten_meters: 0.5375      # 12.9h / 24h
+    northward_wind_at_ten_meters: 0.558333   # 13.4h / 24h
+    PRMSL: 0.804167                          # 19.3h / 24h
+    PRATEsfc: 0.329167                       # 7.9h / 24h
+    air_temperature_at_two_meters: 0.475     # 11.4h / 24h
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+    air_temperature_at_two_meters:
+      p_mean: -1.96
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+    air_temperature_at_two_meters: 0.1403
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+    air_temperature_at_two_meters: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+    air_temperature_at_two_meters: 22.4
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # fine (25km), train-only, global domain -- toy/compute_norm_stats_25km.py
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074   # log1p(PRATEsfc * 86400) space, matching log_transform_channels
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:  # coarse (100km), train-only, global domain -- reused verbatim
+    # from the stage-1 config above: verified 2026-07-24 that the new 100km
+    # store is byte-identical to the dataset those stats were computed from.
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
