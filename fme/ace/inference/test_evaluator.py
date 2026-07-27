@@ -50,7 +50,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.dataset.xarray import ConstantFieldOverrideConfig, XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device, using_gpu
@@ -1025,6 +1025,102 @@ def test_inference_override(tmp_path: pathlib.Path):
         expected_ocean_config=ocean_override,
         expected_multi_call_config=multi_call_override,
     )
+
+
+@pytest.mark.medium_duration
+def test_constant_field_override_holds_prescribed_prognostic_constant(
+    tmp_path: pathlib.Path,
+):
+    """A prognostic variable overridden with a time-constant field and listed
+    in prescribed_prognostic_names stays at that field for the whole rollout.
+
+    This is the combination used to evaluate a checkpoint with a prognostic
+    variable pinned to a precomputed time mean. The saved stepper adds one to
+    every input each step, so an unprescribed variable would drift upward and
+    a merely-overridden-in-the-loader one would only match at the initial
+    condition.
+    """
+    prescribed_name = "surface_temperature"
+    in_names = [prescribed_name, "forcing_var"]
+    out_names = [prescribed_name]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+    n_forward_steps = 4
+    constant_value = 5.0
+
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
+    )
+
+    time_mean_path = tmp_path / "time-mean.nc"
+    xr.Dataset(
+        {
+            prescribed_name: xr.DataArray(
+                np.full((4, 8), constant_value, dtype=np.float32), dims=("lat", "lon")
+            )
+        }
+    ).to_netcdf(time_mean_path)
+
+    loader = dataclasses.replace(
+        data.inference_data_loader_config,
+        dataset=XarrayDataConfig(
+            str(data.data_path),
+            constant_field_override=ConstantFieldOverrideConfig(
+                path=str(time_mean_path), names=[prescribed_name]
+            ),
+        ),
+    )
+
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        forward_steps_in_memory=2,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_file=False, log_to_wandb=False
+        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(),
+        loader=loader,
+        data_writer=DataWriterConfig(
+            save_monthly_files=False,
+            save_prediction_files=False,
+            files=[FileWriterConfig("autoregressive")],
+        ),
+        stepper_override=StepperOverrideConfig(
+            prescribed_prognostic_names=[prescribed_name]
+        ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    main(yaml_config=str(config_filename))
+
+    with xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    ) as ds:
+        predicted = ds[prescribed_name].values
+        ds_dims = ds[prescribed_name].dims
+    assert ds_dims == ("sample", "time", "lat", "lon")
+    assert predicted.shape[1] == n_forward_steps
+    np.testing.assert_allclose(predicted, constant_value)
 
 
 def validate_stepper_config(

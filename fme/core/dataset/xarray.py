@@ -400,6 +400,75 @@ class OverwriteConfig:
 
 
 @dataclasses.dataclass
+class ConstantFieldOverrideConfig:
+    """Configuration to overwrite variables with fields held constant in time.
+
+    Each name in ``names`` is replaced by the corresponding horizontal field
+    read from ``path``, broadcast unchanged across every timestep of the
+    sample. Used to evaluate a checkpoint with a variable held fixed at a
+    prescribed field rather than following the evaluated dataset, e.g. a
+    precomputed time mean, optionally one computed from a different dataset
+    than the one being evaluated.
+
+    Unlike ``XarrayDataConfig.orography_override``, the override fields are
+    read from a single horizontal snapshot rather than from another ACE
+    dataset, so this also works for variables which vary in time in the
+    dataset being overridden.
+
+    For a variable the model predicts, this only fixes the field the dataset
+    provides (the initial condition, the target, and the forcing offered at
+    each step); pair it with
+    ``StepperOverrideConfig.prescribed_prognostic_names`` to also hold the
+    model's own prediction fixed at the provided field on every step.
+
+    Parameters:
+        path: Path to a netCDF file containing the override fields. Each name
+            in ``names`` must be present as a horizontal-only variable (no
+            time dimension) whose shape and index ordering match the
+            horizontal grid of the dataset being overridden.
+        names: Names of the variables to overwrite.
+    """
+
+    path: str
+    names: list[str]
+
+    def __post_init__(self):
+        if len(self.names) == 0:
+            raise ValueError("ConstantFieldOverrideConfig.names must not be empty.")
+        duplicates = sorted({name for name in self.names if self.names.count(name) > 1})
+        if duplicates:
+            raise ValueError(
+                "ConstantFieldOverrideConfig.names contains duplicate names: "
+                f"{duplicates}."
+            )
+
+    def load(self) -> TensorDict:
+        """Read the override fields as horizontal-only tensors."""
+        with fsspec.open(self.path, "rb") as f:
+            ds = xr.load_dataset(f)
+        try:
+            missing = sorted(set(self.names) - set(ds.variables))
+            if missing:
+                raise ValueError(
+                    f"Variables {missing} requested by constant_field_override "
+                    f"are not present in {self.path}."
+                )
+            fields: TensorDict = {}
+            for name in self.names:
+                variable = ds[name].variable
+                if "time" in variable.dims:
+                    raise ValueError(
+                        f"Variable '{name}' in {self.path} has a time dimension "
+                        f"{variable.dims}; constant_field_override requires "
+                        "fields which are constant in time."
+                    )
+                fields[name] = torch.as_tensor(np.asarray(variable.values))
+        finally:
+            ds.close()
+        return fields
+
+
+@dataclasses.dataclass
 class XarrayDataConfig(DatasetConfigABC):
     """
     Parameters:
@@ -441,6 +510,10 @@ class XarrayDataConfig(DatasetConfigABC):
             swapping between the era5 and c96 grids). Only the `HGTsfc`
             variable is read from the override dataset; all other requested
             variables continue to come from `self`.
+        constant_field_override: If set, the named variables are replaced by
+            horizontal fields read from a single file and held constant in
+            time. Unlike `orography_override` this is not restricted to
+            time-invariant variables. See `ConstantFieldOverrideConfig`.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -473,6 +546,7 @@ class XarrayDataConfig(DatasetConfigABC):
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] | None = None
     orography_override: "XarrayDataConfig | None" = None
+    constant_field_override: ConstantFieldOverrideConfig | None = None
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -645,6 +719,30 @@ class XarrayDataset(DatasetABC):
             )
             tensors, *_ = override_dataset[0]
             self._orography_override_tensor = tensors["HGTsfc"][0]
+
+        self._constant_field_overrides: TensorDict = {}
+        if config.constant_field_override is not None:
+            self._constant_field_overrides = config.constant_field_override.load()
+            self._validate_constant_field_overrides(config.constant_field_override.path)
+
+    def _validate_constant_field_overrides(self, path: str) -> None:
+        """Check the loaded override fields against the names and horizontal
+        shape of this dataset, so a mismatch fails at construction rather than
+        silently producing a differently-shaped or unused field.
+        """
+        missing = sorted(set(self._constant_field_overrides) - set(self._names))
+        if missing:
+            raise ValueError(
+                f"Variables {missing} requested by constant_field_override are "
+                f"not loaded by this dataset; available names: {sorted(self._names)}."
+            )
+        expected_shape = tuple(self._shape_excluding_time_after_selection)
+        for name, field in self._constant_field_overrides.items():
+            if tuple(field.shape) != expected_shape:
+                raise ValueError(
+                    f"Variable '{name}' in {path} has shape {tuple(field.shape)}, "
+                    f"but this dataset's per-timestep shape is {expected_shape}."
+                )
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
@@ -983,6 +1081,11 @@ class XarrayDataset(DatasetABC):
             tensor = self._static_derived_data[name]
             horizontal_dims = [1] * tensor.ndim
             tensors[name] = tensor.repeat((total_steps, *horizontal_dims))
+
+        # replace variables held constant in time, broadcasting the single
+        # horizontal field over the window's timesteps
+        for name, field in self._constant_field_overrides.items():
+            tensors[name] = field.unsqueeze(0).expand(total_steps, *field.shape).clone()
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}

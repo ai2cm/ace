@@ -27,6 +27,7 @@ from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
     GET_RAW_TIMES_NUM_FILES_PARALLELIZATION_THRESHOLD,
+    ConstantFieldOverrideConfig,
     OverwriteConfig,
     XarrayDataConfig,
     XarrayDataset,
@@ -1369,3 +1370,100 @@ def test_orography_override_mismatched_shape_fails_loudly(tmp_path_factory):
     # broadcasting mismatched data
     with pytest.raises(RuntimeError):
         torch.stack([data["HGTsfc"], data["PRESsfc"]])
+
+
+def _write_constant_field_file(tmp_path, filename, value, shape=(4, 8)):
+    """Writes a netCDF file holding a single horizontal PRESsfc field with no
+    time dimension, matching the layout of the precomputed time-mean stores
+    used with XarrayDataConfig.constant_field_override."""
+    path = tmp_path / filename
+    xr.Dataset(
+        data_vars={
+            "PRESsfc": xr.DataArray(
+                np.full(shape, value, dtype=np.float32), dims=("lat", "lon")
+            )
+        }
+    ).to_netcdf(path, format="NETCDF4")
+    return path
+
+
+def test_constant_field_override_replaces_time_varying_variable(tmp_path_factory):
+    tmpdir = _write_orography_store(
+        tmp_path_factory, "constant_field", hgtsfc_value=1.0
+    )
+    override_path = _write_constant_field_file(tmpdir, "time-mean.nc", value=7.0)
+    config = XarrayDataConfig(
+        data_path=tmpdir,
+        file_pattern="data.nc",
+        constant_field_override=ConstantFieldOverrideConfig(
+            path=str(override_path), names=["PRESsfc"]
+        ),
+    )
+    dataset = xarray_dataset_constructor(config, ["HGTsfc", "PRESsfc"], 3)
+
+    # sample starting at a non-zero offset, to confirm the override applies
+    # across every timestep of the requested window, not just the first
+    data, *_ = dataset[1]
+    assert torch.equal(data["PRESsfc"], torch.full((3, 4, 8), 7.0))
+    # variables not named in the override are untouched
+    assert torch.equal(data["HGTsfc"], torch.full((3, 4, 8), 1.0))
+
+
+def test_constant_field_override_missing_variable_raises(tmp_path_factory):
+    tmpdir = _write_orography_store(
+        tmp_path_factory, "constant_field_missing", hgtsfc_value=1.0
+    )
+    override_path = _write_constant_field_file(tmpdir, "time-mean.nc", value=7.0)
+    config = XarrayDataConfig(
+        data_path=tmpdir,
+        file_pattern="data.nc",
+        constant_field_override=ConstantFieldOverrideConfig(
+            path=str(override_path), names=["TMP2m"]
+        ),
+    )
+    with pytest.raises(ValueError, match="not present in"):
+        xarray_dataset_constructor(config, ["HGTsfc", "PRESsfc"], 3)
+
+
+def test_constant_field_override_mismatched_shape_raises(tmp_path_factory):
+    tmpdir = _write_orography_store(
+        tmp_path_factory, "constant_field_shape", hgtsfc_value=1.0
+    )
+    override_path = _write_constant_field_file(
+        tmpdir, "time-mean.nc", value=7.0, shape=(6, 10)
+    )
+    config = XarrayDataConfig(
+        data_path=tmpdir,
+        file_pattern="data.nc",
+        constant_field_override=ConstantFieldOverrideConfig(
+            path=str(override_path), names=["PRESsfc"]
+        ),
+    )
+    with pytest.raises(ValueError, match="per-timestep shape"):
+        xarray_dataset_constructor(config, ["HGTsfc", "PRESsfc"], 3)
+
+
+def test_constant_field_override_unloaded_variable_raises(tmp_path_factory):
+    tmpdir = _write_orography_store(
+        tmp_path_factory, "constant_field_unloaded", hgtsfc_value=1.0
+    )
+    override_path = _write_constant_field_file(tmpdir, "time-mean.nc", value=7.0)
+    config = XarrayDataConfig(
+        data_path=tmpdir,
+        file_pattern="data.nc",
+        constant_field_override=ConstantFieldOverrideConfig(
+            path=str(override_path), names=["PRESsfc"]
+        ),
+    )
+    with pytest.raises(ValueError, match="not loaded by this dataset"):
+        xarray_dataset_constructor(config, ["HGTsfc"], 3)
+
+
+def test_constant_field_override_empty_names_raises():
+    with pytest.raises(ValueError, match="must not be empty"):
+        ConstantFieldOverrideConfig(path="unused", names=[])
+
+
+def test_constant_field_override_duplicate_names_raises():
+    with pytest.raises(ValueError, match="duplicate names"):
+        ConstantFieldOverrideConfig(path="unused", names=["PRESsfc", "PRESsfc"])
