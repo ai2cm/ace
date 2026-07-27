@@ -36,10 +36,13 @@ Ocean stream (6-hourly MOM6 chunks):
 Atmosphere stream (3-hourly FV3 chunks):
 
 1. Derive frozen precipitation rate from bucket accumulations
-2. Average 3-hourly fields to the 6-hourly ocean cadence
+2. Coarsen in time from 3-hourly directly to the output cadence
+   (e.g. 3-hourly → daily) in a single step, before regridding — combining
+   both reductions and doing them first minimizes how many timesteps pass
+   through the regridder, the same principle used for the ocean stream's
+   vertical coarsening
 3. Regrid to Gaussian grid via xESMF
-4. Coarsen in time (6-hourly → daily)
-5. Mask sea-ice variables to the ocean
+4. Mask sea-ice variables to the ocean
 
 ## Quick Start
 

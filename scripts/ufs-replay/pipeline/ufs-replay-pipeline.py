@@ -23,10 +23,11 @@ Ocean stream (per 6-hourly MOM6 time-chunk):
 Atmosphere stream (per 3-hourly FV3 time-chunk):
 
   1. Derive the frozen precipitation rate from bucket accumulations.
-  2. Average 3-hourly fields to the 6-hourly ocean cadence.
+  2. Coarsen in time from 3-hourly to the output cadence in one step
+     (e.g. 3-hourly → daily), before regridding, to minimize how much
+     data passes through the regridder.
   3. Regrid to a Gaussian grid via xESMF.
-  4. Coarsen in time (e.g. 6-hourly → daily).
-  5. Mask sea-ice variables to the ocean.
+  4. Mask sea-ice variables to the ocean.
 
 Data sources::
 
@@ -772,14 +773,23 @@ def _process_atmo_chunk(
         ds_atmo = ds_atmo.drop_vars(accum_vars)
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
-    # Average consecutive pairs of 3h fields → 6h.  Both records in a
-    # pair are already center-labeled (see open_atmo) half the atmo
-    # cadence apart, so averaging their labels lands exactly on the
-    # ocean stream's time — no manual relabeling needed.  coarsen is
-    # preferred over resample because the atmo data is regularly spaced
-    # and coarsen always produces equal-sized groups (resample can
-    # create uneven bins at boundaries).
-    ds = ds_atmo.coarsen(time=2, boundary="trim").mean()
+    # Coarsen from 3-hourly to the output cadence in one step, before
+    # horizontal regridding.  Both reductions (3h->6h, 6h->output) are
+    # plain equal-weighted means over equal-sized groups, so combining
+    # them — coarsen(2).mean() then coarsen(N).mean() equals a single
+    # coarsen(2*N).mean() — is exact, not an approximation.  Doing the
+    # combined coarsen before regridding (rather than splitting it
+    # around the regrid step, or doing it entirely after) minimizes how
+    # many timesteps pass through the expensive conservative regridder,
+    # the same "reduce before regrid" principle used for the ocean
+    # stream's vertical coarsening.  Records are already center-labeled
+    # (see open_atmo) half the atmo cadence apart, so averaging labels
+    # lands exactly on the ocean stream's output time — no manual
+    # relabeling needed.  coarsen is preferred over resample because the
+    # atmo data is regularly spaced and coarsen always produces
+    # equal-sized groups (resample can create uneven bins at
+    # boundaries).
+    ds = ds_atmo.coarsen(time=2 * time_coarsen_factor, boundary="trim").mean()
 
     # --- Horizontal regridding ---
     ds = _regrid_dataset(
@@ -790,13 +800,6 @@ def _process_atmo_chunk(
         na_thres=1.0,
     )
     ds = ds.assign_coords(lat=invariant_ds.lat.values, lon=invariant_ds.lon.values)
-
-    # --- Time coarsening ---
-    # The 6h labels above equal the ocean times, so coarsening averages
-    # the same label groups as the ocean stream and both streams emit
-    # identical output time coordinates.
-    if time_coarsen_factor > 1:
-        ds = ds.coarsen(time=time_coarsen_factor, boundary="trim").mean()
 
     # Rename to output names
     rename_map = {**ATMO_FORCING_VARS, **ICE_VARS}
