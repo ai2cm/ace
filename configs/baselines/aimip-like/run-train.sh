@@ -150,10 +150,12 @@ run_training() {
 #      checkpoint, saved on old commit d9faa91, can't be deserialized by this
 #      code -- corrector-union + derived_forcings/input_masking schema drift --
 #      so parameter_init can't init from it. Its config recipe is reused here.)
-#   B  RH-input no-co2 3-step fine-tune of A (same ft recipe). DEFERRED: needs
-#      A's checkpoint dataset; add its config + call and launch once A finishes.
-#   C  no-RH no-co2 3-step fine-tune of D (matched fine-tuned control). DEFERRED:
-#      needs D's checkpoint dataset; launch once D finishes.
+#   B  RH-input no-co2 3-step fine-tune of A (same ft recipe). Mounts A's
+#      checkpoint dataset 01KY0Z49EDHPTHNPZ876Y6P29G via the config "# arg:"
+#      header. Launched 2026-07-22 once A finished (120 ep, val 0.1299).
+#   C  no-RH no-co2 3-step fine-tune of D (matched fine-tuned control). Mounts
+#      D's checkpoint dataset 01KY2PFXNFEXMBMM4D2QCZ3KZT. Launched 2026-07-22
+#      once D finished (120 ep, val 0.1302).
 #
 # The clean matched comparisons are all on this branch's code: A vs D
 # (single-step) and B vs C (3-step fine-tuned). im4ecamc is kept only as an
@@ -162,3 +164,5 @@ run_training() {
 
 run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2.yaml" "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2-rs0" 1
 run_training "train-4deg-daily-v2-era5-only-no-residual-no-co2.yaml"                             "train-4deg-daily-v2-era5-only-no-residual-no-co2-rerun-rs0"                       1
+run_training "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2-ft3step.yaml" "train-4deg-daily-v2-era5-only-fg16-sr0p125-no-residual-rh-input-append-noco2-ft3step-rs0" 1
+run_training "train-4deg-daily-v2-era5-only-no-residual-no-co2-ft3step.yaml"                      "train-4deg-daily-v2-era5-only-no-residual-no-co2-ft3step-rs0"                      1
