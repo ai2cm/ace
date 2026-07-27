@@ -146,13 +146,19 @@ def compact(
 
     fig, ax = plt.subplots(figsize=(10, 5), constrained_layout=True)
     lead = 1
-    ax.plot(result.init_time, result.target.sel(lead_month=lead), label="target")
+    # matplotlib cannot plot cftime DatetimeNoLeap directly; use forecast index.
+    forecast_idx = result.forecast.values
+    ax.plot(forecast_idx, result.target.sel(lead_month=lead), label="target")
     ax.plot(
-        result.init_time,
+        forecast_idx,
         result.prediction.sel(lead_month=lead),
         label="prediction",
     )
-    ax.set(title="Direct Nino3.4 prediction: lead month 1", ylabel="Index (K)")
+    ax.set(
+        title="Direct Nino3.4 prediction: lead month 1",
+        xlabel="Forecast index",
+        ylabel="Index (K)",
+    )
     ax.legend()
     ax.grid(alpha=0.3)
     fig.savefig(output_dir / "lead01_timeseries.png", dpi=150)
