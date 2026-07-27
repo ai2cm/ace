@@ -12,9 +12,10 @@ matching is needed.
 
 Ocean stream (per 6-hourly MOM6 time-chunk):
 
-  1. Regrid to a Gaussian grid via xESMF.
-  2. Apply thickness-weighted vertical coarsening (``ho``-weighted) and
+  1. Apply thickness-weighted vertical coarsening (``ho``-weighted, at
+     native horizontal resolution, matching the CM4 convention) and
      split 3-D fields into per-level 2-D variables.
+  2. Regrid to a Gaussian grid via xESMF.
   3. Derive additional variables (sst, ssu/ssv, wfo, hfds, etc.).
   4. Coarsen in time (e.g. 6-hourly → daily).
   5. Insert NaN on land, nearest-neighbour fill residual coastal NaN.
@@ -59,6 +60,8 @@ from zarr.storage import ObjectStore
 
 OCEAN_TIME_STEP = 6  # hours between ocean output timesteps
 ATMO_TIME_STEP = 3  # hours between atmosphere output timesteps
+# Half the atmosphere cadence, as minutes to stay integral (90 = 3h/2).
+_ATMO_HALF_STEP = np.timedelta64(ATMO_TIME_STEP * 30, "m")
 DEFAULT_OUTPUT_GRID = "F90"
 VDIM = "z_l"  # vertical dimension name after cleaning
 
@@ -411,77 +414,45 @@ def _make_zarr_store(url: str, read_only: bool = True):
         return url
 
 
-def _match_time_type(dt, reference_time):
-    """Convert *dt* to the cftime subclass of *reference_time*.
-
-    The stores are opened with ``use_cftime=True``, so *reference_time*
-    is always a cftime object, while *dt* may be a ``datetime.datetime``
-    from the CLI (or already a cftime object).  Converting makes
-    ``xr.sel(time=slice(...))`` work correctly.
-    """
-    cf_cls = type(reference_time)
-    return cf_cls(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-
-
 def _open_ufs_zarr(url: str) -> xr.Dataset:
-    """Open a UFS zarr store with cftime support and suppress warnings."""
-    import warnings
+    """Open a UFS zarr store, dropping a stray mis-tagged time coordinate.
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", FutureWarning)
-        ds = xr.open_zarr(
-            _make_zarr_store(url),
-            chunks=None,
-            use_cftime=True,
-        )
-    return ds
+    Both stores carry an auxiliary "cftime" coordinate whose "calendar"
+    attribute is (incorrectly) "julian", which fails standard CF time
+    decoding; the "time" dimension coordinate itself uses a valid
+    "proleptic_gregorian" calendar and decodes to plain
+    ``numpy.datetime64`` values, so the rest of the pipeline can use
+    ordinary datetime64/pandas Timestamp semantics.  "ftime" is an
+    unused lead-time coordinate dropped for the same reason.
+    """
+    return xr.open_zarr(
+        _make_zarr_store(url),
+        chunks=None,
+        drop_variables=["cftime", "ftime"],
+    )
 
 
 def open_ocean(variables: list[str], start_time, end_time) -> xr.Dataset:
     """Open ocean variables from MOM6 zarr store (lazy, no Dask)."""
-    ds = _open_ufs_zarr(URL_OCEAN)
-    ds = ds[[v for v in variables if v in ds]]
-    ref = ds.time.values[0]
-    logging.info("Ocean time type: %s (%s)", type(ref).__name__, ref)
-    t0 = _match_time_type(start_time, ref)
-    t1 = _match_time_type(end_time, ref)
-    ds = ds.sel(time=slice(t0, t1))
-    return ds
+    ds = _open_ufs_zarr(URL_OCEAN)[variables]
+    return ds.sel(time=slice(start_time, end_time))
 
 
 def open_atmo(variables: list[str], start_time, end_time) -> xr.Dataset:
     """Open atmosphere variables from FV3 zarr store (lazy, no Dask)."""
     ds = _open_ufs_zarr(URL_ATMO)
-    # Rename horizontal dims to match ocean convention
-    rename = {}
-    if "grid_xt" in ds.dims:
-        rename["grid_xt"] = "lon"
-    if "grid_yt" in ds.dims:
-        rename["grid_yt"] = "lat"
-    if rename:
-        ds = ds.rename(rename)
-    found = [v for v in variables if v in ds]
-    missing = [v for v in variables if v not in ds]
-    if missing:
-        logging.warning("Atmo vars not found in store: %s", missing)
-    logging.info("Atmo vars found: %s", found)
+    ds = ds.rename({"grid_xt": "lon", "grid_yt": "lat"})[variables]
+    ds = ds.sel(time=slice(start_time, end_time))
 
-    # The FV3 store may use a time dimension called "time" on some
-    # variables but have other variables on different time dims (e.g.
-    # "ftime").  Select variables first, then log the time coordinate.
-    ds = ds[found]
-    logging.info("Atmo dims after var selection: %s", dict(ds.sizes))
+    # FV3's interval-average fields are labeled at the END of their 3h
+    # averaging window; shift to the window CENTER (the ocean stream's
+    # convention, see OCEAN_TIME_STEP usage) so that a plain
+    # coarsen(...).mean() lands exactly on the ocean output times
+    # downstream (see _process_atmo_chunk and _validate_time_alignment).
+    ds = ds.assign_coords(time=ds.time - _ATMO_HALF_STEP)
 
-    ref = ds.time.values[0]
-    logging.info("Atmo time type: %s (%s)", type(ref).__name__, ref)
-    t0 = _match_time_type(start_time, ref)
-    t1 = _match_time_type(end_time, ref)
-    logging.info("Atmo time slice: %s to %s", t0, t1)
-    ds = ds.sel(time=slice(t0, t1))
-    logging.info("Atmo after time slice: %d timesteps", ds.sizes["time"])
-
-    # Drop stray non-dimension coordinates (cftime, ftime, etc.) that
-    # pollute downstream coarsen steps and the output encoding.
+    # Drop stray non-dimension coordinates that pollute downstream
+    # coarsen steps and the output encoding.
     keep_coords = {"time", "lat", "lon"}
     stray = [c for c in ds.coords if c not in keep_coords and c not in ds.dims]
     if stray:
@@ -507,8 +478,8 @@ def _clean_ocean_dataset(ds: xr.Dataset) -> xr.Dataset:
 
     ds = ds.rename({**OCEAN_RENAME, **STRESS_RENAME})
 
-    # Drop stray non-dimension coordinates (cftime, ftime, etc.) that
-    # pollute downstream merge/coarsen steps.
+    # Drop any other stray non-dimension coordinates that pollute
+    # downstream merge/coarsen steps.
     keep_coords = {"time", "lat", "lon", VDIM}
     stray = [c for c in ds.coords if c not in keep_coords and c not in ds.dims]
     if stray:
@@ -520,28 +491,24 @@ def _clean_ocean_dataset(ds: xr.Dataset) -> xr.Dataset:
 def _validate_time_alignment(ocean_times, atmo_times) -> None:
     """Check that the atmosphere times exactly interleave the ocean times.
 
-    The 6-hourly ocean fields are averages centered on their labels,
-    while the 3-hourly FV3 interval-average fields are labeled at the
-    END of their averaging window, so ocean time T is covered by the
-    atmosphere pair (T, T+3h).  Verifying this correspondence once up
-    front lets the two Beam streams align purely by integer chunk
-    offsets, with no per-chunk time matching.
+    Both streams use a window-CENTER time convention (see open_atmo):
+    ocean time T's 6h window is covered by the atmosphere pair centered
+    at T minus/plus half the atmosphere cadence.  Verifying this
+    correspondence once up front lets the two Beam streams align purely
+    by integer chunk offsets, with no per-chunk time matching.
     """
     if len(atmo_times) != 2 * len(ocean_times):
         raise ValueError(
             f"Expected exactly {2 * len(ocean_times)} atmosphere timesteps "
             f"(2 per ocean timestep), got {len(atmo_times)}."
         )
-    step = datetime.timedelta(hours=ATMO_TIME_STEP)
     for i, ocean_time in enumerate(ocean_times):
-        if (
-            atmo_times[2 * i] != ocean_time
-            or atmo_times[2 * i + 1] != ocean_time + step
-        ):
+        expected = (ocean_time - _ATMO_HALF_STEP, ocean_time + _ATMO_HALF_STEP)
+        actual = (atmo_times[2 * i], atmo_times[2 * i + 1])
+        if actual != expected:
             raise ValueError(
-                f"Atmosphere times ({atmo_times[2 * i]}, {atmo_times[2 * i + 1]}) "
-                f"do not cover ocean time {ocean_time}; expected "
-                f"({ocean_time}, {ocean_time + step})."
+                f"Atmosphere times {actual} do not cover ocean time "
+                f"{ocean_time}; expected {expected}."
             )
 
 
@@ -612,34 +579,19 @@ def _process_ocean_chunk(
     # produced during template creation.
     ds_ocean = ds_ocean.drop_vars("depth", errors="ignore")
 
-    # Separate ho for independent regridding (thickness-weighted
-    # coarsening needs ho regridded without NaN-masking influence
-    # from tracer fields that have deeper NaN patterns).
     if "ho" not in ds_ocean:
         raise ValueError("'ho' is required for thickness-weighted coarsening")
-    ho_ds = ds_ocean[["ho"]]
-    ds_ocean = ds_ocean.drop_vars("ho")
 
-    # --- Horizontal regridding ---
-    ds_ocean = _regrid_dataset(
-        ds_ocean,
-        output_grid,
-        source_grid_ocean,
-        skipna=True,
-        na_thres=1.0,
-    )
-    ho_ds = _regrid_dataset(
-        ho_ds,
-        output_grid,
-        source_grid_ocean,
-        skipna=True,
-        na_thres=1.0,
-    )
-    ds_ocean["ho"] = ho_ds["ho"].assign_coords(
-        lat=ds_ocean.lat.values, lon=ds_ocean.lon.values
-    )
-
-    # --- Vertical coarsening ---
+    # --- Vertical coarsening (native horizontal resolution) ---
+    # Coarsening at native resolution — using native "ho" thickness
+    # weights, before any horizontal averaging — matches the CM4
+    # pipeline convention and is more accurate than regridding the
+    # native levels first: horizontal regridding and thickness-weighted
+    # vertical averaging don't commute when thickness varies within a
+    # target cell's footprint.  It is also cheaper, since only the 19
+    # coarsened levels (not the 75 native levels) go through the
+    # expensive conservative regridder below, and "ho" no longer needs
+    # a separate regrid — its role is fully consumed here.
     vars_3d_present = [v for v in VARS_3D if v in ds_ocean]
     indices_as_tuples = [tuple(pair) for pair in vertical_coarsening_indices]
     ds = _compute_ocean_vertical_coarsening(
@@ -647,6 +599,15 @@ def _process_ocean_chunk(
         vars_3d_present,
         indices_as_tuples,
         VDIM,
+    )
+
+    # --- Horizontal regridding ---
+    ds = _regrid_dataset(
+        ds,
+        output_grid,
+        source_grid_ocean,
+        skipna=True,
+        na_thres=1.0,
     )
 
     # --- Derived variables ---
@@ -811,17 +772,14 @@ def _process_atmo_chunk(
         ds_atmo = ds_atmo.drop_vars(accum_vars)
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
-    # Average consecutive pairs of 3h fields → 6h, labeled with the
-    # first timestamp of each pair.  The FV3 interval-average fields are
-    # labeled at the END of their 3h averaging window, so the pair
-    # (T, T+3h) covers T-3h through T+3h — exactly the window of the
-    # center-labeled 6h ocean average at T.  coarsen is preferred over
-    # resample because the atmo data is regularly spaced and coarsen
-    # always produces equal-sized groups (resample can create uneven
-    # bins at boundaries).
-    atmo_times = ds_atmo.time.values
+    # Average consecutive pairs of 3h fields → 6h.  Both records in a
+    # pair are already center-labeled (see open_atmo) half the atmo
+    # cadence apart, so averaging their labels lands exactly on the
+    # ocean stream's time — no manual relabeling needed.  coarsen is
+    # preferred over resample because the atmo data is regularly spaced
+    # and coarsen always produces equal-sized groups (resample can
+    # create uneven bins at boundaries).
     ds = ds_atmo.coarsen(time=2, boundary="trim").mean()
-    ds = ds.assign_coords(time=atmo_times[::2])
 
     # --- Horizontal regridding ---
     ds = _regrid_dataset(
@@ -1197,8 +1155,9 @@ def main():
     logging.info("Ocean dataset: %s", dict(ds_ocean.sizes))
 
     # Atmosphere: 3-hourly data covering the same interval as the ocean.
-    # Ocean time T (a center-labeled 6h average) is covered by the
-    # end-labeled 3h atmosphere fields at T and T+3h, so the atmosphere
+    # Ocean time T (a center-labeled 6h average) is covered, in the raw
+    # store's END-labeled convention, by the atmosphere records at T and
+    # T+3h (open_atmo re-centers these internally), so the requested
     # range extends one atmosphere timestep past the last ocean time.
     ocean_times = ds_ocean.time.values
     atmo_load_vars = (
@@ -1206,7 +1165,7 @@ def main():
         + list(ICE_VARS.keys())
         + FROZEN_PRECIP_ACCUM_VARS
     )
-    atmo_end = ocean_times[-1] + datetime.timedelta(hours=ATMO_TIME_STEP)
+    atmo_end = ocean_times[-1] + np.timedelta64(ATMO_TIME_STEP, "h")
     ds_atmo = open_atmo(atmo_load_vars, ocean_times[0], atmo_end)
     logging.info("Atmo dataset: %s", dict(ds_atmo.sizes))
 

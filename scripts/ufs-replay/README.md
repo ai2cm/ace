@@ -22,9 +22,13 @@ integer chunk offsets — no per-chunk time matching is needed.
 
 Ocean stream (6-hourly MOM6 chunks):
 
-1. Regrid to Gaussian grid (F90 = 1°) via xESMF
-2. Thickness-weighted (`ho`) vertical coarsening (75 → 19 levels matching
-   CM4), splitting 3-D fields into per-level 2-D variables
+1. Thickness-weighted (`ho`) vertical coarsening (75 → 19 levels matching
+   CM4) at native horizontal resolution, splitting 3-D fields into
+   per-level 2-D variables — done before horizontal regridding since
+   thickness-weighted vertical averaging and horizontal regridding don't
+   commute, matching the CM4 convention (and cheaper, since only 19
+   levels then need to go through the regridder instead of 75)
+2. Regrid to Gaussian grid (F90 = 1°) via xESMF
 3. Derive additional variables (sst, ssu/ssv, wfo, hfds, etc.)
 4. Coarsen in time (6-hourly → daily)
 5. Insert NaN on land, nearest-neighbour fill residual coastal NaN
