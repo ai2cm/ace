@@ -29,17 +29,22 @@ Each config is its daily counterpart with exactly these mechanical edits
 (arm 9 additionally adds the `energy_score_whitening` block, in arm 8's
 syntax):
 
-- **Data**: `2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr` →
-  `2026-03-19-era5-1deg-8layer-1940-2025.zarr` (the 6-hourly source the daily
-  set was derived from; same variables, same ACE2 train/val/inference split,
-  same 06Z IC timestamps).
+- **Data**: the daily wrapper directory
+  `2026-03-19-era5-1deg-8layer-daily-1940-2025.zarr/` → `data_path:
+  /climate-default/`, with the unchanged `file_pattern` selecting the 6-hourly
+  store `2026-03-19-era5-1deg-8layer-1940-2025.zarr` directly (the 6-hourly
+  store has no wrapper directory; this is the form the prior 6h stochastic
+  runs trained with). Same variables, same ACE2 train/val/inference split,
+  same 06Z IC timestamps.
 - **Normalization**: the daily 1990–2019 stats → the 6-hourly 1990–2019 stats
   (beaker dataset `andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019`,
   mounted at `/statsdata` via the config's `# arg:` header). Residual scaling
   is timestep-dependent, so the daily stats cannot be reused.
 - **Horizons**: inference step counts ×4 at fixed lead time — 10-year runs
   3652 → 14608, the ACE2-comparable 5-year 1826 → 7304, the 5-day weather
-  evals 5 → 20 steps (day-5 `step_means` index 5 → 20).
+  evals 5 → 20 steps, and the day-5 `step_means`/`ensembles` step index
+  5 → 20. `forward_steps_in_memory` is a memory/IO chunk size, not a horizon,
+  and is unchanged everywhere.
 
 Held fixed deliberately, so the only experimental variable vs the daily arms
 is the timestep: model (`NoiseConditionedSFNO`, fg16/sr0.125), 1-step
