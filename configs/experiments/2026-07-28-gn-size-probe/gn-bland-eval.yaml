@@ -1,0 +1,103 @@
+# Quiet-ocean control for the small-domain bias. See gn_frozen_eval.py.
+#
+# The cyclone case cannot separate "the window got smaller" from "the window is
+# full of one violent feature": a 4 deg box on an eyewall is genuinely more
+# extreme than its 16 deg surroundings, and the measured bias profile peaked in
+# a mid-radius ring that looks like storm structure rather than domain geometry.
+#
+# This repeats the identical arm structure over the South Pacific gyre at
+# 25S/210E -- open ocean, no land, no cyclone, late southern autumn -- at the
+# same timestamp.
+#
+#   bias still large at 4 deg  -> the effect is geometric, independent of content
+#   bias small at 4 deg        -> the effect needs extreme content, and the
+#                                 cyclone result is about content x GroupNorm,
+#                                 not about domain size as such
+#
+# Arm suffixes drive the mode (_capture / _live / _recomp / _frozen); the frozen
+# arm replays statistics captured by the capture arm in THIS run, so this must
+# be a separate job from the cyclone config rather than extra events appended
+# to it.
+experiment_dir: /results
+n_samples: 8
+model:
+  mixture_of_experts_path: /moe/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+  # Base loader only; each event overrides the time subset and the extents.
+  lat_extent:
+    start: -33
+    stop: -17
+  lon_extent:
+    start: 202
+    stop: 218
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: bland_16deg_capture
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -33
+    stop: -17
+  lon_extent:
+    start: 202
+    stop: 218
+  n_samples: 8
+- name: bland_04deg_live
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -27
+    stop: -23
+  lon_extent:
+    start: 208
+    stop: 212
+  n_samples: 8
+- name: bland_04deg_recomp
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -27
+    stop: -23
+  lon_extent:
+    start: 208
+    stop: 212
+  n_samples: 8
+- name: bland_04deg_frozen
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -27
+    stop: -23
+  lon_extent:
+    start: 208
+    stop: 212
+  n_samples: 8
+- name: bland_32deg_single
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -41
+    stop: -9
+  lon_extent:
+    start: 194
+    stop: 226
+  n_samples: 4

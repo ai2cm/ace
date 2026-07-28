@@ -7,14 +7,20 @@ not (0.11 at 32 deg). This script asks the causal question: if the small-input
 run is handed the statistics the model would have seen at the trained extent,
 does its bias go away?
 
-Arms, run in order in one process so captured statistics can be replayed:
+Arms are events in the config, run in order in one process so captured
+statistics can be replayed. The name SUFFIX selects the mode:
 
-  tc_16deg_capture  16x16 deg, unmodified. In-distribution control, and the
-                    source of the reference statistics.
-  tc_04deg_live     4x4 deg, unmodified. The biased case as the model runs it.
-  tc_04deg_recomp   4x4 deg, GroupNorm recomputed from its own LIVE statistics.
-  tc_04deg_frozen   4x4 deg, GroupNorm recomputed from tc_16deg_capture's stats.
-  tc_32deg_single   32x32 deg generated as ONE patch, no composite prediction.
+  *_capture  unmodified; also records reference statistics for the frozen arm.
+             Use this on the arm whose extent equals the trained coarse_shape.
+  *_live     unmodified. The case under test, as the model actually runs it.
+  *_recomp   GroupNorm recomputed from its own LIVE statistics -- numerics
+             control for the frozen arm.
+  *_frozen   GroupNorm recomputed from the capture arm's statistics.
+  (anything else runs unmodified, like *_live)
+
+Because the frozen arm replays whatever the capture arm recorded in the same
+process, one config = one location. gn-frozen-eval.yaml is the cyclone case and
+gn-bland-eval.yaml the quiet-ocean control; they are separate jobs.
 
 ``recomp`` exists because this model runs under AMP bf16 against a fused Apex
 GroupNorm kernel, and an unfused Python recomputation of the same arithmetic
@@ -53,9 +59,10 @@ from torch.nn.functional import elu, gelu, leaky_relu, relu, sigmoid, silu, tanh
 
 from fme.downscaling.evaluator import EvaluatorConfig
 
-# The footprint every arm is scored on: the central 4x4 deg of the 16 deg event.
-COMMON_LAT = (13.0, 17.0)
-COMMON_LON = (136.0, 140.0)
+# The footprint every arm is scored on is derived from the config: the
+# intersection of every event's extent, i.e. the smallest arm when they are
+# concentric. Keeps the script location-agnostic so the same code runs the
+# cyclone case and the quiet-ocean control.
 
 # Bias is also profiled against distance from the domain boundary, in fine grid
 # cells (1 cell ~ 1/32 deg ~ 3.5 km at downscale_factor 32). Every conv in this
@@ -253,15 +260,31 @@ def _crop_index(coord: torch.Tensor, lo: float, hi: float) -> torch.Tensor:
     return torch.nonzero((values >= lo) & (values <= hi), as_tuple=True)[0]
 
 
+def _common_footprint(events) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Intersection of every event's extent -- the ground all arms share."""
+    lat = (
+        max(float(e.lat_extent.start) for e in events),
+        min(float(e.lat_extent.stop) for e in events),
+    )
+    lon = (
+        max(float(e.lon_extent.start) for e in events),
+        min(float(e.lon_extent.stop) for e in events),
+    )
+    if lat[0] >= lat[1] or lon[0] >= lon[1]:
+        raise ValueError(f"event extents do not overlap: lat {lat}, lon {lon}")
+    return lat, lon
+
+
 def _common_footprint_bias(
     prediction: dict[str, torch.Tensor],
     target: dict[str, torch.Tensor],
     lat: torch.Tensor,
     lon: torch.Tensor,
+    footprint: tuple[tuple[float, float], tuple[float, float]],
 ) -> dict[str, float]:
     """Mean (prediction - truth) over the common central footprint, per variable."""
-    y_idx = _crop_index(lat, *COMMON_LAT)
-    x_idx = _crop_index(lon, *COMMON_LON)
+    y_idx = _crop_index(lat, *footprint[0])
+    x_idx = _crop_index(lon, *footprint[1])
     if len(y_idx) == 0 or len(x_idx) == 0:
         raise RuntimeError(
             "common footprint empty: "
@@ -311,7 +334,7 @@ def _bias_profile(
     return profiles
 
 
-def _run_arm(event, config: EvaluatorConfig, model, requirements, captured):
+def _run_arm(event, config: EvaluatorConfig, model, requirements, captured, footprint):
     """Run one arm; returns (bias dict, extra diagnostics)."""
     data = event.get_paired_gridded_data(
         base_data_config=config.data, requirements=requirements
@@ -367,7 +390,7 @@ def _run_arm(event, config: EvaluatorConfig, model, requirements, captured):
     )
     fine_coords = batch[0].fine.latlon_coordinates
     bias = _common_footprint_bias(
-        outputs.prediction, outputs.target, fine_coords.lat, fine_coords.lon
+        outputs.prediction, outputs.target, fine_coords.lat, fine_coords.lon, footprint
     )
     profile = _bias_profile(outputs.prediction, outputs.target)
     logging.info(f"{event.name}: bias {bias}")
@@ -392,6 +415,9 @@ def main(config_path: str) -> None:
         f"downscale_factor={model.downscale_factor}"
     )
 
+    footprint = _common_footprint(config.events or [])
+    logging.info(f"common footprint: lat {footprint[0]}, lon {footprint[1]}")
+
     captured: dict[str, list[tuple[torch.Tensor, torch.Tensor]]] = {}
     results: dict[str, dict[str, float]] = {}
     diagnostics: dict[str, dict[str, float]] = {}
@@ -400,7 +426,7 @@ def main(config_path: str) -> None:
     for event in config.events or []:
         try:
             bias, extra, profile = _run_arm(
-                event, config, model, requirements, captured
+                event, config, model, requirements, captured, footprint
             )
             results[event.name] = bias
             diagnostics[event.name] = extra
@@ -410,7 +436,7 @@ def main(config_path: str) -> None:
 
     variables = sorted({v for b in results.values() for v in b})
     lines = [
-        f"common footprint: lat {COMMON_LAT}, lon {COMMON_LON}",
+        f"common footprint: lat {footprint[0]}, lon {footprint[1]}",
         "bias = mean(prediction - truth); frozen vs recomp is the clean contrast",
         "",
     ]

@@ -6,13 +6,16 @@
 
 set -e
 
-JOB_NAME="gn-frozen-eval-tc-20230425"
+# Config to run, relative to this script's directory. Defaults to the cyclone
+# case; pass gn-bland-eval.yaml for the quiet-ocean control.
+CONFIG_FILENAME=${1:-gn-frozen-eval.yaml}
+JOB_NAME="gn-eval-${CONFIG_FILENAME%.yaml}"
 
 # Resolve paths from this script's own location rather than the caller's cwd.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
 REL_DIR=${SCRIPT_DIR#"$REPO_ROOT"/}
-CONFIG_PATH=$REL_DIR/gn-frozen-eval.yaml
+CONFIG_PATH=$REL_DIR/$CONFIG_FILENAME
 PROBE_PATH=$REL_DIR/gn_frozen_eval.py
 
 # since we use a service account API key for wandb, we use the beaker username
@@ -24,7 +27,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 IMAGE="$(cat latest_deps_only_image.txt)"
 
 # Bundled mixture-of-experts checkpoint. The mount point must match
-# `mixture_of_experts_path` in gn-frozen-eval.yaml.
+# `mixture_of_experts_path` in the config.
 MOE_DATASET=01KTCHVDHY0SATWH9E0AW2PDS6
 
 gantry run \
