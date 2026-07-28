@@ -47,8 +47,10 @@ Usage:
 
 import argparse
 import collections
+import dataclasses
 import logging
 import os
+from datetime import datetime, timedelta
 
 import dacite
 import numpy as np
@@ -57,7 +59,11 @@ import yaml
 from einops import rearrange
 from torch.nn.functional import elu, gelu, leaky_relu, relu, sigmoid, silu, tanh
 
+from fme.core.dataset.time import TimeSlice
 from fme.downscaling.evaluator import EvaluatorConfig
+
+# The coarse data is 6-hourly.
+TIMESTEP = timedelta(hours=6)
 
 # The footprint every arm is scored on is derived from the config: the
 # intersection of every event's extent, i.e. the smallest arm when they are
@@ -275,14 +281,18 @@ def _common_footprint(events) -> tuple[tuple[float, float], tuple[float, float]]
     return lat, lon
 
 
-def _common_footprint_bias(
-    prediction: dict[str, torch.Tensor],
-    target: dict[str, torch.Tensor],
+def _footprint_stats(
+    diffs: dict[str, torch.Tensor],
     lat: torch.Tensor,
     lon: torch.Tensor,
     footprint: tuple[tuple[float, float], tuple[float, float]],
-) -> dict[str, float]:
-    """Mean (prediction - truth) over the common central footprint, per variable."""
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Domain-mean bias and spatial RMSE of the time-mean difference field.
+
+    RMSE is reported alongside bias because a domain mean hides cancellation:
+    offsetting errors of either sign average to nearly zero bias while leaving
+    the field wrong everywhere.
+    """
     y_idx = _crop_index(lat, *footprint[0])
     x_idx = _crop_index(lon, *footprint[1])
     if len(y_idx) == 0 or len(x_idx) == 0:
@@ -291,14 +301,41 @@ def _common_footprint_bias(
             f"lat range {float(lat.min())}..{float(lat.max())}, "
             f"lon range {float(lon.min())}..{float(lon.max())}"
         )
-    biases = {}
-    for name, pred in prediction.items():
-        if name not in target:
-            continue
-        p = _to_hw(pred)[y_idx][:, x_idx]
-        t = _to_hw(target[name])[y_idx][:, x_idx]
-        biases[name] = float((p - t).mean())
-    return biases
+    bias, rmse = {}, {}
+    for name, diff in diffs.items():
+        cropped = diff[y_idx][:, x_idx]
+        bias[name] = float(cropped.mean())
+        rmse[name] = float(cropped.pow(2).mean().sqrt())
+    return bias, rmse
+
+
+def _build_paired_data(event, config: EvaluatorConfig, requirements, n_times: int):
+    """Paired data for ``event``, spanning ``n_times`` steps centered on its date.
+
+    EventConfig.get_paired_gridded_data hardcodes a 12h slice ("Event evaluation
+    only load the first snapshot"), so a time mean needs its own construction.
+    Mirrors that method otherwise.
+    """
+    center = datetime.strptime(event.date, event.date_format)
+    half = (n_times - 1) // 2
+    time_slice = TimeSlice(
+        (center - half * TIMESTEP).strftime(event.date_format),
+        (center + (n_times - 1 - half) * TIMESTEP).strftime(event.date_format),
+    )
+    fine = dataclasses.replace(config.data.fine[0])
+    fine.update_subset(time_slice)
+    coarse = dataclasses.replace(config.data.coarse_full_config[0])
+    coarse.update_subset(time_slice)
+    data_config = dataclasses.replace(
+        config.data,
+        fine=[fine],
+        coarse=[coarse],
+        repeat=1,
+        batch_size=1,
+        lat_extent=event.lat_extent,
+        lon_extent=event.lon_extent,
+    )
+    return data_config.build(train=False, requirements=requirements)
 
 
 def _edge_distance(height: int, width: int) -> torch.Tensor:
@@ -310,22 +347,17 @@ def _edge_distance(height: int, width: int) -> torch.Tensor:
     )
 
 
-def _bias_profile(
-    prediction: dict[str, torch.Tensor], target: dict[str, torch.Tensor]
-) -> dict[str, list[float]]:
+def _bias_profile(diffs: dict[str, torch.Tensor]) -> dict[str, list[float]]:
     """Mean bias per edge-distance bin, over the arm's whole domain.
 
-    Unlike the common-footprint scalar, this uses every cell the arm generated:
-    the question is how bias varies with proximity to that arm's own boundary.
+    Unlike the footprint scalars, this uses every cell the arm generated: the
+    question is how bias varies with proximity to that arm's own boundary.
     Bins beyond the domain's reach are NaN.
     """
     profiles: dict[str, list[float]] = {}
-    for name, pred in prediction.items():
-        if name not in target:
-            continue
-        diff = (_to_hw(pred) - _to_hw(target[name])).cpu()
+    for name, diff in diffs.items():
+        flat = diff.cpu().flatten()
         radius = _edge_distance(*diff.shape).flatten()
-        flat = diff.flatten()
         row = []
         for lo, hi in zip(BIN_EDGES[:-1], BIN_EDGES[1:]):
             mask = (radius >= lo) & (radius < hi)
@@ -334,11 +366,9 @@ def _bias_profile(
     return profiles
 
 
-def _run_arm(event, config: EvaluatorConfig, model, requirements, captured, footprint):
-    """Run one arm; returns (bias dict, extra diagnostics)."""
-    data = event.get_paired_gridded_data(
-        base_data_config=config.data, requirements=requirements
-    )
+def _run_arm(event, config, model, requirements, captured, footprint, n_times):
+    """Run one arm over ``n_times`` steps; returns (bias, rmse, extra, profile)."""
+    data = _build_paired_data(event, config, requirements, n_times)
     if event.name.endswith("_capture"):
         mode = "capture"
     elif event.name.endswith("_frozen"):
@@ -349,9 +379,6 @@ def _run_arm(event, config: EvaluatorConfig, model, requirements, captured, foot
         mode = "live"
     logging.info(f"{event.name}: mode={mode}, n_samples={event.n_samples}")
 
-    batch = next(iter(data.get_generator()))
-    base_model = model.with_rolled_lon(batch[0].coarse.latlon_coordinates.lon)
-
     hooks: _Capture | _Recompute | None = None
     if mode == "capture":
         hooks = _Capture()
@@ -361,18 +388,48 @@ def _run_arm(event, config: EvaluatorConfig, model, requirements, captured, foot
         if not captured:
             raise RuntimeError("frozen arm ran before any capture arm")
         hooks = _Recompute(captured)
-    if hooks is not None:
-        for name, module, num_groups in _group_norm_modules(base_model.modules):
-            hooks.attach(name, module, num_groups)
 
-    try:
+    # Accumulate the difference field over time. Averaging (prediction - truth)
+    # over time equals the difference of the time means, so this is the bias of
+    # the time-mean field.
+    totals: dict[str, torch.Tensor] = {}
+    fine_coords = None
+    attached = False
+    n_seen = 0
+
+    for step, batch in enumerate(data.get_generator()):
+        if step >= n_times:
+            break
+        base_model = model.with_rolled_lon(batch[0].coarse.latlon_coordinates.lon)
+        # Hooks bind to modules, which are shared across steps: attach once, and
+        # let the capture/replay call ordinals run continuously so that step k of
+        # the frozen arm replays step k of the capture arm.
+        if hooks is not None and not attached:
+            for name, module, num_groups in _group_norm_modules(base_model.modules):
+                hooks.attach(name, module, num_groups)
+            attached = True
+
         with torch.no_grad():
             outputs = base_model.generate_on_batch(batch, n_samples=event.n_samples)
-    finally:
-        if hooks is not None:
-            hooks.remove()
 
-    extra: dict[str, float] = {}
+        for name, pred in outputs.prediction.items():
+            if name not in outputs.target:
+                continue
+            diff = _to_hw(pred) - _to_hw(outputs.target[name])
+            totals[name] = diff if name not in totals else totals[name] + diff
+        fine_coords = batch[0].fine.latlon_coordinates
+        n_seen += 1
+
+    if hooks is not None:
+        hooks.remove()
+    if n_seen == 0 or fine_coords is None:
+        raise RuntimeError(f"{event.name}: generator yielded no timesteps")
+    if n_seen < n_times:
+        logging.warning(f"{event.name}: only {n_seen} of {n_times} steps available")
+
+    diffs = {k: v / n_seen for k, v in totals.items()}
+
+    extra: dict[str, float] = {"n_times": float(n_seen)}
     if isinstance(hooks, _Capture):
         captured.update(hooks.stats)
         extra["max_abs_error"] = hooks.max_abs_error
@@ -383,21 +440,12 @@ def _run_arm(event, config: EvaluatorConfig, model, requirements, captured, foot
             f"max rel {hooks.max_rel_error:.3e}"
         )
 
-    sample = next(iter(outputs.prediction.values()))
-    logging.info(
-        f"{event.name}: prediction shape {tuple(sample.shape)}, "
-        f"target shape {tuple(next(iter(outputs.target.values())).shape)}"
-    )
-    fine_coords = batch[0].fine.latlon_coordinates
-    bias = _common_footprint_bias(
-        outputs.prediction, outputs.target, fine_coords.lat, fine_coords.lon, footprint
-    )
-    profile = _bias_profile(outputs.prediction, outputs.target)
-    logging.info(f"{event.name}: bias {bias}")
-    return bias, extra, profile
+    bias, rmse = _footprint_stats(diffs, fine_coords.lat, fine_coords.lon, footprint)
+    logging.info(f"{event.name}: {n_seen} steps; bias {bias}; rmse {rmse}")
+    return bias, rmse, extra, _bias_profile(diffs)
 
 
-def main(config_path: str) -> None:
+def main(config_path: str, n_times: int) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
@@ -414,37 +462,50 @@ def main(config_path: str) -> None:
         f"model coarse_shape={model.coarse_shape} fine_shape={model.fine_shape} "
         f"downscale_factor={model.downscale_factor}"
     )
-
     footprint = _common_footprint(config.events or [])
-    logging.info(f"common footprint: lat {footprint[0]}, lon {footprint[1]}")
+    logging.info(
+        f"common footprint: lat {footprint[0]}, lon {footprint[1]}; "
+        f"time mean over {n_times} steps"
+    )
 
     captured: dict[str, list[tuple[torch.Tensor, torch.Tensor]]] = {}
-    results: dict[str, dict[str, float]] = {}
+    biases: dict[str, dict[str, float]] = {}
+    rmses: dict[str, dict[str, float]] = {}
     diagnostics: dict[str, dict[str, float]] = {}
     profiles: dict[str, dict[str, list[float]]] = {}
 
     for event in config.events or []:
         try:
-            bias, extra, profile = _run_arm(
-                event, config, model, requirements, captured, footprint
+            bias, rmse, extra, profile = _run_arm(
+                event, config, model, requirements, captured, footprint, n_times
             )
-            results[event.name] = bias
+            biases[event.name] = bias
+            rmses[event.name] = rmse
             diagnostics[event.name] = extra
             profiles[event.name] = profile
         except Exception:
             logging.exception(f"{event.name}: arm failed, continuing")
 
-    variables = sorted({v for b in results.values() for v in b})
+    variables = sorted({v for b in biases.values() for v in b})
     lines = [
         f"common footprint: lat {footprint[0]}, lon {footprint[1]}",
-        "bias = mean(prediction - truth); frozen vs recomp is the clean contrast",
-        "",
+        f"time mean over {n_times} steps (6-hourly), centered on each event date",
+        "frozen vs recomp is the clean contrast; RMSE is spatial, over the",
+        "time-mean field, and catches error that a domain mean cancels away",
     ]
-    header = f"{'arm':<20}" + "".join(f"{v:>30}" for v in variables)
-    lines += [header, "-" * len(header)]
-    for arm, bias in results.items():
-        row = "".join(f"{bias.get(v, float('nan')):>30.6g}" for v in variables)
-        lines.append(f"{arm:<20}{row}")
+    for label, table in (
+        ("bias = mean(prediction - truth)", biases),
+        ("spatial RMSE", rmses),
+    ):
+        lines += ["", label]
+        header = f"{'arm':<22}" + "".join(f"{v:>30}" for v in variables)
+        lines += [header, "-" * len(header)]
+        for arm in biases:
+            row = table.get(arm, {})
+            lines.append(
+                f"{arm:<22}"
+                + "".join(f"{row.get(v, float('nan')):>30.6g}" for v in variables)
+            )
     for arm, extra in diagnostics.items():
         if "max_abs_error" in extra:
             lines += [
@@ -454,41 +515,42 @@ def main(config_path: str) -> None:
                 f"max rel {extra['max_rel_error']:.3e}",
             ]
 
-    # Edge-distance profiles: one table per variable, rows = arms.
     bin_labels = [f"{lo}-{hi}" for lo, hi in zip(BIN_EDGES[:-1], BIN_EDGES[1:])]
     lines += [
         "",
         "",
         "bias vs distance from domain boundary, in fine cells (1 cell ~ 1/32 deg)",
-        "padding hypothesis: 4deg and 16deg trace the same curve where they "
-        "overlap, rising toward the edge. A flat 4deg row falsifies it.",
     ]
     for var in variables:
         lines += ["", f"--- {var} ---"]
-        header = f"{'arm':<20}" + "".join(f"{b:>14}" for b in bin_labels)
+        header = f"{'arm':<22}" + "".join(f"{b:>14}" for b in bin_labels)
         lines += [header, "-" * len(header)]
-        for arm in results:
+        for arm in biases:
             profile_row = profiles.get(arm, {}).get(var)
             if profile_row is None:
                 continue
             cells = "".join(
                 "             -" if np.isnan(v) else f"{v:>14.5g}" for v in profile_row
             )
-            lines.append(f"{arm:<20}{cells}")
+            lines.append(f"{arm:<22}{cells}")
 
     summary = "\n".join(lines)
     with open(os.path.join(config.experiment_dir, "gn-frozen-summary.txt"), "w") as f:
         f.write(summary)
-    arrays = {
-        f"bias|{arm}|{var}": np.array(val)
-        for arm, b in results.items()
-        for var, val in b.items()
-    }
+    arrays: dict[str, np.ndarray] = {}
+    for kind, table in (("bias", biases), ("rmse", rmses)):
+        arrays.update(
+            {
+                f"{kind}|{arm}|{var}": np.array(val)
+                for arm, d in table.items()
+                for var, val in d.items()
+            }
+        )
     arrays.update(
         {
             f"profile|{arm}|{var}": np.array(val)
-            for arm, p in profiles.items()
-            for var, val in p.items()
+            for arm, pr in profiles.items()
+            for var, val in pr.items()
         }
     )
     arrays["profile_bin_edges"] = np.array(BIN_EDGES)
@@ -501,8 +563,18 @@ def main(config_path: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config_path", type=str, help="Path to the config file")
+    parser.add_argument(
+        "--n-times",
+        type=int,
+        default=1,
+        help=(
+            "Number of 6-hourly steps to average, centered on each event date. "
+            "1 reproduces the single-snapshot behaviour."
+        ),
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    main(parse_args().config_path)
+    _args = parse_args()
+    main(_args.config_path, _args.n_times)

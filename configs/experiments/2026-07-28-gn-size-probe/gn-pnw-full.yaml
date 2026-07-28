@@ -1,0 +1,97 @@
+# Pacific Northwest, time mean over 25 six-hourly steps. See gn_frozen_eval.py.
+#
+# Centered on 45N/238E (122W) and on 2023-01-15T00:00, so the averaging window
+# spans 2023-01-12T00:00 .. 2023-01-18T00:00. Training data for this model ends
+# 2022-12-31, so the whole window is held out; the PNW also sits outside the
+# validation region (lat 0-35, lon 75-195), making it out of sample in region
+# as well as time.
+#
+# A 25-step mean replaces the single cyclone snapshot the earlier configs used,
+# which had no error bars and confounded "small domain" with "domain full of one
+# violent feature".
+#
+# Full arm set. The 4 deg arms pull the derived footprint down to the central
+# 4 deg box, so every arm is scored there.
+experiment_dir: /results
+n_samples: 8
+model:
+  mixture_of_experts_path: /moe/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+  # Base loader only; each event overrides the time subset and the extents.
+  lat_extent:
+    start: 37
+    stop: 53
+  lon_extent:
+    start: 230
+    stop: 246
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: pnw_16deg_capture
+  date: 2023-01-15T00:00
+  lat_extent:
+    start: 37
+    stop: 53
+  lon_extent:
+    start: 230
+    stop: 246
+  n_samples: 8
+- name: pnw_04deg_live
+  date: 2023-01-15T00:00
+  lat_extent:
+    start: 43
+    stop: 47
+  lon_extent:
+    start: 236
+    stop: 240
+  n_samples: 8
+- name: pnw_04deg_recomp
+  date: 2023-01-15T00:00
+  lat_extent:
+    start: 43
+    stop: 47
+  lon_extent:
+    start: 236
+    stop: 240
+  n_samples: 8
+- name: pnw_04deg_frozen
+  date: 2023-01-15T00:00
+  lat_extent:
+    start: 43
+    stop: 47
+  lon_extent:
+    start: 236
+    stop: 240
+  n_samples: 8
+- name: pnw_32deg_single
+  date: 2023-01-15T00:00
+  lat_extent:
+    start: 29
+    stop: 61
+  lon_extent:
+    start: 222
+    stop: 254
+  n_samples: 8

@@ -9,6 +9,7 @@ set -e
 # Config to run, relative to this script's directory. Defaults to the cyclone
 # case; pass gn-bland-eval.yaml for the quiet-ocean control.
 CONFIG_FILENAME=${1:-gn-frozen-eval.yaml}
+N_TIMES=${2:-1}   # 6-hourly steps to average, centered on each event date
 JOB_NAME="gn-eval-${CONFIG_FILENAME%.yaml}"
 
 # Resolve paths from this script's own location rather than the caller's cwd.
@@ -48,4 +49,4 @@ gantry run \
     --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
-    -- python $PROBE_PATH $CONFIG_PATH
+    -- python $PROBE_PATH $CONFIG_PATH --n-times $N_TIMES
