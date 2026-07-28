@@ -1,0 +1,82 @@
+# GroupNorm extent-sensitivity probe. See gn_probe.py.
+#
+# One tropical-cyclone snapshot (WPacific_hurricane_20230425, 2023-04-25T18:00)
+# cropped to three extents about the same center, 15N/138E:
+#
+#   4x4   deg  - below the trained coarse_shape
+#   16x16 deg  - equal to the trained coarse_shape (reference)
+#   32x32 deg  - above the trained coarse_shape
+#
+# The 16x16 case is the in-distribution control: coarse_patch_extent_lat/lon
+# were both 16 in this model's training config, on the ~1 deg (100km) grid.
+#
+# Events run in listed order and each writes its npz as it finishes, so the two
+# cheap extents are safely on disk before the memory-hungry 32x32 attempt.
+experiment_dir: /results
+n_samples: 2
+model:
+  # DenoisingMoEBundledConfig: experts, sigma ranges and sampler settings all
+  # come out of the bundle, so this path is the entire model spec.
+  mixture_of_experts_path: /moe/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+  # Only used to build the base loader; each event overrides the time subset
+  # (EventConfig.get_gridded_data -> update_subset) and the lat/lon extents.
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130
+    stop: 146
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: tc_16deg_reference
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130
+    stop: 146
+  n_samples: 2
+- name: tc_04deg
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 13
+    stop: 17
+  lon_extent:
+    start: 136
+    stop: 140
+  n_samples: 2
+- name: tc_32deg
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -1
+    stop: 31
+  lon_extent:
+    start: 122
+    stop: 154
+  n_samples: 2
