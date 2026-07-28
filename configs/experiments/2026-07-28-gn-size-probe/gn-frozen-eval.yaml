@@ -70,6 +70,19 @@ events:
     start: 136
     stop: 140
   n_samples: 8
+# Numerics control: same recomputation code path as the frozen arm, but using
+# each call's own live statistics. frozen - recomp isolates the statistics;
+# comparing frozen against tc_04deg_live would fold in the difference between
+# the fused Apex kernel and an unfused recomputation under AMP bf16.
+- name: tc_04deg_recomp
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 13
+    stop: 17
+  lon_extent:
+    start: 136
+    stop: 140
+  n_samples: 8
 - name: tc_04deg_frozen
   date: 2023-04-25T18:00
   lat_extent:

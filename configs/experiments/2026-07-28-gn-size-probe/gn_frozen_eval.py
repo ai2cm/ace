@@ -7,32 +7,33 @@ not (0.11 at 32 deg). This script asks the causal question: if the small-input
 run is handed the statistics the model would have seen at the trained extent,
 does its bias go away?
 
-Arms, run in order in one process so the captured statistics can be replayed:
+Arms, run in order in one process so captured statistics can be replayed:
 
-  tc_16deg_capture  16x16 deg, live GroupNorm. In-distribution control, and the
+  tc_16deg_capture  16x16 deg, unmodified. In-distribution control, and the
                     source of the reference statistics.
-  tc_04deg_live     4x4 deg, live GroupNorm. The biased case.
-  tc_04deg_frozen   4x4 deg, GroupNorm statistics replaced by tc_16deg_capture's.
+  tc_04deg_live     4x4 deg, unmodified. The biased case as the model runs it.
+  tc_04deg_recomp   4x4 deg, GroupNorm recomputed from its own LIVE statistics.
+  tc_04deg_frozen   4x4 deg, GroupNorm recomputed from tc_16deg_capture's stats.
   tc_32deg_single   32x32 deg generated as ONE patch, no composite prediction.
+
+``recomp`` exists because this model runs under AMP bf16 against a fused Apex
+GroupNorm kernel, and an unfused Python recomputation of the same arithmetic
+does not reproduce it bit-for-bit. Comparing ``frozen`` against ``live`` would
+therefore confound the frozen statistics with that kernel difference.
+``recomp`` and ``frozen`` take the identical code path and differ only in which
+statistics they use, so **frozen - recomp is the clean measurement**; live is
+kept as the reference for how large the kernel difference actually is.
 
 Bias is reported against the fine truth over the common central 4x4 deg
 footprint, so every arm is scored on identical ground.
 
-Two guards on the machinery:
-
-- ``check_input_shape_supported`` is never reached. It rejects extents below
-  coarse_shape outright, and above it demands composite prediction; both are
-  what we are deliberately measuring. Driving the predictor directly rather
-  than through Downscaler/EventDownscaler sidesteps it without patching, and
-  also means every arm generates as a single patch. The model is fully
-  convolutional here (attn_resolutions=[], bottleneck_attention=false, no
-  additive_pos_embed), so it runs at any extent whose fine grid divides by
-  2**5.
-- The frozen replacement recomputes the whole layer -- normalization, affine,
-  and the activation some of these GroupNorms fuse. During the capture arm it
-  recomputes each layer's output from the LIVE statistics and compares against
-  what the layer actually returned, so any mismatch in eps, affine or fused
-  activation handling is caught before the frozen numbers are believed.
+``check_input_shape_supported`` is never reached: it rejects extents below
+coarse_shape outright and above it demands composite prediction, both of which
+are what we are measuring. Driving the predictor directly rather than through
+Downscaler/EventDownscaler sidesteps it without patching, and also means every
+arm generates as a single patch. The model is fully convolutional here
+(attn_resolutions=[], bottleneck_attention=false, no additive_pos_embed), so it
+runs at any extent whose fine grid divides by 2**5.
 
 Usage:
     python gn_frozen_eval.py <config.yaml>
@@ -86,7 +87,7 @@ def _activation_of(module: torch.nn.Module):
 
     The vendored GroupNorm exposes the resolved callable as ``act_fn``; Apex's
     keeps only the name. Anything unrecognized raises rather than silently
-    dropping an activation from the frozen path.
+    dropping an activation from the recomputed path.
     """
     act_fn = getattr(module, "act_fn", None)
     if act_fn is not None:
@@ -102,35 +103,55 @@ def _activation_of(module: torch.nn.Module):
     return resolved
 
 
+def _group_stats(x: torch.Tensor, num_groups: int):
+    """Per-sample, per-group mean and variance, shaped to broadcast."""
+    grouped = rearrange(x, "b (g c) h w -> b g c h w", g=num_groups)
+    return (
+        grouped.mean(dim=[2, 3, 4], keepdim=True),
+        grouped.var(dim=[2, 3, 4], keepdim=True),
+    )
+
+
 def _normalize(x, num_groups, mean, var, module):
     """Reproduce a GroupNorm's eval-mode forward with supplied statistics.
 
-    ``mean``/``var`` broadcast against the grouped tensor, so they may be either
-    the live per-sample statistics or frozen per-group vectors.
+    Computed in float32 regardless of the incoming dtype: under AMP bf16 an
+    unfused recomputation accumulates visibly more error than the fused kernel,
+    and every arm that uses this path uses it identically, so the cast keeps the
+    frozen-vs-recomputed comparison clean.
     """
-    grouped = rearrange(x, "b (g c) h w -> b g c h w", g=num_groups)
-    normed = (grouped - mean) * (var + module.eps).rsqrt()
+    dtype = x.dtype
+    x32 = x.float()
+    grouped = rearrange(x32, "b (g c) h w -> b g c h w", g=num_groups)
+    normed = (grouped - mean.float()) * (var.float() + module.eps).rsqrt()
     out = rearrange(normed, "b g c h w -> b (g c) h w")
-    weight = module.weight.to(out.dtype).reshape(1, -1, 1, 1)
-    bias = module.bias.to(out.dtype).reshape(1, -1, 1, 1)
-    out = out * weight + bias
+    out = out * module.weight.float().reshape(1, -1, 1, 1)
+    out = out + module.bias.float().reshape(1, -1, 1, 1)
     act_fn = _activation_of(module)
-    return out if act_fn is None else act_fn(out)
+    if act_fn is not None:
+        out = act_fn(out)
+    return out.to(dtype)
 
 
 class _Capture:
-    """Records per-group statistics per call, and self-checks the replacement.
+    """Records per-group statistics per call, and measures replacement fidelity.
 
     GroupNorm reduces over (C/G, H, W) per sample; statistics are averaged over
     the sample dimension, which is a repeat of identical conditions, but kept
     separate per call because they vary strongly with noise level.
+
+    The recorded fidelity numbers say how closely the unfused recomputation
+    tracks the model's own GroupNorm. They are diagnostics, not gates: the
+    frozen measurement is made against the ``recomp`` arm, which shares this
+    code path, so a nonzero gap here does not bias it.
     """
 
     def __init__(self) -> None:
         self.stats: dict[str, list[tuple[torch.Tensor, torch.Tensor]]] = (
             collections.defaultdict(list)
         )
-        self.max_reconstruction_error = 0.0
+        self.max_abs_error = 0.0
+        self.max_rel_error = 0.0
         self._handles: list[torch.utils.hooks.RemovableHandle] = []
 
     def attach(self, name: str, module: torch.nn.Module, num_groups: int) -> None:
@@ -138,18 +159,15 @@ class _Capture:
             x = args[0]
             if not torch.is_tensor(x) or x.dim() != 4:
                 return None
-            grouped = rearrange(x, "b (g c) h w -> b g c h w", g=num_groups)
-            live_mean = grouped.mean(dim=[2, 3, 4], keepdim=True)
-            live_var = grouped.var(dim=[2, 3, 4], keepdim=True)
+            live_mean, live_var = _group_stats(x, num_groups)
 
-            # Self-check: rebuild this layer's output from its own live
-            # statistics. Any gap means the replacement mishandles eps, the
-            # affine parameters or a fused activation.
             rebuilt = _normalize(x, num_groups, live_mean, live_var, mod)
-            err = (rebuilt - output).abs().max().item()
-            self.max_reconstruction_error = max(self.max_reconstruction_error, err)
+            err = (rebuilt.float() - output.float()).abs().max().item()
+            scale = output.float().abs().max().item()
+            self.max_abs_error = max(self.max_abs_error, err)
+            self.max_rel_error = max(self.max_rel_error, err / max(scale, 1e-12))
 
-            # (B, G, 1, 1, 1) -> (G,), averaged over the sample dimension.
+            # (B, G, 1, 1, 1) -> (G, 1, 1, 1), averaged over the sample dim.
             self.stats[name].append(
                 (
                     live_mean.mean(dim=0).detach().clone(),
@@ -166,10 +184,17 @@ class _Capture:
         self._handles.clear()
 
 
-class _Replay:
-    """Replaces each GroupNorm's output using previously captured statistics."""
+class _Recompute:
+    """Replaces each GroupNorm's output with an unfused recomputation.
 
-    def __init__(self, stats: dict[str, list[tuple[torch.Tensor, torch.Tensor]]]):
+    With ``stats=None`` it uses each call's own live statistics -- the numerics
+    control. With captured statistics it replays them by call ordinal, which is
+    the frozen condition. Both paths run identical arithmetic.
+    """
+
+    def __init__(
+        self, stats: dict[str, list[tuple[torch.Tensor, torch.Tensor]]] | None = None
+    ):
         self.stats = stats
         self.calls: dict[str, int] = collections.defaultdict(int)
         self._handles: list[torch.utils.hooks.RemovableHandle] = []
@@ -179,23 +204,22 @@ class _Replay:
             x = args[0]
             if not torch.is_tensor(x) or x.dim() != 4:
                 return None
-            idx = self.calls[name]
-            self.calls[name] += 1
-            cached = self.stats.get(name)
-            if cached is None or idx >= len(cached):
-                raise RuntimeError(
-                    f"no captured statistics for {name} call {idx} "
-                    f"(captured {0 if cached is None else len(cached)}); "
-                    "capture and replay arms must use the same n_samples"
-                )
-            mean, var = cached[idx]
-            return _normalize(
-                x,
-                num_groups,
-                mean.to(x.device, x.dtype),
-                var.to(x.device, x.dtype),
-                mod,
-            )
+            if self.stats is None:
+                mean, var = _group_stats(x, num_groups)
+            else:
+                idx = self.calls[name]
+                self.calls[name] += 1
+                cached = self.stats.get(name)
+                if cached is None or idx >= len(cached):
+                    raise RuntimeError(
+                        f"no captured statistics for {name} call {idx} "
+                        f"(captured {0 if cached is None else len(cached)}); "
+                        "capture and replay arms must use the same n_samples"
+                    )
+                mean, var = cached[idx]
+                mean = mean.to(x.device)
+                var = var.to(x.device)
+            return _normalize(x, num_groups, mean, var, mod)
 
         self._handles.append(module.register_forward_hook(hook))
 
@@ -203,6 +227,16 @@ class _Replay:
         for handle in self._handles:
             handle.remove()
         self._handles.clear()
+
+
+def _to_hw(t: torch.Tensor) -> torch.Tensor:
+    """Collapse any leading batch/sample dimensions, averaging them."""
+    t = t.detach().float()
+    if t.dim() < 2:
+        raise ValueError(
+            f"expected at least 2 spatial dims, got shape {tuple(t.shape)}"
+        )
+    return t.reshape(-1, *t.shape[-2:]).mean(dim=0)
 
 
 def _crop_index(coord: torch.Tensor, lo: float, hi: float) -> torch.Tensor:
@@ -229,13 +263,8 @@ def _common_footprint_bias(
     for name, pred in prediction.items():
         if name not in target:
             continue
-        p = pred.detach().float()
-        # (B, S, H, W) -> average the sample dimension; (B, H, W) -> as is.
-        if p.dim() == 4:
-            p = p.mean(dim=1)
-        t = target[name].detach().float()
-        p = p[0][y_idx][:, x_idx]
-        t = t[0][y_idx][:, x_idx]
+        p = _to_hw(pred)[y_idx][:, x_idx]
+        t = _to_hw(target[name])[y_idx][:, x_idx]
         biases[name] = float((p - t).mean())
     return biases
 
@@ -245,25 +274,28 @@ def _run_arm(event, config: EvaluatorConfig, model, requirements, captured):
     data = event.get_paired_gridded_data(
         base_data_config=config.data, requirements=requirements
     )
-    mode = (
-        "capture"
-        if event.name.endswith("_capture")
-        else "frozen"
-        if event.name.endswith("_frozen")
-        else "live"
-    )
+    if event.name.endswith("_capture"):
+        mode = "capture"
+    elif event.name.endswith("_frozen"):
+        mode = "frozen"
+    elif event.name.endswith("_recomp"):
+        mode = "recomp"
+    else:
+        mode = "live"
     logging.info(f"{event.name}: mode={mode}, n_samples={event.n_samples}")
 
     batch = next(iter(data.get_generator()))
     base_model = model.with_rolled_lon(batch[0].coarse.latlon_coordinates.lon)
 
-    hooks: _Capture | _Replay | None = None
+    hooks: _Capture | _Recompute | None = None
     if mode == "capture":
         hooks = _Capture()
+    elif mode == "recomp":
+        hooks = _Recompute(None)
     elif mode == "frozen":
         if not captured:
             raise RuntimeError("frozen arm ran before any capture arm")
-        hooks = _Replay(captured)
+        hooks = _Recompute(captured)
     if hooks is not None:
         for name, module, num_groups in _group_norm_modules(base_model.modules):
             hooks.attach(name, module, num_groups)
@@ -275,19 +307,25 @@ def _run_arm(event, config: EvaluatorConfig, model, requirements, captured):
         if hooks is not None:
             hooks.remove()
 
-    extra = {}
+    extra: dict[str, float] = {}
     if isinstance(hooks, _Capture):
         captured.update(hooks.stats)
-        extra["max_reconstruction_error"] = hooks.max_reconstruction_error
+        extra["max_abs_error"] = hooks.max_abs_error
+        extra["max_rel_error"] = hooks.max_rel_error
         logging.info(
-            f"{event.name}: captured {len(hooks.stats)} layers; "
-            f"max replacement reconstruction error "
-            f"{hooks.max_reconstruction_error:.3e}"
+            f"{event.name}: captured {len(hooks.stats)} layers; recomputation "
+            f"vs fused kernel max abs {hooks.max_abs_error:.3e}, "
+            f"max rel {hooks.max_rel_error:.3e}"
         )
 
+    sample = next(iter(outputs.prediction.values()))
+    logging.info(
+        f"{event.name}: prediction shape {tuple(sample.shape)}, "
+        f"target shape {tuple(next(iter(outputs.target.values())).shape)}"
+    )
     fine_coords = batch[0].fine.latlon_coordinates
     bias = _common_footprint_bias(
-        outputs.prediction, batch[0].fine.data, fine_coords.lat, fine_coords.lon
+        outputs.prediction, outputs.target, fine_coords.lat, fine_coords.lon
     )
     logging.info(f"{event.name}: bias {bias}")
     return bias, extra
@@ -313,7 +351,7 @@ def main(config_path: str) -> None:
 
     captured: dict[str, list[tuple[torch.Tensor, torch.Tensor]]] = {}
     results: dict[str, dict[str, float]] = {}
-    diagnostics: dict[str, dict] = {}
+    diagnostics: dict[str, dict[str, float]] = {}
 
     for event in config.events or []:
         try:
@@ -324,21 +362,23 @@ def main(config_path: str) -> None:
             logging.exception(f"{event.name}: arm failed, continuing")
 
     variables = sorted({v for b in results.values() for v in b})
-    lines = [f"common footprint: lat {COMMON_LAT}, lon {COMMON_LON}", ""]
-    header = f"{'arm':<22}" + "".join(f"{v:>28}" for v in variables)
+    lines = [
+        f"common footprint: lat {COMMON_LAT}, lon {COMMON_LON}",
+        "bias = mean(prediction - truth); frozen vs recomp is the clean contrast",
+        "",
+    ]
+    header = f"{'arm':<20}" + "".join(f"{v:>30}" for v in variables)
     lines += [header, "-" * len(header)]
     for arm, bias in results.items():
-        lines.append(
-            f"{arm:<22}"
-            + "".join(f"{bias.get(v, float('nan')):>28.6g}" for v in variables)
-        )
+        row = "".join(f"{bias.get(v, float('nan')):>30.6g}" for v in variables)
+        lines.append(f"{arm:<20}{row}")
     for arm, extra in diagnostics.items():
-        if "max_reconstruction_error" in extra:
+        if "max_abs_error" in extra:
             lines += [
                 "",
-                f"{arm}: max GroupNorm replacement reconstruction error "
-                f"{extra['max_reconstruction_error']:.3e} "
-                "(should be ~0; validates the frozen path)",
+                f"{arm}: unfused recomputation vs fused GroupNorm kernel -- "
+                f"max abs {extra['max_abs_error']:.3e}, "
+                f"max rel {extra['max_rel_error']:.3e}",
             ]
 
     summary = "\n".join(lines)
