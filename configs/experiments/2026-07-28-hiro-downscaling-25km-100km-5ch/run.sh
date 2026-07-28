@@ -1,10 +1,15 @@
 #!/bin/bash
 # Full GPU training run for the HiRO-ACE-style spatial downscaling baseline
 # (100km -> 25km, factor 4, 5 channels), via gantry + torchrun DDP. Reads
-# data DIRECTLY FROM GCS (gs://vcm-ml-intermediate/...) -- same store and
-# cluster/workspace as the PMD spatiotemporal configs
-# (../2026-07-24-video-pmd-spatiotemporal-25km-100km/run.sh); see that
-# script's comments for the cluster-choice/GCS-egress history.
+# data from WEKA (climate-default), not GCS directly -- cheaper than the
+# GCS-direct PMD spatiotemporal configs
+# (../2026-07-24-video-pmd-spatiotemporal-25km-100km/run.sh), same weka
+# mount/dir as the PMD stage-1 config (../2026-06-29-video-pmd-titan/run.sh).
+#
+# REQUIRES: both the 25km and 100km zarrs copied to
+# /climate-default/2026-06-25-temporal-diffusion/ on weka first (same
+# filenames as their gs://vcm-ml-intermediate originals) -- this script does
+# NOT do that copy, see train.yaml's header comment.
 #
 # Uses fme.downscaling.train (the plain spatial trainer), NOT
 # fme.downscaling.video_train -- this is a single-frame baseline, not PMD.
@@ -33,7 +38,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run \
     --name "$JOB_NAME" \
-    --description 'HiRO-ACE-style spatial downscaling baseline (100km->25km, 5ch), same split as PMD, global, patch-trained. 4x GPU DDP on titan (GCS-direct).' \
+    --description 'HiRO-ACE-style spatial downscaling baseline (100km->25km, 5ch), same split as PMD, global, patch-trained. 4x GPU DDP on titan (weka).' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
@@ -41,8 +46,7 @@ gantry run \
     --gpus "$N_GPUS" \
     --shared-memory 64GiB \
     --budget ai2/atec-climate \
-    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --weka climate-default:/climate-default \
     --env-secret WANDB_API_KEY="$WANDB_SECRET" \
     --system-python \
     --install "pip install --no-deps ." \
