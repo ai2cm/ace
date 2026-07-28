@@ -23,11 +23,22 @@ mask20-co2bern75, mask20-co2default, mask0-co2bern75, mask0-co2default.
 For v2/v3, global_mean_co2 is not an input channel (see
 ``baseline_configs/versions.md``), so the co2 axis is dropped, but the gmr
 axis is added instead: 2 x 1 x 2 x 5 = 20 configs: mask20-gmron,
-mask20-gmroff, mask0-gmron, mask0-gmroff (each co2default). v3 additionally
-gets the sst axis and the clock50 arm described for v5 below, under the same
-skip rules (sston skipped at mask0, clock50 GMR-on only); unlike v5, v3
-config names keep the co2default token. That grows v3 to 20 + 10 (mask20
-sston, both gmr options) + 5 (gmron mask20 clock50) = 35 configs.
+mask20-gmroff, mask0-gmron, mask0-gmroff (each co2default).
+
+v3 additionally gets an sst axis (``sst_options_for_version``): ``sston`` pins
+``surface_temperature`` to never masked via a rate-0 Bernoulli
+``override_groups`` entry (which also removes it from the uniform pool), while
+the tokenless option keeps it in the uniform pool. ``sston`` is skipped at
+mask0, where it would be a no-op. v3 also gets a ``clock50`` arm (from
+``TARGETED_ARMS``): at mask20, the GMR sentinel channel
+(``__gmr_extra__surface_temperature``) is pulled into its own
+``override_groups`` entry and masked at rate 0.5 on top of the uniform pool.
+It is GMR-on only — ``gmroff`` removes ``global_mean_removal``, so the sentinel
+channel is never packed and the arm is impossible there (masking it would fail
+config validation, cf. the ``sston``-at-mask0 skip) — and is not crossed with
+the sst axis. v3 config names keep the co2default token. That grows v3 to
+20 + 10 (mask20 sston, both gmr options) + 5 (gmron mask20 clock50) = 35
+configs.
 
 For v4, global_mean_co2 is likewise not a native input and stays that way
 (no co2-input axis: every v4 config has co2 excluded, matching the baseline),
@@ -61,25 +72,11 @@ entry: ``co2in`` restores ``global_mean_co2`` as a network input
 sweep becomes 2 x 2 x 5 = 20 configs, each targeted arm becomes 2 x 5 = 10
 configs, for a v4 grand total of 20 + 10 * len(TARGETED_ARMS).
 
-v5 is the mask0/mask20 sweep only (no ``TARGETED_ARMS``), crossed with the gmr
-axis (gmron/gmroff) instead of the co2-input axis: every v5 config trains
-without ``global_mean_co2`` as an input, with no co2 token in the config name.
-v5 also adds an sst axis (``sst_options_for_version``): ``sston`` pins
-``surface_temperature`` to never masked via a rate-0 Bernoulli
-``override_groups`` entry (which also removes it from the uniform pool), while
-the tokenless option keeps it in the uniform pool. ``sston`` is skipped at
-mask0, where it would be a no-op. This is 2 (gmr) x 5 = 10 mask0 configs plus
-2 (gmr) x 2 (sst) x 5 = 20 mask20 configs, i.e. 30:
-gmron/gmroff x mask0, gmron/gmroff x mask20, gmron/gmroff x mask20-sston.
-
-v5 also adds a ``clock50`` arm (from ``TARGETED_ARMS``): at mask20, the GMR
-sentinel channel (``__gmr_extra__surface_temperature``) is pulled into its own
-``override_groups`` entry and masked at rate 0.5 on top of the uniform pool.
-It is GMR-on only — ``gmroff`` removes ``global_mean_removal``, so the sentinel
-channel is never packed and the arm is impossible there (masking it would fail
-config validation, cf. the ``sston``-at-mask0 skip) — and is not crossed with
-the sst axis. This adds 1 (gmron) x 5 = 5 configs (gmron x mask20-clock50), a
-v5 grand total of 35.
+v5 is the mask0/mask20 sweep only (no sst axis, no ``TARGETED_ARMS``), crossed
+with the gmr axis (gmron/gmroff) instead of the co2-input axis: every v5 config
+trains without ``global_mean_co2`` as an input, with no co2 token in the config
+name. This is 2 (mask) x 2 (gmr) x 5 = 20 configs: gmron/gmroff x mask0,
+gmron/gmroff x mask20.
 """
 
 import argparse
@@ -154,16 +151,16 @@ SST_OPTIONS: dict[str, float | None] = {"": None, "sston": 0.0}
 
 
 def sst_options_for_version(version: str) -> dict[str, float | None]:
-    """SST_OPTIONS, restricted to the no-op (SST in uniform pool) except v3/v5.
+    """SST_OPTIONS, restricted to the no-op (SST in uniform pool) except v3.
 
-    v3/v5 add an ``sston`` ablation: ``surface_temperature`` is moved into its
+    v3 adds an ``sston`` ablation: ``surface_temperature`` is moved into its
     own ``override_groups`` entry with Bernoulli rate 0, so it is never masked
     (a rate-0 Bernoulli group never fires, and grouped channels leave the
     uniform pool). The tokenless option keeps SST in the uniform pool, as in
     the baseline. Redundant combinations (``sston`` at mask0, where nothing is
     masked anyway) are skipped in ``iter_train_configs``.
     """
-    if version in ("v3", "v5"):
+    if version == "v3":
         return SST_OPTIONS
     return {"": None}
 
@@ -190,7 +187,7 @@ TARGETED_MASK_LEVEL = 20  # uniform max_masked_vars for the non-targeted channel
 
 # The GMR-sentinel targeted arm (masks the shared global-mean guard channel,
 # __gmr_extra__surface_temperature, at rate 0.5 on top of the uniform pool).
-# Used by v4's TARGETED_ARMS and, GMR-on only, by v5 (see iter_train_configs).
+# Used by v4's TARGETED_ARMS and, GMR-on only, by v3 (see iter_train_configs).
 CLOCK_ARM = TargetedArm("clock50", ["__gmr_extra__surface_temperature"], 0.5)
 
 # v4-only targeted-masking arms: each pulls its channels out of the uniform
@@ -290,16 +287,16 @@ def iter_train_configs(
                     cfg["seed"] = seed
                     configs.append((name, cfg))
 
-    if version in ("v3", "v5"):
-        # v3/v5 clock50 arm: on top of the uniform mask20 pool, pull the GMR
+    if version == "v3":
+        # v3 clock50 arm: on top of the uniform mask20 pool, pull the GMR
         # sentinel channel (__gmr_extra__surface_temperature) into its own
         # group masked at rate 0.5. GMR-on only: gmroff removes
         # global_mean_removal, so the sentinel channel is never packed and the
         # arm is impossible there (cf. the sston-at-mask0 skip above). Not
-        # crossed with the sst axis. Neither version has a co2 input; v3
-        # keeps its co2default name token (v5 has none, see co2_token above).
+        # crossed with the sst axis. v3 has no co2 input, but keeps its
+        # co2default name token.
         gmron_name = next(name for name, keep in GMR_OPTIONS.items() if keep)
-        co2_token = "" if version == "v5" else f"-{next(iter(co2_options))}"
+        co2_token = f"-{next(iter(co2_options))}"
         for seed in range(n_seeds):
             name = (
                 f"{BASE_CONFIG_STEM}-{gmron_name}-mask{TARGETED_MASK_LEVEL}"

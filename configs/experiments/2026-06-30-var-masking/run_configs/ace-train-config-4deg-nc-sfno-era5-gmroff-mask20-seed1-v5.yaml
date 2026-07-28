@@ -600,9 +600,6 @@ stepper:
       - tendency_of_total_water_path_due_to_advection
       - TMP850
       - h500
-      global_mean_removal:
-        kind: shared
-        append_as_input: true
       input_dropout:
         default:
           max_masked_vars: 20
