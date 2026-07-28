@@ -1,0 +1,67 @@
+# Quiet-ocean pair: does generating a 32x32 deg domain and cropping to 16x16 match generating
+# 16x16 directly? See gn_frozen_eval.py.
+#
+# Only two arms, so the auto-derived scoring footprint is their intersection:
+# the FULL 16 deg box. That is the difference from gn-frozen-eval.yaml, where
+# the 4 deg arms pulled the footprint down to 4 deg and the 32 deg arm was only
+# ever scored on that small central box.
+#
+# This is the measurement that would justify relaxing the upper bound of
+# check_input_shape_supported, which currently forces composite prediction for
+# any input larger than coarse_shape.
+experiment_dir: /results
+n_samples: 8
+model:
+  mixture_of_experts_path: /moe/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+  # Base loader only; each event overrides the time subset and the extents.
+  lat_extent:
+    start: -33
+    stop: -17
+  lon_extent:
+    start: 202
+    stop: 218
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: bland_16deg
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -33
+    stop: -17
+  lon_extent:
+    start: 202
+    stop: 218
+  n_samples: 8
+- name: bland_32deg_single
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -41
+    stop: -9
+  lon_extent:
+    start: 194
+    stop: 226
+  n_samples: 8
