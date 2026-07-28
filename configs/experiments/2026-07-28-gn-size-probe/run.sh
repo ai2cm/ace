@@ -8,14 +8,18 @@ set -e
 
 JOB_NAME="gn-size-probe-tc-20230425"
 
-SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
-CONFIG_PATH=$SCRIPT_PATH/gn-probe.yaml
-PROBE_PATH=$SCRIPT_PATH/gn_probe.py
+# Resolve paths from this script's own location rather than the caller's cwd:
+# `git rev-parse --show-prefix` is empty when invoked from the repo root, which
+# would leave the in-container paths as bare "/gn_probe.py".
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)
+REL_DIR=${SCRIPT_DIR#"$REPO_ROOT"/}
+CONFIG_PATH=$REL_DIR/gn-probe.yaml
+PROBE_PATH=$REL_DIR/gn_probe.py
 
 # since we use a service account API key for wandb, we use the beaker username
 # to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
-REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
