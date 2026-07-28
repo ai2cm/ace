@@ -57,12 +57,11 @@ from fme.ace.testing import (
     save_stats_netcdfs,
     save_stepper_checkpoint,
 )
-from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
+from fme.ace.train.train import prepare_directory
 from fme.ace.train.train_config import (
     InlineInferenceConfig,
     InlineValidationConfig,
-    TrainBuilders,
     TrainConfig,
 )
 from fme.core.coordinates import (
@@ -172,8 +171,7 @@ def _get_test_yaml_files(
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
     if nettype == "HEALPixUNet":
-        in_channels = len(in_variable_names)
-        conv_next_block = conv_next_block_config(in_channels=in_channels)
+        conv_next_block = conv_next_block_config()
         down_sampling_block = down_sampling_block_config()
         encoder = encoder_config(
             conv_next_block, down_sampling_block, n_channels=[16, 8, 4]
@@ -850,8 +848,7 @@ def _get_reproducible_trainer(config_dict, seed):
         data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
     )
     prepare_directory(config.experiment_dir, config_dict)
-    builders = TrainBuilders(config)
-    return build_trainer(builders, config)
+    return config.build_trainer()
 
 
 @pytest.mark.medium_duration
@@ -903,11 +900,10 @@ def test_restore_checkpoint(
         data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
     )
     prepare_directory(config.experiment_dir, config_dict)
-    builders = TrainBuilders(config)
 
-    base_trainer = build_trainer(builders, config)
-    restored_trainer1 = build_trainer(builders, config)
-    restored_trainer2 = build_trainer(builders, config)
+    base_trainer = config.build_trainer()
+    restored_trainer1 = config.build_trainer()
+    restored_trainer2 = config.build_trainer()
 
     # run one epoch
     base_trainer.train_one_epoch()

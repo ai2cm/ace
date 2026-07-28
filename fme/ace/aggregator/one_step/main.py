@@ -5,7 +5,10 @@ from collections.abc import Sequence
 
 import torch
 
-from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
+from fme.ace.aggregator.loss_metrics import (
+    PerChannelLossAggregator,
+    PerStepLossAggregator,
+)
 from fme.ace.aggregator.one_step.deterministic import (
     DeterministicTrainOutput,
     OneStepDeterministicAggregator,
@@ -53,6 +56,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         self,
         deterministic_aggregator: OneStepDeterministicAggregator,
         ensemble_aggregators: dict[str, EnsembleAggregator] | None = None,
+        per_channel_loss: bool = True,
     ):
         self._deterministic_aggregator = deterministic_aggregator
         self._ensemble_aggregators: dict[str, EnsembleAggregator] = (
@@ -60,6 +64,9 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         )
         self._ensemble_recorded = False
         self._per_step_losses = PerStepLossAggregator()
+        self._per_channel_losses: PerChannelLossAggregator | None = (
+            PerChannelLossAggregator() if per_channel_loss else None
+        )
 
     @torch.no_grad()
     def record_batch(
@@ -72,6 +79,11 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             if k.startswith("loss_step_") or k.startswith("loss/")
         }
         self._per_step_losses.record(step_metrics)
+        if (
+            self._per_channel_losses is not None
+            and batch.per_channel_losses is not None
+        ):
+            self._per_channel_losses.record(batch.per_channel_losses)
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
         self._deterministic_aggregator.record_batch(
@@ -100,6 +112,8 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         det_summary = self._deterministic_aggregator.get_summary(label)
         logs = dict(det_summary.logs)
         logs.update(self._per_step_losses.get_logs(label))
+        if self._per_channel_losses is not None:
+            logs.update(self._per_channel_losses.get_logs(label))
         if self._ensemble_recorded and self._ensemble_aggregators:
             stochastic_logs: dict = {}
             for agg_name, ensemble_aggregator in self._ensemble_aggregators.items():
@@ -146,6 +160,7 @@ def build_one_step_aggregator(
     channel_mean_names: Sequence[str] | None = None,
     raise_on_unsupported: bool = True,
     include_default_ensemble: bool = True,
+    per_channel_loss: bool = True,
 ) -> OneStepAggregator:
     _validate_no_duplicate_names(metrics)
     ctx = OneStepBuildContext(
@@ -192,6 +207,7 @@ def build_one_step_aggregator(
     return OneStepAggregator(
         deterministic_aggregator=deterministic,
         ensemble_aggregators=ensemble_aggregators,
+        per_channel_loss=per_channel_loss,
     )
 
 
@@ -215,6 +231,9 @@ class OneStepAggregatorConfig:
         mean_map: Mean map image metrics.
         ensemble_denorm: Ensemble spread metrics on denormalized data.
         ensemble_norm: Ensemble spread metrics on normalized data.
+        per_channel_loss: Whether to accumulate and report per-variable (per-channel)
+            loss in get_logs (e.g. val/mean/loss/<var_name>), mirroring the
+            train aggregator.
     """
 
     mean_denorm: OneStepMeanMetricConfig = dataclasses.field(
@@ -244,6 +263,7 @@ class OneStepAggregatorConfig:
             target="norm", enabled=False
         )
     )
+    per_channel_loss: bool = True
 
     def __post_init__(self):
         if not self.mean_denorm.enabled:
@@ -299,6 +319,7 @@ class OneStepAggregatorConfig:
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
             include_default_ensemble=False,
+            per_channel_loss=self.per_channel_loss,
         )
 
 

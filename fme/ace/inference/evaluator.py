@@ -219,6 +219,11 @@ class InferenceEvaluatorConfig:
         n_ensemble_per_ic: Number of ensemble members per initial condition. Useful for
             stochastic model weather inference. n_ensemble_per_ic = 1 is default
             inference behavior.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a reproducible
+            noise sequence, independent of forward_steps_in_memory. Leave unset
+            (None) for the default non-reproducible behavior. Only affects the
+            stepper rollout (not the prediction_loader comparison path).
     """
 
     experiment_dir: str
@@ -239,6 +244,7 @@ class InferenceEvaluatorConfig:
     allow_incompatible_dataset: bool = False
     validation: ValidationConfig | None = None
     n_ensemble_per_ic: int = 1
+    seed: int | None = None
 
     def __post_init__(self):
         self.data_writer.validate_time_coarsen(
@@ -354,6 +360,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
+        data.apply_config_seed(config.seed)
         stepper = config.load_stepper()
         stepper.set_eval()
 
