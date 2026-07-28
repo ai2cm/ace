@@ -1,0 +1,46 @@
+# ERA5-forced uniform-SST response, p4k arm (era5 label mode).
+#
+# Standalone offline inference (fme.ace.inference) of a combined SHiELD+ + ERA5
+# checkpoint on the ERA5 case -- the measurement the training runs never made
+# (their eight inline evaluations all read c96-SHiELD stores with
+# labels: [shield-plus]). 4-year daily rollout from 1979-01-01; the +4K arm
+# perturbs ocean-masked SST by a constant 4 K. Response = p4k - p0k.
+#
+# Label mode "era5":
+#   nolabel  - no labels key; for the unconditional arms A and G.
+#   era5     - labels: [era5]; conformed by name to the checkpoint's 2-wide
+#              encoding (BatchLabels.conform_to_encoding), giving [era5=1,
+#              shield-plus=0].
+#   withheld - labels: []; an empty name list conforms to the ALL-ZEROS row,
+#              i.e. the unconditional state that label dropout trains.
+#
+# research: tasks/2026-07-08-combined-shield-era5-training.md
+checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+experiment_dir: /results
+forward_steps_in_memory: 40
+n_forward_steps: 1460
+labels:
+  - era5
+initial_condition:
+  path: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '1979-01-01T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+  perturbations:
+    sst:
+      - type: constant
+        config:
+          amplitude: 4.0
+logging:
+  project: ace
