@@ -13,30 +13,38 @@ validate_using_ema: true
 max_epochs: 20
 logging: {log_to_screen: true, log_to_wandb: true, log_to_file: true, project: ace}
 
+# stream `name` defaults to `domain` (omitted here). No objective consumes
+# both streams in one term, so they are sampled independently — pairing is
+# derived from objective co-occurrence, not configured.
 train_data:
   batch_size: 16
   num_data_workers: 4
-  sampling: independent   # ERA5 and SHiELD are different realities; no
-                          # objective consumes both streams in one term
   streams:
-    era5:   {domain: era5,       dataset: {data_path: gs://.../era5-4deg-daily/train}}
-    shield: {domain: shield_c96, dataset: {data_path: gs://.../shield-c96-4deg-daily/train}}
+    - {domain: era5,       dataset: {data_path: gs://.../era5-4deg-daily/train}}
+    - {domain: shield_c96, dataset: {data_path: gs://.../shield-c96-4deg-daily/train}}
 
 validation_data:
   batch_size: 16
-  sampling: independent
   streams:
-    era5:   {domain: era5,       dataset: {data_path: gs://.../era5-4deg-daily/valid}}
-    shield: {domain: shield_c96, dataset: {data_path: gs://.../shield-c96-4deg-daily/valid}}
+    - {domain: era5,       dataset: {data_path: gs://.../era5-4deg-daily/valid}}
+    - {domain: shield_c96, dataset: {data_path: gs://.../shield-c96-4deg-daily/valid}}
 
 component_pool:
   domains:
-    era5:
-      channels:              # full list elided; the two variable sets differ
-        - air_temperature_0  # ... _7
-        - specific_total_water_0   # ...
-        - eastward_wind_0    # ...
-        - northward_wind_0   # ...
+    # channel lists live on the transforms below; each domain's load list is
+    # derived from the channels the transforms reference in it. Grids come
+    # from the bound datasets (both 4°).
+    era5: {}
+    shield_c96: {}
+
+  transforms:
+    to_shield:
+      in_domain: era5
+      in_channels: &era5_channels  # full list elided; the two variable sets
+        - air_temperature_0        # differ, and the translators map between
+        - specific_total_water_0   # them — they need not match
+        - eastward_wind_0          # ...
+        - northward_wind_0         # ...
         - PRESsfc
         - surface_temperature
         - DSWRFtoa
@@ -44,12 +52,12 @@ component_pool:
         - land_fraction
         - sea_ice_fraction
         - global_mean_co2
-    shield_c96:
-      channels:              # the donor's full in/out union, incl. channels
-        - air_temperature_0  # ERA5 lacks — the translators map between the
-        - specific_total_water_0   # two sets; they need not match
-        - eastward_wind_0    # ...
-        - northward_wind_0   # ...
+      out_domain: shield_c96
+      out_channels: &shield_channels  # the donor's full in/out union, incl.
+        - air_temperature_0           # channels ERA5 lacks
+        - specific_total_water_0      # ...
+        - eastward_wind_0             # ...
+        - northward_wind_0            # ...
         - PRESsfc
         - surface_temperature
         - LHTFLsfc
@@ -60,11 +68,6 @@ component_pool:
         - land_fraction
         - sea_ice_fraction
         - global_mean_co2
-
-  transforms:
-    to_shield:
-      in_domain: era5
-      out_domain: shield_c96
       module:
         type: same_grid      # both domains on the same 4° grid
         config:
@@ -73,7 +76,9 @@ component_pool:
             config: {embed_dim: 256, num_layers: 4, scale_factor: 1}
     to_era5:
       in_domain: shield_c96
+      in_channels: *shield_channels
       out_domain: era5
+      out_channels: *era5_channels
       module:
         type: same_grid
         config:
@@ -94,16 +99,16 @@ component_pool:
                                    # before DDP wrapping
 
 objectives:
-  # end-to-end rollout scored on ERA5: translate in -> step frozen donor ->
-  # translate out. Forcings (incl. SST for the donor's ocean config, CO2) are
-  # translated per step through to_shield so they arrive in-donor-domain —
-  # the same path the +4K / future-scenario perturbation harnesses exercise.
+  # end-to-end rollout scored on ERA5: a component chain with exactly one
+  # backbone — to_shield encodes once, the frozen donor rolls out, to_era5
+  # decodes every output step. Forcings (incl. SST for the donor's ocean
+  # config, CO2) are translated per step through to_shield so they arrive
+  # in-donor-domain — the same path the +4K / future-scenario perturbation
+  # harnesses exercise.
   - name: forward_era5
     type: forward_prediction
     config:
-      encoder: to_shield
-      backbone: donor
-      decoder: to_era5
+      components: [to_shield, donor, to_era5]
       input_stream: era5
       target_stream: era5
       forcing_stream: era5
@@ -129,8 +134,8 @@ objectives:
     type: translation
     config:
       components: [to_era5, to_shield]
-      input_stream: shield
-      target_stream: shield
+      input_stream: shield_c96
+      target_stream: shield_c96
       loss: {type: MSE}
       weight: 0.2
 
@@ -140,7 +145,7 @@ optimization:
   enable_automatic_mixed_precision: false
 
 inference:
-  - composite: {encoder: to_shield, backbone: donor, decoder: to_era5}
+  - composite: [to_shield, donor, to_era5]
     n_forward_steps: 1460
     forward_steps_in_memory: 50
     loader: {dataset: {data_path: gs://.../era5-4deg-daily/valid}, start_indices: {first: 0, n_initial_conditions: 4, interval: 365}}
