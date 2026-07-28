@@ -44,6 +44,20 @@ Atmosphere stream (3-hourly FV3 chunks):
 3. Regrid to Gaussian grid via xESMF
 4. Mask sea-ice variables to the ocean
 
+### Optional snapshot output
+
+Passing `--snapshot_output_path` adds a second ocean+atmosphere stream pair
+in the same run, writing a native-temporal-resolution ("snapshot") output to
+that path — for training on snapshots rather than time-averaged output.
+Ocean fields get no additional time coarsening beyond the model's own
+6-hourly cadence; the atmosphere forcing is still averaged over the window
+between two ocean snapshots. This reuses the same per-chunk processing
+functions with `time_coarsen_factor` forced to `1`, so it shares the output
+grid and vertical coarsening with the main output, just not its
+time-coarsening. Note this processes the native ocean/atmosphere data a
+second time (once per output), so it roughly doubles the pipeline's compute
+cost when enabled.
+
 ## Quick Start
 
 ```bash
@@ -86,6 +100,7 @@ make ufs_replay_dataflow_test_run
 | `--process_time_chunksize` | `4` | Ocean timesteps per Beam chunk |
 | `--output_time_shardsize` | `360` | Times per zarr shard (~1 year daily) |
 | `--vertical_coarsening_indices` | built-in | JSON list of [start,end) pairs |
+| `--snapshot_output_path` | none | If set, also write a native-cadence snapshot output here |
 
 ## Comparison with `scripts/era5/`
 
