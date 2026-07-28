@@ -1,0 +1,93 @@
+# Frozen-GroupNorm causal test. See gn_frozen_eval.py.
+#
+# Four arms over one tropical-cyclone snapshot (2023-04-25T18:00), all centered
+# on 15N/138E and all scored against fine truth over the common central
+# 4x4 deg footprint:
+#
+#   tc_16deg_capture  in-distribution (== trained coarse_shape), captures stats
+#   tc_04deg_live     below trained extent, live GroupNorm
+#   tc_04deg_frozen   below trained extent, GroupNorm stats from the 16 deg arm
+#   tc_32deg_single   above trained extent, ONE patch, no composite prediction
+#
+# The capture and frozen arms must share n_samples: the replay is keyed by call
+# ordinal, and n_samples sets how many denoiser calls each layer sees.
+#
+# Every arm generates as a single patch -- the script drives the predictor
+# directly and never builds a PatchPredictor -- so the `patch` field is unused.
+experiment_dir: /results
+n_samples: 8
+model:
+  mixture_of_experts_path: /moe/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+  # Base loader only; each event overrides the time subset and the extents.
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130
+    stop: 146
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: tc_16deg_capture
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130
+    stop: 146
+  n_samples: 8
+- name: tc_04deg_live
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 13
+    stop: 17
+  lon_extent:
+    start: 136
+    stop: 140
+  n_samples: 8
+- name: tc_04deg_frozen
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 13
+    stop: 17
+  lon_extent:
+    start: 136
+    stop: 140
+  n_samples: 8
+# Fewer samples: 32x32 deg is a 1024x1024 fine grid, 4x the reference arm's
+# footprint. Bias is a spatial mean over ~1.7e5 points, so it is not
+# sample-count limited.
+- name: tc_32deg_single
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -1
+    stop: 31
+  lon_extent:
+    start: 122
+    stop: 154
+  n_samples: 4
