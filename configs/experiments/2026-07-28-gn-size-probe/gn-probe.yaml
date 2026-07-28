@@ -27,14 +27,10 @@ data:
     - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
       file_pattern: prmsl_100km.zarr
       engine: zarr
-  fine:
-  - merge:
-    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
-      file_pattern: 3km.zarr
-      engine: zarr
-    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
-      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
-      engine: zarr
+  # No `fine` block: this is the no-target generation path (predict.py), which
+  # takes coarse inputs only. Fine topography comes from the model bundle, not
+  # the data config. The probe reads internal activations, so it needs no truth.
+  #
   # Only used to build the base loader; each event overrides the time subset
   # (EventConfig.get_gridded_data -> update_subset) and the lat/lon extents.
   lat_extent:
