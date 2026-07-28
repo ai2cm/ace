@@ -1,11 +1,8 @@
-# Coupled OOS autoregressive Nino3.4 skill from diagnosed SST (not the MLP
-# readout). Same 60 ICs as evaluate-coupled-nino-scalars.yaml; roll out ~12
-# months of ocean steps and save sst for offline index diagnosis.
-#
-# Ocean Δt = 5 days => 73 steps ≈ 365 days. coupled_steps_in_memory must divide
-# n_coupled_steps (73 is prime => 1).
-experiment_dir: /results/raw
-n_coupled_steps: 73
+# Example / smoke-test single-year config (year 0251).
+# Full OOS suite: years 0251–0255 via evaluate-coupled-nino-ar-sst.sh
+# (coupled FT validation window; train starts 0256).
+experiment_dir: /results
+n_coupled_steps: 146
 coupled_steps_in_memory: 1
 checkpoint_path: /ckpt.tar
 logging:
@@ -15,11 +12,21 @@ logging:
   project: ace-samudra-coupled-cm4
   entity: ai2cm
 loader:
-  # 60 ICs separated by 6 x 5-day ocean samples (~monthly coverage).
+  num_data_workers: 1
   start_indices:
-    n_initial_conditions: 60
-    first: 0
-    interval: 6
+    times:
+    - '0250-12-29T12:00:00'
+    - '0251-02-02T12:00:00'
+    - '0251-02-27T12:00:00'
+    - '0251-03-29T12:00:00'
+    - '0251-04-28T12:00:00'
+    - '0251-06-02T12:00:00'
+    - '0251-07-02T12:00:00'
+    - '0251-08-01T12:00:00'
+    - '0251-08-31T12:00:00'
+    - '0251-09-30T12:00:00'
+    - '0251-10-30T12:00:00'
+    - '0251-11-29T12:00:00'
   dataset:
     ocean:
       merge:
@@ -29,7 +36,6 @@ loader:
       - data_path: /climate-default
         file_pattern: 2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
         engine: zarr
-      # Still required: coupled FT ocean out_names include nino34_lead_*.
       - data_path: /climate-default
         file_pattern: 2026-07-14-cm4-1pctCO2-140yr-ocean-no-smoothing-nino-leads.zarr
         engine: zarr
@@ -41,11 +47,10 @@ loader:
       - data_path: /climate-default
         file_pattern: 2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
         engine: zarr
-  num_data_workers: 4
 data_writer:
   ocean:
-    save_prediction_files: true
-    save_monthly_files: false
+    save_prediction_files: false
+    save_monthly_files: true
     names:
     - sst
   atmosphere:

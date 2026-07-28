@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Diagnose Nino3.4 skill from coupled AR SST rollouts.
 
-Reads ocean ``autoregressive_predictions/target.nc`` (variable ``sst``),
-computes the area-weighted Nino3.4 box mean, converts to monthly anomalies
-matching the MLP label recipe (linear detrend + monthly climatology + optional
-trailing running mean), and reports RMSE/MAE/ACC by lead month.
+Reads ocean monthly_mean_predictions/target.nc (preferred) or
+autoregressive_predictions/target.nc (variable ``sst``), computes the
+area-weighted Nino3.4 box mean, converts to monthly anomalies matching the MLP
+label recipe (linear detrend + monthly climatology + optional trailing running
+mean), and reports RMSE/MAE/ACC by lead month.
 
 Lead month ``k`` is the calendar month ``k`` months after the IC month — the
 same lead definition as ``nino34_lead_k``.
@@ -49,6 +50,45 @@ def _lat_lon_dims(da: xr.DataArray) -> tuple[str, str]:
     return spatial[0], spatial[1]
 
 
+def _open_sst_pair(input_dir: Path) -> tuple[xr.Dataset, xr.Dataset]:
+    """Open prediction/target SST, preferring monthly_mean files when present."""
+    monthly_pred = input_dir / "monthly_mean_predictions.nc"
+    monthly_tgt = input_dir / "monthly_mean_target.nc"
+    raw_pred = input_dir / "autoregressive_predictions.nc"
+    raw_tgt = input_dir / "autoregressive_target.nc"
+    if monthly_pred.exists() and monthly_tgt.exists():
+        return xr.open_dataset(monthly_pred), xr.open_dataset(monthly_tgt)
+    if raw_pred.exists() and raw_tgt.exists():
+        return xr.open_dataset(raw_pred), xr.open_dataset(raw_tgt)
+    raise FileNotFoundError(
+        f"No SST prediction/target pair under {input_dir}. "
+        "Expected monthly_mean_*.nc or autoregressive_*.nc."
+    )
+
+
+def _calendar_year_month(
+    dataset: xr.Dataset, sample: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (years, months) along time for one sample.
+
+    Monthly writer files store lead-month indices in ``time`` and calendar
+    dates in ``valid_time``; raw autoregressive files use calendar ``time``.
+    """
+    if "valid_time" in dataset:
+        vt = dataset["valid_time"].isel(sample=sample)
+        return (
+            np.asarray(vt.dt.year.values, dtype=np.int64),
+            np.asarray(vt.dt.month.values, dtype=np.int64),
+        )
+    time = dataset["time"]
+    if "sample" in time.dims:
+        time = time.isel(sample=sample)
+    return (
+        np.asarray(time.dt.year.values, dtype=np.int64),
+        np.asarray(time.dt.month.values, dtype=np.int64),
+    )
+
+
 def _box_mean_sst(dataset: xr.Dataset) -> xr.DataArray:
     """Area-weighted Nino3.4 SST with dims (sample, time)."""
     lat_dim, lon_dim = _lat_lon_dims(dataset["sst"])
@@ -66,10 +106,20 @@ def _box_mean_sst(dataset: xr.Dataset) -> xr.DataArray:
     return xr.concat(means, dim="sample")
 
 
-def _monthly_climatology(box_mean: xr.DataArray) -> dict[int, float]:
-    """Fit per-calendar-month climatology on a 1D or flattened series."""
-    values = np.asarray(box_mean.values, dtype=np.float64).ravel()
-    months = np.asarray(box_mean["time.month"].values, dtype=np.int64).ravel()
+def _monthly_climatology_from_members(
+    box_mean: xr.DataArray, dataset: xr.Dataset
+) -> dict[int, float]:
+    """Fit per-calendar-month climatology across all samples."""
+    values_list: list[np.ndarray] = []
+    months_list: list[np.ndarray] = []
+    for sample in range(box_mean.sizes["sample"]):
+        values_list.append(
+            np.asarray(box_mean.isel(sample=sample).values, dtype=np.float64)
+        )
+        _, months = _calendar_year_month(dataset, sample)
+        months_list.append(months)
+    values = np.concatenate(values_list)
+    months = np.concatenate(months_list)
     climatology: dict[int, float] = {}
     for month in range(1, 13):
         sel = values[months == month]
@@ -80,19 +130,18 @@ def _monthly_climatology(box_mean: xr.DataArray) -> dict[int, float]:
 
 
 def _index_lookup(
-    box_mean_1d: xr.DataArray,
+    values_1d: np.ndarray,
+    years: np.ndarray,
+    months: np.ndarray,
     climatology: dict[int, float],
     n_running_months: int,
 ) -> dict[int, float]:
     """Ym -> monthly (optionally smoothed) anomaly index for one forecast."""
-    values = np.asarray(box_mean_1d.values, dtype=np.float64)
-    years = np.asarray(box_mean_1d["time.year"].values, dtype=np.int64)
-    months = np.asarray(box_mean_1d["time.month"].values, dtype=np.int64)
     ym = years * 12 + (months - 1)
     climo = np.array(
         [climatology.get(int(m), np.nan) for m in months], dtype=np.float64
     )
-    anom_native = values - climo
+    anom_native = np.asarray(values_1d, dtype=np.float64) - climo
 
     unique_ym = np.array(sorted(np.unique(ym).tolist()), dtype=np.int64)
     monthly = np.full(unique_ym.shape, np.nan, dtype=np.float64)
@@ -123,8 +172,7 @@ def diagnose(
     n_running_months: int = 1,
     checkpoint_dataset: str = "",
 ) -> xr.Dataset:
-    prediction = xr.open_dataset(input_dir / "autoregressive_predictions.nc")
-    target = xr.open_dataset(input_dir / "autoregressive_target.nc")
+    prediction, target = _open_sst_pair(input_dir)
     try:
         if "sst" not in prediction or "sst" not in target:
             raise KeyError(
@@ -136,8 +184,6 @@ def diagnose(
         pred_box = _box_mean_sst(prediction).compute()
         truth_box = _box_mean_sst(target).compute()
 
-        # Fit seasonal climatology (and optional linear trend) on all target
-        # members so every forecast shares the same baseline.
         if linear_detrend:
             pred_box = xr.concat(
                 [
@@ -154,12 +200,7 @@ def diagnose(
                 dim="sample",
             )
 
-        # Build a series for climatology by concatenating target members.
-        clim_source = xr.concat(
-            [truth_box.isel(sample=s) for s in range(truth_box.sizes["sample"])],
-            dim="time",
-        )
-        climatology = _monthly_climatology(clim_source)
+        climatology = _monthly_climatology_from_members(truth_box, target)
 
         n_samples = pred_box.sizes["sample"]
         init_times = prediction["init_time"].values
@@ -167,11 +208,21 @@ def diagnose(
         truth_leads = np.full((n_samples, N_LEADS), np.nan, dtype=np.float64)
 
         for s in range(n_samples):
+            p_years, p_months = _calendar_year_month(prediction, s)
+            t_years, t_months = _calendar_year_month(target, s)
             p_index = _index_lookup(
-                pred_box.isel(sample=s), climatology, n_running_months
+                pred_box.isel(sample=s).values,
+                p_years,
+                p_months,
+                climatology,
+                n_running_months,
             )
             t_index = _index_lookup(
-                truth_box.isel(sample=s), climatology, n_running_months
+                truth_box.isel(sample=s).values,
+                t_years,
+                t_months,
+                climatology,
+                n_running_months,
             )
             init_year, init_month = _init_year_month(init_times[s])
             base = _ym_key(init_year, init_month)

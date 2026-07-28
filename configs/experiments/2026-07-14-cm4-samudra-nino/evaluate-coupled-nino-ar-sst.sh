@@ -1,30 +1,42 @@
 #!/bin/bash
+#
+# Year-split coupled AR SST Nino eval for the joint FT checkpoint.
+# Job layout template: exp/samudrace-enso-skill 2026-02-17-samudrace-enso-eval
+# (one gantry job per year, 12 monthly ICs, n_coupled_steps=146).
+#
+# Years default to the coupled FT validation / OOS window 0251–0255
+# (train starts 0256; see coupled-finetune-atmos.yaml).
+#
+# Generate configs first if needed:
+#   python configs/experiments/2026-07-14-cm4-samudra-nino/make_year_configs_ar_sst.py
 
 set -euo pipefail
 
-CONFIG_FILENAME="${CONFIG_FILENAME:-evaluate-coupled-nino-ar-sst.yaml}"
-JOB_NAME="${JOB_NAME:-cm4-coupled-nino-ar-sst}"
 JOB_GROUP="${JOB_GROUP:-cm4-1pct-samudra-nino}"
 COUPLED_RESULTS_DATASET="${COUPLED_RESULTS_DATASET:-01KY3DATM3CAEA479JQZQDPT9W}"
 COUPLED_CKPT="${COUPLED_CKPT:-best_inference_ckpt}"
+YEAR_START="${YEAR_START:-251}"
+YEAR_END="${YEAR_END:-255}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
-CONFIG_PATH="${SCRIPT_PATH}/${CONFIG_FILENAME}"
-DIAGNOSE_SCRIPT="${SCRIPT_PATH}/diagnose_nino_from_sst_rollout.py"
+CONFIG_DIR="${SCRIPT_PATH}/ar_sst_year_configs"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
-# Single GPU: raw netCDF writers are not multi-rank safe.
 N_GPUS=1
 
 cd "$REPO_ROOT"
 
-python -m fme.coupled.validate_config --config_type evaluator "$CONFIG_PATH"
+run_eval() {
+  local config_path="$1"
+  local job_name="$2"
 
-gantry run \
-    --name "$JOB_NAME" \
-    --task-name "$JOB_NAME" \
-    --description "60 OOS coupled FT ~12mo AR rollouts; Nino3.4 diagnosed from SST" \
+  python -m fme.coupled.validate_config --config_type evaluator "$config_path"
+
+  gantry run \
+    --name "$job_name" \
+    --task-name "$job_name" \
+    --description "Coupled FT AR SST Nino eval (12 monthly ICs, 146 ocean steps)" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/climate-titan \
     --priority high \
@@ -32,7 +44,7 @@ gantry run \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \
-    --env WANDB_NAME="$JOB_NAME" \
+    --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=evaluation \
     --env WANDB_RUN_GROUP="$JOB_GROUP" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
@@ -45,9 +57,18 @@ gantry run \
     --allow-dirty \
     --system-python \
     --install "pip install --no-deps ." \
-    -- bash -c \
-        "python -m fme.coupled.evaluator '$CONFIG_PATH' && \
-         python '$DIAGNOSE_SCRIPT' \
-           --input-dir /results/raw/ocean \
-           --output-dir /results/nino_ar_sst_forecasts \
-           --checkpoint-dataset '$COUPLED_RESULTS_DATASET'"
+    -- python -I -m fme.coupled.evaluator "$config_path"
+}
+
+base_name="cm4-coupled-ft-nino-ar-sst"
+
+for year in $(seq "$YEAR_START" "$YEAR_END"); do
+  year_str=$(printf "%04d" "$year")
+  config_path="${CONFIG_DIR}/evaluator-config-1pct-ar-sst-yr${year_str}.yaml"
+  if [[ ! -f "$config_path" ]]; then
+    echo "Missing config: $config_path" >&2
+    echo "Run: python ${SCRIPT_PATH}/make_year_configs_ar_sst.py" >&2
+    exit 1
+  fi
+  run_eval "$config_path" "${base_name}-yr${year_str}"
+done
