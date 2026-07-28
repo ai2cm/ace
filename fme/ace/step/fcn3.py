@@ -23,9 +23,9 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -304,6 +304,9 @@ class FCN3StepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
@@ -444,7 +447,7 @@ class FCN3Step(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         if args.labels is not None:
             raise ValueError("Labels are not supported for FCN3")
 

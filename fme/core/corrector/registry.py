@@ -1,10 +1,11 @@
 import abc
 import dataclasses
 from collections.abc import Mapping
-from typing import Any, Self, final
+from typing import Any, Protocol, Self, final
 
 import dacite
 
+from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnostics
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -66,6 +67,40 @@ class CorrectorConfigABC(abc.ABC):
     ) -> "CorrectorABC": ...
 
 
+class Correction(Protocol):
+    """A single correction applied to ``gen_data`` by a corrector.
+
+    Each correction is a self-contained callable object that bundles its own
+    parameters and operators (e.g. an area-weighted-mean operator or a vertical
+    coordinate) and applies one conservation/positivity step. A corrector holds
+    an ordered sequence of these and simply applies them in turn, so it does not
+    need to read any config fields itself. The signature mirrors
+    ``CorrectorABC.__call__`` so corrections compose: a correction that does not
+    maintain state passes ``corrector_state`` through unchanged.
+
+    Each ``__call__`` returns a ``TensorDict`` containing **only the fields this
+    correction modified** -- not the full ``gen_data``. The caller dict-updates
+    ``gen_data`` with the returned subset and takes its keys as the set of
+    variables the correction is responsible for writing. Because the returned
+    dict is exactly what gets applied, the returned keys are the single source of
+    truth for what changed and cannot drift from the write.
+    """
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple ``(modified, corrector_state)`` where ``modified`` contains
+            only the fields modified by this correction.
+        """
+        ...
+
+
 class CorrectorABC(abc.ABC):
     def train(self, mode: bool = True) -> "CorrectorABC":
         """Set the corrector to training or evaluation mode.
@@ -104,7 +139,7 @@ class CorrectorABC(abc.ABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
+    ) -> CorrectorOutput:
         """Apply corrections to ``gen_data``.
 
         Args:
@@ -116,9 +151,51 @@ class CorrectorABC(abc.ABC):
                 not maintain state should pass this through unchanged.
 
         Returns:
-            A tuple ``(corrected_gen_data, corrector_state)``.
+            A ``CorrectorOutput`` carrying the corrected generated data, the
+            per-variable correction ``delta`` diagnostics, and the updated
+            corrector state.
         """
         ...
+
+
+class CorrectionSequence(CorrectorABC):
+    """A corrector that applies an ordered sequence of ``Correction`` objects.
+
+    The sequence (and thus the order in which corrections are applied) is built
+    by the corrector config's ``_build``; the corrector itself only knows to
+    apply each correction in turn.
+    """
+
+    def __init__(self, corrections: list[Correction]):
+        self._corrections = corrections
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> CorrectorOutput:
+        # Snapshot the entry data (holding references); corrections apply
+        # out-of-place, so these tensors are never mutated and can be diffed
+        # against the corrected output to build the per-variable delta.
+        snapshot = dict(gen_data)
+        gen_data = dict(gen_data)
+        modified: set[str] = set()
+        for correction in self._corrections:
+            changed, corrector_state = correction(
+                input_data, gen_data, forcing_data, corrector_state
+            )
+            # ``changed`` holds only the fields this correction modified; its
+            # keys are the set of variables it is responsible for writing.
+            gen_data.update(changed)
+            modified |= changed.keys()
+        corrected = dict(gen_data)
+        return CorrectorOutput(
+            corrected=corrected,
+            diagnostics=build_corrector_diagnostics(snapshot, corrected, modified),
+            corrector_state=corrector_state,
+        )
 
 
 class EpochScheduledCorrector(CorrectorABC):
@@ -175,7 +252,10 @@ class EpochScheduledCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
+    ) -> CorrectorOutput:
         if self._corrector_disabled and self._training:
-            return dict(gen_data), corrector_state
+            # Nothing was applied: pass the data through with empty diagnostics.
+            return CorrectorOutput(
+                corrected=dict(gen_data), corrector_state=corrector_state
+            )
         return self._wrapped(input_data, gen_data, forcing_data, corrector_state)

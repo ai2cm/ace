@@ -19,6 +19,7 @@ from ..predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
+    check_input_shape_supported,
 )
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
@@ -57,48 +58,39 @@ class Downscaler:
 
     def _get_generation_model(
         self,
-        input_shape: tuple[int, int],
         output: DownscalingOutput,
     ) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
         """
-        Set up the model, wrapping with PatchPredictor if needed.  While models are
+        Set up the model for inference: roll coordinates to match the coarse lon
+        convention, then wrap with PatchPredictor if needed.  While models are
         probably capable of generating any domain size, we haven't tested for domains
         smaller than the model patch size, so we raise an error in that case, and prompt
         the user to use patching for larger domains because that provides better
         generations.
-        """
-        model_patch_shape = self.model.coarse_shape
 
-        if model_patch_shape == input_shape:
-            # short circuit, no patching necessary
-            return self.model
-        elif any(
-            expected > actual
-            for expected, actual in zip(model_patch_shape, input_shape)
-        ):
-            # we don't support generating regions smaller than the model patch size
-            raise ValueError(
-                f"Model coarse shape {model_patch_shape} is larger than "
-                f"actual input shape {input_shape} for output {output.name}."
-                "We do not support generating outputs with a smaller spatial extent"
-                " than the model's trained patch size. Please adjust the spatial extent"
-                " to be at least as large as the model's input patch size."
-            )
-        elif output.patch.needs_patch_predictor:
-            # Use a patch predictor
-            logging.info(f"Using PatchPredictor for output: {output.name}")
-            return PatchPredictor(
-                model=self.model,
-                coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
-            )
-        else:
-            # User should enable patching
-            raise ValueError(
-                f"Model coarse shape {model_patch_shape} does not match "
-                f"actual input shape {input_shape} for output {output.name}, "
-                "and patch prediction is not configured. Generation for larger domains "
-                "requires patch prediction."
-            )
+        The coarse coordinates covering the output's full extent live on
+        ``output.data`` (fixed at build time, independent of the per-batch work-item
+        slices), so both the input shape and the longitude convention to roll to are
+        derived from there.
+        """
+        coarse_coords = output.data.coarse_extent_latlon_coords
+        input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
+        # No-op when coarse_lon does not cross the prime meridian.
+        base_model = self.model.with_rolled_lon(coarse_coords.lon)
+        check_input_shape_supported(
+            base_model.coarse_shape,
+            input_shape,
+            output.patch,
+            name=f"output {output.name}",
+        )
+        if base_model.coarse_shape == input_shape:
+            return base_model
+
+        logging.info(f"Using PatchPredictor for output: {output.name}")
+        return PatchPredictor(
+            model=base_model,
+            coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
+        )
 
     def _on_device_generator(self, loader):
         for loaded_item in loader:
@@ -108,19 +100,13 @@ class Downscaler:
         """Execute the generation loop for this output."""
         logging.info(f"Generating downscaled outputs for output: {output.name}")
 
-        # initialize writer and model in loop for coord info
-        model = None
+        model = self._get_generation_model(output=output)
+
         writer = None
         total_batches = len(output.data.loader)
 
         loaded_item: LoadedSliceWorkItem
         for i, loaded_item in enumerate(output.data.get_generator()):
-            input_shape = loaded_item.batch.horizontal_shape
-            if model is None:
-                model = self._get_generation_model(
-                    input_shape=input_shape, output=output
-                )
-
             if writer is None:
                 fine_latlon_coords = model.get_fine_coords_for_batch(loaded_item.batch)
                 writer = output.get_writer(

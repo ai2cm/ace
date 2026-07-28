@@ -154,6 +154,17 @@ class DistributedBackend(ABC):
         ...
 
     @abstractmethod
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Broadcast a tensor from the spatial-group root to spatial co-ranks.
+
+        Used to make a non-spatial quantity (e.g. a per-sample dropout mask)
+        identical across tiles of the same sample, while leaving data-parallel
+        ranks free to hold distinct values. Identity when there is no spatial
+        parallelism.
+        """
+        ...
+
+    @abstractmethod
     def weighted_mean(
         self,
         data: torch.Tensor,
