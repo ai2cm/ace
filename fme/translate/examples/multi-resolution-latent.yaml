@@ -43,10 +43,12 @@ component_pool:
     atmos_2deg: {}
     atmos_4deg: {}
     # Latent domains, one per resolution. No dataset binds to them, so they
-    # declare their channels directly: `channels` is int | list[str] (or a
-    # list mixing the two); an int declares an anonymous latent block named
-    # after the domain, referenced as a block name in backbone
-    # in_names/out_names and expanded before StepperConfig construction.
+    # declare their channels directly: `channels` is int | list[str]; an int
+    # declares an anonymous latent block named after the domain, referenced
+    # as a block name in backbone in_names/out_names and expanded before
+    # StepperConfig construction. Forcings are not latent channels: they
+    # enter through the encoders (see in_channels below) and are translated
+    # between latent resolutions like the rest of the state.
     latent_1deg:
       grid_like: atmos_1deg
       channels: 512
@@ -55,16 +57,7 @@ component_pool:
       channels: 512
     latent_4deg:
       grid_like: atmos_4deg
-      channels:
-        - 512
-        # forcing channels of the backbone's domain, overwritten from the 4°
-        # stream each step (mirrors ace's existing prescribed/forcing
-        # overwrite semantics) rather than produced by any transform:
-        - DSWRFtoa
-        - ocean_fraction
-        - land_fraction
-        - sea_ice_fraction
-        - global_mean_co2
+      channels: 512
 
   transforms:
     # Per-resolution encoders into that resolution's latent (same grid; the
@@ -138,9 +131,7 @@ component_pool:
         config: {embed_dim: 256, num_layers: 4}
 
     # Learned resamplers between latent resolutions ("down" = toward coarser).
-    # The 1° and 2° encode paths into the 4° latent share latent_2to4. They
-    # map the latent block only; latent_4deg's forcing channels are filled by
-    # the forcing overwrite, not by a transform.
+    # The 1° and 2° encode paths into the 4° latent share latent_2to4.
     latent_1to2:
       in_domain: latent_1deg
       out_domain: latent_2deg
@@ -179,8 +170,10 @@ component_pool:
             # "latent_4deg" is the domain's int-declared latent block,
             # expanded (-> 512 channel names) by BackboneConfig before the
             # StepperConfig is constructed — the stepper never enumerates
-            # latent channels by hand.
-            in_names: [latent_4deg, DSWRFtoa, ocean_fraction, land_fraction, sea_ice_fraction, global_mean_co2]
+            # latent channels by hand. Forcings reach the backbone inside
+            # the latent state (encoded and translated per step from the
+            # forcing stream), not as named input channels.
+            in_names: [latent_4deg]
             out_names: [latent_4deg]
             normalization:
               network: {identity: true}  # NEW: latent channels have no dataset
@@ -225,15 +218,17 @@ objectives:
   # `components` is a flat chain containing exactly one backbone, which
   # splits it: everything before encodes once at the initial time, the
   # backbone rolls out in its own domain, and everything after decodes every
-  # output step. forcing_stream overwrites the backbone domain's forcing
-  # channels each step. ----
+  # output step. Each step's forcings are taken from forcing_stream at that
+  # objective's own resolution and carried into the backbone's latent domain
+  # through the encode chain (a forcing-only application of it — data
+  # prognostics at future steps must not leak in). ----
   - name: forward_4deg
     type: forward_prediction
     config:
       components: [encoder_4deg, stepper_latent, decoder_4deg]
       input_stream: era5_4deg
       target_stream: era5_4deg
-      forcing_stream: era5_4deg   # forcings enter on the latent (4°) grid
+      forcing_stream: era5_4deg
       n_forward_steps:
         start_value: 1
         milestones:
@@ -248,8 +243,7 @@ objectives:
       components: [encoder_2deg, latent_2to4, stepper_latent, latent_4to2, decoder_2deg]
       input_stream: era5_2deg
       target_stream: era5_2deg
-      forcing_stream: era5_4deg   # note: cross-resolution — see issue 4 in the
-                                  # PR discussion
+      forcing_stream: era5_2deg
       n_forward_steps:
         start_value: 1
         milestones:
@@ -264,7 +258,7 @@ objectives:
       components: [encoder_1deg, latent_1to2, latent_2to4, stepper_latent, latent_4to2, latent_2to1, decoder_1deg]
       input_stream: era5_1deg
       target_stream: era5_1deg
-      forcing_stream: era5_4deg
+      forcing_stream: era5_1deg
       n_forward_steps:
         start_value: 1
         milestones:
