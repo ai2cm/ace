@@ -57,6 +57,15 @@ from fme.downscaling.evaluator import EvaluatorConfig
 COMMON_LAT = (13.0, 17.0)
 COMMON_LON = (136.0, 140.0)
 
+# Bias is also profiled against distance from the domain boundary, in fine grid
+# cells (1 cell ~ 1/32 deg ~ 3.5 km at downscale_factor 32). Every conv in this
+# UNet zero-pads (F.conv2d(..., padding=N) throughout layers.py), so if that
+# padding drives the small-domain bias, bias should fall off with distance from
+# the edge -- and the 4 deg and 16 deg runs should trace the SAME curve over
+# their shared range, the 4 deg domain simply having no cells beyond bin 32-64.
+# A flat profile at 4 deg falsifies the padding hypothesis.
+BIN_EDGES = [0, 4, 8, 16, 32, 64, 128, 256, 512]
+
 _ACTIVATIONS = {
     "silu": silu,
     "relu": relu,
@@ -269,6 +278,39 @@ def _common_footprint_bias(
     return biases
 
 
+def _edge_distance(height: int, width: int) -> torch.Tensor:
+    """Distance from each cell to the nearest domain boundary, in cells."""
+    rows = torch.arange(height).reshape(-1, 1).expand(height, width)
+    cols = torch.arange(width).reshape(1, -1).expand(height, width)
+    return torch.minimum(
+        torch.minimum(rows, height - 1 - rows), torch.minimum(cols, width - 1 - cols)
+    )
+
+
+def _bias_profile(
+    prediction: dict[str, torch.Tensor], target: dict[str, torch.Tensor]
+) -> dict[str, list[float]]:
+    """Mean bias per edge-distance bin, over the arm's whole domain.
+
+    Unlike the common-footprint scalar, this uses every cell the arm generated:
+    the question is how bias varies with proximity to that arm's own boundary.
+    Bins beyond the domain's reach are NaN.
+    """
+    profiles: dict[str, list[float]] = {}
+    for name, pred in prediction.items():
+        if name not in target:
+            continue
+        diff = (_to_hw(pred) - _to_hw(target[name])).cpu()
+        radius = _edge_distance(*diff.shape).flatten()
+        flat = diff.flatten()
+        row = []
+        for lo, hi in zip(BIN_EDGES[:-1], BIN_EDGES[1:]):
+            mask = (radius >= lo) & (radius < hi)
+            row.append(float(flat[mask].mean()) if bool(mask.any()) else float("nan"))
+        profiles[name] = row
+    return profiles
+
+
 def _run_arm(event, config: EvaluatorConfig, model, requirements, captured):
     """Run one arm; returns (bias dict, extra diagnostics)."""
     data = event.get_paired_gridded_data(
@@ -327,8 +369,9 @@ def _run_arm(event, config: EvaluatorConfig, model, requirements, captured):
     bias = _common_footprint_bias(
         outputs.prediction, outputs.target, fine_coords.lat, fine_coords.lon
     )
+    profile = _bias_profile(outputs.prediction, outputs.target)
     logging.info(f"{event.name}: bias {bias}")
-    return bias, extra
+    return bias, extra, profile
 
 
 def main(config_path: str) -> None:
@@ -352,12 +395,16 @@ def main(config_path: str) -> None:
     captured: dict[str, list[tuple[torch.Tensor, torch.Tensor]]] = {}
     results: dict[str, dict[str, float]] = {}
     diagnostics: dict[str, dict[str, float]] = {}
+    profiles: dict[str, dict[str, list[float]]] = {}
 
     for event in config.events or []:
         try:
-            bias, extra = _run_arm(event, config, model, requirements, captured)
+            bias, extra, profile = _run_arm(
+                event, config, model, requirements, captured
+            )
             results[event.name] = bias
             diagnostics[event.name] = extra
+            profiles[event.name] = profile
         except Exception:
             logging.exception(f"{event.name}: arm failed, continuing")
 
@@ -381,16 +428,46 @@ def main(config_path: str) -> None:
                 f"max rel {extra['max_rel_error']:.3e}",
             ]
 
+    # Edge-distance profiles: one table per variable, rows = arms.
+    bin_labels = [f"{lo}-{hi}" for lo, hi in zip(BIN_EDGES[:-1], BIN_EDGES[1:])]
+    lines += [
+        "",
+        "",
+        "bias vs distance from domain boundary, in fine cells (1 cell ~ 1/32 deg)",
+        "padding hypothesis: 4deg and 16deg trace the same curve where they "
+        "overlap, rising toward the edge. A flat 4deg row falsifies it.",
+    ]
+    for var in variables:
+        lines += ["", f"--- {var} ---"]
+        header = f"{'arm':<20}" + "".join(f"{b:>14}" for b in bin_labels)
+        lines += [header, "-" * len(header)]
+        for arm in results:
+            profile_row = profiles.get(arm, {}).get(var)
+            if profile_row is None:
+                continue
+            cells = "".join(
+                "             -" if np.isnan(v) else f"{v:>14.5g}" for v in profile_row
+            )
+            lines.append(f"{arm:<20}{cells}")
+
     summary = "\n".join(lines)
     with open(os.path.join(config.experiment_dir, "gn-frozen-summary.txt"), "w") as f:
         f.write(summary)
+    arrays = {
+        f"bias|{arm}|{var}": np.array(val)
+        for arm, b in results.items()
+        for var, val in b.items()
+    }
+    arrays.update(
+        {
+            f"profile|{arm}|{var}": np.array(val)
+            for arm, p in profiles.items()
+            for var, val in p.items()
+        }
+    )
+    arrays["profile_bin_edges"] = np.array(BIN_EDGES)
     np.savez_compressed(
-        os.path.join(config.experiment_dir, "gn-frozen-bias.npz"),
-        **{
-            f"{arm}|{var}": np.array(val)
-            for arm, b in results.items()
-            for var, val in b.items()
-        },
+        os.path.join(config.experiment_dir, "gn-frozen-bias.npz"), **arrays
     )
     print(summary)
 
