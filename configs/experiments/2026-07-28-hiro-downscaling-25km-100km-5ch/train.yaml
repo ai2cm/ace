@@ -1,0 +1,183 @@
+# HiRO-ACE-style spatial downscaling (100km -> 25km, factor 4), trained on
+# OUR 5-channel dataset with the SAME train/val/test split as the PMD
+# spatiotemporal configs (../2026-07-24-video-pmd-spatiotemporal-25km-100km/,
+# ../2026-07-27-video-pmd-spatiotemporal-25km-100km-ou/), so the two are
+# directly comparable as baselines.
+#
+# Uses the plain (non-video) downscaling trainer -- fme.downscaling.train /
+# fme.downscaling.models.DiffusionModelConfig -- NOT fme.downscaling.video_train:
+# this is single-frame spatial super-resolution only, no temporal component,
+# matching the real HiRO-ACE baseline (../../baselines/downscaling-hiro-global/train.yaml)
+# and its equal-downscale-factor CONUS precedent
+# (../../baselines/downscaling/train-conus-100km-to-25km-augusta.yaml).
+#
+# Data: gs://vcm-ml-intermediate/2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr
+# (same store as the PMD spatiotemporal configs). downscale_factor = 4.
+#
+# Patch size: coarse_patch_extent_lat/lon (44, 72) -> fine patch 176x288.
+# Reused verbatim from the PMD stage-2 configs, where this exact geometry was
+# already confirmed NOT to OOM on 4x GPU titan hardware (see that config's
+# header comment for the OOM history) -- our model here is single-frame (no
+# temporal attention, no 9-frame stack), so it should be cheaper per sample,
+# but batch_size below is an unverified starting guess, not re-tuned for
+# this lighter model. attn_resolutions is [] (not [16], unlike the CONUS
+# precedent) for the same reason as PMD stage-2's endpoint_super_resolution
+# sub-model: 176 does not divide evenly to 16 (176/88/44/22 pyramid), so [16]
+# is not a valid resolution here.
+#
+# NOTE on normalization: unlike VideoDiffusionModelConfig, the plain
+# DiffusionModelConfig used here has NO log_transform_channels option, so
+# PRATEsfc is normalized in raw (kg/m2/s) space, not log1p(mm/day) space --
+# do NOT copy the PMD video configs' PRATEsfc mean/std into this file, they
+# are log-space and wrong for this model. `normalization.fine` is
+# toy/norm_stats_25km.json's raw train-split stats (already computed);
+# `normalization.coarse` is toy/norm_stats_100km.json's, computed the same
+# way, both verified 2026-07-28 against the real GCS zarrs.
+#
+# NOTE on fine topography: use_fine_topography is FALSE here, unlike the
+# real HiRO-ACE baseline. Checked directly (2026-07-28): the new fine
+# (25km) store, gs://vcm-ml-intermediate/2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr,
+# does NOT have an HGTsfc variable (data_vars: ICEsfc, PRATEsfc, PRESsfc,
+# air_temperature_at_two_meters, PRMSL, eastward_wind_at_ten_meters,
+# GRAUPELsfc, SNOWsfc, northward_wind_at_ten_meters, plus grid bounds -- no
+# static/topography field at all). The paired 100km (coarse) store DOES have
+# HGTsfc, but at 180x360 -- the wrong grid for use_fine_topography, which
+# requires a field on the FINE output grid (DiffusionModel.build raises if
+# static_inputs.coords != full_fine_coords). So there is currently no valid
+# fine-resolution topography source for this dataset pair; a real HiRO-ACE
+# comparison would need one added to the 25km store first.
+experiment_dir: /results
+max_epochs: 200
+save_checkpoints: true
+validate_using_ema: true
+validate_interval: 10
+generate_n_samples: 2
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: hiro-downscaling-global-25km-100km-5ch-v1
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+  optimizer_type: Adam
+ema:
+  decay: 0.999
+coarse_patch_extent_lat: 44
+coarse_patch_extent_lon: 72
+train_data:
+  batch_size: 16  # UNVERIFIED starting guess -- see header comment; tune per real GPU count
+  num_data_workers: 4
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+  strict_ensemble: false
+validation_data:
+  batch_size: 16
+  num_data_workers: 4
+  fine:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: gs://vcm-ml-intermediate
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+  strict_ensemble: false
+# NOTE: fme.downscaling.train.TrainerConfig has no test_data field (unlike
+# video_train's VideoTrainerConfig) -- the held-out 2023-01-01..2024-01-04
+# window matching the PMD split should be evaluated separately after
+# training, the same way PMD stage-1 testing was done outside the training
+# config (toy/eval_video_ckpt.py) rather than inside video_train.yaml.
+model:
+  in_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  loss:
+    type: MSE
+  module:
+    type: unet_diffusion_song
+    config:
+      model_channels: 64
+      channel_mult: [1, 2, 2, 2]
+      attn_resolutions: []
+  training_noise_distribution:
+    p_mean: -1.2
+    p_std: 1.8
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+  sigma_min: 0.002
+  sigma_max: 150.0
+  predict_residual: true
+  use_fine_topography: false  # no fine-res topography field available -- see header comment
+  normalization:
+    # fine (25km), TRAIN split only, raw (no log transform) -- computed by
+    # toy/compute_norm_stats_25km.py, values in toy/norm_stats_25km.json.
+    fine:
+      means:
+        eastward_wind_at_ten_meters: -0.036200
+        northward_wind_at_ten_meters: 0.170470
+        PRMSL: 1008.160699
+        PRATEsfc: 0.0000280
+        air_temperature_at_two_meters: 279.675977
+      stds:
+        eastward_wind_at_ten_meters: 5.627319
+        northward_wind_at_ten_meters: 4.692752
+        PRMSL: 15.043594
+        PRATEsfc: 0.0001289
+        air_temperature_at_two_meters: 20.455977
+    # coarse (100km), TRAIN split only, raw -- computed 2026-07-28 by
+    # toy/compute_norm_stats_100km.py against the real GCS zarr, values in
+    # toy/norm_stats_100km.json.
+    coarse:
+      means:
+        eastward_wind_at_ten_meters: -0.036981
+        northward_wind_at_ten_meters: 0.171301
+        PRMSL: 1008.158404
+        PRATEsfc: 0.000028
+        air_temperature_at_two_meters: 279.678194
+      stds:
+        eastward_wind_at_ten_meters: 5.538259
+        northward_wind_at_ten_meters: 4.589926
+        PRMSL: 15.020959
+        PRATEsfc: 0.000100
+        air_temperature_at_two_meters: 20.417566
