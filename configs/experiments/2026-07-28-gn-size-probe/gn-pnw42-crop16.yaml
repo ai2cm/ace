@@ -1,0 +1,73 @@
+# PNW 16x16 vs 42x42-cropped-to-16x16, with the bundled MoE checkpoint.
+# See gn_frozen_eval.py.
+#
+# Repeats a 2025-07-11 pair of runs that used an older checkpoint and found time
+# mean RMSE over topography much larger in the cropped 42 deg generation --
+# beaker 01JZXCYV7NZ0VMZNM4SXZ898ER (16x16) and 01JZXCYEMCJCAQDNWFHS8747G8
+# (42x42), whose configs were config-eval-pnw-{16x16,42x42centered}.yaml. Those
+# extents are reproduced exactly: both boxes are centered on 43N/240E, so the
+# derived scoring footprint is the full central 16 deg box.
+#
+# n_samples 4 matches the original. Data paths and the model are this
+# investigation's (X-SHiELD AMIP + prmsl, bundled MoE) rather than the
+# 2025-02-27 dataset the old checkpoint was trained against.
+#
+# Run with a strided window so the time mean is an annual climatology of the
+# held-out year rather than one synoptic episode:
+#   --start-time 2023-01-01T00:00 --stop-time 2023-12-31T18:00 --stride 28
+# (stride 28 = one 6-hourly snapshot per week, ~52 steps).
+experiment_dir: /results
+n_samples: 4
+model:
+  mixture_of_experts_path: /moe/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+  lat_extent:
+    start: 35
+    stop: 51
+  lon_extent:
+    start: 232
+    stop: 248
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: pnw_16deg
+  date: 2023-07-01T00:00
+  lat_extent:
+    start: 35
+    stop: 51
+  lon_extent:
+    start: 232
+    stop: 248
+  n_samples: 4
+- name: pnw_42deg_single
+  date: 2023-07-01T00:00
+  lat_extent:
+    start: 22
+    stop: 64
+  lon_extent:
+    start: 219
+    stop: 261
+  n_samples: 4

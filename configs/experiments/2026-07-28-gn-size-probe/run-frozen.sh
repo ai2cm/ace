@@ -11,6 +11,7 @@ set -e
 CONFIG_FILENAME=${1:-gn-frozen-eval.yaml}
 N_TIMES=${2:-1}   # 6-hourly steps to average, centered on each event date
 SCRIPT_NAME=${3:-gn_frozen_eval.py}
+if [ $# -gt 3 ]; then shift 3; PASSTHRU="$@"; else PASSTHRU=""; fi   # extra script args
 JOB_NAME="gn-eval-${CONFIG_FILENAME%.yaml}"
 
 # Resolve paths from this script's own location rather than the caller's cwd.
@@ -54,4 +55,4 @@ gantry run \
     --budget ai2/atec-climate \
     --system-python \
     --install "pip install --no-deps ." \
-    -- python $PROBE_PATH $CONFIG_PATH $EXTRA_ARGS
+    -- python $PROBE_PATH $CONFIG_PATH $EXTRA_ARGS $PASSTHRU

@@ -309,19 +309,33 @@ def _footprint_stats(
     return bias, rmse
 
 
-def _build_paired_data(event, config: EvaluatorConfig, requirements, n_times: int):
-    """Paired data for ``event``, spanning ``n_times`` steps centered on its date.
+def _build_paired_data(
+    event,
+    config: EvaluatorConfig,
+    requirements,
+    n_times: int,
+    window: tuple[str, str, int] | None = None,
+):
+    """Paired data for ``event`` over the requested times.
 
     EventConfig.get_paired_gridded_data hardcodes a 12h slice ("Event evaluation
     only load the first snapshot"), so a time mean needs its own construction.
     Mirrors that method otherwise.
+
+    Without ``window``, spans ``n_times`` contiguous steps centered on the
+    event date. With ``window`` = (start, stop, stride), takes every
+    ``stride``-th index in [start, stop] -- used for a strided climatology, e.g.
+    one snapshot per week across a year.
     """
-    center = datetime.strptime(event.date, event.date_format)
-    half = (n_times - 1) // 2
-    time_slice = TimeSlice(
-        (center - half * TIMESTEP).strftime(event.date_format),
-        (center + (n_times - 1 - half) * TIMESTEP).strftime(event.date_format),
-    )
+    if window is not None:
+        time_slice = TimeSlice(window[0], window[1], window[2])
+    else:
+        center = datetime.strptime(event.date, event.date_format)
+        half = (n_times - 1) // 2
+        time_slice = TimeSlice(
+            (center - half * TIMESTEP).strftime(event.date_format),
+            (center + (n_times - 1 - half) * TIMESTEP).strftime(event.date_format),
+        )
     fine = dataclasses.replace(config.data.fine[0])
     fine.update_subset(time_slice)
     coarse = dataclasses.replace(config.data.coarse_full_config[0])
@@ -366,9 +380,11 @@ def _bias_profile(diffs: dict[str, torch.Tensor]) -> dict[str, list[float]]:
     return profiles
 
 
-def _run_arm(event, config, model, requirements, captured, footprint, n_times):
+def _run_arm(
+    event, config, model, requirements, captured, footprint, n_times, window=None
+):
     """Run one arm over ``n_times`` steps; returns (bias, rmse, extra, profile)."""
-    data = _build_paired_data(event, config, requirements, n_times)
+    data = _build_paired_data(event, config, requirements, n_times, window)
     if event.name.endswith("_capture"):
         mode = "capture"
     elif event.name.endswith("_frozen"):
@@ -441,11 +457,20 @@ def _run_arm(event, config, model, requirements, captured, footprint, n_times):
         )
 
     bias, rmse = _footprint_stats(diffs, fine_coords.lat, fine_coords.lon, footprint)
+    # Cropped to the shared footprint, every arm's field lands on the same grid,
+    # so the maps are directly comparable under one colorbar.
+    y_idx = _crop_index(fine_coords.lat, *footprint[0])
+    x_idx = _crop_index(fine_coords.lon, *footprint[1])
+    fields = {k: v[y_idx][:, x_idx].cpu().numpy() for k, v in diffs.items()}
+    coords = (
+        fine_coords.lat[y_idx].cpu().numpy(),
+        fine_coords.lon[x_idx].cpu().numpy(),
+    )
     logging.info(f"{event.name}: {n_seen} steps; bias {bias}; rmse {rmse}")
-    return bias, rmse, extra, _bias_profile(diffs)
+    return bias, rmse, extra, _bias_profile(diffs), fields, coords
 
 
-def main(config_path: str, n_times: int) -> None:
+def main(config_path: str, n_times: int, window=None) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
@@ -463,9 +488,17 @@ def main(config_path: str, n_times: int) -> None:
         f"downscale_factor={model.downscale_factor}"
     )
     footprint = _common_footprint(config.events or [])
+    # n_times doubles as the per-arm step cap. A strided window defines its own
+    # length, so unless a cap was explicitly asked for, consume all of it.
+    if window is not None and n_times <= 1:
+        n_times = 10**9
+    span = (
+        f"strided window {window[0]}..{window[1]} step {window[2]}"
+        if window
+        else f"{n_times} contiguous steps centered on each event date"
+    )
     logging.info(
-        f"common footprint: lat {footprint[0]}, lon {footprint[1]}; "
-        f"time mean over {n_times} steps"
+        f"common footprint: lat {footprint[0]}, lon {footprint[1]}; time mean: {span}"
     )
 
     captured: dict[str, list[tuple[torch.Tensor, torch.Tensor]]] = {}
@@ -473,23 +506,27 @@ def main(config_path: str, n_times: int) -> None:
     rmses: dict[str, dict[str, float]] = {}
     diagnostics: dict[str, dict[str, float]] = {}
     profiles: dict[str, dict[str, list[float]]] = {}
+    fields: dict[str, dict[str, np.ndarray]] = {}
+    coords: tuple[np.ndarray, np.ndarray] | None = None
 
     for event in config.events or []:
         try:
-            bias, rmse, extra, profile = _run_arm(
-                event, config, model, requirements, captured, footprint, n_times
+            bias, rmse, extra, profile, arm_fields, arm_coords = _run_arm(
+                event, config, model, requirements, captured, footprint, n_times, window
             )
             biases[event.name] = bias
             rmses[event.name] = rmse
             diagnostics[event.name] = extra
             profiles[event.name] = profile
+            fields[event.name] = arm_fields
+            coords = coords or arm_coords
         except Exception:
             logging.exception(f"{event.name}: arm failed, continuing")
 
     variables = sorted({v for b in biases.values() for v in b})
     lines = [
         f"common footprint: lat {footprint[0]}, lon {footprint[1]}",
-        f"time mean over {n_times} steps (6-hourly), centered on each event date",
+        f"time mean: {span}",
         "frozen vs recomp is the clean contrast; RMSE is spatial, over the",
         "time-mean field, and catches error that a domain mean cancels away",
     ]
@@ -554,6 +591,17 @@ def main(config_path: str, n_times: int) -> None:
         }
     )
     arrays["profile_bin_edges"] = np.array(BIN_EDGES)
+    # Footprint-cropped time-mean bias fields, for map plotting. All arms share
+    # this grid, so a single colorbar covers them.
+    arrays.update(
+        {
+            f"field|{arm}|{var}": val
+            for arm, d in fields.items()
+            for var, val in d.items()
+        }
+    )
+    if coords is not None:
+        arrays["field_lat"], arrays["field_lon"] = coords
     np.savez_compressed(
         os.path.join(config.experiment_dir, "gn-frozen-bias.npz"), **arrays
     )
@@ -572,9 +620,31 @@ def parse_args() -> argparse.Namespace:
             "1 reproduces the single-snapshot behaviour."
         ),
     )
+    parser.add_argument(
+        "--start-time",
+        help=(
+            "Start of a strided time window (e.g. 2023-01-01T00:00). With "
+            "--stop-time this replaces the centered --n-times window."
+        ),
+    )
+    parser.add_argument("--stop-time", help="End of the strided time window.")
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help=(
+            "Index step within the strided window; 28 is one 6-hourly snapshot "
+            "per week."
+        ),
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     _args = parse_args()
-    main(_args.config_path, _args.n_times)
+    _window = None
+    if bool(_args.start_time) != bool(_args.stop_time):
+        raise SystemExit("--start-time and --stop-time must be given together")
+    if _args.start_time:
+        _window = (_args.start_time, _args.stop_time, _args.stride)
+    main(_args.config_path, _args.n_times, _window)
