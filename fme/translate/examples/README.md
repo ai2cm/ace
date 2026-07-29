@@ -2,15 +2,16 @@
 
 Full example training configurations for the two target programs of the
 `fme/translate` PR series, written against the *intended* config surface
-through the whole series. Only the `component_pool:` block is implemented
-in PR 1 (the skeleton); everything else is the shape the follow-on PRs
-must parse. They exist to be critiqued now, before more code exists, and
-to let the critique drive the design — they are not runnable.
+through the whole series. The `component_pool:` and
+`train_data:`/`validation_data:` blocks are implemented; everything else
+is the shape the follow-on PRs must parse. They exist to be critiqued
+now, before more code exists, and to let the critique drive the design —
+they are not runnable.
 
 | Config block | PR |
 |---|---|
 | `component_pool:` (domains / transforms / backbones, freeze, checkpoint init) | 1 — modulo channels-on-transforms (domain load lists derived), int-declared latent blocks expanded in backbone `in_names`/`out_names`, and identity normalization |
-| `train_data:` / `validation_data:` stream lists (time-pairing derived from objective co-occurrence, not configured) | 2 |
+| `train_data:` / `validation_data:` stream lists (time-pairing derived from objective co-occurrence, not configured) | 2 — implemented; the pairing groups come from the `objectives:` list, which PR 3 supplies |
 | `objectives:` (`translation`, `forward_prediction` over one-backbone component chains), `optimization:`, weighted-sum trainer | 3 |
 | `inference:` composites (one-backbone component chains, Stepper-compatible export) | 4 |
 | `latent_consistency` objective type, noise-conditioned encoder and latent-resampler registry entries | 6 |

@@ -4,9 +4,10 @@
 # checkpoint. Cycle consistency in both directions. Both datasets at 4°, so
 # the translators are same-grid (a resolution-changing registry entry drops
 # in if the ERA5 side were 1°).
-# Intended config surface for the fme/translate PR series; only the
-# component_pool: block is implemented in PR 1. See README.md in this
-# directory for which PR lands each block. Not runnable.
+# Intended config surface for the fme/translate PR series; the
+# component_pool: and train_data:/validation_data: blocks are implemented.
+# See README.md in this directory for which PR lands each block.
+# Not runnable.
 experiment_dir: train_output
 save_checkpoint: true
 validate_using_ema: true
