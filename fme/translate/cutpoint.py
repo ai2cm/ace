@@ -365,33 +365,37 @@ class SFNOCutPointConfig(TransformModuleConfig):
             n_out_channels=n_out_channels if self.part == "decoder" else 1,
             dataset_info=dataset_info,
         )
+        # Every shape and flag a part needs comes off the net it is built from,
+        # not from this config, so a part cannot disagree with the net whose
+        # submodules it holds. clip_latent_global_means is the exception: the
+        # net keeps it private, so it is read from the config.
         net = built.conditional_model
         if self.part == "encoder":
             return _UnconditionalCutPoint(
                 _SFNOEncoder(
                     net,
-                    embed_dim=self.sfno.embed_dim,
-                    big_skip=self.sfno.big_skip,
-                    checkpointing=self.sfno.checkpointing,
+                    embed_dim=net.embed_dim,
+                    big_skip=net.big_skip,
+                    checkpointing=net.checkpointing,
                     clip_latent_global_means=self.sfno.clip_latent_global_means,
-                    img_shape=dataset_info.img_shape,
+                    img_shape=net.img_shape,
                 )
             )
         if self.part == "decoder":
             return _UnconditionalCutPoint(
                 _SFNODecoder(
                     net,
-                    checkpointing=self.sfno.checkpointing,
-                    filter_output=self.sfno.filter_output,
+                    checkpointing=net.checkpointing,
+                    filter_output=net.filter_output,
                 )
             )
         # The processor keeps NoiseConditionedModel's noise machinery (and its
         # state_dict names) and swaps the net it wraps for the blocks alone.
         built.conditional_model = _SFNOProcessor(
             net,
-            embed_dim=self.sfno.embed_dim,
-            big_skip=self.sfno.big_skip,
-            checkpointing=self.sfno.checkpointing,
+            embed_dim=net.embed_dim,
+            big_skip=net.big_skip,
+            checkpointing=net.checkpointing,
         )
         return built
 

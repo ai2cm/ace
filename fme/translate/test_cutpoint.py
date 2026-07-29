@@ -150,6 +150,15 @@ def _compose(parts: Mapping[str, Module], x: torch.Tensor) -> torch.Tensor:
         # separate path through the mirrored forward.
         pytest.param({"checkpointing": 1}, id="checkpointing_encoder_decoder"),
         pytest.param({"checkpointing": 3}, id="checkpointing_blocks"),
+        # Block-internal options. These sit wholly inside the processor, so they
+        # cannot reach the stage boundaries — covered so that argument does not
+        # have to be re-made by hand whenever a block option is added.
+        pytest.param({"use_mlp": False}, id="no_mlp"),
+        pytest.param({"lora_rank": 2}, id="lora"),
+        pytest.param({"filter_num_groups": 2}, id="filter_groups"),
+        pytest.param({"spectral_ratio": 0.5}, id="spectral_ratio"),
+        pytest.param({"local_blocks": [0]}, id="local_blocks"),
+        pytest.param({"filter_type": "makani-linear"}, id="makani_filter"),
     ],
 )
 def test_composed_parts_reproduce_the_donor(tmp_path, overrides):
