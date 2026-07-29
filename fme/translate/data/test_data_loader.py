@@ -34,6 +34,9 @@ def _write_stream(
     n_times: int,
     names: list[str] = NAMES,
     timestep_days: float = 1.0,
+    nz_interface: int = 3,
+    save_vertical_coordinate: bool = True,
+    infer_timestep: bool = True,
 ) -> XarrayDataConfig:
     """Write one stream's netCDF file and return the config that reads it."""
     path.mkdir(parents=True, exist_ok=True)
@@ -42,12 +45,13 @@ def _write_stream(
         dim_sizes=DimSizes(
             n_time=n_times,
             horizontal=[DimSize("lat", img_shape[0]), DimSize("lon", img_shape[1])],
-            nz_interface=3,
+            nz_interface=nz_interface,
         ),
         variable_names=names,
         timestep_days=timestep_days,
+        save_vertical_coordinate=save_vertical_coordinate,
     )
-    return XarrayDataConfig(data_path=str(path))
+    return XarrayDataConfig(data_path=str(path), infer_timestep=infer_timestep)
 
 
 def _multi_resolution_config(
@@ -359,6 +363,65 @@ def test_streams_sharing_a_domain_must_be_compatible(tmp_path):
     )
     with pytest.raises(ValueError, match="both serve domain 'atmos'"):
         get_gridded_data(config, _requirements({"era5": NAMES}, {"ifs": NAMES}), True)
+
+
+def test_streams_sharing_a_domain_are_compared_pairwise(tmp_path):
+    """Compatibility with the first stream does not imply mutual compatibility.
+
+    ``no_levels`` has a ``NullVerticalCoordinate``, which opts out of the
+    vertical-coordinate comparison, so it is compatible with both of the others
+    while they disagree with each other.
+    """
+    config = TranslateDataLoaderConfig(
+        streams=[
+            StreamConfig(
+                name="no_levels",
+                domain="atmos",
+                dataset=_write_stream(
+                    tmp_path / "n", (4, 8), 6, save_vertical_coordinate=False
+                ),
+            ),
+            StreamConfig(
+                name="two_levels",
+                domain="atmos",
+                dataset=_write_stream(tmp_path / "t", (4, 8), 6, nz_interface=3),
+            ),
+            StreamConfig(
+                name="three_levels",
+                domain="atmos",
+                dataset=_write_stream(tmp_path / "h", (4, 8), 6, nz_interface=4),
+            ),
+        ],
+        batch_size=2,
+    )
+    requirements = _requirements(
+        {"no_levels": NAMES}, {"two_levels": NAMES}, {"three_levels": NAMES}
+    )
+    with pytest.raises(ValueError, match="vertical_coordinate is not compatible"):
+        get_gridded_data(config, requirements, train=True)
+
+
+def test_a_stream_without_a_timestep_cannot_mask_one_that_has_it(tmp_path):
+    """The domain must not publish the reference stream's missing timestep."""
+    config = TranslateDataLoaderConfig(
+        streams=[
+            StreamConfig(
+                name="no_timestep",
+                domain="atmos",
+                dataset=_write_stream(tmp_path / "n", (4, 8), 6, infer_timestep=False),
+            ),
+            StreamConfig(
+                name="daily",
+                domain="atmos",
+                dataset=_write_stream(tmp_path / "d", (4, 8), 6),
+            ),
+        ],
+        batch_size=2,
+    )
+    with pytest.raises(ValueError, match="timestep is not compatible"):
+        get_gridded_data(
+            config, _requirements({"no_timestep": NAMES}, {"daily": NAMES}), True
+        )
 
 
 def test_stream_no_objective_consumes_raises(tmp_path):

@@ -8,6 +8,7 @@ It also exposes ``dataset_info`` keyed by *domain* — the pairing key
 convention every ace package's training entry point follows.
 """
 
+import itertools
 import logging
 from collections.abc import Iterator, Mapping, Sequence
 
@@ -60,25 +61,38 @@ def _domain_dataset_info(
 
     Streams sharing a domain must describe compatible datasets (same grid,
     vertical coordinate, mask and timestep), checked with
-    ``DatasetInfo.assert_compatible_with``. Their variable metadata and labels
-    are unioned; on a key present in both with conflicting metadata the later
-    stream wins and ``assert_compatible_with`` logs a warning, matching how ace
-    merges metadata across datasets.
+    ``DatasetInfo.assert_compatible_with`` over every *ordered* pair. Both
+    aspects of that matter:
+
+    - every pair, not each stream against the first one, because
+      ``assert_compatible_with`` skips a comparison either side declines to make
+      (a ``NullVerticalCoordinate`` opts out of the vertical check), so a stream
+      can be compatible with the first while disagreeing with a third;
+    - both directions, because the timestep comparison is guarded on the
+      *caller's* timestep being set. Checking one way only would let a stream
+      with no inferred timestep silently pass against one that has it — and,
+      since the returned info takes its coordinates from ``entries[0]``, publish
+      that ``None`` for the whole domain.
+
+    Only after those checks do the shared fields of ``entries[0]`` describe every
+    stream. Variable metadata and labels are unioned; on a key present in two
+    streams with conflicting metadata the later one wins and
+    ``assert_compatible_with`` logs a warning, matching how ace merges metadata
+    across datasets.
     """
-    reference_name, reference = entries[0]
-    info = _dataset_info(reference)
-    variable_metadata: dict[str, VariableMetadata] = dict(reference.variable_metadata)
-    all_labels: set[str] | None = (
-        set(reference.all_labels) if reference.all_labels is not None else None
-    )
-    for name, properties in entries[1:]:
+    infos = [(name, _dataset_info(properties)) for name, properties in entries]
+    for (name, info), (other_name, other) in itertools.permutations(infos, 2):
         try:
-            info.assert_compatible_with(_dataset_info(properties))
+            info.assert_compatible_with(other)
         except IncompatibleDatasetInfo as err:
             raise ValueError(
-                f"Streams {reference_name!r} and {name!r} both serve domain "
+                f"Streams {name!r} and {other_name!r} both serve domain "
                 f"{domain!r} but describe incompatible datasets: {err}"
             ) from err
+    reference = entries[0][1]
+    variable_metadata: dict[str, VariableMetadata] = {}
+    all_labels: set[str] | None = None
+    for _, properties in entries:
         variable_metadata.update(properties.variable_metadata)
         if properties.all_labels is not None:
             all_labels = set(properties.all_labels) | (all_labels or set())
