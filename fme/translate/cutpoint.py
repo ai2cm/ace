@@ -45,6 +45,29 @@ blocks is ``pos_drop``, which is an ``nn.Identity`` because
 ``NoiseConditionedSFNOBuilder`` does not expose ``drop_rate``. The equivalence
 test runs the parts in training mode, so it fails if that stops being true.
 
+Why this mirrors ``forward`` instead of reusing it
+-------------------------------------------------
+
+The stage forwards below restate the monolith's control flow, which is
+duplication worth being uncomfortable about. Both ways of avoiding it are
+closed, so it is a considered choice rather than the easy one:
+
+- **Split ``forward`` into three methods and have each part hold a net and call
+  one of them.** A part holding a net holds *all* of its parameters, which
+  destroys the property the tests assert — that the three parts partition the
+  donor's parameters — and costs a 3x checkpoint, dead parameters in the
+  optimizer and EMA, and DDP unused-parameter errors. Stripping the unused
+  stages out of each net afterwards encodes the same structural knowledge this
+  module does, and leaves a net whose own ``forward`` no longer works.
+- **Make each stage its own ``nn.Module`` inside ``sfnonet.py``.** Owning the
+  stages as submodules adds a level of ``state_dict`` nesting whatever they are
+  named, so every existing SFNO checkpoint fails to load — the one hard
+  backwards-compatibility guarantee in AGENTS.md.
+
+So the mirror is pinned by the bit-exactness test rather than by construction,
+and ``SphericalFourierNeuralOperatorNet.forward`` carries a comment pointing
+here so the coupling is visible from the side that gets edited.
+
 The parts do not change resolution. Resolution-changing operators are separate
 registry entries (``interpolate`` and its successors) that a config chains
 around a cut-point part.
