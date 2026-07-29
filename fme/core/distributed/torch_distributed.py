@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 
 import torch.distributed
 import torch.nn as nn
+import torch.utils.data
 import torch_harmonics as th
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
@@ -23,10 +24,42 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _in_dataloader_worker() -> bool:
+    """Whether this process is a torch DataLoader worker.
+
+    Workers only need rank and world size, which they use to decide which
+    samples belong to their rank. They never run collectives or touch GPU
+    tensors, so joining the process group and setting the CUDA device would
+    only create an idle ~520 MiB CUDA context per worker. With several
+    persistent worker pools per rank that costs GiB of GPU memory that the
+    training step could otherwise use.
+    """
+    return torch.utils.data.get_worker_info() is not None
+
+
+def _rank_metadata_from_env() -> tuple[int, int, int]:
+    """Return ``(rank, world_size, local_rank)`` from the launcher's env vars."""
+    if using_srun():
+        # the srun setting assumes one GPU per process, so local rank is always 0
+        return int(os.environ["SLURM_PROCID"]), int(os.environ["SLURM_NTASKS"]), 0
+    return (
+        int(os.environ["RANK"]),
+        int(os.environ["WORLD_SIZE"]),
+        int(os.environ["LOCAL_RANK"]),
+    )
+
+
 class TorchDistributed(DistributedBackend):
     """A non-distributed backend implementation."""
 
     def __init__(self):
+        if _in_dataloader_worker() and self.is_available():
+            # see _in_dataloader_worker for why workers skip process group
+            # and CUDA device initialization
+            self._rank, self.world_size, local_rank = _rank_metadata_from_env()
+            if using_gpu():
+                self._device_id = local_rank
+            return
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if not torch.distributed.is_initialized():
                 if using_gpu():

@@ -3,9 +3,10 @@ import os
 import pytest
 import torch
 import torch.multiprocessing as mp
+import torch.utils.data
 
 from fme import get_device
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, torch_distributed
 from fme.core.distributed.torch_distributed import (
     _gather_irregular,
     _pad_tensor_at_end,
@@ -147,3 +148,36 @@ def test_gather_irregular():
     assert all(
         shape == gathered_nonscalar_shapes[0] for shape in gathered_nonscalar_shapes
     )
+
+
+def test_dataloader_worker_skips_cuda_and_process_group_init(monkeypatch):
+    """A DataLoader worker gets usable rank metadata without initializing CUDA.
+
+    Each CUDA context costs hundreds of MiB of GPU memory, and workers have no
+    use for one, so a worker must not set the CUDA device or join the process
+    group.
+    """
+    monkeypatch.setattr(torch_distributed, "using_gpu", lambda: True)
+    monkeypatch.setattr(torch_distributed, "using_srun", lambda: False)
+    monkeypatch.setattr(
+        torch.utils.data, "get_worker_info", lambda: object(), raising=False
+    )
+
+    def fail(*args, **kwargs):
+        raise AssertionError("must not be called in a DataLoader worker")
+
+    monkeypatch.setattr(torch.distributed, "init_process_group", fail)
+    monkeypatch.setattr(torch.cuda, "set_device", fail)
+    monkeypatch.setenv("RANK", "3")
+    monkeypatch.setenv("WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_RANK", "3")
+
+    dist = torch_distributed.TorchDistributed()
+
+    assert dist.rank == 3
+    assert dist.total_ranks == 8
+    assert dist._device_id == 3
+
+
+def test_not_in_dataloader_worker_in_main_process():
+    assert not torch_distributed._in_dataloader_worker()
