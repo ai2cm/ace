@@ -112,6 +112,40 @@ def test_a_second_signal_does_not_restart_the_teardown():
     assert excinfo.value.code == 128 + signal.SIGTERM
 
 
+def test_a_signal_after_a_swallowed_exit_kills_the_process(monkeypatch):
+    """A process that swallowed the teardown's SystemExit must stay killable.
+
+    pytest turns a SystemExit raised inside a test into a test failure and
+    keeps running (as does any bare except), and the ignore-repeats guard
+    would otherwise latch every later signal into a no-op: the first Ctrl-C
+    of a test session would make the rest of it un-interruptible.
+    """
+    exited = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+
+    with handle_termination_signals(shutdown=lambda: None):
+        with pytest.raises(SystemExit):
+            signal.raise_signal(signal.SIGTERM)
+        # the SystemExit was swallowed just above; the job is still running
+        signal.raise_signal(signal.SIGINT)
+
+    assert exited == [128 + signal.SIGINT]
+
+
+def test_callback_raising_system_exit_does_not_hijack_the_exit_code():
+    """sys.exit() in a callback must not skip the rest or rewrite the code."""
+    events = []
+    add_post_shutdown_callback(lambda: sys.exit(0))
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: None):
+        with pytest.raises(SystemExit) as excinfo:
+            signal.raise_signal(signal.SIGTERM)
+
+    assert events == ["callback"]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+
+
 def test_deadline_does_not_outlive_a_successful_teardown(monkeypatch):
     """An expired deadline must not kill a process that shut down cleanly.
 

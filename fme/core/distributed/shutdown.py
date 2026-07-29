@@ -12,6 +12,14 @@ of every rank reaching it at the same time. Anything slow -- writing a restart
 checkpoint, in particular -- has to happen *after* the teardown, not before it,
 or the ranks that got there first sit in the collective until the scheduler
 kills them.
+
+The handler runs only when the main thread returns to the interpreter, so a
+rank whose main thread is blocked in a C-level call (a collective's stream
+sync, most importantly) when the signal arrives never starts the teardown and
+rides to the scheduler's SIGKILL. The watchdog thread bounds a teardown once
+it has begun; it cannot start one. Likewise the instants before the handler is
+installed -- ``init_process_group`` itself, inside ``Distributed.context()``
+entry -- remain unprotected.
 """
 
 import contextlib
@@ -88,12 +96,14 @@ def _tear_down(shutdown: Callable[[], None]) -> None:
     """
     try:
         shutdown()
-    except Exception:
+    except BaseException:
         logger.exception("Failed to shut down the distributed backend.")
     for callback in _post_shutdown_callbacks:
         try:
             callback()
-        except Exception:
+        except BaseException:
+            # BaseException so a callback calling sys.exit() cannot skip the
+            # remaining callbacks or hijack the exit code
             logger.exception("Post-shutdown callback %r failed.", callback)
 
 
@@ -124,10 +134,21 @@ def handle_termination_signals(
         return
 
     tearing_down = False
+    teardown_complete = False
 
     def handle(signum: int, frame: types.FrameType | None) -> None:
-        nonlocal tearing_down
+        nonlocal tearing_down, teardown_complete
         exit_code = 128 + signum
+        if teardown_complete:
+            # the SystemExit from the first signal was swallowed (pytest turns
+            # it into a test failure and keeps running; so does any bare
+            # except), so being here means graceful exit failed. Honor the
+            # convention that a repeated signal kills the process.
+            logger.info(
+                "Received %s after teardown already completed; exiting.",
+                signal.Signals(signum).name,
+            )
+            os._exit(exit_code)
         if tearing_down:
             # a repeated Ctrl-C, or both the scheduler and torchrun signalling.
             # The first handler owns the teardown and the deadline already
@@ -146,6 +167,7 @@ def handle_termination_signals(
         try:
             _tear_down(shutdown)
         finally:
+            teardown_complete = True
             # the deadline bounds the teardown, so it must not outlive it and
             # kill a process that already shut down cleanly
             deadline.cancel()

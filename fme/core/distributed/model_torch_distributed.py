@@ -454,5 +454,9 @@ class ModelTorchDistributed(DistributedBackend):
         return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
-        logger.debug("Shutting down rank %d", self._rank)
+        if not torch.distributed.is_initialized():
+            # already shut down; a termination signal can arrive during the
+            # normal end-of-run teardown
+            return
+        logger.info("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()
