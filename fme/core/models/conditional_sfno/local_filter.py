@@ -34,6 +34,7 @@ branches, while ``H`` stays zonally global (its spatial kernel decays like
 
 import dataclasses
 import math
+import re
 
 import torch
 import torch.nn as nn
@@ -47,6 +48,10 @@ from fme.core.disco import (
     kernel_shape_for_basis_count,
 )
 from fme.core.distributed import Distributed
+
+# A kernel_shape of "lmax" or "<n>lmax", i.e. n radius-only basis functions per
+# total wavenumber. Resolution-independent, so one config spans grids.
+_LMAX_SHAPE = re.compile(r"^(\d+)?lmax$")
 
 
 def zonal_quarter_cycle_shift(x: torch.Tensor) -> torch.Tensor:
@@ -97,12 +102,28 @@ class LocalFilterConfig:
     Attributes:
         kernel_shape: Shape of the DISCO filter basis. ``"lmax"`` resolves to
             the shape giving exactly ``lmax`` radius-only basis functions, one
-            degree of freedom per total wavenumber, which is the span-equality
-            condition for reproducing an arbitrary per-``l`` profile. Note that
-            span equality is necessary but not sufficient: a family whose
-            ``l``-transfer matrix is ill-conditioned at that size cannot
-            realize arbitrary profiles in practice even though it nominally
-            spans them.
+            degree of freedom per total wavenumber, and ``"<n>lmax"`` (e.g.
+            ``"2lmax"``) to ``n`` times that many. Counting degrees of freedom
+            is necessary but not sufficient, in two distinct ways:
+
+            - A family whose ``l``-transfer matrix is ill-conditioned at that
+              size cannot realize arbitrary profiles in practice even though it
+              nominally spans them. ``"isotropic morlet"`` at ``"lmax"`` has a
+              condition number of 2e11 at 4 degrees, with only ~25 of 45 usable
+              directions; ``"piecewise linear"`` with one azimuthal bin is 81.
+            - Even well-conditioned, ``"lmax"`` radial modes are not enough to
+              *behave* isotropically. Each basis function's ``l``-transfer
+              drifts with ``m`` (the quadrature is only approximately
+              rotation-equivariant on a lat-lon grid), and cancelling that drift
+              costs degrees of freedom beyond the ``lmax`` needed to span the
+              profile. Measured at 4 degrees against a random dhconv operator,
+              the best achievable relative error is 18% at ``"lmax"``, 4.0% at
+              ``"2lmax"``, 1.7% at ``"3lmax"`` and 0.9% at ``"4lmax"``, with the
+              residual concentrated at high ``l`` and the fitted coefficient
+              norm *decreasing* as ``n`` grows. Oversampling by 2-4x is
+              therefore the rule for approximating a global spectral filter.
+              Cost scales linearly in the count: the DISCO contraction saves a
+              ``(batch, channels, kernel_size, nlat, nlon)`` activation.
         basis_type: Filter basis family. ``two_branch`` requires a family that
             is purely radial at this ``kernel_shape`` (``"isotropic morlet"``,
             or ``"piecewise linear"`` with a single azimuthal bin), since the
@@ -132,11 +153,18 @@ class LocalFilterConfig:
     match_spectral_init: bool = False
 
     def __post_init__(self):
-        if isinstance(self.kernel_shape, str) and self.kernel_shape != "lmax":
-            raise ValueError(
-                "local filter kernel_shape must be a list of ints or the string "
-                f'"lmax", got {self.kernel_shape!r}.'
-            )
+        if isinstance(self.kernel_shape, str):
+            if _LMAX_SHAPE.match(self.kernel_shape) is None:
+                raise ValueError(
+                    "local filter kernel_shape must be a list of ints, the "
+                    'string "lmax", or "<n>lmax" for a multiple of it (e.g. '
+                    f'"2lmax"), got {self.kernel_shape!r}.'
+                )
+            if self._lmax_multiple < 1:
+                raise ValueError(
+                    "local filter kernel_shape multiple of lmax must be at "
+                    f"least 1, got {self.kernel_shape!r}."
+                )
         if isinstance(self.theta_cutoff, str) and self.theta_cutoff != "global":
             raise ValueError(
                 "local filter theta_cutoff must be a number, the string "
@@ -151,12 +179,22 @@ class LocalFilterConfig:
                 "largest geodesic distance on the sphere."
             )
 
+    @property
+    def _lmax_multiple(self) -> int:
+        """The ``n`` in a ``"<n>lmax"`` kernel_shape; ``"lmax"`` means 1."""
+        match = _LMAX_SHAPE.match(str(self.kernel_shape))
+        if match is None:
+            raise ValueError(
+                f"kernel_shape {self.kernel_shape!r} is not lmax-relative."
+            )
+        return int(match.group(1)) if match.group(1) else 1
+
     def resolved_kernel_shape(self, lmax: int) -> tuple[int, ...]:
-        """The concrete ``kernel_shape``, resolving the ``"lmax"`` shorthand."""
-        if self.kernel_shape == "lmax":
-            return kernel_shape_for_basis_count(lmax, self.basis_type)
-        # A str kernel_shape is rejected in __post_init__, so this is a list.
-        return tuple(self.kernel_shape)  # type: ignore[arg-type]
+        """The concrete ``kernel_shape``, resolving the ``"<n>lmax"`` shorthand."""
+        if isinstance(self.kernel_shape, str):
+            count = self._lmax_multiple * lmax
+            return kernel_shape_for_basis_count(count, self.basis_type)
+        return tuple(self.kernel_shape)
 
     def resolved_theta_cutoff(self, nlat: int, kernel_shape: tuple[int, ...]) -> float:
         """The concrete support radius in radians."""

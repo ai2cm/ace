@@ -21,9 +21,11 @@ LMAX, MMAX = NLAT, NLON // 2 + 1
 GRID = "legendre-gauss"
 
 # The radial family the parity experiment uses: piecewise-linear radial bumps
-# with one azimuthal bin, sized to give exactly lmax basis functions.
+# with one azimuthal bin. Oversampled 2x relative to lmax -- one degree of
+# freedom per total wavenumber spans the per-l profiles but is not enough to
+# behave isotropically; see test_oversampling_the_radial_basis_improves_parity.
 PARITY_FILTER = LocalFilterConfig(
-    kernel_shape="lmax",
+    kernel_shape="2lmax",
     basis_type="piecewise linear",
     theta_cutoff="global",
     two_branch=True,
@@ -165,7 +167,7 @@ def test_parity_basis_spans_arbitrary_per_l_profiles():
     sht, isht = _transforms()
     conv = _build(PARITY_FILTER).branches[0]
     transfer = _transfer_matrix(conv, sht, isht)
-    assert transfer.shape == (LMAX, LMAX)
+    assert transfer.shape == (LMAX, conv.kernel_size)
 
     singular_values = torch.linalg.svdvals(transfer)
     condition_number = float(singular_values[0] / singular_values[-1])
@@ -182,29 +184,61 @@ def test_parity_basis_spans_arbitrary_per_l_profiles():
     assert float(solution.norm()) < 1e3, "profile requires implausibly large weights"
 
 
-def _fit_two_branch_to_dhconv(filter_, sht, isht):
-    """Fit both branch weights to a random complex per-l weight.
+def _target_per_l_weight() -> torch.Tensor:
+    """A random complex per-l weight: the hardest case for a radial basis.
 
-    Returns the fitted weights and the per-l weight they target.
+    White in l, so adjacent wavenumbers are uncorrelated. A smooth profile (a
+    low-pass, say) is far easier -- the same fit lands within 0.3% of it -- so
+    fitting this bounds the error for any target.
     """
-    transfer = _transfer_matrix(filter_.branches[0], sht, isht)
     torch.manual_seed(0)
     real_part = torch.randn(LMAX, dtype=torch.float64)
     imag_part = torch.randn(LMAX, dtype=torch.float64)
+    return torch.complex(real_part.float(), imag_part.float())
 
-    def fit(profile):
-        return (
-            torch.linalg.lstsq(transfer, profile.unsqueeze(1))
-            .solution.squeeze(1)
-            .float()
-        )
 
-    # H multiplies by -i sign(m), so the b branch carries the negated imaginary
-    # profile; the design absorbs this sign convention into the learned kernel.
+def _field_ensemble(isht, n: int, seed: int) -> torch.Tensor:
+    """Random real fields with unit power in every representable (l, m) mode."""
+    generator = torch.Generator().manual_seed(seed)
+    coeffs = torch.zeros(n, 1, LMAX, MMAX, dtype=torch.complex64)
+    for ell in range(LMAX):
+        n_m = min(ell + 1, MMAX)
+        real = torch.randn(n, n_m, generator=generator)
+        imag = torch.randn(n, n_m, generator=generator)
+        imag[:, 0] = 0.0  # m = 0 is real for a real field
+        coeffs[:, 0, ell, :n_m] = torch.complex(real, imag)
+    return isht(coeffs)
+
+
+def _fit_two_branch_to_dhconv(filter_, sht, isht, per_l_weight=None):
+    """Fit both branch weights to a per-l weight, over the whole (l, m) plane.
+
+    The fit is a least squares in field space against an ensemble of random
+    fields, i.e. the best achievable approximation of the target operator in the
+    norm that matters. Fitting instead to the l-transfer measured at m = 0 --
+    which looks like the natural thing to do, since the target is m-independent
+    -- leaves a factor of ~5 on the table, because it spends every degree of
+    freedom on one m slice and lets the others drift.
+
+    Returns the fitted weights and the per-l weight they target.
+    """
+    weight = _target_per_l_weight() if per_l_weight is None else per_l_weight
+    conv = filter_.branches[0]
+    fields = _field_ensemble(isht, 64, seed=10)
+    per_basis = _basis_outputs(conv, fields)
+    columns = [per_basis[:, k] for k in range(conv.kernel_size)] + [
+        zonal_quarter_cycle_shift(per_basis[:, k]) for k in range(conv.kernel_size)
+    ]
+    design = torch.stack([c.reshape(-1) for c in columns], dim=1)
+    with torch.no_grad():
+        target = isht(sht(fields) * weight.reshape(1, 1, LMAX, 1))
+    solution = torch.linalg.lstsq(
+        design.double(), target.squeeze(1).reshape(-1).double().unsqueeze(1)
+    ).solution.squeeze(1)
     return (
-        fit(real_part),
-        fit(-imag_part),
-        torch.complex(real_part.float(), imag_part.float()),
+        solution[: conv.kernel_size].float(),
+        solution[conv.kernel_size :].float(),
+        weight,
     )
 
 
@@ -226,38 +260,73 @@ def _random_field(isht, max_l: int, max_m: int, seed: int = 1) -> torch.Tensor:
 
 
 @pytest.mark.medium_duration
-def test_two_branch_reproduces_dhconv_on_resolved_scales():
-    """The fitted two-branch filter approximates the dhconv spectral filter.
+def test_two_branch_reproduces_dhconv():
+    """The fitted two-branch filter reproduces the dhconv spectral filter.
 
-    The two-branch form is the exact decomposition of dhconv in the continuum,
-    so this checks the implementation wires it up correctly. It is checked on the
-    resolved part of the spectrum because DISCO's quadrature is only
-    approximately isotropic on a lat-lon grid: the measured l-transfer drifts
-    with zonal wavenumber (about 1% at m = 1, growing toward the Nyquist), so a
-    fit performed at m = 0 cannot match the operator exactly at every m. That
-    ceiling belongs to the DISCO discretization, not to this decomposition or to
-    the choice of radial family, and it does not shrink with either.
+    The two-branch form is the exact decomposition of dhconv in the continuum;
+    this checks the implementation realizes it on the grid, across the whole
+    (l, m) plane and on fields the fit has not seen.
     """
     sht, isht = _transforms()
     filter_ = _build(PARITY_FILTER)
     weight_a, weight_b, per_l_weight = _fit_two_branch_to_dhconv(filter_, sht, isht)
 
-    fields = _random_field(isht, max_l=3 * LMAX // 4, max_m=MMAX)
+    fields = _field_ensemble(isht, 64, seed=11)
     got, a_only = _apply_fitted(filter_, fields, weight_a, weight_b)
     with torch.no_grad():
         expected = isht(sht(fields) * per_l_weight.reshape(1, 1, LMAX, 1))
 
     error = float((got - expected).norm() / expected.norm())
-    assert error < 0.15, f"two-branch filter does not reproduce dhconv: {error}"
+    assert error < 0.07, f"two-branch filter does not reproduce dhconv: {error}"
 
     # Without H only the real part of the per-l weight is reproduced, which must
     # be markedly worse -- otherwise the test would pass with the chiral part
     # silently absent.
     error_without_h = float((a_only - expected).norm() / expected.norm())
-    assert error_without_h > 3 * error, (
+    assert error_without_h > 5 * error, (
         "the H branch contributes little, so the imaginary part of the spectral "
         "filter is not being reproduced"
     )
+
+
+@pytest.mark.slow
+def test_oversampling_the_radial_basis_improves_parity():
+    """One radial mode per total wavenumber spans the profiles but is not enough.
+
+    lmax radius-only basis functions span every real per-l profile exactly (see
+    test_parity_basis_spans_arbitrary_per_l_profiles), which makes "size the
+    basis to lmax" look like the natural rule. It is not: each basis function's
+    l-transfer drifts with m, because DISCO's quadrature is only approximately
+    rotation-equivariant on a lat-lon grid, and cancelling that drift costs
+    degrees of freedom beyond the ones spent spanning the profile. Oversampling
+    buys back the isotropy, and buys it cheaply -- the fitted coefficient norm
+    *falls* as the basis grows, so this is a better-conditioned fit and not a
+    finer cancellation.
+
+    Guards the choice of "2lmax" for the parity experiment against being
+    "simplified" back to "lmax" on the span argument alone.
+    """
+    sht, isht = _transforms()
+    errors, norms = {}, {}
+    for shape in ("lmax", "2lmax", "4lmax"):
+        filter_ = _build(dataclasses.replace(PARITY_FILTER, kernel_shape=shape))
+        weight_a, weight_b, per_l_weight = _fit_two_branch_to_dhconv(filter_, sht, isht)
+        fields = _field_ensemble(isht, 64, seed=11)
+        got, _ = _apply_fitted(filter_, fields, weight_a, weight_b)
+        with torch.no_grad():
+            expected = isht(sht(fields) * per_l_weight.reshape(1, 1, LMAX, 1))
+        errors[shape] = float((got - expected).norm() / expected.norm())
+        norms[shape] = float(torch.cat([weight_a, weight_b]).norm())
+
+    assert errors["lmax"] > 0.15, (
+        "lmax radial modes unexpectedly reproduce dhconv well; if the DISCO "
+        f"quadrature became more isotropic, revisit the 2x rule: {errors}"
+    )
+    assert errors["2lmax"] < errors["lmax"] / 4, f"2lmax must be far better: {errors}"
+    assert errors["4lmax"] < errors["2lmax"], f"error must keep falling: {errors}"
+    assert (
+        norms["2lmax"] < norms["lmax"]
+    ), f"oversampling should improve conditioning, not worsen it: {norms}"
 
 
 @pytest.mark.medium_duration
@@ -345,11 +414,28 @@ def test_default_config_reproduces_the_historical_local_filter():
         ({"theta_cutoff": 0.0}, "theta_cutoff must be in"),
         ({"theta_cutoff": "everywhere"}, "theta_cutoff must be a number"),
         ({"kernel_shape": "all"}, "kernel_shape must be a list"),
+        ({"kernel_shape": "lmax2"}, "kernel_shape must be a list"),
+        ({"kernel_shape": "2 lmax"}, "kernel_shape must be a list"),
+        ({"kernel_shape": "0lmax"}, "multiple of lmax must be at least 1"),
     ],
 )
 def test_config_rejects_invalid_values(kwargs, match):
     with pytest.raises(ValueError, match=match):
         LocalFilterConfig(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kernel_shape, expected_count",
+    [("lmax", LMAX), ("1lmax", LMAX), ("2lmax", 2 * LMAX), ("4lmax", 4 * LMAX)],
+)
+def test_lmax_relative_kernel_shape_resolves_to_that_many_basis_functions(
+    kernel_shape, expected_count
+):
+    config = dataclasses.replace(PARITY_FILTER, kernel_shape=kernel_shape)
+    shape = config.resolved_kernel_shape(LMAX)
+    # A (n, 1) piecewise-linear basis has (n // 2) + n % 2 functions.
+    assert shape[0] // 2 + shape[0] % 2 == expected_count
+    assert _build(config).branches[0].kernel_size == expected_count
 
 
 def test_lmax_kernel_shape_requires_a_radial_family():
