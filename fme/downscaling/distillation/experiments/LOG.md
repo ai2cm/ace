@@ -10,10 +10,19 @@ Central planning + outcomes log for distilled downscaling students. Process:
 
 ## ⚡ At a glance  <!-- keep this current: the daily check-in view -->
 
-_Last updated: 2026-07-23._
+_Last updated: 2026-07-28._
 
 ### 🔴 In flight — check for updates, finish write-ups when done
 
+- **Single-GPU CONUS eval — hirov1 vs spectral student** (launched 2026-07-28) — hirov1
+  `6eff6ig5` (`01KYP41B245ZXBNH3QGJEGR74N`) + spectral `i26sidsm` `y543b0gf`
+  (`01KYP41DEZ7DND9YFY77XVYEH7`), commit
+  [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f). Run on **one rank** because
+  the tail histograms are never reduced across ranks (see the follow-up below), so every
+  earlier multi-rank eval reported `histogram/prediction_frac_of_target/*` from a single
+  rank's shard. First eval with **whole-dataset tails**; CRPS/PSD stay comparable to the
+  4-GPU runs, tails supersede them.
+  ([write-up](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md))
 - **f-distill step-count sweep** (launched 2026-07-23) — native **1-step**
   (`01KY8F8DJG89CNVV89257V0B72`) + native **4-step** (`01KY8F8M3BD7NG1QQDNQJJ8KVW`),
   spectral W=1e-2, **early-stop patience=10** (spec-13, first sweep to use it). Baseline =
@@ -82,6 +91,7 @@ Every launched run gets a row. `verdict`: ✅ win · ➕ mild positive · ➖ fl
 | `rmoodemk` | `1r1p6djp` | 2026-07-08 | CONUS 2023, 100km→3km X-SHiELD | [`de3e00c`](https://github.com/ai2cm/ace/commit/de3e00ce2bf8215114a818faae11700afd8005f9) | `01KWZD6YMZSD37XZHDMYB8RFC7` / `01KWZD6WFN4TCSMMC48BTFMN8Q` | see report | [report](reports/2026-07-08-moe-eval-distilled-vs-teacher.md) |
 | `x2nyzmzh` (spectral) | `flzvb6tp` (baseline) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.46→0.13 (−71%), CRPS −3.5%, tails ~ideal | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
 | `l6vv7yx0` (spectral) | `fg9byv9y` (baseline) | 2026-07-13 | maritime continent, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.60→0.13 (−78%), CRPS −2.6%, tails closer to 1 | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
+| `y543b0gf` (spectral `i26sidsm`, 2-step) | `6eff6ig5` (hirov1, full diffusion) | 2026-07-28 | CONUS, 100km→3km X-SHiELD AMIP — **single GPU** | [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f) | `01KYP41DEZ7DND9YFY77XVYEH7` / `01KYP41B245ZXBNH3QGJEGR74N` | ⏳ running | [report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md) |
 | `p337gcg9` (Lo-only, 2 NFE) | `rmoodemk` (Hi→Lo bundle, 3 NFE) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP | [`af4d134`](https://github.com/ai2cm/ace/commit/af4d13415dacc38ab34e5ad8bbfa22a51615d611) | `01KXEYCC9HAZ7F1G85E3KRPKFD` | ✅ **Hi needed for extreme precip only**: Lo-only ≈ bundle on CRPS (<0.03%) + PSD (<1%) all 4 vars, but under-produces `tail_99.9999_PRATEsfc` 1.01→0.93 (wind tails unchanged) | [report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md) |
 
 ### MoE per-expert base models (bundled into `rmoodemk`)
@@ -120,6 +130,25 @@ point at the standardized reports.
   2026-07-13): the `min_wavenumber=85` cut is tied with flat-band `i26sidsm` at the
   best-sustained spectrum (marginally better mid+hi, within noise). See report +
   outcomes bullet.
+- **★ TASK — reduce the tail histograms across ranks** (found 2026-07-28 while setting up
+  the single-GPU CONUS eval). `ComparedDynamicTailsHistograms` in `fme/core/histogram.py`
+  performs **no cross-rank reduction**, so on any multi-rank run the logged
+  `histogram/prediction_frac_of_target/*` tail ratios come from **one rank's shard** —
+  on 4 GPUs, a quarter of the samples, and the 99.9999th percentile is exactly where the
+  4× smaller sample hurts most. Verified scope: the histogram is the *only* affected
+  path — `Mean` / `MeanComparison` both return
+  `TensorDictAccumulator.get_distributed_mean()`, so `metrics/crps/*`, `metrics/rmse/*`
+  and `power_spectrum/*` were always reduced correctly; the other `Distributed` users in
+  the downscaling aggregators are `LossVsNoiseAggregator` (training-only `reduce_sum`)
+  and `PairedSampleAggregator` (`gather` for event images). **Consequences:** (a) every
+  multi-rank eval's tails are shard-local — the 4-GPU CONUS/maritime tail ratios in the
+  2026-07-13 reports included; (b) more insidiously, **`best_student_tail.ckpt` and
+  `best_histogram_tail.ckpt` were *selected* on a shard**, so every tail-based checkpoint
+  selector in the history above is noisier than assumed. **Interim workaround:** run evals
+  on one GPU (`configs/experiments/2026-07-28-hirov1-vs-spectral-conus-1gpu/`). **Real
+  fix:** add the reduction — durable pipeline change → numbered spec under `../specs/`
+  first, and note it will shift every tail-selected checkpoint, so it interacts with the
+  spec-13 early-stop work below.
 - **★ TASK — spectral-aware early stopping / checkpoint selection** (motivated by
   `xgcaf2rt`). Two coupled problems this run exposed: (a) **wasted compute** — it ran
   to 52k steps but its useful spectral optimum was ~2.6k; `val/crps_mean` is flat to

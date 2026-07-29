@@ -8,8 +8,8 @@ relabel teacher/distilled -> hirov1/spectral).
 -->
 # Eval comparison — **hirov1** baseline vs **spectral-loss** distilled (CONUS 2023, 100km→3km, single GPU)
 
-_Status: **launched 2026-07-28**, awaiting results. wandb ids TBD — rename this file
-once known._
+_Status: **running** (launched 2026-07-28) — hirov1 `6eff6ig5`, spectral `y543b0gf`.
+Awaiting results; tables below are unfilled._
 
 ## Why this run
 
@@ -61,8 +61,16 @@ longer on one GPU with no resume path.
 
 | role | wandb run | commit | Beaker experiment | checkpoint |
 |---|---|---|---|---|
-| hirov1 (baseline) | `<id>` — <url> | `<short-sha>` | `<ULID>` | `best_histogram_tail.ckpt` |
-| spectral (`i26sidsm`) | `<id>` — <url> | `<short-sha>` | `<ULID>` | `best_student_tail.ckpt` |
+| hirov1 (baseline) | `6eff6ig5` — https://wandb.ai/ai2cm/andrep-downscaling/runs/6eff6ig5 | [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f) | [`01KYP41B245ZXBNH3QGJEGR74N`](https://beaker.org/ex/01KYP41B245ZXBNH3QGJEGR74N) | `best_histogram_tail.ckpt` |
+| spectral (`i26sidsm`) | `y543b0gf` — https://wandb.ai/ai2cm/andrep-downscaling/runs/y543b0gf | [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f) | [`01KYP41DEZ7DND9YFY77XVYEH7`](https://beaker.org/ex/01KYP41DEZ7DND9YFY77XVYEH7) | `best_student_tail.ckpt` |
+
+Fill the tables with:
+
+```
+conda run -n fme python -m fme.downscaling.distillation.check_runs \
+    --compare-eval 6eff6ig5 y543b0gf --project andrep-downscaling \
+    --out fme/downscaling/distillation/experiments/reports/
+```
 
 ## CRPS  (`metrics/crps/<VAR>` — lower better)
 
