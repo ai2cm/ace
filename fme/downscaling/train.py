@@ -156,7 +156,26 @@ class Trainer:
             batch_generator = data.get_patched_generator(
                 coarse_yx_patch_extent=self.model.coarse_shape,
                 overlap=0,
-                drop_partial_patches=True,
+                # False, not True: get_offset() draws its random_offset from
+                # plain `random.randint`, unsynced across DDP ranks, so with
+                # drop_partial_patches=True the number of patches per raw
+                # batch varies per rank per draw. That desyncs ranks'
+                # per-epoch step counts and eventually deadlocks/crashes
+                # DDP's collectives once the drift is large enough (observed:
+                # a silent NCCL ALLREDUCE watchdog timeout after ~2.5h of
+                # otherwise-healthy training). Same bug and fix as
+                # video_train.py's VideoTrainer._get_batch_generator (see
+                # d13644f32, "Fix DDP desync from unsynced random patch-grid
+                # offsets") -- that fix was applied there only, not here.
+                # False is safe: patches are always read via the "input"
+                # slice (never the boundary-trimmed "output" slice, that's
+                # only for stitching inference output), which is always
+                # exactly coarse_yx_patch_extent wide regardless of offset --
+                # so this only changes whether the boundary patch is
+                # included, never any patch's shape. Covered generically by
+                # fme/downscaling/data/test_patching.py's
+                # test_get_patches_count_with_random_offset_and_drop_partial.
+                drop_partial_patches=False,
                 random_offset=random_offset,
                 shuffle=shuffle,
                 region_sampling=region_sampling,
