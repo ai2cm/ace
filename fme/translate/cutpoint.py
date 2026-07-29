@@ -459,7 +459,11 @@ class SFNOCutPointConfig(TransformModuleConfig):
                 f"The donor checkpoint {self.donor_checkpoint!r} has no weights "
                 f"for {len(missing)} parameter(s) of this sfno_cut_point "
                 f"{self.part!r}, e.g. {sorted(missing)[:5]}. The 'sfno' block "
-                "must be the donor's own module configuration."
+                "must be the donor's own module configuration. To add "
+                "parameters the donor does not have (LoRA adapters over a "
+                "non-LoRA donor, say), point parameter_init.weights_path at a "
+                "state_dict filtered to this part's names instead; it accepts "
+                "a subset, whereas donor_checkpoint requires an exact match."
             )
         if mismatched:
             # overwrite_weights would copy the leading slice of each of these and
@@ -469,10 +473,11 @@ class SFNOCutPointConfig(TransformModuleConfig):
                 f"The donor checkpoint {self.donor_checkpoint!r} has "
                 f"differently-shaped weights for {len(mismatched)} parameter(s) "
                 f"of this sfno_cut_point {self.part!r}: {sorted(mismatched)[:5]}. "
-                "The usual cause is a cut-point domain whose channel count is "
-                "not embed_dim plus the donor's own input channels. For a "
-                "deliberately partial load, use parameter_init.weights_path "
-                "instead of donor_checkpoint."
+                "The usual cause is an 'sfno' block that is not the donor's own "
+                "module configuration. For a deliberate partial load, point "
+                "parameter_init.weights_path at a state_dict filtered to this "
+                "part's parameter names; it accepts a subset of them, whereas "
+                "donor_checkpoint requires an exact match."
             )
         destination = set(module.state_dict())
         overwrite_weights(
