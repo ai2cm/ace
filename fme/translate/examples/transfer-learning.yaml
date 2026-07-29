@@ -5,9 +5,10 @@
 # the translators are same-grid (a resolution-changing registry entry drops
 # in if the ERA5 side were 1°).
 # Intended config surface for the fme/translate PR series; the
-# component_pool: and train_data:/validation_data: blocks are implemented.
-# See README.md in this directory for which PR lands each block.
-# Not runnable.
+# train_data:/validation_data: blocks are implemented, and component_pool:
+# modulo the PR-1 rework noted in README.md (until that lands, the
+# component_pool: block below does not parse). See README.md in this
+# directory for which PR lands each block. Not runnable.
 experiment_dir: train_output
 save_checkpoint: true
 validate_using_ema: true

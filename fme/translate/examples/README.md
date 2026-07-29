@@ -2,11 +2,12 @@
 
 Full example training configurations for the two target programs of the
 `fme/translate` PR series, written against the *intended* config surface
-through the whole series. The `component_pool:` and
-`train_data:`/`validation_data:` blocks are implemented; everything else
-is the shape the follow-on PRs must parse. They exist to be critiqued
-now, before more code exists, and to let the critique drive the design —
-they are not runnable.
+through the whole series. The `train_data:`/`validation_data:` blocks are
+implemented, and `component_pool:` is implemented modulo the rework noted
+in the table below (until that lands, the `component_pool:` blocks here do
+not parse); everything else is the shape the follow-on PRs must parse.
+They exist to be critiqued now, before more code exists, and to let the
+critique drive the design — they are not runnable.
 
 | Config block | PR |
 |---|---|
