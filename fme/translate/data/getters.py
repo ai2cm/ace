@@ -128,6 +128,11 @@ def get_gridded_data(
         Data over every configured stream, one batch carrying all of them.
     """
     _validate_streams_match_requirements(config, requirements)
+    Distributed.get_instance().require_no_spatial_parallelism(
+        "The translate data loader does not scatter batches spatially: each "
+        "stream would have to be scattered against its own grid, which no "
+        "translate module supports yet. Run without spatial parallelism."
+    )
     stream_configs = config.stream_configs
     datasets: dict[str, DatasetABC] = {}
     properties: dict[str, DatasetProperties] = {}
