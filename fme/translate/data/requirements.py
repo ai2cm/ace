@@ -54,11 +54,12 @@ class StreamRequirements:
 
     @property
     def n_timesteps_schedule(self) -> IntSchedule:
-        # Delegate so the int-or-schedule union is normalized in exactly one
-        # place, ace's DataRequirements.
-        return DataRequirements(
-            names=list(self.names), n_timesteps=self.n_timesteps
-        ).n_timesteps_schedule
+        # The int-or-schedule union is the shape a config author writes (a plain
+        # int being the common case), so narrowing it needs this check; the same
+        # one ace's DataRequirements.n_timesteps_schedule makes.
+        if isinstance(self.n_timesteps, IntSchedule):
+            return self.n_timesteps
+        return IntSchedule.from_constant(self.n_timesteps)
 
 
 @dataclasses.dataclass(frozen=True)
