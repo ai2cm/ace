@@ -768,9 +768,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         return x
 
     def forward(self, x: torch.Tensor, context: Context):
-        # fme/translate/cutpoint.py mirrors the three stages below as separate
-        # modules and asserts bit-exact equivalence with this method, so changes
-        # here need a matching change there. Its tests will say so if not.
         # save big skip
         if self.big_skip:
             residual = self.residual_filter_up(self.residual_filter_down(x))
