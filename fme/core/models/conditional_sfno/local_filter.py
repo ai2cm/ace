@@ -79,8 +79,8 @@ def zonal_quarter_cycle_shift(x: torch.Tensor) -> torch.Tensor:
         A real tensor of the same shape and dtype as ``x``.
     """
     nlon = x.shape[-1]
-    # FFTs are not supported in reduced precision, and the filter runs with
-    # autocast disabled around the spectral path for the same reason.
+    # FFTs are not supported in reduced precision, so cast up regardless of
+    # what autocast handed in and cast the result back.
     coeffs = torch.fft.rfft(x.float(), dim=-1)
     m = torch.arange(coeffs.shape[-1], device=x.device)
     shifted = m > 0
@@ -198,13 +198,14 @@ class LocalFilterConfig:
 
     def resolved_theta_cutoff(self, nlat: int, kernel_shape: tuple[int, ...]) -> float:
         """The concrete support radius in radians."""
-        if self.theta_cutoff == "global":
-            return math.pi
         if self.theta_cutoff is None:
             # Historically the only available value, and doubled at the call
             # site; fold the factor of 2 in so the default is unchanged.
             return 2 * compute_cutoff_radius(nlat, kernel_shape, self.basis_type)
-        return float(self.theta_cutoff)  # type: ignore[arg-type]
+        if isinstance(self.theta_cutoff, str):
+            # __post_init__ admits no other string.
+            return math.pi
+        return float(self.theta_cutoff)
 
     def build(
         self,
@@ -297,6 +298,7 @@ class LocalFilter(nn.Module):
 
         self.two_branch = config.two_branch
         n_branches = 2 if config.two_branch else 1
+        dist = Distributed.get_instance()
 
         if config.two_branch:
             if not basis.is_isotropic:
@@ -307,12 +309,11 @@ class LocalFilter(nn.Module):
                     "'isotropic morlet', or 'piecewise linear' with a single "
                     "azimuthal bin."
                 )
-            Distributed.get_instance().require_no_spatial_parallelism(
+            dist.require_no_spatial_parallelism(
                 "the two-branch local filter's zonal quarter-cycle shift is an "
                 "FFT over the full longitude circle"
             )
 
-        dist = Distributed.get_instance()
         self.branches = nn.ModuleList(
             [
                 dist.get_disco_conv_s2(

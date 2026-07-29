@@ -143,10 +143,11 @@ def test_isotropic_branch_commutes_with_longitude_reflection():
     with torch.no_grad():
         from_reflected, _ = filter_(x[..., reflect])
         reflected_out = filter_(x)[0][..., reflect]
-    # Longitude reflection is not an exact symmetry of the DISCO quadrature, so
-    # this is a "much smaller than the signal" check rather than exact equality.
+    # Exact to float32 round-off (measured 2e-7): longitude reflection maps the
+    # grid onto itself and an isotropic kernel is even in phi, so the DISCO
+    # quadrature commutes with it exactly rather than approximately.
     error = (from_reflected - reflected_out).norm() / reflected_out.norm()
-    assert error < 1e-2, f"isotropic branch is not mirror-symmetric: {error}"
+    assert error < 1e-5, f"isotropic branch is not mirror-symmetric: {error}"
 
 
 @pytest.mark.medium_duration
@@ -289,7 +290,7 @@ def test_two_branch_reproduces_dhconv():
     )
 
 
-@pytest.mark.slow
+@pytest.mark.medium_duration
 def test_oversampling_the_radial_basis_improves_parity():
     """One radial mode per total wavenumber spans the profiles but is not enough.
 
@@ -385,10 +386,14 @@ def test_match_spectral_init_matches_spectral_filter_output_magnitude():
     )
     with torch.no_grad():
         unscaled_out, _ = unscaled(x)
+    # At this grid the unscaled filter is only ~2.2x weaker; the ~50x of the
+    # PR description needs kernel_size 45 at 512 channels. Any strict factor
+    # distinguishes "applied" from "not applied", where the two would be equal.
     unscaled_ratio = float(unscaled_out.std() / spectral_out.std())
-    assert (
-        unscaled_ratio < 0.5 * ratio
-    ), "match_spectral_init made no difference, so it is not being applied"
+    assert unscaled_ratio < 0.7 * ratio, (
+        f"match_spectral_init made no difference ({unscaled_ratio:.3f} vs "
+        f"{ratio:.3f}), so it is not being applied"
+    )
 
 
 def test_default_config_reproduces_the_historical_local_filter():

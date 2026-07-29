@@ -30,7 +30,9 @@ class LocalNetConfig:
             to the filter basis constructor. Only affects 'disco' blocks.
         basis_type: Type of filter basis for the DISCO convolution
             ('morlet', 'isotropic morlet', 'piecewise linear', or 'zernike').
-            Only affects 'disco' blocks.
+            Only affects 'disco' blocks. 'isotropic morlet' and 'zernike' are
+            radius-only families that use kernel_shape[0] alone and ignore
+            kernel_shape[1].
         block_types: List of filter types for each block ('disco', 'conv1x1').
             The length determines the number of blocks.
         global_layer_norm: Whether to reduce along the spatial domain when
