@@ -1,15 +1,10 @@
 #!/bin/bash
 # Full GPU training run for the HiRO-ACE-style spatial downscaling baseline
-# (100km -> 25km, factor 4, 5 channels), via gantry + torchrun DDP. Reads
-# data from WEKA (climate-default), not GCS directly -- cheaper than the
-# GCS-direct PMD spatiotemporal configs
-# (../2026-07-24-video-pmd-spatiotemporal-25km-100km/run.sh), same weka
-# mount/dir as the PMD stage-1 config (../2026-06-29-video-pmd-titan/run.sh).
-#
-# REQUIRES: both the 25km and 100km zarrs copied to
-# /climate-default/2026-06-25-temporal-diffusion/ on weka first (same
-# filenames as their gs://vcm-ml-intermediate originals) -- this script does
-# NOT do that copy, see train.yaml's header comment.
+# (100km -> 25km, factor 4, 5 channels), via gantry + torchrun DDP. Ported
+# from Anna Kwa's config/global-moe-models config (see train.yaml's header)
+# -- data already lives on WEKA under climate-default (no GCS copy needed
+# for this version, unlike the from-scratch config this replaced), so the
+# existing --weka mount below covers it as-is.
 #
 # Uses fme.downscaling.train (the plain spatial trainer), NOT
 # fme.downscaling.video_train -- this is a single-frame baseline, not PMD.
@@ -22,7 +17,7 @@
 # Run:  bash configs/experiments/2026-07-28-hiro-downscaling-25km-100km-5ch/run.sh
 set -e
 
-JOB_NAME="hiro-downscaling-25km-100km-global-5ch-v1"
+JOB_NAME="hiro-downscaling-25km-100km-global-5ch-v3-moe-port"
 CONFIG_FILENAME="train.yaml"
 WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/titan"
@@ -38,7 +33,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run \
     --name "$JOB_NAME" \
-    --description 'HiRO-ACE-style spatial downscaling baseline (100km->25km, 5ch), same split as PMD, global, patch-trained. 4x GPU DDP on titan (weka).' \
+    --description 'HiRO-ACE-style spatial downscaling baseline (100km->25km, 5ch), ported from config/global-moe-models, unet_diffusion_song_v2, global, patch-trained. 4x GPU DDP on titan (weka).' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
