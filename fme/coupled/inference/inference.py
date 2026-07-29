@@ -15,6 +15,7 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
 from fme.ace.requirements import InitialConditionRequirements
+from fme.ace.stepper import StepperOverrideConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
@@ -36,6 +37,7 @@ from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
 from .evaluator import (
     StandaloneComponentCheckpointsConfig,
     _validate_coupled_steps_config,
+    _validate_stepper_overrides,
     load_stepper,
     load_stepper_config,
 )
@@ -127,6 +129,12 @@ class InferenceConfig:
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
         n_ensemble_per_ic: Number of ensemble members per initial condition
+        ocean_stepper_override: Optional overrides when loading a **single** coupled
+            checkpoint (not ``StandaloneComponentCheckpointsConfig``), applied to the
+            ocean ``Stepper`` and to ``CoupledStepperConfig`` used for forcing windows
+            (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
+        atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
+            when loading a single coupled checkpoint.
     """
 
     experiment_dir: str
@@ -143,10 +151,17 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     n_ensemble_per_ic: int = 1
+    ocean_stepper_override: StepperOverrideConfig | None = None
+    atmosphere_stepper_override: StepperOverrideConfig | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
             self.n_coupled_steps, self.coupled_steps_in_memory
+        )
+        _validate_stepper_overrides(
+            self.checkpoint_path,
+            self.ocean_stepper_override,
+            self.atmosphere_stepper_override,
         )
 
     def configure_logging(self, log_filename: str):
@@ -156,10 +171,18 @@ class InferenceConfig:
         )
 
     def load_stepper(self) -> CoupledStepper:
-        return load_stepper(self.checkpoint_path)
+        return load_stepper(
+            self.checkpoint_path,
+            ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
+        )
 
     def load_stepper_config(self) -> CoupledStepperConfig:
-        return load_stepper_config(self.checkpoint_path)
+        return load_stepper_config(
+            self.checkpoint_path,
+            ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
+        )
 
     def get_data_writer(
         self,
