@@ -7,8 +7,8 @@
 # Years default to the coupled FT validation / OOS window 0251–0255
 # (train starts 0256; see coupled-finetune-atmos.yaml).
 #
-# Generate configs first if needed:
-#   python configs/experiments/2026-07-14-cm4-samudra-nino/make_year_configs_ar_sst.py
+# Year YAMLs under ar_sst_year_configs/ are generated (often untracked), so
+# each Beaker job regenerates its config on the worker before evaluate.
 
 set -euo pipefail
 
@@ -22,15 +22,21 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 CONFIG_DIR="${SCRIPT_PATH}/ar_sst_year_configs"
+MAKE_SCRIPT="${SCRIPT_PATH}/make_year_configs_ar_sst.py"
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 N_GPUS=1
 
 cd "$REPO_ROOT"
 
 run_eval() {
-  local config_path="$1"
-  local job_name="$2"
+  local year="$1"
+  local year_str
+  year_str=$(printf "%04d" "$year")
+  local config_path="${CONFIG_DIR}/evaluator-config-1pct-ar-sst-yr${year_str}.yaml"
+  local job_name="cm4-coupled-ft-nino-ar-sst-yr${year_str}"
 
+  # Local smoke-validate (also materializes the year YAML if missing).
+  python "$MAKE_SCRIPT" --year-start "$year" --year-end "$year"
   python -m fme.coupled.validate_config --config_type evaluator "$config_path"
 
   gantry run \
@@ -57,18 +63,11 @@ run_eval() {
     --allow-dirty \
     --system-python \
     --install "pip install --no-deps ." \
-    -- python -I -m fme.coupled.evaluator "$config_path"
+    -- bash -c \
+        "python '$MAKE_SCRIPT' --year-start $year --year-end $year && \
+         python -I -m fme.coupled.evaluator '$config_path'"
 }
 
-base_name="cm4-coupled-ft-nino-ar-sst"
-
 for year in $(seq "$YEAR_START" "$YEAR_END"); do
-  year_str=$(printf "%04d" "$year")
-  config_path="${CONFIG_DIR}/evaluator-config-1pct-ar-sst-yr${year_str}.yaml"
-  if [[ ! -f "$config_path" ]]; then
-    echo "Missing config: $config_path" >&2
-    echo "Run: python ${SCRIPT_PATH}/make_year_configs_ar_sst.py" >&2
-    exit 1
-  fi
-  run_eval "$config_path" "${base_name}-yr${year_str}"
+  run_eval "$year"
 done
