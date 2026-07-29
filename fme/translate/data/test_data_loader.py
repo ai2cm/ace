@@ -11,6 +11,7 @@ import pytest
 
 from fme.ace.testing import DimSizes, save_nd_netcdf
 from fme.core.coordinates import DimSize
+from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.rand import set_seed
 from fme.core.typing_ import Slice
@@ -218,6 +219,45 @@ def test_group_length_is_the_minimum_over_its_streams(tmp_path):
     )
     data = get_gridded_data(config, requirements, train=False)
     assert data.n_batches == 5
+
+
+def test_scheduled_window_growth_keeps_the_group_length(tmp_path):
+    """A stream whose window grows over epochs keeps its start-time count.
+
+    A group's length and its start-time alignment are computed once, when the
+    ``PairedStreamDataset`` is built, so they are only correct if a stream's
+    number of valid start times is fixed by its schedule's *longest* window
+    rather than by the current epoch's.
+    """
+    config = _multi_resolution_config(tmp_path, n_times=8, batch_size=1)
+    requirements = TranslateDataRequirements.from_objectives(
+        [
+            ObjectiveDataRequirements(
+                streams={
+                    "era5_1deg": StreamRequirements(names=NAMES, n_timesteps=1),
+                    "era5_2deg": StreamRequirements(names=NAMES, n_timesteps=1),
+                    "era5_4deg": StreamRequirements(
+                        names=NAMES,
+                        n_timesteps=IntSchedule(
+                            start_value=1,
+                            milestones=[IntMilestone(epoch=2, value=4)],
+                        ),
+                    ),
+                }
+            )
+        ]
+    )
+    data = get_gridded_data(config, requirements, train=False)
+    window_lengths = {}
+    for epoch in [0, 1, 2, 5]:
+        data.set_epoch(epoch)
+        # 8 - 4 + 1, set by the longest scheduled window, at every epoch
+        assert data.n_batches == 5
+        assert len(list(data.loader)) == 5
+        batch = next(iter(data.loader))
+        window_lengths[epoch] = batch["era5_4deg"].data["temp"].shape[1]
+    # the window itself does grow at the milestone; only the count is fixed
+    assert window_lengths == {0: 1, 1: 1, 2: 4, 5: 4}
 
 
 def test_validation_loader_is_not_shuffled(tmp_path):
