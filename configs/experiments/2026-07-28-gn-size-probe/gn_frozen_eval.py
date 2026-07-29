@@ -59,7 +59,7 @@ import yaml
 from einops import rearrange
 from torch.nn.functional import elu, gelu, leaky_relu, relu, sigmoid, silu, tanh
 
-from fme.core.dataset.time import TimeSlice
+from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.downscaling.evaluator import EvaluatorConfig
 
 # The coarse data is 6-hourly.
@@ -381,7 +381,15 @@ def _bias_profile(diffs: dict[str, torch.Tensor]) -> dict[str, list[float]]:
 
 
 def _run_arm(
-    event, config, model, requirements, captured, footprint, n_times, window=None
+    event,
+    config,
+    model,
+    requirements,
+    captured,
+    footprint,
+    n_times,
+    window=None,
+    mask=None,
 ):
     """Run one arm over ``n_times`` steps; returns (bias, rmse, extra, profile)."""
     data = _build_paired_data(event, config, requirements, n_times, window)
@@ -416,6 +424,12 @@ def _run_arm(
     for step, batch in enumerate(data.get_generator()):
         if step >= n_times:
             break
+        # RepeatedInterval selects which steps within the window contribute,
+        # reproducing the original experiment's 1d-in-every-7d sampling. Skipping
+        # here (rather than in the subset) is what lets the window stay bounded to
+        # the held-out year, since a dataset config carries only one subset.
+        if mask is not None and not mask[step]:
+            continue
         base_model = model.with_rolled_lon(batch[0].coarse.latlon_coordinates.lon)
         # Hooks bind to modules, which are shared across steps: attach once, and
         # let the capture/replay call ordinals run continuously so that step k of
@@ -470,7 +484,7 @@ def _run_arm(
     return bias, rmse, extra, _bias_profile(diffs), fields, coords
 
 
-def main(config_path: str, n_times: int, window=None) -> None:
+def main(config_path: str, n_times: int, window=None, interval=None) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
@@ -492,11 +506,25 @@ def main(config_path: str, n_times: int, window=None) -> None:
     # length, so unless a cap was explicitly asked for, consume all of it.
     if window is not None and n_times <= 1:
         n_times = 10**9
+    mask = None
+    if interval is not None:
+        mask = RepeatedInterval(
+            interval_length=interval[0], start=interval[1], block_length=interval[2]
+        ).get_boolean_mask(n_times if n_times < 10**6 else 100_000, TIMESTEP)
+        logging.info(
+            f"RepeatedInterval{interval}: {int(mask.sum())} of {len(mask)} steps "
+            "in the window contribute"
+        )
     span = (
         f"strided window {window[0]}..{window[1]} step {window[2]}"
         if window
         else f"{n_times} contiguous steps centered on each event date"
     )
+    if interval is not None:
+        span += (
+            f", RepeatedInterval(interval={interval[0]}, "
+            f"start={interval[1]}, block={interval[2]})"
+        )
     logging.info(
         f"common footprint: lat {footprint[0]}, lon {footprint[1]}; time mean: {span}"
     )
@@ -512,14 +540,34 @@ def main(config_path: str, n_times: int, window=None) -> None:
     for event in config.events or []:
         try:
             bias, rmse, extra, profile, arm_fields, arm_coords = _run_arm(
-                event, config, model, requirements, captured, footprint, n_times, window
+                event,
+                config,
+                model,
+                requirements,
+                captured,
+                footprint,
+                n_times,
+                window,
+                mask,
             )
             biases[event.name] = bias
             rmses[event.name] = rmse
             diagnostics[event.name] = extra
             profiles[event.name] = profile
             fields[event.name] = arm_fields
-            coords = coords or arm_coords
+            if coords is None:
+                coords = arm_coords
+            else:
+                # The shared colorbar and any difference of these maps assume the
+                # arms landed on identical cells. Fail loudly rather than plot
+                # two subtly different grids against each other.
+                for axis, (seen, new) in enumerate(zip(coords, arm_coords)):
+                    if seen.shape != new.shape or not np.allclose(seen, new):
+                        raise RuntimeError(
+                            f"{event.name}: cropped grid does not match the first "
+                            f"arm on axis {axis} "
+                            f"({seen.shape} vs {new.shape}); maps are not comparable"
+                        )
         except Exception:
             logging.exception(f"{event.name}: arm failed, continuing")
 
@@ -637,6 +685,13 @@ def parse_args() -> argparse.Namespace:
             "per week."
         ),
     )
+    parser.add_argument(
+        "--repeated-interval",
+        help=(
+            "interval_length,start,block_length as timedeltas (e.g. 1d,6d,7d) -- "
+            "reproduces the original experiment's sampling within the window."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -647,4 +702,13 @@ if __name__ == "__main__":
         raise SystemExit("--start-time and --stop-time must be given together")
     if _args.start_time:
         _window = (_args.start_time, _args.stop_time, _args.stride)
-    main(_args.config_path, _args.n_times, _window)
+    _interval = None
+    if _args.repeated_interval:
+        parts = [x.strip() for x in _args.repeated_interval.split(",")]
+        if len(parts) != 3:
+            raise SystemExit(
+                "--repeated-interval wants interval_length,start,block_length "
+                "(e.g. 1d,6d,7d)"
+            )
+        _interval = tuple(parts)
+    main(_args.config_path, _args.n_times, _window, _interval)

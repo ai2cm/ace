@@ -40,9 +40,11 @@ MOE_DATASET=01KTCHVDHY0SATWH9E0AW2PDS6
 gantry run \
     --name $JOB_NAME \
     --description 'Frozen-GroupNorm causal test for downscaling extent bias' \
-    --workspace ai2/climate-titan \
-    --priority normal \
+    --workspace ai2/ace \
+    --priority high \
     --cluster ai2/titan \
+    --cluster ai2/jupiter \
+    --cluster ai2/ceres \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \

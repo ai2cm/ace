@@ -12,10 +12,16 @@
 # investigation's (X-SHiELD AMIP + prmsl, bundled MoE) rather than the
 # 2025-02-27 dataset the old checkpoint was trained against.
 #
-# Run with a strided window so the time mean is an annual climatology of the
-# held-out year rather than one synoptic episode:
-#   --start-time 2023-01-01T00:00 --stop-time 2023-12-31T18:00 --stride 28
-# (stride 28 = one 6-hourly snapshot per week, ~52 steps).
+# Run bounded to the held-out year, sampled with the ORIGINAL experiment's
+# RepeatedInterval so the time mean is comparable:
+#   --start-time 2023-01-01T00:00 --stop-time 2023-12-31T18:00 \
+#   --repeated-interval 1d,6d,7d
+# That is 1 day out of every 7, from day 6 of each block: 208 of 2023's 1460
+# 6-hourly steps, covering all four synoptic hours (00/06/12/18) so the
+# precipitation time mean is not diurnally phase-locked.
+#
+# A dataset config carries only one `subset`, so the year bound goes in the
+# TimeSlice and the RepeatedInterval is applied as a step filter on top.
 experiment_dir: /results
 n_samples: 4
 model:
