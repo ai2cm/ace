@@ -754,3 +754,20 @@ def test_clip_latent_global_means_envelope_synchronized_across_ranks():
     # different envelopes and this reduction would change the values.
     torch.testing.assert_close(dist.reduce_min(model._gm_min.clone()), model._gm_min)
     torch.testing.assert_close(dist.reduce_max(model._gm_max.clone()), model._gm_max)
+
+
+def test_sfnonet_local_blocks_get_the_post_filter_activation():
+    """Swapping the spectral filter for a DISCO one must change only the filter.
+
+    The block used to add its post-filter activation for spectral filters only,
+    so a local block silently differed from a linear block by a missing
+    nonlinearity as well as by its filter.
+    """
+    params = SFNONetConfig(
+        embed_dim=16, num_layers=2, filter_type="linear", local_blocks=[0]
+    )
+    model = get_lat_lon_sfnonet(
+        params=params, img_shape=(9, 18), in_chans=2, out_chans=3
+    )
+    assert hasattr(model.blocks[0], "act_layer")  # the local block
+    assert hasattr(model.blocks[1], "act_layer")  # the linear block, unchanged

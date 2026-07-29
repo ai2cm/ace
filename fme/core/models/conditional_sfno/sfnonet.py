@@ -341,7 +341,9 @@ class FourierNeuralOperatorBlock(nn.Module):
                 lora_alpha=lora_alpha,
             )
 
-        if filter_type == "linear" or filter_type == "real linear":
+        # "local" is included so that swapping the spectral filter for a DISCO
+        # filter changes only the filter, not the block's activation placement.
+        if filter_type in ("linear", "real linear", "local"):
             self.act_layer = act_layer()
 
         # dropout
