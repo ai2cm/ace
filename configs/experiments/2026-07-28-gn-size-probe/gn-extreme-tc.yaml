@@ -1,0 +1,99 @@
+# Cyclone extremes vs GroupNorm freezing at off-training extents.
+# See gn_extreme_metrics.py.
+#
+# WPacific hurricane, 2023-04-25T18:00 (held out: training ends 2022-12-31),
+# centered 15N/138E. Five arms; the derived scoring footprint is their
+# intersection, the central 4x4 deg box.
+#
+#   tc_16deg_capture  control -- the trained extent -- and the source of the
+#                     statistics the frozen arms replay
+#   tc_04deg_live / tc_04deg_frozen
+#   tc_32deg_live / tc_32deg_frozen
+#
+# n_samples is identical across arms and must stay so: the frozen replay is
+# keyed on call ordinal, which n_samples and SAMPLE_GROUP determine. 32 samples
+# gives the ensemble spread the significance test needs, max wind being an
+# extreme statistic with a wide sampling distribution.
+experiment_dir: /results
+n_samples: 8
+model:
+  mixture_of_experts_path: /moe/bundled_moe_multivariate.ckpt
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+  # Base loader only; each event overrides the time subset and the extents.
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130
+    stop: 146
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: tc_16deg_capture
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 7
+    stop: 23
+  lon_extent:
+    start: 130
+    stop: 146
+  n_samples: 32
+- name: tc_04deg_live
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 13
+    stop: 17
+  lon_extent:
+    start: 136
+    stop: 140
+  n_samples: 32
+- name: tc_04deg_frozen
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: 13
+    stop: 17
+  lon_extent:
+    start: 136
+    stop: 140
+  n_samples: 32
+- name: tc_32deg_live
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -1
+    stop: 31
+  lon_extent:
+    start: 122
+    stop: 154
+  n_samples: 32
+- name: tc_32deg_frozen
+  date: 2023-04-25T18:00
+  lat_extent:
+    start: -1
+    stop: 31
+  lon_extent:
+    start: 122
+    stop: 154
+  n_samples: 32
