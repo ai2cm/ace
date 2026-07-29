@@ -16,7 +16,7 @@ both: :class:`fme.core.generics.dataset.GenericDataset`, whose
 epoch propagation and shuffle control.
 """
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 
 import numpy as np
 import xarray as xr
@@ -106,19 +106,11 @@ class PairedStreamDataset(GenericDataset[dict[str, DatasetItem]]):
                 dataset.sample_start_times[: self._length],
             )
 
-    @property
-    def stream_names(self) -> list[str]:
-        return list(self._datasets)
-
     def __getitem__(self, index) -> dict[str, DatasetItem]:
         return {name: dataset[index] for name, dataset in self._datasets.items()}
 
     def __len__(self) -> int:
         return self._length
-
-    def __iter__(self) -> Iterator[dict[str, DatasetItem]]:
-        for index in range(self._length):
-            yield self[index]
 
     def set_epoch(self, epoch: int) -> None:
         for dataset in self._datasets.values():
