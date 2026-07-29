@@ -6,6 +6,7 @@ import torch
 
 from fme.core.disco._disco_utils import _disco_s2_contraction_fft
 from fme.core.distributed import Distributed
+from fme.core.distributed.distributed import SpatialParallelismNotImplemented
 from fme.core.models.conditional_sfno.local_filter import (
     LocalFilter,
     LocalFilterConfig,
@@ -386,9 +387,9 @@ def test_match_spectral_init_matches_spectral_filter_output_magnitude():
     )
     with torch.no_grad():
         unscaled_out, _ = unscaled(x)
-    # At this grid the unscaled filter is only ~2.2x weaker; the ~50x of the
-    # PR description needs kernel_size 45 at 512 channels. Any strict factor
-    # distinguishes "applied" from "not applied", where the two would be equal.
+    # At this grid the unscaled filter is only ~2.2x weaker; the ~50x that
+    # motivates the option needs kernel_size 45 at 512 channels. Any strict
+    # factor separates "applied" from "not applied", where the two are equal.
     unscaled_ratio = float(unscaled_out.std() / spectral_out.std())
     assert unscaled_ratio < 0.7 * ratio, (
         f"match_spectral_init made no difference ({unscaled_ratio:.3f} vs "
@@ -448,6 +449,27 @@ def test_lmax_kernel_shape_requires_a_radial_family():
     config = LocalFilterConfig(kernel_shape="lmax", basis_type="morlet")
     with pytest.raises(ValueError, match="no purely radial form"):
         config.resolved_kernel_shape(LMAX)
+
+
+@pytest.mark.parallel
+def test_two_branch_rejects_spatial_parallelism():
+    """H is an FFT over the full longitude circle, so a zonal tile is not enough.
+
+    Without the guard a spatially-parallel run would compute the phase shift
+    per tile and silently return a wrong filter rather than failing.
+    """
+    dist = Distributed.get_instance()
+    config = LocalFilterConfig(
+        kernel_shape="lmax",
+        basis_type="piecewise linear",
+        theta_cutoff="global",
+        two_branch=True,
+    )
+    if dist.world_size == dist.total_data_parallel_ranks:
+        assert _build(config).two_branch  # no spatial ranks: builds normally
+    else:
+        with pytest.raises(SpatialParallelismNotImplemented):
+            _build(config)
 
 
 def test_two_branch_requires_isotropic_branches():
