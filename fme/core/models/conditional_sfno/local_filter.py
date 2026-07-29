@@ -165,7 +165,9 @@ class LocalFilterConfig:
                     "local filter kernel_shape multiple of lmax must be at "
                     f"least 1, got {self.kernel_shape!r}."
                 )
-        if isinstance(self.theta_cutoff, str) and self.theta_cutoff != "global":
+        # bool is an int subclass, so the range check below would silently read
+        # `theta_cutoff: true` as a 1 radian support radius.
+        if isinstance(self.theta_cutoff, str | bool) and self.theta_cutoff != "global":
             raise ValueError(
                 "local filter theta_cutoff must be a number, the string "
                 f'"global", or null, got {self.theta_cutoff!r}.'

@@ -419,6 +419,8 @@ def test_default_config_reproduces_the_historical_local_filter():
         ({"theta_cutoff": 4.0}, "theta_cutoff must be in"),
         ({"theta_cutoff": 0.0}, "theta_cutoff must be in"),
         ({"theta_cutoff": "everywhere"}, "theta_cutoff must be a number"),
+        # bool is an int subclass, so this must not read as 1 radian.
+        ({"theta_cutoff": True}, "theta_cutoff must be a number"),
         ({"kernel_shape": "all"}, "kernel_shape must be a list"),
         ({"kernel_shape": "lmax2"}, "kernel_shape must be a list"),
         ({"kernel_shape": "2 lmax"}, "kernel_shape must be a list"),
