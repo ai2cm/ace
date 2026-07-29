@@ -164,14 +164,30 @@ class TranslateDataRequirements:
 
     def __post_init__(self):
         grouped = [name for group in self.pairing_groups for name in group]
+        # Checked before the partition check, which would otherwise report a
+        # duplicated stream as a partition mismatch.
+        if len(set(grouped)) != len(grouped):
+            raise ValueError(
+                f"A stream may appear in only one pairing group; got {grouped}."
+            )
         if sorted(grouped) != sorted(self.streams):
             raise ValueError(
                 "pairing_groups must partition the streams; got groups over "
                 f"{sorted(grouped)} for streams {sorted(self.streams)}."
             )
-        if len(set(grouped)) != len(grouped):
+        missing_allowed = sorted(
+            name
+            for name, requirements in self.streams.items()
+            if requirements.allow_missing_variables
+        )
+        if missing_allowed:
+            # The loader passes no allow_missing_variables through to
+            # DatasetABC.build, so honoring it would need plumbing in
+            # StreamConfig.get_dataset; refuse rather than silently load
+            # every variable.
             raise ValueError(
-                f"A stream may appear in only one pairing group; got {grouped}."
+                "allow_missing_variables is not supported by the translate data "
+                f"loader, but is set on streams {missing_allowed}."
             )
 
     @classmethod

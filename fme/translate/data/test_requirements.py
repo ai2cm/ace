@@ -1,5 +1,6 @@
 import pytest
 
+from fme.ace.requirements import DataRequirements
 from fme.core.dataset.schedule import IntMilestone, IntSchedule
 from fme.translate.data.requirements import (
     ObjectiveDataRequirements,
@@ -124,4 +125,27 @@ def test_pairing_groups_must_partition_streams():
     with pytest.raises(ValueError, match="must partition the streams"):
         TranslateDataRequirements(
             streams=requirements.streams, pairing_groups=[["era5"], ["missing"]]
+        )
+
+
+def test_a_stream_in_two_pairing_groups_is_rejected():
+    requirements = TranslateDataRequirements.from_objectives(
+        [_objective(era5=StreamRequirements(names=["temp"]))]
+    )
+    with pytest.raises(ValueError, match="only one pairing group"):
+        TranslateDataRequirements(
+            streams=requirements.streams, pairing_groups=[["era5"], ["era5"]]
+        )
+
+
+def test_allow_missing_variables_is_rejected():
+    """The loader ignores the flag, so carrying it set would load silently wrong."""
+    with pytest.raises(ValueError, match="allow_missing_variables is not supported"):
+        TranslateDataRequirements(
+            streams={
+                "era5": DataRequirements(
+                    names=["temp"], n_timesteps=1, allow_missing_variables=True
+                )
+            },
+            pairing_groups=[["era5"]],
         )
