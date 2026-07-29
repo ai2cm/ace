@@ -228,6 +228,9 @@ class SingleModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
@@ -633,8 +636,9 @@ def step_with_adjustments(
             ``global_mean_removal.forward_transform``.
         stepper_state: Per-sample state carried across step calls. The
             corrector's slice (``stepper_state.corrector_state``) is passed to
-            the corrector and any updates are written back into a returned
-            ``StepperState``. Pass-through unchanged when no corrector is set.
+            the corrector and any updates are written back into the returned
+            ``StepperState``; the other fields (e.g. ``random_state``) pass
+            through unchanged. Pass-through unchanged when no corrector is set.
 
     Returns:
         A ``StepOutput`` carrying the denormalized data at the next time step,
@@ -674,21 +678,32 @@ def step_with_adjustments(
             delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
         )
         if result.corrector_state is not None:
-            stepper_state = StepperState(corrector_state=result.corrector_state)
+            # Preserve the incoming state's other fields (e.g. random_state)
+            # rather than rebuilding from scratch, so StepperState stays
+            # coherent across step calls.
+            stepper_state = (
+                StepperState(corrector_state=result.corrector_state)
+                if stepper_state is None
+                else dataclasses.replace(
+                    stepper_state, corrector_state=result.corrector_state
+                )
+            )
 
-    # The post-corrector adjustments below run after the corrector and are
-    # excluded from the diagnostics. Their written names must stay disjoint from
-    # the corrector's modified names, or ``delta = output - input_snapshot``
-    # would no longer be exact for an overlapping variable.
-    post_corrector_names: set[str] = set(prescribed_prognostic_names)
+    # The ocean surface temperature prescription runs after the corrector and is
+    # excluded from the diagnostics. Its written name must stay disjoint from the
+    # corrector's modified names, or ``delta = output - input_snapshot`` would no
+    # longer be exact for an overlapping variable. A prescribed prognostic
+    # overwrite is exempt from this guard: it is an intentional "use the given
+    # value regardless of what the network or corrector produced" operation, and
+    # the corrector's delta for the overwritten variable is dropped below so the
+    # reported delta stays exact for every variable it still contains.
     if ocean is not None:
-        post_corrector_names.add(ocean.surface_temperature_name)
-    overlap = post_corrector_names & set(diagnostics.delta)
-    if overlap:
-        raise ValueError(
-            "post-corrector adjustment names overlap the corrector's modified "
-            f"names: {sorted(overlap)}"
-        )
+        overlap = {ocean.surface_temperature_name} & set(diagnostics.delta)
+        if overlap:
+            raise ValueError(
+                "post-corrector adjustment names overlap the corrector's modified "
+                f"names: {sorted(overlap)}"
+            )
 
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
@@ -699,6 +714,18 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
+    # A prescribed overwrite replaces the output with the prescribed value, so the
+    # corrector's delta for that variable no longer describes the returned output.
+    # Drop prescribed names from the reported delta (a no-op for names the
+    # corrector never modified).
+    if prescribed_prognostic_names:
+        diagnostics = CorrectorDiagnostics(
+            delta={
+                name: value
+                for name, value in diagnostics.delta.items()
+                if name not in prescribed_prognostic_names
+            }
+        )
     return StepOutput(
         output=output,
         stepper_state=stepper_state,

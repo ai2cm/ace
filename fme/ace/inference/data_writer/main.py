@@ -8,10 +8,13 @@ from typing import TypeAlias
 import cftime
 import numpy as np
 import numpy.typing as npt
-import torch
-import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.batch_data import (
+    _RESERVED_PREFIX,
+    BatchData,
+    PairedData,
+    PrognosticState,
+)
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
@@ -20,6 +23,7 @@ from .dataset_metadata import DatasetMetadata
 from .file_writer import FileWriter, FileWriterConfig, PairedFileWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter, RawDataWriter
+from .step_diagnostics import STEP_DIAGNOSTICS_DIR, StepDiagnosticsWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 
 PairedSubwriter: TypeAlias = (
@@ -39,6 +43,12 @@ class DataWriterConfig:
             containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
+        save_step_diagnostics: Whether to enable writing of netCDF files
+            containing per-step diagnostics of the prediction, one file per
+            named diagnostics dataset under a ``step_diagnostics/`` directory
+            (currently the corrector's per-step correction delta, written to
+            ``step_diagnostics/correction_deltas.nc``). Nothing is written
+            when no corrector modified anything.
         names: Names of variables to save in the prediction and monthly
             netCDF files.
         time_coarsen: Configuration for time coarsening of written outputs to the
@@ -49,13 +59,20 @@ class DataWriterConfig:
 
     save_prediction_files: bool = True
     save_monthly_files: bool = True
+    save_step_diagnostics: bool = False
     names: Sequence[str] | None = None
     time_coarsen: TimeCoarsenConfig | None = None
     files: list[FileWriterConfig] | None = None
 
     def __post_init__(self):
         if (
-            not any([self.save_prediction_files, self.save_monthly_files])
+            not any(
+                [
+                    self.save_prediction_files,
+                    self.save_monthly_files,
+                    self.save_step_diagnostics,
+                ]
+            )
             and self.names is not None
         ):
             warnings.warn(
@@ -136,7 +153,43 @@ class DataWriterConfig:
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
+            step_diagnostics_writer=self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            ),
         )
+
+    def _build_step_diagnostics_writer(
+        self,
+        experiment_dir: str,
+        initial_condition_times: npt.NDArray[cftime.datetime],
+        variable_metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
+    ) -> StepDiagnosticsWriter | None:
+        if not self.save_step_diagnostics:
+            return None
+
+        def writer_factory(name: str) -> RawDataWriter | TimeCoarsen:
+            path = os.path.join(experiment_dir, STEP_DIAGNOSTICS_DIR)
+            os.makedirs(path, exist_ok=True)
+            writer: RawDataWriter | TimeCoarsen = RawDataWriter(
+                path=path,
+                label=name,
+                initial_condition_times=initial_condition_times,
+                save_names=self.names,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            )
+            if self.time_coarsen is not None:
+                writer = self.time_coarsen.build(writer)
+            return writer
+
+        return StepDiagnosticsWriter(writer_factory)
 
     def build(
         self,
@@ -195,6 +248,13 @@ class DataWriterConfig:
             variable_metadata=variable_metadata,
             coords=coords,
             dataset_metadata=dataset_metadata,
+            step_diagnostics_writer=self._build_step_diagnostics_writer(
+                experiment_dir=experiment_dir,
+                initial_condition_times=initial_condition_times,
+                variable_metadata=variable_metadata,
+                coords=coords,
+                dataset_metadata=dataset_metadata,
+            ),
         )
 
 
@@ -206,6 +266,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None,
     ):
         """
         Args:
@@ -215,8 +276,13 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
+            step_diagnostics_writer: Writer for per-step diagnostics of the
+                prediction, or None to not write them. Held separately from
+                the paired sub-writers: it consumes only the prediction's
+                diagnostics, not the target/prediction pair.
         """
         self._writers = writers
+        self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.coords = coords
         self.variable_metadata = variable_metadata
@@ -254,6 +320,13 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 prediction=dict(batch.prediction),
                 batch_time=batch.time,
             )
+        if (
+            self._step_diagnostics_writer is not None
+            and batch.step_diagnostics is not None
+        ):
+            self._step_diagnostics_writer.append_batch(
+                batch.step_diagnostics.to_datasets(batch.time)
+            )
 
     def flush(self):
         """
@@ -261,10 +334,14 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
             writer.finalize()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.finalize()
 
 
 def _write(
@@ -277,8 +354,13 @@ def _write(
 ):
     """Write provided data to a single netCDF at specified path/filename.
 
-    If the data has only one timestep, the data is squeezed to remove
-    the time dimension.
+    ``BatchData.to_xarray_dataset`` produces the complete dataset: prognostic
+    variables under plain names + time (with the single-timestep time dimension
+    squeezed), plus the round-trippable extras (stepper_state, labels, data_mask)
+    embedded under reserved ``_fme_state__`` variables when present. This adds the
+    writer's presentation on top - per-variable metadata attrs, coordinates, and
+    dataset metadata. When ``data`` carries no extras the file is byte-identical
+    to the data+time-only file written before this feature.
 
     Args:
         data: Batch data to written.
@@ -288,30 +370,15 @@ def _write(
         coords: Coordinate data to be written to the file.
         dataset_metadata: Metadata for the dataset.
     """
-    if data.time.sizes["time"] == 1:
-        time_dim = data.dims.index("time")
-        dims_to_write = data.dims[:time_dim] + data.dims[time_dim + 1 :]
-
-        def maybe_squeeze(x: torch.Tensor) -> torch.Tensor:
-            return x.squeeze(dim=time_dim)
-
-        time_array = data.time.isel(time=0)
-    else:
-        dims_to_write = data.dims
-
-        def maybe_squeeze(x):
-            return x
-
-        time_array = data.time
-
-    data_arrays = {}
-    for name in data.data:
-        array = maybe_squeeze(data.data[name]).detach().cpu().numpy()
-        data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
-        if name in variable_metadata:
-            data_arrays[name].attrs = variable_metadata[name].as_attrs()
-    data_arrays["time"] = time_array
-    ds = xr.Dataset(data_arrays, coords=coords)
+    ds = data.to_xarray_dataset()
+    for name in ds.data_vars:
+        # Metadata applies only to physical prognostic variables, never to
+        # ``time`` or the reserved embedded-state variables.
+        if str(name) == "time" or str(name).startswith(_RESERVED_PREFIX):
+            continue
+        if str(name) in variable_metadata:
+            ds[name].attrs.update(variable_metadata[str(name)].as_attrs())
+    ds = ds.assign_coords(coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
     to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
 
@@ -324,6 +391,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         dataset_metadata: DatasetMetadata,
+        step_diagnostics_writer: StepDiagnosticsWriter | None = None,
     ):
         """
         Args:
@@ -335,8 +403,13 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
+            step_diagnostics_writer: Writer for per-step diagnostics of the
+                prediction, or None to not write them. Held separately from
+                the sub-writers: it consumes only the prediction's
+                diagnostics.
         """
         self._writers = writers
+        self._step_diagnostics_writer = step_diagnostics_writer
         self.path = path
         self.variable_metadata = variable_metadata
         self.dataset_metadata = dataset_metadata
@@ -357,6 +430,13 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             labels=batch.labels,
         )
         self._append_batch(unpaired_batch)
+        if (
+            self._step_diagnostics_writer is not None
+            and batch.step_diagnostics is not None
+        ):
+            self._step_diagnostics_writer.append_batch(
+                batch.step_diagnostics.to_datasets(batch.time)
+            )
 
     def _append_batch(self, batch: BatchData):
         for writer in self._writers:
@@ -371,10 +451,14 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.flush()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.flush()
 
     def finalize(self):
         for writer in self._writers:
             writer.finalize()
+        if self._step_diagnostics_writer is not None:
+            self._step_diagnostics_writer.finalize()
 
     def write(self, data: PrognosticState, filename: str):
         _write(

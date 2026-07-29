@@ -115,3 +115,6 @@ aggregator:
     strict: true
   monthly_reference_data: null
   time_mean_reference_data: null
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: false

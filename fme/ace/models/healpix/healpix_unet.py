@@ -4,14 +4,9 @@ HEALPix UNet: single forward-pass encoder–decoder stack.
 Adapted from the modulus-uw ``physicsnemo.models.dlwp_healpix.HEALPixUNet``.
 """
 
-from collections.abc import Sequence
-from typing import Literal
-
-import torch as th
+import torch
 import torch.nn as nn
 
-from .healpix_decoder import UNetDecoderConfig
-from .healpix_encoder import UNetEncoderConfig
 from .healpix_layers import HEALPixFoldFaces, HEALPixUnfoldFaces
 
 
@@ -23,88 +18,50 @@ class HEALPixUNet(nn.Module):
     folded into the batch dimension before the encoder/decoder and unfolded
     after the decoder, so the encoder/decoder operate on plain 4D tensors of
     shape ``[B*F, C, H, W]``.
+
+    The encoder and decoder modules are built and validated by
+    :class:`~fme.ace.registry.hpx.HEALPixUNetBuilder`; this module receives the
+    built collaborators and the runtime scalars it needs and does no building
+    itself.
     """
 
     CHANNEL_DIM = 2  # [B, F, C, H, W]
 
     def __init__(
         self,
-        encoder: UNetEncoderConfig,
-        decoder: UNetDecoderConfig,
+        encoder: nn.Module,
+        decoder: nn.Module,
         input_channels: int,
         output_channels: int,
-        enable_nhwc: bool = False,
-        hpx_padding_mode: Literal[
-            "earth2grid", "karlbauer", "isolatitude"
-        ] = "earth2grid",
-        nside: Sequence[int] | None = None,
+        nside: tuple[int, ...] | None = None,
     ):
         """
         Initialize the HEALPixUNet model.
 
         Args:
-            encoder: Configuration for the U-net encoder.
-            decoder: Configuration for the U-net decoder.
+            encoder: Built U-net encoder module.
+            decoder: Built U-net decoder module.
             input_channels: Number of channels in the input tensor (i.e. the
                 size of the channel dimension of the tensor passed to
                 ``forward``).
             output_channels: Number of channels in the output tensor.
-            enable_nhwc: Use NHWC tensor layout for child modules.
-            hpx_padding_mode: HEALPix padding backend. One of ``"earth2grid"``,
-                ``"karlbauer"``, or ``"isolatitude"``. Default ``"earth2grid"``.
-            nside: Face height/width per UNet level, shallowest to deepest.
-                Length must equal ``len(encoder.n_channels)``. Required when
-                ``hpx_padding_mode`` is ``"isolatitude"``. Child modules validate
-                face size at runtime (e.g. ``HEALPixPaddingIsolatitude``).
+            nside: Resolved face height/width per UNet level, shallowest to
+                deepest, or ``None``. ``forward`` checks the input face size
+                against ``nside[0]`` when set.
         """
         super().__init__()
 
         self.input_channels = input_channels
         self.output_channels = output_channels
-        self.enable_nhwc = enable_nhwc
-        self.hpx_padding_mode = hpx_padding_mode
+        self.nside = nside
 
-        levels = len(encoder.n_channels)
-        if len(decoder.n_channels) != levels:
-            raise ValueError(
-                "encoder and decoder must have same number of levels; got "
-                f"{levels} vs {len(decoder.n_channels)}"
-            )
-        if hpx_padding_mode == "isolatitude" and nside is None:
-            raise ValueError(
-                'hpx_padding_mode="isolatitude" requires nside (one int per UNet level)'
-            )
-        nside_resolved: tuple[int, ...] | None
-        if nside is not None:
-            nside_levels = tuple(int(v) for v in nside)
-            if len(nside_levels) != levels:
-                raise ValueError(
-                    f"nside length must match UNet levels; got {len(nside_levels)} "
-                    f"vs {levels}"
-                )
-            if any(v < 1 for v in nside_levels):
-                raise ValueError(f"nside values must be positive; got {nside_levels}")
-            nside_resolved = nside_levels
-        else:
-            nside_resolved = None
-        self.nside = nside_resolved
+        self.fold = HEALPixFoldFaces()
+        self.unfold = HEALPixUnfoldFaces(num_faces=12)
 
-        self.fold = HEALPixFoldFaces(enable_nhwc=enable_nhwc)
-        self.unfold = HEALPixUnfoldFaces(num_faces=12, enable_nhwc=enable_nhwc)
+        self.encoder = encoder
+        self.decoder = decoder
 
-        encoder.input_channels = input_channels
-        encoder.enable_nhwc = enable_nhwc
-        encoder.hpx_padding_mode = self.hpx_padding_mode
-        encoder.nside = self.nside
-        self.encoder = encoder.build()
-
-        decoder.output_channels = output_channels
-        decoder.enable_nhwc = enable_nhwc
-        decoder.hpx_padding_mode = self.hpx_padding_mode
-        decoder.nside = self.nside
-        self.decoder = decoder.build()
-
-    def forward(self, inputs: th.Tensor) -> th.Tensor:
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
         Args:
