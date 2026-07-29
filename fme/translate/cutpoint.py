@@ -51,6 +51,7 @@ around a cut-point part.
 """
 
 import dataclasses
+from collections.abc import Mapping
 from typing import Literal
 
 import torch
@@ -73,6 +74,11 @@ __all__ = ["SFNOCutPointConfig"]
 
 CutPointPart = Literal["encoder", "processor", "decoder"]
 _PARTS: tuple[CutPointPart, ...] = ("encoder", "processor", "decoder")
+
+# The donor's first encoder convolution, whose input axis is the donor's own
+# input channel count. Present for any encoder_layers, and in every part's
+# donor checkpoint whether or not that part keeps the encoder.
+_DONOR_INPUT_WEIGHT = "conditional_model.encoder.0.weight"
 
 
 class _SFNOEncoder(nn.Module):
@@ -389,7 +395,38 @@ class SFNOCutPointConfig(TransformModuleConfig):
         )
         return built
 
-    def _apply_donor_weights(self, module: nn.Module) -> None:
+    def _validate_donor_width(
+        self, donor: Mapping[str, torch.Tensor], latent: int
+    ) -> None:
+        """Check the cut-point width against the donor's own input width.
+
+        The per-parameter shape check below catches a mis-declared cut-point
+        only when some parameter of *this* part is sized by the donor's input
+        channels. A lone processor — the latent-splice arm's central config —
+        keeps nothing sized by them unless ``normalize_big_skip`` is set, so
+        without this the arm's own configuration is the one case where an
+        over-wide latent domain passes silently. The donor's first encoder
+        convolution carries the width whether or not this part keeps it.
+        """
+        donor_input_weight = donor.get(_DONOR_INPUT_WEIGHT)
+        if donor_input_weight is None:
+            return
+        donor_in_channels = donor_input_weight.shape[1]
+        expected = self.sfno.embed_dim + (
+            donor_in_channels if self.sfno.big_skip else 0
+        )
+        if latent != expected:
+            raise ValueError(
+                f"An sfno_cut_point {self.part!r} loading donor "
+                f"{self.donor_checkpoint!r} sits at a cut-point of {latent} "
+                f"channels, but that donor takes {donor_in_channels} input "
+                f"channels, so its cut-point is {expected} "
+                f"(embed_dim {self.sfno.embed_dim}"
+                + (f" + {donor_in_channels}" if self.sfno.big_skip else "")
+                + ")."
+            )
+
+    def _apply_donor_weights(self, module: nn.Module, latent: int) -> None:
         weights, _ = load_weights_and_history(self.donor_checkpoint)
         if weights is None:
             raise ValueError(
@@ -402,6 +439,7 @@ class SFNOCutPointConfig(TransformModuleConfig):
                 f"for a donor stepper with {len(weights)} module(s)."
             )
         donor = strip_leading_module(weights[self.donor_module_index])
+        self._validate_donor_width(donor, latent)
         missing = []
         mismatched = []
         for name, parameter in module.named_parameters():
@@ -458,7 +496,9 @@ class SFNOCutPointConfig(TransformModuleConfig):
         self._validate_channels(n_in_channels, n_out_channels)
         module = self._build_part(n_in_channels, n_out_channels, in_dataset_info)
         if load_donor and self.donor_checkpoint is not None:
-            self._apply_donor_weights(module)
+            self._apply_donor_weights(
+                module, self._latent_channels(n_in_channels, n_out_channels)
+            )
         label_encoding = (
             LabelEncoding(sorted(in_dataset_info.all_labels))
             if self.conditional

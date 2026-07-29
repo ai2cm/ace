@@ -40,9 +40,10 @@ def _sfno_config(**overrides: Any) -> dict[str, Any]:
 
 def _latent_channels(sfno: Mapping[str, Any]) -> int:
     """The cut-point width: the latent, plus the big-skip residual."""
+    embed_dim = sfno.get("embed_dim", EMBED_DIM)
     if sfno.get("big_skip", True):
-        return EMBED_DIM + len(DONOR_NAMES)
-    return EMBED_DIM
+        return embed_dim + len(DONOR_NAMES)
+    return embed_dim
 
 
 def _dataset_info() -> DatasetInfo:
@@ -245,33 +246,51 @@ def test_donor_missing_part_weights_raises(tmp_path):
         _build_part("processor", _sfno_config(num_layers=3), checkpoint)
 
 
-@pytest.mark.parametrize("part", ["encoder", "decoder"])
-def test_donor_shape_mismatch_raises(tmp_path, part):
+@pytest.mark.parametrize("part", PARTS)
+@pytest.mark.parametrize("normalize_big_skip", [False, True])
+def test_donor_cut_point_width_mismatch_raises(tmp_path, part, normalize_big_skip):
     """A too-wide cut-point is not silently loaded a leading slice at a time.
 
     ``overwrite_weights`` copies the initial slice when the destination axis is
-    longer, so without a shape check a cut-point domain declaring more than
-    ``embed_dim`` plus the donor's input channels would build a part that is
-    only partly the donor's, with no error.
+    longer, so a cut-point domain declaring more than ``embed_dim`` plus the
+    donor's input channels would otherwise build a part that is only partly the
+    donor's, with no error. A lone processor is the case the per-parameter shape
+    check cannot see: with ``normalize_big_skip`` off it keeps no parameter
+    sized by the donor's input channels at all.
     """
-    sfno = _sfno_config()
+    sfno = _sfno_config(normalize_big_skip=normalize_big_skip)
     checkpoint, _ = _donor_checkpoint(tmp_path, sfno)
     # One channel more than the donor has, declared self-consistently so that
-    # _validate_channels passes and only the donor's shapes disagree.
+    # _validate_channels passes and only the donor disagrees.
     wide_physical = len(DONOR_NAMES) + 1
+    wide_latent = EMBED_DIM + wide_physical
     n_in, n_out = {
-        "encoder": (wide_physical, EMBED_DIM + wide_physical),
-        "decoder": (EMBED_DIM + wide_physical, len(DONOR_NAMES)),
+        "encoder": (wide_physical, wide_latent),
+        "processor": (wide_latent, wide_latent),
+        "decoder": (wide_latent, len(DONOR_NAMES)),
     }[part]
     info = _dataset_info()
 
-    with pytest.raises(ValueError, match="differently-shaped weights"):
+    with pytest.raises(ValueError, match="that donor takes"):
         _part_config(part, sfno, donor_checkpoint=checkpoint).build(
             n_in_channels=n_in,
             n_out_channels=n_out,
             in_dataset_info=info,
             out_dataset_info=info,
         )
+
+
+@pytest.mark.parametrize("part", PARTS)
+def test_donor_shape_mismatch_raises(tmp_path, part):
+    """A donor whose stage is shaped differently is rejected, not sliced.
+
+    A mismatched ``embed_dim`` leaves the cut-point width self-consistent, so
+    only the per-parameter shapes give the mismatch away.
+    """
+    checkpoint, _ = _donor_checkpoint(tmp_path, _sfno_config(embed_dim=EMBED_DIM))
+
+    with pytest.raises(ValueError, match="differently-shaped weights"):
+        _build_part(part, _sfno_config(embed_dim=EMBED_DIM + 1), checkpoint)
 
 
 @pytest.mark.parametrize(
