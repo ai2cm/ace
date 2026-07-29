@@ -11,6 +11,7 @@ from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
+from .local_filter import LocalFilterConfig
 from .s2convolutions import SpectralConvS2
 from .sfnonet import SFNONetConfig, get_lat_lon_sfnonet
 
@@ -756,6 +757,29 @@ def test_clip_latent_global_means_envelope_synchronized_across_ranks():
     torch.testing.assert_close(dist.reduce_max(model._gm_max.clone()), model._gm_max)
 
 
+def _local_block_net(local_filter: LocalFilterConfig, img_shape=(9, 18), embed_dim=16):
+    params = SFNONetConfig(
+        embed_dim=embed_dim,
+        num_layers=2,
+        filter_type="linear",
+        local_blocks=[0],
+        local_filter=local_filter,
+    )
+    return get_lat_lon_sfnonet(
+        params=params, img_shape=img_shape, in_chans=2, out_chans=3
+    )
+
+
+def test_sfnonet_local_blocks_default_filter_is_unchanged():
+    """local_blocks predates the local_filter options, so the default must not
+    change what an existing config builds: a single 3x3 Morlet branch."""
+    model = _local_block_net(LocalFilterConfig())
+    local_filter = model.blocks[0].filter.filter
+    assert not local_filter.two_branch
+    assert len(local_filter.branches) == 1
+    assert local_filter.branches[0].kernel_size == 9  # 3x3 Morlet
+
+
 def test_sfnonet_local_blocks_get_the_post_filter_activation():
     """Swapping the spectral filter for a DISCO one must change only the filter.
 
@@ -763,11 +787,45 @@ def test_sfnonet_local_blocks_get_the_post_filter_activation():
     so a local block silently differed from a linear block by a missing
     nonlinearity as well as by its filter.
     """
-    params = SFNONetConfig(
-        embed_dim=16, num_layers=2, filter_type="linear", local_blocks=[0]
-    )
-    model = get_lat_lon_sfnonet(
-        params=params, img_shape=(9, 18), in_chans=2, out_chans=3
-    )
-    assert hasattr(model.blocks[0], "act_layer")  # the local block
+    model = _local_block_net(LocalFilterConfig())
+    assert hasattr(model.blocks[0].filter.filter, "branches")  # the local block
+    assert hasattr(model.blocks[0], "act_layer")
     assert hasattr(model.blocks[1], "act_layer")  # the linear block, unchanged
+
+
+@pytest.mark.medium_duration
+def test_sfnonet_two_branch_local_blocks_end_to_end():
+    """The globally-supported two-branch DISCO filter trains inside the net.
+
+    Both branches must receive gradients: an unused H branch would make the
+    model a single isotropic filter while reporting the two-branch form.
+    """
+    torch.manual_seed(0)
+    device = get_device()
+    model = _local_block_net(
+        LocalFilterConfig(
+            kernel_shape="lmax",
+            basis_type="piecewise linear",
+            theta_cutoff="global",
+            two_branch=True,
+            match_spectral_init=True,
+        )
+    ).to(device)
+    x = torch.randn(2, 2, 9, 18, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
+    assert output.shape == (2, 3, 9, 18)
+    output.sum().backward()
+
+    local_filter = model.blocks[0].filter.filter
+    assert local_filter.two_branch
+    assert len(local_filter.branches) == 2
+    for branch in local_filter.branches:
+        assert branch.kernel_size == 9  # lmax basis functions on a 9-lat grid
+        assert branch.weight.grad is not None
+        assert not torch.all(branch.weight.grad == 0)
