@@ -135,3 +135,23 @@ def test_get_sampler_seed_reproducibility():
     second = list(dist.get_sampler(dataset, shuffle=True))
 
     assert first == second
+
+
+@pytest.mark.parallel
+def test_get_sampler_seed_offset_gives_independent_order():
+    """
+    Two samplers over equal-length datasets shuffle in lockstep unless they
+    are given different seed offsets.
+    """
+    dist = Distributed.get_instance()
+    n_dp = dist.total_data_parallel_ranks
+    dataset = _make_dataset(8 * n_dp)
+
+    set_seed(42)
+    baseline = list(dist.get_sampler(dataset, shuffle=True))
+    same_offset = list(dist.get_sampler(dataset, shuffle=True, seed_offset=0))
+    other_offset = list(dist.get_sampler(dataset, shuffle=True, seed_offset=1))
+
+    assert same_offset == baseline
+    assert other_offset != baseline
+    assert sorted(other_offset) == sorted(baseline)

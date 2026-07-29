@@ -205,13 +205,27 @@ class Distributed:
         dataset: torch.utils.data.Dataset,
         shuffle: bool,
         drop_last: bool = False,
+        seed_offset: int = 0,
     ) -> torch.utils.data.Sampler:
+        """
+        Get a sampler over ``dataset`` for this rank.
+
+        Args:
+            dataset: The dataset to sample from.
+            shuffle: Whether to shuffle the samples.
+            drop_last: Whether to drop the incomplete tail of the dataset.
+            seed_offset: Added to the distributed seed. Two samplers built with
+                different offsets produce different permutations of
+                equal-length datasets in the same epoch; leave it at 0 unless
+                sampling several datasets that must be shuffled independently
+                of one another rather than in lockstep.
+        """
         return torch.utils.data.DistributedSampler(
             dataset,
             shuffle=shuffle,
             num_replicas=self._distributed.total_data_parallel_ranks,
             rank=self._distributed.data_parallel_rank,
-            seed=self._seed,
+            seed=self._seed + seed_offset,
             drop_last=drop_last,
         )
 
