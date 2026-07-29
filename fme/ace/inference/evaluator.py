@@ -412,7 +412,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
             val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,
-                loss_scaling=train_stepper.effective_loss_scaling,
                 save_diagnostics=True,
                 output_dir=os.path.join(config.experiment_dir, "validation"),
                 channel_mean_names=stepper.loss_names,
