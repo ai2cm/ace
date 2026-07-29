@@ -577,6 +577,3 @@ stepper:
       - TMP850
       - h500
       - total_frozen_precipitation_rate
-      global_mean_removal:
-        kind: shared
-        append_as_input: true
