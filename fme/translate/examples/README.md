@@ -15,10 +15,11 @@ to let the critique drive the design — they are not runnable.
 | `inference:` composites (one-backbone component chains, Stepper-compatible export) | 4 |
 | `latent_consistency` objective type, noise-conditioned encoder and latent-resampler registry entries | 6 |
 
-PR 5 (SFNO cut-point decomposition) doesn't appear in either config: it
-would show up as `parameter_init.weights_path` warm-starts on
-encoder/backbone/decoder, and as a bare-processor backbone in the
-latent-splice transfer variant.
+PR 5 (SFNO cut-point decomposition) doesn't appear in either config. It
+shows up as `sfno_cut_point` transforms with a `donor_checkpoint` — one
+per stage for the multi-scale warm-start, or the processor alone for the
+latent-splice transfer variant — over a latent domain declaring
+`embed_dim` plus the donor's input channels.
 
 - [multi-resolution-latent.yaml](multi-resolution-latent.yaml) —
   1°/2°/4° encoders/decoders into per-resolution latent domains, learned

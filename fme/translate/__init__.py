@@ -14,6 +14,7 @@ from .components import (
     ComponentPoolConfig,
     TransformConfig,
 )
+from .cutpoint import SFNOCutPointConfig
 from .domains import DomainConfig, LatentChannels
 from .modules import (
     InterpolateTransformConfig,
@@ -29,6 +30,7 @@ __all__ = [
     "DomainConfig",
     "InterpolateTransformConfig",
     "LatentChannels",
+    "SFNOCutPointConfig",
     "SameGridTransformConfig",
     "TransformConfig",
     "TransformModuleConfig",

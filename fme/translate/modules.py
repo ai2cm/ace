@@ -65,6 +65,26 @@ class TransformModuleConfig(abc.ABC):
         """
         ...
 
+    def build_for_load(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        in_dataset_info: DatasetInfo,
+        out_dataset_info: DatasetInfo,
+    ) -> Module:
+        """Build a module whose weights are about to be restored from a state.
+
+        Defaults to :meth:`build`. Override in builders that read an external
+        checkpoint at build time, so that reloading a saved component does not
+        depend on that checkpoint still existing.
+        """
+        return self.build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            in_dataset_info=in_dataset_info,
+            out_dataset_info=out_dataset_info,
+        )
+
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "TransformModuleConfig":
         return dacite.from_dict(
@@ -106,6 +126,20 @@ class TransformSelector:
         out_dataset_info: DatasetInfo,
     ) -> Module:
         return self._instance.build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            in_dataset_info=in_dataset_info,
+            out_dataset_info=out_dataset_info,
+        )
+
+    def build_for_load(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        in_dataset_info: DatasetInfo,
+        out_dataset_info: DatasetInfo,
+    ) -> Module:
+        return self._instance.build_for_load(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             in_dataset_info=in_dataset_info,

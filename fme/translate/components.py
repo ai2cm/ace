@@ -132,8 +132,10 @@ class TransformConfig:
         n_out_channels: int,
         in_dataset_info: DatasetInfo,
         out_dataset_info: DatasetInfo,
+        for_load: bool = False,
     ) -> Module:
-        return self.module.build(
+        build = self.module.build_for_load if for_load else self.module.build
+        return build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             in_dataset_info=in_dataset_info,
@@ -176,9 +178,16 @@ class TransformConfig:
         Used when reconstructing from a saved state: the weights are restored by
         a subsequent ``load_state``, so external initialization is skipped and,
         as with ``Stepper.from_state``, the reloaded module is left unfrozen.
+        Builders that read a checkpoint of their own at build time (the SFNO
+        cut-point parts' ``donor_checkpoint``) skip it here too, so a saved
+        component reloads without that checkpoint still existing.
         """
         module = self._build_raw(
-            n_in_channels, n_out_channels, in_dataset_info, out_dataset_info
+            n_in_channels,
+            n_out_channels,
+            in_dataset_info,
+            out_dataset_info,
+            for_load=True,
         )
         return module.wrap_module(Distributed.get_instance().wrap_module)
 
@@ -486,7 +495,16 @@ class ComponentPool:
             backbone.set_eval()
 
     def set_epoch(self, epoch: int) -> None:
-        # Transforms have no epoch-dependent state; only backbones react.
+        for transform in self._transforms.values():
+            # Mirrors Stepper.set_epoch: a transform holding the SFNO's
+            # post-encoder latent global-mean envelope needs it reset each
+            # epoch, and duck-typing is how the stepper finds those modules.
+            for submodule in transform.torch_module.modules():
+                request_reset = getattr(
+                    submodule, "request_latent_global_mean_envelope_reset", None
+                )
+                if callable(request_reset):
+                    request_reset()
         for backbone in self._backbones.values():
             backbone.set_epoch(epoch)
 
