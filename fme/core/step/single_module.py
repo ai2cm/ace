@@ -228,6 +228,9 @@ class SingleModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
