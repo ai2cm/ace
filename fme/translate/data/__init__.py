@@ -16,6 +16,7 @@ groups are sampled independently of one another. A sampling knob in the config
 could contradict the objectives; a derivation cannot.
 """
 
+from .batch_data import TranslateBatchData, TranslateCollateFn
 from .requirements import (
     ObjectiveDataRequirements,
     StreamRequirements,
@@ -25,5 +26,7 @@ from .requirements import (
 __all__ = [
     "ObjectiveDataRequirements",
     "StreamRequirements",
+    "TranslateBatchData",
+    "TranslateCollateFn",
     "TranslateDataRequirements",
 ]
