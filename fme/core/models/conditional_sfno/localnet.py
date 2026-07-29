@@ -6,15 +6,17 @@ import torch
 import torch.nn as nn
 
 from fme.core.benchmark.timer import NullTimer, Timer
+from fme.core.disco import BasisType, compute_cutoff_radius
 from fme.core.distributed import Distributed
 
 from .initialization import trunc_normal_
 from .layers import MLP, ConditionalLayerNorm, Context, ContextConfig
 from .lora import LoRAConv2d
-from .sfnonet import DiscreteContinuousConvS2, NoLayerNorm, _compute_cutoff_radius
+from .sfnonet import DiscreteContinuousConvS2, NoLayerNorm
 
 BlockType = Literal["disco", "conv1x1"]
-BasisType = Literal["morlet", "piecewise linear", "zernike"]
+
+__all__ = ["BasisType", "BlockType", "LocalNet", "LocalNetConfig"]
 
 
 @dataclasses.dataclass
@@ -27,7 +29,7 @@ class LocalNetConfig:
         kernel_shape: Shape of the DISCO convolution filter basis, passed
             to the filter basis constructor. Only affects 'disco' blocks.
         basis_type: Type of filter basis for the DISCO convolution
-            ('morlet', 'piecewise linear', or 'zernike').
+            ('morlet', 'isotropic morlet', 'piecewise linear', or 'zernike').
             Only affects 'disco' blocks.
         block_types: List of filter types for each block ('disco', 'conv1x1').
             The length determines the number of blocks.
@@ -120,7 +122,7 @@ class LocalFilterLayer(nn.Module):
 
         if filter_type == "disco":
             nlat, nlon = img_shape
-            theta_cutoff = 2 * _compute_cutoff_radius(
+            theta_cutoff = 2 * compute_cutoff_radius(
                 nlat=nlat,
                 kernel_shape=kernel_shape,
                 basis_type=basis_type,
