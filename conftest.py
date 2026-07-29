@@ -185,6 +185,18 @@ def reset_global_timer():
 
 
 @pytest.fixture(autouse=True)
+def reset_post_shutdown_callbacks():
+    # the session-scoped Distributed.context() above holds one registry for the
+    # whole run, so without this every Trainer built by an earlier test would
+    # still be called on a termination signal raised by a later one
+    from fme.core.distributed.shutdown import clear_post_shutdown_callbacks
+
+    clear_post_shutdown_callbacks()
+    yield
+    clear_post_shutdown_callbacks()
+
+
+@pytest.fixture(autouse=True)
 def mock_gc_collect(monkeypatch):
     def mock_collect(*args, **kwargs):
         pass

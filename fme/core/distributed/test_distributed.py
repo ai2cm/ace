@@ -1,4 +1,8 @@
 import os
+import signal
+import subprocess
+import sys
+import textwrap
 
 import pytest
 import torch
@@ -11,6 +15,37 @@ from fme.core.distributed.torch_distributed import (
     _pad_tensor_at_end,
     _unpad_tensor_at_end,
 )
+
+
+@pytest.mark.medium_duration
+def test_context_tears_down_the_backend_on_sigterm():
+    """Every entrypoint wraps its work in `Distributed.context()`.
+
+    Handling the signal here rather than in the Trainer is what puts a graceful
+    teardown on the inference and evaluation paths, and on the startup phase of
+    training before the Trainer exists.
+
+    Runs in a subprocess because the test session is itself already inside a
+    `Distributed.context()`, which refuses to nest.
+    """
+    program = textwrap.dedent(
+        """
+        import signal
+        from fme.core.distributed import Distributed
+        from fme.core.distributed.shutdown import add_post_shutdown_callback
+
+        Distributed.get_instance().shutdown = lambda: print("shutdown")
+        with Distributed.context():
+            add_post_shutdown_callback(lambda: print("callback"))
+            signal.raise_signal(signal.SIGTERM)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, timeout=120, text=True
+    )
+
+    assert result.stdout.split() == ["shutdown", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
 
 
 @pytest.mark.parametrize(

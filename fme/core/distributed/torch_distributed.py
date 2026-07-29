@@ -233,7 +233,11 @@ class TorchDistributed(DistributedBackend):
         return data.nanmean(dim=-1)
 
     def shutdown(self):
-        logger.debug(f"Shutting down rank {self.rank}")
+        if not torch.distributed.is_initialized():
+            # already shut down; a termination signal can arrive during the
+            # normal end-of-run teardown
+            return
+        logger.info(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
 
 

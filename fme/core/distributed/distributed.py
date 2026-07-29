@@ -11,6 +11,7 @@ from fme.core import metrics
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
+from .shutdown import handle_termination_signals
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -72,13 +73,18 @@ class Distributed:
         This should generally be used at the top level of the training script to
         wrap the entire training process, to ensure proper initialization and
         shutdown of the distributed backend.
+
+        Termination signals are handled for the lifetime of the context, so that
+        a preempted job tears the backend down instead of dropping its NVLink
+        peers. See `fme.core.distributed.shutdown`.
         """
         if cls._entered:
             raise RuntimeError("Nested Distributed.context() is not supported.")
         cls._entered = True
         instance = cls.get_instance()
         try:
-            yield
+            with handle_termination_signals(instance.shutdown):
+                yield
         except BaseException:
             # exit immediately to avoid hanging other ranks
             # the OS should clean up resources based on the non-zero exit
