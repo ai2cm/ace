@@ -123,8 +123,21 @@ def handle_termination_signals(
         yield
         return
 
+    tearing_down = False
+
     def handle(signum: int, frame: types.FrameType | None) -> None:
+        nonlocal tearing_down
         exit_code = 128 + signum
+        if tearing_down:
+            # a repeated Ctrl-C, or both the scheduler and torchrun signalling.
+            # The first handler owns the teardown and the deadline already
+            # bounds it, so restarting it here would only cost us the callbacks.
+            logger.info(
+                "Received %s while already shutting down; ignoring.",
+                signal.Signals(signum).name,
+            )
+            return
+        tearing_down = True
         logger.info(
             "Received %s, shutting down the distributed backend before exiting.",
             signal.Signals(signum).name,

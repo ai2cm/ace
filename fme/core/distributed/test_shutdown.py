@@ -90,6 +90,28 @@ def test_previous_handlers_and_callbacks_are_restored_on_exit():
     assert ran == []
 
 
+def test_a_second_signal_does_not_restart_the_teardown():
+    """A repeated Ctrl-C must not cost us the restart checkpoint.
+
+    Re-entering would abandon the in-progress teardown and start it over, so
+    the callbacks would run twice and the checkpoint write would restart.
+    """
+    events = []
+
+    def shutdown():
+        events.append("shutdown")
+        signal.raise_signal(signal.SIGINT)  # arrives while we are tearing down
+
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=shutdown):
+        with pytest.raises(SystemExit) as excinfo:
+            signal.raise_signal(signal.SIGTERM)
+
+    assert events == ["shutdown", "callback"]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+
+
 def test_deadline_does_not_outlive_a_successful_teardown(monkeypatch):
     """An expired deadline must not kill a process that shut down cleanly.
 
