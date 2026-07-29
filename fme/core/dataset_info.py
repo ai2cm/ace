@@ -3,6 +3,8 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+import torch
+
 from fme.core.atmosphere_data import HasAtmosphereVerticalIntegral
 from fme.core.coordinates import (
     HorizontalCoordinates,
@@ -13,6 +15,7 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
+from fme.core.dataset_info_errors import IncompatibleDatasetInfo, MissingDatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.ocean_data import HasOceanDepthIntegral
 from fme.core.spatial_mask_provider import (
@@ -21,16 +24,7 @@ from fme.core.spatial_mask_provider import (
     SpatialMaskProviderABC,
 )
 
-
-class MissingDatasetInfo(ValueError):
-    def __init__(self, info: str):
-        super().__init__(
-            f"Dataset used for initialization is missing required information: {info}"
-        )
-
-
-class IncompatibleDatasetInfo(ValueError):
-    pass
+__all__ = ["DatasetInfo", "IncompatibleDatasetInfo", "MissingDatasetInfo"]
 
 
 class DatasetInfo:
@@ -187,6 +181,12 @@ class DatasetInfo:
         if self._horizontal_coordinates is None:
             raise MissingDatasetInfo("horizontal_coordinates")
         return self._horizontal_coordinates
+
+    @property
+    def lat_1d(self) -> torch.Tensor:
+        if self._horizontal_coordinates is None:
+            raise MissingDatasetInfo("horizontal_coordinates")
+        return self._horizontal_coordinates.lat_1d
 
     @property
     def vertical_coordinate(self) -> VerticalCoordinate:

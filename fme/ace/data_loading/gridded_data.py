@@ -247,6 +247,13 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     def initial_condition(self) -> PrognosticState:
         return self._initial_condition
 
+    def apply_config_seed(self, seed: int | None) -> None:
+        """Seed the initial condition's random state from ``config.seed``,
+        unless it already carries one (see
+        ``PrognosticState.apply_config_seed``).
+        """
+        self._initial_condition = self._initial_condition.apply_config_seed(seed)
+
     @property
     def initial_time(self) -> xr.DataArray:
         return self.initial_condition.as_batch_data().time.isel(time=0)

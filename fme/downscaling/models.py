@@ -21,7 +21,10 @@ from fme.downscaling.data import (
     PairedBatchData,
     StaticInputs,
     adjust_fine_coord_range,
+    coords_require_lon_roll,
+    find_roll_anchor,
     load_coords_from_path,
+    roll_lon_coords,
 )
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
@@ -399,6 +402,8 @@ class DiffusionModel:
         self._channel_axis = -3
         self.full_fine_coords = full_fine_coords.to(get_device())
         self.static_inputs = static_inputs.to_device() if static_inputs else None
+        # Set True only by with_rolled_lon (inference only); guards train_on_batch.
+        self._is_longitude_rolled = False
         self._loss_weight_tensor = _build_variable_loss_weight_tensor(
             config.loss_weights.output_channels, self.out_names
         )
@@ -492,6 +497,12 @@ class DiffusionModel:
         optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
+        if self._is_longitude_rolled:
+            raise RuntimeError(
+                "Cannot train a longitude-rolled DiffusionModel. with_rolled_lon "
+                "is intended for inference only; rolled models share weights and "
+                "would corrupt gradient synchronization under distributed training."
+            )
         _static_inputs = self._subset_static_if_available(batch.coarse)
         coarse, fine = batch.coarse.data, batch.fine.data
         inputs_norm = self._get_input_from_coarse(coarse, _static_inputs)
@@ -747,6 +758,68 @@ class DiffusionModel:
             else 0,
         )
 
+    def _lon_roll_amount(self, coarse_lon: torch.Tensor) -> tuple[int, float]:
+        """
+        Number of positions to roll the fine grid (and the lon_start it aligns to)
+        so the fine cells stay aligned to coarse_lon's coarse cells.
+
+        Assumes a uniformly spaced fine grid; validated by roll_lon_coords when
+        the roll is applied.
+        """
+        lon_start = float(coarse_lon.min())
+        fine_lon = self.full_fine_coords.lon
+        fine_spacing = float(fine_lon[1] - fine_lon[0])
+        # Anchor on the western coarse-cell *edge* (not its center, lon_start) so
+        # the roll is a whole number of coarse cells; anchoring on the center
+        # would split the boundary coarse cell across the seam.
+        western_edge = lon_start - self.downscale_factor * fine_spacing / 2.0
+        return find_roll_anchor(fine_lon, western_edge), lon_start
+
+    def with_rolled_lon(self, coarse_lon: torch.Tensor) -> "DiffusionModel":
+        """
+        Return a new model with full_fine_coords and static_inputs rolled to match
+        coarse_lon's longitude convention, sharing the network weights.
+
+        Models with rolled longitude are useful when inference region crosses
+        the prime meridian, where we want to ensure we can grab proper slices
+        from the static inputs and provide the right coordinates for the outputs.
+
+        Returns self unchanged when coarse_lon does not cross the prime meridian.
+
+        Intended for inference only: rebuilding wraps the module in a second
+        DistributedDataParallel under torch distributed, which is a hazard for
+        gradient-synchronized training.
+        """
+        if not coords_require_lon_roll(coarse_lon):
+            return self
+        roll_amount, lon_start = self._lon_roll_amount(coarse_lon)
+
+        # The new model is built through the constructor (rather than a shallow copy)
+        # so its coords are re-validated and derived state is rebuilt fresh; the raw
+        # module is unwrapped and passed so __init__ re-wraps it exactly once.
+        rolled = DiffusionModel(
+            config=self.config,
+            module=self.module.module,
+            normalizer=self.normalizer,
+            loss=self.loss,
+            coarse_shape=self.coarse_shape,
+            downscale_factor=self.downscale_factor,
+            sigma_data=self.sigma_data,
+            full_fine_coords=LatLonCoordinates(
+                lat=self.full_fine_coords.lat,
+                lon=roll_lon_coords(self.full_fine_coords.lon, roll_amount, lon_start),
+            ),
+            in_names=self.in_names,
+            out_names=self.out_names,
+            static_inputs=(
+                self.static_inputs.roll(roll_amount, lon_start)
+                if self.static_inputs is not None
+                else None
+            ),
+        )
+        rolled._is_longitude_rolled = True
+        return rolled
+
 
 @dataclasses.dataclass
 class _CheckpointModelConfigSelector:
@@ -818,6 +891,7 @@ class CheckpointModelConfig:
     def _get_coords_backwards_compatible(
         coords_from_state: dict | None,
         fine_coordinates_path: str | None,
+        static_inputs: StaticInputs | None,
     ) -> LatLonCoordinates:
         if coords_from_state and fine_coordinates_path:
             raise ValueError(
@@ -831,25 +905,28 @@ class CheckpointModelConfig:
                 lon=coords_from_state["lon"].to(get_device(), copy=True),
             )
         elif fine_coordinates_path is not None:
-            return load_coords_from_path(fine_coordinates_path)
+            return load_coords_from_path(fine_coordinates_path).to(get_device())
+        elif static_inputs is not None:
+            return static_inputs.coords
         else:
             raise ValueError(
-                "No fine coordinates found in checkpoint state and no "
-                "fine_coordinates_path provided. One of these must be provided to "
-                "load the model using CheckpointModelConfig."
+                "No fine coordinates found in checkpoint state or static inputs, "
+                "and no fine_coordinates_path provided. One of these must be "
+                "provided to load the model using CheckpointModelConfig."
             )
 
     def build(
         self,
     ) -> DiffusionModel:
         checkpoint_model: dict = self._checkpoint["model"]
-        full_fine_coords = self._get_coords_backwards_compatible(
-            checkpoint_model.get("full_fine_coords"),
-            self.fine_coordinates_path,
-        )
         static_inputs = StaticInputs.from_state_backwards_compatible(
             state=checkpoint_model.get("static_inputs") or {},
             static_inputs_config=self.static_inputs or {},
+        )
+        full_fine_coords = self._get_coords_backwards_compatible(
+            checkpoint_model.get("full_fine_coords"),
+            self.fine_coordinates_path,
+            static_inputs,
         )
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]

@@ -327,6 +327,7 @@ class SeparateICZarrWriterAdapter:
                     array_attributes=self.variable_metadata,
                     group_attributes=self.dataset_metadata,
                     nondim_coords=self._nondim_coords,
+                    time_calendar=first_batch_time.dt.calendar,
                     mode="w",
                     overwrite_check=self.overwrite_check,
                 )

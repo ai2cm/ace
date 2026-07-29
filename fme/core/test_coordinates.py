@@ -12,6 +12,7 @@ from fme.core.coordinates import (
     SerializableVerticalCoordinate,
     dz_from_idepth,
 )
+from fme.core.dataset_info import MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 
@@ -211,6 +212,20 @@ def test_depth_integral_3d_data():
     torch.testing.assert_close(result, expected)
 
 
+def test_lat_lon_lat_1d_returns_lat():
+    lat = torch.tensor([1.0, 2.0, 3.0])
+    coords = LatLonCoordinates(lat=lat, lon=torch.tensor([4.0, 5.0, 6.0]))
+    torch.testing.assert_close(coords.lat_1d, lat)
+
+
+def test_healpix_lat_1d_raises():
+    healpix_coords = HEALPixCoordinates(
+        face=torch.arange(12), height=torch.arange(16), width=torch.arange(16)
+    )
+    with pytest.raises(MissingDatasetInfo, match="12 tiles"):
+        healpix_coords.lat_1d
+
+
 def test_masked_lat_lon_ops_from_coords():
     lat = torch.tensor([0.0, 0.0, 0.0])
     lon = torch.tensor([0.0])
@@ -380,7 +395,7 @@ def test_healpix_coordinates_xyz(pad: bool):
     # Apply HEALPix padding
     if pad:
         padding = 2
-        healpix_padding = HEALPixPadding(padding=padding, enable_nhwc=False)
+        healpix_padding = HEALPixPadding(padding=padding)
         padded_x = healpix_padding(torch.Tensor(x).unsqueeze(1)).squeeze(1)
         padded_y = healpix_padding(torch.Tensor(y).unsqueeze(1)).squeeze(1)
         padded_z = healpix_padding(torch.Tensor(z).unsqueeze(1)).squeeze(1)

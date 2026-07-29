@@ -341,7 +341,9 @@ class InferenceDataset(torch.utils.data.Dataset[BatchData]):
         if self._persistence_data is not None:
             updated_data = {}
             for key, value in self._persistence_data.data.items():
-                updated_data[key] = value.expand_as(result.data[key])
+                # contiguous: the DataLoader pin-memory thread cannot pin the
+                # overlapping-memory view produced by expand_as
+                updated_data[key] = value.expand_as(result.data[key]).contiguous()
             result.data = {**result.data, **updated_data}
         assert result.time.shape[0] == (
             self._n_initial_conditions // dist.total_data_parallel_ranks

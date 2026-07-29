@@ -2,12 +2,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fme.ace.aggregator.one_step.main import (
+    OneStepAggregatorConfig,
+    OneStepSnapshotMetricConfig,
+)
 from fme.ace.data_loading.inference import InferenceInitialConditionIndices
 from fme.ace.stepper.time_length_probabilities import (
     TimeLengthProbabilities,
     TimeLengthProbability,
 )
 from fme.core.dataset.xarray import XarrayDataConfig
+from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
 from fme.core.loss import StepLossConfig
 from fme.core.typing_ import Slice
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
@@ -24,7 +29,11 @@ from fme.coupled.train.train_config import (
 )
 from fme.coupled.typing_ import CoupledOptionalInt
 
-from .train_config import _validate_n_steps
+from .train_config import (
+    _get_inference_callback,
+    _get_validation_callback,
+    _validate_n_steps,
+)
 
 _MOCK_LOSS = MagicMock(spec=StepLossConfig)
 
@@ -315,6 +324,32 @@ def test_validation_default_weight_is_one():
     assert config.weight == 1.0
 
 
+def test_validation_default_aggregator_config():
+    config = _make_validation_config()
+    assert isinstance(config.aggregator, OneStepAggregatorConfig)
+
+
+def test_build_aggregator_factory_passes_config():
+    aggregator_config = OneStepAggregatorConfig(
+        snapshot=OneStepSnapshotMetricConfig(enabled=False)
+    )
+    config = InlineValidationConfig(
+        loader=MagicMock(spec=CoupledDataLoaderConfig),
+        aggregator=aggregator_config,
+    )
+    with patch("fme.coupled.train.train_config.OneStepAggregator") as mock_aggregator:
+        factory = config.build_aggregator_factory(
+            name="val",
+            dataset_info=MagicMock(),
+            loss_scaling=MagicMock(),
+            save_per_epoch_diagnostics=False,
+            output_dir="/tmp/out",
+        )
+        factory()
+    _, kwargs = mock_aggregator.call_args
+    assert kwargs["config"] is aggregator_config
+
+
 def test_validation_single_config_gives_list(tmp_path):
     config = _make_train_config_for_validation(tmp_path, _make_validation_config())
     assert isinstance(config.validation, InlineValidationConfig)
@@ -371,17 +406,15 @@ def test_duplicate_validation_names_raises(tmp_path):
 
 
 class TestGetValidationCallback:
-    """Smoke test for `get_validation_callback` wiring.
+    """Smoke test for `_get_validation_callback` wiring.
 
     Helper behavior (weighted loss, missing-metric raise, overlap raise, etc.)
     is covered by `TestBuildValidationCallback` in
     `fme.core.generics.test_trainer`. This test only verifies that entry name
-    and weight flow correctly from config through to the shared helper.
+    and weight flow correctly through to the shared helper.
     """
 
     def test_entries_wired_to_tasks(self):
-        from fme.coupled.train.train import get_validation_callback
-
         entries = [
             (_make_validation_config(name="a", weight=2.0), MagicMock(), "a"),
             (_make_validation_config(name="b", weight=3.0), MagicMock(), "b"),
@@ -389,9 +422,12 @@ class TestGetValidationCallback:
         stepper = MagicMock()
         with patch(
             "fme.core.generics.trainer.run_validation",
-            side_effect=[{"a/mean/loss": 0.1}, {"b/mean/loss": 0.2}],
+            side_effect=[
+                AggregatorSummary(logs={}, loss=0.1),
+                AggregatorSummary(logs={}, loss=0.2),
+            ],
         ):
-            callback = get_validation_callback(
+            callback = _get_validation_callback(
                 validation_entries=entries,
                 stepper=stepper,
                 dataset_info=MagicMock(),
@@ -422,8 +458,6 @@ class TestGetInferenceCallback:
         inference_epochs=(1,),
         inference_epoch_sets=None,
     ):
-        from fme.coupled.train.train import get_inference_callback
-
         if inference_epoch_sets is None:
             inference_epoch_sets = [{1} for _ in entries]
         stepper = MagicMock()
@@ -431,7 +465,7 @@ class TestGetInferenceCallback:
             "fme.core.generics.trainer.inference_one_epoch",
             side_effect=inference_one_epoch_side_effect,
         ):
-            callback = get_inference_callback(
+            callback = _get_inference_callback(
                 inference_entries=entries,
                 inference_epochs=list(inference_epochs),
                 inference_epoch_sets=list(inference_epoch_sets),
@@ -457,24 +491,32 @@ class TestGetInferenceCallback:
         entries = [self._make_entry("inference", weight=2.0)]
         logs, error = self._call(
             entries,
-            [{"inference/time_mean_norm/rmse/channel_mean": 0.4}],
+            [
+                InferenceSummary(
+                    logs={"inference/time_mean_norm/rmse/channel_mean": 0.4}, loss=0.4
+                )
+            ],
         )
         assert error == pytest.approx(2.0 * 0.4)
         assert "inference/time_mean_norm/rmse/channel_mean" in logs
 
     def test_weighted_entry_missing_metric_raises(self):
         entries = [self._make_entry("a", weight=1.0)]
-        with pytest.raises(RuntimeError, match="did not produce expected metric key"):
+        with pytest.raises(RuntimeError, match="did not produce a loss"):
             self._call(
                 entries,
-                [{"a/other_metric": 1.0}],
+                [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
             )
 
     def test_all_zero_weight_returns_none_error(self):
         entries = [self._make_entry("a", weight=0.0)]
         logs, error = self._call(
             entries,
-            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                )
+            ],
         )
         assert error is None
         assert "a/time_mean_norm/rmse/channel_mean" in logs
@@ -487,8 +529,12 @@ class TestGetInferenceCallback:
         logs, error = self._call(
             entries,
             [
-                {"a/time_mean_norm/rmse/channel_mean": 0.1},
-                {"b/time_mean_norm/rmse/channel_mean": 0.2},
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.1}, loss=0.1
+                ),
+                InferenceSummary(
+                    logs={"b/time_mean_norm/rmse/channel_mean": 0.2}, loss=0.2
+                ),
             ],
         )
         assert error == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
@@ -500,7 +546,11 @@ class TestGetInferenceCallback:
         ]
         logs, error = self._call(
             entries,
-            [{"a/time_mean_norm/rmse/channel_mean": 0.5}],
+            [
+                InferenceSummary(
+                    logs={"a/time_mean_norm/rmse/channel_mean": 0.5}, loss=0.5
+                ),
+            ],
             epoch=1,
             inference_epochs=(1,),
             inference_epoch_sets=[{1}, {2}],

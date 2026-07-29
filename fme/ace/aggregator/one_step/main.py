@@ -5,7 +5,10 @@ from collections.abc import Sequence
 
 import torch
 
-from fme.ace.aggregator.loss_metrics import PerStepLossAggregator
+from fme.ace.aggregator.loss_metrics import (
+    PerChannelLossAggregator,
+    PerStepLossAggregator,
+)
 from fme.ace.aggregator.one_step.deterministic import (
     DeterministicTrainOutput,
     OneStepDeterministicAggregator,
@@ -16,7 +19,7 @@ from fme.ace.aggregator.one_step.ensemble import (
 )
 from fme.ace.stepper import TrainOutput
 from fme.core.dataset_info import DatasetInfo
-from fme.core.generics.aggregator import AggregatorABC
+from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import EnsembleTensorDict, TensorMapping
 
@@ -53,6 +56,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         self,
         deterministic_aggregator: OneStepDeterministicAggregator,
         ensemble_aggregators: dict[str, EnsembleAggregator] | None = None,
+        per_channel_loss: bool = True,
     ):
         self._deterministic_aggregator = deterministic_aggregator
         self._ensemble_aggregators: dict[str, EnsembleAggregator] = (
@@ -60,6 +64,9 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         )
         self._ensemble_recorded = False
         self._per_step_losses = PerStepLossAggregator()
+        self._per_channel_losses: PerChannelLossAggregator | None = (
+            PerChannelLossAggregator() if per_channel_loss else None
+        )
 
     @torch.no_grad()
     def record_batch(
@@ -72,6 +79,11 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             if k.startswith("loss_step_") or k.startswith("loss/")
         }
         self._per_step_losses.record(step_metrics)
+        if (
+            self._per_channel_losses is not None
+            and batch.per_channel_losses is not None
+        ):
+            self._per_channel_losses.record(batch.per_channel_losses)
         folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
         folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
         self._deterministic_aggregator.record_batch(
@@ -96,29 +108,28 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             self._ensemble_recorded = True
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        """
-        Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
-        """
-        deterministic_logs = self._deterministic_aggregator.get_logs(label)
-        deterministic_logs.update(self._per_step_losses.get_logs(label))
+    def get_summary(self, label: str) -> AggregatorSummary:
+        det_summary = self._deterministic_aggregator.get_summary(label)
+        logs = dict(det_summary.logs)
+        logs.update(self._per_step_losses.get_logs(label))
+        if self._per_channel_losses is not None:
+            logs.update(self._per_channel_losses.get_logs(label))
         if self._ensemble_recorded and self._ensemble_aggregators:
             stochastic_logs: dict = {}
             for agg_name, ensemble_aggregator in self._ensemble_aggregators.items():
                 for k, v in ensemble_aggregator.get_logs(label=agg_name).items():
                     stochastic_logs[f"{label}/{k}"] = v
-            if len(set(deterministic_logs.keys()) & set(stochastic_logs.keys())) > 0:
+            if len(set(logs.keys()) & set(stochastic_logs.keys())) > 0:
                 raise ValueError(
                     "Stochastic and deterministic logs have overlapping keys, "
                     f"stochastic logs: {stochastic_logs}, "
-                    f"deterministic logs: {deterministic_logs}"
+                    f"deterministic logs: {logs}"
                 )
-            return {**deterministic_logs, **stochastic_logs}
-        else:
-            return deterministic_logs
+            logs.update(stochastic_logs)
+        return AggregatorSummary(logs=logs, loss=det_summary.loss)
+
+    def get_logs(self, label: str):
+        return self.get_summary(label).logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: str | None = None):
@@ -149,6 +160,7 @@ def build_one_step_aggregator(
     channel_mean_names: Sequence[str] | None = None,
     raise_on_unsupported: bool = True,
     include_default_ensemble: bool = True,
+    per_channel_loss: bool = True,
 ) -> OneStepAggregator:
     _validate_no_duplicate_names(metrics)
     ctx = OneStepBuildContext(
@@ -195,6 +207,7 @@ def build_one_step_aggregator(
     return OneStepAggregator(
         deterministic_aggregator=deterministic,
         ensemble_aggregators=ensemble_aggregators,
+        per_channel_loss=per_channel_loss,
     )
 
 
@@ -218,6 +231,9 @@ class OneStepAggregatorConfig:
         mean_map: Mean map image metrics.
         ensemble_denorm: Ensemble spread metrics on denormalized data.
         ensemble_norm: Ensemble spread metrics on normalized data.
+        per_channel_loss: Whether to accumulate and report per-variable (per-channel)
+            loss in get_logs (e.g. val/mean/loss/<var_name>), mirroring the
+            train aggregator.
     """
 
     mean_denorm: OneStepMeanMetricConfig = dataclasses.field(
@@ -247,6 +263,7 @@ class OneStepAggregatorConfig:
             target="norm", enabled=False
         )
     )
+    per_channel_loss: bool = True
 
     def __post_init__(self):
         if not self.mean_denorm.enabled:
@@ -302,6 +319,7 @@ class OneStepAggregatorConfig:
             channel_mean_names=channel_mean_names,
             raise_on_unsupported=False,
             include_default_ensemble=False,
+            per_channel_loss=self.per_channel_loss,
         )
 
 

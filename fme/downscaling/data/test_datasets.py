@@ -4,8 +4,12 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.coordinates import NullVerticalCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.dataset import DatasetItem
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.testing import assert_dataset_item_length
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.downscaling.data.datasets import (
     BatchData,
     BatchItem,
@@ -202,6 +206,33 @@ def test_batch_item_validation(key, failing_value):
         BatchItem(**kwargs)
 
 
+def _make_horizontal_subset_dataset(coords, data_tensor, lat_interval, lon_interval):
+    """Build a HorizontalSubsetDataset over a single mocked base-dataset item.
+
+    Uses a real DatasetProperties (so ``all_labels`` is a real set) and centralizes
+    the hand-built DatasetItem tuple, guarded by ``assert_dataset_item_length``.
+    """
+    properties = DatasetProperties(
+        variable_metadata={"x": VariableMetadata(units="", long_name="")},
+        vertical_coordinate=NullVerticalCoordinate(),
+        horizontal_coordinates=coords,
+        spatial_mask_provider=SpatialMaskProvider(),
+        timestep=None,
+        is_remote=False,
+        all_labels=set(),
+    )
+    datum: DatasetItem = ({"x": data_tensor}, xr.DataArray([0.0]), set(), 0, None)
+    assert_dataset_item_length(datum)
+    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
+    base_dataset.__getitem__.return_value = datum
+    return HorizontalSubsetDataset(
+        dataset=base_dataset,
+        properties=properties,
+        lat_interval=lat_interval,
+        lon_interval=lon_interval,
+    )
+
+
 @pytest.mark.parametrize(
     "lat_interval,lon_interval,n_lat,n_lon,expected_n_lat,expected_n_lon",
     [
@@ -219,27 +250,15 @@ def test_horizontal_subset(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 
-    datum: DatasetItem = (
-        {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
-        xr.DataArray([0.0]),
-        set(),
-        0,
-        None,
-    )
-    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
-    properties = MagicMock(spec=DatasetProperties)
-    properties.horizontal_coordinates = coords
-    properties.all_labels = MagicMock(spec=set)
-    base_dataset.__getitem__.return_value = datum
-    dataset = HorizontalSubsetDataset(
-        dataset=base_dataset,
-        properties=properties,
+    dataset = _make_horizontal_subset_dataset(
+        coords=coords,
+        data_tensor=torch.zeros(batch_size, n_timesteps, n_lat, n_lon),
         lat_interval=ClosedInterval(float(lat_interval[0]), float(lat_interval[1])),
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
     )
 
     subset, _, labels, _, _ = dataset[0]
-    assert labels is properties.all_labels
+    assert labels is dataset._properties.all_labels
     assert subset["x"].shape == (
         batch_size,
         n_timesteps,
@@ -248,6 +267,46 @@ def test_horizontal_subset(
     )
     assert dataset.subset_latlon_coordinates.lat.shape == (expected_n_lat,)
     assert dataset.subset_latlon_coordinates.lon.shape == (expected_n_lon,)
+
+
+@pytest.mark.parametrize(
+    "lon_interval,expected_lons",
+    [
+        pytest.param((-90.0, 45.0), [-90.0, -45.0, 0.0, 45.0], id="negative-start"),
+        pytest.param((270.0, 405.0), [270.0, 315.0, 360.0, 405.0], id="stop-past-360"),
+    ],
+)
+def test_horizontal_subset_prime_meridian_spanning(lon_interval, expected_lons):
+    """HorizontalSubsetDataset must handle lon intervals that cross 0°/360°.
+
+    (-90, 45) and (270, 405) select the same physical data; coordinates are
+    returned in whichever convention the caller supplied.
+    """
+    # 8-point longitude grid in 0–360° convention, 45° spacing
+    lons = torch.tensor([0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0])
+    n_lat, n_lon = 4, 8
+    coords = LatLonCoordinates(lat=torch.linspace(0.0, 1.0, n_lat), lon=lons)
+    # Data: lon index encodes original position so we can verify the roll
+    data_tensor = torch.arange(n_lon, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+    data_tensor = data_tensor.expand(1, 1, n_lat, n_lon).clone()
+
+    dataset = _make_horizontal_subset_dataset(
+        coords=coords,
+        data_tensor=data_tensor,
+        lat_interval=ClosedInterval(float("-inf"), float("inf")),
+        lon_interval=ClosedInterval(*lon_interval),
+    )
+
+    assert dataset.subset_latlon_coordinates.lon.shape == (4,)
+    assert torch.allclose(
+        dataset.subset_latlon_coordinates.lon, torch.tensor(expected_lons)
+    )
+
+    subset, _, _, _, _ = dataset[0]
+    assert subset["x"].shape == (1, 1, n_lat, 4)
+    # Data values should correspond to original lon indices 6, 7, 0, 1
+    expected_vals = torch.tensor([6.0, 7.0, 0.0, 1.0])
+    assert torch.allclose(subset["x"][0, 0, 0], expected_vals)
 
 
 def test_batch_data_from_sequence():
