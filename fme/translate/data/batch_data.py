@@ -25,8 +25,14 @@ __all__ = ["TranslateBatchData", "TranslateCollateFn"]
 
 
 @dataclasses.dataclass
-class TranslateBatchData:
+class TranslateBatchData(Mapping[str, BatchData]):
     """A batch holding one :class:`BatchData` per named data stream.
+
+    A read-only ``Mapping`` from stream name to that stream's data, since that
+    is how objectives will reach their streams: ``batch["era5_1deg"]``,
+    ``batch.items()``, ``**batch``. Inheriting ``Mapping`` rather than
+    hand-rolling the surface keeps ``keys``/``values``/``items``/``get`` in
+    agreement with ``__getitem__``.
 
     Parameters:
         streams: The batch's per-stream data, keyed by stream name.
@@ -56,9 +62,6 @@ class TranslateBatchData:
     def __getitem__(self, name: str) -> BatchData:
         return self.streams[name]
 
-    def __contains__(self, name: str) -> bool:
-        return name in self.streams
-
     def __iter__(self) -> Iterator[str]:
         return iter(self.streams)
 
@@ -76,7 +79,14 @@ class TranslateBatchData:
         )
 
     def pin_memory(self) -> "TranslateBatchData":
-        """Page-lock every stream's tensors; called by torch's DataLoader."""
+        """Page-lock every stream's tensors *in place*, and return self.
+
+        Deliberately unlike ``to_device``/``to_cpu``, which return copies:
+        ``BatchData.pin_memory`` and ``fme.coupled``'s both mutate and return
+        self, because torch's DataLoader calls this on a batch it has just
+        collated and is about to hand over, so no other holder of the un-pinned
+        tensors can be surprised. Do not call it on a batch someone else keeps.
+        """
         self.streams = {
             name: batch.pin_memory() for name, batch in self.streams.items()
         }

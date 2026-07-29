@@ -18,6 +18,23 @@ def test_streams_are_accessible_by_name():
     assert batch["era5"] is batch.streams["era5"]
 
 
+def test_batch_is_a_mapping_of_streams():
+    """The surface objectives will reach their streams through."""
+    era5, shield = _batch(), _batch()
+    batch = TranslateBatchData(streams={"era5": era5, "shield": shield})
+    assert sorted(batch.keys()) == ["era5", "shield"]
+    assert dict(batch.items()) == {"era5": era5, "shield": shield}
+    assert list(batch.values()) == [era5, shield]
+    assert batch.get("missing") is None
+    assert {**batch} == {"era5": era5, "shield": shield}
+
+
+def test_missing_stream_raises_key_error():
+    batch = TranslateBatchData(streams={"era5": _batch()})
+    with pytest.raises(KeyError):
+        batch["shield"]
+
+
 def test_epoch_is_the_shared_epoch():
     batch = TranslateBatchData(streams={"era5": _batch(epoch=7), "s": _batch(epoch=7)})
     assert batch.epoch == 7
@@ -51,6 +68,16 @@ def test_merge_rejects_a_stream_in_two_groups():
                 TranslateBatchData(streams={"a": _batch()}),
             ]
         )
+
+
+def test_device_moves_copy_rather_than_mutate():
+    """``pin_memory`` mutating in place is the documented exception to this;
+    it cannot be exercised here because it requires CUDA."""
+    batch = TranslateBatchData(streams={"era5": _batch()})
+    moved = batch.to_cpu()
+    assert moved is not batch
+    assert moved.streams is not batch.streams
+    assert batch.to_device() is not batch
 
 
 def test_collate_fn_requires_matching_stream_sets():
