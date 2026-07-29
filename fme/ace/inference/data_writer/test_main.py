@@ -11,6 +11,8 @@ import xarray as xr
 from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import DataWriterConfig, _write
+from fme.ace.inference.data_writer.raw import RawDataWriter
+from fme.ace.inference.data_writer.step_diagnostics import StepDiagnosticsWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
@@ -171,8 +173,11 @@ def test_step_diagnostics_writer_writes_delta_series(
         writer = getattr(config, builder)(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
-        filename = os.path.join(tmpdir, "autoregressive_step_diagnostics.nc")
+        filename = os.path.join(tmpdir, "step_diagnostics", "correction_deltas.nc")
         assert os.path.exists(filename)
+        assert not os.path.exists(
+            os.path.join(tmpdir, "autoregressive_step_diagnostics.nc")
+        )
         with xr.open_dataset(filename, decode_timedelta=False) as ds:
             expected_names = {"a"} if save_names == ["a"] else {"a", "b"}
             assert expected_names.issubset(set(ds.data_vars))
@@ -188,29 +193,79 @@ def test_step_diagnostics_writer_writes_delta_series(
                 np.testing.assert_allclose(ds[name].values, expected.numpy(), rtol=1e-6)
 
 
-def test_no_step_diagnostics_file_by_default_or_without_corrector():
+def test_no_step_diagnostics_output_by_default_or_without_corrector():
     config, build_kwargs, batch, _ = _get_step_diagnostics_setup()
 
-    # flag off: no file at all
+    # flag off: no step-diagnostics output at all
     config.save_step_diagnostics = False
     with tempfile.TemporaryDirectory() as tmpdir:
         writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
-        assert not os.path.exists(
-            os.path.join(tmpdir, "autoregressive_step_diagnostics.nc")
-        )
+        assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
 
-    # flag on, but no diagnostics on the batch: no diagnostics content
+    # flag on, but no diagnostics on the batch: no step-diagnostics output
     config.save_step_diagnostics = True
     batch_no_diagnostics = dataclasses.replace(batch, step_diagnostics=None)
     with tempfile.TemporaryDirectory() as tmpdir:
         writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch_no_diagnostics)
         writer.finalize()
-        filename = os.path.join(tmpdir, "autoregressive_step_diagnostics.nc")
-        # the file's time variables were never filled, so skip time decoding
-        with xr.open_dataset(
-            filename, decode_times=False, decode_timedelta=False
-        ) as ds:
-            assert len(ds.data_vars.keys() - {"valid_time", "init_time"}) == 0
+        assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
+
+    # flag on, but an empty delta: no step-diagnostics output
+    batch_empty_delta = dataclasses.replace(
+        batch, step_diagnostics=StepDiagnostics(delta={})
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
+        writer.append_batch(batch_empty_delta)
+        writer.finalize()
+        assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics"))
+
+
+def test_step_diagnostics_writer_writes_one_file_per_named_dataset():
+    _, build_kwargs, batch, _ = _get_step_diagnostics_setup()
+    n_samples, n_times, n_lat, n_lon = 2, 4, 4, 5
+
+    def make_dataset(value: float) -> xr.Dataset:
+        return xr.Dataset(
+            {
+                "a": xr.DataArray(
+                    np.full((n_samples, n_times, n_lat, n_lon), value),
+                    dims=["sample", "time", "lat", "lon"],
+                )
+            }
+        ).assign_coords(valid_time=(("sample", "time"), batch.time.values))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+
+        def writer_factory(name: str) -> RawDataWriter:
+            path = os.path.join(tmpdir, "step_diagnostics")
+            os.makedirs(path, exist_ok=True)
+            return RawDataWriter(
+                path=path,
+                label=name,
+                initial_condition_times=build_kwargs["initial_condition_times"],
+                save_names=None,
+                variable_metadata={},
+                coords=build_kwargs["coords"],
+                dataset_metadata=DatasetMetadata(),
+            )
+
+        writer = StepDiagnosticsWriter(writer_factory)
+        writer.append_batch(
+            {
+                "first": make_dataset(1.0),
+                "second": make_dataset(2.0),
+                "empty": xr.Dataset(),
+            }
+        )
+        writer.finalize()
+        for name, expected_value in [("first", 1.0), ("second", 2.0)]:
+            filename = os.path.join(tmpdir, "step_diagnostics", f"{name}.nc")
+            assert os.path.exists(filename)
+            with xr.open_dataset(filename, decode_timedelta=False) as ds:
+                assert ds["a"].shape == (n_samples, n_times, n_lat, n_lon)
+                np.testing.assert_allclose(ds["a"].values, expected_value)
+        assert not os.path.exists(os.path.join(tmpdir, "step_diagnostics", "empty.nc"))

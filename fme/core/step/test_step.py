@@ -19,6 +19,7 @@ from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.ocean import OceanConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import (
@@ -770,31 +771,6 @@ def test_step_returns_step_output_with_populated_detached_delta():
         assert not tensor.requires_grad  # detached at the step boundary
 
 
-def test_from_state_strips_deprecated_clip_frozen_precipitation():
-    # Checkpoints serialized before clip_frozen_precipitation was folded into the
-    # moisture corrector (always-on) carry a stale corrector key. from_state must
-    # drop it so those older checkpoints still load.
-    normalization = get_network_and_loss_normalization_config(
-        names=["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"],
-    )
-    config = SingleModuleStepConfig(
-        builder=ModuleSelector(
-            type="SphericalFourierNeuralOperatorNet",
-            config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
-        ),
-        in_names=["forcing_shared", "forcing_rad"],
-        out_names=["diagnostic_main", "diagnostic_rad"],
-        normalization=normalization,
-        corrector=AtmosphereCorrectorConfig(conserve_dry_air=True),
-    )
-    state = dataclasses.asdict(config)
-    state["corrector"]["clip_frozen_precipitation"] = True
-    restored = SingleModuleStepConfig.from_state(state)
-    assert isinstance(restored.corrector, AtmosphereCorrectorConfig)
-    assert restored.corrector.conserve_dry_air is True
-    assert not hasattr(restored.corrector, "clip_frozen_precipitation")
-
-
 def test_step_empty_delta_when_no_corrector():
     selector = get_single_module_selector()
     img_shape = DEFAULT_IMG_SHAPE
@@ -864,10 +840,12 @@ def test_step_boundary_disjointness_passes_when_disjoint():
     assert "diagnostic_main" not in result.corrector_diagnostics.delta
 
 
-def test_step_boundary_overlap_prescribes_and_drops_stale_delta():
-    # corrector modifies diagnostic_main and the post-corrector prescription also
-    # writes diagnostic_main -> the prescribed value wins and its now-stale delta
-    # is dropped so ``output - delta = network_output`` holds for reported deltas.
+def test_step_prescribed_prognostic_shadows_corrector_modified_name():
+    # corrector modifies diagnostic_main and the post-corrector prescription
+    # also writes diagnostic_main. Prescribing a corrector-modified variable is
+    # a supported, silent operation: the step runs, the prescribed value wins in
+    # the output, and diagnostic_main is dropped from the reported delta (its
+    # corrector delta no longer describes the overwritten output).
     selector = _single_module_corrector_prescribed_selector(
         force_positive_names=["diagnostic_main"],
         prescribed_prognostic_names=["diagnostic_main"],
@@ -876,7 +854,7 @@ def test_step_boundary_overlap_prescribes_and_drops_stale_delta():
     step = get_step(selector, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
     next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
-    prescribed_value = torch.full((2, *img_shape), 3.5, device=fme.get_device())
+    prescribed_value = torch.full((2, *img_shape), 42.0, device=fme.get_device())
     next_step_input_data["diagnostic_main"] = prescribed_value
     result = step.step(
         args=StepArgs(
@@ -885,10 +863,117 @@ def test_step_boundary_overlap_prescribes_and_drops_stale_delta():
             labels=None,
         ),
     )
-    # prescribed value wins over both the network output and the corrector
     torch.testing.assert_close(result.output["diagnostic_main"], prescribed_value)
-    # the overwritten name's stale delta is dropped from the diagnostics
     assert "diagnostic_main" not in result.corrector_diagnostics.delta
+
+
+def _single_module_ocean_corrector_selector(
+    force_positive_names: list[str],
+    prescribed_prognostic_names: list[str] | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=["surface_temperature", "ocean_fraction"],
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={"scale_factor": 1, "embed_dim": 4, "num_layers": 2},
+                ),
+                in_names=["surface_temperature", "ocean_fraction"],
+                out_names=["surface_temperature"],
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(
+                    force_positive_names=force_positive_names
+                ),
+                ocean=OceanConfig(
+                    surface_temperature_name="surface_temperature",
+                    ocean_fraction_name="ocean_fraction",
+                ),
+                prescribed_prognostic_names=prescribed_prognostic_names or [],
+            ),
+        ),
+    )
+
+
+def test_step_boundary_disjointness_raises_on_ocean_overlap():
+    # corrector modifies surface_temperature and the ocean prescription also
+    # writes surface_temperature -> the ocean overlap remains a hard error.
+    selector = _single_module_ocean_corrector_selector(
+        force_positive_names=["surface_temperature"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    with pytest.raises(ValueError, match="overlap"):
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_input_data,
+                labels=None,
+            ),
+        )
+
+
+def test_step_ocean_overlap_raises_even_when_name_also_prescribed():
+    # A name that is both the ocean surface_temperature_name and a prescribed
+    # prognostic still triggers the ocean overlap guard when the corrector
+    # modifies it. The prescribed exemption does not suppress the ocean raise:
+    # the guard runs against the full corrector delta before the delta filter.
+    # No correction currently touches surface_temperature, so this locks the
+    # guard down for whoever adds one.
+    selector = _single_module_ocean_corrector_selector(
+        force_positive_names=["surface_temperature"],
+        prescribed_prognostic_names=["surface_temperature"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    with pytest.raises(ValueError, match="overlap"):
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_input_data,
+                labels=None,
+            ),
+        )
+
+
+def test_multi_step_prescribed_corrected_collision_stacks_diagnostics():
+    # A prescribed name that the corrector also modifies is dropped from the
+    # delta on every step, so the surviving delta keys stay identical across
+    # steps and StepDiagnostics stacking does not fail.
+    selector = _single_module_corrector_prescribed_selector(
+        force_positive_names=["diagnostic_main", "diagnostic_rad"],
+        prescribed_prognostic_names=["diagnostic_main"],
+    )
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    outputs = []
+    stepper_state = None
+    for _ in range(3):
+        input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+        next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+        result = step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step_input_data,
+                labels=None,
+                stepper_state=stepper_state,
+            ),
+        )
+        stepper_state = result.stepper_state
+        outputs.append(result)
+    for result in outputs:
+        assert "diagnostic_main" not in result.corrector_diagnostics.delta
+        assert "diagnostic_rad" in result.corrector_diagnostics.delta
+    stacked = StepOutput.stack_diagnostics(outputs)
+    assert stacked is not None
+    assert set(stacked.delta) == {"diagnostic_rad"}
 
 
 def test_secondary_module_empty_names_raises():

@@ -12,7 +12,7 @@ from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import (
     load_stepper_config_with_override as load_single_stepper_config,
 )
-from fme.ace.stepper.single_module import StepperConfig
+from fme.ace.stepper.single_module import apply_stepper_override_to_stepper_config
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
@@ -41,41 +41,32 @@ from fme.coupled.stepper import (
 )
 
 
-def apply_stepper_override_to_nested_stepper_config(
-    stepper_config: StepperConfig, override: StepperOverrideConfig | None
+def _validate_coupled_component_override(
+    override: StepperOverrideConfig | None,
 ) -> None:
-    """Apply optional overrides to a ``StepperConfig`` (not a loaded ``Stepper``).
+    """Restrict coupled inference overrides to ``prescribed_prognostic_names``.
 
-    Used when building ``CoupledStepperConfig`` from a serialized coupled checkpoint
-    so that forcing-window requirements match inference-time overrides (e.g.
-    ``prescribed_prognostic_names``) before any data is loaded.
+    ``CoupledStepperConfig`` caches cross-component forcing-name sets and
+    validates component compatibility at construction. Only
+    ``prescribed_prognostic_names`` is recomputed on demand; an ``ocean``,
+    ``multi_call`` or ``derived_forcings`` override applied afterward would leave
+    those caches stale, so reject them rather than silently use stale values.
     """
     if override is None:
         return
-    if override.ocean != "keep":
-        logging.info(
-            "Overriding training ocean configuration with a new ocean configuration."
+    unsupported = [
+        name
+        for name, value in (
+            ("ocean", override.ocean),
+            ("multi_call", override.multi_call),
+            ("derived_forcings", override.derived_forcings),
         )
-        stepper_config.replace_ocean(override.ocean)
-    if override.multi_call != "keep":
+        if value != "keep"
+    ]
+    if unsupported:
         raise ValueError(
-            "StepperOverrideConfig.multi_call cannot be applied when loading "
-            "CoupledStepperConfig without constructing a Stepper; use load_stepper "
-            "with a full checkpoint instead."
-        )
-    if override.derived_forcings != "keep":
-        logging.info(
-            "Overriding training derived_forcings configuration with a new "
-            "derived_forcings configuration."
-        )
-        stepper_config.replace_derived_forcings(override.derived_forcings)
-    if override.prescribed_prognostic_names != "keep":
-        logging.info(
-            "Overriding prescribed_prognostic_names with %s.",
-            override.prescribed_prognostic_names,
-        )
-        stepper_config.replace_prescribed_prognostic_names(
-            override.prescribed_prognostic_names
+            "Coupled inference overrides only support prescribed_prognostic_names, "
+            f"but got unsupported override(s): {sorted(unsupported)}."
         )
 
 
@@ -84,19 +75,24 @@ def apply_coupled_stepper_config_inference_overrides(
     ocean_override: StepperOverrideConfig | None,
     atmosphere_override: StepperOverrideConfig | None,
 ) -> None:
-    """Mutate ``coupled_config`` in place for inference overrides, then refresh
-    cached forcing-window name lists.
+    """Mutate ``coupled_config`` in place for inference overrides.
+
+    Forcing-window names are computed on demand from the (now mutated) component
+    step configs, so no explicit refresh is needed.
     """
+    _validate_coupled_component_override(ocean_override)
+    _validate_coupled_component_override(atmosphere_override)
     if ocean_override is not None:
-        apply_stepper_override_to_nested_stepper_config(
+        apply_stepper_override_to_stepper_config(
             coupled_config.ocean.stepper, ocean_override
         )
-        coupled_config.refresh_ocean_forcing_window_names()
     if atmosphere_override is not None:
-        apply_stepper_override_to_nested_stepper_config(
+        apply_stepper_override_to_stepper_config(
             coupled_config.atmosphere.stepper, atmosphere_override
         )
-        coupled_config.refresh_atmosphere_forcing_window_names()
+    # overrides may have changed prescribed_prognostic_names after
+    # CoupledStepperConfig.__post_init__ validated them
+    coupled_config.validate_prescribed_prognostic_names()
 
 
 @dataclasses.dataclass
@@ -220,19 +216,19 @@ def load_stepper_config(
 
 def load_stepper(
     checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
-    atmosphere_stepper_override: StepperOverrideConfig | None = None,
     ocean_stepper_override: StepperOverrideConfig | None = None,
+    atmosphere_stepper_override: StepperOverrideConfig | None = None,
 ) -> CoupledStepper:
     """Load a coupled stepper.
 
     Args:
         checkpoint_path: The path to the serialized CoupledStepper checkpoint, or a
             StandaloneComponentCheckpointsConfig.
-        atmosphere_stepper_override: When loading a single coupled checkpoint, optional
-            overrides for the atmosphere Stepper (ignored for
-            StandaloneComponentCheckpointsConfig).
         ocean_stepper_override: When loading a single coupled checkpoint, optional
             overrides for the ocean Stepper (ignored for
+            StandaloneComponentCheckpointsConfig).
+        atmosphere_stepper_override: When loading a single coupled checkpoint, optional
+            overrides for the atmosphere Stepper (ignored for
             StandaloneComponentCheckpointsConfig).
 
     Returns:
@@ -250,21 +246,46 @@ def load_stepper(
         return checkpoint_path.load_stepper()
 
     stepper = load_coupled_stepper(checkpoint_path)
+    _validate_coupled_component_override(ocean_stepper_override)
+    _validate_coupled_component_override(atmosphere_stepper_override)
+    # Overrides mutate each component Stepper's config, which the CoupledStepper
+    # aliases as its nested CoupledStepperConfig component config, so forcing
+    # windows (computed on demand) reflect the overrides automatically.
     if atmosphere_stepper_override is not None:
         apply_stepper_override(stepper.atmosphere, atmosphere_stepper_override)
     if ocean_stepper_override is not None:
         apply_stepper_override(stepper.ocean, ocean_stepper_override)
-    # Overrides mutate shared StepperConfig; refresh cached forcing-window
-    # name lists on CoupledStepperConfig
-    # (see sync_coupled_stepper_runtime_stepper_configs).
-    stepper._config.refresh_ocean_forcing_window_names()
-    stepper._config.refresh_atmosphere_forcing_window_names()
+    # overrides may have changed prescribed_prognostic_names after
+    # CoupledStepperConfig.__post_init__ validated them
+    stepper.config.validate_prescribed_prognostic_names()
     return stepper
 
 
 def _validate_coupled_steps_config(n_coupled_steps: int, coupled_steps_in_memory: int):
     if n_coupled_steps % coupled_steps_in_memory:
         raise ValueError("n_coupled_steps must be divisible by coupled_steps_in_memory")
+
+
+def _validate_stepper_overrides(
+    checkpoint_path: str | pathlib.Path | StandaloneComponentCheckpointsConfig,
+    ocean_stepper_override: StepperOverrideConfig | None,
+    atmosphere_stepper_override: StepperOverrideConfig | None,
+) -> None:
+    """Reject top-level stepper overrides for standalone component checkpoints.
+
+    The top-level ``ocean_stepper_override`` / ``atmosphere_stepper_override`` only
+    apply when loading a single coupled checkpoint. A
+    ``StandaloneComponentCheckpointsConfig`` carries its own per-component overrides,
+    so top-level ones would be silently ignored; raise instead.
+    """
+    if isinstance(checkpoint_path, StandaloneComponentCheckpointsConfig) and (
+        ocean_stepper_override is not None or atmosphere_stepper_override is not None
+    ):
+        raise ValueError(
+            "ocean_stepper_override / atmosphere_stepper_override are only "
+            "supported when loading a single coupled checkpoint. Set overrides on "
+            "the StandaloneComponentCheckpointsConfig components instead."
+        )
 
 
 @dataclasses.dataclass
@@ -315,6 +336,11 @@ class InferenceEvaluatorConfig:
         _validate_coupled_steps_config(
             self.n_coupled_steps, self.coupled_steps_in_memory
         )
+        _validate_stepper_overrides(
+            self.checkpoint_path,
+            self.ocean_stepper_override,
+            self.atmosphere_stepper_override,
+        )
 
     def configure_logging(self, log_filename: str):
         config = dataclasses.asdict(self)
@@ -325,8 +351,8 @@ class InferenceEvaluatorConfig:
     def load_stepper(self) -> CoupledStepper:
         return load_stepper(
             self.checkpoint_path,
-            atmosphere_stepper_override=self.atmosphere_stepper_override,
             ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
         )
 
     def load_stepper_config(self) -> CoupledStepperConfig:

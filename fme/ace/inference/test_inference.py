@@ -29,6 +29,7 @@ from fme.ace.inference.inference import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import (
@@ -461,7 +462,9 @@ def test_get_initial_condition(n_ensemble):
         np.random.rand(sample, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition = get_initial_condition(data, ["prog"], n_ensemble=n_ensemble)
+    initial_condition = get_initial_condition(
+        data, InitialConditionRequirements(["prog"], n_ensemble=n_ensemble)
+    )
     assert isinstance(initial_condition, PrognosticState)
     batch_data = initial_condition.as_batch_data()
     assert batch_data.time.shape == (sample * n_ensemble, 1)
@@ -484,13 +487,29 @@ def test_get_initial_condition(n_ensemble):
 
 
 def test_get_initial_condition_raises_bad_variable_shape():
+    # A variable with no spatial dims (only the sample dim) is rejected: the
+    # contract is (n_samples, [spatial dims]).
+    time_da = xr.DataArray([0, 5], dims=["sample"])
+    prognostic_da = xr.DataArray(np.random.rand(2), dims=["sample"])
+    data = xr.Dataset({"prog": prognostic_da, "time": time_da})
+    with pytest.raises(ValueError, match="spatial dims"):
+        get_initial_condition(data, InitialConditionRequirements(["prog"]))
+
+
+def test_get_initial_condition_healpix_spatial_dims():
+    # A HEALPix IC (face/height/width) flows through the lenient path: the
+    # horizontal dims are taken from the variable, not assumed to be lat/lon.
     time_da = xr.DataArray([0, 5], dims=["sample"])
     prognostic_da = xr.DataArray(
-        np.random.rand(2, 8, 16, 32), dims=["sample", "layer", "lat", "lon"]
+        np.random.rand(2, 12, 8, 8), dims=["sample", "face", "height", "width"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+    initial_condition = get_initial_condition(
+        data, InitialConditionRequirements(["prog"])
+    )
+    batch_data = initial_condition.as_batch_data()
+    assert batch_data.horizontal_dims == ["face", "height", "width"]
+    assert batch_data.data["prog"].shape == (2, 1, 12, 8, 8)
 
 
 def test_get_initial_condition_raises_missing_time():
@@ -499,7 +518,7 @@ def test_get_initial_condition_raises_missing_time():
     )
     data = xr.Dataset({"prog": prognostic_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, InitialConditionRequirements(["prog"]))
 
 
 def test_get_initial_condition_raises_mismatched_time_length():
@@ -509,7 +528,7 @@ def test_get_initial_condition_raises_mismatched_time_length():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
-        get_initial_condition(data, ["prog"])
+        get_initial_condition(data, InitialConditionRequirements(["prog"]))
 
 
 @pytest.mark.parametrize(

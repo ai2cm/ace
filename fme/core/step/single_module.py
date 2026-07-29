@@ -228,6 +228,9 @@ class SingleModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
@@ -693,6 +696,22 @@ def step_with_adjustments(
                 )
             )
 
+    # The ocean surface temperature prescription runs after the corrector and is
+    # excluded from the diagnostics. Its written name must stay disjoint from the
+    # corrector's modified names, or ``delta = output - input_snapshot`` would no
+    # longer be exact for an overlapping variable. A prescribed prognostic
+    # overwrite is exempt from this guard: it is an intentional "use the given
+    # value regardless of what the network or corrector produced" operation, and
+    # the corrector's delta for the overwritten variable is dropped below so the
+    # reported delta stays exact for every variable it still contains.
+    if ocean is not None:
+        overlap = {ocean.surface_temperature_name} & set(diagnostics.delta)
+        if overlap:
+            raise ValueError(
+                "post-corrector adjustment names overlap the corrector's modified "
+                f"names: {sorted(overlap)}"
+            )
+
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -702,28 +721,18 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-
-    # The ocean SST prescription and prescribed-prognostic overwrites above run
-    # after the corrector and replace its output for those names. The recorded
-    # ``delta = corrected - network_output`` would then no longer satisfy
-    # ``output - delta = network_output`` for an overwritten name, so drop those
-    # names from the diagnostics rather than report a stale delta. The remaining
-    # deltas still describe the final prediction exactly. This lets a variable be
-    # both corrected and prescribed (e.g. prescribing reference atmosphere fluxes
-    # that the corrector also touches when forcing a coupled ocean).
-    post_corrector_names: set[str] = set(prescribed_prognostic_names)
-    if ocean is not None:
-        post_corrector_names.add(ocean.surface_temperature_name)
-    overwritten = post_corrector_names & set(diagnostics.delta)
-    if overwritten:
+    # A prescribed overwrite replaces the output with the prescribed value, so the
+    # corrector's delta for that variable no longer describes the returned output.
+    # Drop prescribed names from the reported delta (a no-op for names the
+    # corrector never modified).
+    if prescribed_prognostic_names:
         diagnostics = CorrectorDiagnostics(
             delta={
                 name: value
                 for name, value in diagnostics.delta.items()
-                if name not in overwritten
+                if name not in prescribed_prognostic_names
             }
         )
-
     return StepOutput(
         output=output,
         stepper_state=stepper_state,
