@@ -1,7 +1,11 @@
 #!/bin/bash
 # Full GPU training run for the spatiotemporal video PMD trainer, via gantry +
-# torchrun DDP. Reads data DIRECTLY FROM GCS (gs://vcm-ml-intermediate/...),
-# not weka -- the new paired 25km/100km dataset isn't mirrored to weka yet.
+# torchrun DDP. Reads data from WEKA (climate-default) as of 2026-07-29 --
+# both the 25km and 100km zarrs were copied there from GCS for cost
+# efficiency. Also RESUMES from this job's own previous run (killed
+# 2026-07-29 by request), mounting that run's result dataset
+# (01KYGFN978NFP253PY41YWHJ1Z) read-only and pointing
+# resume_results_dir at it -- see video_train.yaml's header for details.
 #
 # Cluster/workspace: ai2/titan + ai2/climate-titan, per user instruction
 # (2026-07-24). NOTE: an earlier version of this script used
@@ -13,13 +17,14 @@
 # errors, that's the likely cause -- worth confirming titan's egress with
 # whoever administers it before spending a long run's budget.
 #
-# Data on GCS:
-#   gs://vcm-ml-intermediate/2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr  (fine)
-#   gs://vcm-ml-intermediate/2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr (coarse)
+# Data on weka (/climate-default/2026-06-25-temporal-diffusion/):
+#   2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr  (fine)
+#   2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr (coarse)
 #
 # Prereqs (one-time, PER WORKSPACE -- secrets are workspace-scoped; confirmed
-# 2026-07-24 that CHLOE_WANDB_API_KEY and google-credentials both already
-# exist in ai2/climate-titan via `beaker secret list -w ai2/climate-titan`):
+# 2026-07-24 that CHLOE_WANDB_API_KEY already exists in ai2/climate-titan via
+# `beaker secret list -w ai2/climate-titan`; google-credentials no longer
+# needed since data moved to weka):
 #   pip install beaker-gantry
 #   also commit + push your code: gantry runs your pushed git commit.
 #
@@ -36,7 +41,7 @@
 # understood/resolved if you want to shave off the (minor) overhead.
 set -e
 
-JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v1"
+JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2-resume"
 CONFIG_FILENAME="video_train.yaml"
 WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/titan"
@@ -52,7 +57,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run \
     --name "$JOB_NAME" \
-    --description 'Spatiotemporal video PMD: stage-1 temporal infilling + stage-2 spatial downscaling (25km/100km), 5 channels, flat/independent noise, no subset training, global, patch-trained. 4x GPU DDP on titan (GCS-direct).' \
+    --description 'Spatiotemporal video PMD: stage-1 temporal infilling + stage-2 spatial downscaling (25km/100km), 5 channels, flat/independent noise, no subset training, global, patch-trained. 4x GPU DDP on titan (weka), resumed from prior killed run.' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
@@ -60,8 +65,8 @@ gantry run \
     --gpus "$N_GPUS" \
     --shared-memory 64GiB \
     --budget ai2/atec-climate \
-    --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
+    --weka climate-default:/climate-default \
+    --dataset 01KYGFN978NFP253PY41YWHJ1Z:/resume_results \
     --env-secret WANDB_API_KEY="$WANDB_SECRET" \
     --env TORCH_NCCL_TRACE_BUFFER_SIZE=2000 \
     --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
