@@ -144,6 +144,11 @@ def _compose(parts: Mapping[str, Module], x: torch.Tensor) -> torch.Tensor:
         pytest.param(
             {"context_pos_embed_dim": 2, "pos_embed": False}, id="context_pos_embed"
         ),
+        # The parts mirror the monolith's checkpointing levels (>=1 wraps the
+        # encoder and decoder stacks, >=3 each block), so each level is a
+        # separate path through the mirrored forward.
+        pytest.param({"checkpointing": 1}, id="checkpointing_encoder_decoder"),
+        pytest.param({"checkpointing": 3}, id="checkpointing_blocks"),
     ],
 )
 def test_composed_parts_reproduce_the_donor(tmp_path, overrides):
@@ -164,6 +169,22 @@ def test_composed_parts_reproduce_the_donor(tmp_path, overrides):
     torch.manual_seed(0)
     result = _compose(parts, x)
 
+    torch.testing.assert_close(result, expected, rtol=0, atol=0)
+
+
+def test_composed_parts_accept_an_ensemble_dimension(tmp_path):
+    """The parts flatten leading dimensions as ``NoiseConditionedModel`` does."""
+    sfno = _sfno_config()
+    checkpoint, donor = _donor_checkpoint(tmp_path, sfno)
+    parts = _build_parts(sfno, donor_checkpoint=checkpoint)
+    x = torch.randn(3, 2, len(DONOR_NAMES), *IMG_SHAPE)
+
+    torch.manual_seed(0)
+    expected = donor(x)
+    torch.manual_seed(0)
+    result = _compose(parts, x)
+
+    assert result.shape == (6, len(DONOR_NAMES), *IMG_SHAPE)
     torch.testing.assert_close(result, expected, rtol=0, atol=0)
 
 
@@ -222,6 +243,35 @@ def test_donor_missing_part_weights_raises(tmp_path):
 
     with pytest.raises(ValueError, match="no weights for"):
         _build_part("processor", _sfno_config(num_layers=3), checkpoint)
+
+
+@pytest.mark.parametrize("part", ["encoder", "decoder"])
+def test_donor_shape_mismatch_raises(tmp_path, part):
+    """A too-wide cut-point is not silently loaded a leading slice at a time.
+
+    ``overwrite_weights`` copies the initial slice when the destination axis is
+    longer, so without a shape check a cut-point domain declaring more than
+    ``embed_dim`` plus the donor's input channels would build a part that is
+    only partly the donor's, with no error.
+    """
+    sfno = _sfno_config()
+    checkpoint, _ = _donor_checkpoint(tmp_path, sfno)
+    # One channel more than the donor has, declared self-consistently so that
+    # _validate_channels passes and only the donor's shapes disagree.
+    wide_physical = len(DONOR_NAMES) + 1
+    n_in, n_out = {
+        "encoder": (wide_physical, EMBED_DIM + wide_physical),
+        "decoder": (EMBED_DIM + wide_physical, len(DONOR_NAMES)),
+    }[part]
+    info = _dataset_info()
+
+    with pytest.raises(ValueError, match="differently-shaped weights"):
+        _part_config(part, sfno, donor_checkpoint=checkpoint).build(
+            n_in_channels=n_in,
+            n_out_channels=n_out,
+            in_dataset_info=info,
+            out_dataset_info=info,
+        )
 
 
 @pytest.mark.parametrize(

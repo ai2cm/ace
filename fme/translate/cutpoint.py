@@ -38,6 +38,13 @@ the three parts reproduces the monolithic net's output *exactly* rather than
 approximately, for any configuration. ``test_cutpoint.py`` asserts that
 equivalence; it is what pins this module against changes to the net it mirrors.
 
+Bit-exactness also requires the encoder stage to consume no randomness, because
+the composed path runs it *before* the processor's noise draw while the monolith
+draws the noise first. That holds today: the only RNG-consuming op ahead of the
+blocks is ``pos_drop``, which is an ``nn.Identity`` because
+``NoiseConditionedSFNOBuilder`` does not expose ``drop_rate``. The equivalence
+test runs the parts in training mode, so it fails if that stops being true.
+
 The parts do not change resolution. Resolution-changing operators are separate
 registry entries (``interpolate`` and its successors) that a config chains
 around a cut-point part.
@@ -250,10 +257,16 @@ class SFNOCutPointConfig(TransformModuleConfig):
         part: Which stage to build.
         sfno: The donor's noise-conditioned SFNO configuration.
         donor_checkpoint: Path to an ACE stepper checkpoint to name-match this
-            part's parameters against. Every parameter of the built part must
-            be present in the donor, which holds when ``sfno`` is the donor's
-            own config. Applied before ``TransformConfig.parameter_init``, so
-            an explicit ``weights_path`` still wins over the donor.
+            part's parameters against. Every parameter of the built part must be
+            present in the donor *and* have the donor's shape, which holds when
+            ``sfno`` is the donor's own config and the cut-point domain declares
+            ``embed_dim`` plus the donor's input channels; anything else raises
+            rather than partly initializing the part. Applied before
+            ``TransformConfig.parameter_init``, so an explicit ``weights_path``
+            still wins over the donor. Only parameters are transferred, not
+            buffers: an encoder configured with ``clip_latent_global_means``
+            therefore starts with an empty envelope and relearns it over the
+            first training epoch rather than inheriting the donor's.
         donor_module_index: Index into the donor stepper's ``modules`` list.
         conditional: Whether to pass batch labels through to the context.
             Only the processor consumes context.
@@ -289,7 +302,9 @@ class SFNOCutPointConfig(TransformModuleConfig):
 
         Only the encoder sees it directly. The others recover it from the
         cut-point width, which carries the big-skip residual; when there is no
-        big skip they never need it (nothing they build is sized by it).
+        big skip they keep nothing sized by it, so any positive placeholder does
+        (``norm_big_skip`` is still *built* at that size when
+        ``normalize_big_skip`` is set, but no part keeps it without a big skip).
         """
         if self.part == "encoder":
             return n_in_channels
@@ -381,21 +396,41 @@ class SFNOCutPointConfig(TransformModuleConfig):
                 f"Donor checkpoint {self.donor_checkpoint!r} contains no module "
                 "weights."
             )
-        if self.donor_module_index >= len(weights):
+        if not 0 <= self.donor_module_index < len(weights):
             raise ValueError(
                 f"donor_module_index {self.donor_module_index} is out of range "
                 f"for a donor stepper with {len(weights)} module(s)."
             )
         donor = strip_leading_module(weights[self.donor_module_index])
-        missing = sorted(
-            name for name, _ in module.named_parameters() if name not in donor
-        )
+        missing = []
+        mismatched = []
+        for name, parameter in module.named_parameters():
+            if name not in donor:
+                missing.append(name)
+            elif donor[name].shape != parameter.shape:
+                mismatched.append(
+                    f"{name} (donor {tuple(donor[name].shape)}, "
+                    f"part {tuple(parameter.shape)})"
+                )
         if missing:
             raise ValueError(
                 f"The donor checkpoint {self.donor_checkpoint!r} has no weights "
                 f"for {len(missing)} parameter(s) of this sfno_cut_point "
-                f"{self.part!r}, e.g. {missing[:5]}. The 'sfno' block must be "
-                "the donor's own module configuration."
+                f"{self.part!r}, e.g. {sorted(missing)[:5]}. The 'sfno' block "
+                "must be the donor's own module configuration."
+            )
+        if mismatched:
+            # overwrite_weights would copy the leading slice of each of these and
+            # leave the rest at its random initialization, silently producing a
+            # part that is only partly the donor's.
+            raise ValueError(
+                f"The donor checkpoint {self.donor_checkpoint!r} has "
+                f"differently-shaped weights for {len(mismatched)} parameter(s) "
+                f"of this sfno_cut_point {self.part!r}: {sorted(mismatched)[:5]}. "
+                "The usual cause is a cut-point domain whose channel count is "
+                "not embed_dim plus the donor's own input channels. For a "
+                "deliberately partial load, use parameter_init.weights_path "
+                "instead of donor_checkpoint."
             )
         destination = set(module.state_dict())
         overwrite_weights(
