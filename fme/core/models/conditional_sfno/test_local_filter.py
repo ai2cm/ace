@@ -6,6 +6,7 @@ import torch
 
 from fme.core.disco._disco_utils import _disco_s2_contraction_fft
 from fme.core.distributed import Distributed
+from fme.core.distributed.distributed import SpatialParallelismNotImplemented
 from fme.core.models.conditional_sfno.local_filter import (
     LocalFilter,
     LocalFilterConfig,
@@ -143,10 +144,11 @@ def test_isotropic_branch_commutes_with_longitude_reflection():
     with torch.no_grad():
         from_reflected, _ = filter_(x[..., reflect])
         reflected_out = filter_(x)[0][..., reflect]
-    # Longitude reflection is not an exact symmetry of the DISCO quadrature, so
-    # this is a "much smaller than the signal" check rather than exact equality.
+    # Exact to float32 round-off (measured 2e-7): longitude reflection maps the
+    # grid onto itself and an isotropic kernel is even in phi, so the DISCO
+    # quadrature commutes with it exactly rather than approximately.
     error = (from_reflected - reflected_out).norm() / reflected_out.norm()
-    assert error < 1e-2, f"isotropic branch is not mirror-symmetric: {error}"
+    assert error < 1e-5, f"isotropic branch is not mirror-symmetric: {error}"
 
 
 @pytest.mark.medium_duration
@@ -289,7 +291,7 @@ def test_two_branch_reproduces_dhconv():
     )
 
 
-@pytest.mark.slow
+@pytest.mark.medium_duration
 def test_oversampling_the_radial_basis_improves_parity():
     """One radial mode per total wavenumber spans the profiles but is not enough.
 
@@ -385,10 +387,14 @@ def test_match_spectral_init_matches_spectral_filter_output_magnitude():
     )
     with torch.no_grad():
         unscaled_out, _ = unscaled(x)
+    # At this grid the unscaled filter is only ~2.2x weaker; the ~50x that
+    # motivates the option needs kernel_size 45 at 512 channels. Any strict
+    # factor separates "applied" from "not applied", where the two are equal.
     unscaled_ratio = float(unscaled_out.std() / spectral_out.std())
-    assert (
-        unscaled_ratio < 0.5 * ratio
-    ), "match_spectral_init made no difference, so it is not being applied"
+    assert unscaled_ratio < 0.7 * ratio, (
+        f"match_spectral_init made no difference ({unscaled_ratio:.3f} vs "
+        f"{ratio:.3f}), so it is not being applied"
+    )
 
 
 def test_default_config_reproduces_the_historical_local_filter():
@@ -413,6 +419,8 @@ def test_default_config_reproduces_the_historical_local_filter():
         ({"theta_cutoff": 4.0}, "theta_cutoff must be in"),
         ({"theta_cutoff": 0.0}, "theta_cutoff must be in"),
         ({"theta_cutoff": "everywhere"}, "theta_cutoff must be a number"),
+        # bool is an int subclass, so this must not read as 1 radian.
+        ({"theta_cutoff": True}, "theta_cutoff must be a number"),
         ({"kernel_shape": "all"}, "kernel_shape must be a list"),
         ({"kernel_shape": "lmax2"}, "kernel_shape must be a list"),
         ({"kernel_shape": "2 lmax"}, "kernel_shape must be a list"),
@@ -443,6 +451,27 @@ def test_lmax_kernel_shape_requires_a_radial_family():
     config = LocalFilterConfig(kernel_shape="lmax", basis_type="morlet")
     with pytest.raises(ValueError, match="no purely radial form"):
         config.resolved_kernel_shape(LMAX)
+
+
+@pytest.mark.parallel
+def test_two_branch_rejects_spatial_parallelism():
+    """H is an FFT over the full longitude circle, so a zonal tile is not enough.
+
+    Without the guard a spatially-parallel run would compute the phase shift
+    per tile and silently return a wrong filter rather than failing.
+    """
+    dist = Distributed.get_instance()
+    config = LocalFilterConfig(
+        kernel_shape="lmax",
+        basis_type="piecewise linear",
+        theta_cutoff="global",
+        two_branch=True,
+    )
+    if dist.world_size == dist.total_data_parallel_ranks:
+        assert _build(config).two_branch  # no spatial ranks: builds normally
+    else:
+        with pytest.raises(SpatialParallelismNotImplemented):
+            _build(config)
 
 
 def test_two_branch_requires_isotropic_branches():
