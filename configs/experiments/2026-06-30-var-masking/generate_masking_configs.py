@@ -129,7 +129,9 @@ def _apply_settings(
     dropout: dict = {"default": default}
     override_groups: list[dict] = []
     if co2_rate is not None:
-        override_groups.append({"variables": [CO2_FIELD], "masking": {"rate": co2_rate}})
+        override_groups.append(
+            {"variables": [CO2_FIELD], "masking": {"rate": co2_rate}}
+        )
     if extra_override_groups:
         override_groups.extend(extra_override_groups)
     if override_groups:

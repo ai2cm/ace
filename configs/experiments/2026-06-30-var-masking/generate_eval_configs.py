@@ -62,7 +62,10 @@ else:
 
 
 def eval_suite_config_to_run_name(config_filename: str) -> str:
-    """Wandb run name for an eval suite config filename (stem ends in -v1/-v2/-v3/-v4)."""
+    """Wandb run name for an eval suite config filename.
+
+    The filename stem ends in a version suffix (-v1/-v2/-v3/-v4).
+    """
     stem = pathlib.Path(config_filename).stem
     suffix = stem.removeprefix(EVAL_SUITE_CONFIG_PREFIX)
     return f"{WANDB_PREFIX}{suffix}"
@@ -324,8 +327,8 @@ def main() -> None:
     if args.delete_if_in_wandb:
         # Standalone pass over on-disk eval configs so cleanup covers every
         # version present (-v1, -v2, -v3, -v4), not just the version whose
-        # training configs currently sit in run_configs. Generation below still (re)writes
-        # eval configs for runs not yet finished in wandb.
+        # training configs currently sit in run_configs. Generation below
+        # still (re)writes eval configs for runs not yet finished in wandb.
         delete_eval_configs_in_wandb(WANDB_PROJECT)
 
     # Enumerate every training run in memory (masking + seed families) for the
