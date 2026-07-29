@@ -119,9 +119,12 @@ class TranslateGriddedData(GriddedDataABC[TranslateBatchData]):
     ):
         """
         Args:
-            group_loaders: One loader per pairing group. Their streams must
-                partition ``stream_properties``, and they must share a batch
-                size.
+            group_loaders: One loader per pairing group. They must share a batch
+                size, and their streams must partition ``stream_properties`` —
+                not checked here, since a loader does not expose its streams;
+                :func:`fme.translate.data.getters.get_gridded_data` gets it from
+                ``TranslateDataRequirements``, whose groups are validated to
+                partition its streams.
             stream_properties: Each stream's dataset properties. Data can be on
                 any device.
             stream_domains: The domain each stream serves.

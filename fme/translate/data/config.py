@@ -74,7 +74,9 @@ class TranslateDataLoaderConfig:
             :attr:`StreamConfig.stream_name`) must be unique.
         batch_size: Number of samples per batch, per stream. Must be divisible
             by the number of data-parallel ranks.
-        num_data_workers: Number of parallel workers to use for data loading.
+        num_data_workers: Number of parallel workers to use for data loading,
+            per pairing group. Each group has its own loader, so the process
+            count and prefetched host memory scale with the number of groups.
         prefetch_factor: How many batches a single data worker will attempt to
             hold in host memory at a given time.
 
