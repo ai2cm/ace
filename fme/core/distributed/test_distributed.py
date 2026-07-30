@@ -3,9 +3,12 @@ import os
 import pytest
 import torch
 import torch.multiprocessing as mp
+import torch.utils.data
 
 from fme import get_device
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, torch_distributed
+from fme.core.distributed.external.pnd_manager import DistributedManager
+from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 from fme.core.distributed.torch_distributed import (
     _gather_irregular,
     _pad_tensor_at_end,
@@ -147,3 +150,128 @@ def test_gather_irregular():
     assert all(
         shape == gathered_nonscalar_shapes[0] for shape in gathered_nonscalar_shapes
     )
+
+
+def _set_torchrun_env(monkeypatch, rank: int, world_size: int, local_rank: int):
+    monkeypatch.delenv("FME_USE_SRUN", raising=False)
+    monkeypatch.setenv("RANK", str(rank))
+    monkeypatch.setenv("WORLD_SIZE", str(world_size))
+    monkeypatch.setenv("LOCAL_RANK", str(local_rank))
+
+
+def _set_srun_env(monkeypatch, rank: int, world_size: int, local_rank: int):
+    monkeypatch.setenv("FME_USE_SRUN", "1")
+    monkeypatch.setenv("SLURM_PROCID", str(rank))
+    monkeypatch.setenv("SLURM_NTASKS", str(world_size))
+    monkeypatch.setenv("SLURM_LOCALID", str(local_rank))
+    monkeypatch.setenv(
+        "SRUN_DIST_FILE_PATH", "/tmp/unused-init-process-group-is-stubbed"
+    )
+
+
+def _forbid_cuda_and_process_group_init(monkeypatch):
+    """Make every CUDA and process group entry point a worker must avoid fail."""
+
+    def fail(*args, **kwargs):
+        raise AssertionError("must not be called in a DataLoader worker")
+
+    monkeypatch.setattr(torch.distributed, "init_process_group", fail)
+    monkeypatch.setattr(torch.cuda, "set_device", fail)
+    # get_device() calls current_device(), which lazily initializes CUDA
+    monkeypatch.setattr(torch.cuda, "current_device", fail)
+
+
+def _pretend_dataloader_worker(monkeypatch):
+    monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
+
+
+LAUNCHER_ENVS = [
+    pytest.param(_set_torchrun_env, id="torchrun"),
+    pytest.param(_set_srun_env, id="srun"),
+]
+
+LAUNCHER_ENVS_AND_DEVICE_IDS = [
+    pytest.param(_set_torchrun_env, 1, id="torchrun"),
+    pytest.param(_set_srun_env, 0, id="srun"),
+]
+
+
+@pytest.mark.parametrize("set_launcher_env", LAUNCHER_ENVS)
+def test_dataloader_worker_skips_cuda_and_process_group_init(
+    monkeypatch, set_launcher_env
+):
+    """A DataLoader worker gets usable rank metadata without initializing CUDA.
+
+    Each CUDA context costs hundreds of MiB of GPU memory, and workers have no
+    use for one, so a worker must not set the CUDA device or join the process
+    group.
+    """
+    set_launcher_env(monkeypatch, rank=3, world_size=8, local_rank=1)
+    _pretend_dataloader_worker(monkeypatch)
+    _forbid_cuda_and_process_group_init(monkeypatch)
+
+    dist = torch_distributed.TorchDistributed()
+
+    assert dist.rank == 3
+    assert dist.total_ranks == 8
+
+
+@pytest.mark.parametrize("set_launcher_env", LAUNCHER_ENVS)
+def test_spatial_parallel_dataloader_worker_skips_cuda_and_process_group_init(
+    monkeypatch, set_launcher_env
+):
+    """A worker under spatial parallelism also gets metadata CUDA-free.
+
+    The data-parallel index and size are derived from the row-major
+    (data, h, w) mesh layout rather than from the DeviceMesh, which cannot be
+    built without the process group the worker skips.
+    """
+    set_launcher_env(monkeypatch, rank=3, world_size=8, local_rank=1)
+    _pretend_dataloader_worker(monkeypatch)
+    _forbid_cuda_and_process_group_init(monkeypatch)
+
+    def fail_initialize():
+        raise AssertionError("must not be called in a DataLoader worker")
+
+    monkeypatch.setattr(DistributedManager, "initialize", fail_initialize)
+
+    dist = ModelTorchDistributed(h_size=2, w_size=1)
+
+    assert dist.rank == 3
+    assert dist.total_ranks == 8
+    # rank 3 is the second (h, w) group of the second data-parallel slice
+    assert dist.data_parallel_rank == 1
+    assert dist.total_data_parallel_ranks == 4
+
+
+@pytest.mark.parametrize(
+    "set_launcher_env,expected_device_id", LAUNCHER_ENVS_AND_DEVICE_IDS
+)
+def test_dataloader_worker_guard_does_not_affect_main_process(
+    monkeypatch, set_launcher_env, expected_device_id
+):
+    """Outside a worker the CUDA device is still set, as training requires."""
+    set_launcher_env(monkeypatch, rank=3, world_size=8, local_rank=1)
+    monkeypatch.setattr(torch_distributed, "using_gpu", lambda: True)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 8)
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda: 3)
+    monkeypatch.setattr(torch.distributed, "init_process_group", lambda **kwargs: None)
+    set_devices: list[int] = []
+    monkeypatch.setattr(torch.cuda, "set_device", set_devices.append)
+
+    dist = torch_distributed.TorchDistributed()
+
+    assert dist.rank == 3
+    assert dist.total_ranks == 8
+    assert set_devices == [expected_device_id]
+
+
+def test_dataloader_worker_without_launcher_env_raises(monkeypatch):
+    """A worker with no launcher environment reports why, not a KeyError."""
+    monkeypatch.delenv("FME_USE_SRUN", raising=False)
+    monkeypatch.delenv("RANK", raising=False)
+    _pretend_dataloader_worker(monkeypatch)
+
+    with pytest.raises(ValueError, match="without torchrun or srun"):
+        torch_distributed.TorchDistributed()
