@@ -64,7 +64,7 @@ then
         --gpus 0 \
         --shared-memory 400GiB \
         --weka climate-default:/climate-default \
-        --budget ai2/climate \
+        --budget ai2/atec-climate \
         -- bash -c "gcloud auth activate-service-account --key-file=/tmp/google_application_credentials.json && python3 ./scripts/data_process/compute_dlwp_dataset.py --config=\"./scripts/data_process/${CONFIG}\" --run-directory=\"${run_directory}\" --output-store=\"${output_directory}\" $(if [[ \"$OVERWRITE\" == \"true\" ]]; then echo \"--overwrite\"; fi) && echo '=== DLWP ACE DATASET COMPUTATION COMPLETED SUCCESSFULLY ===' && echo \"Output written to: ${output_directory}\" && echo \"Config used: ${CONFIG}\" && echo \"Timestamp: \$(date)\""
 else
     if [[ "$OVERWRITE" == "true" ]]; then

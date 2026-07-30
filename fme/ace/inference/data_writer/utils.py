@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TypeVar
@@ -17,8 +18,13 @@ def get_all_names(
         variables = variables.union(set(varnames))
     if allowlist is None:
         return variables
-    else:
-        return variables.intersection(set(allowlist))
+    allowlist = set(allowlist)
+    missing = allowlist - variables
+    if missing:
+        warnings.warn(
+            f"Requested variable(s) not present in data: {list(missing)}",
+        )
+    return variables.intersection(allowlist)
 
 
 @dataclass

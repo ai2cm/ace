@@ -1,133 +1,64 @@
-import abc
-import dataclasses
-
-import torch
-
-from fme.core.device import get_device
-from fme.core.loss import StepLoss
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
 
 
-class StepPredictionABC(abc.ABC):
-    @property
-    @abc.abstractmethod
-    def data(self) -> TensorMapping: ...
-
-    @property
-    @abc.abstractmethod
-    def step(self) -> int: ...
-
-
-class StepLossABC(abc.ABC):
-    """
-    Abstract base class for step loss functions.
-
-    """
-
-    @property
-    @abc.abstractmethod
-    def effective_loss_scaling(self) -> TensorDict: ...
-
-    @abc.abstractmethod
-    def step_is_optimized(self, step: int) -> bool:
-        """Returns True if the step is less than to the number of
-        steps contributing to the loss.
-        """
-        ...
-
-    @abc.abstractmethod
-    def __call__(
-        self, prediction: StepPredictionABC, target_data: TensorMapping
-    ) -> torch.Tensor:
-        """Computes the loss for a given prediction and target data."""
-        ...
-
-
-@dataclasses.dataclass
-class LossContributionsConfig:
-    """
-    Configuration for loss contributions.
-
-    Parameters:
-        n_steps: (optional) The number of consecutive steps contributing to the loss,
-            starting from the first.
-        weight: (optional) Weight applied to each step loss for the given realm.
-            Each step contributes equally to the total loss.
-
-    """
-
-    n_steps: float = float("inf")
-    weight: float = 1.0
-
-    def build(
-        self,
-        loss_obj: StepLoss,
-        time_dim: int,
-    ) -> StepLossABC:
-        if self.n_steps == 0 or self.weight == 0.0:
-            return NullLossContributions(loss_obj)
-        return LossContributions(
-            n_steps=self.n_steps,
-            weight=self.weight,
-            loss_obj=loss_obj,
-            time_dim=time_dim,
-        )
-
-
-class NullLossContributions(StepLossABC):
-    """
-    Loss that always returns zero and an empty dictionary regardless of inputs.
-
+class ComponentLossSchedule:
+    """Mutable per-component schedule that tracks the current effective
+    ``n_steps`` (which may change per batch when stochastic) and answers
+    step-optimization queries.
     """
 
     def __init__(
         self,
-        loss_obj: StepLoss,
+        n_steps: TimeLengthProbabilities | int | None,
+        optimize_last_step_only: bool,
+        loss_weight: float,
+        n_steps_limit: int,
     ):
-        self._loss = loss_obj
-
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        return self._loss.effective_loss_scaling
-
-    def step_is_optimized(self, step: int) -> bool:
-        return False
-
-    def __call__(
-        self, prediction: StepPredictionABC, target_data: TensorMapping
-    ) -> torch.Tensor:
-        return torch.tensor(0.0, device=get_device())
-
-
-class LossContributions(StepLossABC):
-    def __init__(
-        self,
-        n_steps: float,
-        weight: float,
-        loss_obj: StepLoss,
-        time_dim: int,
-    ):
-        self._loss = loss_obj
-        self._n_steps = n_steps
-        self._weight = weight
-        self._time_dim = time_dim
-
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        return self._loss.effective_loss_scaling
-
-    def step_is_optimized(self, step: int) -> bool:
-        """Returns True if the step is less than to the number of steps and
-        weight is != 0. The first step number is assumed to be 0.
-
-        """
-        return step < self._n_steps and self._weight != 0.0
-
-    def __call__(
-        self, prediction: StepPredictionABC, target_data: TensorMapping
-    ) -> torch.Tensor:
-        if self.step_is_optimized(prediction.step):
-            return self._weight * self._loss(
-                prediction.data, target_data, prediction.step
+        if isinstance(n_steps, TimeLengthProbabilities):
+            self._n_steps_sampler: TimeLengthProbabilities | None = n_steps
+            self._eval_n_steps_sampler: TimeLengthProbabilities | None = (
+                TimeLengthProbabilities(outcomes=list(n_steps.outcomes))
             )
-        return torch.tensor(0.0, device=get_device())
+            self._n_steps: float = float(n_steps.max_n_forward_steps)
+        else:
+            self._n_steps_sampler = None
+            self._eval_n_steps_sampler = None
+            self._n_steps = float("inf") if n_steps is None else float(n_steps)
+        self._is_training: bool = True
+        self._optimize_last_step_only = optimize_last_step_only
+        self._loss_weight = loss_weight
+        self._n_steps_limit = n_steps_limit
+
+    @property
+    def loss_weight(self) -> float:
+        return self._loss_weight
+
+    def sample_n_steps(self) -> None:
+        sampler = (
+            self._n_steps_sampler if self._is_training else self._eval_n_steps_sampler
+        )
+        if sampler is not None:
+            self._n_steps = float(sampler.sample())
+
+    def seed_rng(self, seed: int) -> None:
+        if self._eval_n_steps_sampler is not None:
+            self._eval_n_steps_sampler.seed_rng(seed)
+
+    def set_train(self) -> None:
+        self._is_training = True
+
+    def set_eval(self) -> None:
+        self._is_training = False
+
+    def n_required_forward_steps(self) -> int:
+        if self.loss_weight == 0.0:
+            return 0
+        return int(min(self._n_steps, self._n_steps_limit))
+
+    def step_is_optimized(self, step: int) -> bool:
+        if self.loss_weight == 0.0:
+            return False
+        if self._optimize_last_step_only:
+            last_optimized_step = min(self._n_steps, self._n_steps_limit) - 1
+            return step == last_optimized_step
+        return step < self._n_steps

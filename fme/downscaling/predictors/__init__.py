@@ -1,9 +1,16 @@
-from .cascade import CascadePredictor, CascadePredictorConfig
 from .composite import PatchPredictionConfig, PatchPredictor
+from .serial_denoising import (
+    DenoisingExpertCheckpointConfig,
+    DenoisingMoEBundledConfig,
+    DenoisingMoEConfig,
+    DenoisingMoEPredictor,
+)
 
 __all__ = [
-    "CascadePredictor",
-    "CascadePredictorConfig",
+    "DenoisingMoEBundledConfig",
+    "DenoisingMoEConfig",
+    "DenoisingExpertCheckpointConfig",
+    "DenoisingMoEPredictor",
     "PatchPredictionConfig",
     "PatchPredictor",
 ]

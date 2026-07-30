@@ -1,7 +1,7 @@
 from typing import Any, Literal
 
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
-from fme.core.masking import HasGetMaskTensorFor
+from fme.core.spatial_masking import HasGetSpatialMask
 from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
 
 
@@ -22,21 +22,21 @@ class CoupledDatasetInfo:
         self.atmosphere = atmosphere
 
     @property
-    def ocean_mask_provider(self) -> HasGetMaskTensorFor:
+    def ocean_spatial_mask_provider(self) -> HasGetSpatialMask:
         try:
-            return self.ocean.mask_provider
+            return self.ocean.spatial_mask_provider
         except MissingDatasetInfo as err:
-            raise MissingCoupledDatasetInfo("ocean_mask_provider") from err
+            raise MissingCoupledDatasetInfo("ocean_spatial_mask_provider") from err
 
     def __eq__(self, other):
         if not isinstance(other, CoupledDatasetInfo):
             return False
         return self.ocean == other.ocean and self.atmosphere == other.atmosphere
 
-    def to_state(self) -> dict[Literal["ocean", "atmosphere"], dict[str, Any]]:
+    def get_state(self) -> dict[Literal["ocean", "atmosphere"], dict[str, Any]]:
         return {
-            "ocean": self.ocean.to_state(),
-            "atmosphere": self.atmosphere.to_state(),
+            "ocean": self.ocean.get_state(),
+            "atmosphere": self.atmosphere.get_state(),
         }
 
     @property

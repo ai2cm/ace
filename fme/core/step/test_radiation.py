@@ -134,7 +134,7 @@ def test_detach_radiation(detach_radiation: bool):
     output_data = step.step(
         args=StepArgs(input=input_data, next_step_input_data=input_data, labels=None),
         wrapper=lambda x: x,
-    )
+    ).output
     for name, value in output_data.items():
         assert value.requires_grad, f"{name} should require grad"
     grad = torch.autograd.grad(
@@ -147,7 +147,7 @@ def test_detach_radiation(detach_radiation: bool):
     output_data = step.step(
         args=StepArgs(input=input_data, next_step_input_data=input_data, labels=None),
         wrapper=lambda x: x,
-    )
+    ).output
     grad = torch.autograd.grad(
         outputs=output_data["diagnostic_main"].sum(),
         inputs=input_data["forcing_rad"],
@@ -180,7 +180,7 @@ def test_residual_prediction(residual_prediction: bool):
             labels=None,
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     for name in MAIN_PROGNOSTIC_NAMES:
         if residual_prediction:

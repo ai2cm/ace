@@ -104,7 +104,7 @@ class ParameterInitializationConfig:
     pre-trained model, only the initial slice of the weights is overwritten.
 
     Parameters:
-        weight_path: path to a Stepper checkpoint
+        weights_path: path to a Stepper checkpoint
             containing weights to load
         parameters: list of ParameterClassification objects, each specifying
             whether parameters are excluded from initialization or frozen.

@@ -6,23 +6,25 @@ from fme.downscaling.test_utils import data_paths_helper
 
 
 @pytest.fixture
-def loader_config(tmp_path, request):
-    """Create DataLoaderConfig with test data."""
-    path = tmp_path / "test_data"
-    path.mkdir()
-    add_topography_path = request.param
+def data_paths(tmp_path):
+    """Create test data paths."""
     # TODO: should probably consolidate cross imported
     # .      data path helpers to a single file instead
     # .      of importing from test_train in each location
-    test_data_path = data_paths_helper(path)
-    topography_path = (
-        f"{test_data_path.fine}/data.nc" if add_topography_path is True else None
-    )
+    # NOTE: data_paths_helper creates fine and coarse data
+    #   including the static input topography field
+    path = tmp_path / "test_data"
+    path.mkdir()
+    return data_paths_helper(path)
 
+
+@pytest.fixture
+def loader_config(data_paths):
+    """Create DataLoaderConfig with test data."""
     return DataLoaderConfig(
         coarse=[
             XarrayDataConfig(
-                data_path=str(test_data_path.coarse),
+                data_path=str(data_paths.coarse),
                 file_pattern="*.nc",
                 engine="netcdf4",
             )
@@ -30,5 +32,4 @@ def loader_config(tmp_path, request):
         batch_size=2,
         num_data_workers=0,
         strict_ensemble=False,
-        topography=topography_path,
     )

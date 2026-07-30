@@ -11,6 +11,7 @@ from typing import Protocol
 
 import torch
 
+from fme.core.tensor_dict_accumulator import TensorDictAccumulator
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -63,41 +64,19 @@ class AreaWeightedReducedMetric:
         channel_mean_names: Sequence[str] | None = None,
     ):
         self._compute_metric = compute_metric
-        self._total: TensorDict | None = None
+        self._accumulator = TensorDictAccumulator(device=device)
         self._channel_mean: torch.Tensor | None = None
         self._device = device
         self._channel_mean_names = channel_mean_names
+        # Variables whose target is entirely NaN (e.g. filled by
+        # allow_missing_variables); detected once on the first batch since
+        # missingness is constant, then excluded from the channel mean.
+        self._all_nan_target_names: set[str] | None = None
 
     def _get_channel_mean_names(self, tensors: TensorDict) -> Sequence[str]:
         if self._channel_mean_names is None:
             return list(tensors.keys())
         return self._channel_mean_names
-
-    def _update_total(self, tensors: TensorDict):
-        if self._total is None:
-            self._total = {
-                name: torch.zeros_like(tensor, device=self._device)
-                for name, tensor in tensors.items()
-            }
-            self._channel_mean = torch.tensor(0.0, device=self._device)
-        missing_names = set(self._total) - set(tensors)
-        if len(missing_names) > 0:
-            raise ValueError(
-                f"Missing metrics for {missing_names} which were "
-                "present the first time metrics were recorded."
-            )
-        channel_mean_names = self._get_channel_mean_names(tensors)
-        for name, tensor in tensors.items():
-            try:
-                self._total[name] += tensor
-                if name in channel_mean_names:
-                    self._channel_mean += tensor / len(channel_mean_names)
-            except KeyError:
-                raise ValueError(
-                    "Attempted to record the area weighted reduced metric for "
-                    f"'{name}' but it was not present the first time metrics "
-                    "were recorded."
-                )
 
     def record(self, target: TensorMapping, gen: TensorMapping):
         """Add a batch of data to the metric.
@@ -106,18 +85,44 @@ class AreaWeightedReducedMetric:
             target: Target data. Should have shape [batch, time, height, width].
             gen: Generated data. Should have shape [batch, time, height, width].
         """
-        # Update totals for each variable
         batch_avgs = {
             name: tensor.mean(dim=0)
             for name, tensor in self._compute_metric(target, gen).items()
         }
-        self._update_total(batch_avgs)
+        if self._channel_mean is None:
+            self._channel_mean = torch.tensor(0.0, device=self._device)
+        channel_mean_names = self._get_channel_mean_names(batch_avgs)
+        missing = [n for n in channel_mean_names if n not in batch_avgs]
+        if missing:
+            raise KeyError(
+                f"channel_mean_names contains entries not present in the "
+                f"recorded data: {missing}. Available: {sorted(batch_avgs)}."
+            )
+        if self._all_nan_target_names is None:
+            self._all_nan_target_names = {
+                name for name in channel_mean_names if torch.isnan(target[name]).all()
+            }
+        # Targets may be entirely NaN if filled by allow_missing_variables
+        non_nan_targets = [
+            name
+            for name in channel_mean_names
+            if name not in self._all_nan_target_names
+        ]
+        if not non_nan_targets:
+            raise ValueError(
+                "All target variables are NaN; cannot compute channel mean."
+            )
+        for name in non_nan_targets:
+            self._channel_mean += batch_avgs[name] / len(non_nan_targets)
+
+        self._accumulator.add(batch_avgs)
 
     def get(self) -> TensorDict:
         """Returns the metric."""
-        if self._total is None:
+        total = self._accumulator.get_sum()
+        if total is None:
             return defaultdict(lambda: torch.tensor(torch.nan))
-        return self._total
+        return total
 
     def get_channel_mean(self) -> torch.Tensor:
         """Returns the channel-mean metric."""

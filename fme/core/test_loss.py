@@ -8,8 +8,16 @@ from fme.core.loss import (
     AreaWeightedMSELoss,
     CRPSLoss,
     EnergyScoreLoss,
+    EnsembleComponentLoss,
+    FiniteDifferenceCRPSLoss,
     GlobalMeanLoss,
+    LossComponent,
     LossConfig,
+    LossOutput,
+    LpLoss,
+    SpectralWhitening,
+    SpectralWhiteningConfig,
+    StandardLoss,
     StepLossConfig,
     VariableWeightingLoss,
     WeightedMappingLoss,
@@ -19,24 +27,29 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 
 
+def _components_total(components: list[LossComponent]) -> torch.Tensor:
+    """Compute the scalar total from a list of LossComponent instances."""
+    bc = sum(c.reduce_to_channel() for c in components)
+    assert isinstance(bc, torch.Tensor)
+    return bc.mean()
+
+
 @pytest.mark.parametrize("global_mean_type", [None, "LpLoss"])
 def test_loss_builds_and_runs(global_mean_type):
     config = LossConfig(global_mean_type=global_mean_type)
     area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     loss = config.build(
-        reduction="mean",
         gridded_operations=LatLonOperations(area),
     )
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert result.shape == ()
-    assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
+    assert all(isinstance(c, LossComponent) for c in result)
 
 
-def test_spectral_energy_score(very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+@pytest.mark.medium_duration
+def test_spectral_energy_score():
     torch.manual_seed(0)
     DEVICE = get_device()
     n_lat, n_lon = 16, 32
@@ -45,15 +58,15 @@ def test_spectral_energy_score(very_fast_only: bool):
     sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
     crps_loss = CRPSLoss(alpha=0.95)
-    score = spectral_energy_score_loss(pred, target)
-    crps = crps_loss(pred, target)
+    score = _components_total(spectral_energy_score_loss(pred, target))
+    crps = _components_total(crps_loss(pred, target))
 
     n_lat2, n_lon2 = 32, 64
     pred = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
     target = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
     sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht()
     spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
-    larger_domain_score = spectral_energy_score_loss(pred, target)
+    larger_domain_score = _components_total(spectral_energy_score_loss(pred, target))
     torch.testing.assert_close(larger_domain_score, score, rtol=0.05, atol=0.0)
     torch.testing.assert_close(score, crps, rtol=0.5, atol=0.0)
 
@@ -62,21 +75,19 @@ def test_loss_of_zeros_is_variance():
     torch.manual_seed(0)
     config = LossConfig(global_mean_type=None)
     loss = config.build(
-        reduction="mean",
         gridded_operations=LatLonOperations(torch.ones(10, 10)),
     )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert result.shape == ()
-    assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
     if str(get_device()).startswith("cuda"):
         tol = {"rtol": 1e-4, "atol": 1e-4}
     elif str(get_device()).startswith("mps"):
         tol = {"rtol": 1e-3, "atol": 1e-3}
     else:
         tol = {}
-    torch.testing.assert_close(result, y.var(), **tol)
+    torch.testing.assert_close(_components_total(result), y.var(), **tol)
 
 
 @pytest.mark.parametrize("global_mean_weight", [0.0, 1.0, 5.0])
@@ -87,21 +98,19 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     )
     area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     loss = config.build(
-        reduction="mean",
         gridded_operations=LatLonOperations(area),
     )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert result.shape == ()
-    assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
     expected = torch.tensor(1.0 + global_mean_weight)
     tol = (
         {"atol": 0.015, "rtol": 0.01}
         if str(get_device()).startswith("cuda")
         else {"atol": 0.01, "rtol": 0.0}
     )
-    torch.testing.assert_close(result.cpu(), expected, **tol)
+    torch.testing.assert_close(_components_total(result).cpu(), expected, **tol)
 
 
 @pytest.mark.parametrize(
@@ -110,7 +119,12 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         LossConfig(type="AreaWeightedMSE"),
         LossConfig(global_mean_type="LpLoss"),
         LossConfig(
-            type="EnsembleLoss", kwargs={"energy_score_weight": 1.0, "crps_weight": 0.0}
+            type="EnsembleLoss",
+            kwargs={
+                "energy_score_weight": 1.0,
+                "crps_weight": 0.0,
+                "finite_difference_crps_weight": 0.05,
+            },
         ),
     ],
 )
@@ -118,27 +132,29 @@ def test_loss_fails_when_gridded_operations_not_provided(
     config: LossConfig,
 ):
     with pytest.raises(ValueError):
-        config.build(reduction="mean", gridded_operations=None)
+        config.build(gridded_operations=None)
 
 
 def test_global_mean_loss():
     torch.manual_seed(0)
     area = torch.randn(10, 1, device=get_device()).broadcast_to(size=(10, 10))
-    loss = GlobalMeanLoss(
-        LatLonOperations(area).area_weighted_mean, loss=torch.nn.MSELoss()
-    )
+    loss = GlobalMeanLoss(LatLonOperations(area).area_weighted_mean, loss=LpLoss(p=2))
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
-    assert result.shape == ()
-    assert isinstance(result, torch.Tensor)
+    assert isinstance(result, list)
+    total = _components_total(result)
 
     def global_weighted_mean(tensor, area):
         return (tensor * area[None, None, None, :, :]).sum(dim=(-1, -2)) / area.sum()
 
-    mse = torch.nn.MSELoss()
-    expected = mse(global_weighted_mean(x, area), global_weighted_mean(y, area))
-    torch.testing.assert_close(result, expected)
+    gm_x = global_weighted_mean(x, area)
+    gm_y = global_weighted_mean(y, area)
+    B, C = gm_x.shape[0], gm_x.shape[1]
+    diff_norms = torch.linalg.norm((gm_x - gm_y).reshape(B, C, -1), ord=2, dim=2)
+    y_norms = torch.linalg.norm(gm_y.reshape(B, C, -1), ord=2, dim=2)
+    expected = (diff_norms / y_norms).mean()
+    torch.testing.assert_close(total, expected)
 
 
 def test_area_weighted_mse():
@@ -148,10 +164,12 @@ def test_area_weighted_mse():
     area = torch.rand(10, 1, device=get_device()).broadcast_to(size=(10, 10))
     area_weighted_mse = AreaWeightedMSELoss(LatLonOperations(area).area_weighted_mean)
     result = area_weighted_mse(x, target)
+    assert isinstance(result, list)
+    total = _components_total(result)
     expected = metrics.weighted_mean(
         torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
     ).mean()
-    torch.testing.assert_close(result, expected)
+    torch.testing.assert_close(total, expected)
 
 
 def test__construct_weight_tensor():
@@ -178,7 +196,7 @@ def test__construct_weight_tensor():
 @pytest.mark.parametrize("mean", [0.0, 1.0])
 @pytest.mark.parametrize("scale", [1.0, 2.0])
 def test_WeightedMappingLoss(mean, scale):
-    loss = torch.nn.MSELoss()
+    loss = torch.nn.MSELoss(reduction="none")
     n_channels = 5
     packer = Packer([f"var_{i}" for i in range(n_channels)])
     out_names = [f"var_{i}" for i in range(n_channels)]
@@ -192,21 +210,18 @@ def test_WeightedMappingLoss(mean, scale):
         out_names=out_names,
         normalizer=normalizer,
     )
-    x = torch.randn(
-        15,
-        n_channels,
-        10,
-        10,
-    ).to(get_device(), dtype=torch.float)
-    y = torch.randn(
-        15,
-        n_channels,
-        10,
-        10,
-    ).to(get_device(), dtype=torch.float)
+    x = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
+    y = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, i, :, :] for i, name in enumerate(packer.names)}
-    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y) / scale**2)
+    result = mapping_loss(x_mapping, y_mapping)
+    assert isinstance(result, LossOutput)
+    expected_scalar = torch.nn.MSELoss()(x, y) / scale**2
+    torch.testing.assert_close(result.total(), expected_scalar)
+    channel_losses = result.get_channel_losses()
+    assert set(channel_losses.keys()) == set(out_names)
+    channel_mean = torch.stack([v.loss for v in channel_losses.values()]).mean()
+    torch.testing.assert_close(channel_mean, expected_scalar)
 
 
 def test_VariableWeightingLoss():
@@ -231,10 +246,10 @@ def test_StepLossConfig_no_weights():
     n_channels = 5
     out_names = [f"var_{i}" for i in range(n_channels)]
     channel_dim = -3
-    area = torch.tensor([])  # area not used by this config
+    area = torch.ones(1, 1)  # area not used by this config
     gridded_operations: GriddedOperations = LatLonOperations(area)
     mapping_loss_config = StepLossConfig(sqrt_loss_step_decay_constant=0.0)
-    loss = loss_config.build(reduction="mean", gridded_operations=gridded_operations)
+    loss = loss_config.build(gridded_operations=gridded_operations)
     normalizer = StandardNormalizer(
         means={name: torch.as_tensor(0.0) for name in out_names},
         stds={name: torch.as_tensor(1.0) for name in out_names},
@@ -252,14 +267,18 @@ def test_StepLossConfig_no_weights():
     x = packer.pack(x_mapping, axis=channel_dim)
     y = packer.pack(y_mapping, axis=channel_dim)
 
-    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=0)
-    assert loss(x, y) == mapping_loss(x_mapping, y_mapping, step=1)
+    expected = _components_total(loss(x, y))
+    result_step0 = mapping_loss(x_mapping, y_mapping, step=0)
+    result_step1 = mapping_loss(x_mapping, y_mapping, step=1)
+    assert isinstance(result_step0, LossOutput)
+    torch.testing.assert_close(expected, result_step0.total())
+    torch.testing.assert_close(expected, result_step1.total())
 
 
 def test_StepLossConfig_weights():
     out_names = ["var_0", "var_1"]
     channel_dim = -3
-    area = torch.tensor([])  # area not used by this config
+    area = torch.ones(1, 1)  # area not used by this config
     mapping_loss_config = StepLossConfig(
         type="MSE", weights={"var_0": 4.0, "var_1": 1.0}
     )
@@ -285,14 +304,21 @@ def test_StepLossConfig_weights():
     x_mapping = {"var_0": x0, "var_1": x1}
     y_mapping = {"var_0": y0, "var_1": y1}
 
-    assert mapping_loss(x_mapping, y_mapping, step=0) == ((16 + 0.25) / 2.0)
+    result = mapping_loss(x_mapping, y_mapping, step=0)
+    assert isinstance(result, LossOutput)
+    expected = torch.tensor((16 + 0.25) / 2.0, device=get_device())
+    torch.testing.assert_close(result.total(), expected)
+    channel_losses = result.get_channel_losses()
+    assert set(channel_losses.keys()) == set(out_names)
+    channel_mean = torch.stack([v.loss for v in channel_losses.values()]).mean()
+    torch.testing.assert_close(channel_mean, expected)
 
 
 @pytest.mark.parametrize("sqrt_loss_step_decay_constant", [0.0, 0.1, 1.0])
 def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
     out_names = ["var_0", "var_1"]
     channel_dim = -3
-    area = torch.tensor([])  # area not used by this config
+    area = torch.ones(1, 1)  # area not used by this config
     mapping_loss_config = StepLossConfig(
         type="MSE",
         weights={"var_0": 4.0, "var_1": 1.0},
@@ -321,13 +347,13 @@ def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
     y_mapping = {"var_0": y0, "var_1": y1}
 
     torch.testing.assert_close(
-        mapping_loss(x_mapping, y_mapping, step=0),
-        mapping_loss(x_mapping, y_mapping, step=1)
+        mapping_loss(x_mapping, y_mapping, step=0).total(),
+        mapping_loss(x_mapping, y_mapping, step=1).total()
         * (1 + sqrt_loss_step_decay_constant) ** 0.5,
     )
     torch.testing.assert_close(
-        mapping_loss(x_mapping, y_mapping, step=0),
-        mapping_loss(x_mapping, y_mapping, step=2)
+        mapping_loss(x_mapping, y_mapping, step=0).total(),
+        mapping_loss(x_mapping, y_mapping, step=2).total()
         * (1 + sqrt_loss_step_decay_constant * 2) ** 0.5,
     )
 
@@ -335,7 +361,7 @@ def test_StepLossConfig_with_step_loss_decay(sqrt_loss_step_decay_constant):
 @pytest.mark.parametrize("mean", [0.0, 1.0])
 @pytest.mark.parametrize("scale", [1.0, 2.0])
 def test_WeightedMappingLoss_with_ensemble_dim(mean, scale):
-    loss = torch.nn.MSELoss()
+    loss = torch.nn.MSELoss(reduction="none")
     n_channels = 5
     n_ensemble = 3
     packer = Packer([f"var_{i}" for i in range(n_channels)])
@@ -350,27 +376,22 @@ def test_WeightedMappingLoss_with_ensemble_dim(mean, scale):
         out_names=out_names,
         normalizer=normalizer,
     )
-    x = torch.randn(
-        15,
-        n_ensemble,
-        n_channels,
-        10,
-        10,
-    ).to(get_device(), dtype=torch.float)
-    y = torch.randn(
-        15,
-        1,  # only 1 ensemble member for target
-        n_channels,
-        10,
-        10,
-    ).to(get_device(), dtype=torch.float)
+    x = torch.randn(15, n_ensemble, n_channels, 10, 10).to(
+        get_device(), dtype=torch.float
+    )
+    y = torch.randn(15, 1, n_channels, 10, 10).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, :, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, :, i, :, :] for i, name in enumerate(packer.names)}
-    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y) / scale**2)
+    result = mapping_loss(x_mapping, y_mapping)
+    assert isinstance(result, LossOutput)
+    expected_scalar = torch.nn.MSELoss()(x, y) / scale**2
+    torch.testing.assert_close(result.total(), expected_scalar)
+    channel_losses = result.get_channel_losses()
+    assert set(channel_losses.keys()) == set(out_names)
 
 
 def test_WeightedMappingLoss_with_target_nans():
-    loss = torch.nn.MSELoss()
+    loss = torch.nn.MSELoss(reduction="none")
     n_channels = 5
     packer = Packer([f"var_{i}" for i in range(n_channels)])
     out_names = [f"var_{i}" for i in range(n_channels)]
@@ -384,21 +405,595 @@ def test_WeightedMappingLoss_with_target_nans():
         out_names=out_names,
         normalizer=normalizer,
     )
-    x = torch.randn(
-        15,
-        n_channels,
-        10,
-        10,
-    ).to(get_device(), dtype=torch.float)
-    y = torch.randn(
-        15,
-        n_channels,
-        10,
-        10,
-    ).to(get_device(), dtype=torch.float)
+    x = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
+    y = torch.randn(15, n_channels, 10, 10).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, i, :, :].clone() for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, i, :, :].clone() for i, name in enumerate(packer.names)}
     y_mapping[packer.names[0]][:, :, 0] = float("nan")
     x[:, 0, :, 0] = 0.0
     y[:, 0, :, 0] = 0.0
-    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y))
+    result = mapping_loss(x_mapping, y_mapping)
+    assert isinstance(result, LossOutput)
+    mse = torch.nn.MSELoss()
+    expected = mse(x, y)
+    torch.testing.assert_close(result.total(), expected)
+    channel_losses = result.get_channel_losses()
+    assert set(channel_losses.keys()) == set(out_names)
+
+
+def test_standard_loss_reduce_to_channel():
+    n_c = 3
+
+    four_d = torch.randn(4, n_c, 8, 8, device=get_device())
+    result = StandardLoss(four_d).reduce_to_channel()
+    assert result.shape == (4, n_c)
+    torch.testing.assert_close(result, four_d.mean(dim=(2, 3)))
+
+    two_d = torch.randn(4, n_c, device=get_device())
+    result_2d = StandardLoss(two_d).reduce_to_channel()
+    assert result_2d.shape == (4, n_c)
+    torch.testing.assert_close(result_2d, two_d)
+
+    five_d = torch.randn(4, n_c, 6, 8, 8, device=get_device())
+    result_5d = StandardLoss(five_d).reduce_to_channel()
+    assert result_5d.shape == (4, n_c)
+    torch.testing.assert_close(result_5d, five_d.mean(dim=(2, 3, 4)))
+
+
+def test_finite_difference_crps_zero_for_spatially_constant():
+    """Data varying by channel but constant spatially should give zero loss.
+
+    Catches bugs where finite differences are taken along the channel dim
+    instead of spatial dims.
+    """
+    torch.manual_seed(0)
+    gen = torch.randn(4, 2, 3, 1, 1).expand(4, 2, 3, 8, 16).clone()
+    target = torch.randn(4, 1, 3, 1, 1).expand(4, 1, 3, 8, 16).clone()
+    loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=1)
+    result = _components_total(loss(gen, target))
+    torch.testing.assert_close(result, torch.tensor(0.0), atol=1e-6, rtol=0.0)
+
+
+def test_finite_difference_crps_positive_for_different_inputs():
+    torch.manual_seed(0)
+    gen = torch.randn(4, 2, 3, 8, 16)
+    target = torch.randn(4, 1, 3, 8, 16)
+    loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=1)
+    result = _components_total(loss(gen, target))
+    assert result > 0
+
+
+@pytest.mark.parametrize("levels", [1, 2, 3])
+def test_finite_difference_crps_multi_level(levels: int):
+    torch.manual_seed(0)
+    gen = torch.randn(4, 2, 3, 16, 32)
+    target = torch.randn(4, 1, 3, 16, 32)
+    loss = FiniteDifferenceCRPSLoss(alpha=1.0, levels=levels)
+    result = _components_total(loss(gen, target))
+    assert result.shape == ()
+    assert result > 0
+
+
+def test_finite_difference_crps_rejects_zero_levels():
+    with pytest.raises(ValueError, match="levels must be at least 1"):
+        FiniteDifferenceCRPSLoss(alpha=1.0, levels=0)
+
+
+def test_packer_builds_channel_mask():
+    data_mask = {
+        "a": torch.tensor([1.0, 1.0, 0.0]),
+        "b": torch.tensor([1.0, 0.0, 1.0]),
+    }
+    packer = Packer(["a", "b"])
+    mask = packer.pack(data_mask, axis=1)
+    assert mask.shape == (3, 2)
+    expected = torch.tensor(
+        [
+            [1.0, 1.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ]
+    )
+    torch.testing.assert_close(mask, expected)
+
+
+def test_packer_mask_missing_name_defaults_to_present():
+    packer = Packer(["a", "b", "c"])
+    filled = {
+        "a": torch.tensor([1.0, 0.0]),
+        "b": torch.tensor([1.0, 1.0]),
+        "c": torch.tensor([0.0, 1.0]),
+    }
+    mask = packer.pack(filled, axis=1)
+    expected = torch.tensor(
+        [
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+        ]
+    )
+    torch.testing.assert_close(mask, expected)
+
+
+def test_loss_output_total_with_mask():
+    loss = torch.tensor(
+        [
+            [[1.0], [2.0]],
+            [[3.0], [4.0]],
+            [[5.0], [6.0]],
+        ]
+    ).unsqueeze(-1)
+    mask = torch.tensor([[1.0, 1.0], [1.0, 0.0], [0.0, 1.0]])
+    output = LossOutput(
+        losses=[StandardLoss(loss)], channel_names=["a", "b"], mask=mask
+    )
+    # ch_a: mean(1,3)=2.0; ch_b: mean(2,6)=4.0
+    expected = (2.0 + 4.0) / 2.0
+    torch.testing.assert_close(output.total(), torch.tensor(expected))
+
+
+def test_loss_output_total_without_mask_unchanged():
+    loss = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    output = LossOutput(losses=[StandardLoss(loss)], channel_names=["a", "b"])
+    torch.testing.assert_close(output.total(), torch.tensor(2.5))
+
+
+def test_loss_output_channel_losses_with_mask():
+    torch.manual_seed(42)
+    loss = torch.randn(4, 3, 5, 5).abs()
+    mask = torch.tensor(
+        [
+            [1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [1.0, 0.0, 1.0],
+            [0.0, 1.0, 1.0],
+        ]
+    )
+    output = LossOutput(
+        losses=[StandardLoss(loss)],
+        channel_names=["a", "b", "c"],
+        mask=mask,
+    )
+    channel_losses = output.get_channel_losses()
+    active_losses = [v.loss for v in channel_losses.values() if v.count > 0]
+    torch.testing.assert_close(
+        torch.stack(active_losses).mean(), output.total(), atol=1e-5, rtol=1e-5
+    )
+    assert channel_losses["a"].count == 3
+    assert channel_losses["b"].count == 3
+    assert channel_losses["c"].count == 4
+
+
+def test_weighted_mapping_loss_with_data_mask():
+    out_names = ["var_0", "var_1"]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    loss = torch.nn.MSELoss(reduction="none")
+    mapping_loss = WeightedMappingLoss(
+        loss,
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x_val = torch.ones(4, 5, 5).to(get_device())
+    y_val = torch.zeros(4, 5, 5).to(get_device())
+    x_mapping = {"var_0": x_val, "var_1": x_val * 2}
+    y_mapping = {"var_0": y_val, "var_1": y_val}
+    result_no_mask = mapping_loss(x_mapping, y_mapping)
+    expected_no_mask = (1.0 + 4.0) / 2.0
+    torch.testing.assert_close(
+        result_no_mask.total(), torch.tensor(expected_no_mask, device=get_device())
+    )
+
+    data_mask = {
+        "var_0": torch.tensor([True, True, True, True]),
+        "var_1": torch.tensor([True, True, False, False]),
+    }
+    result_masked = mapping_loss(x_mapping, y_mapping, data_mask=data_mask)
+    # var_0: MSE=1.0 for all 4 samples, mean=1.0
+    # var_1: MSE=4.0, but only 2 of 4 unmasked, mean=4.0
+    # total: mean(1.0, 4.0) = 2.5
+    torch.testing.assert_close(
+        result_masked.total(),
+        torch.tensor(2.5, device=get_device()),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+
+
+def test_step_loss_forwards_data_mask():
+    out_names = ["var_0", "var_1"]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    area = torch.ones(1, 1)
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+    config = StepLossConfig(type="MSE")
+    step_loss = config.build(
+        gridded_operations,
+        out_names=out_names,
+        channel_dim=-3,
+        normalizer=normalizer,
+    )
+    x_mapping = {
+        "var_0": torch.ones(4, 5, 5).to(get_device()),
+        "var_1": torch.full((4, 5, 5), 2.0).to(get_device()),
+    }
+    y_mapping = {name: torch.zeros(4, 5, 5).to(get_device()) for name in out_names}
+    data_mask = {
+        "var_0": torch.tensor([True, True, True, True]),
+        "var_1": torch.tensor([False, False, False, False]),
+    }
+    result = step_loss(x_mapping, y_mapping, step=0, data_mask=data_mask)
+    # var_0: MSE=1.0 (4 samples). var_1: MSE=4.0 but all masked out → no contribution.
+    # Without the mask the total would be mean(1.0, 4.0) = 2.5.
+    torch.testing.assert_close(result.total(), torch.tensor(1.0, device=get_device()))
+
+
+def test_weighted_mapping_loss_with_ensemble_and_data_mask():
+    out_names = ["a", "b"]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    loss = torch.nn.MSELoss(reduction="none")
+    mapping_loss = WeightedMappingLoss(
+        loss, weights={}, out_names=out_names, normalizer=normalizer
+    )
+    n_batch, n_ens, h, w = 3, 2, 4, 4
+    x = {
+        "a": torch.ones(n_batch, n_ens, h, w).to(get_device()),
+        "b": torch.ones(n_batch, n_ens, h, w).to(get_device()) * 2,
+    }
+    y = {name: torch.zeros(n_batch, n_ens, h, w).to(get_device()) for name in out_names}
+    data_mask = {
+        "a": torch.tensor([True, True, False]),
+        "b": torch.tensor([True, False, False]),
+    }
+    result = mapping_loss(x, y, data_mask=data_mask)
+    assert result._mask is not None
+    assert result._mask.shape == (n_batch, len(out_names))
+    # a: MSE=1.0 for 2 unmasked samples, per-channel mean=1.0
+    # b: MSE=4.0 for 1 unmasked sample, per-channel mean=4.0
+    # total: mean(1.0, 4.0) = 2.5
+    torch.testing.assert_close(
+        result.total(), torch.tensor(2.5, device=get_device()), atol=1e-5, rtol=1e-5
+    )
+
+
+def test_per_channel_losses_are_distinct_area_weighted_mse():
+    """Per-channel losses should differ when inputs differ per channel.
+
+    This is the bug that PR #1111 identified: losses were being
+    reduced to a scalar internally, so all channels reported the same value.
+    """
+    torch.manual_seed(0)
+    area = torch.ones(8, 16, device=get_device())
+    out_names = ["var_a", "var_b"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    config = StepLossConfig(type="AreaWeightedMSE")
+    loss = config.build(
+        LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {"var_a": torch.zeros(4, 8, 16, device=get_device())}
+    x["var_b"] = torch.ones(4, 8, 16, device=get_device()) * 10.0
+    y = {n: torch.zeros(4, 8, 16, device=get_device()) for n in out_names}
+    output = loss(x, y, step=0)
+    channel_losses = output.get_channel_losses()
+    assert channel_losses["var_a"].loss != channel_losses["var_b"].loss
+    assert channel_losses["var_a"].loss < channel_losses["var_b"].loss
+
+
+def test_per_channel_losses_average_to_total():
+    """mean(info.loss for all channels) must equal total() when no mask."""
+    torch.manual_seed(0)
+    area = torch.ones(8, 16, device=get_device())
+    out_names = ["a", "b", "c"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    config = StepLossConfig(type="AreaWeightedMSE")
+    loss = config.build(
+        LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {n: torch.randn(4, 8, 16, device=get_device()) for n in out_names}
+    y = {n: torch.randn(4, 8, 16, device=get_device()) for n in out_names}
+    output = loss(x, y, step=0)
+    total = output.total()
+    channel_mean = torch.stack(
+        [info.loss for info in output.get_channel_losses().values()]
+    ).mean()
+    torch.testing.assert_close(channel_mean, total)
+
+
+def test_per_channel_losses_are_distinct_mse():
+    """Same distinct-channel test but with standard MSE loss."""
+    torch.manual_seed(0)
+    area = torch.ones(8, 16, device=get_device())
+    out_names = ["var_a", "var_b"]
+    normalizer = StandardNormalizer(
+        means={n: torch.as_tensor(0.0) for n in out_names},
+        stds={n: torch.as_tensor(1.0) for n in out_names},
+    )
+    config = StepLossConfig(type="MSE")
+    loss = config.build(
+        LatLonOperations(area),
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = {"var_a": torch.zeros(4, 8, 16, device=get_device())}
+    x["var_b"] = torch.ones(4, 8, 16, device=get_device()) * 10.0
+    y = {n: torch.zeros(4, 8, 16, device=get_device()) for n in out_names}
+    output = loss(x, y, step=0)
+    channel_losses = output.get_channel_losses()
+    assert channel_losses["var_a"].loss != channel_losses["var_b"].loss
+    assert channel_losses["var_a"].loss < channel_losses["var_b"].loss
+
+
+@pytest.mark.medium_duration
+def test_energy_score_preweighting_preserves_total():
+    """Verify the pre-weighted spectral tensor's mean matches the old scalar."""
+    torch.manual_seed(42)
+    DEVICE = get_device()
+    n_lat, n_lon = 16, 32
+    n_batch = 8
+    pred = torch.randn(n_batch, 2, 3, n_lat, n_lon, device=DEVICE)
+    target = torch.randn(n_batch, 1, 3, n_lat, n_lon, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
+    loss = EnergyScoreLoss(sht=sht)
+    components = loss(pred, target)
+    total = _components_total(components)
+    assert total.shape == ()
+    assert total > 0
+
+
+def test_ensemble_component_loss_reduce_to_channel():
+    """EnsembleComponentLoss reduces over non-batch, non-channel dims."""
+    tensor = torch.randn(4, 3, 5, 8, 8, device=get_device())
+    result = EnsembleComponentLoss(tensor).reduce_to_channel()
+    assert result.shape == (4, 5)
+    expected = tensor.mean(dim=(1, 3, 4))
+    torch.testing.assert_close(result, expected)
+
+
+def test_ensemble_component_loss_reduce_to_channel_scalar():
+    tensor = torch.tensor(5.0, device=get_device())
+    result = EnsembleComponentLoss(tensor).reduce_to_channel()
+    torch.testing.assert_close(result, tensor)
+
+
+class TestLossOutputScale:
+    def test_total_scales(self):
+        loss = LossOutput(
+            losses=[StandardLoss(torch.tensor([[1.0, 2.0], [3.0, 4.0]]))],
+            channel_names=["a", "b"],
+        )
+        scaled = loss.scale(0.5)
+        torch.testing.assert_close(scaled.total(), loss.total() * 0.5)
+
+    def test_per_channel_losses_scale(self):
+        loss = LossOutput(
+            losses=[StandardLoss(torch.tensor([[1.0, 2.0], [3.0, 4.0]]))],
+            channel_names=["a", "b"],
+        )
+        original_channels = loss.get_channel_losses()
+        scaled_channels = loss.scale(3.0).get_channel_losses()
+        for name in original_channels:
+            torch.testing.assert_close(
+                scaled_channels[name].loss, original_channels[name].loss * 3.0
+            )
+            assert scaled_channels[name].count == original_channels[name].count
+
+    def test_channel_names_preserved(self):
+        names = ["x", "y", "z"]
+        loss = LossOutput(
+            losses=[StandardLoss(torch.randn(2, 3))],
+            channel_names=names,
+        )
+        scaled = loss.scale(2.0)
+        assert list(scaled.get_channel_losses().keys()) == names
+
+    def test_scale_preserves_counts(self):
+        mask = torch.tensor([[1.0, 1.0], [1.0, 0.0], [0.0, 1.0]])
+        loss = LossOutput(
+            losses=[StandardLoss(torch.randn(3, 2, 4, 4).abs())],
+            channel_names=["a", "b"],
+            mask=mask,
+        )
+        original = loss.get_channel_losses()
+        scaled = loss.scale(2.0).get_channel_losses()
+        assert original["a"].count == scaled["a"].count == 2
+        assert original["b"].count == scaled["b"].count == 2
+
+    def test_preserves_component_subclass_types(self):
+        components = [
+            StandardLoss(torch.randn(2, 3, 4, 4)),
+            EnsembleComponentLoss(torch.randn(2, 5, 3, 4, 4)),
+        ]
+        loss = LossOutput(losses=components, channel_names=["a", "b", "c"])
+        scaled = loss.scale(2.0)
+        for orig, new in zip(components, scaled._losses):
+            assert type(new) is type(orig)
+
+    def test_multiple_components(self):
+        c1 = StandardLoss(torch.tensor([[1.0, 0.0]]))
+        c2 = StandardLoss(torch.tensor([[0.0, 2.0]]))
+        loss = LossOutput(losses=[c1, c2], channel_names=["a", "b"])
+        scaled = loss.scale(0.5)
+        torch.testing.assert_close(scaled.total(), loss.total() * 0.5)
+        original_channels = loss.get_channel_losses()
+        scaled_channels = scaled.get_channel_losses()
+        for name in original_channels:
+            torch.testing.assert_close(
+                scaled_channels[name].loss, original_channels[name].loss * 0.5
+            )
+
+    def test_scale_by_zero(self):
+        loss = LossOutput(
+            losses=[StandardLoss(torch.tensor([[5.0, 3.0]]))],
+            channel_names=["a", "b"],
+        )
+        scaled = loss.scale(0.0)
+        torch.testing.assert_close(scaled.total(), torch.tensor(0.0))
+
+
+def test_spectral_whitening_config_invalid_kind_raises():
+    with pytest.raises(NotImplementedError):
+        SpectralWhiteningConfig(kind="bogus")  # type: ignore[arg-type]
+
+
+def test_spectral_whitening_config_build_disabled_by_default():
+    """kind='none' (default) builds no operator; 'per_sample' builds one."""
+    assert SpectralWhiteningConfig().build() is None
+    assert isinstance(
+        SpectralWhiteningConfig(kind="per_sample").build(), SpectralWhitening
+    )
+
+
+def test_energy_score_whitening_disabled_matches_default():
+    """The default (no whitening config) leaves the energy score unchanged."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_lat, n_lon = 16, 32
+    pred = torch.randn(8, 2, 3, n_lat, n_lon, device=DEVICE)
+    target = torch.randn(8, 1, 3, n_lat, n_lon, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht()
+    default = _components_total(EnergyScoreLoss(sht=sht)(pred, target))
+    disabled = _components_total(
+        EnergyScoreLoss(
+            sht=sht, whitening=SpectralWhiteningConfig(kind="none").build()
+        )(pred, target)
+    )
+    torch.testing.assert_close(default, disabled)
+
+
+def _valid_mask(n_l, n_m, device):
+    l_idx = torch.arange(n_l, device=device).unsqueeze(-1)
+    m_idx = torch.arange(n_m, device=device).unsqueeze(0)
+    return (m_idx <= l_idx).float()
+
+
+def test_spectral_whitening_white_target_is_noop():
+    """A white-spectrum target (equal per-mode amplitude) -> uniform factor 1."""
+    DEVICE = get_device()
+    n_l = n_m = 10
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    y_hat = (valid.to(torch.cfloat))[None, None]  # (B=1, ens=1, L, M)
+    factor = SpectralWhitening().factor(y_hat)
+    torch.testing.assert_close(factor, torch.ones_like(factor), rtol=1e-5, atol=1e-5)
+
+
+def test_spectral_whitening_boosts_small_scales_for_red_spectrum():
+    """A red target spectrum -> factor increases with degree l (boosts small scales)."""
+    DEVICE = get_device()
+    n_l = n_m = 16
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).unsqueeze(-1)
+    y_hat = (amp * valid).to(torch.cfloat)[None, None]  # (1, 1, L, M)
+    factor = SpectralWhitening().factor(y_hat).reshape(-1)  # (L,)
+    assert torch.all(factor[1:] >= factor[:-1] - 1e-5)  # non-decreasing in l
+    assert factor[-1] > 2.0 * factor[0]  # substantial small-scale boost
+
+
+def test_spectral_whitening_preserves_amplitude_weighted_mass():
+    """The reweight is magnitude-preserving: sum_lm w*|y| is unchanged."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_l = n_m = 12
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (torch.rand(n_l, n_m, device=DEVICE) + 0.1) * valid
+    y_hat = amp.to(torch.cfloat)[None, None].repeat(3, 1, 1, 1)  # (3, 1, L, M)
+    factor = SpectralWhitening().factor(y_hat)  # (3, L, 1)
+    redundancy = 2.0 * torch.ones(n_l, n_m, device=DEVICE)
+    redundancy[:, 0] = 1.0
+    w = redundancy * valid
+    amp_mode = y_hat.squeeze(1).abs()  # (3, L, M)
+    mass_base = (w * amp_mode).sum(dim=(-2, -1))
+    mass_white = (w * amp_mode * factor).sum(dim=(-2, -1))
+    torch.testing.assert_close(mass_white, mass_base, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize("exponent", [0.0, -0.5, 1.5])
+def test_spectral_whitening_config_exponent_out_of_range_raises(exponent):
+    with pytest.raises(ValueError):
+        SpectralWhiteningConfig(kind="per_sample", exponent=exponent)
+
+
+@pytest.mark.parametrize("field", ["exponent", "eps_frac"])
+def test_spectral_whitening_config_knob_requires_per_sample(field):
+    """Setting a whitening knob with whitening off is a config error, not a
+    silent no-op -- symmetric across exponent and eps_frac."""
+    with pytest.raises(ValueError):
+        SpectralWhiteningConfig(kind="none", **{field: 0.5})
+
+
+def test_spectral_whitening_config_per_sample_defaults_to_stable_knee():
+    """Enabling whitening without knobs resolves to the validated defaults
+    (gamma=0.5, eps_frac=0.02), not to unstable full whitening."""
+    config = SpectralWhiteningConfig(kind="per_sample")
+    assert config.exponent == 0.5
+    assert config.eps_frac == 0.02
+
+
+def test_spectral_whitening_exponent_partial_interpolates():
+    """gamma=0.5 gives a smaller small-scale boost than full whitening (gamma=1),
+    while staying above the no-whitening uniform factor and magnitude-preserving."""
+    DEVICE = get_device()
+    n_l = n_m = 16
+    valid = _valid_mask(n_l, n_m, DEVICE)
+    amp = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).unsqueeze(-1)
+    y_hat = (amp * valid).to(torch.cfloat)[None, None]  # (1, 1, L, M)
+    full = SpectralWhitening(exponent=1.0).factor(y_hat).reshape(-1)
+    partial = SpectralWhitening(exponent=0.5).factor(y_hat).reshape(-1)
+    # still boosts small scales, but less aggressively than full whitening
+    assert partial[-1] > partial[0]
+    assert 1.0 < partial[-1] / partial[0] < full[-1] / full[0]
+    # magnitude preservation holds for the partial exponent too
+    redundancy = 2.0 * torch.ones(n_l, n_m, device=DEVICE)
+    redundancy[:, 0] = 1.0
+    w = redundancy * valid
+    amp_mode = y_hat.squeeze(1).squeeze(0).abs()  # (L, M)
+    mass_base = (w * amp_mode).sum()
+    mass_partial = (w * amp_mode * partial.unsqueeze(-1)).sum()
+    torch.testing.assert_close(mass_partial, mass_base, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "whitening",
+    [
+        {"kind": "per_sample"},
+        {"kind": "per_sample", "exponent": 0.5},
+        SpectralWhiteningConfig(kind="per_sample", exponent=0.5),
+    ],
+)
+def test_ensemble_loss_with_whitening_builds_and_runs(whitening):
+    """EnsembleLoss accepts energy_score_whitening as a config dict (from YAML)
+    or a SpectralWhiteningConfig, and runs finite."""
+    DEVICE = get_device()
+    n_lat, n_lon = 8, 16
+    config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            "crps_weight": 0.9,
+            "energy_score_weight": 0.1,
+            "energy_score_whitening": whitening,
+        },
+    )
+    loss = config.build(
+        gridded_operations=LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE))
+    )
+    x = torch.rand(4, 2, 3, n_lat, n_lon, device=DEVICE)
+    y = torch.rand(4, 1, 3, n_lat, n_lon, device=DEVICE)
+    out = loss(x, y)
+    assert all(isinstance(c, LossComponent) for c in out)
+    assert torch.isfinite(_components_total(out))

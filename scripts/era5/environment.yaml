@@ -2,6 +2,7 @@ name: era5-ingestion
 channels:
   - conda-forge
 dependencies:
-  - python=3.9
-  - metview-batch
+  - python=3.11
+  - esmf
+  - xesmf
   - pip

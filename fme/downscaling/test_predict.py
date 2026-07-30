@@ -2,19 +2,28 @@ import os
 
 import pytest
 import torch
-import xarray as xr
 import yaml
 
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import predict
-from fme.downscaling.data import StaticInputs, Topography
+from fme.downscaling.data import (
+    ClosedInterval,
+    DataLoaderConfig,
+    StaticInputs,
+    coords_require_lon_roll,
+    load_static_inputs,
+)
+from fme.downscaling.data.test_config import global_data_paths_helper
 from fme.downscaling.models import DiffusionModelConfig, PairedNormalizationConfig
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.predictors import PatchPredictionConfig
+from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_models import LinearDownscaling
-from fme.downscaling.test_utils import data_paths_helper
+from fme.downscaling.test_utils import cell_centered_coordinate, data_paths_helper
 
 
 class LinearDownscalingDiffusion(LinearDownscaling):
@@ -22,7 +31,11 @@ class LinearDownscalingDiffusion(LinearDownscaling):
         return super().forward(coarse)
 
 
-def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
+def get_model_config(
+    coarse_shape: tuple[int, int],
+    downscale_factor: int,
+    use_fine_topography: bool = True,
+):
     fine_shape = (
         coarse_shape[0] * downscale_factor,
         coarse_shape[1] * downscale_factor,
@@ -34,7 +47,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
                 "module": LinearDownscalingDiffusion(
                     factor=1,  # will pass coarse input interpolated to fine shape
                     fine_img_shape=fine_shape,
-                    n_channels_in=3,
+                    n_channels_in=3 if use_fine_topography else 2,
                     n_channels_out=2,
                 )
             },
@@ -58,7 +71,7 @@ def get_model_config(coarse_shape: tuple[int, int], downscale_factor: int):
         churn=1,
         num_diffusion_generation_steps=2,
         predict_residual=True,
-        use_fine_topography=True,
+        use_fine_topography=use_fine_topography,
     )
 
 
@@ -80,7 +93,6 @@ def create_predictor_config(
     experiment_dir.mkdir()
     with open(file_path) as file:
         config = yaml.safe_load(file)
-    config["data"]["topography"] = f"{paths.fine}/data.nc"
     config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
     config["data"]["lat_extent"] = {"start": 1, "stop": 6}
     config["experiment_dir"] = str(experiment_dir)
@@ -96,53 +108,31 @@ def create_predictor_config(
     out_path = tmp_path / "predictor-config.yaml"
     with open(out_path, "w") as file:
         yaml.dump(config, file)
-    return out_path
+    return out_path, f"{paths.fine}/data.nc"
 
 
-@pytest.mark.parametrize("static_inputs_on_model", [True, False])
-def test_predictor_runs(static_inputs_on_model, tmp_path, very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+@pytest.mark.medium_duration
+def test_predictor_runs(tmp_path):
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2
-    predictor_config_path = create_predictor_config(
+    predictor_config_path, fine_data_path = create_predictor_config(
         tmp_path,
         n_samples,
     )
     model_config = get_model_config(coarse_shape, downscale_factor=downscale_factor)
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
     model = model_config.build(
-        coarse_shape=coarse_shape, downscale_factor=downscale_factor
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
     )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
-
-    if static_inputs_on_model:
-        # ensure model static inputs shape is consistent with the test data
-        fine_data = xr.load_dataset(predictor_config["data"]["topography"])
-        topo_data = fine_data["HGTsfc"]
-        model.static_inputs = StaticInputs(
-            [
-                Topography(
-                    data=torch.randn(topo_data.shape[-2:]),
-                    coords=LatLonCoordinates(
-                        lat=torch.tensor(topo_data.lat.values),
-                        lon=torch.tensor(topo_data.lon.values),
-                    ),
-                )
-            ]
-        )
-        # overwrite dataset removing HGTsfc (fine data path is same as topography path)
-        fine_data.drop_vars("HGTsfc").to_netcdf(
-            predictor_config["data"]["topography"], mode="w"
-        )
-        # overwrite config to remove topography path
-        predictor_config["data"]["topography"] = None
-        with open(predictor_config_path, "w") as f:
-            yaml.dump(predictor_config, f)
 
     torch.save(
         {
@@ -159,17 +149,91 @@ def test_predictor_runs(static_inputs_on_model, tmp_path, very_fast_only: bool):
     assert os.path.exists(f"{predictor_config['experiment_dir']}/test_event.nc")
 
 
+def _build_seam_crossing_model_and_data(tmp_path):
+    """A real model on a global fine grid plus a seam-crossing GriddedData.
+
+    The lon extent straddles the 0/360 seam and is sized to match the model's
+    coarse patch, so no patching is needed. No HGTsfc field, so StaticInputs is
+    empty and the model runs with use_fine_topography=False.
+    """
+    coarse_shape = (4, 4)
+    downscale_factor = 2
+    fine_shape = (
+        coarse_shape[0] * downscale_factor,
+        coarse_shape[1] * downscale_factor,
+    )
+    paths = global_data_paths_helper(tmp_path)
+
+    full_fine_coords = LatLonCoordinates(
+        lat=cell_centered_coordinate(0.0, 8.0, fine_shape[0]),
+        lon=cell_centered_coordinate(0.0, 360.0, fine_shape[1]),
+    )
+    model = get_model_config(
+        coarse_shape, downscale_factor, use_fine_topography=False
+    ).build(
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        full_fine_coords=full_fine_coords,
+        static_inputs=StaticInputs(fields=[], coords=full_fine_coords),
+    )
+    data = DataLoaderConfig(
+        coarse=[XarrayDataConfig(str(paths.coarse))],
+        batch_size=2,
+        num_data_workers=0,
+        strict_ensemble=False,
+        lat_extent=ClosedInterval(0.0, 8.0),
+        lon_extent=ClosedInterval(-90.0, 90.0),
+    ).build(
+        requirements=DataRequirements(
+            fine_names=[], coarse_names=["var0", "var1"], n_timesteps=1
+        ),
+    )
+    return model, data, fine_shape
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_predictor_runs_seam_crossing(tmp_path, cls):
+    """Confirm the predict entrypoints roll the model end-to-end on real data (no
+    mocks): the real coarse coords cross the prime meridian, with_rolled_lon
+    produces a rolled model, and generation runs clean in the rolled convention.
+    """
+    model, data, fine_shape = _build_seam_crossing_model_and_data(tmp_path)
+    kwargs = dict(
+        data=data,
+        model=model,
+        experiment_dir=str(tmp_path / "output"),
+        n_samples=2,
+        patch=PatchPredictionConfig(),  # region matches model, so no patching
+    )
+    if cls is predict.EventDownscaler:
+        downscaler = cls(event_name="evt", **kwargs)
+    else:
+        downscaler = cls(**kwargs)
+
+    # The real coarse coords cross the seam, so the entrypoint rolls the model.
+    assert coords_require_lon_roll(data.coarse_extent_latlon_coords.lon)
+    generation_model = downscaler._get_generation_model()
+    assert generation_model is not model  # a real roll produced a new model
+    assert float(generation_model.full_fine_coords.lon.min()) < 0.0
+
+    # Generation runs clean on a real batch, in the rolled convention.
+    batch = next(iter(data.get_generator()))
+    fine_coords = generation_model.get_fine_coords_for_batch(batch)
+    assert float(fine_coords.lon.min()) < 0.0
+    outputs = generation_model.generate_on_batch_no_target(batch, n_samples=2)
+    for value in outputs.values():
+        assert value.shape[-2:] == fine_shape
+
+
+@pytest.mark.medium_duration
 def test_predictor_renaming(
     tmp_path,
-    very_fast_only: bool,
 ):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
     n_samples = 2
     coarse_shape = (4, 4)
     downscale_factor = 2
     renaming = {"var0": "var0_renamed", "var1": "var1_renamed"}
-    predictor_config_path = create_predictor_config(
+    predictor_config_path, fine_data_path = create_predictor_config(
         tmp_path,
         n_samples,
         model_renaming=renaming,
@@ -177,13 +241,22 @@ def test_predictor_renaming(
             "rename": {"var0": "var0_renamed", "var1": "var1_renamed"}
         },
     )
-    model_config = get_model_config(coarse_shape, downscale_factor)
-    model = model_config.build(coarse_shape=coarse_shape, downscale_factor=2)
+    model_config = get_model_config(
+        coarse_shape, downscale_factor, use_fine_topography=False
+    )
+    static_inputs = load_static_inputs({"HGTsfc": fine_data_path})
+    model = model_config.build(
+        coarse_shape=coarse_shape,
+        downscale_factor=2,
+        full_fine_coords=static_inputs.coords,
+        static_inputs=static_inputs,
+    )
     with open(predictor_config_path) as f:
         predictor_config = yaml.safe_load(f)
     os.makedirs(
         os.path.join(predictor_config["experiment_dir"], "checkpoints"), exist_ok=True
     )
+
     torch.save(
         {
             "model": model.get_state(),

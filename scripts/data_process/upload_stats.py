@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import shutil
 import tempfile
 from typing import Dict, List, Optional
@@ -46,7 +47,10 @@ def main(config_yaml: str):
     Arguments:
     config_yaml -- Path to the configuration file for the data processing pipeline.
     """
+    logging.basicConfig(level=logging.INFO)
+
     # imported here so we don't need to install beaker for the tests
+    import beaker as beaker_module
     from beaker import Beaker
 
     with open(config_yaml, "r") as f:
@@ -54,7 +58,18 @@ def main(config_yaml: str):
     config = dacite.from_dict(data_class=Config, data=config_data)
 
     stats_combined_dir = config.stats.output_directory + "/combined/"
-    beaker = Beaker.from_env()
+    beaker_client = Beaker.from_env()
+
+    try:
+        beaker_client.dataset.get(config.stats.beaker_dataset)
+        logging.info(
+            f"Beaker dataset '{config.stats.beaker_dataset}' already exists. "
+            "Skipping."
+        )
+        return
+    except beaker_module.exceptions.BeakerDatasetNotFound:
+        pass
+
     with tempfile.TemporaryDirectory() as tmpdir:
         for filename in (
             "centering.nc",
@@ -73,7 +88,7 @@ def main(config_yaml: str):
             end = "end of run"
         else:
             end = config.stats.end_date
-        beaker.dataset.create(
+        beaker_client.dataset.create(
             config.stats.beaker_dataset,
             tmpdir,
             workspace="ai2/ace",

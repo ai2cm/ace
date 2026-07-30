@@ -1,9 +1,7 @@
 import abc
 import dataclasses
-from collections.abc import Callable
-
-# we use Type to distinguish from type attr of StepSelector
-from typing import Any, ClassVar, Self, Type, TypeVar, cast, final  # noqa: UP035
+from collections.abc import Callable, Mapping
+from typing import Any, ClassVar, Self, TypeVar, final
 
 import dacite
 import torch
@@ -14,6 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -109,6 +108,15 @@ class StepConfigABC(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+
+    @property
+    @abc.abstractmethod
+    def allow_missing_variables(self) -> bool:
+        pass
+
+    @abc.abstractmethod
     def load(self):
         """
         Update configuration in-place so it does not depend on external files.
@@ -116,30 +124,26 @@ class StepConfigABC(abc.ABC):
         pass
 
     @classmethod
-    def from_state(cls, state: dict[str, Any]) -> Self:
-        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
-
-
-T = TypeVar("T", bound=StepConfigABC)
+    @abc.abstractmethod
+    def from_state(cls, state: Mapping[str, Any]) -> Self:
+        pass
 
 
 @dataclasses.dataclass
 class StepSelector(StepConfigABC):
     type: str
     config: dict[str, Any]
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry[StepConfigABC]] = Registry[StepConfigABC]()
 
     def __post_init__(self):
-        self._step_config_instance: StepConfigABC = cast(
-            StepConfigABC, self.registry.get(self.type, self.config)
-        )
+        self._step_config_instance = self.registry.get(self.type, self.config)
 
     @property
     def n_ic_timesteps(self) -> int:
         return self._step_config_instance.n_ic_timesteps
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
+    def register(cls, name: str):
         return cls.registry.register(name)
 
     def get_step(
@@ -211,18 +215,51 @@ class StepSelector(StepConfigABC):
     def get_ocean(self) -> OceanConfig | None:
         return self._step_config_instance.get_ocean()
 
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        self._step_config_instance.replace_prescribed_prognostic_names(names)
+        self.config = dataclasses.asdict(self._step_config_instance)
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return self._step_config_instance.allow_missing_variables
+
     def load(self):
         self._step_config_instance.load()
         self.config = dataclasses.asdict(self._step_config_instance)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> Self:
+        return dacite.from_dict(cls, state, config=dacite.Config(strict=True))
 
 
 class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
+    def __init__(self) -> None:
+        # Mirrors ``torch.nn.Module.training`` so that step-level eval/train
+        # state is observable without reaching into the underlying modules.
+        self._training: bool = True
+
     @property
     @abc.abstractmethod
     def config(self) -> StepConfigABC:
         pass
+
+    def train(self, mode: bool = True) -> "StepABC":
+        """Set the step (and all submodules) to training mode.
+
+        Matches the ``torch.nn.Module.train`` signature so step instances
+        can be toggled with the same API as the modules they own.
+        """
+        self._training = mode
+        for module in self.modules:
+            module.train(mode)
+        return self
+
+    @final
+    def eval(self) -> "StepABC":
+        """Set the step (and all submodules) to evaluation mode."""
+        return self.train(False)
 
     @final
     def get_loss_normalizer(
@@ -324,7 +361,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -333,7 +370,17 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            The denormalized output data at the next time step.
+            A ``StepOutput`` carrying the denormalized data at the next time
+            step, the per-sample state to thread into the next call (or
+            ``None``), and the corrector's per-variable correction diagnostics.
+        """
+        pass
+
+    def set_epoch(self, epoch: int) -> None:
+        """Called by the stepper at the start of each training epoch.
+
+        Default implementation is a no-op. Steps which wrap another step must
+        forward the call to the wrapped step.
         """
         pass
 

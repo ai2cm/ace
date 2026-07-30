@@ -12,4 +12,4 @@ beaker session create \
 	--mount hostpath://${DIR}=/full-model \
 	--workdir /full-model \
 	--workspace ai2/ace \
-	--budget ai2/climate
+	--budget ai2/atec-climate

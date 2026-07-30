@@ -75,10 +75,22 @@ def run_gather_test(rank, worldsize):
             assert torch.allclose(gathered[i].cpu(), torch.ones(2, 5) * i)
 
 
+@pytest.mark.serial
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="requires multi-GPU machine")
 def test_distributed_gather():
     world_size = 2
     mp.spawn(run_gather_test, args=(world_size,), nprocs=world_size, join=True)
+
+
+@pytest.mark.parallel
+def test_scatter_object():
+    dist = Distributed()
+    if dist.is_root():
+        obj = {"key": "value"}
+    else:
+        obj = None
+    scattered = dist.scatter_object(obj)
+    assert scattered == {"key": "value"}
 
 
 def test_non_distributed_gather():

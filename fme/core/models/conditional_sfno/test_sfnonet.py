@@ -1,15 +1,18 @@
 import os
-from types import SimpleNamespace
 
 import pytest
 import torch
 from torch import nn
 
+from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
+from fme.core.models.conditional_sfno.benchmark import get_block_benchmark
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
-from .sfnonet import get_lat_lon_sfnonet
+from .s2convolutions import SpectralConvS2
+from .sfnonet import SFNONetConfig, get_lat_lon_sfnonet
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -40,10 +43,9 @@ def test_can_call_sfnonet(
     img_shape = (9, 18)
     n_samples = 4
     device = get_device()
-    params = SimpleNamespace(
+    params = SFNONetConfig(
         embed_dim=16,
         num_layers=2,
-        residual_filter_factor=residual_filter_factor,
         filter_type="makani-linear",
     )
     model = get_lat_lon_sfnonet(
@@ -86,7 +88,7 @@ def test_scale_factor_not_implemented():
     output_channels = 3
     img_shape = (9, 18)
     device = get_device()
-    params = SimpleNamespace(embed_dim=16, num_layers=2, scale_factor=2)
+    params = SFNONetConfig(embed_dim=16, num_layers=2, scale_factor=2)
     with pytest.raises(NotImplementedError):
         # if this ever gets implemented, we need to instead test that the scale factor
         # is used to determine the nlat/nlon of the image in the network
@@ -104,8 +106,7 @@ def test_scale_factor_not_implemented():
         ).to(device)
 
 
-def test_sfnonet_output_is_unchanged():
-    torch.manual_seed(0)
+def setup_sfnonet():
     input_channels = 2
     output_channels = 3
     img_shape = (9, 18)
@@ -115,9 +116,7 @@ def test_sfnonet_output_is_unchanged():
     conditional_embed_dim_noise = 16
     conditional_embed_dim_pos = 0
     device = get_device()
-    params = SimpleNamespace(
-        embed_dim=16, num_layers=2, filter_type="linear", operator_type="dhconv"
-    )
+    params = SFNONetConfig(embed_dim=16, num_layers=2, filter_type="linear")
     model = get_lat_lon_sfnonet(
         params=params,
         img_shape=img_shape,
@@ -146,11 +145,49 @@ def test_sfnonet_output_is_unchanged():
         noise=context_embedding_noise,
         embedding_pos=context_embedding_pos,
     )
+    return model, x, context
+
+
+def test_sfnonet_output_is_unchanged():
+    torch.manual_seed(0)
+    model, x, context = setup_sfnonet()
     with torch.no_grad():
         output = model(x, context)
     validate_tensor(
         output,
         os.path.join(DIR, "testdata/test_sfnonet_output_is_unchanged.pt"),
+    )
+
+
+def load_or_cache_model_state(
+    model: SphericalFourierNeuralOperatorNet,
+    x: torch.Tensor,
+    context: Context,
+    path: str,
+):
+    if os.path.exists(path):
+        data = torch.load(path, map_location=get_device())
+        x = data.pop("x")
+        context = Context.from_dict(data.pop("context"))
+        model.load_state_dict(data)
+    else:
+        data = model.state_dict()
+        data["x"] = x
+        data["context"] = context.asdict()
+        torch.save(data, path)
+    return model, x, context
+
+
+def test_sfnonet_output_from_checkpoint_is_unchanged():
+    torch.manual_seed(0)
+    model, x, context = setup_sfnonet()
+    checkpoint_path = os.path.join(DIR, "testdata/test_sfnonet_checkpoint_input.pt")
+    model, x, context = load_or_cache_model_state(model, x, context, checkpoint_path)
+    with torch.no_grad():
+        output = model(x, context)
+    validate_tensor(
+        output,
+        os.path.join(DIR, "testdata/test_sfnonet_checkpoint_output.pt"),
     )
 
 
@@ -177,12 +214,11 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
     original_layer_norm = nn.LayerNorm
     try:
         nn.LayerNorm = SetToZero
-        params = SimpleNamespace(
+        params = SFNONetConfig(
             embed_dim=16,
             num_layers=2,
             normalize_big_skip=normalize_big_skip,
             global_layer_norm=True,  # so it uses nn.LayerNorm
-            operator_type="dhconv",
         )
         model = get_lat_lon_sfnonet(
             params=params,
@@ -221,3 +257,388 @@ def test_all_inputs_get_layer_normed(normalize_big_skip: bool):
         assert not torch.isnan(output).any()
     else:
         assert torch.isnan(output).any()
+
+
+@pytest.mark.skipif(
+    get_device().type != "cuda",
+    reason=(
+        "This test is only relevant for CUDA since "
+        "it's testing speed of SFNO blocks on GPU."
+    ),
+)  # noqa: E501
+@pytest.mark.serial
+def test_block_speed():
+    ungrouped = get_block_benchmark(filter_num_groups=1).run_benchmark(
+        iters=5, warmup=1
+    )
+    grouped = get_block_benchmark(filter_num_groups=8).run_benchmark(iters=5, warmup=1)
+    assert grouped.timer.avg_time < ungrouped.timer.avg_time, (
+        "Expected grouped DHConv to be faster than ungrouped, but got "
+        f"{grouped.timer.avg_time:.6f} ms for grouped and "
+        f"{ungrouped.timer.avg_time:.6f} ms for ungrouped."
+    )
+    assert grouped.memory.max_alloc < ungrouped.memory.max_alloc, (
+        "Expected grouped DHConv to use less memory than ungrouped, but got "
+        f"{grouped.memory.max_alloc / 1e6:.2f} MB for grouped and "
+        f"{ungrouped.memory.max_alloc / 1e6:.2f} MB for ungrouped."
+    )
+
+
+def _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean, bias=False):
+    dist = Distributed.get_instance()
+    modes_lat = nlat
+    modes_lon = nlon // 2 + 1
+    sht = dist.get_sht(
+        nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
+    )
+    isht = dist.get_isht(
+        nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid="legendre-gauss"
+    )
+    conv = SpectralConvS2(
+        sht,
+        isht,
+        embed_dim,
+        embed_dim,
+        bias=bias,
+        preserve_global_mean=preserve_global_mean,
+    )
+    return conv, sht
+
+
+def test_filter_preserves_global_mean():
+    torch.manual_seed(0)
+    nlat, nlon, embed_dim = 16, 32, 8
+    device = get_device()
+    conv, sht = _make_spectral_conv(nlat, nlon, embed_dim, preserve_global_mean=True)
+    conv = conv.to(device)
+    sht = sht.to(device)
+
+    x = torch.randn(2, embed_dim, nlat, nlon, device=device)
+    with torch.no_grad():
+        output, _ = conv(x)
+
+    x_spectral = sht(x.float())
+    out_spectral = sht(output.float())
+    torch.testing.assert_close(
+        out_spectral[:, :, 0, :], x_spectral[:, :, 0, :], atol=1e-5, rtol=1e-5
+    )
+
+
+def test_sfnonet_spectral_ratio_end_to_end():
+    """End-to-end: SFNO with spectral_ratio < 1 builds, forwards, and shrinks
+    the per-block spectral weight tensor."""
+    torch.manual_seed(0)
+    input_channels = 2
+    output_channels = 3
+    embed_dim = 16
+    img_shape = (9, 18)
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=embed_dim,
+        num_layers=2,
+        filter_type="linear",
+        spectral_ratio=0.5,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(2, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
+    assert output.shape == (2, output_channels, *img_shape)
+    output.sum().backward()
+    for block in model.blocks:
+        spectral_conv = block.filter.filter
+        assert spectral_conv.spectral_channels == embed_dim // 2
+        assert spectral_conv.weight.shape[-2] == embed_dim // 2
+        assert spectral_conv.weight.shape[-3] == embed_dim // 2
+        assert spectral_conv.pre_proj is not None
+        assert spectral_conv.post_proj is not None
+        assert spectral_conv.weight.grad is not None
+        assert spectral_conv.pre_proj.weight.grad is not None
+        assert spectral_conv.post_proj.weight.grad is not None
+
+
+def test_sfnonet_spectral_ratio_rejects_non_linear_filter():
+    with pytest.raises(NotImplementedError, match="filter_type='linear'"):
+        SFNONetConfig(
+            embed_dim=16,
+            num_layers=2,
+            filter_type="makani-linear",
+            spectral_ratio=0.5,
+        )
+
+
+def test_sfnonet_spectral_ratio_rejects_preserve_global_mean():
+    with pytest.raises(NotImplementedError, match="filter_preserves_global_mean"):
+        SFNONetConfig(
+            embed_dim=16,
+            num_layers=2,
+            filter_type="linear",
+            spectral_ratio=0.5,
+            filter_preserves_global_mean=True,
+        )
+
+
+def test_sfnonet_spectral_ratio_rejects_local_blocks():
+    with pytest.raises(NotImplementedError, match="local_blocks"):
+        SFNONetConfig(
+            embed_dim=16,
+            num_layers=2,
+            filter_type="linear",
+            spectral_ratio=0.5,
+            local_blocks=[0],
+        )
+
+
+def test_sfnonet_spectral_ratio_rejects_indivisible_groups():
+    # 8 * 0.25 -> 2 spectral channels, not divisible by filter_num_groups=4
+    with pytest.raises(ValueError, match="filter_num_groups"):
+        SFNONetConfig(
+            embed_dim=8,
+            num_layers=2,
+            filter_type="linear",
+            spectral_ratio=0.25,
+            filter_num_groups=4,
+        )
+
+
+def test_filter_preserves_global_mean_allows_grad():
+    torch.manual_seed(0)
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        filter_preserves_global_mean=True,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+    ).to(device)
+    x = torch.randn(2, input_channels, *img_shape, device=device)
+    context = Context(
+        embedding_scalar=torch.zeros(2, 0, device=device),
+        labels=torch.zeros(2, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    output = model(x, context)
+    assert output.shape == (2, output_channels, *img_shape)
+    output.sum().backward()
+    for block in model.blocks:
+        weight = block.filter.filter.weight
+        assert weight.grad is not None
+        assert not torch.all(weight.grad == 0)
+
+
+def _make_clip_model(
+    embed_dim: int = 16,
+    num_layers: int = 2,
+    img_shape: tuple[int, int] = (9, 18),
+):
+    device = get_device()
+    params = SFNONetConfig(
+        embed_dim=embed_dim,
+        num_layers=num_layers,
+        filter_type="linear",
+        clip_latent_global_means=True,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=2,
+        out_chans=2,
+    ).to(device)
+    context = Context(
+        embedding_scalar=torch.zeros(4, 0, device=device),
+        labels=torch.zeros(4, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    return model, context, device
+
+
+def test_clip_latent_global_means_envelope_starts_uninitialized():
+    torch.manual_seed(0)
+    model, _, _ = _make_clip_model()
+    assert torch.isinf(model._gm_min).all() and (model._gm_min > 0).all()
+    assert torch.isinf(model._gm_max).all() and (model._gm_max < 0).all()
+
+
+def test_clip_latent_global_means_envelope_tracked_in_training():
+    torch.manual_seed(0)
+    model, ctx, device = _make_clip_model()
+    x = torch.randn(4, 2, 9, 18, device=device)
+    model.train()
+    with torch.no_grad():
+        model(x, ctx)
+    assert torch.isfinite(model._gm_min).all()
+    assert torch.isfinite(model._gm_max).all()
+    assert (model._gm_max >= model._gm_min).all()
+    # A larger-magnitude batch should widen the envelope.
+    gm_min_before = model._gm_min.clone()
+    gm_max_before = model._gm_max.clone()
+    x_big = 10.0 * torch.randn(4, 2, 9, 18, device=device)
+    with torch.no_grad():
+        model(x_big, ctx)
+    assert (model._gm_min <= gm_min_before).all()
+    assert (model._gm_max >= gm_max_before).all()
+
+
+def test_clip_latent_global_means_eval_with_uninitialized_envelope_is_identity():
+    # Before any training-mode forward, the envelope is at sentinels and
+    # eval-mode clipping must be a no-op.
+    torch.manual_seed(0)
+    device = get_device()
+    params_clip = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        clip_latent_global_means=True,
+    )
+    params_no_clip = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        clip_latent_global_means=False,
+    )
+    torch.manual_seed(0)
+    model_clip = get_lat_lon_sfnonet(
+        params=params_clip, img_shape=(9, 18), in_chans=2, out_chans=2
+    ).to(device)
+    torch.manual_seed(0)
+    model_no_clip = get_lat_lon_sfnonet(
+        params=params_no_clip, img_shape=(9, 18), in_chans=2, out_chans=2
+    ).to(device)
+    model_clip.eval()
+    model_no_clip.eval()
+    x = torch.randn(4, 2, 9, 18, device=device)
+    ctx = Context(
+        embedding_scalar=torch.zeros(4, 0, device=device),
+        labels=torch.zeros(4, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    with torch.no_grad():
+        out_clip = model_clip(x, ctx)
+        out_no_clip = model_no_clip(x, ctx)
+    torch.testing.assert_close(out_clip, out_no_clip)
+
+
+def test_clip_latent_global_means_eval_shifts_when_outside_envelope():
+    # With a tight known envelope, eval must clamp the latent's per-channel
+    # spatial mean into the envelope via a spatially-constant shift.
+    torch.manual_seed(0)
+    model, ctx, device = _make_clip_model()
+    model.eval()
+    latents = []
+    handle = model.blocks[0].register_forward_pre_hook(
+        lambda _module, args: latents.append(args[0].detach().clone())
+    )
+    x = 10.0 * torch.randn(4, 2, 9, 18, device=device)
+    with torch.no_grad():
+        # First forward with the envelope at sentinels: no clipping, so the
+        # hook captures the raw latent.
+        model(x, ctx)
+        # Force envelope to a tight range; any latent mean outside it must
+        # be clipped on the second forward.
+        model._gm_min.fill_(-0.01)
+        model._gm_max.fill_(0.01)
+        model(x, ctx)
+    handle.remove()
+    raw_latent, clipped_latent = latents
+    raw_means = raw_latent.mean(dim=(-2, -1), keepdim=True)
+    clipped_means = clipped_latent.mean(dim=(-2, -1), keepdim=True)
+    # The scenario must actually exercise clipping.
+    assert (raw_means.abs() > 0.01).any()
+    # Means are clamped into the envelope...
+    torch.testing.assert_close(clipped_means, raw_means.clamp(min=-0.01, max=0.01))
+    # ...via a spatially-constant per-channel shift that preserves anomalies.
+    torch.testing.assert_close(clipped_latent - clipped_means, raw_latent - raw_means)
+
+
+def test_clip_latent_global_means_lazy_reset():
+    torch.manual_seed(0)
+    model, ctx, device = _make_clip_model()
+    x = torch.randn(4, 2, 9, 18, device=device)
+    model.train()
+    with torch.no_grad():
+        model(x, ctx)
+    gm_min_after_epoch1 = model._gm_min.clone()
+    gm_max_after_epoch1 = model._gm_max.clone()
+    assert torch.isfinite(gm_min_after_epoch1).all()
+
+    # Requesting a reset should not immediately wipe the envelope.
+    model.request_latent_global_mean_envelope_reset()
+    torch.testing.assert_close(model._gm_min, gm_min_after_epoch1)
+    torch.testing.assert_close(model._gm_max, gm_max_after_epoch1)
+
+    # Eval between request and next training forward sees the prior envelope.
+    model.eval()
+    with torch.no_grad():
+        model(x, ctx)
+    torch.testing.assert_close(model._gm_min, gm_min_after_epoch1)
+    torch.testing.assert_close(model._gm_max, gm_max_after_epoch1)
+
+    # The first subsequent training forward performs the reset, then
+    # records new statistics from that batch alone.
+    model.train()
+    x_new = 0.5 * torch.randn(4, 2, 9, 18, device=device)
+    with torch.no_grad():
+        model(x_new, ctx)
+    assert not torch.allclose(model._gm_min, gm_min_after_epoch1)
+    assert not torch.allclose(model._gm_max, gm_max_after_epoch1)
+
+
+@pytest.mark.parallel
+def test_clip_latent_global_means_envelope_synchronized_across_ranks():
+    """The envelope must be min/max-reduced across data-parallel ranks.
+
+    Each data-parallel rank feeds a differently-scaled input, so local batch
+    envelopes differ across ranks. After a training-mode forward the envelope
+    must contain the local batch means and be identical across the
+    data-parallel group (a further reduction must be a no-op).
+    """
+    torch.manual_seed(0)
+    dist = Distributed.get_instance()
+    img_shape = (8, 16)  # divides evenly across spatial ranks
+    model, ctx, device = _make_clip_model(img_shape=img_shape)
+    x_global = torch.randn(4, 2, *img_shape, device=device)
+    h_slice, w_slice = dist.get_local_slices(img_shape)
+    x_local = x_global[..., h_slice, w_slice] * (1.0 + dist.data_parallel_rank)
+
+    latents = []
+    handle = model.blocks[0].register_forward_pre_hook(
+        lambda _module, args: latents.append(args[0].detach().clone())
+    )
+    model.train()
+    with torch.no_grad():
+        model(x_local, ctx)
+    handle.remove()
+    (latent,) = latents
+    local_means = latent.mean(dim=(-2, -1), keepdim=True)
+
+    # The envelope contains every local sample's per-channel mean.
+    assert (model._gm_min <= local_means).all()
+    assert (model._gm_max >= local_means).all()
+
+    # All ranks in the data-parallel group hold the same envelope, so a
+    # further reduction is a no-op. Without the cross-rank reduction in
+    # forward, the differently-scaled inputs would leave ranks with
+    # different envelopes and this reduction would change the values.
+    torch.testing.assert_close(dist.reduce_min(model._gm_min.clone()), model._gm_min)
+    torch.testing.assert_close(dist.reduce_max(model._gm_max.clone()), model._gm_max)

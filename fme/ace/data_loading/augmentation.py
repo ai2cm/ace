@@ -110,6 +110,7 @@ class RotateModifier(BatchModifierABC):
             time=batch.time,
             horizontal_dims=batch.horizontal_dims,
             labels=batch.labels,
+            data_mask=batch.data_mask,
         )
 
 

@@ -240,6 +240,9 @@ class CoupledSeaSurfaceConfig:
             copies of the mask will be added as "mask_{extra_name}". NOTE: The
             sea-ice fraction and "ocean" sea-ice fraction masks don't need to be
             specified here.
+        ocean_extra_fill_values: Dictionary where keys are a subset of
+            ocean_extra_masked_names entries and values are used to fill any
+            NaNs that are found in the non-NaN area of the sea ice mask.
         sea_ice_window_avg: Optional configuration for windowed time-averaging of the
             coupled sea ice dataset. If None, the coupled sea ice is simply subsampled
             to the ocean dataset temporal frequency.
@@ -250,6 +253,7 @@ class CoupledSeaSurfaceConfig:
     surface_flux_window_avg: WindowAvgDatasetConfig
     sst_threshold: float | None = None
     ocean_extra_masked_names: list[str] = dataclasses.field(default_factory=list)
+    ocean_extra_fill_values: dict[str, float] = dataclasses.field(default_factory=dict)
     precomputed_sea_ice_mask: PrecomputedSeaIceMaskConfig | None = None
     sea_ice_window_avg: WindowAvgDatasetConfig | None = None
     timedelta: str = "120h"
@@ -287,7 +291,7 @@ class CoupledSeaSurfaceConfig:
             self._mask = (sst_tm < self.sst_threshold).fillna(0.0)
         return self._mask
 
-    def apply_mask(self, da: xr.DataArray) -> xr.DataArray:
+    def apply_mask(self, da: xr.DataArray, name: str | None = None) -> xr.DataArray:
         """Apply the computed sea ice mask to a data array.
 
         Args:
@@ -301,6 +305,8 @@ class CoupledSeaSurfaceConfig:
         """
         if self._mask is None:
             raise RuntimeError("Call compute_sea_ice_mask before apply_mask.")
+        if name is not None and name in self.ocean_extra_fill_values:
+            da = da.fillna(self.ocean_extra_fill_values[name])
         return da.where(self._mask > 0)
 
     def apply_sea_ice_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
@@ -647,7 +653,7 @@ def compute_coupled_ocean(
 
     # apply masking to other sea ice variables in the ocean dataset
     for name in config.ocean_extra_masked_names:
-        ds[name] = config.apply_mask(ocean[name])
+        ds[name] = config.apply_mask(ocean[name], name)
         ds[name].attrs = ocean[name].attrs
         ds[f"mask_{name}"] = sea_ice_mask
 

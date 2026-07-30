@@ -19,6 +19,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -105,11 +106,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         init_weights: Callable[[list[nn.Module]], None],
     ) -> "SeparateRadiationStep":
         logging.info("Initializing stepper from provided config")
-        corrector = dataset_info.vertical_coordinate.build_corrector(
-            config=self.corrector,
-            gridded_operations=dataset_info.gridded_operations,
-            timestep=dataset_info.timestep,
-        )
+        corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SeparateRadiationStep(
             config=self,
@@ -163,6 +160,13 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_next_step_forcing_names(self) -> list[str]:
         return self.next_step_forcing_names
+
+    def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
+        pass
+
+    @property
+    def allow_missing_variables(self) -> bool:
+        return False
 
     @property
     def diagnostic_names(self) -> list[str]:
@@ -348,18 +352,7 @@ class SeparateRadiationStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> TensorDict:
-        """
-        Step the model forward one timestep given input data.
-
-        Args:
-            args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
-
-        Returns:
-            The denormalized output data at the next time step.
-        """
-
+    ) -> StepOutput:
         def network_calls(input_norm: TensorDict) -> TensorDict:
             radiation_input_tensor = self.radiation_in_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
@@ -400,20 +393,33 @@ class SeparateRadiationStep(StepABC):
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
+            stepper_state=args.stepper_state,
         )
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
+
+    def train(self, mode: bool = True) -> StepABC:
+        super().train(mode)
+        self._corrector.train(mode)
+        return self
+
+    def set_epoch(self, epoch: int) -> None:
+        self._corrector.set_epoch(epoch)
 
     def get_state(self):
         """
         Returns:
             The state of the ML modules.
         """
-        return {
+        state = {
             "module": self.module.get_state(),
             "radiation_module": self.radiation_module.get_state(),
         }
+        corrector_state = self._corrector.get_state()
+        if len(corrector_state) > 0:
+            state["corrector"] = corrector_state
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
         """
@@ -424,3 +430,4 @@ class SeparateRadiationStep(StepABC):
         """
         self.module.load_state(state["module"])
         self.radiation_module.load_state(state["radiation_module"])
+        self._corrector.load_state(state.get("corrector", {}))

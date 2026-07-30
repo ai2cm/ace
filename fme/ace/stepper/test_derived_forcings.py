@@ -150,8 +150,13 @@ def test_forcing_deriver(insolation: InsolationConfig | None):
             solar_constant_name = insolation.solar_constant.name
             forcing_dict[solar_constant_name] = torch.full(expected_shape, S0)
 
-    forcing = BatchData(forcing_dict, time, labels=None)
+    data_mask = {"some_var": torch.tensor([True, False, True])}
+    forcing = BatchData(forcing_dict, time, labels=None, data_mask=data_mask)
     result = forcing_deriver(forcing)
+
+    assert result.data_mask is not None
+    assert "some_var" in result.data_mask
+    torch.testing.assert_close(result.data_mask["some_var"], data_mask["some_var"])
 
     if insolation is None:
         assert result.data == {}

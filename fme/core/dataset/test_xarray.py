@@ -39,7 +39,7 @@ from fme.core.dataset.xarray import (
     _repeat_and_increment_time,
     get_xarray_dataset,
 )
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
 
 from .utils import as_broadcasted_tensor
@@ -426,7 +426,7 @@ def test_XarrayDataset_monthly(
     expected_n_samples = len(mock_data.obs_times) - 1
 
     assert len(dataset) == expected_n_samples
-    arrays, time, dataset_labels, epoch = dataset[global_idx]
+    arrays, time, dataset_labels, epoch, _ = dataset[global_idx]
     assert epoch is None
     assert dataset_labels == labels
     ds = load_files_without_dask(mock_data.tmpdir.glob(file_pattern), engine=engine)
@@ -534,7 +534,7 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx, labels):
             target_times = ds["time"][global_idx : global_idx + n_steps].drop_vars(
                 "time"
             )
-            data, time, labels, epoch = dataset[global_idx]
+            data, time, labels, epoch, _ = dataset[global_idx]
             assert epoch is None
             assert labels == labels
             data_tensor = data[var_name]
@@ -556,7 +556,7 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
     )
     assert data_properties.vertical_coordinate.ak.dtype == torch.bfloat16
     assert data_properties.vertical_coordinate.bk.dtype == torch.bfloat16
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     for tensor in data.values():
         assert tensor.dtype == torch.bfloat16
 
@@ -754,7 +754,7 @@ def test_get_sample_by_time_slice_times_n_repeats(mock_monthly_netcdfs: MockData
     unrepeated_length = len(repeated_dataset.all_times) // n_repeats
     time_slice = slice(unrepeated_length, unrepeated_length + 3)
 
-    _, result, _, _ = repeated_dataset.get_sample_by_time_slice(time_slice)
+    _, result, _, _, _ = repeated_dataset.get_sample_by_time_slice(time_slice)
     expected = xr.DataArray(
         repeated_dataset.all_times[time_slice].values, dims=["time"]
     )
@@ -792,7 +792,7 @@ def test_fill_nans(mock_data_fixture, engine, file_pattern, request):
     )
     names = mock_data.var_names.all_names
     dataset = xarray_dataset_constructor(config, names, 2)
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     assert torch.all(data["foo"][0, :, 0] == 0)
     assert torch.all(data["constant_var"][:, 0, 0] == 0)
 
@@ -801,7 +801,7 @@ def test_keep_nans(mock_monthly_netcdfs_with_nans):
     config_keep_nan = XarrayDataConfig(data_path=mock_monthly_netcdfs_with_nans.tmpdir)
     names = mock_monthly_netcdfs_with_nans.var_names.all_names
     dataset = xarray_dataset_constructor(config_keep_nan, names, 2)
-    data_with_nan, _, _, _ = dataset[0]
+    data_with_nan, _, _, _, _ = dataset[0]
     assert torch.all(torch.isnan(data_with_nan["foo"][0, :, 0]))
     assert torch.all(torch.isnan(data_with_nan["constant_var"][:, 0, 0]))
 
@@ -981,32 +981,58 @@ def test__get_vertical_coordinate_hybrid_sigma_pressure():
     assert vertical_coordinate.bk[0] == 0.5
 
 
-def test__get_vertical_coordinate_depth_no_mask():
-    data = xr.Dataset({"idepth_0": 1.0, "idepth_1": 2.0})
+@pytest.mark.parametrize("has_deptho", [False, True], ids=["no_deptho", "with_deptho"])
+def test__get_vertical_coordinate_depth_no_mask(has_deptho):
+    data_vars: dict = {"idepth_0": 1.0, "idepth_1": 2.0}
+    if has_deptho:
+        data_vars["deptho"] = 1.5
+    data = xr.Dataset(data_vars)
     vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
     assert isinstance(vertical_coordinate, DepthCoordinate)
     assert vertical_coordinate.idepth[0] == 1.0
     assert vertical_coordinate.mask[0] == 1.0
+    if has_deptho:
+        assert vertical_coordinate.deptho is not None
+        assert float(vertical_coordinate.deptho) == 1.5
+    else:
+        assert vertical_coordinate.deptho is None
 
 
-def test__get_vertical_coordinate_depth_with_lat_dependent_mask():
-    data = xr.Dataset(
-        data_vars={
-            "idepth_0": 1.0,
-            "idepth_1": 2.0,
-            "idepth_2": 3.0,
-            "mask_0": ("lat", np.array([1.0, 1.0])),
-            "mask_1": ("lat", np.array([0.0, 1.0])),
-        },
-        coords={
-            "lat": np.array([1.0, 2.0]),
-        },
-    )
+@pytest.mark.parametrize("has_deptho", [False, True], ids=["no_deptho", "with_deptho"])
+def test__get_vertical_coordinate_depth_with_lat_dependent_mask(has_deptho):
+    data_vars: dict = {
+        "idepth_0": 1.0,
+        "idepth_1": 2.0,
+        "idepth_2": 3.0,
+        "mask_0": ("lat", np.array([1.0, 1.0])),
+        "mask_1": ("lat", np.array([0.0, 1.0])),
+    }
+    if has_deptho:
+        data_vars["deptho"] = ("lat", np.array([2.5, 3.0]))
+    data = xr.Dataset(data_vars, coords={"lat": np.array([1.0, 2.0])})
     vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
     assert isinstance(vertical_coordinate, DepthCoordinate)
     assert vertical_coordinate.idepth[0] == 1.0
     assert vertical_coordinate.idepth.shape == (3,)
     assert vertical_coordinate.mask.shape == (2, 2)
+    if has_deptho:
+        assert vertical_coordinate.deptho is not None
+        assert vertical_coordinate.deptho.shape == (2,)
+    else:
+        assert vertical_coordinate.deptho is None
+
+
+def test__get_vertical_coordinate_depth_with_time_dependent_deptho():
+    data = xr.Dataset(
+        data_vars={
+            "idepth_0": 1.0,
+            "idepth_1": 2.0,
+            "deptho": ("time", np.array([1.5, 1.5])),
+        },
+        coords={"time": np.array([1.0, 2.0])},
+    )
+    with pytest.raises(ValueError, match="'deptho' must be time-independent"):
+        _get_vertical_coordinate(data, dtype=None)
 
 
 def test__get_vertical_coordinate_depth_with_time_dependent_mask():
@@ -1066,7 +1092,7 @@ def test_dataset_with_nonspacetime_dim(
     # Omit the test variable that has mismatch dimensions
     vars = list(set(mock_data.var_names.all_names) - {"var_no_ensemble_dim"})
     dataset = xarray_dataset_constructor(config, vars, 2)
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     assert len(data["foo"].shape) == 4
     assert dataset.dims == ["time", "sample", "lat", "lon"]
 
@@ -1113,7 +1139,7 @@ def test_xarray_dataset_isel(mock_data_fixture, engine, file_pattern, request):
     )
     vars = list(set(mock_data.var_names.all_names) - {"var_no_ensemble_dim"})
     dataset = xarray_dataset_constructor(config, vars, 2)
-    data, _, _, _ = dataset[0]
+    data, _, _, _, _ = dataset[0]
     # Original lat/lon sizes are 4, 8
     assert data["var_matches_sample_index"].shape == (2, 4, 8)
     assert data["constant_var"].shape == (2, 4, 8)
@@ -1200,7 +1226,50 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
     data_properties = dataset.properties
-    assert not data_properties.mask_provider.masks
-    existing_mask = MaskProvider(masks={"mask_0": torch.ones(4, 8)})
-    data_properties.update_mask_provider(existing_mask)
-    assert "mask_0" in dataset.properties.mask_provider.masks
+    assert not data_properties.spatial_mask_provider.masks
+    existing_mask = SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    data_properties.update_spatial_mask_provider(existing_mask)
+    assert "mask_0" in dataset.properties.spatial_mask_provider.masks
+
+
+def test_variable_metadata_includes_all_names(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    names = mock_data.var_names.all_names
+    dataset = xarray_dataset_constructor(config, names, 2)
+    metadata_keys = set(dataset.properties.variable_metadata.keys())
+    assert metadata_keys == set(names)
+
+
+def test_allow_missing_variables_fills_nan_for_missing(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    existing_names = list(mock_data.var_names.time_dependent_names)
+    names_with_missing = existing_names + ["nonexistent_var"]
+    dataset = XarrayDataset(
+        config,
+        names_with_missing,
+        IntSchedule.from_constant(2),
+        allow_missing_variables=True,
+    )
+    sample_data, _, _, _, missing_names = dataset[0]
+    assert "nonexistent_var" in sample_data
+    assert sample_data["nonexistent_var"].isnan().all()
+    assert missing_names == frozenset({"nonexistent_var"})
+    for name in existing_names:
+        assert name in sample_data
+        assert not sample_data[name].isnan().any()
+
+
+def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    existing_names = list(mock_data.var_names.time_dependent_names)
+    names_with_missing = existing_names + ["nonexistent_var"]
+    with pytest.raises(ValueError, match="Required variable not found"):
+        XarrayDataset(
+            config,
+            names_with_missing,
+            IntSchedule.from_constant(2),
+            allow_missing_variables=False,
+        )

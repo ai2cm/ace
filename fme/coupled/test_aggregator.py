@@ -8,14 +8,26 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.test_evaluator import get_zero_time
+from fme.ace.aggregator.one_step.main import (
+    OneStepAggregatorConfig,
+    OneStepSnapshotMetricConfig,
+)
 from fme.ace.data_loading.batch_data import PairedData
+from fme.ace.stepper import TrainOutput
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.coupled.aggregator import InferenceEvaluatorAggregator, _combine_logs
+from fme.core.typing_ import EnsembleTensorDict
+from fme.coupled.aggregator import (
+    InferenceEvaluatorAggregatorConfig,
+    OneStepAggregator,
+    _combine_logs,
+)
 from fme.coupled.data_loading.batch_data import CoupledPairedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
+from fme.coupled.stepper import CoupledTrainOutput
+from fme.coupled.typing_ import CoupledTensorMapping
 
 TIMESTEP = datetime.timedelta(days=5)
 
@@ -152,26 +164,27 @@ def test_inference_logs_labels_exist(tmpdir):
         ),
         n_ensemble=3,
     )
-    monthly_ds = xr.open_dataset(
-        monthly_reference_data.data_filename, decode_timedelta=False
-    )
+    time_mean_path = str(pathlib.Path(tmpdir) / "time_mean_reference.nc")
+    reference_time_means.to_netcdf(time_mean_path)
     coord = LatLonCoordinates(lon=torch.arange(nx), lat=torch.arange(ny))
     info = CoupledDatasetInfo(
         ocean=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
         atmosphere=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
     )
     output_dir = pathlib.Path(tmpdir) / "output"
-    agg = InferenceEvaluatorAggregator(
+    aggregator_config = InferenceEvaluatorAggregatorConfig(
+        log_video=True,
+        log_zonal_mean_images=True,
+        time_mean_reference_data=time_mean_path,
+        monthly_reference_data=str(monthly_reference_data.data_filename),
+    )
+    agg = aggregator_config.build(
         dataset_info=info,
         n_timesteps_ocean=n_time,
         n_timesteps_atmosphere=n_time,
         initial_time=initial_time,
-        ocean_normalize=lambda x: dict(x),
-        atmosphere_normalize=lambda x: dict(x),
-        log_video=True,
-        log_zonal_mean_images=True,
-        time_mean_reference_data=reference_time_means,
-        monthly_reference_data=monthly_ds,
+        ocean_normalize=lambda x, apply_mean=True: dict(x),
+        atmosphere_normalize=lambda x, apply_mean=True: dict(x),
         output_dir=str(output_dir),
     )
 
@@ -217,12 +230,15 @@ def test_inference_logs_labels_exist(tmpdir):
         assert "mean/weighted_bias/ocean_var" in log
         assert "mean/weighted_bias/atmos_var" in log
 
-    summary_logs = agg.get_summary_logs()
+    summary = agg.get_summary()
+    summary_logs = summary.logs
     expected_keys = [
         # ocean-specific keys
         "annual/ocean_var",
         "annual/r2/ocean_var_gen",
         "annual/r2/ocean_var_target",
+        "annual/rmse/ocean_var",
+        "annual/crps/ocean_var",
         "mean_step_20/weighted_rmse/ocean_var",
         "mean_step_20_norm/weighted_rmse/ocean_var",
         "mean_step_20_norm/weighted_rmse/ocean_channel_mean",
@@ -250,6 +266,8 @@ def test_inference_logs_labels_exist(tmpdir):
         "annual/atmos_var",
         "annual/r2/atmos_var_gen",
         "annual/r2/atmos_var_target",
+        "annual/rmse/atmos_var",
+        "annual/crps/atmos_var",
         "mean_step_20/weighted_rmse/atmos_var",
         "mean_step_20_norm/weighted_rmse/atmos_var",
         "mean_step_20_norm/weighted_rmse/atmosphere_channel_mean",
@@ -279,6 +297,7 @@ def test_inference_logs_labels_exist(tmpdir):
 
     # Check that all expected keys exist in the logs and no extra keys are present
     assert set(summary_logs) == set(expected_keys)
+    assert summary.loss == summary_logs["time_mean_norm/rmse/channel_mean"]
 
     agg.flush_diagnostics()
     ocean_directory = output_dir / "ocean"
@@ -308,3 +327,68 @@ def test_inference_logs_labels_exist(tmpdir):
     )
     assert "weighted_bias-atmos_var" in atmosphere_mean_dataset.data_vars
     assert atmosphere_mean_dataset["weighted_bias-atmos_var"].size == n_time
+
+
+def _coupled_ds_info(nx: int, ny: int) -> CoupledDatasetInfo:
+    coord = LatLonCoordinates(lon=torch.arange(nx), lat=torch.arange(ny))
+    return CoupledDatasetInfo(
+        ocean=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
+        atmosphere=DatasetInfo(horizontal_coordinates=coord, timestep=TIMESTEP),
+    )
+
+
+def _make_one_step_train_output(nx: int, ny: int) -> CoupledTrainOutput:
+    batch_size, n_time = 3, 2
+
+    def _component(name: str, loss_key: str) -> TrainOutput:
+        return TrainOutput(
+            metrics={loss_key: torch.tensor(1.0, device=get_device())},
+            target_data=EnsembleTensorDict(
+                {name: torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())}
+            ),
+            gen_data=EnsembleTensorDict(
+                {name: torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())}
+            ),
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
+            normalize=lambda x: dict(x),
+        )
+
+    return CoupledTrainOutput(
+        total_metrics={"loss": torch.tensor(1.0, device=get_device())},
+        ocean=_component("ocean_var", "loss/ocean"),
+        atmosphere=_component("atmos_var", "loss/atmosphere"),
+    )
+
+
+def _one_step_summary_logs(config: OneStepAggregatorConfig | None) -> dict:
+    info = _coupled_ds_info(2, 2)
+    loss_scaling = CoupledTensorMapping(ocean={}, atmosphere={})
+    agg = OneStepAggregator(
+        dataset_info=info,
+        loss_scaling=loss_scaling,
+        save_diagnostics=False,
+        config=config,
+    )
+    agg.record_batch(_make_one_step_train_output(2, 2))
+    return agg.get_summary(label="val").logs
+
+
+def test_one_step_aggregator_default_config_emits_snapshot_for_both():
+    # Default (config unspecified) must reproduce today's behavior: snapshot
+    # metrics present for both the ocean and atmosphere sub-aggregators.
+    logs = _one_step_summary_logs(config=None)
+    assert "val/snapshot/image-full-field/ocean_var" in logs
+    assert "val/snapshot/image-full-field/atmos_var" in logs
+
+
+def test_one_step_aggregator_config_reaches_both_sub_aggregators():
+    # A non-default config disabling snapshot must reach BOTH sub-aggregators,
+    # so no snapshot key survives for either component.
+    config = OneStepAggregatorConfig(
+        snapshot=OneStepSnapshotMetricConfig(enabled=False)
+    )
+    logs = _one_step_summary_logs(config=config)
+    assert not any(key.startswith("val/snapshot/") for key in logs)
+    # sanity check: the disabled keys are exactly the ones present by default
+    default_logs = _one_step_summary_logs(config=None)
+    assert any(key.startswith("val/snapshot/") for key in default_logs)

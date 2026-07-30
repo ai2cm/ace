@@ -1,0 +1,10 @@
+variable_sources:
+  2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr:
+    - deptho
+
+dataset_computation:
+  n_split: 50
+  standard_names:
+    longitude_dim: "lon"
+    latitude_dim: "lat"
+    time_dim: "time"

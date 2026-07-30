@@ -31,12 +31,18 @@ TIMESTEP = datetime.timedelta(hours=6)
     [1, 2],
 )
 def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
-    n_samples = 2
+    initial_condition_times = np.array(
+        [
+            cftime.DatetimeProlepticGregorian(2020, 1, 1),
+            cftime.DatetimeProlepticGregorian(2020, 1, 2),
+        ]
+    )
+    n_samples = len(initial_condition_times)
     n_lat, n_lon = 8, 16
     writer = MonthlyDataWriter(
         path=str(tmpdir),
         label="monthly_mean_predictions",
-        n_samples=n_samples,
+        initial_condition_times=initial_condition_times,
         save_names=None,
         variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
         coords={},
@@ -90,7 +96,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     expected_init_time = xr.DataArray(
         [
             cftime.DatetimeProlepticGregorian(2020, 1, 1),
-            cftime.DatetimeProlepticGregorian(2020, 1, 1),
+            cftime.DatetimeProlepticGregorian(2020, 1, 2),
         ],
         dims=["sample"],
         name="init_time",
@@ -292,13 +298,14 @@ def test_monthly_data_writer_long_run(tmpdir):
     # fastest possible test we can construct for this issue. It takes less
     # than 0.2s on a laptop.
     n_timesteps = 82
-    n_samples = 1
+    initial_condition_times = np.array([cftime.Datetime360Day(2019, 1, 1)])
+    n_samples = len(initial_condition_times)
     n_lat, n_lon = 1, 1
     timestep = datetime.timedelta(days=360)
     writer = MonthlyDataWriter(
         path=str(tmpdir),
         label="monthly_mean_predictions",
-        n_samples=n_samples,
+        initial_condition_times=initial_condition_times,
         save_names=None,
         variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
         coords={},

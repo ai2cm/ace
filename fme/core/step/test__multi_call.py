@@ -13,13 +13,14 @@ from fme.ace.stepper.single_module import StepperConfig, TrainStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.args import StepArgs
 from fme.core.step.multi_call import MultiCallStepConfig
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
+from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.timing import GlobalTimer
 
 from ._multi_call import MultiCallConfig, get_multi_call_name
@@ -32,7 +33,8 @@ TEST_CONFIG = MultiCallConfig(
 
 
 def _step(args: StepArgs, wrapper: Callable[[nn.Module], nn.Module] = lambda x: x):
-    return {k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names}
+    output = {k: args.input["CO2"].detach().clone() for k in TEST_CONFIG.output_names}
+    return StepOutput(output=output, stepper_state=args.stepper_state)
 
 
 def test_multi_call_names():
@@ -63,7 +65,7 @@ def test_multi_call():
             labels=None,
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     assert set(output) == set(config.names)
     for name in config.output_names:
@@ -76,10 +78,6 @@ def test_multi_call():
                 co2_data["CO2"] * multiplier_value,
             )
     torch.testing.assert_close(co2_data["CO2"], torch.full(shape, co2_value))
-
-
-def get_scalar_data(names, value):
-    return {n: value for n in names}
 
 
 def _get_stepper_config(
@@ -111,11 +109,8 @@ def _get_stepper_config(
                                 ),
                                 in_names=in_names,
                                 out_names=out_names,
-                                normalization=NetworkAndLossNormalizationConfig(
-                                    network=NormalizationConfig(
-                                        means=get_scalar_data(all_names, 0.0),
-                                        stds=get_scalar_data(all_names, 1.0),
-                                    ),
+                                normalization=trivial_network_and_loss_normalization(
+                                    all_names
                                 ),
                             ),
                         ),
@@ -165,7 +160,7 @@ def test_integration_with_stepper():
     train_stepper_config = TrainStepperConfig(
         loss=StepLossConfig(type="MSE", weights={"temperature": 1.0}),
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     time = xr.DataArray([[1, 1, 1]], dims=["sample", "time"])
     data = BatchData(
         {
@@ -210,7 +205,7 @@ def test_integration_with_stepper():
     config = _get_stepper_config(
         in_names, out_names, expected_all_names, multi_call_config, False
     )
-    stepper = train_stepper_config.get_train_stepper(config.get_stepper(dataset_info))
+    stepper = train_stepper_config.get_train_stepper(config, dataset_info)
     with GlobalTimer():
         output_without_loss = stepper.train_on_batch(data, NullOptimization())
 

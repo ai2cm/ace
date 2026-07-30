@@ -12,8 +12,6 @@ from fme.core.registry import ModuleSelector
 from fme.core.registry.module import Module
 from fme.core.typing_ import TensorDict
 
-_VALID_NETWORK_TYPES = {"MLP"}
-
 
 @dataclasses.dataclass
 class SecondaryDecoderConfig:
@@ -31,21 +29,16 @@ class SecondaryDecoderConfig:
     secondary_diagnostic_names: list[str]
     network: ModuleSelector
 
-    def __post_init__(self):
-        if self.network.type not in _VALID_NETWORK_TYPES:
-            raise ValueError(
-                f"Invalid network type '{self.network.type}'. "
-                f"Valid types are: {_VALID_NETWORK_TYPES}"
-            )
-
     def build(
         self,
         n_in_channels: int,
+        dataset_info: DatasetInfo,
     ) -> "SecondaryDecoder":
         return SecondaryDecoder(
             in_dim=n_in_channels,
             out_names=self.secondary_diagnostic_names,
             network=self.network,
+            dataset_info=dataset_info,
         )
 
 
@@ -64,18 +57,22 @@ class SecondaryDecoder:
         in_dim: int,
         out_names: list[str],
         network: ModuleSelector,
+        dataset_info: DatasetInfo,
     ):
         """
         Args:
             in_dim: Number of input channels (should match main module output).
             out_names: Names of the diagnostic variables this decoder produces.
             network: ModuleSelector specifying the network architecture.
+            dataset_info: Information about the dataset, forwarded to the
+                underlying network builder. Some networks (e.g. MLP) ignore
+                this, while others (e.g. SFNO) require horizontal coordinates.
         """
         out_dim = len(out_names)
         self._module: Module = network.build(
             n_in_channels=in_dim,
             n_out_channels=out_dim,
-            dataset_info=DatasetInfo(),  # Not needed for MLP
+            dataset_info=dataset_info,
         )
         self._packer = Packer(out_names)
 

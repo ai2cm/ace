@@ -41,7 +41,7 @@ beaker dataset get $SRC_DATASET && gantry run \
     --gpus 0 \
     --dataset $SRC_DATASET:/src-dataset \
     --weka climate-default:/climate-default \
-    --budget ai2/climate \
+    --budget ai2/atec-climate \
     --no-python \
     --install "echo 'skipping installation step'" \
     -- bash -c "mkdir -p /climate-default/beaker-datasets/$SRC_DATASET && cp -r /src-dataset/* /climate-default/beaker-datasets/$SRC_DATASET"

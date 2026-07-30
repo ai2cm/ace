@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from fme.core.coordinates import (
+    DepthCoordinate,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
     NullVerticalCoordinate,
@@ -17,9 +18,10 @@ from fme.core.dataset_info import (
     MissingDatasetInfo,
     get_keys_with_conflicts,
 )
+from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.mask_provider import MaskProvider
 from fme.core.metrics import spherical_area_weights
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 @pytest.mark.parametrize(
@@ -32,11 +34,12 @@ from fme.core.metrics import spherical_area_weights
         pytest.param(
             DatasetInfo(
                 horizontal_coordinates=LatLonCoordinates(
-                    lat=torch.arange(-4, 4), lon=torch.arange(16)
+                    lat=torch.arange(-4, 4, device=get_device()),
+                    lon=torch.arange(16, device=get_device()),
                 ),
                 vertical_coordinate=HybridSigmaPressureCoordinate(
-                    ak=torch.arange(10),
-                    bk=torch.arange(10),
+                    ak=torch.arange(10, device=get_device()),
+                    bk=torch.arange(10, device=get_device()),
                 ),
                 timestep=datetime.timedelta(hours=1),
             ),
@@ -45,12 +48,15 @@ from fme.core.metrics import spherical_area_weights
         pytest.param(
             DatasetInfo(
                 horizontal_coordinates=LatLonCoordinates(
-                    lat=torch.arange(-4, 4), lon=torch.arange(16)
+                    lat=torch.arange(-4, 4, device=get_device()),
+                    lon=torch.arange(16, device=get_device()),
                 ),
-                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)}),
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={"mask_0": torch.ones(10, 10, device=get_device())}
+                ),
                 timestep=datetime.timedelta(hours=1),
             ),
-            id="mask_provider",
+            id="spatial_mask_provider",
         ),
         pytest.param(
             DatasetInfo(
@@ -66,7 +72,7 @@ from fme.core.metrics import spherical_area_weights
     ],
 )
 def test_dataset_info_round_trip(dataset_info: DatasetInfo):
-    state = dataset_info.to_state()
+    state = dataset_info.get_state()
     dataset_info_reloaded = DatasetInfo.from_state(state)
     assert dataset_info == dataset_info_reloaded
 
@@ -158,22 +164,42 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
         ),
         pytest.param(
             DatasetInfo(
-                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={"mask_0": torch.ones(10, 10)}
+                )
             ),
             DatasetInfo(
-                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={"mask_0": torch.ones(10, 10)}
+                )
             ),
-            id="mask_provider_equal",
+            id="spatial_mask_provider_equal",
         ),
         pytest.param(
-            DatasetInfo(mask_provider=MaskProvider()),
+            DatasetInfo(
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={"mask_0": torch.ones(10, 10)}
+                )
+            ),
+            DatasetInfo(
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={
+                        "mask_0": torch.ones(10, 10),
+                        "mask_1": torch.ones(10, 10),
+                    }
+                )
+            ),
+            id="spatial_mask_provider_subset",
+        ),
+        pytest.param(
+            DatasetInfo(spatial_mask_provider=SpatialMaskProvider()),
             DatasetInfo(),
-            id="mask_provider_missing_from_second",
+            id="spatial_mask_provider_missing_from_second",
         ),
         pytest.param(
             DatasetInfo(),
-            DatasetInfo(mask_provider=MaskProvider()),
-            id="mask_provider_missing_from_first",
+            DatasetInfo(spatial_mask_provider=SpatialMaskProvider()),
+            id="spatial_mask_provider_missing_from_first",
         ),
         pytest.param(
             DatasetInfo(),
@@ -233,13 +259,34 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
         ),
         pytest.param(
             DatasetInfo(
-                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={"mask_0": torch.ones(10, 10)}
+                )
             ),
             DatasetInfo(
-                mask_provider=MaskProvider(masks={"mask_0": torch.zeros(10, 10)})
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={"mask_0": torch.zeros(10, 10)}
+                )
             ),
-            ["mask_provider"],
-            id="mask_provider_masks_differ",
+            ["spatial_mask_provider"],
+            id="spatial_mask_provider_masks_differ",
+        ),
+        pytest.param(
+            DatasetInfo(
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={
+                        "mask_0": torch.ones(10, 10),
+                        "mask_1": torch.ones(10, 10),
+                    }
+                )
+            ),
+            DatasetInfo(
+                spatial_mask_provider=SpatialMaskProvider(
+                    masks={"mask_0": torch.zeros(10, 10)}
+                )
+            ),
+            ["spatial_mask_provider"],
+            id="spatial_mask_provider_not_subset",
         ),
         pytest.param(
             DatasetInfo(timestep=datetime.timedelta(hours=1)),
@@ -369,15 +416,58 @@ def test_masked_gridded_ops():
     lon = torch.arange(4)
     lat = torch.arange(2)
     coords = LatLonCoordinates(lat=lat, lon=lon)
-    mask_provider = MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_0": torch.ones(10, 10)})
     dataset_info = DatasetInfo(
         horizontal_coordinates=coords,
-        mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
     )
     assert dataset_info.horizontal_coordinates == coords
-    assert dataset_info.mask_provider == mask_provider
+    assert dataset_info.spatial_mask_provider == spatial_mask_provider
     expected_gridded_ops = LatLonOperations(
         area_weights=spherical_area_weights(lat, len(lon)),
-        mask_provider=mask_provider,
+        spatial_mask_provider=spatial_mask_provider,
     )
     assert dataset_info.gridded_operations == expected_gridded_ops
+
+
+def _make_hybrid_sigma_pressure_coordinate():
+    return HybridSigmaPressureCoordinate(ak=torch.arange(10), bk=torch.arange(10))
+
+
+def _make_depth_coordinate():
+    return DepthCoordinate(
+        idepth=torch.arange(4, dtype=torch.float),
+        mask=torch.ones(3),
+    )
+
+
+class TestAtmosphereVerticalCoordinate:
+    def test_returns_coordinate_for_atmosphere(self):
+        vc = _make_hybrid_sigma_pressure_coordinate()
+        info = DatasetInfo(vertical_coordinate=vc)
+        assert info.atmosphere_vertical_coordinate is vc
+
+    def test_returns_none_for_null(self):
+        info = DatasetInfo(vertical_coordinate=NullVerticalCoordinate())
+        assert info.atmosphere_vertical_coordinate is None
+
+    def test_raises_for_ocean_coordinate(self):
+        info = DatasetInfo(vertical_coordinate=_make_depth_coordinate())
+        with pytest.raises(RuntimeError, match="atmosphere vertical coordinate"):
+            info.atmosphere_vertical_coordinate
+
+
+class TestOceanVerticalCoordinate:
+    def test_returns_coordinate_for_ocean(self):
+        vc = _make_depth_coordinate()
+        info = DatasetInfo(vertical_coordinate=vc)
+        assert info.ocean_vertical_coordinate is vc
+
+    def test_returns_none_for_null(self):
+        info = DatasetInfo(vertical_coordinate=NullVerticalCoordinate())
+        assert info.ocean_vertical_coordinate is None
+
+    def test_raises_for_atmosphere_coordinate(self):
+        info = DatasetInfo(vertical_coordinate=_make_hybrid_sigma_pressure_coordinate())
+        with pytest.raises(RuntimeError, match="ocean vertical coordinate"):
+            info.ocean_vertical_coordinate

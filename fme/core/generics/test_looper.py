@@ -19,14 +19,14 @@ from fme.core.generics.data import SimpleInferenceData
 from fme.core.generics.inference import (
     Looper,
     PredictFunction,
+    WandBStepLogger,
     get_record_to_wandb,
     run_inference,
 )
-from fme.core.loss import StepLossConfig
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
+from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.testing.wandb import mock_wandb
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -49,10 +49,6 @@ def get_data(
     ak, bk = torch.arange(nz), torch.arange(nz)
     vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
     return SphericalData(data, area_weights, vertical_coord)
-
-
-def get_scalar_data(names, value):
-    return {n: value for n in names}
 
 
 class MockLoader(torch.utils.data.DataLoader):
@@ -134,16 +130,10 @@ def _get_stepper():
                     ),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means=get_scalar_data(all_names, 0.0),
-                            stds=get_scalar_data(all_names, 1.0),
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(all_names),
                 ),
             ),
         ),
-        loss=StepLossConfig(),
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
@@ -503,7 +493,7 @@ def test_run_inference_simple(
         with mock_wandb() as wandb:
             wandb.configure(log_to_wandb=True)
             record_logs = unittest.mock.MagicMock(
-                side_effect=get_record_to_wandb("inference")
+                side_effect=get_record_to_wandb("inference").log
             )  # this init must be within mock_wandb context
             run_inference(
                 predict=stepper.predict,
@@ -530,3 +520,64 @@ def test_run_inference_simple(
         assert (
             record_logs.call_count == n_iterations + 1
         )  # +1 for the initial condition
+
+
+def test_wandb_step_logger_with_label():
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = WandBStepLogger(label="inference")
+        logger.log([{"a": 1}, {"b": 2}])
+        assert logger.step == 2
+        logger.log([{"c": 3}])
+        assert logger.step == 3
+        logs = wandb.get_logs()
+        assert logs[0] == {"inference/a": 1}
+        assert logs[1] == {"inference/b": 2}
+        assert logs[2] == {"inference/c": 3}
+
+
+def test_wandb_step_logger_without_label():
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = WandBStepLogger(label="")
+        logger.log([{"a": 1}, {"b": 2}])
+        assert logger.step == 2
+        logs = wandb.get_logs()
+        assert logs[0] == {"a": 1}
+        assert logs[1] == {"b": 2}
+
+
+def test_wandb_step_logger_label_override():
+    """log() with an explicit label overrides the default."""
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = WandBStepLogger(label="inference")
+        logger.log([{"a": 1}])
+        logger.log([{"b": 2}], label="")
+        logger.log([{"c": 3}], label="val")
+        assert logger.step == 3
+        logs = wandb.get_logs()
+        assert logs[0] == {"inference/a": 1}
+        assert logs[1] == {"b": 2}
+        assert logs[2] == {"val/c": 3}
+
+
+def test_wandb_step_logger_skips_empty_logs():
+    """Empty dicts don't produce wandb.log calls, but step still advances."""
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = WandBStepLogger(label="inference")
+        logger.log([{}, {"a": 1}, {}])
+        assert logger.step == 3
+        logs = wandb.get_logs()
+        assert len(logs) == 2
+        assert logs[0] == {}
+        assert logs[1] == {"inference/a": 1}
+
+
+def test_get_record_to_wandb_returns_step_logger():
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        logger = get_record_to_wandb(label="test")
+        assert isinstance(logger, WandBStepLogger)
+        assert logger.step == 0

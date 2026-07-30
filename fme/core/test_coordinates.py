@@ -8,8 +8,13 @@ from fme.core.coordinates import (
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    SerializableHorizontalCoordinates,
+    SerializableVerticalCoordinate,
+    dz_from_idepth,
 )
-from fme.core.mask_provider import MaskProvider
+from fme.core.dataset_info import MissingDatasetInfo
+from fme.core.device import get_device
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 try:
     from earth2grid import healpix as e2ghpx
@@ -47,6 +52,18 @@ except ImportError:
         (
             DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
             DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
+        ),
+        (
+            DepthCoordinate(
+                idepth=torch.tensor([0.0, 10.0, 50.0]),
+                mask=torch.tensor([1.0, 0.0]),
+                deptho=torch.tensor([float("nan"), 10.0]),
+            ),
+            DepthCoordinate(
+                idepth=torch.tensor([0.0, 10.0, 50.0]),
+                mask=torch.tensor([1.0, 0.0]),
+                deptho=torch.tensor([float("nan"), 10.0]),
+            ),
         ),
     ],
 )
@@ -195,29 +212,18 @@ def test_depth_integral_3d_data():
     torch.testing.assert_close(result, expected)
 
 
-@pytest.mark.parametrize(
-    "name, level",
-    [
-        ("sfc_level", 0),
-        ("depth_0", 0),
-        ("depth_3", 3),
-    ],
-)
-def test_depth_get_mask_tensor_for(name, level):
-    idepth = torch.arange(end=5)
-    mask = torch.arange(end=4)
-    coord = DepthCoordinate(idepth, mask)
-    assert coord.get_mask_tensor_for(name) == level
+def test_lat_lon_lat_1d_returns_lat():
+    lat = torch.tensor([1.0, 2.0, 3.0])
+    coords = LatLonCoordinates(lat=lat, lon=torch.tensor([4.0, 5.0, 6.0]))
+    torch.testing.assert_close(coords.lat_1d, lat)
 
 
-def test_depth_returns_surface_mask_if_specified():
-    idepth = torch.arange(end=5)
-    mask = torch.arange(end=4)
-    surface_mask = torch.tensor([4])
-    coord_sfc_mask = DepthCoordinate(idepth, mask, surface_mask)
-    coord_no_sfc_mask = DepthCoordinate(idepth, mask)
-    assert coord_sfc_mask.get_mask_tensor_for("sfc_level") == surface_mask[0]
-    assert coord_no_sfc_mask.get_mask_tensor_for("sfc_level") == mask[0]
+def test_healpix_lat_1d_raises():
+    healpix_coords = HEALPixCoordinates(
+        face=torch.arange(12), height=torch.arange(16), width=torch.arange(16)
+    )
+    with pytest.raises(MissingDatasetInfo, match="12 tiles"):
+        healpix_coords.lat_1d
 
 
 def test_masked_lat_lon_ops_from_coords():
@@ -225,8 +231,10 @@ def test_masked_lat_lon_ops_from_coords():
     lon = torch.tensor([0.0])
     mask = torch.tensor([[1], [0], [1]])
     coords = LatLonCoordinates(lat=lat, lon=lon)
-    mask_provider = MaskProvider(masks={"mask_0": mask})
-    gridded_ops = coords.get_gridded_operations(mask_provider=mask_provider)
+    spatial_mask_provider = SpatialMaskProvider(masks={"mask_0": mask})
+    gridded_ops = coords.get_gridded_operations(
+        spatial_mask_provider=spatial_mask_provider
+    )
     input_ = torch.tensor([[1.0], [-10.0], [3.0]])
     result = gridded_ops.area_weighted_mean(input_, name="T_0")
     torch.testing.assert_close(result, torch.tensor(2.0))
@@ -237,11 +245,129 @@ def test_healpix_ops_raises_value_error_with_mask():
     height = torch.arange(16)
     width = torch.arange(16)
     healpix_coords = HEALPixCoordinates(face=face, height=height, width=width)
-    mask_provider = MaskProvider(masks={"mask_0": torch.tensor([1, 0, 1])})
+    spatial_mask_provider = SpatialMaskProvider(
+        masks={"mask_0": torch.tensor([1, 0, 1])}
+    )
 
     expected_msg = "HEALPixCoordinates does not support a mask"
     with pytest.raises(NotImplementedError, match=expected_msg):
-        healpix_coords.get_gridded_operations(mask_provider=mask_provider)
+        healpix_coords.get_gridded_operations(
+            spatial_mask_provider=spatial_mask_provider
+        )
+
+
+@pytest.mark.parametrize(
+    "idepth, mask, deptho, expected",
+    [
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
+            None,
+            torch.tensor([10.0, 40.0, 50.0]),
+            id="no_deptho",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
+            torch.tensor(50.0),
+            torch.tensor([10.0, 40.0, 0.0]),
+            id="deptho_at_interface",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
+            torch.tensor(30.0),
+            torch.tensor([10.0, 20.0, 0.0]),
+            id="deptho_between_interfaces",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
+            torch.tensor(100.0),
+            torch.tensor([10.0, 40.0, 50.0]),
+            id="deptho_at_bottom",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.ones(3),
+            torch.tensor(101.0),
+            torch.tensor([10.0, 40.0, 50.0]),
+            id="deptho_below_bottom",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor([1.0, 1.0, 0.0]),
+            None,
+            torch.tensor([10.0, 40.0, 0.0]),
+            id="deepest_layer_masked",
+        ),
+        pytest.param(
+            torch.tensor([0.0, 10.0, 50.0, 100.0]),
+            torch.tensor([0.0, 0.0, 0.0]),
+            None,
+            torch.tensor([0.0, 0.0, 0.0]),
+            id="all_masked",
+        ),
+    ],
+)
+def test_dz_from_idepth(idepth, mask, deptho, expected):
+    result = dz_from_idepth(idepth, mask, deptho)
+    torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize(
+    "leading_dims",
+    [(), (2,), (2, 3)],
+    ids=["no_leading", "batch", "batch_time"],
+)
+def test_depth_integral_with_deptho(leading_dims):
+    nlat, nlon = 2, 3
+    idepth = torch.tensor([0.0, 10.0, 50.0, 100.0])
+    nz = len(idepth) - 1
+    mask = torch.ones(nlat, nlon, nz)
+
+    deptho = torch.full((nlat, nlon), 100.0)
+    # cell (0, 0): deptho at intermediate interface -> layers below are zero-thickness
+    deptho[0, 0] = 50.0
+    # cell (0, 1): deptho between interfaces -> partial bottom cell
+    deptho[0, 1] = 30.0
+
+    coord = DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho)
+
+    integrand = torch.ones(*leading_dims, nlat, nlon, nz)
+    result = coord.depth_integral(integrand)
+    assert result.shape == (*leading_dims, nlat, nlon)
+
+    # cell (0, 0): dz = [10, 40, 0] -> integral = 50
+    torch.testing.assert_close(
+        result[..., 0, 0], torch.tensor(50.0).expand(leading_dims)
+    )
+    # cell (0, 1): dz = [10, 20, 0] -> integral = 30
+    torch.testing.assert_close(
+        result[..., 0, 1], torch.tensor(30.0).expand(leading_dims)
+    )
+    # cell (1, 0): deptho = 100 (full depth), dz = [10, 40, 50] -> integral = 100
+    torch.testing.assert_close(
+        result[..., 1, 0], torch.tensor(100.0).expand(leading_dims)
+    )
+
+
+def test_depth_integral_gradient_with_mask():
+    nlat, nlon, nz = 3, 4, 2
+    idepth = torch.tensor([0.0, 10.0, 50.0])
+    mask = torch.ones(nlat, nlon, nz)
+    mask[0, 0, :] = 0  # land point
+    mask[1, 1, 1] = 0  # partial mask (only top layer valid)
+
+    coord = DepthCoordinate(idepth=idepth, mask=mask)
+    integrand = torch.randn(nlat, nlon, nz, requires_grad=True)
+    result = coord.depth_integral(integrand)
+    ocean_mask = mask.select(dim=-1, index=0) > 0
+    loss = result[ocean_mask].sum()
+    loss.backward()
+
+    assert integrand.grad is not None
+    assert torch.all(torch.isfinite(integrand.grad))
 
 
 @pytest.mark.skipif(e2ghpx is None, reason="earth2grid is not available")
@@ -269,7 +395,7 @@ def test_healpix_coordinates_xyz(pad: bool):
     # Apply HEALPix padding
     if pad:
         padding = 2
-        healpix_padding = HEALPixPadding(padding=padding, enable_nhwc=False)
+        healpix_padding = HEALPixPadding(padding=padding)
         padded_x = healpix_padding(torch.Tensor(x).unsqueeze(1)).squeeze(1)
         padded_y = healpix_padding(torch.Tensor(y).unsqueeze(1)).squeeze(1)
         padded_z = healpix_padding(torch.Tensor(z).unsqueeze(1)).squeeze(1)
@@ -303,3 +429,73 @@ def test_healpix_coordinates_xyz(pad: bool):
 
         assert np.allclose(distances_x, mean_distances_x, atol=0.03)
         assert np.allclose(distances_y, mean_distances_y, atol=0.03)
+
+
+def _cpu_tensor(*args, **kwargs) -> torch.Tensor:
+    return torch.tensor(*args, device="cpu", **kwargs)
+
+
+def test_vertical_coordinate_from_state_places_tensors_on_device():
+    state = {"ak": _cpu_tensor([1.0, 2.0, 3.0]), "bk": _cpu_tensor([4.0, 5.0, 6.0])}
+    coord = SerializableVerticalCoordinate.from_state(state)
+    device = get_device()
+    assert isinstance(coord, HybridSigmaPressureCoordinate)
+    assert coord.ak.device == device
+    assert coord.bk.device == device
+
+
+def test_vertical_coordinate_from_state_decouples_memory():
+    state = {"ak": _cpu_tensor([1.0, 2.0, 3.0]), "bk": _cpu_tensor([4.0, 5.0, 6.0])}
+    coord = SerializableVerticalCoordinate.from_state(state)
+    assert isinstance(coord, HybridSigmaPressureCoordinate)
+    state["ak"].fill_(999.0)
+    assert coord.ak[0].item() == 1.0
+
+
+def test_depth_coordinate_from_state_places_tensors_on_device():
+    state = {
+        "idepth": _cpu_tensor([0.0, 10.0, 20.0]),
+        "mask": _cpu_tensor([[1.0, 1.0]]),
+    }
+    coord = SerializableVerticalCoordinate.from_state(state)
+    device = get_device()
+    assert isinstance(coord, DepthCoordinate)
+    assert coord.idepth.device == device
+    assert coord.mask.device == device
+
+
+def test_horizontal_latlon_from_state_places_tensors_on_device():
+    state = {
+        "lat": _cpu_tensor([10.0, 20.0, 30.0]),
+        "lon": _cpu_tensor([0.0, 90.0, 180.0, 270.0]),
+    }
+    coord = SerializableHorizontalCoordinates.from_state(state)
+    device = get_device()
+    assert isinstance(coord, LatLonCoordinates)
+    assert coord.lat.device == device
+    assert coord.lon.device == device
+
+
+def test_horizontal_latlon_from_state_decouples_memory():
+    state = {
+        "lat": _cpu_tensor([10.0, 20.0, 30.0]),
+        "lon": _cpu_tensor([0.0, 90.0, 180.0, 270.0]),
+    }
+    coord = SerializableHorizontalCoordinates.from_state(state)
+    assert isinstance(coord, LatLonCoordinates)
+    state["lat"].fill_(999.0)
+    assert coord.lat[0].item() == 10.0
+
+
+def test_horizontal_healpix_from_state_places_tensors_on_device():
+    state = {
+        "face": _cpu_tensor(list(range(12)), dtype=torch.long),
+        "height": _cpu_tensor(list(range(4)), dtype=torch.long),
+        "width": _cpu_tensor(list(range(4)), dtype=torch.long),
+    }
+    coord = SerializableHorizontalCoordinates.from_state(state)
+    device = get_device()
+    assert isinstance(coord, HEALPixCoordinates)
+    assert coord.face.device == device
+    assert coord.height.device == device
+    assert coord.width.device == device

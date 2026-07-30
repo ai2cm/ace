@@ -15,7 +15,7 @@ from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.inference import ExplicitIndices, ForcingDataLoaderConfig
 from fme.ace.data_loading.test_data_loader import _get_coords
 from fme.ace.requirements import DataRequirements
-from fme.ace.testing import save_scalar_netcdf
+from fme.ace.testing import save_stats_netcdfs
 from fme.core.coordinates import (
     HorizontalCoordinates,
     OptionalDepthCoordinate,
@@ -25,11 +25,11 @@ from fme.core.coordinates import (
 from fme.core.dataset.merged import MergeNoConcatDatasetConfig
 from fme.core.dataset.xarray import (
     XarrayDataConfig,
-    _get_mask_provider,
+    _get_spatial_mask_provider,
     _get_vertical_coordinate,
     get_horizontal_coordinates,
 )
-from fme.core.mask_provider import MaskProvider
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
@@ -38,9 +38,14 @@ from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledDataRequirements
 
-from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
+from .config import (
+    CoupledConcatDatasetConfig,
+    CoupledDataLoaderConfig,
+    CoupledDatasetConfig,
+)
 from .getters import get_forcing_data, get_gridded_data
 from .inference import (
     CoupledForcingDataLoaderConfig,
@@ -61,6 +66,7 @@ def _save_netcdf(
     timestep_size=1,
     timestep_start=0,
     nz=3,
+    masked_fill_value: float = float("nan"),
 ):
     data_vars = {}
     dim_sizes_without_time = {k: v for k, v in dim_sizes.items() if k != "time"}
@@ -87,22 +93,22 @@ def _save_netcdf(
             data_vars[f"ak_{i}"] = float(i)
             data_vars[f"bk_{i}"] = float(i + 1)
     elif realm == "ocean":
+        if "mask_0" in data_vars and "mask_2d" not in data_vars:
+            data_vars["mask_2d"] = data_vars["mask_0"]
         if "mask_2d" in data_vars and "mask_0" in data_vars:
             data_vars["mask_2d"] = data_vars["mask_0"]
         if "mask_2d" in data_vars or "mask_0" in data_vars:
             mask = data_vars.get("mask_2d", data_vars.get("mask_0"))
             assert mask is not None
-            # add nans to 2D vars
             names = [
                 name
                 for name in data_vars
                 if re.search(r"_\d+$", name) is None and name != "mask_2d"
             ]
             for name in names:
-                data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
+                data_vars[name] = data_vars[name].where(mask == 1, masked_fill_value)
         for i in range(nz):
             if f"mask_{i}" in data_vars:
-                # add nans to 3D vars
                 mask = data_vars[f"mask_{i}"]
                 names = [
                     name
@@ -110,7 +116,9 @@ def _save_netcdf(
                     if name != f"mask_{i}" and name.endswith(f"_{i}")
                 ]
                 for name in names:
-                    data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
+                    data_vars[name] = data_vars[name].where(
+                        mask == 1, masked_fill_value
+                    )
             data_vars[f"idepth_{i}"] = float(i)
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
@@ -137,8 +145,8 @@ class MockComponentData:
         return pd.Timedelta(self.timedelta).to_pytimedelta()
 
     @property
-    def mask_provider(self) -> MaskProvider:
-        return _get_mask_provider(self.ds, dtype=None)
+    def spatial_mask_provider(self) -> SpatialMaskProvider:
+        return _get_spatial_mask_provider(self.ds, dtype=None)
 
     @property
     def vcoord(self) -> VerticalCoordinate:
@@ -214,6 +222,28 @@ class MockCoupledData:
             ),
         )
 
+    def build_dataset_info(self) -> CoupledDatasetInfo:
+        """Construct a CoupledDatasetInfo directly from the mock on-disk data.
+
+        This mimics what the stepper's training_dataset_info would provide in the
+        no-target inference path (used by _make_dummy_ocean_forcing).
+        """
+        from fme.core.dataset_info import DatasetInfo
+
+        ocean_info = DatasetInfo(
+            horizontal_coordinates=self.ocean.hcoord,
+            vertical_coordinate=self.ocean.vcoord,
+            spatial_mask_provider=self.ocean.spatial_mask_provider,
+            timestep=self.ocean.timestep,
+        )
+        atmos_info = DatasetInfo(
+            horizontal_coordinates=self.atmosphere.hcoord,
+            vertical_coordinate=self.atmosphere.vcoord,
+            spatial_mask_provider=self.atmosphere.spatial_mask_provider,
+            timestep=self.atmosphere.timestep,
+        )
+        return CoupledDatasetInfo(ocean=ocean_info, atmosphere=atmos_info)
+
 
 def create_coupled_data_on_disk(
     data_dir: pathlib.Path,
@@ -225,6 +255,7 @@ def create_coupled_data_on_disk(
     n_levels_ocean: int = 2,
     n_levels_atmosphere: int = 2,
     ocean_timestep_size_in_days: int | None = None,
+    masked_fill_value: float = float("nan"),
 ) -> MockCoupledData:
     """Create synthetic coupled ocean-atmosphere data on disk for testing.
 
@@ -252,6 +283,9 @@ def create_coupled_data_on_disk(
         n_levels_atmosphere: Number of atmosphere vertical levels. Default is 2.
         ocean_timestep_size_in_days: The ocean timestep size, in days. If None, then
             n_forward_times_ocean must evenly divide n_forward_times_atmosphere.
+        masked_fill_value: Value to use for points where the mask is 0 (e.g. land).
+            Default is NaN. Use 0.0 when metrics must stay finite (e.g. prediction vs
+            target comparison tests).
 
     Returns:
         MockCoupledData containing the created ocean and atmosphere datasets,
@@ -291,6 +325,7 @@ def create_coupled_data_on_disk(
         timestep_size=ocean_timestep_size,
         nz=n_levels_ocean + 1,
         timestep_start=0,  # ocean start time fixed
+        masked_fill_value=masked_fill_value,
     )
 
     atmos_dir = data_dir / "atmos"
@@ -314,6 +349,7 @@ def create_coupled_data_on_disk(
         timestep_size=1,
         timestep_start=timestep_start_atmosphere,
         nz=n_levels_atmosphere + 1,
+        masked_fill_value=masked_fill_value,
     )
     # _save_netcdf creates integer times in units of "days since 1970-01-01"
     timedelta_atmos = "1D"
@@ -322,8 +358,11 @@ def create_coupled_data_on_disk(
     stats_dir = data_dir / "stats"
     stats_dir.mkdir()
     all_names = list(set(ocean_names + atmosphere_names))
-    save_scalar_netcdf(stats_dir / "means.nc", variable_names=all_names)
-    save_scalar_netcdf(stats_dir / "stds.nc", variable_names=all_names)
+    save_stats_netcdfs(
+        stats_dir / "means.nc",
+        stats_dir / "stds.nc",
+        variable_names=all_names,
+    )
     return MockCoupledData(
         ocean=MockComponentData(
             ds=ocean_ds,
@@ -373,18 +412,20 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
         atmos_data_subset = Slice()
 
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(
-                    data_path=ics[i].ocean.data_dir,
-                ),
-                atmosphere=XarrayDataConfig(
-                    data_path=ics[i].atmosphere.data_dir,
-                    subset=atmos_data_subset,
-                ),
-            )
-            for i in range(n_ics)
-        ],
+        dataset=CoupledConcatDatasetConfig(
+            concat=[
+                CoupledDatasetConfig(
+                    ocean=XarrayDataConfig(
+                        data_path=ics[i].ocean.data_dir,
+                    ),
+                    atmosphere=XarrayDataConfig(
+                        data_path=ics[i].atmosphere.data_dir,
+                        subset=atmos_data_subset,
+                    ),
+                )
+                for i in range(n_ics)
+            ]
+        ),
         batch_size=1,
         num_data_workers=0,
         strict_ensemble=True,
@@ -449,18 +490,20 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: int):
 
 def test_zarr_engine_used_true():
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(
-                    data_path="atmos", file_pattern="data.zarr", engine="zarr"
+        dataset=CoupledConcatDatasetConfig(
+            concat=[
+                CoupledDatasetConfig(
+                    ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                    atmosphere=XarrayDataConfig(
+                        data_path="atmos", file_pattern="data.zarr", engine="zarr"
+                    ),
                 ),
-            ),
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
-            ),
-        ],
+                CoupledDatasetConfig(
+                    ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                    atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+                ),
+            ]
+        ),
         batch_size=1,
     )
     assert config.zarr_engine_used
@@ -468,12 +511,10 @@ def test_zarr_engine_used_true():
 
 def test_zarr_engine_used_false():
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
-                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
-            )
-        ],
+        dataset=CoupledDatasetConfig(
+            ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+        ),
         batch_size=1,
     )
     assert not config.zarr_engine_used
@@ -566,12 +607,10 @@ def test_coupled_data_loader_merge_no_concat(tmp_path):
 
     # test CoupledDataLoaderConfig
     config = CoupledDataLoaderConfig(
-        dataset=[
-            CoupledDatasetConfig(
-                ocean=ocean_config,
-                atmosphere=atmos_config,
-            )
-        ],
+        dataset=CoupledDatasetConfig(
+            ocean=ocean_config,
+            atmosphere=atmos_config,
+        ),
         batch_size=1,
         num_data_workers=0,
     )

@@ -15,6 +15,9 @@ class BatchLabels:
             )
         self._names_set = set(names)
 
+    def pin_memory(self) -> "BatchLabels":
+        return BatchLabels(self.tensor.pin_memory(), self.names)
+
     def to(self, device) -> "BatchLabels":
         """
         Move the BatchLabels tensor to the specified device.

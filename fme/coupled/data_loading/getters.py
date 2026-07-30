@@ -1,7 +1,7 @@
 import datetime
 import logging
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable
 
 import torch
 import torch.utils.data
@@ -9,7 +9,7 @@ import xarray as xr
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
-from fme.core.dataset.merged import MergeNoConcatDatasetConfig
+from fme.core.dataset.merged import MergeNoConcatDatasetConfig, TimePaddedMergedDataset
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -17,6 +17,7 @@ from fme.core.labels import LabelEncoding
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.concat import ConcatDataset
 from fme.coupled.data_loading.config import (
+    CoupledConcatDatasetConfig,
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
 )
@@ -36,9 +37,20 @@ from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
+    CoupledTrainDataRequirements,
 )
 
 from .inference import ExplicitIndices
+
+_COUPLED_WORKER_DIST_CX = None
+
+
+def _coupled_forkserver_worker_init_fn(worker_id: int) -> None:
+    global _COUPLED_WORKER_DIST_CX
+    _COUPLED_WORKER_DIST_CX = Distributed.context()
+    _COUPLED_WORKER_DIST_CX.__enter__()
+    # don't need to exit the context on workers as they are not
+    # initialized/managed by torchrun
 
 
 class CollateFn:
@@ -87,15 +99,22 @@ def get_dataset(
     return dataset, properties
 
 
-def get_datasets(
-    configs: Sequence[CoupledDatasetConfig],
-    requirements: CoupledDataRequirements,
+def _combine_datasets(
+    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    build_one: Callable[
+        [CoupledDatasetConfig], tuple[CoupledDataset, CoupledDatasetProperties]
+    ],
     strict: bool = True,
 ) -> tuple[ConcatDataset, CoupledDatasetProperties]:
+    """Build and combine multiple coupled datasets.
+
+    ``build_one`` is called for each ``CoupledDatasetConfig`` in *configs* and
+    should return a single ``(CoupledDataset, CoupledDatasetProperties)`` pair.
+    """
     datasets = []
     properties: CoupledDatasetProperties | None = None
-    for coupled_data_config in configs:
-        ds, prop = get_dataset(coupled_data_config, requirements)
+    for coupled_data_config in configs.coupled_configs:
+        ds, prop = build_one(coupled_data_config)
         datasets.append(ds)
         if properties is None:
             properties = prop
@@ -114,21 +133,30 @@ def get_datasets(
     return dataset, properties
 
 
-def get_gridded_data(
-    config: CoupledDataLoaderConfig,
-    train: bool,
+def get_datasets(
+    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
     requirements: CoupledDataRequirements,
-) -> GriddedData:
-    """
-    Args:
-        config: Parameters for the data loader.
-        train: Whether loader is intended for training or validation data; if True,
-            then data will be shuffled.
-        requirements: Data requirements for the model.
-    """
-    dataset, properties = get_datasets(
-        config.dataset, requirements, strict=config.strict_ensemble
+    strict: bool = True,
+) -> tuple[ConcatDataset, CoupledDatasetProperties]:
+    return _combine_datasets(
+        configs,
+        build_one=lambda cfg: get_dataset(cfg, requirements),
+        strict=strict,
     )
+
+
+def _build_gridded_data(
+    config: CoupledDataLoaderConfig,
+    dataset: ConcatDataset,
+    properties: CoupledDatasetProperties,
+    train: bool,
+) -> GriddedData:
+    """Construct a CoupledDataLoader and wrap it in GriddedData.
+
+    Shared between ``get_gridded_data`` and ``get_gridded_train_data``; the
+    only difference between those is how ``dataset`` and ``properties`` are
+    built upstream.
+    """
     dist = Distributed.get_instance()
     if dist.is_distributed():
         sampler = DistributedSampler(dataset, shuffle=train)
@@ -197,12 +225,96 @@ def get_gridded_data(
     )
 
 
+def get_gridded_data(
+    config: CoupledDataLoaderConfig,
+    train: bool,
+    requirements: CoupledDataRequirements,
+) -> GriddedData:
+    """
+    Args:
+        config: Parameters for the data loader.
+        train: Whether loader is intended for training or validation data; if True,
+            then data will be shuffled.
+        requirements: Data requirements for the model.
+    """
+    dataset, properties = get_datasets(
+        config.dataset, requirements, strict=config.strict_ensemble
+    )
+    return _build_gridded_data(config, dataset, properties, train)
+
+
+def get_train_dataset(
+    config: CoupledDatasetConfig,
+    requirements: CoupledTrainDataRequirements,
+) -> tuple[CoupledDataset, CoupledDatasetProperties]:
+    """Build a CoupledDataset for training, where the atmosphere is split
+    into a short-horizon target dataset and a long-horizon forcing dataset
+    that are merged via TimePaddedMergedDataset.
+    """
+    ocean: torch.utils.data.Dataset
+    ocean, ocean_properties = config.ocean.build(
+        requirements.ocean_requirements.names,
+        requirements.ocean_requirements.n_timesteps_schedule,
+    )
+    atmos_target, atmos_target_properties = config.atmosphere.build(
+        requirements.atmosphere_target_requirements.names,
+        requirements.atmosphere_target_requirements.n_timesteps_schedule,
+    )
+    atmos_forcing, atmos_forcing_properties = config.atmosphere.build(
+        requirements.atmosphere_forcing_requirements.names,
+        requirements.atmosphere_forcing_requirements.n_timesteps_schedule,
+    )
+    # canonical = the long (forcing) horizon, since it provides the time
+    # coordinate that downstream code uses
+    atmosphere = TimePaddedMergedDataset([atmos_forcing, atmos_target])
+    atmosphere_properties = atmos_forcing_properties.copy()
+    atmosphere_properties.update_merged_dataset(atmos_target_properties)
+    properties = CoupledDatasetProperties(ocean_properties, atmosphere_properties)
+    dataset = CoupledDataset(
+        ocean=ocean,
+        atmosphere=atmosphere,
+        properties=properties,
+        n_steps_fast=requirements.n_steps_fast,
+    )
+    return dataset, properties
+
+
+def get_train_datasets(
+    configs: CoupledConcatDatasetConfig | CoupledDatasetConfig,
+    requirements: CoupledTrainDataRequirements,
+    strict: bool = True,
+) -> tuple[ConcatDataset, CoupledDatasetProperties]:
+    return _combine_datasets(
+        configs,
+        build_one=lambda cfg: get_train_dataset(cfg, requirements),
+        strict=strict,
+    )
+
+
+def get_gridded_train_data(
+    config: CoupledDataLoaderConfig,
+    requirements: CoupledTrainDataRequirements,
+) -> GriddedData:
+    """Build a GriddedData loader for coupled training with split atmosphere
+    target/forcing horizons.
+
+    Unlike ``get_gridded_data``, the atmosphere target variables are loaded
+    only for the loss horizon (plus the IC) and NaN-padded along the time
+    dimension to match the atmosphere forcing window.
+    """
+    dataset, properties = get_train_datasets(
+        config.dataset, requirements, strict=config.strict_ensemble
+    )
+    return _build_gridded_data(config, dataset, properties, train=True)
+
+
 def get_inference_data(
     config: InferenceDataLoaderConfig,
     total_coupled_steps: int,
     window_requirements: CoupledDataRequirements,
     initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
     dataset_info: CoupledDatasetInfo | None = None,
+    _force_forkserver: bool = False,
 ) -> InferenceGriddedData:
     initial_time = None
     if isinstance(initial_condition, CoupledPrognosticState):
@@ -218,14 +330,16 @@ def get_inference_data(
     )
     properties = dataset.properties
 
-    if config.zarr_engine_used:
+    if config.zarr_engine_used or _force_forkserver:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
         persistent_workers = True
+        worker_init_fn = _coupled_forkserver_worker_init_fn
     else:
         mp_context = None
         persistent_workers = False
+        worker_init_fn = None
 
     logging.info(f"Multiprocessing inference context: {mp_context or 'fork'}")
 
@@ -238,6 +352,7 @@ def get_inference_data(
         pin_memory=using_gpu(),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        worker_init_fn=worker_init_fn,
     )
     inference_data = InferenceGriddedData(
         loader=loader,

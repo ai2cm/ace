@@ -1,9 +1,9 @@
 paths:
-  - gs://vcm-ml-intermediate/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0001.zarr
-  - gs://vcm-ml-intermediate/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0002.zarr
+  - gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0001.zarr
+  - gs://vcm-ml-intermediate/2026-01-28-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/ic_0002.zarr
 start_date: "1940-01-01"
 end_date: "2020-12-31"
-stats_path: gs://vcm-ml-intermediate/2024-07-21-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-noise-floor/
+stats_path: gs://vcm-ml-intermediate/2026-04-23-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-noise-floor/
 years_per_ensemble: 81
 is_amip: true
 names:
@@ -51,6 +51,7 @@ names:
   - USWRFsfc
   - USWRFtoa
   - tendency_of_total_water_path_due_to_advection
+  - total_frozen_precipitation_rate
   - TMP850
   - h500
   - TMP2m

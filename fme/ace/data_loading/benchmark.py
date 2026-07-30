@@ -15,6 +15,7 @@ import yaml
 
 from fme.core import logging_utils
 from fme.core.dicts import to_flat_dict
+from fme.core.distributed.distributed import Distributed
 from fme.core.timing import GlobalTimer
 from fme.core.wandb import WandB
 
@@ -43,22 +44,16 @@ class BenchmarkConfig:
             requirements=DataRequirements(self.names, self.n_timesteps),
         )
 
-    def configure_wandb(self, env_vars: dict | None = None, **kwargs):
-        config = to_flat_dict(dataclasses.asdict(self))
-        # our wandb class requires "experiment_dir" to be in config
-        config["experiment_dir"] = TMPDIR
-        os.makedirs(TMPDIR)
-        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
-
     def configure_logging(self):
-        self.logging.configure_logging("/tmp", "log.txt")
+        config = to_flat_dict(dataclasses.asdict(self))
+        os.makedirs(TMPDIR, exist_ok=True)
+        self.logging.configure_logging(
+            TMPDIR, "log.txt", config=config, resumable=False
+        )
 
 
 def benchmark(config: BenchmarkConfig):
     config.configure_logging()
-    env_vars = logging_utils.retrieve_env_vars()
-    beaker_url = logging_utils.log_beaker_url()
-    config.configure_wandb(env_vars=env_vars, notes=beaker_url)
     wandb = WandB.get_instance()
 
     with GlobalTimer():
@@ -85,7 +80,7 @@ def benchmark(config: BenchmarkConfig):
         timer.start("data_loading")
         seconds_per_batch = time.time()
         for i, batch in enumerate(loader):
-            timer.stop()
+            timer.stop("data_loading")
             if i % 10 == 0:
                 logging.info(f"Loaded batch {i}")
             with timer.context("sleeping"):
@@ -94,7 +89,7 @@ def benchmark(config: BenchmarkConfig):
             wandb.log({"seconds_per_batch": seconds_per_batch}, step=i)
             seconds_per_batch = time.time()
             timer.start("data_loading")
-        timer.stop()
+        timer.stop("data_loading")
         logging.info(f"Finished loading {len(loader)} batches.")
         total_time = timer.get_duration("data_loading") + timer.get_duration("sleeping")
         actual_throughput = (bytes_per_batch * len(loader)) / total_time
@@ -128,4 +123,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    with Distributed.context():
+        main()

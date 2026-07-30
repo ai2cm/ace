@@ -15,7 +15,7 @@ def test_mean_metrics_call_distributed():
     This tests that functionality by modifying the Distributed singleton.
     """
     with mock_distributed(-1.0) as mock:
-        area_weights = torch.ones([4]).to(get_device())
+        area_weights = torch.ones([4, 4]).to(get_device())
         agg = MeanAggregator(LatLonOperations(area_weights))
         sample_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
         agg.record_batch(
@@ -36,7 +36,7 @@ def test_i_time_start_gets_correct_time_one_step_windows():
     # while this directly tests the "mean" result, this is really a test that
     # the data from the correct timestep is piped into the aggregator.
     target_time = 3
-    area_weights = torch.ones([4]).to(get_device())
+    area_weights = torch.ones([4, 4]).to(get_device())
     agg = MeanAggregator(LatLonOperations(area_weights), target_time=target_time)
     target_data = {"a": torch.zeros([2, 1, 4, 4], device=get_device())}
     for i in range(5):
@@ -68,7 +68,7 @@ def test_i_time_start_gets_correct_time_longer_windows(
 ):
     # while this directly tests the "mean" result, this is really a test that
     # the data from the correct timestep is piped into the aggregator.
-    area_weights = torch.ones([4]).to(get_device())
+    area_weights = torch.ones([4, 4]).to(get_device())
     agg = MeanAggregator(LatLonOperations(area_weights), target_time=target_time)
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
     i_start = 0
@@ -91,6 +91,40 @@ def test_i_time_start_gets_correct_time_longer_windows(
     )
 
 
+def test_report_variables_filters_per_variable_but_keeps_channel_mean():
+    area_weights = torch.ones([4, 4]).to(get_device())
+    agg = MeanAggregator(
+        LatLonOperations(area_weights),
+        target="norm",
+        include_bias=False,
+        include_grad_mag_percent_diff=False,
+        channel_mean_names=["a", "b", "c"],
+        report_variables=["a"],
+    )
+    sample_data = {
+        "a": torch.randn(2, 3, 4, 4, device=get_device()),
+        "b": torch.randn(2, 3, 4, 4, device=get_device()),
+        "c": torch.randn(2, 3, 4, 4, device=get_device()),
+    }
+    agg.record_batch(
+        target_data=sample_data,
+        gen_data=sample_data,
+        target_data_norm=sample_data,
+        gen_data_norm=sample_data,
+    )
+    logs = agg.get_logs(label="m")
+    assert "m/weighted_rmse/a" in logs
+    assert "m/weighted_rmse/b" not in logs
+    assert "m/weighted_rmse/c" not in logs
+    assert "m/weighted_rmse/channel_mean" in logs
+
+    ds = agg.get_dataset()
+    assert "weighted_rmse-a" in ds.data_vars
+    assert "weighted_rmse-b" not in ds.data_vars
+    assert "weighted_rmse-c" not in ds.data_vars
+    assert "weighted_rmse-channel_mean" in ds.data_vars
+
+
 def test_loss():
     """
     Basic test the aggregator combines loss correctly
@@ -100,7 +134,7 @@ def test_loss():
     example_data = {
         "a": torch.randn(1, 2, 5, 5, device=get_device()),
     }
-    area_weights = torch.ones(1).to(get_device())
+    area_weights = torch.ones(5, 5).to(get_device())
     aggregator = MeanAggregator(LatLonOperations(area_weights))
     aggregator.record_batch(
         loss=1.0,

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
+from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.coordinates import DepthCoordinate
 from fme.core.ocean_data import OceanData
 
@@ -26,8 +26,8 @@ def test_column_integrated_ocean_heat_content(has_depth_coordinate: bool):
         mask[:, :, 0, 1, 1] = 0.0
 
         expected_ohc = torch.tensor(
-            SPECIFIC_HEAT_OF_WATER_CM4
-            * DENSITY_OF_WATER_CM4
+            SPECIFIC_HEAT_OF_SEA_WATER_CM4
+            * DENSITY_OF_SEA_WATER_CM4
             * n_samples
             * n_time_steps
             * (

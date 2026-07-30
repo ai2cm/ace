@@ -44,6 +44,10 @@ class TimeLengthProbabilities:
     def max_n_forward_steps(self) -> int:
         return int(max(self._n_times))
 
+    def seed_rng(self, seed: int) -> None:
+        """Reset the RNG to a deterministic state with the given seed."""
+        self._rng = np.random.RandomState(seed)
+
     def sample(self) -> int:
         """
         Update the current number of timesteps to sample based on
