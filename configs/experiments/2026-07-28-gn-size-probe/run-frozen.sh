@@ -29,6 +29,11 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
+# GPUS=none (or 0) omits --gpus entirely, so CPU-only work such as grid_probe.py
+# schedules against any free node instead of queueing for an accelerator.
+GPU_ARG="--gpus ${GPUS:-1}"
+case "${GPUS:-1}" in none|0) GPU_ARG="" ;; esac
+
 # gn_extreme_metrics.py takes no --n-times; only pass it to gn_frozen_eval.py.
 EXTRA_ARGS=""
 if [ "$SCRIPT_NAME" = "gn_frozen_eval.py" ]; then EXTRA_ARGS="--n-times $N_TIMES"; fi
@@ -52,7 +57,7 @@ gantry run \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $MOE_DATASET:bundled_moe_multivariate.ckpt:/moe/bundled_moe_multivariate.ckpt \
     --weka climate-default:/climate-default \
-    --gpus 1 \
+    $GPU_ARG \
     --shared-memory 400GiB \
     --budget ai2/atec-climate \
     --system-python \
