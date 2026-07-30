@@ -7,6 +7,17 @@ baseline/spectral (the tool is a generic A-vs-B diff of two eval-run summaries).
 -->
 # Eval comparison — distilled **baseline** vs distilled **spectral** (held-out X-SHiELD AMIP control, 100km→3km)
 
+> ⚠️ **Caveat added 2026-07-29 — the tail rows below are shard-local.** These were 4-GPU
+> runs, and `ComparedDynamicTailsHistograms` performs no cross-rank reduction, so the
+> histogram saw **one rank's quarter** of the samples. The single-GPU re-run
+> ([report](2026-07-28-hirov1-vs-spectral-conus-1gpu.md)) measured the error directly: the
+> ground-truth percentile was understated **8.1% @99.9999** and **21.1% @99.99**.
+> **The verdict here still stands** — tail *ratios* largely self-normalize (numerator and
+> denominator share the shard; spectral @99.9999 moved only 0.99545 → 0.99495 on the full
+> sample), and CRPS / power-spectrum bias were always reduced correctly (they reproduce to
+> ≤0.3%). Read the **tail ratios as approximate** and any absolute percentile as a lower
+> bound; the CRPS and PSD conclusions are unaffected.
+
 _The held-out confirmation of the training-val spectral win `i26sidsm`. Compares the
 GAN-only distilled PRATEsfc student (`f7z93y0a`) against the spectral-matching-loss
 student (`i26sidsm`) on genuinely out-of-sample data — X-SHiELD **AMIP control** (not

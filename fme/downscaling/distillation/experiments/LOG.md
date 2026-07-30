@@ -10,19 +10,10 @@ Central planning + outcomes log for distilled downscaling students. Process:
 
 ## ⚡ At a glance  <!-- keep this current: the daily check-in view -->
 
-_Last updated: 2026-07-28._
+_Last updated: 2026-07-29._
 
 ### 🔴 In flight — check for updates, finish write-ups when done
 
-- **Single-GPU CONUS eval — hirov1 vs spectral student** (launched 2026-07-28) — hirov1
-  `6eff6ig5` (`01KYP41B245ZXBNH3QGJEGR74N`) + spectral `i26sidsm` `y543b0gf`
-  (`01KYP41DEZ7DND9YFY77XVYEH7`), commit
-  [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f). Run on **one rank** because
-  the tail histograms are never reduced across ranks (see the follow-up below), so every
-  earlier multi-rank eval reported `histogram/prediction_frac_of_target/*` from a single
-  rank's shard. First eval with **whole-dataset tails**; CRPS/PSD stay comparable to the
-  4-GPU runs, tails supersede them.
-  ([write-up](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md))
 - **f-distill step-count sweep** (launched 2026-07-23) — native **1-step**
   (`01KY8F8DJG89CNVV89257V0B72`) + native **4-step** (`01KY8F8M3BD7NG1QQDNQJJ8KVW`),
   spectral W=1e-2, **early-stop patience=10** (spec-13, first sweep to use it). Baseline =
@@ -31,6 +22,12 @@ _Last updated: 2026-07-28._
   ([write-up](reports/2026-07-13-fdistill-step-count-sweep-TBD.md))
 
 _Recently closed:_
+- **Single-GPU CONUS eval** `6eff6ig5` (hirov1) + `y543b0gf` (spectral) → ✅ **whole-dataset
+  tails; the shard understated ground-truth extremes 8–21%** (2026-07-29). Past comparative
+  verdicts survive (ratios self-normalize; CRPS/PSD agree to ≤0.3%), but hirov1's extreme
+  tail goes 0.936→0.974 and the student's @99.99 over-production is now clearly its weakest
+  metric (+9.5%). Cost 4.02× wall clock → **fix the reduction** rather than repeat this.
+  ([report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md))
 - `2yhjonz9` (band_gamma=0.5) + `34rg7wii` (band_gamma=1) → ➕ **mild positive; monotonic
   response curve** (2026-07-14). The hi-k tilt works as designed — best-sustained hi
   `spec_mae` improves 0.074→0.066→0.050 and overall mean 0.043→0.038→0.035 across
@@ -91,7 +88,7 @@ Every launched run gets a row. `verdict`: ✅ win · ➕ mild positive · ➖ fl
 | `rmoodemk` | `1r1p6djp` | 2026-07-08 | CONUS 2023, 100km→3km X-SHiELD | [`de3e00c`](https://github.com/ai2cm/ace/commit/de3e00ce2bf8215114a818faae11700afd8005f9) | `01KWZD6YMZSD37XZHDMYB8RFC7` / `01KWZD6WFN4TCSMMC48BTFMN8Q` | see report | [report](reports/2026-07-08-moe-eval-distilled-vs-teacher.md) |
 | `x2nyzmzh` (spectral) | `flzvb6tp` (baseline) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.46→0.13 (−71%), CRPS −3.5%, tails ~ideal | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
 | `l6vv7yx0` (spectral) | `fg9byv9y` (baseline) | 2026-07-13 | maritime continent, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.60→0.13 (−78%), CRPS −2.6%, tails closer to 1 | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
-| `y543b0gf` (spectral `i26sidsm`, 2-step) | `6eff6ig5` (hirov1, full diffusion) | 2026-07-28 | CONUS, 100km→3km X-SHiELD AMIP — **single GPU** | [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f) | `01KYP41DEZ7DND9YFY77XVYEH7` / `01KYP41B245ZXBNH3QGJEGR74N` | ⏳ running | [report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md) |
+| `y543b0gf` (spectral `i26sidsm`, 2-step) | `6eff6ig5` (hirov1, full diffusion) | 2026-07-28 | CONUS, 100km→3km X-SHiELD AMIP — **single GPU** | [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f) | `01KYP41DEZ7DND9YFY77XVYEH7` / `01KYP41B245ZXBNH3QGJEGR74N` | ✅ tails now trustworthy: ground-truth percentile was understated **8% @99.9999 / 21% @99.99**; ratios self-normalize so past verdicts hold, but hirov1's extreme tail 0.936→**0.974**. Student within 3.3% CRPS / 8.3% PSD of full diffusion, better @99.9999, +9.5% @99.99 | [report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md) |
 | `p337gcg9` (Lo-only, 2 NFE) | `rmoodemk` (Hi→Lo bundle, 3 NFE) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP | [`af4d134`](https://github.com/ai2cm/ace/commit/af4d13415dacc38ab34e5ad8bbfa22a51615d611) | `01KXEYCC9HAZ7F1G85E3KRPKFD` | ✅ **Hi needed for extreme precip only**: Lo-only ≈ bundle on CRPS (<0.03%) + PSD (<1%) all 4 vars, but under-produces `tail_99.9999_PRATEsfc` 1.01→0.93 (wind tails unchanged) | [report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md) |
 
 ### MoE per-expert base models (bundled into `rmoodemk`)
@@ -140,15 +137,19 @@ point at the standardized reports.
   `TensorDictAccumulator.get_distributed_mean()`, so `metrics/crps/*`, `metrics/rmse/*`
   and `power_spectrum/*` were always reduced correctly; the other `Distributed` users in
   the downscaling aggregators are `LossVsNoiseAggregator` (training-only `reduce_sum`)
-  and `PairedSampleAggregator` (`gather` for event images). **Consequences:** (a) every
-  multi-rank eval's tails are shard-local — the 4-GPU CONUS/maritime tail ratios in the
-  2026-07-13 reports included; (b) more insidiously, **`best_student_tail.ckpt` and
-  `best_histogram_tail.ckpt` were *selected* on a shard**, so every tail-based checkpoint
-  selector in the history above is noisier than assumed. **Interim workaround:** run evals
-  on one GPU (`configs/experiments/2026-07-28-hirov1-vs-spectral-conus-1gpu/`). **Real
-  fix:** add the reduction — durable pipeline change → numbered spec under `../specs/`
-  first, and note it will shift every tail-selected checkpoint, so it interacts with the
-  spec-13 early-stop work below.
+  and `PairedSampleAggregator` (`gather` for event images). **Magnitude now measured**
+  (2026-07-29 single-GPU re-run): on ¼ of the samples the **ground-truth** percentile was
+  understated **8.1% @99.9999** and **21.1% @99.99**. Tail *ratios* largely self-normalize,
+  so past comparative verdicts survive — but not always: hirov1's extreme tail moved
+  0.936→0.974. **Consequences:** (a) absolute tails in every multi-rank eval are lower
+  bounds; (b) more insidiously, **`best_student_tail.ckpt` and `best_histogram_tail.ckpt`
+  were *selected* on a shard**, so every tail-based checkpoint selector in the history above
+  is noisier than assumed. **Interim workaround:** run evals on one GPU
+  (`configs/experiments/2026-07-28-hirov1-vs-spectral-conus-1gpu/`) — but it costs **4×**
+  wall clock (12.6 h for hirov1), so this is not standing practice. **Real fix:** add the
+  reduction — durable pipeline change → numbered spec under `../specs/` first, and note it
+  will shift every tail-selected checkpoint, so it interacts with the spec-13 early-stop
+  work below.
 - **★ TASK — spectral-aware early stopping / checkpoint selection** (motivated by
   `xgcaf2rt`). Two coupled problems this run exposed: (a) **wasted compute** — it ran
   to 52k steps but its useful spectral optimum was ~2.6k; `val/crps_mean` is flat to
@@ -202,6 +203,21 @@ point at the standardized reports.
 
 _Reverse-chronological; one line per finding, linking the run report._
 
+- **2026-07-29** — ✅ **Whole-dataset tails: the shard-local histogram understated extremes
+  by 8–21%, but past comparative verdicts survive.** Single-GPU CONUS re-runs of hirov1
+  (`6eff6ig5`) and the spectral student (`y543b0gf`) against their 4-GPU twins (`j3thqivd` /
+  `x2nyzmzh`) isolate the bug: the **ground-truth** percentile — identical data, so pure
+  artifact — was understated **8.1% @99.9999** and **21.1% @99.99** on ¼ of the samples, and
+  came out bit-identical across both models within each rank count (a clean check). Tail
+  *ratios* mostly self-normalize (shared shard cancels), so the 2026-07-13
+  spectral-vs-baseline verdict stands, and CRPS/RMSE/PSD agree to **≤0.3%**, confirming those
+  were always reduced correctly. **What does change:** hirov1's extreme tail
+  0.936→**0.974** (under-produces 2.6%, not 6.4%) — the ratio's robustness was luck, not a
+  property. Head-to-head, the 2-step student is within **3.3% CRPS / 8.3% PSD** of full
+  diffusion at ~17× lower per-batch cost and better @99.9999 (0.995 vs 0.974), but
+  over-produces **@99.99 by 9.5%** — now its clearest weakness. Cost 4.02× wall clock (12.6 h
+  for hirov1) → fix the reduction rather than repeat the workaround. See
+  [report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md).
 - **2026-07-14** — ➕ **`band_gamma` hi-k tilt is a mild, monotonic positive.** The
   `{0, 0.5, 1}` sweep (`i26sidsm` / `2yhjonz9` / `34rg7wii`) shows, at each run's
   best-sustained spectrum, that tilting the spectral budget toward high-k does exactly
