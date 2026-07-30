@@ -35,6 +35,10 @@ inferences:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        constant_field_override:
+          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
+          names:
+          - specific_total_water_0
       num_data_workers: 8
     aggregator:
       step_means:
@@ -99,6 +103,9 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
+    stepper_override:
+      prescribed_prognostic_names:
+      - specific_total_water_0
 - name: 10year_insample
   config:
     experiment_dir: /results/10year_insample
@@ -126,6 +133,10 @@ inferences:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        constant_field_override:
+          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
+          names:
+          - specific_total_water_0
       num_data_workers: 8
     aggregator:
       step_means:
@@ -190,6 +201,9 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
+    stepper_override:
+      prescribed_prognostic_names:
+      - specific_total_water_0
 - name: weather_2024
   config:
     experiment_dir: /results/weather_2024
@@ -217,6 +231,10 @@ inferences:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        constant_field_override:
+          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
+          names:
+          - specific_total_water_0
       num_data_workers: 8
     aggregator:
       step_means:
@@ -295,6 +313,9 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
+    stepper_override:
+      prescribed_prognostic_names:
+      - specific_total_water_0
 - name: weather_1994
   config:
     experiment_dir: /results/weather_1994
@@ -322,6 +343,10 @@ inferences:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        constant_field_override:
+          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
+          names:
+          - specific_total_water_0
       num_data_workers: 8
     aggregator:
       step_means:
@@ -400,6 +425,9 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 8
     allow_incompatible_dataset: true
+    stepper_override:
+      prescribed_prognostic_names:
+      - specific_total_water_0
 - name: long_46year
   config:
     experiment_dir: /results/long_46year
@@ -427,6 +455,10 @@ inferences:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        constant_field_override:
+          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
+          names:
+          - specific_total_water_0
       num_data_workers: 8
     aggregator:
       step_means: []
@@ -491,6 +523,9 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
+    stepper_override:
+      prescribed_prognostic_names:
+      - specific_total_water_0
 - name: long_46year_constant_co2
   config:
     experiment_dir: /results/long_46year_constant_co2
@@ -518,6 +553,10 @@ inferences:
         data_path: /climate-default
         file_pattern: 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
         engine: zarr
+        constant_field_override:
+          path: /climate-default/2026-04-17-era5-4deg-8layer-daily-stats-1990-2019/2026-03-19-era5-4deg-8layer-1940-2025/time-mean.nc
+          names:
+          - specific_total_water_0
       num_data_workers: 8
       persistence_names:
       - global_mean_co2
@@ -584,3 +623,6 @@ inferences:
       save_monthly_files: false
     n_ensemble_per_ic: 1
     allow_incompatible_dataset: true
+    stepper_override:
+      prescribed_prognostic_names:
+      - specific_total_water_0

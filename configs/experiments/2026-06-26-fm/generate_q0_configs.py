@@ -15,8 +15,9 @@ inference entry gets:
 
 Together those hold Q0 fixed at one grid's time mean for the whole rollout.
 
-Only the FM (multi-dataset) runs are generated; the single-dataset runs are
-not part of this experiment. Both grid variants are generated for every run,
+Generated for the FM (multi-dataset) runs and for runs trained with Q0 input
+masking; the remaining single-dataset runs are not part of this experiment.
+Both grid variants are generated for every run,
 and each run's suite already contains inference entries on both the ERA5 and
 C96 datasets, so the two configs cover all four (forcing dataset, Q0 grid)
 combinations.
@@ -36,6 +37,7 @@ from generate_eval_configs import (
     RUN_CONFIGS_DIR,
     WANDB_PREFIX,
     _build_eval_suite_config,
+    _fetch_wandb_finished_summaries,
     _fetch_wandb_run_names,
     _write_config,
     discover_source_configs,
@@ -81,6 +83,26 @@ def _is_fm_run(run_name: str) -> bool:
     return run_name.removeprefix(WANDB_PREFIX).startswith("nc-sfno-fm")
 
 
+def _masks_q0_in_training(train_cfg: dict) -> bool:
+    """True if the run's input dropout masks Q0 during training.
+
+    A single-dataset run that was trained with Q0 masked is also a valid
+    subject for the Q0 swap: it has learned to run with Q0 supplied rather
+    than freely evolved, which is exactly what the swap prescribes.
+    """
+    dropout = train_cfg["stepper"]["step"]["config"].get("input_dropout")
+    if dropout is None:
+        return False
+    return any(
+        Q0_NAME in group.get("variables", [])
+        for group in dropout.get("override_groups", [])
+    )
+
+
+def _is_q0_eval_run(run_name: str, train_cfg: dict) -> bool:
+    return _is_fm_run(run_name) or _masks_q0_in_training(train_cfg)
+
+
 def _apply_q0_override(dataset: dict, grid: str) -> dict:
     """Return `dataset` with Q0 sourced from `grid`'s time mean.
 
@@ -114,11 +136,9 @@ def generate_q0_eval_config(
     checkpoint_path: str,
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
+    wandb_finished_summaries: dict[str, list[set[str]]] | None = None,
 ) -> None:
     source_run_name = source_config_to_run_name(source_path.name)
-    if not _is_fm_run(source_run_name):
-        print(f"Skipped {source_path.name} (not a multi-dataset FM run)")
-        return
     source_dataset_id = source_map.get(source_run_name)
     if source_dataset_id is None:
         # No training result dataset recorded for this run yet (e.g. a config
@@ -128,6 +148,10 @@ def generate_q0_eval_config(
 
     with source_path.open() as f:
         train_cfg = yaml.safe_load(f)
+
+    if not _is_q0_eval_run(source_run_name, train_cfg):
+        print(f"Skipped {source_path.name} (not a multi-dataset FM or Q0-masked run)")
+        return
 
     for grid in Q0_TIME_MEAN_PATHS:
         cfg = _build_eval_suite_config(
@@ -152,6 +176,7 @@ def generate_q0_eval_config(
             wandb_run_names,
             eval_run_name_base=eval_suite_config_to_run_name(out_path.name),
             checkpoint_suffixes=Q0_CHECKPOINT_SUFFIXES,
+            wandb_finished_summaries=wandb_finished_summaries,
         )
 
 
@@ -191,6 +216,16 @@ def main() -> None:
             "in wandb."
         ),
     )
+    parser.add_argument(
+        "--skip-if-in-wandb",
+        action="store_true",
+        help=(
+            "Delete/skip eval suites whose checkpoint runs all finished in "
+            "wandb with every inference entry logged. Stricter than "
+            "--delete-if-in-wandb, which only checks that runs with the "
+            "expected names exist."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.source_map) as f:
@@ -202,6 +237,12 @@ def main() -> None:
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
 
+    wandb_finished_summaries: dict[str, list[set[str]]] | None = None
+    if args.skip_if_in_wandb:
+        print("Fetching finished runs from wandb...")
+        wandb_finished_summaries = _fetch_wandb_finished_summaries()
+        print(f"Found {len(wandb_finished_summaries)} finished run names.")
+
     source_configs = discover_source_configs(args.version)
 
     for source_path in source_configs:
@@ -212,6 +253,7 @@ def main() -> None:
             checkpoint_path=args.checkpoint_path,
             existing_only=args.existing_only,
             wandb_run_names=wandb_run_names,
+            wandb_finished_summaries=wandb_finished_summaries,
         )
 
 
