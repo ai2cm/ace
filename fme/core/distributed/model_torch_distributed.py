@@ -106,12 +106,7 @@ class ModelTorchDistributed(DistributedBackend):
     ):
         spatial_size = h_size * w_size
         if _in_dataloader_worker():
-            # see _in_dataloader_worker for why workers skip process group and
-            # CUDA device initialization, which here also means skipping the
-            # DeviceMesh. The (data, h, w) mesh is row-major over global ranks,
-            # so the data-parallel index and size follow from arithmetic; the
-            # spatial groups, mesh and device id are left unset, so that using
-            # them raises rather than silently misbehaving without a mesh.
+            # see _in_dataloader_worker; the (data, h, w) mesh is row-major
             self._rank, self._world_size = _rank_metadata_from_env()
             _check_world_size_divisible(self._world_size, spatial_size)
             self._data_size = self._world_size // spatial_size

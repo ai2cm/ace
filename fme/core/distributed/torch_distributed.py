@@ -49,10 +49,7 @@ class TorchDistributed(DistributedBackend):
 
     def __init__(self):
         if _in_dataloader_worker():
-            # see _in_dataloader_worker for why workers skip process group and
-            # CUDA device initialization. _device_id is deliberately left
-            # unset, so that using it raises instead of silently reporting a
-            # device this process never selected.
+            # see _in_dataloader_worker; _device_id is deliberately left unset
             self._rank, self.world_size = _rank_metadata_from_env()
             return
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
