@@ -41,6 +41,8 @@ def _rank_metadata_from_env() -> tuple[int, int]:
     """Return ``(rank, world_size)`` from the launcher's environment variables."""
     if using_srun():
         return int(os.environ["SLURM_PROCID"]), int(os.environ["SLURM_NTASKS"])
+    if "RANK" not in os.environ:
+        raise ValueError("Distributed backend initialized without torchrun or srun.")
     return int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
 
 

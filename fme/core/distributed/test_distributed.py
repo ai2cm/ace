@@ -177,6 +177,7 @@ def _forbid_cuda_and_process_group_init(monkeypatch):
 
     monkeypatch.setattr(torch.distributed, "init_process_group", fail)
     monkeypatch.setattr(torch.cuda, "set_device", fail)
+    # get_device() calls current_device(), which lazily initializes CUDA
     monkeypatch.setattr(torch.cuda, "current_device", fail)
 
 
@@ -187,6 +188,11 @@ def _pretend_dataloader_worker(monkeypatch):
 LAUNCHER_ENVS = [
     pytest.param(_set_torchrun_env, id="torchrun"),
     pytest.param(_set_srun_env, id="srun"),
+]
+
+LAUNCHER_ENVS_AND_DEVICE_IDS = [
+    pytest.param(_set_torchrun_env, 1, id="torchrun"),
+    pytest.param(_set_srun_env, 0, id="srun"),
 ]
 
 
@@ -238,9 +244,11 @@ def test_spatial_parallel_dataloader_worker_skips_cuda_and_process_group_init(
     assert dist.total_data_parallel_ranks == 4
 
 
-@pytest.mark.parametrize("set_launcher_env", LAUNCHER_ENVS)
+@pytest.mark.parametrize(
+    "set_launcher_env,expected_device_id", LAUNCHER_ENVS_AND_DEVICE_IDS
+)
 def test_dataloader_worker_guard_does_not_affect_main_process(
-    monkeypatch, set_launcher_env
+    monkeypatch, set_launcher_env, expected_device_id
 ):
     """Outside a worker the CUDA device is still set, as training requires."""
     set_launcher_env(monkeypatch, rank=3, world_size=8, local_rank=1)
@@ -256,4 +264,14 @@ def test_dataloader_worker_guard_does_not_affect_main_process(
 
     assert dist.rank == 3
     assert dist.total_ranks == 8
-    assert set_devices == [dist._device_id]
+    assert set_devices == [expected_device_id]
+
+
+def test_dataloader_worker_without_launcher_env_raises(monkeypatch):
+    """A worker with no launcher environment reports why, not a KeyError."""
+    monkeypatch.delenv("FME_USE_SRUN", raising=False)
+    monkeypatch.delenv("RANK", raising=False)
+    _pretend_dataloader_worker(monkeypatch)
+
+    with pytest.raises(ValueError, match="without torchrun or srun"):
+        torch_distributed.TorchDistributed()
