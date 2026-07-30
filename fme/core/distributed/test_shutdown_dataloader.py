@@ -136,11 +136,19 @@ _RANK_ENV = (
     "SLURM_NTASKS",
 )
 
+# Generous, because they only decide which diagnostic a hang produces, not how
+# long one takes to notice: the suite's autouse 90s alarm (see conftest.py) fires
+# first either way, so anything above it is a ceiling we never reach. Kept above
+# the alarm deliberately -- lowering them would trade the alarm's "failed due to
+# timeout" for our own message without making either arrive sooner. Observed
+# runtime is ~10s.
 _READY_TIMEOUT = 120.0
 _EXIT_TIMEOUT = 120.0
-# The driver's exit joins its workers, so a worker's teardown has finished by
-# the time the driver is gone. This only covers a worker whose teardown
-# outlived a driver that died some other way.
+# A worker that decides to tear down writes its marker in microseconds, so this
+# is long enough to catch one. It is not a guarantee: the driver's exit joins
+# each worker for only MP_STATUS_CHECK_INTERVAL (5s) before terminating it, so
+# the driver being gone does not mean a worker finished arbitrary work -- the
+# negative assertion below rests on this sleep, not on that join.
 _SETTLE = 2.0
 
 _HANDLER_QUALNAME = "handle_termination_signals.<locals>.handle"

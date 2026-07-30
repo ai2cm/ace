@@ -181,9 +181,12 @@ def handle_termination_signals(
         yield
         return
     if torch.utils.data.get_worker_info() is not None:
-        # DataLoader workers enter this context only to learn their rank. The
-        # DataLoader owns their lifecycle, so leave their signal disposition to
-        # it rather than exiting out from under it.
+        # A spawn- or forkserver-started DataLoader worker enters this context to
+        # learn its rank. It is a fresh process, so the pid guard below would let
+        # it install a handler of its own -- but the DataLoader owns its
+        # lifecycle, and exiting out from under it is not ours to do. Fork-started
+        # workers reach the handler by inheritance instead of coming through here,
+        # which is what the pid guard covers.
         yield
         return
 

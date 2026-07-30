@@ -4,9 +4,11 @@ import signal
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 
 import pytest
+import torch.utils.data
 
 from fme.core.distributed.shutdown import (
     add_post_shutdown_callback,
@@ -167,6 +169,13 @@ def test_deadline_does_not_outlive_a_successful_teardown(monkeypatch):
 
     The timer runs on its own thread, so leaving it armed takes the process
     down some seconds after the graceful path already finished.
+
+    This covers the common case, not an absolute guarantee: `Timer.cancel` is a
+    no-op once the timer has begun running, so a clean teardown that finishes in
+    the same instant the deadline expires still exits 143. Cancelling as soon as
+    the collective returns keeps that window down to the collective's own
+    duration -- it used to span the checkpoint write as well -- but it cannot
+    close it.
     """
     exited = []
     monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
@@ -291,14 +300,12 @@ def test_a_signal_during_the_callbacks_kills_the_process():
 
     # died inside the first callback: the second never ran, and the exit code is
     # the escalating signal's rather than the original SIGTERM's
-    assert result.stdout.split("\n")[:1] == ["first callback"]
+    assert result.stdout.splitlines() == ["first callback"]
     assert result.returncode == 128 + signal.SIGINT
 
 
 def test_no_handler_installed_off_the_main_thread():
     """Only the main thread can own the process's signal disposition."""
-    import threading
-
     original = signal.getsignal(signal.SIGTERM)
     observed = []
 
@@ -356,21 +363,20 @@ def test_no_teardown_in_a_process_forked_inside_the_context():
             os.close(read_fd)
             if not ready:
                 os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
+            _, status = os.waitpid(pid, 0)
 
     assert observed == b""
+    # and the other half of the guard's contract: the child dies from the signal
+    # as it would have without inheriting the handler. Without this the child's
+    # `os._exit(0)` backstop would let a `raise_signal` that quietly failed to
+    # kill anything pass as success.
+    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGTERM
 
 
 def test_no_handler_installed_in_a_dataloader_worker(monkeypatch):
     """The DataLoader owns its workers' lifecycle, so leave their signals alone."""
-    import torch.utils.data
-
-    from fme.core.distributed import shutdown as shutdown_module
-
-    monkeypatch.setattr(
-        torch.utils.data, "get_worker_info", lambda: object(), raising=False
-    )
+    monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
     original = signal.getsignal(signal.SIGTERM)
 
-    with shutdown_module.handle_termination_signals(shutdown=lambda: None):
+    with handle_termination_signals(shutdown=lambda: None):
         assert signal.getsignal(signal.SIGTERM) is original
