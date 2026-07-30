@@ -16,13 +16,19 @@ kills them.
 The handler runs only when the main thread returns to the interpreter, so a
 rank whose main thread is blocked in a C-level call (a collective's stream
 sync, most importantly) when the signal arrives never starts the teardown and
-rides to the scheduler's SIGKILL. The watchdog thread bounds a teardown once
-it has begun; it cannot start one. Likewise the instants before the handler is
-installed -- ``init_process_group`` itself, inside ``Distributed.context()``
-entry -- remain unprotected.
+rides to the scheduler's SIGKILL. The watchdog thread bounds the collective
+once it has begun; it cannot start one. Likewise the instants before the
+handler is installed -- ``init_process_group`` itself, inside
+``Distributed.context()`` entry -- remain unprotected.
+
+The watchdog covers the collective and stops there. Whatever runs afterwards --
+the restart checkpoint above all -- is deliberately unbounded: by then the
+peers are already out of the collective, so a deadline could only truncate the
+write it was meant to make room for.
 """
 
 import contextlib
+import enum
 import logging
 import os
 import signal
@@ -37,22 +43,51 @@ logger = logging.getLogger(__name__)
 
 TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
 
-# Bounds the collective teardown. Beaker's grace period and torchrun's elastic
-# agent (30s) both start counting when the signal is delivered, so a rank that
-# is wedged in an unrelated collective must not be able to hold the others past
-# the shorter of the two.
+# Bounds the collective teardown, and only that: a rank wedged in an unrelated
+# collective must not be able to hold its peers there, but once
+# `destroy_process_group` returns they are safe and nothing further needs a
+# deadline.
+#
+# torchrun's elastic agent, not the scheduler, is the binding constraint. Beaker
+# allows 5 minutes between SIGTERM and SIGKILL [1], but the agent gives the
+# ranks 30s: `PContext.close` defaults to `timeout=30` and
+# `LocalElasticAgent._shutdown` calls it without an argument
+# (torch/distributed/elastic/agent/server/local_elastic_agent.py:372), then
+# SIGKILLs whoever is still alive. That 30s is one budget shared by every rank
+# rather than 30s each, so a slow rank spends its peers' allowance too. 20s
+# leaves 10s of margin beneath it.
+#
+# [1]: https://beaker-docs.apps.allenai.org/scheduling/interruption.html#automated-preemption
 DEFAULT_TEARDOWN_TIMEOUT = 20.0
 
 _post_shutdown_callbacks: list[Callable[[], None]] = []
 
 
+class _Phase(enum.Enum):
+    """How far the teardown has got, which is what a repeated signal turns on.
+
+    The three post-signal phases want three different answers: while the
+    collective is in flight a repeat must not disturb it, once it is done there
+    is nothing left to protect, and after a swallowed exit the process needs
+    killing outright.
+    """
+
+    RUNNING = enum.auto()
+    COLLECTIVE = enum.auto()
+    CALLBACKS = enum.auto()
+    COMPLETE = enum.auto()
+
+
 def add_post_shutdown_callback(callback: Callable[[], None]) -> None:
     """Register work to run on termination, once the process group is gone.
 
-    Callbacks run in registration order and must not use collectives. They run
-    on borrowed time -- the scheduler may SIGKILL the process at any point
-    after its grace period -- so they are best-effort, and the most valuable
-    work should be registered first.
+    Callbacks run in registration order and must not use collectives, the
+    process group having already been destroyed.
+
+    They are not bounded by the teardown deadline -- that covers the collective
+    alone -- but they are still best-effort: torchrun SIGKILLs the rank about
+    30s after the signal reaches the agent, whatever it is doing (see
+    `DEFAULT_TEARDOWN_TIMEOUT`). Register the most valuable work first.
     """
     _post_shutdown_callbacks.append(callback)
 
@@ -88,16 +123,34 @@ def _hard_exit_after(timeout: float, exit_code: int) -> threading.Timer:
     return timer
 
 
-def _tear_down(shutdown: Callable[[], None]) -> None:
-    """Release the backend, then run the best-effort callbacks.
+def _shut_down_backend(shutdown: Callable[[], None], deadline: threading.Timer) -> None:
+    """Release the backend, then stand the watchdog down.
 
-    Nothing here may raise: every remaining step is worth attempting even if an
-    earlier one failed.
+    Cancelling here rather than after the callbacks is the point: the deadline
+    exists to stop a wedged rank holding its peers inside the collective, and
+    the moment `shutdown` returns they are out of it. Leaving it armed any
+    longer would put our own ceiling on the restart checkpoint -- tighter than
+    either clock that actually ends the process (see
+    `DEFAULT_TEARDOWN_TIMEOUT`), and on the very write that running the teardown
+    first exists to make room for.
+
+    This may not raise: the callbacks are worth attempting even if the backend
+    could not be released.
     """
     try:
         shutdown()
     except BaseException:
         logger.exception("Failed to shut down the distributed backend.")
+    finally:
+        deadline.cancel()
+
+
+def _run_post_shutdown_callbacks() -> None:
+    """Run the best-effort callbacks in registration order.
+
+    Nothing here may raise: every remaining callback is worth attempting even if
+    an earlier one failed.
+    """
     for callback in _post_shutdown_callbacks:
         try:
             callback()
@@ -118,8 +171,9 @@ def handle_termination_signals(
         shutdown: Tears the distributed backend down. Called before any
             callback registered with `add_post_shutdown_callback`, so that
             every rank reaches the collective teardown together.
-        teardown_timeout: Seconds to allow for `shutdown` and the callbacks
-            before exiting regardless.
+        teardown_timeout: Seconds to allow `shutdown` before exiting
+            regardless. It does not bound the callbacks that follow; those are
+            left to run against the scheduler's clock.
     """
     if threading.current_thread() is not threading.main_thread():
         # only the main thread may install handlers; a thread shares the
@@ -134,11 +188,10 @@ def handle_termination_signals(
         return
 
     installed_pid = os.getpid()
-    tearing_down = False
-    teardown_complete = False
+    phase = _Phase.RUNNING
 
     def handle(signum: int, frame: types.FrameType | None) -> None:
-        nonlocal tearing_down, teardown_complete
+        nonlocal phase
         exit_code = 128 + signum
         if os.getpid() != installed_pid:
             # A forked child inherited this handler: the default DataLoader
@@ -151,7 +204,31 @@ def handle_termination_signals(
             signal.signal(signum, signal.SIG_DFL)
             signal.raise_signal(signum)
             return
-        if teardown_complete:
+        if phase is _Phase.COLLECTIVE:
+            # a repeated Ctrl-C, or both the scheduler and torchrun signalling.
+            # The first handler owns the collective and the deadline already
+            # bounds it, so restarting it here would only cost us the callbacks.
+            logger.info(
+                "Received %s while the backend is still shutting down; ignoring.",
+                signal.Signals(signum).name,
+            )
+            return
+        # the two branches below return after `os._exit` only so that a caller
+        # who stubbed it out -- which the tests do, having no use for a dead
+        # interpreter -- cannot fall through and start the teardown over
+        if phase is _Phase.CALLBACKS:
+            # the collective is done, so the peers are already safe and there is
+            # nothing left for us to protect. Someone escalating at this point
+            # -- a second Ctrl-C, or the scheduler -- means it deliberately,
+            # even at the cost of the checkpoint still being written.
+            logger.info(
+                "Received %s while running post-shutdown callbacks; the backend "
+                "is already down, so exiting and abandoning the rest.",
+                signal.Signals(signum).name,
+            )
+            os._exit(exit_code)
+            return
+        if phase is _Phase.COMPLETE:
             # the SystemExit from the first signal was swallowed (pytest turns
             # it into a test failure and keeps running; so does any bare
             # except), so being here means graceful exit failed. Honor the
@@ -161,28 +238,18 @@ def handle_termination_signals(
                 signal.Signals(signum).name,
             )
             os._exit(exit_code)
-        if tearing_down:
-            # a repeated Ctrl-C, or both the scheduler and torchrun signalling.
-            # The first handler owns the teardown and the deadline already
-            # bounds it, so restarting it here would only cost us the callbacks.
-            logger.info(
-                "Received %s while already shutting down; ignoring.",
-                signal.Signals(signum).name,
-            )
             return
-        tearing_down = True
+        phase = _Phase.COLLECTIVE
         logger.info(
             "Received %s, shutting down the distributed backend before exiting.",
             signal.Signals(signum).name,
         )
-        deadline = _hard_exit_after(teardown_timeout, exit_code)
+        _shut_down_backend(shutdown, _hard_exit_after(teardown_timeout, exit_code))
+        phase = _Phase.CALLBACKS
         try:
-            _tear_down(shutdown)
+            _run_post_shutdown_callbacks()
         finally:
-            teardown_complete = True
-            # the deadline bounds the teardown, so it must not outlive it and
-            # kill a process that already shut down cleanly
-            deadline.cancel()
+            phase = _Phase.COMPLETE
         sys.exit(exit_code)
 
     previous = {sig: signal.getsignal(sig) for sig in TERMINATION_SIGNALS}

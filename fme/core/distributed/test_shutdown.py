@@ -14,6 +14,21 @@ from fme.core.distributed.shutdown import (
 )
 
 
+def _run_handler_program(program: str) -> "subprocess.CompletedProcess[str]":
+    """Exercise the handler in a subprocess.
+
+    Cases that turn on whether the process survives cannot run in-process:
+    pytest catches the graceful `SystemExit`, and an `os._exit` would take the
+    whole session down without a summary.
+    """
+    return subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(program)],
+        capture_output=True,
+        timeout=60,
+        text=True,
+    )
+
+
 def test_process_group_is_torn_down_before_callbacks_run():
     """Slow work must not delay the collective teardown.
 
@@ -171,7 +186,7 @@ def test_hard_exits_when_teardown_hangs():
     Run in a subprocess: the point of the timeout is that it fires from another
     thread while the main thread is stuck, and the outcome is process death.
     """
-    program = textwrap.dedent(
+    result = _run_handler_program(
         """
         import signal, threading
         from fme.core.distributed.shutdown import handle_termination_signals
@@ -183,12 +198,101 @@ def test_hard_exits_when_teardown_hangs():
             signal.raise_signal(signal.SIGTERM)
         """
     )
-    result = subprocess.run(
-        [sys.executable, "-c", program], capture_output=True, timeout=60, text=True
-    )
 
     assert result.returncode == 128 + signal.SIGTERM
     assert "did not complete" in result.stderr
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize(
+    "shutdown_body",
+    [
+        pytest.param("pass", id="collective_succeeded"),
+        pytest.param(
+            'raise RuntimeError("NCCL communicator was aborted")',
+            id="collective_failed",
+        ),
+    ],
+)
+def test_the_deadline_does_not_bound_the_checkpoint_write(tmp_path, shutdown_body):
+    """Rank 0 must finish its work whatever became of its peers.
+
+    The deadline is there to stop a wedged rank holding its peers inside the
+    collective. Once `shutdown` has returned they are out of it either way --
+    cleanly, or because the communicator was already aborted -- so nothing is
+    left for the deadline to protect, and leaving it armed can only truncate the
+    restart checkpoint that running the teardown first exists to make room for.
+
+    Both parameters therefore expect the same outcome: the write completes even
+    though it outlasts `teardown_timeout` several times over.
+
+    A subprocess, because the failure is `os._exit` mid-write. The exit code
+    cannot distinguish it -- the graceful `sys.exit(143)` and the watchdog's
+    `os._exit(143)` are identical -- so the evidence is the file plus stderr.
+    """
+    checkpoint = tmp_path / "checkpoint"
+    result = _run_handler_program(
+        f"""
+        import signal, time
+        from fme.core.distributed.shutdown import (
+            add_post_shutdown_callback,
+            handle_termination_signals,
+        )
+
+        def shutdown():
+            {shutdown_body}
+
+        def write_checkpoint():
+            # stands in for the Trainer's multi-GB torch.save
+            with open({str(checkpoint)!r}, "w") as f:
+                f.write("partial")
+            time.sleep(2.0)
+            with open({str(checkpoint)!r}, "a") as f:
+                f.write(" complete")
+
+        add_post_shutdown_callback(write_checkpoint)
+        with handle_termination_signals(shutdown=shutdown, teardown_timeout=0.5):
+            signal.raise_signal(signal.SIGTERM)
+        """
+    )
+
+    assert "did not complete" not in result.stderr
+    assert checkpoint.read_text() == "partial complete"
+
+
+@pytest.mark.medium_duration
+def test_a_signal_during_the_callbacks_kills_the_process():
+    """Once the peers are safe, an escalating signal must be obeyed.
+
+    The callbacks are deliberately unbounded, so ignoring repeats here -- as we
+    do during the collective -- would leave a rank wedged in a stalled
+    checkpoint write deaf to every signal until SIGKILL. By this point the
+    process group is gone, so honoring the signal costs at most the checkpoint.
+    """
+    result = _run_handler_program(
+        """
+        import os, signal
+        from fme.core.distributed.shutdown import (
+            add_post_shutdown_callback,
+            handle_termination_signals,
+        )
+
+        def stalled_write():
+            print("first callback", flush=True)  # os._exit will not flush for us
+            signal.raise_signal(signal.SIGINT)  # the operator, losing patience
+            print("first callback returned", flush=True)
+
+        add_post_shutdown_callback(stalled_write)
+        add_post_shutdown_callback(lambda: print("second callback", flush=True))
+        with handle_termination_signals(shutdown=lambda: None):
+            signal.raise_signal(signal.SIGTERM)
+        """
+    )
+
+    # died inside the first callback: the second never ran, and the exit code is
+    # the escalating signal's rather than the original SIGTERM's
+    assert result.stdout.split("\n")[:1] == ["first callback"]
+    assert result.returncode == 128 + signal.SIGINT
 
 
 def test_no_handler_installed_off_the_main_thread():
