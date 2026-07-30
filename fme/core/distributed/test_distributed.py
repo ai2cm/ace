@@ -51,6 +51,42 @@ def test_context_tears_down_the_backend_on_sigterm():
     assert result.returncode == 128 + signal.SIGTERM
 
 
+@pytest.mark.medium_duration
+def test_context_leaves_signals_alone_when_asked_not_to_handle_them():
+    """The test suite wraps the whole session in a context and needs Ctrl-C.
+
+    A handler installed for the session's lifetime turns the first Ctrl-C into a
+    caught teardown -- a test failure, with the rest of the run left without a
+    process group -- instead of stopping pytest. So the suite opts out, and this
+    covers the opt-out: the process keeps whatever disposition it had.
+
+    A subprocess for the same reason as the test above: the session is already
+    inside a context, which refuses to nest.
+    """
+    program = textwrap.dedent(
+        """
+        import signal
+        from fme.core.distributed import Distributed
+
+        before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
+        with Distributed.context(handle_signals=False):
+            during = (
+                signal.getsignal(signal.SIGTERM),
+                signal.getsignal(signal.SIGINT),
+            )
+        print(before == during)
+        # the default disposition survives, so Ctrl-C still raises here
+        print(signal.getsignal(signal.SIGINT) is signal.default_int_handler)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, timeout=120, text=True
+    )
+
+    assert result.stdout.split() == ["True", "True"], result.stderr
+    assert result.returncode == 0
+
+
 def test_torch_shutdown_is_a_noop_when_the_process_group_is_gone(monkeypatch):
     """A termination signal can arrive during the normal end-of-run teardown.
 

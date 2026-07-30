@@ -66,7 +66,7 @@ class Distributed:
 
     @classmethod
     @contextlib.contextmanager
-    def context(cls) -> Generator[None, None, None]:
+    def context(cls, handle_signals: bool = True) -> Generator[None, None, None]:
         """
         Context manager for initializing and shutting down the distributed backend.
 
@@ -77,13 +77,22 @@ class Distributed:
         Termination signals are handled for the lifetime of the context, so that
         a preempted job tears the backend down instead of dropping its NVLink
         peers. See `fme.core.distributed.shutdown`.
+
+        Args:
+            handle_signals: Install the termination handler. Pass `False` only
+                when something else owns the process's response to SIGTERM and
+                SIGINT -- the test suite, which wraps the whole session in this
+                context and needs Ctrl-C to keep interrupting pytest rather than
+                becoming a caught teardown. Every entrypoint wants the default.
         """
         if cls._entered:
             raise RuntimeError("Nested Distributed.context() is not supported.")
         cls._entered = True
         instance = cls.get_instance()
         try:
-            with handle_termination_signals(instance.shutdown):
+            with contextlib.ExitStack() as stack:
+                if handle_signals:
+                    stack.enter_context(handle_termination_signals(instance.shutdown))
                 yield
         except BaseException:
             # exit immediately to avoid hanging other ranks
