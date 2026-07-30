@@ -3,14 +3,17 @@ import signal
 import subprocess
 import sys
 import textwrap
+from types import SimpleNamespace
 
 import pytest
 import torch
 import torch.multiprocessing as mp
 
 from fme import get_device
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, model_torch_distributed
+from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 from fme.core.distributed.torch_distributed import (
+    TorchDistributed,
     _gather_irregular,
     _pad_tensor_at_end,
     _unpad_tensor_at_end,
@@ -46,6 +49,43 @@ def test_context_tears_down_the_backend_on_sigterm():
 
     assert result.stdout.split() == ["shutdown", "callback"]
     assert result.returncode == 128 + signal.SIGTERM
+
+
+def test_torch_shutdown_is_a_noop_when_the_process_group_is_gone(monkeypatch):
+    """A termination signal can arrive during the normal end-of-run teardown.
+
+    `destroy_process_group` raises when there is no group left, which would turn
+    a second teardown into a logged exception on the way out.
+    """
+    destroyed = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        torch.distributed, "destroy_process_group", lambda *args: destroyed.append(args)
+    )
+
+    TorchDistributed.shutdown(SimpleNamespace(rank=0))  # type: ignore[arg-type]
+
+    assert destroyed == []
+
+
+def test_model_shutdown_still_cleans_up_when_the_process_group_is_gone(monkeypatch):
+    """The spatial backend has manager state to reset even with no group left.
+
+    `DistributedManager.cleanup` skips the collective by itself when the manager
+    is not initialized, and clears its shared state either way, so skipping the
+    call would strand that state and leave the manager claiming to be up.
+    """
+    cleaned = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        model_torch_distributed.DistributedManager,
+        "cleanup",
+        classmethod(lambda cls: cleaned.append("cleanup")),
+    )
+
+    ModelTorchDistributed.shutdown(SimpleNamespace(_rank=0))  # type: ignore[arg-type]
+
+    assert cleaned == ["cleanup"]
 
 
 @pytest.mark.parametrize(
