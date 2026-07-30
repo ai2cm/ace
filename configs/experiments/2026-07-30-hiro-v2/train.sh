@@ -6,8 +6,8 @@ set -e
 
 # recommended but not required to change this
 
-JOB_NAME="xshield-downscaling-100km-to-3km-tmp2m-high-sigma-sigmax1000"
-CONFIG_FILENAME="train-high-denoiser.yaml"
+JOB_NAME="xshield-downscaling-25km-to-3km"
+CONFIG_FILENAME="train-25-to-3km.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
