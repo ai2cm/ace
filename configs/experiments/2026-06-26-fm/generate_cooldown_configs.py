@@ -181,6 +181,7 @@ def _write_config(
         header = f"# arg: --dataset {beaker_dataset_id}:/checkpoints\n"
     else:
         header = "# arg: --dataset REPLACE_WITH_BEAKER_DATASET_ID:/checkpoints\n"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:
         f.write(header)
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)

@@ -27,6 +27,11 @@ CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 # submit_eval_jobs.py's CHECKPOINTS and for --delete-if-in-wandb below.
 EVAL_CHECKPOINT_NAME_SUFFIXES = ("-besttrain", "-bestinf", "-lastepoch")
 
+# Summary metric logged per inference entry at the end of its evaluation (see
+# fme/ace/inference/evaluator.py); used by --skip-if-in-wandb to tell a suite
+# that ran to completion from one that died partway through.
+SUCCESS_METRIC = "total_steps_per_second"
+
 HERE = pathlib.Path(__file__).parent
 BASE_CONFIGS_DIR = HERE / "base_configs"
 RUN_CONFIGS_DIR = HERE / "run_configs"
@@ -145,6 +150,53 @@ def _fetch_wandb_run_names() -> set[str]:
     return {run.name for run in runs}
 
 
+def _fetch_wandb_finished_summaries() -> dict[str, list[set[str]]]:
+    """Map run name -> summary key sets of that name's finished wandb runs.
+
+    One key set per run, so a suite is only considered done if a *single* run
+    logged every inference entry (a name reused across partial runs must not
+    add up to a complete suite).
+    """
+    import wandb  # lazy import: only needed with --skip-if-in-wandb
+
+    api = wandb.Api()
+    summaries: dict[str, list[set[str]]] = {}
+    for run in api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}"):
+        if run.state != "finished":
+            continue
+        summaries.setdefault(run.name, []).append(set(run.summary.keys()))
+    return summaries
+
+
+def _all_inferences_succeeded(
+    cfg: dict,
+    eval_run_names: list[str],
+    wandb_finished_summaries: dict[str, list[set[str]]],
+) -> bool:
+    """True if every eval run logged SUCCESS_METRIC for every inference entry.
+
+    run_eval_suite.py labels each entry's logs with the entry name, and the
+    summary metric is only written once that entry's inference completes, so
+    its presence means the entry ran through.
+    """
+    required_keys = {f"{entry['name']}/{SUCCESS_METRIC}" for entry in cfg["inferences"]}
+    return all(
+        any(
+            required_keys <= summary_keys
+            for summary_keys in wandb_finished_summaries.get(run_name, [])
+        )
+        for run_name in eval_run_names
+    )
+
+
+def _delete_or_skip(out_path: pathlib.Path, reason: str) -> None:
+    if out_path.exists():
+        out_path.unlink()
+        print(f"Deleted {out_path.name} ({reason})")
+    else:
+        print(f"Skipped {out_path.name} ({reason})")
+
+
 def _write_config(
     cfg: dict,
     out_path: pathlib.Path,
@@ -154,18 +206,19 @@ def _write_config(
     wandb_run_names: set[str] | None = None,
     eval_run_name_base: str | None = None,
     checkpoint_suffixes: tuple[str, ...] = EVAL_CHECKPOINT_NAME_SUFFIXES,
+    wandb_finished_summaries: dict[str, list[set[str]]] | None = None,
 ) -> None:
+    eval_run_names = [
+        f"{eval_run_name_base or source_run_name}{suffix}"
+        for suffix in checkpoint_suffixes
+    ]
     if wandb_run_names is not None:
-        eval_run_name_base = eval_run_name_base or source_run_name
-        eval_run_names = [
-            f"{eval_run_name_base}{suffix}" for suffix in checkpoint_suffixes
-        ]
         if all(name in wandb_run_names for name in eval_run_names):
-            if out_path.exists():
-                out_path.unlink()
-                print(f"Deleted {out_path.name} (all eval runs exist in wandb)")
-            else:
-                print(f"Skipped {out_path.name} (all eval runs exist in wandb)")
+            _delete_or_skip(out_path, "all eval runs exist in wandb")
+            return
+    if wandb_finished_summaries is not None:
+        if _all_inferences_succeeded(cfg, eval_run_names, wandb_finished_summaries):
+            _delete_or_skip(out_path, "all inferences succeeded in wandb")
             return
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
@@ -173,6 +226,7 @@ def _write_config(
     header = (
         f"# source_run: {source_run_name}\n" f"# source_dataset: {source_dataset_id}\n"
     )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:
         f.write(header)
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
@@ -186,6 +240,7 @@ def generate_eval_config(
     checkpoint_path: str,
     existing_only: bool,
     wandb_run_names: set[str] | None = None,
+    wandb_finished_summaries: dict[str, list[set[str]]] | None = None,
 ) -> None:
     source_run_name = source_config_to_run_name(source_path.name)
     source_dataset_id = source_map.get(source_run_name)
@@ -211,6 +266,7 @@ def generate_eval_config(
         source_dataset_id,
         existing_only,
         wandb_run_names,
+        wandb_finished_summaries=wandb_finished_summaries,
     )
 
 
@@ -263,6 +319,16 @@ def main() -> None:
             f"in {WANDB_ENTITY}/{WANDB_PROJECT}."
         ),
     )
+    parser.add_argument(
+        "--skip-if-in-wandb",
+        action="store_true",
+        help=(
+            "Delete/skip eval suites whose checkpoint runs all finished in "
+            f"{WANDB_ENTITY}/{WANDB_PROJECT} with every inference entry logged. "
+            "Stricter than --delete-if-in-wandb, which only checks that runs "
+            "with the expected names exist."
+        ),
+    )
     args = parser.parse_args()
 
     with open(args.source_map) as f:
@@ -274,6 +340,12 @@ def main() -> None:
         wandb_run_names = _fetch_wandb_run_names()
         print(f"Found {len(wandb_run_names)} existing runs.")
 
+    wandb_finished_summaries: dict[str, list[set[str]]] | None = None
+    if args.skip_if_in_wandb:
+        print(f"Fetching finished runs from {WANDB_ENTITY}/{WANDB_PROJECT}...")
+        wandb_finished_summaries = _fetch_wandb_finished_summaries()
+        print(f"Found {len(wandb_finished_summaries)} finished run names.")
+
     source_configs = discover_source_configs(args.version)
 
     for source_path in source_configs:
@@ -284,6 +356,7 @@ def main() -> None:
             checkpoint_path=args.checkpoint_path,
             existing_only=args.existing_only,
             wandb_run_names=wandb_run_names,
+            wandb_finished_summaries=wandb_finished_summaries,
         )
 
 
