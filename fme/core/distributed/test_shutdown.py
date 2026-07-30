@@ -1,4 +1,5 @@
 import os
+import select
 import signal
 import subprocess
 import sys
@@ -206,6 +207,54 @@ def test_no_handler_installed_off_the_main_thread():
     thread.join()
 
     assert observed == [original]
+
+
+def test_no_teardown_in_a_process_forked_inside_the_context():
+    """A forked child must not tear the parent's backend down.
+
+    The default DataLoader start method is fork, so each worker inherits this
+    handler, and torchrun signals the whole process group. Every worker would
+    then destroy a fork-inherited NCCL context and re-run the parent's
+    callbacks -- including the multi-GB restart checkpoint write.
+
+    The `get_worker_info` guard cannot catch this: it is only set in workers,
+    which under fork have already inherited the handler by the time it runs,
+    and spawn/forkserver workers never inherited it at all.
+    """
+    read_fd, write_fd = os.pipe()
+
+    def report(event: bytes) -> None:
+        # the child cannot report back through the parent's objects
+        os.write(write_fd, event)
+
+    add_post_shutdown_callback(lambda: report(b"callback"))
+
+    with handle_termination_signals(shutdown=lambda: report(b"shutdown")):
+        pid = os.fork()
+        if pid == 0:
+            # never let a forked copy of the test session escape back into
+            # pytest, whatever the handler does
+            try:
+                os.close(read_fd)
+                signal.raise_signal(signal.SIGTERM)
+            except BaseException:
+                pass
+            finally:
+                os._exit(0)
+
+        os.close(write_fd)
+        ready: list[int] = []
+        try:
+            # EOF (the child exiting) or its first write, whichever comes first
+            ready, _, _ = select.select([read_fd], [], [], 30.0)
+            observed = os.read(read_fd, 4096) if ready else b"child hung"
+        finally:
+            os.close(read_fd)
+            if not ready:
+                os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+
+    assert observed == b""
 
 
 def test_no_handler_installed_in_a_dataloader_worker(monkeypatch):

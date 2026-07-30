@@ -133,12 +133,24 @@ def handle_termination_signals(
         yield
         return
 
+    installed_pid = os.getpid()
     tearing_down = False
     teardown_complete = False
 
     def handle(signum: int, frame: types.FrameType | None) -> None:
         nonlocal tearing_down, teardown_complete
         exit_code = 128 + signum
+        if os.getpid() != installed_pid:
+            # A forked child inherited this handler: the default DataLoader
+            # start method is fork, and the scheduler signals the whole process
+            # group, so every worker would otherwise destroy a fork-inherited
+            # process group and re-run the parent's callbacks -- including the
+            # restart-checkpoint write, racing the parent's write of the same
+            # path. Only the process that installed the handler owns the
+            # teardown; die as this process would have without the inheritance.
+            signal.signal(signum, signal.SIG_DFL)
+            signal.raise_signal(signum)
+            return
         if teardown_complete:
             # the SystemExit from the first signal was swallowed (pytest turns
             # it into a test failure and keeps running; so does any bare
