@@ -41,8 +41,8 @@ model:
       global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260514.nc
       global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260514.nc
     fine:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/centering-20260514.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/scaling-full-field-20260514.nc
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/centering-20260206.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/scaling-full-field-20260206.nc
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:
