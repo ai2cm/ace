@@ -29,10 +29,13 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-# GPUS=none (or 0) omits --gpus entirely, so CPU-only work such as grid_probe.py
-# schedules against any free node instead of queueing for an accelerator.
+# GPUS=none (or 0) omits --gpus entirely and routes to the CPU cluster, so
+# CPU-only work such as grid_probe.py does not queue behind accelerator demand.
 GPU_ARG="--gpus ${GPUS:-1}"
-case "${GPUS:-1}" in none|0) GPU_ARG="" ;; esac
+CLUSTER_ARGS="--cluster ai2/titan --cluster ai2/jupiter --cluster ai2/ceres"
+case "${GPUS:-1}" in
+    none|0) GPU_ARG=""; CLUSTER_ARGS="--cluster ai2/phobos" ;;
+esac
 
 # gn_extreme_metrics.py takes no --n-times; only pass it to gn_frozen_eval.py.
 EXTRA_ARGS=""
@@ -47,9 +50,7 @@ gantry run \
     --description 'Frozen-GroupNorm causal test for downscaling extent bias' \
     --workspace ai2/ace \
     --priority high \
-    --cluster ai2/titan \
-    --cluster ai2/jupiter \
-    --cluster ai2/ceres \
+    $CLUSTER_ARGS \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
