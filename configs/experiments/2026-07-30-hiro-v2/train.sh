@@ -25,9 +25,9 @@ IMAGE=$(cat $REPO_ROOT/latest_deps_only_image.txt)
 gantry run \
     --name $JOB_NAME \
     --description 'Run downscaling 100km to 3km multivar training' \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority high \
-    --cluster ai2/ace \
+    --cluster ai2/titan \
     --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
