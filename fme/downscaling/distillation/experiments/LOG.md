@@ -22,11 +22,13 @@ _Last updated: 2026-07-29._
   ([write-up](reports/2026-07-13-fdistill-step-count-sweep-TBD.md))
 
 _Recently closed:_
-- **Single-GPU CONUS eval** `6eff6ig5` (hirov1) + `y543b0gf` (spectral) → ✅ **whole-dataset
-  tails; the shard understated ground-truth extremes 8–21%** (2026-07-29). Past comparative
-  verdicts survive (ratios self-normalize; CRPS/PSD agree to ≤0.3%), but hirov1's extreme
-  tail goes 0.936→0.974 and the student's @99.99 over-production is now clearly its weakest
-  metric (+9.5%). Cost 4.02× wall clock → **fix the reduction** rather than repeat this.
+- **Single-GPU CONUS eval** `6eff6ig5` (hirov1) + `y543b0gf` (spectral) → ✅ **the multi-rank
+  tail histogram was measuring winter only; ground-truth extremes understated 8–21%**
+  (2026-07-29). `ContiguousDistributedSampler` gives rank 0 the *first* quarter of the record
+  (Jan–early Apr), so it is a seasonal bias, not a smaller sample. CRPS/PSD verdicts survive
+  (≤0.3%), but hirov1's extreme tail goes 0.936→0.974 and the student's @99.99
+  over-production is now clearly its weakest metric (+9.5%). Cost 4.02× wall clock →
+  **fix the reduction** rather than repeat this.
   ([report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md))
 - `2yhjonz9` (band_gamma=0.5) + `34rg7wii` (band_gamma=1) → ➕ **mild positive; monotonic
   response curve** (2026-07-14). The hi-k tilt works as designed — best-sustained hi
@@ -137,14 +139,20 @@ point at the standardized reports.
   `TensorDictAccumulator.get_distributed_mean()`, so `metrics/crps/*`, `metrics/rmse/*`
   and `power_spectrum/*` were always reduced correctly; the other `Distributed` users in
   the downscaling aggregators are `LossVsNoiseAggregator` (training-only `reduce_sum`)
-  and `PairedSampleAggregator` (`gather` for event images). **Magnitude now measured**
-  (2026-07-29 single-GPU re-run): on ¼ of the samples the **ground-truth** percentile was
-  understated **8.1% @99.9999** and **21.1% @99.99**. Tail *ratios* largely self-normalize,
-  so past comparative verdicts survive — but not always: hirov1's extreme tail moved
-  0.936→0.974. **Consequences:** (a) absolute tails in every multi-rank eval are lower
-  bounds; (b) more insidiously, **`best_student_tail.ckpt` and `best_histogram_tail.ckpt`
-  were *selected* on a shard**, so every tail-based checkpoint selector in the history above
-  is noisier than assumed. **Interim workaround:** run evals on one GPU
+  and `PairedSampleAggregator` (`gather` for event images). **The shard is contiguous, which
+  makes this a seasonal bias rather than just a smaller sample** — the eval loader builds
+  with `train=False`, so `_get_sampler` (`fme/downscaling/data/config.py:630-637`) returns
+  `ContiguousDistributedSampler`, whose `__iter__` gives rank 0
+  `indices[0:N/num_replicas]`: on 4 ranks over CONUS 2023 that is **1 Jan – early Apr only**,
+  no summer convection. **Magnitude measured** (2026-07-29 single-GPU re-run): the
+  **ground-truth** percentile was understated **8.1% @99.9999** and **21.1% @99.99** — and the
+  99.99th moving *more* than the 99.9999th is the seasonal signature (sample-size loss
+  predicts the reverse). Tail *ratios* largely self-normalize, so past comparative verdicts
+  mostly survive — but not always: hirov1's extreme tail moved 0.936→**0.974**.
+  **Consequences:** (a) absolute tails in every multi-rank eval are lower bounds; (b) more
+  insidiously, **`best_student_tail.ckpt` and `best_histogram_tail.ckpt` were *selected* on a
+  seasonally biased slice**, so every tail-based checkpoint selector in the history above is
+  biased, not merely noisier. **Interim workaround:** run evals on one GPU
   (`configs/experiments/2026-07-28-hirov1-vs-spectral-conus-1gpu/`) — but it costs **4×**
   wall clock (12.6 h for hirov1), so this is not standing practice. **Real fix:** add the
   reduction — durable pipeline change → numbered spec under `../specs/` first, and note it
@@ -203,20 +211,23 @@ point at the standardized reports.
 
 _Reverse-chronological; one line per finding, linking the run report._
 
-- **2026-07-29** — ✅ **Whole-dataset tails: the shard-local histogram understated extremes
-  by 8–21%, but past comparative verdicts survive.** Single-GPU CONUS re-runs of hirov1
-  (`6eff6ig5`) and the spectral student (`y543b0gf`) against their 4-GPU twins (`j3thqivd` /
-  `x2nyzmzh`) isolate the bug: the **ground-truth** percentile — identical data, so pure
-  artifact — was understated **8.1% @99.9999** and **21.1% @99.99** on ¼ of the samples, and
-  came out bit-identical across both models within each rank count (a clean check). Tail
-  *ratios* mostly self-normalize (shared shard cancels), so the 2026-07-13
-  spectral-vs-baseline verdict stands, and CRPS/RMSE/PSD agree to **≤0.3%**, confirming those
-  were always reduced correctly. **What does change:** hirov1's extreme tail
-  0.936→**0.974** (under-produces 2.6%, not 6.4%) — the ratio's robustness was luck, not a
-  property. Head-to-head, the 2-step student is within **3.3% CRPS / 8.3% PSD** of full
-  diffusion at ~17× lower per-batch cost and better @99.9999 (0.995 vs 0.974), but
-  over-produces **@99.99 by 9.5%** — now its clearest weakness. Cost 4.02× wall clock (12.6 h
-  for hirov1) → fix the reduction rather than repeat the workaround. See
+- **2026-07-29** — ✅ **Multi-rank tail histograms were measuring *winter only*, not a random
+  quarter — extremes understated 8–21%.** Single-GPU CONUS re-runs of hirov1 (`6eff6ig5`) and
+  the spectral student (`y543b0gf`) against their 4-GPU twins (`j3thqivd` / `x2nyzmzh`)
+  isolate the bug. The eval loader uses **`ContiguousDistributedSampler`** (`train=False`), so
+  rank 0 held the **first** quarter of the record — **1 Jan – early Apr 2023**, no summer
+  convection. The **ground-truth** percentile (same observed data in every run → pure
+  artifact, and bit-identical across both models within each rank count, a clean check) was
+  understated **8.1% @99.9999** and **21.1% @99.99**; the 99.99th moving *more* is the
+  seasonal signature — sample-size loss predicts the reverse. Tail *ratios* mostly
+  self-normalize (shared shard cancels), and CRPS/RMSE/PSD agree to **≤0.3%**, confirming
+  those were always reduced correctly, so the 2026-07-13 **CRPS/PSD** verdict stands. **What
+  does change:** hirov1's extreme tail 0.936→**0.974** (under-produces 2.6%, not 6.4%) — ratio
+  robustness is not a property to assume, and that report's tail rows still rest on an
+  un-rerun baseline arm (`flzvb6tp`). Head-to-head, the 2-step student is within **3.3% CRPS
+  / 8.3% PSD** of full diffusion at ~17× lower per-batch cost and better @99.9999 (0.995 vs
+  0.974), but over-produces **@99.99 by 9.5%** — now its clearest weakness. Cost 4.02× wall
+  clock (12.6 h for hirov1) → fix the reduction rather than repeat the workaround. See
   [report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md).
 - **2026-07-14** — ➕ **`band_gamma` hi-k tilt is a mild, monotonic positive.** The
   `{0, 0.5, 1}` sweep (`i26sidsm` / `2yhjonz9` / `34rg7wii`) shows, at each run's

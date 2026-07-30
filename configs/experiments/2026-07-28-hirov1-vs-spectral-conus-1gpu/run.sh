@@ -6,7 +6,12 @@
 # Why one GPU: fme/core/histogram.py's ComparedDynamicTailsHistograms performs no
 # cross-rank reduction, so on a multi-rank eval the logged
 # histogram/prediction_frac_of_target/* tail ratios come from a single rank's
-# shard of the data. CRPS / RMSE / power_spectrum are unaffected -- Mean and
+# shard of the data. That shard is contiguous in time, not a random subsample:
+# the evaluator builds with train=False, so PairedDataLoaderConfig._get_sampler
+# returns a ContiguousDistributedSampler and rank 0 gets indices[0:N/nranks] --
+# on 4 ranks over CONUS 2023, roughly Jan through early Apr, with no summer
+# convection. Measured cost: ground-truth percentiles understated 8% (99.9999th)
+# and 21% (99.99th). CRPS / RMSE / power_spectrum are unaffected -- Mean and
 # MeanComparison reduce via TensorDictAccumulator.get_distributed_mean() -- so
 # those metrics remain comparable to the earlier 4-GPU runs (flzvb6tp/x2nyzmzh).
 # Only the tails change meaning here. Fixing the reduction properly is a durable
