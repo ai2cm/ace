@@ -41,6 +41,14 @@ _Recently closed:_
 
 ### 🟢 Next up — likely-good experiments (queued, not launched)
 
+0. **★ Two measured f-distill defects the current selectors are blind to** (raised
+   2026-07-30, see the ★ RESEARCH TASK entries below). Both are ~8–30× the teacher's error
+   and both sit where the spectral loss tuning actively removed weight:
+   **(a)** 200–400 mm/day precip density **+25% to +52%** (teacher ~2%), invisible because
+   `tail@99.9999` reads 0.995; **(b)** zonal PSD **+48% at k≈95 (~70 km)**, in the **lo**
+   third that `min_wavenumber=85` zeroed and `band_gamma=1` down-weighted ~12×.
+   Cheapest next probes: `--disc-feature-depth 1|2` (current disc cell ≈180 km vs a 70 km
+   defect) and a DMD2-vs-f-distill histogram comparison.
 1. **Native step-count sweep** — 1-step (task #3) + 4-step (task #2) f-distill vs the
    2-step `i26sidsm`; find the quality-vs-NFE knee.
    ([write-up](reports/2026-07-13-fdistill-step-count-sweep-TBD.md))
@@ -50,10 +58,12 @@ _Recently closed:_
    (up-weight the worst-spectrum vars; winds/PRMSL were the MoE weak spots).
 4. **Multi-scale (multi-head) discriminator** — spec 12 flagship E2; the big untested GAN
    texture lever for the winds hi-k gap single taps never closed.
-5. **Non-monotonic hi *bump*** (SpectralMatchingLoss code change) — motivated by the
+5. **Non-monotonic band *bump*** (SpectralMatchingLoss code change) — motivated by the
    closed `band_gamma` sweep: monotonic tilt improves hi but makes **lo** the limiting
-   band at γ=1, so the better lever is a bump that lifts hi/mid **without** down-weighting
-   lo (rather than pushing γ higher toward the neutral `xgcaf2rt` regime).
+   band at γ=1, so the better lever is a bump that lifts a target band **without**
+   down-weighting the rest (rather than pushing γ higher toward the neutral `xgcaf2rt`
+   regime). **Aim it at lo, not hi:** the measured defect is at k≈21 of 257 (~70 km), and
+   γ>0 down-weights exactly there — see the ★ RESEARCH TASK on the k≈95 bump.
 6. **Longer reduce-GAN re-run** (`gan=3e-4`) — `6dotglmg` stopped at 14k, before the
    late-drift regime it was meant to test; re-run with checkpointing.
 
@@ -129,6 +139,62 @@ point at the standardized reports.
   2026-07-13): the `min_wavenumber=85` cut is tied with flat-band `i26sidsm` at the
   best-sustained spectrum (marginally better mid+hi, within noise). See report +
   outcomes bullet.
+- **★ RESEARCH TASK — why does f-distill over-produce 200–400 mm/day precip?** (raised
+  2026-07-30.) **Measured** on the 1-GPU CONUS evals with
+  `scripts/downscaling/diagnose_eval_histogram_spectrum.py` (mass fraction per magnitude
+  band, each source using **its own** dynamic bin edges — see the script's bin-edge warning;
+  the script's `--check` reproduces the logged `prediction_frac_of_target` exactly):
+
+  | band (mm/day) | hirov1 `6eff6ig5` | f-distill spectral `y543b0gf` |
+  |---|---|---|
+  | 50–100 | −17.7% | −7.5% |
+  | 100–200 | −0.7% | −4.9% |
+  | 200–300 | −1.0% | **+25.4%** |
+  | 300–400 | −1.6% | **+51.5%** |
+  | 400–600 | −7.9% | **+33.3%** |
+
+  **The signature is a redistribution, not an inflation:** f-distill is *deficient* at
+  50–200 mm/day and *excessive* at 200–600, i.e. it moves mass up into the
+  moderate-extreme range. The teacher is unbiased to ~2% across 100–600. **Why it went
+  unnoticed:** the headline tail selectors are blind to it —
+  `prediction_frac_of_target@99.9999` is **0.995** (looks ideal) and @99.99 only **+9.5%**,
+  because a steeply-decaying PDF converts a 1.5× density excess into a small *quantile*
+  shift. Log-scaled histogram axes hide it too.
+  **Investigate:** (a) is this the same defect as the k≈95 spectral bump below — excess
+  variance at ~70 km producing too many moderate-extreme cells? Test by checking whether
+  the two co-vary across the existing arms (`f7z93y0a` no-spectral, `i26sidsm`,
+  `2yhjonz9`/`34rg7wii` γ sweep, `xgcaf2rt`); (b) **does the GAN cause it?** — compare
+  against a **DMD2** arm and the GAN-only baseline, since the user's recollection is that
+  DMD2 training did not show this; the DMD2 eval config already exists
+  (`configs/experiments/2026-05-20-distilled-model-eval/config-dmd2.yaml`, dataset
+  `01KRYPVQ3Z5YWQWND9X680GBMD`); (c) is it a **step-count / exposure-bias** effect? The
+  1-step and 4-step arms (`xklvoz0n` / `850hcj6i`) are a free test — see
+  [[fdistill-step-coupling]]; (d) add a **mid-magnitude density metric** to validation
+  (e.g. mass-fraction ratio over fixed physical bands), since no current selector sees this.
+- **★ RESEARCH TASK — f-distill power-spectrum excess at k≈95 (~70 km); would the GAN
+  lever fix it?** (raised 2026-07-30.) **Measured** on the same evals: f-distill peaks at
+  **+48.2% at k=95** of 1153 (`k/k_max`=0.082), a broad bump over k≈50–200 (+30% to +45%);
+  hirov1's worst error anywhere below k=384 is **+6.1%**. So this is ~8× the teacher's error
+  and specific to the student. Because `k/k_max = 2·Δx/λ`, the fractional position is
+  **grid-independent**: 0.082 ⇒ λ ≈ **70 km** (≈24 fine pixels) on any 3 km grid.
+  **Why the spectral loss never addressed it — quantitatively.** Training patches are
+  512² (`input_shape [1,512,512]`), so the val PSD has **257** wavenumbers and its
+  equal-thirds `spec_mae_{lo,mid,hi}` split falls at **k=85 / k=171**. The defect sits at
+  k ≈ 0.082·256 ≈ **21** — deep in the **lo** third. Both tuning knobs moved weight *away*
+  from it: `min_wavenumber=85` (`xgcaf2rt`) is *exactly* the lo/mid boundary and zeroed the
+  defect band entirely, and `band_gamma` weights ∝ `(k/k_max)^γ`, so γ=1 (`34rg7wii`)
+  **down-weighted the defect band ~12×** relative to Nyquist. The sweep concluded "γ=1 is
+  best on mean but lo becomes the worst band" — that lo cost *is* this defect.
+  **On the GAN question:** the discriminator currently taps a **single, deepest** encoder
+  level — `feature_index=6, resolution=8, all_res=[512,…,8]`, i.e. `disc_feature_depth=0`,
+  so each disc cell covers 64 fine px ≈ **180 km**, ~2.6× coarser than the 70 km defect. So
+  the defect scale is plausibly *under-policed* today, and the multi-scale discriminator
+  (below) is a reasonable candidate — but note it is motivated in this LOG by the **hi-k**
+  winds gap, which is a different scale. **Cheapest decisive test first:** re-run with
+  `--disc-feature-depth 1` or `2` (tap `resolution=16`/`32` ⇒ 32/16 px cells ≈ 90/45 km,
+  straddling the defect) before building a multi-head disc. Complementary and cheaper still:
+  a **non-monotonic band weight** that *lifts* k≈15–40 on the 257-axis instead of tilting
+  toward hi — the "non-monotonic bump" item below, but aimed at **lo**, not hi.
 - **★ TASK — reduce the tail histograms across ranks** (found 2026-07-28 while setting up
   the single-GPU CONUS eval). `ComparedDynamicTailsHistograms` in `fme/core/histogram.py`
   performs **no cross-rank reduction**, so on any multi-rank run the logged
