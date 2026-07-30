@@ -6,8 +6,8 @@ region_sampling:
     stop: 30.0
   weight: 8
 static_inputs:
-  HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/25km.zarr
-  land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/25km/land_fraction.zarr
+  HGTsfc: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+  land_fraction: /climate-default/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr
 model:
   use_amp_bf16: true
   out_names:
@@ -38,11 +38,11 @@ model:
     type: unet_diffusion_song_v2
   normalization:
     coarse:
-      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/centering-20260514.nc
-      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/100km/scaling-full-field-20260514.nc
-    fine:
       global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/centering-20260206.nc
       global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/25km/scaling-full-field-20260206.nc
+    fine:
+      global_means_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/centering-20260206.nc
+      global_stds_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/stats/3km/scaling-full-field-20260206.nc
   num_diffusion_generation_steps: 18
   churn: 0.0
   training_noise_distribution:
@@ -65,13 +65,13 @@ train_data:
   fine:
   - merge:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
-      file_pattern: 25km.zarr
+      file_pattern: 3km.zarr
       engine: zarr
       subset:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
     - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
-      file_pattern: instantaneous_surface_and_sea_level_pressure_25km.zarr
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
       engine: zarr
       subset:
         start_time: '2014-01-01T00:00:00'
@@ -79,13 +79,13 @@ train_data:
   coarse:
   - merge:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
-      file_pattern: 100km.zarr
+      file_pattern: 25km.zarr
       engine: zarr
       subset:
         start_time: '2014-01-01T00:00:00'
         stop_time: '2022-12-31T23:59:00'
     - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
-      file_pattern: prmsl_100km.zarr
+      file_pattern: instantaneous_surface_and_sea_level_pressure_25km.zarr
       engine: zarr
       subset:
         start_time: '2014-01-01T00:00:00'
@@ -100,14 +100,14 @@ validation_data:
   fine:
   - merge:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
-      file_pattern: 25km.zarr
+      file_pattern: 3km.zarr
       engine: zarr
       subset:
         start_time: '2023-01-01T00:00:00'
         stop_time: '2024-01-01T00:00:00'
         step: 9
     - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
-      file_pattern: instantaneous_surface_and_sea_level_pressure_25km.zarr
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
       engine: zarr
       subset:
         start_time: '2023-01-01T00:00:00'
@@ -116,14 +116,14 @@ validation_data:
   coarse:
   - merge:
     - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
-      file_pattern: 100km.zarr
+      file_pattern: 25km.zarr
       engine: zarr
       subset:
         start_time: '2023-01-01T00:00:00'
         stop_time: '2024-01-01T00:00:00'
         step: 9
     - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
-      file_pattern: prmsl_100km.zarr
+      file_pattern: instantaneous_surface_and_sea_level_pressure_25km.zarr
       engine: zarr
       subset:
         start_time: '2023-01-01T00:00:00'
