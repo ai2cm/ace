@@ -177,7 +177,6 @@ def _forbid_cuda_and_process_group_init(monkeypatch):
 
     monkeypatch.setattr(torch.distributed, "init_process_group", fail)
     monkeypatch.setattr(torch.cuda, "set_device", fail)
-    # get_device() calls current_device(), which lazily initializes CUDA
     monkeypatch.setattr(torch.cuda, "current_device", fail)
 
 
