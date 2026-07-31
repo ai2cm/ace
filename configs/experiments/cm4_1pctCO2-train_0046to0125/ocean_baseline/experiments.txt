@@ -14,3 +14,5 @@ cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|01KXX9GVZ2Q5101M3SYDGVSMAG|in
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs2|01KXX9HMZHC4ASJGY59YCQA13P|invalid|best_inference_ckpt|normal|--min-runtime 8h
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|01KXXJ1WAGMCYTEZ1TRC0D6K62|invalid|best_inference_ckpt|normal|--min-runtime 8h
 # -- end invalidated block; new rows are appended below by the job runner ---
+
+cm4_1pctCO2-train_0046to0125-ocean_baseline|rs0|01KYX3GZH9D18HS93BF55B73F4|training|best_inference_ckpt|normal|--min-runtime 8h
