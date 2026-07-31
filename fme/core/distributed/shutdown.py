@@ -43,10 +43,7 @@ logger = logging.getLogger(__name__)
 
 TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
 
-# Bounds the collective teardown, and only that: a rank wedged in an unrelated
-# collective must not be able to hold its peers there, but once
-# `destroy_process_group` returns they are safe and nothing further needs a
-# deadline.
+# Bounds the collective teardown and nothing after it, per the module docstring.
 #
 # torchrun's elastic agent, not the scheduler, is the binding constraint. Beaker
 # allows 5 minutes between SIGTERM and SIGKILL [1], but the agent gives the
@@ -64,13 +61,7 @@ _post_shutdown_callbacks: list[Callable[[], None]] = []
 
 
 class _Phase(enum.Enum):
-    """How far the teardown has got, which is what a repeated signal turns on.
-
-    The three post-signal phases want three different answers: while the
-    collective is in flight a repeat must not disturb it, once it is done there
-    is nothing left to protect, and after a swallowed exit the process needs
-    killing outright.
-    """
+    """How far the teardown has got, which is what a repeated signal turns on."""
 
     RUNNING = enum.auto()
     COLLECTIVE = enum.auto()
@@ -84,10 +75,10 @@ def add_post_shutdown_callback(callback: Callable[[], None]) -> None:
     Callbacks run in registration order and must not use collectives, the
     process group having already been destroyed.
 
-    They are not bounded by the teardown deadline -- that covers the collective
-    alone -- but they are still best-effort: torchrun SIGKILLs the rank about
-    30s after the signal reaches the agent, whatever it is doing (see
-    `DEFAULT_TEARDOWN_TIMEOUT`). Register the most valuable work first.
+    They are not bounded by the teardown deadline, but they are still
+    best-effort: torchrun SIGKILLs the rank about 30s after the signal reaches
+    the agent, whatever it is doing (see `DEFAULT_TEARDOWN_TIMEOUT`). Register
+    the most valuable work first.
 
     Registering the same callback twice runs it twice; a caller that may be
     constructed more than once per process should guard its own registration.
@@ -113,13 +104,10 @@ def _hard_exit_after(timeout: float, exit_code: int) -> threading.Timer:
     """
 
     def give_up() -> None:
-        # `os.write` rather than the logger: a handler holds its lock for the
-        # whole of an emit, and the main thread may have been inside that window
-        # when the signal arrived. The handler runs on the main thread, so its
-        # own logging is re-entrant and safe -- but it then wedges here without
-        # returning to release the lock, and this runs on another thread, where
-        # that lock would block for good and leave the process to be SIGKILLed
-        # with its communicators open.
+        # `os.write` rather than the logger: a handler holds its lock across an
+        # emit, so if the signal arrived inside that window the main thread holds
+        # it and is now wedged below. Acquiring it from this thread would block
+        # for good, leaving the rank to be SIGKILLed.
         os.write(
             2,
             f"Distributed shutdown did not complete within {timeout:.0f}s, "
@@ -136,13 +124,9 @@ def _hard_exit_after(timeout: float, exit_code: int) -> threading.Timer:
 def _shut_down_backend(shutdown: Callable[[], None], deadline: threading.Timer) -> None:
     """Release the backend, then stand the watchdog down.
 
-    Cancelling here rather than after the callbacks is the point: the deadline
-    exists to stop a wedged rank holding its peers inside the collective, and
-    the moment `shutdown` returns they are out of it. Leaving it armed any
-    longer would put our own ceiling on the restart checkpoint -- tighter than
-    either clock that actually ends the process (see
-    `DEFAULT_TEARDOWN_TIMEOUT`), and on the very write that running the teardown
-    first exists to make room for.
+    Cancelling here rather than after the callbacks is the point: the moment
+    `shutdown` returns the peers are out of the collective, and a deadline left
+    armed past that could only cap the restart checkpoint.
 
     This may not raise: the callbacks are worth attempting even if the backend
     could not be released.
@@ -191,12 +175,10 @@ def handle_termination_signals(
         yield
         return
     if in_dataloader_worker():
-        # A spawn- or forkserver-started DataLoader worker enters this context to
-        # learn its rank. It is a fresh process, so the pid guard below would let
-        # it install a handler of its own -- but the DataLoader owns its
-        # lifecycle, and exiting out from under it is not ours to do. Fork-started
-        # workers reach the handler by inheritance instead of coming through here,
-        # which is what the pid guard covers.
+        # A spawn- or forkserver-started worker enters this context only to learn
+        # its rank, and the DataLoader owns its lifecycle: exiting out from under
+        # it is not ours to do. Fork-started workers never come through here --
+        # they inherit the handler, which the pid guard below catches.
         yield
         return
 
@@ -207,13 +189,11 @@ def handle_termination_signals(
         nonlocal phase
         exit_code = 128 + signum
         if os.getpid() != installed_pid:
-            # A forked child inherited this handler: the default DataLoader
-            # start method is fork, and the scheduler signals the whole process
-            # group, so every worker would otherwise destroy a fork-inherited
-            # process group and re-run the parent's callbacks -- including the
-            # restart-checkpoint write, racing the parent's write of the same
-            # path. Only the process that installed the handler owns the
-            # teardown; die as this process would have without the inheritance.
+            # A forked child inherited this handler: the default DataLoader start
+            # method is fork and the scheduler signals the whole process group, so
+            # every worker would otherwise tear down a fork-inherited process
+            # group and re-run the parent's callbacks, racing its checkpoint
+            # write. Die as this process would have without the inheritance.
             signal.signal(signum, signal.SIG_DFL)
             signal.raise_signal(signum)
             return
@@ -230,10 +210,9 @@ def handle_termination_signals(
         # who stubbed it out -- which the tests do, having no use for a dead
         # interpreter -- cannot fall through and start the teardown over
         if phase is _Phase.CALLBACKS:
-            # the collective is done, so the peers are already safe and there is
-            # nothing left for us to protect. Someone escalating at this point
-            # -- a second Ctrl-C, or the scheduler -- means it deliberately,
-            # even at the cost of the checkpoint still being written.
+            # the peers are already out of the collective, so nothing is left to
+            # protect. Someone escalating here -- a second Ctrl-C, or the
+            # scheduler -- means it, even at the cost of the checkpoint.
             logger.info(
                 "Received %s while running post-shutdown callbacks; the backend "
                 "is already down, so exiting and abandoning the rest.",

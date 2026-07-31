@@ -190,11 +190,7 @@ def test_deadline_does_not_outlive_a_successful_teardown(monkeypatch):
 
 @pytest.mark.medium_duration
 def test_hard_exits_when_teardown_hangs():
-    """A wedged rank must not hold the process until the scheduler SIGKILLs it.
-
-    Run in a subprocess: the point of the timeout is that it fires from another
-    thread while the main thread is stuck, and the outcome is process death.
-    """
+    """A wedged rank must not hold the process until the scheduler SIGKILLs it."""
     result = _run_handler_program(
         """
         import signal, threading
@@ -216,13 +212,9 @@ def test_hard_exits_when_teardown_hangs():
 def test_hard_exits_when_the_teardown_hangs_holding_the_logging_lock():
     """The watchdog must not need a lock the wedged main thread is holding.
 
-    A logging handler holds its lock for the duration of an emit, and a training
-    rank passes through that window constantly. If the signal arrives there, the
-    handler runs on the main thread -- re-entrantly, so its own logging is safe
-    -- and then wedges in the collective, never returning to release the lock.
-    The watchdog runs on another thread, so anything it logs would block for
-    good and the rank would ride to the scheduler's SIGKILL with its
-    communicators open: exactly the fault this module exists to prevent.
+    A rank passes through `Handler.handle`'s locked emit constantly, so a signal
+    arriving there leaves the main thread holding that lock as it wedges in the
+    collective. Anything the watchdog logs would then block for good.
     """
     result = _run_handler_program(
         """
@@ -259,18 +251,13 @@ def test_hard_exits_when_the_teardown_hangs_holding_the_logging_lock():
 def test_the_deadline_does_not_bound_the_checkpoint_write(tmp_path, shutdown_body):
     """Rank 0 must finish its work whatever became of its peers.
 
-    The deadline is there to stop a wedged rank holding its peers inside the
-    collective. Once `shutdown` has returned they are out of it either way --
-    cleanly, or because the communicator was already aborted -- so nothing is
-    left for the deadline to protect, and leaving it armed can only truncate the
-    restart checkpoint that running the teardown first exists to make room for.
+    Once `shutdown` has returned the peers are out of the collective either way
+    -- cleanly, or because the communicator was already aborted -- so both
+    parameters expect the same outcome: the write completes even though it
+    outlasts `teardown_timeout` several times over.
 
-    Both parameters therefore expect the same outcome: the write completes even
-    though it outlasts `teardown_timeout` several times over.
-
-    A subprocess, because the failure is `os._exit` mid-write. The exit code
-    cannot distinguish it -- the graceful `sys.exit(143)` and the watchdog's
-    `os._exit(143)` are identical -- so the evidence is the file plus stderr.
+    The exit code cannot be the evidence, the graceful `sys.exit(143)` and the
+    watchdog's `os._exit(143)` being identical, so it is the file plus stderr.
     """
     checkpoint = tmp_path / "checkpoint"
     result = _run_handler_program(

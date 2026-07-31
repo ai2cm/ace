@@ -138,10 +138,8 @@ _RANK_ENV = (
 
 # Generous, because they only decide which diagnostic a hang produces, not how
 # long one takes to notice: the suite's autouse 90s alarm (see conftest.py) fires
-# first either way, so anything above it is a ceiling we never reach. Kept above
-# the alarm deliberately -- lowering them would trade the alarm's "failed due to
-# timeout" for our own message without making either arrive sooner. Observed
-# runtime is ~10s.
+# first either way. Lowering them would trade its "failed due to timeout" for our
+# own message without making either arrive sooner. Observed runtime is ~10s.
 _READY_TIMEOUT = 120.0
 _EXIT_TIMEOUT = 120.0
 # A worker that decides to tear down writes its marker in microseconds, so this
