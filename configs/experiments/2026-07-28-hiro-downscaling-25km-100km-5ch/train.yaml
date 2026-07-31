@@ -172,6 +172,19 @@ validation_data:
     start: 0
     stop: 360
   strict_ensemble: false
+  # Required for DDP validation: train=False uses ContiguousDistributedSampler
+  # (fme/downscaling/data/config.py), whose __iter__ gives the LAST rank the
+  # entire remainder when the validation set size isn't evenly divisible by
+  # world_size (datasets.py: `end = start + chunk_size if rank !=
+  # num_replicas - 1 else total_size`). Without drop_last, that rank
+  # iterates more validation batches than the others, desyncing the
+  # Aggregator/GenerationAggregator reduce_sum collectives every rank must
+  # issue in lockstep -- observed in job 01KYTJGBDYQ6A1W0DK3QF5CEP1 as a
+  # silent NCCL ALLREDUCE watchdog timeout ~4h into the FIRST validation
+  # pass (never reached a single training batch). Anna Kwa's original
+  # source config (config/global-moe-models) already had this set; it was
+  # dropped when this file was ported/reverted.
+  drop_last: true
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
 max_epochs: 200
