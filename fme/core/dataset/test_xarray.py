@@ -1372,7 +1372,9 @@ def test_orography_override_mismatched_shape_fails_loudly(tmp_path_factory):
         torch.stack([data["HGTsfc"], data["PRESsfc"]])
 
 
-def _write_constant_field_file(tmp_path, filename, value, shape=(4, 8)):
+def _write_constant_field_file(
+    tmp_path, filename, value, shape=(4, 8), dims=("lat", "lon")
+):
     """Writes a netCDF file holding a single horizontal PRESsfc field with no
     time dimension, matching the layout of the precomputed time-mean stores
     used with XarrayDataConfig.constant_field_override."""
@@ -1380,7 +1382,7 @@ def _write_constant_field_file(tmp_path, filename, value, shape=(4, 8)):
     xr.Dataset(
         data_vars={
             "PRESsfc": xr.DataArray(
-                np.full(shape, value, dtype=np.float32), dims=("lat", "lon")
+                np.full(shape, value, dtype=np.float32), dims=dims[: len(shape)]
             )
         }
     ).to_netcdf(path, format="NETCDF4")
@@ -1407,6 +1409,48 @@ def test_constant_field_override_replaces_time_varying_variable(tmp_path_factory
     assert torch.equal(data["PRESsfc"], torch.full((3, 4, 8), 7.0))
     # variables not named in the override are untouched
     assert torch.equal(data["HGTsfc"], torch.full((3, 4, 8), 1.0))
+
+
+def test_constant_field_override_scalar_field_is_broadcast(tmp_path_factory):
+    """A variable which is uniform in space has a scalar time mean; overriding
+    with it broadcasts that value over the whole horizontal grid."""
+    tmpdir = _write_orography_store(
+        tmp_path_factory, "constant_field_scalar", hgtsfc_value=1.0
+    )
+    override_path = _write_constant_field_file(
+        tmpdir, "time-mean.nc", value=7.0, shape=()
+    )
+    config = XarrayDataConfig(
+        data_path=tmpdir,
+        file_pattern="data.nc",
+        constant_field_override=ConstantFieldOverrideConfig(
+            path=str(override_path), names=["PRESsfc"]
+        ),
+    )
+    dataset = xarray_dataset_constructor(config, ["HGTsfc", "PRESsfc"], 3)
+
+    data, *_ = dataset[1]
+    assert torch.equal(data["PRESsfc"], torch.full((3, 4, 8), 7.0))
+
+
+def test_constant_field_override_extra_dimension_raises(tmp_path_factory):
+    """A field with an extra leading dimension broadcasts *with* the horizontal
+    shape but not *to* it, so it is rejected rather than silently expanded."""
+    tmpdir = _write_orography_store(
+        tmp_path_factory, "constant_field_extra_dim", hgtsfc_value=1.0
+    )
+    override_path = _write_constant_field_file(
+        tmpdir, "time-mean.nc", value=7.0, shape=(2, 4, 8), dims=("z", "lat", "lon")
+    )
+    config = XarrayDataConfig(
+        data_path=tmpdir,
+        file_pattern="data.nc",
+        constant_field_override=ConstantFieldOverrideConfig(
+            path=str(override_path), names=["PRESsfc"]
+        ),
+    )
+    with pytest.raises(ValueError, match="per-timestep shape"):
+        xarray_dataset_constructor(config, ["HGTsfc", "PRESsfc"], 3)
 
 
 def test_constant_field_override_missing_variable_raises(tmp_path_factory):

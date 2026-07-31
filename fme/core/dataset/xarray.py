@@ -399,6 +399,19 @@ class OverwriteConfig:
         return set(self.constant.keys()) | set(self.multiply_scalar.keys())
 
 
+def _broadcasts_to(shape: tuple[int, ...], expected: tuple[int, ...]) -> bool:
+    """Whether a tensor of `shape` can be expanded to exactly `expected`.
+
+    Stricter than mutual broadcastability: a shape which broadcasts with
+    `expected` to something larger (e.g. an extra leading dimension) does not
+    broadcast *to* it.
+    """
+    try:
+        return tuple(torch.broadcast_shapes(shape, expected)) == expected
+    except RuntimeError:
+        return False
+
+
 @dataclasses.dataclass
 class ConstantFieldOverrideConfig:
     """Configuration to overwrite variables with fields held constant in time.
@@ -424,8 +437,11 @@ class ConstantFieldOverrideConfig:
     Parameters:
         path: Path to a netCDF file containing the override fields. Each name
             in ``names`` must be present as a horizontal-only variable (no
-            time dimension) whose shape and index ordering match the
-            horizontal grid of the dataset being overridden.
+            time dimension) whose shape and index ordering broadcast to the
+            horizontal grid of the dataset being overridden. A scalar is
+            therefore allowed, which is how a variable that is uniform in
+            space (e.g. a global-mean forcing, whose time mean has no
+            horizontal dimensions) can be overridden.
         names: Names of the variables to overwrite.
     """
 
@@ -722,27 +738,40 @@ class XarrayDataset(DatasetABC):
 
         self._constant_field_overrides: TensorDict = {}
         if config.constant_field_override is not None:
-            self._constant_field_overrides = config.constant_field_override.load()
-            self._validate_constant_field_overrides(config.constant_field_override.path)
+            self._constant_field_overrides = self._prepare_constant_field_overrides(
+                config.constant_field_override.load(),
+                config.constant_field_override.path,
+            )
 
-    def _validate_constant_field_overrides(self, path: str) -> None:
-        """Check the loaded override fields against the names and horizontal
-        shape of this dataset, so a mismatch fails at construction rather than
-        silently producing a differently-shaped or unused field.
+    def _prepare_constant_field_overrides(
+        self, fields: TensorDict, path: str
+    ) -> TensorDict:
+        """Check override fields against the names and horizontal shape of this
+        dataset and expand each to that shape, so a mismatch fails at
+        construction rather than silently producing a differently-shaped or
+        unused field.
+
+        Fields need only broadcast to the horizontal shape rather than match it
+        exactly, so a variable which is uniform in space can be overridden with
+        the scalar its time mean collapses to.
         """
-        missing = sorted(set(self._constant_field_overrides) - set(self._names))
+        missing = sorted(set(fields) - set(self._names))
         if missing:
             raise ValueError(
                 f"Variables {missing} requested by constant_field_override are "
                 f"not loaded by this dataset; available names: {sorted(self._names)}."
             )
         expected_shape = tuple(self._shape_excluding_time_after_selection)
-        for name, field in self._constant_field_overrides.items():
-            if tuple(field.shape) != expected_shape:
+        expanded: TensorDict = {}
+        for name, field in fields.items():
+            if not _broadcasts_to(tuple(field.shape), expected_shape):
                 raise ValueError(
                     f"Variable '{name}' in {path} has shape {tuple(field.shape)}, "
-                    f"but this dataset's per-timestep shape is {expected_shape}."
+                    f"which does not broadcast to this dataset's per-timestep "
+                    f"shape {expected_shape}."
                 )
+            expanded[name] = field.expand(expected_shape)
+        return expanded
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
