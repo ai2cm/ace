@@ -1,4 +1,9 @@
 import os
+import signal
+import subprocess
+import sys
+import textwrap
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -6,14 +11,119 @@ import torch.multiprocessing as mp
 import torch.utils.data
 
 from fme import get_device
-from fme.core.distributed import Distributed, torch_distributed
+from fme.core.distributed import Distributed, model_torch_distributed, torch_distributed
 from fme.core.distributed.external.pnd_manager import DistributedManager
 from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
 from fme.core.distributed.torch_distributed import (
+    TorchDistributed,
     _gather_irregular,
     _pad_tensor_at_end,
     _unpad_tensor_at_end,
 )
+
+
+@pytest.mark.medium_duration
+def test_context_tears_down_the_backend_on_sigterm():
+    """Every entrypoint wraps its work in `Distributed.context()`.
+
+    Handling the signal here rather than in the Trainer is what puts a graceful
+    teardown on the inference and evaluation paths, and on the startup phase of
+    training before the Trainer exists.
+
+    Runs in a subprocess because the test session is itself already inside a
+    `Distributed.context()`, which refuses to nest.
+    """
+    program = textwrap.dedent(
+        """
+        import signal
+        from fme.core.distributed import Distributed
+        from fme.core.distributed.shutdown import add_post_shutdown_callback
+
+        Distributed.get_instance().shutdown = lambda: print("shutdown")
+        with Distributed.context():
+            add_post_shutdown_callback(lambda: print("callback"))
+            signal.raise_signal(signal.SIGTERM)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, timeout=120, text=True
+    )
+
+    assert result.stdout.split() == ["shutdown", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_context_leaves_signals_alone_when_asked_not_to_handle_them():
+    """The test suite wraps the whole session in a context and needs Ctrl-C.
+
+    A handler installed for the session's lifetime turns the first Ctrl-C into a
+    caught teardown -- a test failure, with the rest of the run left without a
+    process group -- instead of stopping pytest. So the suite opts out, and this
+    covers the opt-out: the process keeps whatever disposition it had.
+
+    A subprocess for the same reason as the test above: the session is already
+    inside a context, which refuses to nest.
+    """
+    program = textwrap.dedent(
+        """
+        import signal
+        from fme.core.distributed import Distributed
+
+        before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
+        with Distributed.context(handle_signals=False):
+            during = (
+                signal.getsignal(signal.SIGTERM),
+                signal.getsignal(signal.SIGINT),
+            )
+        print(before == during)
+        # the default disposition survives, so Ctrl-C still raises here
+        print(signal.getsignal(signal.SIGINT) is signal.default_int_handler)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, timeout=120, text=True
+    )
+
+    assert result.stdout.split() == ["True", "True"], result.stderr
+    assert result.returncode == 0
+
+
+def test_torch_shutdown_is_a_noop_when_the_process_group_is_gone(monkeypatch):
+    """A termination signal can arrive during the normal end-of-run teardown.
+
+    `destroy_process_group` raises when there is no group left, which would turn
+    a second teardown into a logged exception on the way out.
+    """
+    destroyed = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        torch.distributed, "destroy_process_group", lambda *args: destroyed.append(args)
+    )
+
+    TorchDistributed.shutdown(SimpleNamespace(rank=0))  # type: ignore[arg-type]
+
+    assert destroyed == []
+
+
+def test_model_shutdown_still_cleans_up_when_the_process_group_is_gone(monkeypatch):
+    """The spatial backend has manager state to reset even with no group left.
+
+    `DistributedManager.cleanup` skips the collective by itself when the manager
+    is not initialized, and clears its shared state either way, so skipping the
+    call would strand that state and leave the manager claiming to be up.
+    """
+    cleaned = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        model_torch_distributed.DistributedManager,
+        "cleanup",
+        classmethod(lambda cls: cleaned.append("cleanup")),
+    )
+
+    ModelTorchDistributed.shutdown(SimpleNamespace(_rank=0))  # type: ignore[arg-type]
+
+    assert cleaned == ["cleanup"]
 
 
 @pytest.mark.parametrize(
