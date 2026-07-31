@@ -3,8 +3,7 @@ save_checkpoint: true
 validate_using_ema: true
 evaluate_before_training: true
 ema:
-  decay: 0.9995
-  faster_decay_at_start: false
+  decay: 0.999
 max_epochs: 25
 inference:
   - name: inference_1pct
