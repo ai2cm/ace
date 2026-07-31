@@ -14,6 +14,7 @@ import pathlib
 from _submit_common import add_beaker_args, submit_job
 from _version_select import add_version_arg, stem_matches_version
 from generate_eval_configs import (
+    CONFIG_PREFIX,
     EVAL_CHECKPOINT_NAME_SUFFIXES,
     TRAINING_RESULT_DATASETS,
     WANDB_PREFIX,
@@ -23,6 +24,7 @@ from generate_eval_configs import (
 from generate_fixed_var_configs import (
     FIXED_VAR_CHECKPOINT_SUFFIXES,
     FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX,
+    select_source_configs,
 )
 from run_eval_suite import run_eval_suite
 
@@ -76,12 +78,32 @@ def _fixed_var_base_run_name(run_name: str) -> str:
     return max(matches, key=len)
 
 
-def configs_for_version(version: str | None) -> list[str]:
+def configs_for_version(
+    version: str | None, base_configs: list[str] | None = None
+) -> list[str]:
+    """Generated fixed-variable suite filenames to submit.
+
+    `base_configs` narrows the selection to the suites generated from the named
+    training configs, resolved the same way generate_fixed_var_configs.py
+    resolves its own --base-config. A suite filename ends with the training
+    config's stem, so matching that tail selects one run's whole variable sweep
+    without also catching runs whose stem merely starts the same way.
+    """
+    suffixes: list[str] | None = None
+    if base_configs is not None:
+        suffixes = [
+            path.stem.removeprefix(CONFIG_PREFIX)
+            for path in select_source_configs(version, base_configs)
+        ]
     configs = []
     for path in sorted(RUN_CONFIGS_DIR.glob("*.yaml")):
         if not path.name.startswith(FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX):
             continue
         if not stem_matches_version(path.stem, version):
+            continue
+        if suffixes is not None and not any(
+            path.stem.endswith(f"-{suffix}") for suffix in suffixes
+        ):
             continue
         run_name = eval_suite_config_to_run_name(path.name)
         try:
@@ -113,6 +135,15 @@ def config_to_jobs(config_filename: str) -> list[tuple[str, str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_version_arg(parser)
+    parser.add_argument(
+        "--base-config",
+        nargs="+",
+        default=None,
+        help=(
+            "Only submit suites generated from these training config(s), named "
+            "by filename, stem, or run-name suffix (default: all suites)."
+        ),
+    )
     add_beaker_args(
         parser,
         default_workspace="ai2/climate-titan",
@@ -121,7 +152,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    configs = configs_for_version(args.version)
+    configs = configs_for_version(args.version, args.base_config)
     if not args.dry_run:
         validate_configs(configs)
 
