@@ -39,3 +39,15 @@ data_writer:
   save_monthly_files: true
 aggregator:
   log_histograms: true
+  # Both of these plot a matplotlib *date* axis (they are the only two
+  # aggregators that call convert_cftime_to_datetime_coord). Autoscale pads ~5%
+  # below the data range, which on a 140-year series starting in year 0001
+  # lands at year -6 — and matplotlib rejects dates before year 0001:
+  #   ValueError: Date ordinal -721577.15 converts to -006-05-22 ...
+  # It kills the run at the very end, after the rollout and the reduced-metric
+  # netcdf are already written. Nothing here needs the ENSO or IPO index, so
+  # they are off; the alternative (starting at year 0008+ to clear the padding)
+  # would cost the first 7 out-of-sample years. Re-enable once the plotting
+  # code clamps its date axis.
+  log_nino34_index: false
+  log_ipo_index: false
