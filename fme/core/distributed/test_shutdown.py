@@ -213,6 +213,39 @@ def test_hard_exits_when_teardown_hangs():
 
 
 @pytest.mark.medium_duration
+def test_hard_exits_when_the_teardown_hangs_holding_the_logging_lock():
+    """The watchdog must not need a lock the wedged main thread is holding.
+
+    A logging handler holds its lock for the duration of an emit, and a training
+    rank passes through that window constantly. If the signal arrives there, the
+    handler runs on the main thread -- re-entrantly, so its own logging is safe
+    -- and then wedges in the collective, never returning to release the lock.
+    The watchdog runs on another thread, so anything it logs would block for
+    good and the rank would ride to the scheduler's SIGKILL with its
+    communicators open: exactly the fault this module exists to prevent.
+    """
+    result = _run_handler_program(
+        """
+        import logging, signal, sys, threading
+        logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+        from fme.core.distributed.shutdown import handle_termination_signals
+
+        def hang():
+            threading.Event().wait()
+
+        # holding the lock stands in for being interrupted mid-emit, inside
+        # `Handler.handle`'s `with self.lock`
+        with handle_termination_signals(shutdown=hang, teardown_timeout=1.0):
+            with logging.getLogger().handlers[0].lock:
+                signal.raise_signal(signal.SIGTERM)
+        """
+    )
+
+    assert result.returncode == 128 + signal.SIGTERM
+    assert "did not complete" in result.stderr
+
+
+@pytest.mark.medium_duration
 @pytest.mark.parametrize(
     "shutdown_body",
     [

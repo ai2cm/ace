@@ -110,10 +110,17 @@ def _hard_exit_after(timeout: float, exit_code: int) -> threading.Timer:
     """
 
     def give_up() -> None:
-        logger.error(
-            "Distributed shutdown did not complete within %.0fs, exiting now. "
-            "GPUs on this node may need to be reset.",
-            timeout,
+        # `os.write` rather than the logger: a handler holds its lock for the
+        # whole of an emit, and the main thread may have been inside that window
+        # when the signal arrived. The handler runs on the main thread, so its
+        # own logging is re-entrant and safe -- but it then wedges here without
+        # returning to release the lock, and this runs on another thread, where
+        # that lock would block for good and leave the process to be SIGKILLed
+        # with its communicators open.
+        os.write(
+            2,
+            f"Distributed shutdown did not complete within {timeout:.0f}s, "
+            "exiting now. GPUs on this node may need to be reset.\n".encode(),
         )
         os._exit(exit_code)
 
