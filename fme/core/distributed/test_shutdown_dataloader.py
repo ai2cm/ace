@@ -6,6 +6,7 @@ process group to signal, so it carries a driver script and process plumbing
 that the unit tests there do not.
 """
 
+import multiprocessing
 import os
 import signal
 import subprocess
@@ -151,6 +152,17 @@ _SETTLE = 2.0
 
 _HANDLER_QUALNAME = "handle_termination_signals.<locals>.handle"
 
+# The behavior under test only exists where a worker starts by forking, so that
+# it inherits an already-installed handler. Asking for fork explicitly on a
+# platform that does not default to it would test a loader production never
+# builds, so the precondition is read rather than forced: fork on Linux under
+# the Python versions this runs on, spawn on macOS, and forkserver on Linux from
+# Python 3.14. A spawned or forkserver-started worker begins from a fresh
+# interpreter with no handler to inherit, leaving nothing to decline to act on.
+# It also cannot run this driver, which arrives as `python -c` and so has a
+# `__main__` that a re-importing worker cannot load `_Dataset` from.
+_DEFAULT_START_METHOD = multiprocessing.get_start_method()
+
 
 def _markers(marker_dir: str, event: str) -> dict[str, str]:
     """Map pid to detail for every marker file recording `event`."""
@@ -192,12 +204,19 @@ def _kill_group(pgid: int) -> None:
 
 
 @pytest.mark.medium_duration
+@pytest.mark.skipif(
+    _DEFAULT_START_METHOD != "fork",
+    reason=(
+        f"DataLoader workers default to {_DEFAULT_START_METHOD} here, so no "
+        "worker inherits the handler this test checks is declined"
+    ),
+)
 def test_dataloader_workers_do_not_tear_down_when_the_group_is_signalled(tmp_path):
     """Only the process that installed the handler may run the teardown.
 
-    The default DataLoader start method is fork, so every worker inherits the
-    handler, and torchrun signals the whole process group, which delivers the
-    signal to the workers directly. A worker that runs the teardown destroys a
+    Where the default DataLoader start method is fork, every worker inherits
+    the handler, and torchrun signals the whole process group, which delivers
+    the signal to the workers directly. A worker that runs the teardown destroys a
     fork-inherited process group and re-runs the parent's callbacks, including
     the Trainer's multi-GB restart-checkpoint write, which then races the
     parent's own write of the same path.
