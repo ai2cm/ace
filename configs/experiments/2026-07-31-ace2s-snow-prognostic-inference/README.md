@@ -44,13 +44,20 @@ Only the 1-step pretrain exists; the multi-step finetune stage of the recipe was
 ## Interpreting the results
 
 **There is no control 40-year evaluation to compare against.** The `ace2s-cm4-picontrol` W&B group
-contains training runs only, so nothing here is a control-relative result. Two candidate baseline
-checkpoints for a future batch:
+contains training runs only, so nothing here is a control-relative result.
+
+Any control 40-year eval belongs on the control training branch,
+`exp/ace2s-cm4-piControl-train` — `configs/experiments/2026-06-05-ace2s-cm4-picontrol/run-ace-evaluator.sh`
+already has the seed loop for it. Not to be launched from this directory. Two candidate baseline
+checkpoints, for reference:
 
 | baseline | beaker dataset | note |
 |---|---|---|
 | control 1-step pretrain | `01KTPTS6C23P8SWB9RBFWB09BE` | stage-matched, but stopped at epoch 11 |
 | deployed finetuned control (rs0) | `01KTYXNSJX90Y5E2CQ6SV8K37D` | production ACE2S CM4, includes multi-step finetune |
+
+Comparison across arms happens in W&B on the shared metric keys, so the runs need matching
+`n_forward_steps`/IC/aggregator settings — not co-located configs.
 
 Expect noticeable climate drift. The training run's inline 20-year
 `inference/time_mean/rmse/PRESsfc` bottoms out near 200 Pa around epoch 26, degrades to
