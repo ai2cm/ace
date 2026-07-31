@@ -19,7 +19,6 @@ COMMON_ARGS=(
     --output_time_chunksize 1
     --output_time_shardsize 360
     --process_time_chunksize 4
-    --time_coarsen_factor 4
     --runner="$RUNNER"
     --save_main_session
 )

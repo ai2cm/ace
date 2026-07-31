@@ -8,8 +8,9 @@ DATASET_NAME ?= ufs-replay-ocean-1deg-19level-1994-2023
 # Ocean (MOM6): 1993-12-31 18:00 to 2023-12-31 00:00
 # Atmo  (FV3):  1993-12-31 18:00 to 2023-10-13 03:00
 # Use the overlap: 1994-01-01 to 2023-10-12 (atmo is the binding constraint)
-# Start at 00Z so daily groups are (00,06,12,18); these center-labeled 6h
-# averages cover 21Z(-1d)–21Z, so the daily-mean label lands at 09Z.
+# Start at 00Z so native 6-hourly groups are (00,06,12,18) per day, which
+# keeps any downstream daily/N-day coarsening (see `make coarsen_daily`)
+# cleanly aligned to day boundaries.
 START_TIME=1994-01-01T00:00:00
 END_TIME=2023-10-12T18:00:00
 OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/$(DATE)-$(DATASET_NAME).zarr
@@ -21,7 +22,7 @@ END_TIME_TEST_RUN ?= 2023-10-12T18:00:00
 OUTPUT_PATH_TEST_RUN ?= gs://vcm-ml-scratch/$(DATE)-ufs-replay-test/ocean-1deg.zarr
 OUTPUT_GRID_TEST_RUN ?= F90
 
-# Local debug parameters (just 1 day = 4 ocean timesteps → 1 daily output)
+# Local debug parameters (just 1 day = 4 native 6-hourly outputs)
 START_TIME_LOCAL ?= 2023-10-01T00:00:00
 END_TIME_LOCAL ?= 2023-10-01T18:00:00
 OUTPUT_PATH_LOCAL ?= /tmp/ufs-replay-local-test.zarr
@@ -89,3 +90,15 @@ ufs_replay_local_debug:
 compute_stats:
 	cd ../data_process && \
 		./compute_stats.sh --config configs/ufs-replay-ocean-1deg-19level.yaml
+
+# Time-coarsen the raw 6-hourly output to daily via data_process/time_coarsen.py:
+# ocean/sea-ice state variables are snapshotted, forcing/flux variables are
+# window-averaged (see configs/ufs-replay-ocean-1deg-19level-daily.yaml for
+# the classification). Requires `pip install dacite xpartition` in
+# $(LOCAL_ENVIRONMENT) (xpartition is optional; falls back to an eager write
+# without it).
+.PHONY: coarsen_daily
+coarsen_daily:
+	cd ../data_process && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		python time_coarsen.py configs/ufs-replay-ocean-1deg-19level-daily.yaml 0

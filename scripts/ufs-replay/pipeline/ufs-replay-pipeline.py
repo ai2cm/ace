@@ -10,13 +10,13 @@ validated up front to exactly interleave the 6-hourly ocean times, the
 streams align purely by integer chunk offsets — no per-chunk time
 matching is needed.
 
-If ``--snapshot_output_path`` is given, a second ocean+atmosphere stream
-pair writes a native-temporal-resolution ("snapshot") output to that
-path in the same run: ocean fields get no additional time coarsening
-beyond the model's own 6-hourly cadence, while the atmosphere forcing
-is still averaged over the window between two ocean snapshots (this
-reuses the exact same per-chunk processing with ``time_coarsen_factor``
-forced to 1 — no separate code path).
+The pipeline always emits data at the ocean model's native 6-hourly
+cadence — no time coarsening happens here.  Coarser products (daily,
+5-day, etc.) are produced downstream from this raw output by
+``scripts/data_process/time_coarsen.py``, a separate, much cheaper
+post-processing step (plain zarr region writes, no regridding) that also
+snapshots ocean/sea-ice state variables rather than averaging them — see
+the ``README.md`` in this directory.
 
 Ocean stream (per 6-hourly MOM6 time-chunk):
 
@@ -25,15 +25,13 @@ Ocean stream (per 6-hourly MOM6 time-chunk):
      split 3-D fields into per-level 2-D variables.
   2. Regrid to a Gaussian grid via xESMF.
   3. Derive additional variables (sst, ssu/ssv, wfo, hfds, etc.).
-  4. Coarsen in time (e.g. 6-hourly → daily).
-  5. Insert NaN on land, nearest-neighbour fill residual coastal NaN.
+  4. Insert NaN on land, nearest-neighbour fill residual coastal NaN.
 
 Atmosphere stream (per 3-hourly FV3 time-chunk):
 
   1. Derive the frozen precipitation rate from bucket accumulations.
-  2. Coarsen in time from 3-hourly to the output cadence in one step
-     (e.g. 3-hourly → daily), before regridding, to minimize how much
-     data passes through the regridder.
+  2. Average 3-hourly fields to the 6-hourly ocean cadence, before
+     regridding, to minimize how much data passes through the regridder.
   3. Regrid to a Gaussian grid via xESMF.
   4. Mask sea-ice variables to the ocean.
 
@@ -52,7 +50,7 @@ See ``run-dataflow.sh`` and the ``Makefile`` for production invocations.
 import argparse
 import datetime
 import logging
-from typing import NamedTuple, Sequence
+from typing import Sequence
 
 import apache_beam as beam
 import numpy as np
@@ -567,21 +565,20 @@ def _finalize_chunk(ds: xr.Dataset) -> xr.Dataset:
 # ---------------------------------------------------------------------------
 
 
-def _process_ocean_chunk_native(
+def _process_ocean_chunk(
     ds_ocean: xr.Dataset,
     output_grid: str,
     vertical_coarsening_indices: Sequence[Sequence[int]],
     source_grid_ocean: xr.Dataset,
+    invariant_ds: xr.Dataset,
+    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
 ) -> xr.Dataset:
-    """Compute the regridded, derived-variable ocean chunk at native
-    (6-hourly) cadence — the expensive, output-cadence-independent part
-    of ocean processing.
+    """Process one time-chunk of ocean data.
 
-    This is split out from ``_finalize_ocean_chunk`` (the cheap,
-    output-specific time-coarsening + masking) so that when a snapshot
-    output is requested, this expensive part can be computed once per
-    chunk and shared between the main and snapshot outputs (see
-    ``_add_fanout_beam_streams``) rather than repeated for each.
+    Receives a loaded (in-memory) Dataset for a small number of native
+    6-hourly timesteps, plus the precomputed invariant fields (masks,
+    fractions) and NN-fill indices, and returns the processed output
+    Dataset at that same native cadence.
     """
     xr.set_options(keep_attrs=True)
 
@@ -672,29 +669,6 @@ def _process_ocean_chunk_native(
         [v for v in WFO_COMPONENTS + HFDS_COMPONENTS if v in ds],
         errors="ignore",
     )
-    return ds
-
-
-def _finalize_ocean_chunk(
-    ds: xr.Dataset,
-    time_coarsen_factor: int,
-    invariant_ds: xr.Dataset,
-    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
-) -> xr.Dataset:
-    """Apply output-specific time coarsening, land masking, and NN-fill
-    to an already-regridded native-cadence ocean chunk (the cheap part
-    of ocean processing — see ``_process_ocean_chunk_native``)."""
-    xr.set_options(keep_attrs=True)
-
-    # --- Time coarsening ---
-    # coarsen().mean() also averages the time coordinate.  The ocean 6h
-    # fields are center-labeled (00Z, 06Z, 12Z, 18Z) covering
-    # 21Z(-1d)–21Z, so the daily-mean label lands naturally at 09Z.
-    # The atmosphere stream produces identical labels (see
-    # _finalize_atmo_chunk), so both streams share one output time
-    # coordinate.
-    if time_coarsen_factor > 1:
-        ds = ds.coarsen(time=time_coarsen_factor, boundary="trim").mean()
 
     # --- Insert NaN on land ---
     # Vertically coarsened per-level fields use the matching per-level
@@ -719,42 +693,19 @@ def _finalize_ocean_chunk(
     return _finalize_chunk(ds)
 
 
-def _process_ocean_chunk(
-    ds_ocean: xr.Dataset,
-    output_grid: str,
-    vertical_coarsening_indices: Sequence[Sequence[int]],
-    time_coarsen_factor: int,
-    source_grid_ocean: xr.Dataset,
-    invariant_ds: xr.Dataset,
-    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
-) -> xr.Dataset:
-    """Process one time-chunk of ocean data, native through finalized.
-
-    Receives a loaded (in-memory) Dataset for a small number of
-    timesteps, plus the precomputed invariant fields (masks, fractions)
-    and NN-fill indices, and returns the processed output Dataset.
-    """
-    native = _process_ocean_chunk_native(
-        ds_ocean, output_grid, vertical_coarsening_indices, source_grid_ocean
-    )
-    return _finalize_ocean_chunk(native, time_coarsen_factor, invariant_ds, nn_fill_map)
-
-
 def process_ocean_chunk(
     key,
     ds_ocean_chunk,
     output_grid=DEFAULT_OUTPUT_GRID,
     vertical_coarsening_indices=None,
-    time_coarsen_factor=1,
     invariant_ds=None,
     nn_fill_map=None,
 ):
     """Beam-compatible ocean stream function: (key, ds) → (new_key, output_ds).
 
     Called by ``beam.MapTuple`` for each time-chunk of ocean data.  Each
-    output timestep consumes ``time_coarsen_factor`` 6-hourly ocean
-    timesteps, so the output time offset is the input offset divided by
-    that factor.
+    native 6-hourly input timestep produces one output timestep, so the
+    output key's time offset is unchanged from the input.
     """
     if vertical_coarsening_indices is None:
         vertical_coarsening_indices = DEFAULT_VERTICAL_COARSENING_INDICES
@@ -766,63 +717,18 @@ def process_ocean_chunk(
         ds_ocean_chunk,
         output_grid,
         vertical_coarsening_indices,
-        time_coarsen_factor,
         _get_source_grid(ds_ocean_chunk),
         invariant_ds,
         nn_fill_map,
     )
 
+    # Explicitly set offsets to just "time": the input key also carries a
+    # "z_l" offset (from the source ds_ocean's vertical dimension), which
+    # must not be carried over since the output no longer has that
+    # dimension — otherwise xarray-beam's consolidation step gets a key
+    # inconsistent with the actual output dataset's dimensions.
     new_key = key.replace(
-        offsets={"time": key.offsets["time"] // time_coarsen_factor},
-        vars=frozenset(output.keys()),
-    )
-    return new_key, output
-
-
-def process_ocean_chunk_native(
-    key,
-    ds_ocean_chunk,
-    output_grid=DEFAULT_OUTPUT_GRID,
-    vertical_coarsening_indices=None,
-):
-    """Beam-compatible: compute the shared native-cadence ocean chunk.
-
-    Used instead of ``process_ocean_chunk`` when a snapshot output is
-    requested, so the expensive vertical-coarsening + regridding work
-    runs once per chunk and is shared between the main and snapshot
-    outputs via ``finalize_ocean_chunk`` (see
-    ``_add_fanout_beam_streams``).  The output key's time offset is left
-    at native (6-hourly) granularity — unlike ``process_ocean_chunk``,
-    no output-cadence reduction has happened yet.
-    """
-    if vertical_coarsening_indices is None:
-        vertical_coarsening_indices = DEFAULT_VERTICAL_COARSENING_INDICES
-
-    logging.info("Processing native ocean chunk at key=%s", key)
-    ds_ocean_chunk = ds_ocean_chunk.load()
-
-    output = _process_ocean_chunk_native(
-        ds_ocean_chunk,
-        output_grid,
-        vertical_coarsening_indices,
-        _get_source_grid(ds_ocean_chunk),
-    )
-    new_key = key.replace(vars=frozenset(output.keys()))
-    return new_key, output
-
-
-def finalize_ocean_chunk(
-    key,
-    ds,
-    time_coarsen_factor=1,
-    invariant_ds=None,
-    nn_fill_map=None,
-):
-    """Beam-compatible: finish one output's ocean chunk from the shared
-    native-cadence result produced by ``process_ocean_chunk_native``."""
-    output = _finalize_ocean_chunk(ds, time_coarsen_factor, invariant_ds, nn_fill_map)
-    new_key = key.replace(
-        offsets={"time": key.offsets["time"] // time_coarsen_factor},
+        offsets={"time": key.offsets["time"]},
         vars=frozenset(output.keys()),
     )
     return new_key, output
@@ -833,25 +739,19 @@ def finalize_ocean_chunk(
 # ---------------------------------------------------------------------------
 
 
-def _process_atmo_chunk_native(
+def _process_atmo_chunk(
     ds_atmo: xr.Dataset,
     output_grid: str,
-    pre_regrid_coarsen_factor: int,
     source_grid_atmo: xr.Dataset,
     invariant_ds: xr.Dataset,
+    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
 ) -> xr.Dataset:
-    """Derive frozen precipitation and coarsen+regrid atmosphere data.
+    """Process one time-chunk of atmosphere data.
 
-    Coarsens from 3-hourly to a cadence of ``2 * pre_regrid_coarsen_factor``
-    hours, then regrids — the expensive, shared part of atmosphere
-    processing.  Passing the full output ``time_coarsen_factor`` here
-    (as ``process_atmo_chunk``/``_process_atmo_chunk`` do) collapses
-    all the way to the output cadence before regridding, minimizing
-    regrid cost — the cheapest option when there is only one output.
-    Passing ``1`` instead stops at 6-hourly (ocean cadence), preserving
-    enough resolution to serve a native-cadence snapshot output too;
-    ``_finalize_atmo_chunk`` then does any further reduction needed for
-    each individual output — see ``_add_fanout_beam_streams``.
+    Receives a loaded (in-memory) Dataset whose 3-hourly times pairwise
+    cover the 6-hourly ocean times of the corresponding output chunk
+    (validated up front by ``_validate_time_alignment``), and returns
+    the processed output Dataset at that 6-hourly ocean cadence.
     """
     xr.set_options(keep_attrs=True)
 
@@ -871,23 +771,16 @@ def _process_atmo_chunk_native(
         ds_atmo = ds_atmo.drop_vars(accum_vars)
         ds_atmo["total_frozen_precipitation_rate"] = frozen_rate
 
-    # Coarsen from 3-hourly to the target cadence in one step, before
-    # horizontal regridding.  Both reductions (3h->6h, 6h->output) are
-    # plain equal-weighted means over equal-sized groups, so combining
-    # them — coarsen(2).mean() then coarsen(N).mean() equals a single
-    # coarsen(2*N).mean() — is exact, not an approximation.  Doing the
-    # combined coarsen before regridding (rather than splitting it
-    # around the regrid step, or doing it entirely after) minimizes how
-    # many timesteps pass through the expensive conservative regridder,
-    # the same "reduce before regrid" principle used for the ocean
-    # stream's vertical coarsening.  Records are already center-labeled
-    # (see open_atmo) half the atmo cadence apart, so averaging labels
-    # lands exactly on the ocean stream's output time — no manual
-    # relabeling needed.  coarsen is preferred over resample because the
-    # atmo data is regularly spaced and coarsen always produces
-    # equal-sized groups (resample can create uneven bins at
+    # Average consecutive pairs of 3h fields → 6h, before horizontal
+    # regridding, to minimize how much data passes through the
+    # expensive conservative regridder.  Records are already
+    # center-labeled (see open_atmo) half the atmo cadence apart, so
+    # averaging labels lands exactly on the ocean stream's output time
+    # — no manual relabeling needed.  coarsen is preferred over resample
+    # because the atmo data is regularly spaced and coarsen always
+    # produces equal-sized groups (resample can create uneven bins at
     # boundaries).
-    ds = ds_atmo.coarsen(time=2 * pre_regrid_coarsen_factor, boundary="trim").mean()
+    ds = ds_atmo.coarsen(time=2, boundary="trim").mean()
 
     # --- Horizontal regridding ---
     ds = _regrid_dataset(
@@ -898,22 +791,6 @@ def _process_atmo_chunk_native(
         na_thres=1.0,
     )
     ds = ds.assign_coords(lat=invariant_ds.lat.values, lon=invariant_ds.lon.values)
-    return ds
-
-
-def _finalize_atmo_chunk(
-    ds: xr.Dataset,
-    remaining_time_coarsen_factor: int,
-    invariant_ds: xr.Dataset,
-    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
-) -> xr.Dataset:
-    """Apply any remaining time coarsening, renaming, sea-ice masking,
-    and NN-fill to an already-regridded atmosphere chunk (the cheap part
-    of atmosphere processing — see ``_process_atmo_chunk_native``)."""
-    xr.set_options(keep_attrs=True)
-
-    if remaining_time_coarsen_factor > 1:
-        ds = ds.coarsen(time=remaining_time_coarsen_factor, boundary="trim").mean()
 
     # Rename to output names
     rename_map = {**ATMO_FORCING_VARS, **ICE_VARS}
@@ -945,40 +822,19 @@ def _finalize_atmo_chunk(
     return _finalize_chunk(ds)
 
 
-def _process_atmo_chunk(
-    ds_atmo: xr.Dataset,
-    output_grid: str,
-    time_coarsen_factor: int,
-    source_grid_atmo: xr.Dataset,
-    invariant_ds: xr.Dataset,
-    nn_fill_map: dict[str, tuple[np.ndarray, np.ndarray]] | None,
-) -> xr.Dataset:
-    """Process one time-chunk of atmosphere data, native through finalized.
-
-    Receives a loaded (in-memory) Dataset whose 3-hourly times pairwise
-    cover the 6-hourly ocean times of the corresponding output chunk
-    (validated up front by ``_validate_time_alignment``).
-    """
-    native = _process_atmo_chunk_native(
-        ds_atmo, output_grid, time_coarsen_factor, source_grid_atmo, invariant_ds
-    )
-    return _finalize_atmo_chunk(native, 1, invariant_ds, nn_fill_map)
-
-
 def process_atmo_chunk(
     key,
     ds_atmo_chunk,
     output_grid=DEFAULT_OUTPUT_GRID,
-    time_coarsen_factor=1,
     invariant_ds=None,
     nn_fill_map=None,
 ):
     """Beam-compatible atmosphere stream function: (key, ds) → (new_key, output_ds).
 
     Called by ``beam.MapTuple`` for each time-chunk of atmosphere data.
-    Each output timestep consumes ``2 * time_coarsen_factor`` 3-hourly
-    atmosphere timesteps (pair-averaging to 6-hourly, then coarsening),
-    so the output time offset is the input offset divided by that.
+    Each output timestep consumes 2 3-hourly atmosphere timesteps
+    (pair-averaging to the 6-hourly ocean cadence), so the output time
+    offset is the input offset divided by 2.
     """
     logging.info("Processing atmo chunk at key=%s", key)
     ds_atmo_chunk = ds_atmo_chunk.load()
@@ -986,66 +842,13 @@ def process_atmo_chunk(
     output = _process_atmo_chunk(
         ds_atmo_chunk,
         output_grid,
-        time_coarsen_factor,
         _get_source_grid(ds_atmo_chunk),
         invariant_ds,
         nn_fill_map,
     )
 
     new_key = key.replace(
-        offsets={"time": key.offsets["time"] // (2 * time_coarsen_factor)},
-        vars=frozenset(output.keys()),
-    )
-    return new_key, output
-
-
-def process_atmo_chunk_native(
-    key,
-    ds_atmo_chunk,
-    output_grid=DEFAULT_OUTPUT_GRID,
-    invariant_ds=None,
-):
-    """Beam-compatible: compute the shared 6-hourly-cadence atmo chunk.
-
-    Used instead of ``process_atmo_chunk`` when a snapshot output is
-    requested: coarsens only to the ocean's native 6-hourly cadence
-    (``pre_regrid_coarsen_factor=1``, preserving enough resolution for
-    a native-cadence snapshot) rather than all the way to the output
-    cadence, so the regridding work is shared between the main and
-    snapshot outputs via ``finalize_atmo_chunk`` (see
-    ``_add_fanout_beam_streams``).  The output key's time offset is in
-    6-hourly (ocean-cadence) units — unlike ``process_atmo_chunk``, no
-    further output-cadence reduction has happened yet.
-    """
-    logging.info("Processing native atmo chunk at key=%s", key)
-    ds_atmo_chunk = ds_atmo_chunk.load()
-
-    output = _process_atmo_chunk_native(
-        ds_atmo_chunk,
-        output_grid,
-        1,
-        _get_source_grid(ds_atmo_chunk),
-        invariant_ds,
-    )
-    new_key = key.replace(
         offsets={"time": key.offsets["time"] // 2},
-        vars=frozenset(output.keys()),
-    )
-    return new_key, output
-
-
-def finalize_atmo_chunk(
-    key,
-    ds,
-    time_coarsen_factor=1,
-    invariant_ds=None,
-    nn_fill_map=None,
-):
-    """Beam-compatible: finish one output's atmo chunk from the shared
-    6-hourly-cadence result produced by ``process_atmo_chunk_native``."""
-    output = _finalize_atmo_chunk(ds, time_coarsen_factor, invariant_ds, nn_fill_map)
-    new_key = key.replace(
-        offsets={"time": key.offsets["time"] // time_coarsen_factor},
         vars=frozenset(output.keys()),
     )
     return new_key, output
@@ -1144,7 +947,6 @@ def _make_template(
     ds_atmo: xr.Dataset,
     output_grid: str,
     vertical_coarsening_indices: Sequence[Sequence[int]],
-    time_coarsen_factor: int,
     output_time: list,
 ) -> tuple[
     xr.Dataset,
@@ -1171,18 +973,17 @@ def _make_template(
     ).drop_encoding()
     mask_2d_arr = invariant_ds["mask_2d"].values
 
-    # Process one chunk of each stream to get the time-varying variable
+    # Process one native 6-hourly ocean timestep and its two matching
+    # 3-hourly atmosphere timesteps to get the time-varying variable
     # schema.  Process WITHOUT NN fill so the fill indices can be
     # extracted from the un-filled data (the fill pattern depends only
     # on the static ocean mask, so it is computed once here and passed
     # to every Beam worker), then apply the fill.
-    ocean_per_output = time_coarsen_factor
-    ds_ocean_small = ds_ocean.isel(time=slice(0, ocean_per_output)).load()
+    ds_ocean_small = ds_ocean.isel(time=slice(0, 1)).load()
     processed_ocean = _process_ocean_chunk(
         ds_ocean_small,
         output_grid,
         vertical_coarsening_indices,
-        time_coarsen_factor,
         src_ocean,
         invariant_ds,
         nn_fill_map=None,
@@ -1191,11 +992,10 @@ def _make_template(
     processed_ocean = _apply_nn_fill(processed_ocean, ocean_nn_fill_map)
 
     # Atmosphere sample: two 3-hourly timesteps per 6-hourly ocean timestep.
-    ds_atmo_small = ds_atmo.isel(time=slice(0, 2 * ocean_per_output)).load()
+    ds_atmo_small = ds_atmo.isel(time=slice(0, 2)).load()
     processed_atmo = _process_atmo_chunk(
         ds_atmo_small,
         output_grid,
-        time_coarsen_factor,
         _make_source_grid(ds_atmo_small),
         invariant_ds,
         nn_fill_map=None,
@@ -1220,21 +1020,8 @@ def _make_template(
 
 
 # ---------------------------------------------------------------------------
-# Output stream assembly (one call per output: the main, possibly
-# time-coarsened output, and optionally a second native-cadence snapshot
-# output — see main()).
+# Output stream assembly
 # ---------------------------------------------------------------------------
-
-
-class _StreamOutput(NamedTuple):
-    """Everything needed to write one output (one zarr store)."""
-
-    template: xr.Dataset
-    invariant_ds: xr.Dataset
-    ocean_nn_fill_map: dict
-    atmo_nn_fill_map: dict
-    output_store: object
-    time_coarsen_factor: int
 
 
 def _build_stream_config(
@@ -1242,41 +1029,24 @@ def _build_stream_config(
     ds_atmo: xr.Dataset,
     output_grid: str,
     vert_indices: Sequence[Sequence[int]],
-    time_coarsen_factor: int,
     output_path: str,
-) -> _StreamOutput:
-    """Compute the output time coordinate, template, and per-stream
-    invariant/NN-fill data for one output (one zarr store)."""
-    if time_coarsen_factor > 1:
-        output_time = list(
-            ds_ocean["time"]
-            .coarsen(time=time_coarsen_factor, boundary="trim")
-            .mean()
-            .values
-        )
-    else:
-        output_time = list(ds_ocean.time.values)
+):
+    """Compute the output time coordinate, template, and invariant/NN-fill
+    data needed to write the output zarr store."""
+    output_time = list(ds_ocean.time.values)
 
     logging.info(
-        "Output time range (%s): %s to %s (%d steps)",
-        output_path,
+        "Output time range: %s to %s (%d steps)",
         output_time[0],
         output_time[-1],
         len(output_time),
     )
 
     template, invariant_ds, ocean_nn_fill_map, atmo_nn_fill_map = _make_template(
-        ds_ocean, ds_atmo, output_grid, vert_indices, time_coarsen_factor, output_time
+        ds_ocean, ds_atmo, output_grid, vert_indices, output_time
     )
     output_store = _make_zarr_store(output_path, read_only=False)
-    return _StreamOutput(
-        template,
-        invariant_ds,
-        ocean_nn_fill_map,
-        atmo_nn_fill_map,
-        output_store,
-        time_coarsen_factor,
-    )
+    return template, invariant_ds, ocean_nn_fill_map, atmo_nn_fill_map, output_store
 
 
 def _add_beam_streams(
@@ -1289,33 +1059,31 @@ def _add_beam_streams(
     atmo_process_chunks: dict,
     output_chunks: dict,
     output_shards: dict,
-    stream: _StreamOutput,
-    label_prefix: str,
+    template: xr.Dataset,
+    invariant_ds: xr.Dataset,
+    ocean_nn_fill_map: dict,
+    atmo_nn_fill_map: dict,
+    output_store,
 ) -> None:
-    """Add one ocean + atmosphere Beam stream pair writing to one zarr
-    store, each independently computing the full native-through-final
-    chunk.  Used when there is only one output — see
-    ``_add_fanout_beam_streams`` for the shared-computation version used
-    when a main and snapshot output are both requested."""
+    """Add the ocean + atmosphere Beam stream pair writing to the output
+    zarr store."""
     (
         p
-        | f"{label_prefix}ocean_DatasetToChunks"
+        | "ocean_DatasetToChunks"
         >> xbeam.DatasetToChunks(ds_ocean, chunks=process_chunks)
-        | f"{label_prefix}ocean_MapTuple"
+        | "ocean_MapTuple"
         >> beam.MapTuple(
             process_ocean_chunk,
             output_grid=output_grid,
             vertical_coarsening_indices=vert_indices,
-            time_coarsen_factor=stream.time_coarsen_factor,
-            invariant_ds=stream.invariant_ds,
-            nn_fill_map=stream.ocean_nn_fill_map,
+            invariant_ds=invariant_ds,
+            nn_fill_map=ocean_nn_fill_map,
         )
-        | f"{label_prefix}ocean_ConsolidateChunks"
-        >> xbeam.ConsolidateChunks(output_shards)
-        | f"{label_prefix}ocean_to_zarr"
+        | "ocean_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
+        | "ocean_to_zarr"
         >> xbeam.ChunksToZarr(
-            stream.output_store,
-            stream.template,
+            output_store,
+            template,
             zarr_chunks=output_chunks,
             zarr_shards=output_shards,
             zarr_format=3,
@@ -1324,128 +1092,25 @@ def _add_beam_streams(
 
     (
         p
-        | f"{label_prefix}atmo_DatasetToChunks"
+        | "atmo_DatasetToChunks"
         >> xbeam.DatasetToChunks(ds_atmo, chunks=atmo_process_chunks)
-        | f"{label_prefix}atmo_MapTuple"
+        | "atmo_MapTuple"
         >> beam.MapTuple(
             process_atmo_chunk,
             output_grid=output_grid,
-            time_coarsen_factor=stream.time_coarsen_factor,
-            invariant_ds=stream.invariant_ds,
-            nn_fill_map=stream.atmo_nn_fill_map,
+            invariant_ds=invariant_ds,
+            nn_fill_map=atmo_nn_fill_map,
         )
-        | f"{label_prefix}atmo_ConsolidateChunks"
-        >> xbeam.ConsolidateChunks(output_shards)
-        | f"{label_prefix}atmo_to_zarr"
+        | "atmo_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
+        | "atmo_to_zarr"
         >> xbeam.ChunksToZarr(
-            stream.output_store,
-            stream.template,
+            output_store,
+            template,
             zarr_chunks=output_chunks,
             zarr_shards=output_shards,
             zarr_format=3,
         )
     )
-
-
-def _add_fanout_beam_streams(
-    p: beam.Pipeline,
-    ds_ocean: xr.Dataset,
-    ds_atmo: xr.Dataset,
-    output_grid: str,
-    vert_indices: Sequence[Sequence[int]],
-    process_chunks: dict,
-    atmo_process_chunks: dict,
-    output_chunks: dict,
-    output_shards: dict,
-    main: _StreamOutput,
-    snapshot: _StreamOutput,
-) -> None:
-    """Add ocean + atmosphere Beam streams for both the main (possibly
-    time-coarsened) output and a native-cadence snapshot output,
-    sharing the expensive regridding computation between them instead
-    of repeating it per output (as two separate ``_add_beam_streams``
-    calls would).
-
-    Ocean's regrid cost is independent of time_coarsen_factor (it
-    always regrids every native timestep in the chunk; coarsening in
-    time happens afterward — see ``_finalize_ocean_chunk``), so
-    computing it once and branching into main/snapshot finalization
-    eliminates nearly all of the duplicate work for the ocean stream
-    (~94% of total per-chunk processing cost, measured).  Atmosphere's
-    shared step regrids at 6-hourly (ocean) cadence rather than
-    collapsing all the way to the output cadence first, so it costs a
-    bit more than the single-output fast path when snapshots are
-    enabled — but atmosphere is a small fraction of total cost either
-    way.
-    """
-    ocean_native = (
-        p
-        | "ocean_DatasetToChunks"
-        >> xbeam.DatasetToChunks(ds_ocean, chunks=process_chunks)
-        | "ocean_ProcessNative"
-        >> beam.MapTuple(
-            process_ocean_chunk_native,
-            output_grid=output_grid,
-            vertical_coarsening_indices=vert_indices,
-        )
-    )
-    for label_prefix, stream in [("main_", main), ("snapshot_", snapshot)]:
-        (
-            ocean_native
-            | f"{label_prefix}ocean_Finalize"
-            >> beam.MapTuple(
-                finalize_ocean_chunk,
-                time_coarsen_factor=stream.time_coarsen_factor,
-                invariant_ds=stream.invariant_ds,
-                nn_fill_map=stream.ocean_nn_fill_map,
-            )
-            | f"{label_prefix}ocean_ConsolidateChunks"
-            >> xbeam.ConsolidateChunks(output_shards)
-            | f"{label_prefix}ocean_to_zarr"
-            >> xbeam.ChunksToZarr(
-                stream.output_store,
-                stream.template,
-                zarr_chunks=output_chunks,
-                zarr_shards=output_shards,
-                zarr_format=3,
-            )
-        )
-
-    atmo_native = (
-        p
-        | "atmo_DatasetToChunks"
-        >> xbeam.DatasetToChunks(ds_atmo, chunks=atmo_process_chunks)
-        | "atmo_ProcessNative"
-        >> beam.MapTuple(
-            process_atmo_chunk_native,
-            output_grid=output_grid,
-            # lat/lon values only — identical regardless of which
-            # stream's invariant_ds is used, since they don't depend on
-            # time_coarsen_factor.
-            invariant_ds=main.invariant_ds,
-        )
-    )
-    for label_prefix, stream in [("main_", main), ("snapshot_", snapshot)]:
-        (
-            atmo_native
-            | f"{label_prefix}atmo_Finalize"
-            >> beam.MapTuple(
-                finalize_atmo_chunk,
-                time_coarsen_factor=stream.time_coarsen_factor,
-                invariant_ds=stream.invariant_ds,
-                nn_fill_map=stream.atmo_nn_fill_map,
-            )
-            | f"{label_prefix}atmo_ConsolidateChunks"
-            >> xbeam.ConsolidateChunks(output_shards)
-            | f"{label_prefix}atmo_to_zarr"
-            >> xbeam.ChunksToZarr(
-                stream.output_store,
-                stream.template,
-                zarr_chunks=output_chunks,
-                zarr_shards=output_shards,
-                zarr_format=3,
-            )
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -1484,17 +1149,7 @@ def _get_parser():
         "--process_time_chunksize",
         type=int,
         default=4,
-        help=(
-            "Number of ocean timesteps per processing chunk.  Should be a "
-            "multiple of time_coarsen_factor.  With time_coarsen_factor=4 "
-            "the default of 4 produces 1 output timestep per chunk."
-        ),
-    )
-    parser.add_argument(
-        "--time_coarsen_factor",
-        type=int,
-        default=4,
-        help="Temporal coarsening factor (e.g. 4 for 6h→daily). Default: 4.",
+        help="Number of native 6-hourly ocean timesteps per processing chunk.",
     )
     parser.add_argument(
         "--vertical_coarsening_indices",
@@ -1503,19 +1158,6 @@ def _get_parser():
         help=(
             "JSON-encoded list of [start,end) pairs for vertical coarsening. "
             "Default uses the built-in 75→19 level mapping."
-        ),
-    )
-    parser.add_argument(
-        "--snapshot_output_path",
-        type=str,
-        default=None,
-        help=(
-            "If set, also write a second output at native temporal "
-            "resolution (no additional time coarsening beyond the ocean "
-            "model's own 6-hourly cadence; atmosphere forcing is still "
-            "averaged over the window between two ocean snapshots) to "
-            "this path.  Uses the same output grid and vertical "
-            "coarsening as the main output."
         ),
     )
     return parser
@@ -1544,26 +1186,12 @@ def main():
     else:
         vert_indices = DEFAULT_VERTICAL_COARSENING_INDICES
 
-    time_coarsen_factor = args.time_coarsen_factor
-    assert time_coarsen_factor >= 1, "time_coarsen_factor must be >= 1"
-
-    if args.snapshot_output_path:
-        assert (
-            args.snapshot_output_path != args.output_path
-        ), "snapshot_output_path must differ from output_path"
-
     # Validate chunk/shard divisibility
     msg = (
         "output_time_shardsize must be a multiple of output_time_chunksize, "
         f"got {args.output_time_shardsize} and {args.output_time_chunksize}"
     )
     assert args.output_time_shardsize % args.output_time_chunksize == 0, msg
-
-    if time_coarsen_factor > 1:
-        assert args.process_time_chunksize % time_coarsen_factor == 0, (
-            f"process_time_chunksize ({args.process_time_chunksize}) must be "
-            f"a multiple of time_coarsen_factor ({time_coarsen_factor})"
-        )
 
     output_chunks = {"time": args.output_time_chunksize}
     output_shards = {"time": args.output_time_shardsize}
@@ -1574,7 +1202,7 @@ def main():
 
     ds_ocean = open_ocean(OCEAN_LOAD_VARS, start_time, end_time)
     # Truncate to a multiple of process_time_chunksize so every chunk has
-    # exactly the same number of timesteps (avoids coarsen failures).
+    # exactly the same number of timesteps.
     n_ocean = ds_ocean.sizes["time"]
     n_usable = (n_ocean // args.process_time_chunksize) * args.process_time_chunksize
     if n_usable < n_ocean:
@@ -1607,40 +1235,18 @@ def main():
 
     # With aligned times, the two Beam streams correspond purely by
     # integer chunk offsets: ocean offset i and atmosphere offset 2*i
-    # contribute to output offset i // time_coarsen_factor.
+    # both contribute to output offset i.
     _validate_time_alignment(ocean_times, ds_atmo.time.values)
 
-    # --- Build template(s) ---
+    # --- Build template ---
     logging.info("Generating template")
-    main_stream = _build_stream_config(
-        ds_ocean,
-        ds_atmo,
-        args.output_grid,
-        vert_indices,
-        time_coarsen_factor,
-        args.output_path,
+    template, invariant_ds, ocean_nn_fill_map, atmo_nn_fill_map, output_store = (
+        _build_stream_config(
+            ds_ocean, ds_atmo, args.output_grid, vert_indices, args.output_path
+        )
     )
 
-    # Optional second output at native temporal resolution (snapshots):
-    # reuses the same per-chunk processing with time_coarsen_factor
-    # forced to 1, so ocean fields get no additional time averaging
-    # beyond the model's own 6-hourly cadence, while the atmosphere
-    # forcing is still averaged over the window between two ocean
-    # snapshots (exactly what _process_atmo_chunk already does for any
-    # time_coarsen_factor).
-    snapshot_stream = None
-    if args.snapshot_output_path:
-        logging.info("Generating snapshot template (native temporal resolution)")
-        snapshot_stream = _build_stream_config(
-            ds_ocean,
-            ds_atmo,
-            args.output_grid,
-            vert_indices,
-            1,
-            args.snapshot_output_path,
-        )
-
-    logging.info("Template(s) generated. Starting pipeline.")
+    logging.info("Template generated. Starting pipeline.")
     logging.info(
         "Pipeline options: %s",
         PipelineOptions(pipeline_args).get_all_options(),
@@ -1651,37 +1257,22 @@ def main():
     atmo_process_chunks = {"time": 2 * args.process_time_chunksize}
 
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
-        if snapshot_stream is None:
-            _add_beam_streams(
-                p,
-                ds_ocean,
-                ds_atmo,
-                args.output_grid,
-                vert_indices,
-                process_chunks,
-                atmo_process_chunks,
-                output_chunks,
-                output_shards,
-                main_stream,
-                label_prefix="",
-            )
-        else:
-            # Share the expensive regridding computation between the
-            # main and snapshot outputs rather than computing each
-            # independently — see _add_fanout_beam_streams.
-            _add_fanout_beam_streams(
-                p,
-                ds_ocean,
-                ds_atmo,
-                args.output_grid,
-                vert_indices,
-                process_chunks,
-                atmo_process_chunks,
-                output_chunks,
-                output_shards,
-                main_stream,
-                snapshot_stream,
-            )
+        _add_beam_streams(
+            p,
+            ds_ocean,
+            ds_atmo,
+            args.output_grid,
+            vert_indices,
+            process_chunks,
+            atmo_process_chunks,
+            output_chunks,
+            output_shards,
+            template,
+            invariant_ds,
+            ocean_nn_fill_map,
+            atmo_nn_fill_map,
+            output_store,
+        )
 
 
 if __name__ == "__main__":

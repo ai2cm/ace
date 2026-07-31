@@ -20,6 +20,13 @@ output zarr store.  The 3-hourly atmosphere times are validated up front to
 exactly interleave the 6-hourly ocean times, so the streams align purely by
 integer chunk offsets — no per-chunk time matching is needed.
 
+The pipeline always emits data at the ocean model's native 6-hourly cadence —
+no time coarsening happens here.  Coarser products (daily, 5-day, etc.) are
+produced downstream from this raw output by
+[`scripts/data_process/time_coarsen.py`](../data_process/time_coarsen.py), a
+separate, much cheaper post-processing step (plain zarr region writes, no
+regridding) — see "Downstream time coarsening" below.
+
 Ocean stream (6-hourly MOM6 chunks):
 
 1. Thickness-weighted (`ho`) vertical coarsening (75 → 19 levels matching
@@ -30,33 +37,43 @@ Ocean stream (6-hourly MOM6 chunks):
    levels then need to go through the regridder instead of 75)
 2. Regrid to Gaussian grid (F90 = 1°) via xESMF
 3. Derive additional variables (sst, ssu/ssv, wfo, hfds, etc.)
-4. Coarsen in time (6-hourly → daily)
-5. Insert NaN on land, nearest-neighbour fill residual coastal NaN
+4. Insert NaN on land, nearest-neighbour fill residual coastal NaN
 
 Atmosphere stream (3-hourly FV3 chunks):
 
 1. Derive frozen precipitation rate from bucket accumulations
-2. Coarsen in time from 3-hourly directly to the output cadence
-   (e.g. 3-hourly → daily) in a single step, before regridding — combining
-   both reductions and doing them first minimizes how many timesteps pass
-   through the regridder, the same principle used for the ocean stream's
-   vertical coarsening
+2. Average 3-hourly fields to the 6-hourly ocean cadence, before
+   regridding, to minimize how many timesteps pass through the regridder
 3. Regrid to Gaussian grid via xESMF
 4. Mask sea-ice variables to the ocean
 
-### Optional snapshot output
+## Downstream time coarsening
 
-Passing `--snapshot_output_path` adds a second ocean+atmosphere stream pair
-in the same run, writing a native-temporal-resolution ("snapshot") output to
-that path — for training on snapshots rather than time-averaged output.
-Ocean fields get no additional time coarsening beyond the model's own
-6-hourly cadence; the atmosphere forcing is still averaged over the window
-between two ocean snapshots. This reuses the same per-chunk processing
-functions with `time_coarsen_factor` forced to `1`, so it shares the output
-grid and vertical coarsening with the main output, just not its
-time-coarsening. Note this processes the native ocean/atmosphere data a
-second time (once per output), so it roughly doubles the pipeline's compute
-cost when enabled.
+The pipeline always outputs raw 6-hourly data; producing a coarser product
+(daily, 5-day, etc.) is a separate, much cheaper step (plain zarr region
+writes, no xESMF regridding) run on that raw output, via
+[`scripts/data_process/time_coarsen.py`](../data_process/time_coarsen.py)
+(`make coarsen_daily`; config at
+[`configs/ufs-replay-ocean-1deg-19level-daily.yaml`](../data_process/configs/ufs-replay-ocean-1deg-19level-daily.yaml)).
+
+It's config-driven, and distinguishes ocean/sea-ice *state* variables
+(per-level `thetao`/`so`/`uo`/`vo`, `sst`/`ssu`/`ssv`/`zos`, sea-ice
+fraction/thickness), which are **snapshotted** (the last native timestep of
+each day, not averaged), from atmosphere forcing and ocean surface flux
+variables, which are **window-averaged** over the day — matching the
+convention used by the SHiELD-family `time_coarsen` configs elsewhere in
+`data_process`. This is the physically appropriate choice for training on
+daily data: it preserves actual model states rather than smoothing them,
+while still correctly time-integrating forcing. (A plain uniform mean over
+every variable, with no state/forcing distinction, is also possible by
+putting every time-varying variable in `window_names` and leaving
+`snapshot_names` empty.)
+
+Note the resulting time label: with any snapshot variables present (as in
+our config), `time_coarsen.py` labels each day at 18Z (the snapshotted
+state's own valid time), not the 09Z center-of-day label a pure mean — or
+this pipeline's daily output before it was simplified to always emit raw
+6-hourly data — would produce.
 
 ## Quick Start
 
@@ -96,11 +113,9 @@ make ufs_replay_dataflow_test_run
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--output_grid` | `F90` | Gaussian grid spec (`F90`=1°, `F22.5`=4°) |
-| `--time_coarsen_factor` | `4` | Temporal coarsening (4 = 6h→daily) |
-| `--process_time_chunksize` | `4` | Ocean timesteps per Beam chunk |
-| `--output_time_shardsize` | `360` | Times per zarr shard (~1 year daily) |
+| `--process_time_chunksize` | `4` | Native 6-hourly ocean timesteps per Beam chunk |
+| `--output_time_shardsize` | `360` | Times per zarr shard (~90 days at 6-hourly) |
 | `--vertical_coarsening_indices` | built-in | JSON list of [start,end) pairs |
-| `--snapshot_output_path` | none | If set, also write a native-cadence snapshot output here |
 
 ## Comparison with `scripts/era5/`
 
@@ -109,5 +124,5 @@ make ufs_replay_dataflow_test_run
 | Source | ARCO-ERA5 (0.25°) | NOAA UFS replay (0.25°) |
 | Streams | 4 parallel (flux, surface, pressure, model) | 2 parallel (ocean, atmosphere) |
 | Vertical | Pressure-weighted (137→8 layers) | Thickness-weighted (75→19 levels) |
-| Time step | 6-hourly output | 6-hourly → daily |
+| Time step | 6-hourly output | 6-hourly (native; coarsen downstream if needed) |
 | Runner | Dataflow / DirectRunner | Dataflow / DirectRunner |
