@@ -270,6 +270,12 @@ compute_cm4_trial_run_atmosphere_stats:
 cm4_picontrol_atmosphere_8layer_200yr:
 	./compute_dataset.sh --dataset --stats --config configs/CM4-piControl-atmosphere-$(RESOLUTION)-8layer-200yr.yaml
 
+# Time-coarsens the existing 2025-03-21 1deg 6-hourly store to daily. Does not
+# pass --dataset, so the 6-hourly source is never rewritten.
+.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_daily
+cm4_picontrol_atmosphere_1deg_8layer_200yr_daily:
+	./compute_dataset.sh --time-coarsen --stats --config configs/CM4-piControl-atmosphere-1deg-8layer-200yr-daily.yaml
+
 .PHONY: cm4_1pctCO2_atmosphere_8layer_140yr
 cm4_1pctCO2_atmosphere_8layer_140yr:
 	./compute_dataset.sh --dataset --stats --config configs/CM4-1pctCO2-atmosphere-$(RESOLUTION)-8layer-140yr.yaml
