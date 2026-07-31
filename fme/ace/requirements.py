@@ -1,6 +1,23 @@
 import dataclasses
+from collections.abc import Sequence
 
 from fme.core.dataset.schedule import IntSchedule
+
+
+@dataclasses.dataclass
+class InitialConditionRequirements:
+    """
+    The requirements an inference run places on its initial condition.
+
+    Parameters:
+        prognostic_names: Names of the prognostic variables the stepper needs.
+        labels: Labels for the initial conditions, or None for none.
+        n_ensemble: Number of ensemble members per initial state.
+    """
+
+    prognostic_names: Sequence[str]
+    labels: list[str] | None = None
+    n_ensemble: int = 1
 
 
 @dataclasses.dataclass

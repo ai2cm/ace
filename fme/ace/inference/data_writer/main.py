@@ -8,10 +8,13 @@ from typing import TypeAlias
 import cftime
 import numpy as np
 import numpy.typing as npt
-import torch
-import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.batch_data import (
+    _RESERVED_PREFIX,
+    BatchData,
+    PairedData,
+    PrognosticState,
+)
 from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
@@ -351,8 +354,13 @@ def _write(
 ):
     """Write provided data to a single netCDF at specified path/filename.
 
-    If the data has only one timestep, the data is squeezed to remove
-    the time dimension.
+    ``BatchData.to_xarray_dataset`` produces the complete dataset: prognostic
+    variables under plain names + time (with the single-timestep time dimension
+    squeezed), plus the round-trippable extras (stepper_state, labels, data_mask)
+    embedded under reserved ``_fme_state__`` variables when present. This adds the
+    writer's presentation on top - per-variable metadata attrs, coordinates, and
+    dataset metadata. When ``data`` carries no extras the file is byte-identical
+    to the data+time-only file written before this feature.
 
     Args:
         data: Batch data to written.
@@ -362,30 +370,15 @@ def _write(
         coords: Coordinate data to be written to the file.
         dataset_metadata: Metadata for the dataset.
     """
-    if data.time.sizes["time"] == 1:
-        time_dim = data.dims.index("time")
-        dims_to_write = data.dims[:time_dim] + data.dims[time_dim + 1 :]
-
-        def maybe_squeeze(x: torch.Tensor) -> torch.Tensor:
-            return x.squeeze(dim=time_dim)
-
-        time_array = data.time.isel(time=0)
-    else:
-        dims_to_write = data.dims
-
-        def maybe_squeeze(x):
-            return x
-
-        time_array = data.time
-
-    data_arrays = {}
-    for name in data.data:
-        array = maybe_squeeze(data.data[name]).detach().cpu().numpy()
-        data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
-        if name in variable_metadata:
-            data_arrays[name].attrs = variable_metadata[name].as_attrs()
-    data_arrays["time"] = time_array
-    ds = xr.Dataset(data_arrays, coords=coords)
+    ds = data.to_xarray_dataset()
+    for name in ds.data_vars:
+        # Metadata applies only to physical prognostic variables, never to
+        # ``time`` or the reserved embedded-state variables.
+        if str(name) == "time" or str(name).startswith(_RESERVED_PREFIX):
+            continue
+        if str(name) in variable_metadata:
+            ds[name].attrs.update(variable_metadata[str(name)].as_attrs())
+    ds = ds.assign_coords(coords)
     ds.attrs.update(dataset_metadata.as_flat_str_dict())
     to_netcdf_via_inter_filesystem_copy(ds, os.path.join(path, filename))
 

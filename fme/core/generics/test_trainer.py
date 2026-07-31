@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
+from fme.core.distributed.shutdown import handle_termination_signals
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -604,10 +605,13 @@ def preempt_after_calls_patch(object, method: str, call_count: int):
 
     with unittest.mock.patch.object(object, method) as mock:
         mock.side_effect = wrapper
-        try:
-            yield mock
-        except SystemExit:
-            pass
+        # the handler that turns SIGTERM into a restart checkpoint is installed
+        # by Distributed.context() around the whole job in production
+        with handle_termination_signals(shutdown=lambda: None):
+            try:
+                yield mock
+            except SystemExit:
+                pass
 
 
 @pytest.mark.parametrize(

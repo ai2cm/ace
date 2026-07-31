@@ -54,7 +54,6 @@ from fme.core.generics.inference import (
 )
 from fme.core.generics.validation import run_validation
 from fme.core.logging_utils import LoggingConfig
-from fme.core.random_state import RandomState
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -371,10 +370,7 @@ def run_evaluator_from_config(
             data._initial_condition = PrognosticState(
                 ic.broadcast_ensemble(config.n_ensemble_per_ic)
             )
-        if config.seed is not None:
-            data._initial_condition = data.initial_condition.with_random_state(
-                RandomState.from_seed(config.seed)
-            )
+        data.apply_config_seed(config.seed)
         stepper = config.load_stepper()
         stepper.set_eval()
 
@@ -426,7 +422,6 @@ def run_evaluator_from_config(
 
             val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,
-                loss_scaling=train_stepper.effective_loss_scaling,
                 save_diagnostics=True,
                 output_dir=os.path.join(config.experiment_dir, "validation"),
                 channel_mean_names=stepper.loss_names,
