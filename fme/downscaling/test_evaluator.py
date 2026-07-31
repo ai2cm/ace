@@ -216,6 +216,34 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
     assert (experiment_dir / "evaluator_maps_and_metrics.nc").exists()
 
 
+def test_evaluator_raises_when_larger_without_patching(tmp_path):
+    """The default evaluator refuses a region larger than the model patch when
+    patch prediction is not configured.
+
+    The model and data are mocked so the shape check in ``_build_default_evaluator``
+    is exercised without building a real model or dataset. The lower-level check is
+    covered directly in test_composite.py; this verifies the evaluator wiring.
+    """
+    model_config = unittest.mock.MagicMock()
+    built_model = model_config.build.return_value
+    built_model.coarse_shape = (4, 4)
+    built_model.with_rolled_lon.return_value = built_model  # same model, no roll
+
+    data_config = unittest.mock.MagicMock()
+    dataset = data_config.build.return_value
+    dataset.coarse_shape = (4, 8)
+
+    config = evaluator.EvaluatorConfig(
+        model=model_config,
+        experiment_dir=str(tmp_path),
+        data=data_config,
+        logging=LoggingConfig(),
+        n_samples=2,
+    )
+    with pytest.raises(ValueError, match="requires patch prediction"):
+        config._build_default_evaluator()
+
+
 @pytest.mark.parametrize(
     "evaluator_model_config, num_samples",
     [
