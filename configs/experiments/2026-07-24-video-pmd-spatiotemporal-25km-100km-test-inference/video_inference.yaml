@@ -37,7 +37,7 @@
 # model:/test_data: blocks -- do not hand-edit them out of sync with that file.
 checkpoint_path: /checkpoint/checkpoints/latest.ckpt
 experiment_dir: /results
-output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v1/test-2023-2024-ens4.zarr
+output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v1/test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr
 n_ensemble: 4
 ensemble_chunk_size: 1
 use_ema: true
@@ -67,12 +67,25 @@ data:
   batch_size: 4
   num_data_workers: 2
   strict_ensemble: false
+  # NOT full global (-88/88, 0/360) -- that OOM'd (67.3 GiB single alloc for
+  # the attention_levels: [3,4] spatial attention on the full 720x1440 fine
+  # grid, folded with n_timesteps=9 as an effective batch multiplier: at
+  # level 3 (~88x180=15840px after 3 downsamples), memory is
+  # batch(1)*T(9)*heads(8)*N^2(15840^2)*4B =~67GB, on a GPU already at
+  # 172/178GiB before that allocation even starts -- this architecture has
+  # no spatial-attention tiling, so true single-shot full-globe generation
+  # doesn't fit no matter the batch_size (already minimal at 1/GPU). Cut to
+  # a quarter-area region (half lat, half lon) as a first empirical probe;
+  # shrink further if this still OOMs. Genuinely-global coverage would need
+  # running several such regions and concatenating outputs (accepting a
+  # small accuracy cost at the seams vs. true full-domain attention), not a
+  # single job -- see run.sh header before scaling this up.
   lat_extent:
-    start: -88
-    stop: 88
+    start: -44
+    stop: 44
   lon_extent:
     start: 0
-    stop: 360
+    stop: 180
 model:
   n_timesteps: 9
   model_channels: 128
