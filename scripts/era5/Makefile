@@ -9,6 +9,8 @@ OUTPUT_PATH_ONE_DEGREE=gs://vcm-ml-intermediate/2026-03-19-era5-1deg-8layer-1940
 OUTPUT_GRID_ONE_DEGREE=F90
 OUTPUT_PATH_FOUR_DEGREE=gs://vcm-ml-intermediate/2026-03-19-era5-4deg-8layer-1940-2025.zarr
 OUTPUT_GRID_FOUR_DEGREE=F22.5
+OUTPUT_PATH_TWO_DEGREE=gs://vcm-ml-intermediate/2026-06-23-era5-2deg-8layer-1940-2025.zarr
+OUTPUT_GRID_TWO_DEGREE=F45
 
 # Test run parameters
 START_TIME_TEST_RUN ?= 2025-12-30T00:00:00
@@ -56,6 +58,18 @@ era5_dataflow_four_degree:
 		DataflowRunner \
 		$(OUTPUT_PATH_FOUR_DEGREE) \
 		$(OUTPUT_GRID_FOUR_DEGREE) \
+		$(START_TIME) \
+		$(END_TIME) \
+		--check_data_validity
+
+.PHONY: era5_dataflow_two_degree
+era5_dataflow_two_degree:
+	cd pipeline && \
+		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
+		./run-dataflow.sh \
+		DataflowRunner \
+		$(OUTPUT_PATH_TWO_DEGREE) \
+		$(OUTPUT_GRID_TWO_DEGREE) \
 		$(START_TIME) \
 		$(END_TIME) \
 		--check_data_validity

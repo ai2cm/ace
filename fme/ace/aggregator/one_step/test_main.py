@@ -51,7 +51,7 @@ def test_labels_exist():
             normalize=lambda x: x,
         ),
     )
-    logs = agg.get_logs(label="test")
+    summary = agg.get_summary(label="test")
     expected_keys = [
         "test/mean/loss",
         "test/mean/weighted_rmse/a",
@@ -75,7 +75,8 @@ def test_labels_exist():
         "test/ensemble/ensemble_mean_rmse/mean_map/a",
         "test/ensemble/ensemble_mean_rmse/a",
     ]
-    assert set(logs.keys()) == set(expected_keys)
+    assert set(summary.logs.keys()) == set(expected_keys)
+    assert summary.loss == summary.logs["test/mean/loss"]
 
 
 def test_aggregator_raises_on_no_data():

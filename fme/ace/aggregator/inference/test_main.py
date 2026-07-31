@@ -48,7 +48,7 @@ def test_inference_evaluator_aggregator_channel_mean_names(
         n_ic_steps=n_ic_steps,
         n_forward_steps=n_forward_steps,
         initial_time=initial_time,
-        normalize=lambda x: dict(x),
+        normalize=lambda x, apply_mean=True: dict(x),
         channel_mean_names=channel_mean_names,
         save_diagnostics=False,
         n_ensemble_per_ic=n_ensemble,
@@ -81,13 +81,13 @@ def test_inference_evaluator_aggregator_channel_mean_names(
 
     agg.record_batch(paired_data)
 
-    summary_logs = agg.get_summary_logs()
+    summary = agg.get_summary()
 
     for varname in ["a", "b", "c"]:
-        assert f"time_mean_norm/rmse/{varname}" in summary_logs
+        assert f"time_mean_norm/rmse/{varname}" in summary.logs
 
-    assert "time_mean_norm/rmse/channel_mean" in summary_logs
-    actual_channel_mean_rmse = summary_logs["time_mean_norm/rmse/channel_mean"]
+    assert "time_mean_norm/rmse/channel_mean" in summary.logs
+    actual_channel_mean_rmse = summary.logs["time_mean_norm/rmse/channel_mean"]
     if channel_mean_names is None:
         expected_channel_mean_rmse = 5 / 3
     else:
@@ -96,6 +96,7 @@ def test_inference_evaluator_aggregator_channel_mean_names(
         actual_channel_mean_rmse,
         expected_channel_mean_rmse,
     )
+    assert summary.loss == actual_channel_mean_rmse
 
 
 def test_inference_evaluator_aggregator_ensemble():
@@ -122,7 +123,7 @@ def test_inference_evaluator_aggregator_ensemble():
         n_ic_steps=n_ic_steps,
         n_forward_steps=n_forward_steps,
         initial_time=initial_time,
-        normalize=lambda x: {k: v * 0.5 for k, v in x.items()},
+        normalize=lambda x, apply_mean=True: {k: v * 0.5 for k, v in x.items()},
         channel_mean_names=channel_mean_names,
         save_diagnostics=False,
         n_ensemble_per_ic=n_ensemble,

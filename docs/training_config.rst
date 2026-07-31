@@ -29,7 +29,7 @@ The example is based on training with separate training and validation datasets,
 
 You can flexibly modify the example to run on data organized in a different manner, and change the data paths as you wish.
 
-A 1-year (1940) single-ensemble member data subsample available on the in the `ACE2-ERA5 Hugging Face page`_.
+A 1-year (1940) single-ensemble member data subsample is available in the `ACE2-ERA5 Hugging Face page`_.
 In that example dataset, the  ``.nc`` files would correspond to files like ``training_validation_data/training_validation/1940010100.nc``, and ``ckpt.tar`` corresponds to ``ace2_era5_ckpt.tar``.
 
 .. _ACE2-ERA5 Hugging Face page: https://huggingface.co/allenai/ACE2-ERA5

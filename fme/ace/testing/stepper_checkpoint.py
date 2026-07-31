@@ -8,9 +8,9 @@ from fme.ace.stepper.single_module import StepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
+from fme.core.testing import trivial_network_and_loss_normalization
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -50,12 +50,7 @@ def save_stepper_checkpoint(
                     ),
                     in_names=in_names,
                     out_names=out_names,
-                    normalization=NetworkAndLossNormalizationConfig(
-                        network=NormalizationConfig(
-                            means={name: 0.0 for name in all_names},
-                            stds={name: 1.0 for name in all_names},
-                        ),
-                    ),
+                    normalization=trivial_network_and_loss_normalization(all_names),
                 ),
             ),
         ),

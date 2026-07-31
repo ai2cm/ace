@@ -25,11 +25,7 @@ from fme.ace.stepper.parameter_init import (
     null_weights_and_history,
 )
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
-from fme.core.coordinates import (
-    NullPostProcessFn,
-    SerializableVerticalCoordinate,
-    VerticalCoordinate,
-)
+from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
@@ -47,8 +43,13 @@ from fme.core.normalizer import (
 )
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.rand import use_generator
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
+from fme.core.spatial_masking import (
+    NullSpatialMasking,
+    SpatialMasking,
+    StaticSpatialMaskingConfig,
+)
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
@@ -56,6 +57,7 @@ from fme.core.step.multi_call import (
     MultiCallStepConfig,
     replace_multi_call,
 )
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.stepper_state import StepperState
@@ -358,6 +360,13 @@ class TrainOutput(TrainOutputABC):
                     f"target_data can only have one ensemble member, got {v.shape[1]}"
                 )
 
+    @property
+    def n_ensemble(self) -> int:
+        """The number of ensemble members in the generated data."""
+        for v in self.gen_data.values():
+            return v.shape[1]
+        raise ValueError("gen_data is empty, ensemble member count is not defined")
+
     def ensemble_derive_func(
         self, data: EnsembleTensorDict, forcing_data: TensorMapping
     ) -> EnsembleTensorDict:
@@ -487,7 +496,7 @@ def process_ensemble_prediction_generator_list(
 
 
 def process_prediction_generator_list(
-    output_list: list[tuple[TensorDict, StepperState | None]],
+    output_list: list[StepOutput],
     time: xr.DataArray,
     n_ensemble: int,
     labels: BatchLabels | None = None,
@@ -499,8 +508,8 @@ def process_prediction_generator_list(
     ``output_list``) to the returned BatchData so it can propagate to the
     next ``Stepper.predict`` call.
     """
-    output_dicts = [item[0] for item in output_list]
-    terminal_state = output_list[-1][1] if output_list else None
+    output_dicts = [item.output for item in output_list]
+    terminal_state = output_list[-1].stepper_state if output_list else None
     output_timeseries = stack_list_of_tensor_dicts(output_dicts, time_dim=1)
     return BatchData.new_on_device(
         data=output_timeseries,
@@ -613,17 +622,17 @@ class StepperConfig:
                 means=step.normalizer.means,
             )
         try:
-            output_process_func = (
+            output_masking: SpatialMasking = (
                 dataset_info.spatial_mask_provider.build_output_spatial_masker()
             )
         except MissingDatasetInfo:
-            output_process_func = NullPostProcessFn()
+            output_masking = NullSpatialMasking()
         return Stepper(
             config=self,
             step=step,
             dataset_info=dataset_info,
             input_process_func=input_masking,
-            output_process_func=output_process_func,
+            output_masking=output_masking,
             derive_func=derive_func,
             parameter_initializer=parameter_initializer,
             training_history=training_history,
@@ -804,7 +813,7 @@ class Stepper:
         step: StepABC,
         dataset_info: DatasetInfo,
         input_process_func: Callable[[TensorMapping], TensorDict],
-        output_process_func: Callable[[TensorMapping], TensorDict],
+        output_masking: SpatialMasking,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         parameter_initializer: ParameterInitializer,
         training_history: TrainingHistory | None = None,
@@ -814,8 +823,8 @@ class Stepper:
             config: The configuration.
             step: The step object.
             dataset_info: Information about dataset used for training.
-            output_process_func: Function to post-process the output of the step
-                function.
+            output_masking: Spatial masking applied to the step output and to
+                the corrector diagnostics carried alongside it.
             derive_func: Function to compute derived variables.
             input_process_func: Optional function for processing inputs and next-step
                 inputs before passing them to the step object, e.g., by masking
@@ -828,7 +837,7 @@ class Stepper:
         self._step_obj = step
         self._dataset_info = dataset_info
         self._derive_func = derive_func
-        self._output_process_func = output_process_func
+        self._output_masking = output_masking
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
@@ -1033,7 +1042,7 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -1042,13 +1051,24 @@ class Stepper:
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            A tuple ``(output, stepper_state)`` where ``output`` is the
-            denormalized data at the next time step and ``stepper_state`` is
-            the per-sample state to thread into the next call (or ``None``).
+            A ``StepOutput`` carrying the denormalized data at the next time
+            step, the per-sample state to thread into the next call (or
+            ``None``), and the corrector's per-variable correction diagnostics,
+            spatially masked consistently with the output.
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output, stepper_state = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output), stepper_state
+        random_state = (
+            args.stepper_state.random_state if args.stepper_state is not None else None
+        )
+        with use_generator(None if random_state is None else random_state.generator):
+            result = self._step_obj.step(args=args, wrapper=wrapper)
+        return StepOutput(
+            output=self._output_masking(result.output),
+            stepper_state=result.stepper_state,
+            corrector_diagnostics=result.corrector_diagnostics.apply_output_masking(
+                self._output_masking
+            ),
+        )
 
     def get_prediction_generator(
         self,
@@ -1056,7 +1076,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
+    ) -> Generator[StepOutput, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1073,7 +1093,7 @@ class Stepper:
             optimizer: The optimizer to use for updating the module.
 
         Returns:
-            Generator yielding (output, stepper_state) tuples at each timestep.
+            Generator yielding a ``StepOutput`` at each timestep.
         """
         ic_batch_data = initial_condition.as_batch_data()
         if ic_batch_data.labels != forcing_data.labels:
@@ -1108,7 +1128,7 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
-    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
+    ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1129,7 +1149,7 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state, stepper_state = self.step(
+                result = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
@@ -1139,7 +1159,9 @@ class Stepper:
                     ),
                     wrapper=checkpoint,
                 )
-            yield state, stepper_state
+            state = result.output
+            stepper_state = result.stepper_state
+            yield result
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
     def predict(
@@ -1218,6 +1240,11 @@ class Stepper:
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
         prognostic_state = data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        # Attach the stacked per-step diagnostics only at this final
+        # reconstruction, after the derived-variables prepend/remove dance:
+        # here the data and the series are both n_forward_steps long and
+        # time-aligned, so the diagnostics never pass through a time-changing
+        # BatchData method (which would raise).
         data = BatchData.new_on_device(
             data=data.data,
             time=data.time,
@@ -1225,6 +1252,7 @@ class Stepper:
             labels=data.labels,
             n_ensemble=data.n_ensemble,
             stepper_state=data.stepper_state,
+            step_diagnostics=StepOutput.stack_diagnostics(output_list),
         )
         return data, prognostic_state
 
@@ -1399,12 +1427,20 @@ class Stepper:
         return stepper
 
     def set_eval(self) -> None:
-        for module in self.modules:
-            module.eval()
+        self._step_obj.eval()
 
     def set_train(self) -> None:
+        self._step_obj.train()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._step_obj.set_epoch(epoch)
         for module in self.modules:
-            module.train()
+            for submodule in module.modules():
+                request_reset = getattr(
+                    submodule, "request_latent_global_mean_envelope_reset", None
+                )
+                if callable(request_reset):
+                    request_reset()
 
 
 @dataclasses.dataclass
@@ -1657,7 +1693,7 @@ class TrainStepper(
             n_forward_steps,
             optimization,
             labels=input_ensemble_data.labels,
-            data_mask=input_ensemble_data.data_mask,
+            data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
         )
         output_list: list[EnsembleTensorDict] = []
@@ -1673,7 +1709,7 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step, _ = next(output_iterator)
+                gen_step = next(output_iterator).output
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
@@ -1686,7 +1722,7 @@ class TrainStepper(
                     gen_step=gen_step,
                     target_step=target_step,
                     step=step,
-                    data_mask=input_batch_data.data_mask,
+                    data_mask=data.data_mask,
                     optimize=optimize_step,
                     metrics=metrics,
                     weighted_sums=weighted_sums,
@@ -1790,6 +1826,9 @@ class TrainStepper(
     def set_train(self) -> None:
         self._loss_schedule.set_train()
         self._stepper.set_train()
+
+    def set_epoch(self, epoch: int) -> None:
+        self._stepper.set_epoch(epoch)
 
 
 def get_serialized_stepper_vertical_coordinate(

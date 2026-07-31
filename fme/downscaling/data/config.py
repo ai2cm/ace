@@ -1,6 +1,7 @@
 import dataclasses
 from collections.abc import Sequence
 
+import torch
 from torch.utils.data import DataLoader, Dataset, RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 
@@ -26,9 +27,91 @@ from fme.downscaling.data.datasets import (
 from fme.downscaling.data.utils import (
     ClosedInterval,
     adjust_fine_coord_range,
+    find_roll_anchor,
+    find_roll_anchor_from_interval,
     get_latlon_coords_from_properties,
+    roll_lon_coords,
 )
 from fme.downscaling.requirements import DataRequirements
+
+
+def _roll_lons_to_extent_convention(
+    coarse_lon: torch.Tensor,
+    fine_lon: torch.Tensor,
+    lon_extent: ClosedInterval,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Roll coarse and fine lon coords into the convention of lon_extent so that
+    adjust_fine_coord_range can align fine and coarse subselection for domains
+    crossing the prime meridian (lon_start < 0 or lon_stop > 360). No-op for
+    in-range extents.
+
+    The fine roll is anchored one half-coarse-spacing before lon_start so the
+    fine half-cells below the first coarse grid point remain accessible.
+    """
+    lon_start, _ = lon_extent.finite_values
+    coarse_roll = find_roll_anchor_from_interval(coarse_lon, lon_extent)
+    rolled_coarse_lon = roll_lon_coords(coarse_lon, coarse_roll, lon_start)
+
+    if coarse_roll > 0 and len(rolled_coarse_lon) >= 2:
+        coarse_spacing = float((rolled_coarse_lon[1] - rolled_coarse_lon[0]).item())
+        fine_anchor = lon_start - coarse_spacing / 2
+        fine_roll = find_roll_anchor(fine_lon, fine_anchor % 360.0)
+        rolled_fine_lon = roll_lon_coords(fine_lon, fine_roll, fine_anchor)
+    else:
+        rolled_fine_lon = fine_lon
+
+    return rolled_coarse_lon, rolled_fine_lon
+
+
+def _build_aligned_subset_pair(
+    dataset_fine: XarrayConcat,
+    properties_fine: DatasetProperties,
+    dataset_coarse: XarrayConcat,
+    properties_coarse: DatasetProperties,
+    lat_extent: ClosedInterval,
+    lon_extent: ClosedInterval,
+) -> tuple[HorizontalSubsetDataset, HorizontalSubsetDataset]:
+    """Subset fine and coarse datasets so their selections align exactly.
+
+    The coarse dataset is subset with the requested lat/lon extent. The fine
+    extent is adjusted (adjust_fine_coord_range) so the fine subselection lines up
+    with the coarse one; both grids are first rolled into the extent's longitude
+    convention so this holds for prime-meridian-crossing domains as well (see
+    _roll_lons_to_extent_convention).
+    """
+    coarse_coords = get_latlon_coords_from_properties(properties_coarse)
+    fine_coords = get_latlon_coords_from_properties(properties_fine)
+
+    rolled_coarse_lon, rolled_fine_lon = _roll_lons_to_extent_convention(
+        coarse_lon=coarse_coords.lon,
+        fine_lon=fine_coords.lon,
+        lon_extent=lon_extent,
+    )
+    fine_lat_extent = adjust_fine_coord_range(
+        lat_extent,
+        full_coarse_coord=coarse_coords.lat,
+        full_fine_coord=fine_coords.lat,
+    )
+    fine_lon_extent = adjust_fine_coord_range(
+        lon_extent,
+        full_coarse_coord=rolled_coarse_lon,
+        full_fine_coord=rolled_fine_lon,
+    )
+
+    dataset_fine_subset = HorizontalSubsetDataset(
+        dataset_fine,
+        properties=properties_fine,
+        lat_interval=fine_lat_extent,
+        lon_interval=fine_lon_extent,
+    )
+    dataset_coarse_subset = HorizontalSubsetDataset(
+        dataset_coarse,
+        properties=properties_coarse,
+        lat_interval=lat_extent,
+        lon_interval=lon_extent,
+    )
+    return dataset_fine_subset, dataset_coarse_subset
 
 
 def enforce_lat_bounds(lat: ClosedInterval):
@@ -299,6 +382,7 @@ class DataLoaderConfig:
             dims=example.latlon_coordinates.dims,
             variable_metadata=dataset.variable_metadata,
             all_times=all_times,
+            coarse_extent_latlon_coords=example.latlon_coordinates,
         )
 
 
@@ -461,30 +545,13 @@ class PairedDataLoaderConfig:
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
-        # Ensure fine data subselection lines up exactly with coarse data
-        fine_lat_extent = adjust_fine_coord_range(
-            self.lat_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lat,
-            full_fine_coord=properties_fine.horizontal_coordinates.lat,
-        )
-        fine_lon_extent = adjust_fine_coord_range(
-            self.lon_extent,
-            full_coarse_coord=properties_coarse.horizontal_coordinates.lon,
-            full_fine_coord=properties_fine.horizontal_coordinates.lon,
-        )
-
-        dataset_fine_subset = HorizontalSubsetDataset(
-            dataset_fine,
-            properties=properties_fine,
-            lat_interval=fine_lat_extent,
-            lon_interval=fine_lon_extent,
-        )
-
-        dataset_coarse_subset = HorizontalSubsetDataset(
-            dataset_coarse,
-            properties=properties_coarse,
-            lat_interval=self.lat_extent,
-            lon_interval=self.lon_extent,
+        dataset_fine_subset, dataset_coarse_subset = _build_aligned_subset_pair(
+            dataset_fine=dataset_fine,
+            properties_fine=properties_fine,
+            dataset_coarse=dataset_coarse,
+            properties_coarse=properties_coarse,
+            lat_extent=self.lat_extent,
+            lon_extent=self.lon_extent,
         )
 
         # Convert datasets to produce BatchItems
@@ -534,6 +601,7 @@ class PairedDataLoaderConfig:
             variable_metadata=variable_metadata,
             all_times=all_times,
             fine_coords=get_latlon_coords_from_properties(properties_fine),
+            coarse_extent_latlon_coords=example.coarse.latlon_coordinates,
         )
 
     def _get_sampler(

@@ -260,17 +260,15 @@ def test_xarray_loader(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "workers, force_zarr_engine_used", [(0, False), (0, True), (1, True)]
+    "workers, force_zarr_engine_used",
+    [(0, False), (0, True), pytest.param(1, True, marks=pytest.mark.medium_duration)],
 )
 def test_xarray_loader_scheduled_epoch(
     tmp_path,
     force_zarr_engine_used: bool,
     workers: int,
-    very_fast_only: bool,
 ):
     """Checks that vertical coordinates are present."""
-    if very_fast_only and workers > 0:
-        pytest.skip("Skipping non-fast tests")
     _create_dataset_on_disk(tmp_path, n_times=4)
     config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(
@@ -506,13 +504,10 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "num_data_workers, force_forkserver", [(0, False), (3, False), (3, True)]
+    "num_data_workers, force_forkserver",
+    [(0, False), (3, False), pytest.param(3, True, marks=pytest.mark.medium_duration)],
 )
-def test_inference_data_loader(
-    tmp_path, num_data_workers: int, force_forkserver: bool, very_fast_only: bool
-):
-    if very_fast_only and force_forkserver:
-        pytest.skip("Skipping non-fast tests")
+def test_inference_data_loader(tmp_path, num_data_workers: int, force_forkserver: bool):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
@@ -960,6 +955,36 @@ def test_inference_persistence_names(tmp_path):
     torch.testing.assert_close(first_item["foo"], second_item["foo"])
     # ensure this is not the case for another variable
     assert not torch.all(first_item["bar"] == second_item["bar"])
+
+
+def test_inference_persistence_names_tensors_support_pin_memory(tmp_path):
+    """Persisted variables must not be stride-0 expanded views.
+
+    The DataLoader pin-memory thread allocates a pinned tensor with the same
+    strides and copies into it, which fails for tensors with overlapping
+    memory ("more than one element of the written-to tensor refers to a
+    single memory location").
+    """
+    _create_dataset_on_disk(tmp_path, n_times=14)
+
+    config = InferenceDataLoaderConfig(
+        dataset=XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0, 3]),
+        persistence_names=["foo"],
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        9,
+        requirements=window_requirements,
+    )
+    foo = dataset[0].data["foo"]
+    # same layout-preserving copy that torch.utils.data pin_memory performs
+    result = torch.empty_strided(foo.size(), foo.stride()).copy_(foo)
+    torch.testing.assert_close(result, foo)
 
 
 def test_inference_dataset_label_override_without_dataset_labels(tmp_path):

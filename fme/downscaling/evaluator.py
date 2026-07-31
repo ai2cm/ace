@@ -200,6 +200,9 @@ class EvaluatorConfig:
             train=False,
             requirements=self.model.data_requirements,
         )
+        coarse_lon = dataset.coarse_extent_latlon_coords.lon
+        # No-op when coarse_lon does not cross the prime meridian.
+        model = model.with_rolled_lon(coarse_lon)
         evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
         if self.patch.divide_generation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
@@ -236,7 +239,9 @@ class EvaluatorConfig:
             base_data_config=self.data,
             requirements=self.model.data_requirements,
         )
-
+        coarse_lon = dataset.coarse_extent_latlon_coords.lon
+        # No-op when coarse_lon does not cross the prime meridian.
+        model = model.with_rolled_lon(coarse_lon)
         if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
             dataset.coarse_shape[1] > model.coarse_shape[1]
         ):

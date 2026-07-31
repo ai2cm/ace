@@ -12,7 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
-from fme.core.stepper_state import StepperState
+from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -235,10 +235,31 @@ class StepSelector(StepConfigABC):
 class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
+    def __init__(self) -> None:
+        # Mirrors ``torch.nn.Module.training`` so that step-level eval/train
+        # state is observable without reaching into the underlying modules.
+        self._training: bool = True
+
     @property
     @abc.abstractmethod
     def config(self) -> StepConfigABC:
         pass
+
+    def train(self, mode: bool = True) -> "StepABC":
+        """Set the step (and all submodules) to training mode.
+
+        Matches the ``torch.nn.Module.train`` signature so step instances
+        can be toggled with the same API as the modules they own.
+        """
+        self._training = mode
+        for module in self.modules:
+            module.train(mode)
+        return self
+
+    @final
+    def eval(self) -> "StepABC":
+        """Set the step (and all submodules) to evaluation mode."""
+        return self.train(False)
 
     @final
     def get_loss_normalizer(
@@ -340,7 +361,7 @@ class StepABC(abc.ABC):
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -349,9 +370,17 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            A tuple ``(output, stepper_state)`` where ``output`` is the
-            denormalized data at the next time step and ``stepper_state`` is
-            the per-sample state to thread into the next call (or ``None``).
+            A ``StepOutput`` carrying the denormalized data at the next time
+            step, the per-sample state to thread into the next call (or
+            ``None``), and the corrector's per-variable correction diagnostics.
+        """
+        pass
+
+    def set_epoch(self, epoch: int) -> None:
+        """Called by the stepper at the start of each training epoch.
+
+        Default implementation is a no-op. Steps which wrap another step must
+        forward the call to the wrapped step.
         """
         pass
 

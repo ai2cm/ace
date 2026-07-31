@@ -48,13 +48,14 @@ def test_logs_labels_exist():
         assert len(log) == len(expected_step_keys), set(log).difference(
             expected_step_keys
         )
-    summary_logs = agg.get_summary_logs()
+    summary = agg.get_summary()
     expected_summary_keys = ["time_mean/gen_map/a", "annual/a", "power_spectrum/a"]
     for key in expected_summary_keys:
-        assert key in summary_logs, key
-    assert len(summary_logs) == len(expected_summary_keys), set(
-        summary_logs
+        assert key in summary.logs, key
+    assert len(summary.logs) == len(expected_summary_keys), set(
+        summary.logs
     ).difference(expected_summary_keys)
+    assert summary.loss is None
 
 
 def test_logs_labels_exist_with_reference_time_means(tmp_path):

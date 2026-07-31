@@ -1,6 +1,5 @@
 import collections
 import dataclasses
-from collections.abc import Callable
 from typing import Literal, Protocol, runtime_checkable
 
 import torch
@@ -33,7 +32,7 @@ def replace_on_mask(
 
 @runtime_checkable
 class HasGetSpatialMask(Protocol):
-    def build_output_spatial_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+    def build_output_spatial_masker(self) -> "SpatialMasking": ...
 
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         """Get the mask for a specific variable name."""
@@ -154,3 +153,10 @@ class StaticSpatialMasking:
 class NullSpatialMasking:
     def __call__(self, data: TensorMapping) -> TensorDict:
         return dict(data)
+
+
+SpatialMasking = StaticSpatialMasking | NullSpatialMasking
+"""The type of a spatial masker: it replaces values in masked regions and is
+the identity elsewhere (or a no-op when there is no mask). Annotating with
+this type, rather than a bare callable, keeps arbitrary data-transforming
+functions from flowing into seams that assume masking semantics."""

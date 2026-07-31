@@ -7,9 +7,10 @@ Adapted from the modulus-uw ``physicsnemo.models.dlwp_healpix.HEALPixUNet``.
 from collections.abc import Sequence
 from typing import Literal
 
-import torch as th
+import torch
 import torch.nn as nn
 
+from .healpix_blocks import HEALPixBuildContext
 from .healpix_decoder import UNetDecoderConfig
 from .healpix_encoder import UNetEncoderConfig
 from .healpix_layers import HEALPixFoldFaces, HEALPixUnfoldFaces
@@ -33,7 +34,6 @@ class HEALPixUNet(nn.Module):
         decoder: UNetDecoderConfig,
         input_channels: int,
         output_channels: int,
-        enable_nhwc: bool = False,
         hpx_padding_mode: Literal[
             "earth2grid", "karlbauer", "isolatitude"
         ] = "earth2grid",
@@ -49,7 +49,6 @@ class HEALPixUNet(nn.Module):
                 size of the channel dimension of the tensor passed to
                 ``forward``).
             output_channels: Number of channels in the output tensor.
-            enable_nhwc: Use NHWC tensor layout for child modules.
             hpx_padding_mode: HEALPix padding backend. One of ``"earth2grid"``,
                 ``"karlbauer"``, or ``"isolatitude"``. Default ``"earth2grid"``.
             nside: Face height/width per UNet level, shallowest to deepest.
@@ -61,7 +60,6 @@ class HEALPixUNet(nn.Module):
 
         self.input_channels = input_channels
         self.output_channels = output_channels
-        self.enable_nhwc = enable_nhwc
         self.hpx_padding_mode = hpx_padding_mode
 
         levels = len(encoder.n_channels)
@@ -89,22 +87,18 @@ class HEALPixUNet(nn.Module):
             nside_resolved = None
         self.nside = nside_resolved
 
-        self.fold = HEALPixFoldFaces(enable_nhwc=enable_nhwc)
-        self.unfold = HEALPixUnfoldFaces(num_faces=12, enable_nhwc=enable_nhwc)
+        build_ctx = HEALPixBuildContext(
+            hpx_padding_mode=hpx_padding_mode,
+            nside_levels=nside_resolved,
+        )
 
-        encoder.input_channels = input_channels
-        encoder.enable_nhwc = enable_nhwc
-        encoder.hpx_padding_mode = self.hpx_padding_mode
-        encoder.nside = self.nside
-        self.encoder = encoder.build()
+        self.fold = HEALPixFoldFaces()
+        self.unfold = HEALPixUnfoldFaces(num_faces=12)
 
-        decoder.output_channels = output_channels
-        decoder.enable_nhwc = enable_nhwc
-        decoder.hpx_padding_mode = self.hpx_padding_mode
-        decoder.nside = self.nside
-        self.decoder = decoder.build()
+        self.encoder = encoder.build(input_channels=input_channels, ctx=build_ctx)
+        self.decoder = decoder.build(output_channels=output_channels, ctx=build_ctx)
 
-    def forward(self, inputs: th.Tensor) -> th.Tensor:
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
         Args:
