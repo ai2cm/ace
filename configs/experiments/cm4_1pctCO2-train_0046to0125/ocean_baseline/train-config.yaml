@@ -415,6 +415,25 @@ stepper:
       - uo_16
       - uo_17
       - uo_18
+      - vo_0
+      - vo_1
+      - vo_2
+      - vo_3
+      - vo_4
+      - vo_5
+      - vo_6
+      - vo_7
+      - vo_8
+      - vo_9
+      - vo_10
+      - vo_11
+      - vo_12
+      - vo_13
+      - vo_14
+      - vo_15
+      - vo_16
+      - vo_17
+      - vo_18
       # sea ice prognostic
       - ocean_sea_ice_fraction
       - sea_ice_volume
