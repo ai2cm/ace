@@ -52,9 +52,10 @@ gantry run \
   --description "Preemption teardown test for PR #1398 (simulated ${DELAY}s restart-checkpoint write)" \
   --beaker-image "$(cat "$REPO_ROOT"/latest_deps_only_image.txt)" \
   --workspace ai2/ace \
-  --priority normal \
+  --priority high \
   --preemptible \
   --cluster ai2/titan \
+  --cluster ai2/jupiter \
   --env WANDB_USERNAME="$WANDB_USERNAME" \
   --env WANDB_NAME="$JOB_NAME" \
   --env WANDB_JOB_TYPE=training \
