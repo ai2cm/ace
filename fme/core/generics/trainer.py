@@ -326,6 +326,24 @@ class Trainer:
             free of collectives. `save_checkpoint` is root-only and reads local
             state, which satisfies that.
             """
+            # EXPERIMENT (not for merge): emulate a restart-checkpoint write
+            # slow enough to outlive torchrun's 30s grace budget, so a real
+            # Beaker preemption exercises the worst case: this rank is
+            # SIGKILLed mid-write, after the process group is already gone.
+            # Root-only, mirroring the incident: peers must exit cleanly on
+            # their own clock. Override the delay (seconds) with
+            # FME_SIMULATED_RESTART_CHECKPOINT_DELAY; 0 disables it.
+            if self._should_save_checkpoints():
+                delay = float(
+                    os.environ.get("FME_SIMULATED_RESTART_CHECKPOINT_DELAY", "45")
+                )
+                if delay > 0:
+                    logging.info(
+                        "SIMULATION: delaying restart checkpoint write by "
+                        f"{delay:.0f}s to emulate a slow save"
+                    )
+                    time.sleep(delay)
+                    logging.info("SIMULATION: delay complete, proceeding to save")
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
