@@ -13,7 +13,7 @@ from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core import metrics
-from fme.core.device import get_device, using_gpu, using_srun
+from fme.core.device import get_device, in_dataloader_worker, using_gpu, using_srun
 from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend
@@ -22,19 +22,6 @@ from .non_distributed import DummyWrapper
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-def _in_dataloader_worker() -> bool:
-    """Whether this process is a torch DataLoader worker.
-
-    Workers only need sharding metadata, which they use to decide which samples
-    belong to their rank. They never run collectives or touch GPU tensors, so
-    joining the process group and setting the CUDA device would only create an
-    idle ~520 MiB CUDA context per worker. With several persistent worker pools
-    per rank that costs GiB of GPU memory that the training step could
-    otherwise use.
-    """
-    return torch.utils.data.get_worker_info() is not None
 
 
 def _rank_metadata_from_env() -> tuple[int, int]:
@@ -50,7 +37,11 @@ class TorchDistributed(DistributedBackend):
     """A non-distributed backend implementation."""
 
     def __init__(self):
-        if _in_dataloader_worker():
+        if in_dataloader_worker():
+            # a worker only needs the sharding metadata that tells it which
+            # samples are its rank's. Joining the process group and setting the
+            # device would buy it nothing and leave an idle ~520 MiB CUDA context
+            # behind, GiB of it across several persistent worker pools per rank.
             self._rank, self.world_size = _rank_metadata_from_env()
             return
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun

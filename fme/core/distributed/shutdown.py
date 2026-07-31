@@ -37,7 +37,7 @@ import threading
 import types
 from collections.abc import Callable, Generator
 
-import torch.utils.data
+from fme.core.device import in_dataloader_worker
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +190,7 @@ def handle_termination_signals(
         # process disposition its main thread installed
         yield
         return
-    if torch.utils.data.get_worker_info() is not None:
+    if in_dataloader_worker():
         # A spawn- or forkserver-started DataLoader worker enters this context to
         # learn its rank. It is a fresh process, so the pid guard below would let
         # it install a handler of its own -- but the DataLoader owns its
