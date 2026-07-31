@@ -3,17 +3,22 @@
 
 Job layout mirrors ``exp/samudrace-enso-skill`` /
 ``2026-02-17-samudrace-enso-eval`` (one year per gantry job, 12 monthly ICs,
-``n_coupled_steps: 146``), but the year window matches our coupled FT
-held-out split:
+``n_coupled_steps: 146``).
 
-* train: 0256-01-03 → 0349-01-01 (``coupled-finetune-atmos.yaml``)
-* validation / OOS: 0251-01-03 → 0255-12-29
+CM4 1pctCO2 zarr spans model years **0211–0350**. Samudra + coupled FT use:
 
-So defaults are years 0251–0255 (not the template's 0244–0254).
+* **train:** 0256-01-03 → 0349-01-01
+* **validation (early-stop metric):** 0251-01-03 → 0255-12-29
+* **extended OOS (never train/val):** 0211–0250
+
+Presets (``--oos-window``):
+
+* ``val`` — 0251–0255 (official FT validation; default)
+* ``extended20`` — 0231–0250 (20 calendar years, strictly unseen)
+* ``extended40`` — 0211–0250 (full pre-train window)
 
 IC times are the closest 5-day ocean samples to each calendar-month start on
-the CM4 1pctCO2 ocean zarr (stable noleap alignment used by the reference
-enso-eval configs). Atmosphere paths match our coupled FT checkpoint
+the CM4 1pctCO2 ocean zarr. Atmosphere paths match our coupled FT checkpoint
 (sea_ice); the nino-leads zarr is included because FT ocean ``out_names``
 still list ``nino34_lead_*``.
 """
@@ -25,9 +30,26 @@ from pathlib import Path
 
 import yaml
 
-# Coupled FT validation window (inclusive calendar years for monthly ICs).
-YEAR_START = 251
-YEAR_END = 255
+# OOS year-window presets (inclusive calendar years, 12 monthly ICs each).
+OOS_WINDOWS: dict[str, tuple[int, int, str]] = {
+    "val": (
+        251,
+        255,
+        "official coupled FT validation (early-stop metric; train starts 0256)",
+    ),
+    "extended20": (
+        231,
+        250,
+        "20y strictly OOS (never in Samudra or coupled FT train/val)",
+    ),
+    "extended40": (
+        211,
+        250,
+        "40y pre-train OOS (0211–0250; zarr starts at 0211)",
+    ),
+}
+YEAR_START = OOS_WINDOWS["val"][0]
+YEAR_END = OOS_WINDOWS["val"][1]
 
 
 def monthly_ic_times(year: int) -> list[str]:
@@ -139,6 +161,20 @@ def make_config(times: list[str]) -> dict:
     }
 
 
+def _resolve_year_range(
+    oos_window: str | None, year_start: int | None, year_end: int | None
+) -> tuple[int, int, str]:
+    if oos_window is not None:
+        if oos_window not in OOS_WINDOWS:
+            choices = ", ".join(sorted(OOS_WINDOWS))
+            raise ValueError(f"Unknown --oos-window {oos_window!r}; choose: {choices}")
+        start, end, note = OOS_WINDOWS[oos_window]
+        return start, end, note
+    start = YEAR_START if year_start is None else year_start
+    end = YEAR_END if year_end is None else year_end
+    return start, end, f"custom years {start:04d}–{end:04d}"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -146,26 +182,40 @@ def main() -> None:
         type=Path,
         default=Path(__file__).resolve().parent / "ar_sst_year_configs",
     )
-    parser.add_argument("--year-start", type=int, default=YEAR_START)
-    parser.add_argument("--year-end", type=int, default=YEAR_END)
+    parser.add_argument(
+        "--oos-window",
+        choices=sorted(OOS_WINDOWS),
+        default=None,
+        help="Preset OOS year range (overrides --year-start/--year-end).",
+    )
+    parser.add_argument("--year-start", type=int, default=None)
+    parser.add_argument("--year-end", type=int, default=None)
     args = parser.parse_args()
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    # Drop stale years from a previous window (e.g. 0244–0250).
-    for stale in args.output_dir.glob("evaluator-config-1pct-ar-sst-yr*.yaml"):
-        stale.unlink()
+    year_start, year_end, window_note = _resolve_year_range(
+        args.oos_window, args.year_start, args.year_end
+    )
+    n_years = year_end - year_start + 1
+    print(f"Generating {n_years} year configs ({window_note})")
 
-    for year in range(args.year_start, args.year_end + 1):
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    # Drop stale years outside the requested window.
+    for stale in args.output_dir.glob("evaluator-config-1pct-ar-sst-yr*.yaml"):
+        year_token = stale.stem.split("yr")[-1]
+        year = int(year_token)
+        if year < year_start or year > year_end:
+            stale.unlink()
+
+    for year in range(year_start, year_end + 1):
         times = monthly_ic_times(year)
         config = make_config(times)
         out = args.output_dir / f"evaluator-config-1pct-ar-sst-yr{year:04d}.yaml"
         header = (
             f"# Autoregressive SST Nino eval for year {year:04d}.\n"
-            "# OOS window for coupled FT (train starts 0256): validation years\n"
-            "# 0251–0255. Job layout matches exp/samudrace-enso-skill\n"
-            "# 2026-02-17-samudrace-enso-eval (12 monthly ICs, 146 ocean steps).\n"
+            f"# OOS window: {window_note}.\n"
+            "# 12 monthly ICs, 146 ocean steps (~2y rollout). Layout:\n"
+            "# exp/samudrace-enso-skill/2026-02-17-samudrace-enso-eval.\n"
             "# Checkpoint: coupled FT 01KY3DATM3CAEA479JQZQDPT9W (/ckpt.tar).\n"
-            "# Atmosphere data matches coupled FT (sea_ice), not interpolate_sst.\n"
         )
         with open(out, "w") as file:
             file.write(header)
