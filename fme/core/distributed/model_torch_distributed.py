@@ -469,11 +469,9 @@ class ModelTorchDistributed(DistributedBackend):
         return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
-        # a termination signal can arrive during the normal end-of-run teardown,
-        # so this has to tolerate the process group already being gone. Only the
-        # log line needs guarding: `cleanup` skips the collective itself when
-        # the manager is not initialized, and resets its shared state either
-        # way -- returning early here would leave that state behind.
+        # only the log line is guarded: `cleanup` already skips the collective
+        # when the manager is not initialized, and resets its shared state either
+        # way, so returning early here would leave that state behind.
         if torch.distributed.is_initialized():
             logger.info("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()

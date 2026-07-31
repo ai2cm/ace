@@ -88,6 +88,9 @@ def add_post_shutdown_callback(callback: Callable[[], None]) -> None:
     alone -- but they are still best-effort: torchrun SIGKILLs the rank about
     30s after the signal reaches the agent, whatever it is doing (see
     `DEFAULT_TEARDOWN_TIMEOUT`). Register the most valuable work first.
+
+    Registering the same callback twice runs it twice; a caller that may be
+    constructed more than once per process should guard its own registration.
     """
     _post_shutdown_callbacks.append(callback)
 
