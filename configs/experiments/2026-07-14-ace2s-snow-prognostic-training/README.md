@@ -105,3 +105,6 @@ After a model finetunes, compare against the deployed ACE2S control checkpoints.
 skill (the new `surface_snow_amount`/`surface_snow_area_fraction` metrics and the one-step
 skill_map panels), the `inference-short-lead` section for short-range skill, and near-surface T/Q
 to check for regressions from the added prognostic state.
+
+The offline 40-year holdout evaluation of the CM4 pretrain lives in
+`configs/experiments/2026-07-31-ace2s-snow-prognostic-inference/`.
