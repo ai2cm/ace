@@ -11,14 +11,14 @@ cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs1|01KY8Q2WMEGTE9KXCKCNAZ98GC|
 
 cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs2|01KY8Q35QPW4XAFJC4BXXEBDBF|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs0|01KYJAQR72T2FHQXYCYXY4EM3J|run_ICx1|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs0|01KYJAQR72T2FHQXYCYXY4EM3J|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace
 
-cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs1|01KYJAR1MQH53Y1KF32XC7XDRE|run_ICx1|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs1|01KYJAR1MQH53Y1KF32XC7XDRE|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace
 
-cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs2|01KYJARAG6M0NE0EB99GX68FV2|run_ICx1|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pctCO2-4deg-train_0046to0125-ocean_baseline|rs2|01KYJARAG6M0NE0EB99GX68FV2|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace
 
 
 
-cm4_1pctCO2-4deg-train_0046to0125-ocean_fill_value_mean|rs0|01KYQFTR9NVFT74CEQGREEB1A2|run_ICx1|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pctCO2-4deg-train_0046to0125-ocean_fill_value_mean|rs0|01KYQFTR9NVFT74CEQGREEB1A2|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace
 
-cm4_1pctCO2-4deg-train_0046to0125-ocean_fill_value_mean|rs1|01KYQFV0V8XM1KM60WPX39VND5|run_ICx1|best_inference_ckpt|high|--min-runtime 8h
+cm4_1pctCO2-4deg-train_0046to0125-ocean_fill_value_mean|rs1|01KYQFV0V8XM1KM60WPX39VND5|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace
