@@ -1,0 +1,337 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true
+ema:
+  decay: 0.999
+max_epochs: 15
+inference:
+  - name: inference_1pct
+    weight: 1.0
+    n_coupled_steps: 1460 # exactly 20 noleap years at the 5-day ocean step
+    coupled_steps_in_memory: 2
+    epochs:
+      start: -1
+      step: -2
+    loader:
+      num_data_workers: 4
+      start_indices:
+        times:
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+          # (validation + training), never entering the 131-140 holdout.
+          # The first IC label '0041-01-01T00' is the boundary instant of the
+          # 1-40 low-CO2 holdout: under issue 03's rule a boundary label
+          # belongs to the split ending at it. It is read as a single
+          # diagnostic start state and the rollout runs forward into year 41+,
+          # so no holdout interval is rolled through; the uncoupled
+          # ocean_baseline/atmos_baseline configs use the same IC list.
+          - '0041-01-01T00:00:00'
+          - '0051-01-01T00:00:00'
+          - '0061-01-01T00:00:00'
+          - '0071-01-01T00:00:00'
+          - '0081-01-01T00:00:00'
+          - '0091-01-01T00:00:00'
+          - '0101-01-01T00:00:00'
+          - '0111-01-01T00:00:00'
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+              engine: zarr
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
+  - name: inference_piC
+    weight: 1.0
+    n_coupled_steps: 1460 # exactly 20 noleap years at the 5-day ocean step
+    coupled_steps_in_memory: 2
+    epochs:
+      start: -1
+      step: -2
+    loader:
+      num_data_workers: 4
+      start_indices:
+        times:
+          # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+          # 1-90, never entering the relative-year-91+ holdout. The first IC
+          # is nudged 5 days past the store start to the first valid coupled
+          # timestep (leading all-NaN ffill window in the ocean-sourced
+          # fields ends at the first 5-daily ocean snapshot).
+          - '0151-01-06T00:00:00'
+          - '0161-01-01T00:00:00'
+          - '0171-01-01T00:00:00'
+          - '0181-01-01T00:00:00'
+          - '0191-01-01T00:00:00'
+          - '0201-01-01T00:00:00'
+          - '0211-01-01T00:00:00'
+          - '0221-01-01T00:00:00'
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+              engine: zarr
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+              engine: zarr
+            - data_path: /climate-default
+              file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+              engine: zarr
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 16
+  num_data_workers: 2
+  prefetch_factor: 2
+  dataset:
+    # Both realms start at the same instant: CoupledDataset pairs ocean sample
+    # i with atmosphere sample i * 20 and rejects a first-time mismatch, so the
+    # atmosphere window opens on the 5-day ocean grid rather than at the
+    # split's first 6-hourly sample.
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0046-01-06T00:00:00'
+            stop_time: '0126-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0046-01-06T00:00:00'
+            stop_time: '0126-01-01T00:00:00'
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+          engine: zarr
+          subset:
+            start_time: '0046-01-06T00:00:00'
+            stop_time: '0126-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+          subset:
+            start_time: '0046-01-06T00:00:00'
+            stop_time: '0126-01-01T00:00:00'
+validation:
+  - name: val_1pct_early
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 2
+      prefetch_factor: 2
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+              engine: zarr
+              subset:
+                start_time: '0041-01-06T00:00:00'
+                stop_time: '0046-01-01T00:00:00'
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+              engine: zarr
+              subset:
+                start_time: '0041-01-06T00:00:00'
+                stop_time: '0046-01-01T00:00:00'
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+              engine: zarr
+              subset:
+                start_time: '0041-01-06T00:00:00'
+                stop_time: '0046-01-01T00:00:00'
+            - data_path: /climate-default
+              file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+              engine: zarr
+              subset:
+                start_time: '0041-01-06T00:00:00'
+                stop_time: '0046-01-01T00:00:00'
+  - name: val_1pct_late
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 2
+      prefetch_factor: 2
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+              engine: zarr
+              subset:
+                start_time: '0126-01-06T00:00:00'
+                stop_time: '0131-01-01T00:00:00'
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+              engine: zarr
+              subset:
+                start_time: '0126-01-06T00:00:00'
+                stop_time: '0131-01-01T00:00:00'
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+              engine: zarr
+              subset:
+                start_time: '0126-01-06T00:00:00'
+                stop_time: '0131-01-01T00:00:00'
+            - data_path: /climate-default
+              file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+              engine: zarr
+              subset:
+                start_time: '0126-01-06T00:00:00'
+                stop_time: '0131-01-01T00:00:00'
+  - name: val_piC
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 2
+      prefetch_factor: 2
+      dataset:
+        ocean:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+              engine: zarr
+              subset:
+                start_time: '0236-01-06T00:00:00'
+                stop_time: '0241-01-01T00:00:00'
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+              engine: zarr
+              subset:
+                start_time: '0236-01-06T00:00:00'
+                stop_time: '0241-01-01T00:00:00'
+        atmosphere:
+          merge:
+            - data_path: /climate-default
+              file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+              engine: zarr
+              subset:
+                start_time: '0236-01-06T00:00:00'
+                stop_time: '0241-01-01T00:00:00'
+            - data_path: /climate-default
+              file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+              engine: zarr
+              subset:
+                start_time: '0236-01-06T00:00:00'
+                stop_time: '0241-01-01T00:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+  scheduler:
+    schedulers:
+      - type: LinearLR
+        step_each_iteration: true
+        kwargs:
+          start_factor: 0.01
+          end_factor: 1
+          total_iters: 2000
+      - type: ConstantLR
+        step_each_iteration: true
+    milestones: [2000]
+stepper_training:
+  n_coupled_steps: 4
+  # Required, not incidental: the ocean's stochasticity is supplied by the
+  # atmosphere, so the ensemble must run through both realms even while the
+  # atmosphere is frozen and contributes no loss.
+  n_ensemble: 2
+  optimize_single_component_per_batch: false
+  ocean:
+    parameter_init:
+      weights_path: /ocean_ckpt.tar
+    n_steps: 4
+    optimize_last_step_only: false
+    loss_weight: 1.0
+    loss:
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+  atmosphere:
+    parameter_init:
+      weights_path: /atmos_ckpt.tar
+      parameters:
+        - frozen:
+            include:
+              - '*'
+    n_steps: 0
+    loss_weight: 0.0
+    loss:
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
+      weights:
+        air_temperature_0: 0.5
+        air_temperature_1: 0.5
+        eastward_wind_0: 0.5
+        northward_wind_0: 0.5
+        specific_total_water_0: 0.5
+        specific_total_water_1: 0.25
+        specific_total_water_2: 0.5
+        PRATEsfc: 0.5
+        h500: 10
+        TMP850: 5
+        Q2m: 0.5
+        TMP2m: 10
+        UGRD10m: 2.5
+        VGRD10m: 2.5
+        DLWRFsfc: 2
+        ULWRFsfc: 5
+        USWRFsfc: 2
+        DSWRFsfc: 2
+        USWRFtoa: 2
+        tendency_of_total_water_path_due_to_advection: 0.5
+        PRESsfc: 3
+stepper:
+  ocean_fraction_prediction:
+    land_fraction_name: land_fraction
+    sea_ice_fraction_name: ocean_sea_ice_fraction
+    sea_ice_fraction_name_in_atmosphere: sea_ice_fraction
+  sst_name: sst
+  ocean:
+    timedelta: 5D
+    # stepper added by job_runner/create_coupled_train_config.sh
+  atmosphere:
+    timedelta: 6h
+    # stepper added by job_runner/create_coupled_train_config.sh

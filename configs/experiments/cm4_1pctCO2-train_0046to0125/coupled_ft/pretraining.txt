@@ -1,0 +1,12 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
+
+# Single joint stage straight from the fine-tuned uncoupled components — no
+# preceding ocean-only stage — so in the manifest scheme it is a pretraining
+# row. Same pairings, tags, checkpoint type and resourcing as the two-stage
+# lineage; expect one or two of these to be submitted, not all six.
+cm4_1pctCO2-train_0046to0125-coupled_ft|o0a0rs0|ace-samudra-cm4|OCEAN_RS0_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
+cm4_1pctCO2-train_0046to0125-coupled_ft|o0a2rs0|ace-samudra-cm4|OCEAN_RS0_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
+cm4_1pctCO2-train_0046to0125-coupled_ft|o1a0rs0|ace-samudra-cm4|OCEAN_RS1_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
+cm4_1pctCO2-train_0046to0125-coupled_ft|o1a2rs0|ace-samudra-cm4|OCEAN_RS1_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
+cm4_1pctCO2-train_0046to0125-coupled_ft|o2a0rs0|ace-samudra-cm4|OCEAN_RS2_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
+cm4_1pctCO2-train_0046to0125-coupled_ft|o2a2rs0|ace-samudra-cm4|OCEAN_RS2_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m

@@ -1,0 +1,11 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Joint stage, resumed from the coupled checkpoint the matching ocean-only row
+# produced. One row per ocean x atmos pairing; each wandb id is filled in from
+# its own ocean-only run before that row is flipped to `train`.
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o0a0rs0|ace-samudra-coupled-cm4|FTO_O0A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|FTO_O0A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o1a0rs0|ace-samudra-coupled-cm4|FTO_O1A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o1a2rs0|ace-samudra-coupled-cm4|FTO_O1A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o2a0rs0|ace-samudra-coupled-cm4|FTO_O2A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o2a2rs0|ace-samudra-coupled-cm4|FTO_O2A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
