@@ -14,7 +14,8 @@ rm atmos-config.yaml.bak
 
 beaker dataset fetch ${EXISTING_RESULTS_OCEAN_DATASET} --prefix config.yaml
 mv ./config.yaml ./ocean-config.yaml
-sed -i '' 's/statsdata/ocean_stats/g' ./ocean-config.yaml
+sed -i.bak 's/statsdata/ocean_stats/g' ./ocean-config.yaml
+rm ocean-config.yaml.bak
 
 # Remove training-specific fields from loaded stepper configs
 yq -i 'del(.stepper.loss, .stepper.optimize_last_step_only, .stepper.n_ensemble, .stepper.parameter_init, .stepper.train_n_forward_steps)' ./ocean-config.yaml
