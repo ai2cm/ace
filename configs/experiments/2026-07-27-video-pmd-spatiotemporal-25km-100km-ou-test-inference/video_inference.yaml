@@ -22,7 +22,7 @@
 # model:/test_data: blocks -- do not hand-edit them out of sync with that file.
 checkpoint_path: /checkpoint/checkpoints/latest.ckpt
 experiment_dir: /results
-output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v1/test-2023-2024-ens4.zarr
+output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v1/test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr
 n_ensemble: 4
 ensemble_chunk_size: 1
 use_ema: true
@@ -52,12 +52,18 @@ data:
   batch_size: 4
   num_data_workers: 2
   strict_ensemble: false
+  # NOT full global -- same OOM the flat variant hit (67.3 GiB single
+  # allocation for attention_levels [3,4] spatial attention on the full
+  # 720x1440 fine grid, see that config's own header comment /
+  # ../2026-07-24-video-pmd-spatiotemporal-25km-100km-test-inference/video_inference.yaml
+  # for the full accounting). Same quarter-area region as the flat run, for
+  # a like-for-like comparison.
   lat_extent:
-    start: -88
-    stop: 88
+    start: -44
+    stop: 44
   lon_extent:
     start: 0
-    stop: 360
+    stop: 180
 model:
   n_timesteps: 9
   model_channels: 128
