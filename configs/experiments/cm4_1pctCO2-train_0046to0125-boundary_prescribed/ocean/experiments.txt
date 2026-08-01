@@ -1,0 +1,2 @@
+
+cm4_1pctCO2-train_0046to0125-boundary_prescribed-ocean|rs0|01KYY1P7H1QH0DEA8PE80X6GBD|training|best_inference_ckpt|normal|--min-runtime 8h
