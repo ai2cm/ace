@@ -1,4 +1,10 @@
-FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime AS base
+# FLAVOR is `runtime` for the production image, and `devel` for the deps-only
+# image, which needs the nvcc shipped in the devel variant to build the CUDA
+# extensions. This tag provides Python 3.12 on Ubuntu 24.04; keep the torch
+# version in constraints.txt in sync with it.
+ARG PYTORCH_TAG=2.10.0-cuda12.8-cudnn9
+ARG FLAVOR=runtime
+FROM pytorch/pytorch:${PYTORCH_TAG}-${FLAVOR} AS base
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
@@ -13,11 +19,18 @@ RUN apt-get update -y && apt-get install -y \
 
 # Install gcloud- used for monthly netcdf data processing script
 # https://cloud.google.com/sdk/docs/install#deb
+# apt-key is gone in Ubuntu 24.04, so dearmor the key into the keyring directly.
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | \
-  tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
-  apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && apt-get install google-cloud-cli -y
+  tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
+  curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+  gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+  apt-get update -y && apt-get install google-cloud-cli -y
 
 ENV FORCE_CUDA_EXTENSION=1
+# The image's interpreter is the Ubuntu system Python, which carries the PEP 668
+# externally-managed marker. Installing into it is what we want in a container.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV UV_BREAK_SYSTEM_PACKAGES=1
 # install python deps
 RUN pip install uv
 COPY pyproject.toml /tmp/pyproject.toml
