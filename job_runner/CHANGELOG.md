@@ -47,8 +47,19 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 - [ISSUE] `init_exper.sh` populates wrong dataset for `<COUPLED_ATMOS_ZARR>` in uncoupled atmosphere config.
 - [ISSUE] `init_exper.sh` populates top-level `n_forward_steps` with inference value
-- Use `ocean` as sub-directory of `--coupled_stats`.
-- Use `*=n` rather than `*=` in `create_coupled_finetune_config.sh`.
+- [ISSUE] Use `ocean` as sub-directory of `--coupled_stats`.
+- [ISSUE] Use `*=n` rather than `*=` in `create_coupled_finetune_config.sh`.
+- [ISSUE] `create_coupled_train_config.sh` used the BSD-only `sed -i ''` form for
+  the ocean stats rewrite, so every coupled submission from a Linux host aborted
+  with `sed: can't read s/statsdata/ocean_stats/g: No such file or directory`.
+  Now uses the portable `-i.bak` form already used for the atmosphere rewrite
+  two lines above.
+- [ISSUE] `create_input_txt_files()` wrote a 10-column `experiments.txt` header,
+  but `evaluate.sh` and `inference.sh` read 14 fields — `cluster`,
+  `ocean_results_dataset`, `atmos_results_dataset`, `shared_mem`. Coupled
+  evaluation silently skipped the component checkpoint mounts and fell back to
+  an empty cluster and shared memory. Header corrected in all three template
+  branches, and in README.md.
 
 ## Releases
 
@@ -69,3 +80,10 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [ISSUE] Ignore header and empty lines in input .txt files when using `--dry-run`
 - [ISSUE] Don't commit if gantry fails.
 - [ISSUE] `sed` usage not working on macOS
+- [CHORE] Work out which `job_runner/` changes made on experiment branches need
+  to go back into the `job_runner` branch. Fixes have been landing directly on
+  `exper/*` branches because that is where they are discovered, and the two
+  above did as well — they are on `exper/2026-07-16-jamesd`, not on
+  `job_runner`. Nothing reconciles the two automatically, so the next person to
+  branch from `job_runner` gets the old behaviour. Needs a deliberate pass, not
+  a per-fix cherry-pick habit.

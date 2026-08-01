@@ -178,7 +178,8 @@ Each job type reads from a pipe-delimited text file:
 - **Coupled fine-tuning**: `finetuning.txt` (15 fields)
 - **Uncoupled fine-tuning**: `finetuning.txt` (15 fields)
 - **Resume**: `resuming.txt` (16 fields)
-- **Evaluate**: `experiments.txt` (10 fields)
+- **Evaluate / Inference**: `experiments.txt` (14 fields; `inference.sh` reads the
+  first 13 and ignores `shared_mem`)
 
 ### `min_runtime` Field (Optional, Training Inputs)
 
