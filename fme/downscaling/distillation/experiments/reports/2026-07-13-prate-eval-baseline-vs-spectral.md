@@ -7,6 +7,22 @@ baseline/spectral (the tool is a generic A-vs-B diff of two eval-run summaries).
 -->
 # Eval comparison — distilled **baseline** vs distilled **spectral** (held-out X-SHiELD AMIP control, 100km→3km)
 
+> ⚠️ **Caveat added 2026-07-29 — the tail rows below describe winter only.** These were 4-GPU
+> runs, and `ComparedDynamicTailsHistograms` performs no cross-rank reduction, so the
+> histogram saw **one rank's shard**. Because the eval loader uses
+> `ContiguousDistributedSampler`, that shard is the **first contiguous quarter of the
+> record** — for CONUS 2023, roughly **1 Jan – early Apr**, with no summer convection. The
+> single-GPU re-run ([report](2026-07-28-hirov1-vs-spectral-conus-1gpu.md)) measured the error
+> directly: the ground-truth percentile was understated **8.1% @99.9999** and **21.1%
+> @99.99**.
+> **The verdict here still stands** — tail *ratios* largely self-normalize (numerator and
+> denominator share the shard; the spectral arm's @99.9999 moved only 0.99545 → 0.99495 on the
+> full year), and CRPS / power-spectrum bias were always reduced correctly (they reproduce to
+> ≤0.3%), so the **CRPS and PSD conclusions are unaffected**. Read the **tail ratios as
+> approximate** and any absolute percentile as a lower bound: only the spectral arm was
+> re-run, the baseline `flzvb6tp` was not, and hirov1 showed ratio robustness is not
+> guaranteed (0.936 → 0.974 on the full year).
+
 _The held-out confirmation of the training-val spectral win `i26sidsm`. Compares the
 GAN-only distilled PRATEsfc student (`f7z93y0a`) against the spectral-matching-loss
 student (`i26sidsm`) on genuinely out-of-sample data — X-SHiELD **AMIP control** (not

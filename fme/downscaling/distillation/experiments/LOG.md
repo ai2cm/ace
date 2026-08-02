@@ -10,7 +10,7 @@ Central planning + outcomes log for distilled downscaling students. Process:
 
 ## ⚡ At a glance  <!-- keep this current: the daily check-in view -->
 
-_Last updated: 2026-07-23._
+_Last updated: 2026-07-29._
 
 ### 🔴 In flight — check for updates, finish write-ups when done
 
@@ -22,6 +22,14 @@ _Last updated: 2026-07-23._
   ([write-up](reports/2026-07-13-fdistill-step-count-sweep-TBD.md))
 
 _Recently closed:_
+- **Single-GPU CONUS eval** `6eff6ig5` (hirov1) + `y543b0gf` (spectral) → ✅ **the multi-rank
+  tail histogram was measuring winter only; ground-truth extremes understated 8–21%**
+  (2026-07-29). `ContiguousDistributedSampler` gives rank 0 the *first* quarter of the record
+  (Jan–early Apr), so it is a seasonal bias, not a smaller sample. CRPS/PSD verdicts survive
+  (≤0.3%), but hirov1's extreme tail goes 0.936→0.974 and the student's @99.99
+  over-production is now clearly its weakest metric (+9.5%). Cost 4.02× wall clock →
+  **fix the reduction** rather than repeat this.
+  ([report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md))
 - `2yhjonz9` (band_gamma=0.5) + `34rg7wii` (band_gamma=1) → ➕ **mild positive; monotonic
   response curve** (2026-07-14). The hi-k tilt works as designed — best-sustained hi
   `spec_mae` improves 0.074→0.066→0.050 and overall mean 0.043→0.038→0.035 across
@@ -33,6 +41,14 @@ _Recently closed:_
 
 ### 🟢 Next up — likely-good experiments (queued, not launched)
 
+0. **★ Two measured f-distill defects the current selectors are blind to** (raised
+   2026-07-30, see the ★ RESEARCH TASK entries below). Both are ~8–30× the teacher's error
+   and both sit where the spectral loss tuning actively removed weight:
+   **(a)** 200–400 mm/day precip density **+25% to +52%** (teacher ~2%), invisible because
+   `tail@99.9999` reads 0.995; **(b)** zonal PSD **+48% at k≈95 (~70 km)**, in the **lo**
+   third that `min_wavenumber=85` zeroed and `band_gamma=1` down-weighted ~12×.
+   Cheapest next probes: `--disc-feature-depth 1|2` (current disc cell ≈180 km vs a 70 km
+   defect) and a DMD2-vs-f-distill histogram comparison.
 1. **Native step-count sweep** — 1-step (task #3) + 4-step (task #2) f-distill vs the
    2-step `i26sidsm`; find the quality-vs-NFE knee.
    ([write-up](reports/2026-07-13-fdistill-step-count-sweep-TBD.md))
@@ -42,10 +58,12 @@ _Recently closed:_
    (up-weight the worst-spectrum vars; winds/PRMSL were the MoE weak spots).
 4. **Multi-scale (multi-head) discriminator** — spec 12 flagship E2; the big untested GAN
    texture lever for the winds hi-k gap single taps never closed.
-5. **Non-monotonic hi *bump*** (SpectralMatchingLoss code change) — motivated by the
+5. **Non-monotonic band *bump*** (SpectralMatchingLoss code change) — motivated by the
    closed `band_gamma` sweep: monotonic tilt improves hi but makes **lo** the limiting
-   band at γ=1, so the better lever is a bump that lifts hi/mid **without** down-weighting
-   lo (rather than pushing γ higher toward the neutral `xgcaf2rt` regime).
+   band at γ=1, so the better lever is a bump that lifts a target band **without**
+   down-weighting the rest (rather than pushing γ higher toward the neutral `xgcaf2rt`
+   regime). **Aim it at lo, not hi:** the measured defect is at k≈21 of 257 (~70 km), and
+   γ>0 down-weights exactly there — see the ★ RESEARCH TASK on the k≈95 bump.
 6. **Longer reduce-GAN re-run** (`gan=3e-4`) — `6dotglmg` stopped at 14k, before the
    late-drift regime it was meant to test; re-run with checkpointing.
 
@@ -82,6 +100,7 @@ Every launched run gets a row. `verdict`: ✅ win · ➕ mild positive · ➖ fl
 | `rmoodemk` | `1r1p6djp` | 2026-07-08 | CONUS 2023, 100km→3km X-SHiELD | [`de3e00c`](https://github.com/ai2cm/ace/commit/de3e00ce2bf8215114a818faae11700afd8005f9) | `01KWZD6YMZSD37XZHDMYB8RFC7` / `01KWZD6WFN4TCSMMC48BTFMN8Q` | see report | [report](reports/2026-07-08-moe-eval-distilled-vs-teacher.md) |
 | `x2nyzmzh` (spectral) | `flzvb6tp` (baseline) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.46→0.13 (−71%), CRPS −3.5%, tails ~ideal | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
 | `l6vv7yx0` (spectral) | `fg9byv9y` (baseline) | 2026-07-13 | maritime continent, 100km→3km X-SHiELD AMIP control | [`d6cd8dd`](https://github.com/ai2cm/ace/commit/d6cd8dd261a45aaa999e58cc551c460ee68dc940) | — | ✅ spectral wins: PSD bias 0.60→0.13 (−78%), CRPS −2.6%, tails closer to 1 | [report](reports/2026-07-13-prate-eval-baseline-vs-spectral.md) |
+| `y543b0gf` (spectral `i26sidsm`, 2-step) | `6eff6ig5` (hirov1, full diffusion) | 2026-07-28 | CONUS, 100km→3km X-SHiELD AMIP — **single GPU** | [`8b9edba`](https://github.com/ai2cm/ace/commit/8b9edba3f) | `01KYP41DEZ7DND9YFY77XVYEH7` / `01KYP41B245ZXBNH3QGJEGR74N` | ✅ tails now trustworthy: ground-truth percentile was understated **8% @99.9999 / 21% @99.99**; ratios self-normalize so past verdicts hold, but hirov1's extreme tail 0.936→**0.974**. Student within 3.3% CRPS / 8.3% PSD of full diffusion, better @99.9999, +9.5% @99.99 | [report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md) |
 | `p337gcg9` (Lo-only, 2 NFE) | `rmoodemk` (Hi→Lo bundle, 3 NFE) | 2026-07-13 | CONUS, 100km→3km X-SHiELD AMIP | [`af4d134`](https://github.com/ai2cm/ace/commit/af4d13415dacc38ab34e5ad8bbfa22a51615d611) | `01KXEYCC9HAZ7F1G85E3KRPKFD` | ✅ **Hi needed for extreme precip only**: Lo-only ≈ bundle on CRPS (<0.03%) + PSD (<1%) all 4 vars, but under-produces `tail_99.9999_PRATEsfc` 1.01→0.93 (wind tails unchanged) | [report](reports/2026-07-13-lo-only-from-noise200-ablation-p337gcg9.md) |
 
 ### MoE per-expert base models (bundled into `rmoodemk`)
@@ -120,6 +139,91 @@ point at the standardized reports.
   2026-07-13): the `min_wavenumber=85` cut is tied with flat-band `i26sidsm` at the
   best-sustained spectrum (marginally better mid+hi, within noise). See report +
   outcomes bullet.
+- **★ RESEARCH TASK — why does f-distill over-produce 200–400 mm/day precip?** (raised
+  2026-07-30.) **Measured** on the 1-GPU CONUS evals with
+  `scripts/downscaling/diagnose_eval_histogram_spectrum.py` (mass fraction per magnitude
+  band, each source using **its own** dynamic bin edges — see the script's bin-edge warning;
+  the script's `--check` reproduces the logged `prediction_frac_of_target` exactly):
+
+  | band (mm/day) | hirov1 `6eff6ig5` | f-distill spectral `y543b0gf` |
+  |---|---|---|
+  | 50–100 | −17.7% | −7.5% |
+  | 100–200 | −0.7% | −4.9% |
+  | 200–300 | −1.0% | **+25.4%** |
+  | 300–400 | −1.6% | **+51.5%** |
+  | 400–600 | −7.9% | **+33.3%** |
+
+  **The signature is a redistribution, not an inflation:** f-distill is *deficient* at
+  50–200 mm/day and *excessive* at 200–600, i.e. it moves mass up into the
+  moderate-extreme range. The teacher is unbiased to ~2% across 100–600. **Why it went
+  unnoticed:** the headline tail selectors are blind to it —
+  `prediction_frac_of_target@99.9999` is **0.995** (looks ideal) and @99.99 only **+9.5%**,
+  because a steeply-decaying PDF converts a 1.5× density excess into a small *quantile*
+  shift. Log-scaled histogram axes hide it too.
+  **Investigate:** (a) is this the same defect as the k≈95 spectral bump below — excess
+  variance at ~70 km producing too many moderate-extreme cells? Test by checking whether
+  the two co-vary across the existing arms (`f7z93y0a` no-spectral, `i26sidsm`,
+  `2yhjonz9`/`34rg7wii` γ sweep, `xgcaf2rt`); (b) **does the GAN cause it?** — compare
+  against a **DMD2** arm and the GAN-only baseline, since the user's recollection is that
+  DMD2 training did not show this; the DMD2 eval config already exists
+  (`configs/experiments/2026-05-20-distilled-model-eval/config-dmd2.yaml`, dataset
+  `01KRYPVQ3Z5YWQWND9X680GBMD`); (c) is it a **step-count / exposure-bias** effect? The
+  1-step and 4-step arms (`xklvoz0n` / `850hcj6i`) are a free test — see
+  [[fdistill-step-coupling]]; (d) add a **mid-magnitude density metric** to validation
+  (e.g. mass-fraction ratio over fixed physical bands), since no current selector sees this.
+- **★ RESEARCH TASK — f-distill power-spectrum excess at k≈95 (~70 km); would the GAN
+  lever fix it?** (raised 2026-07-30.) **Measured** on the same evals: f-distill peaks at
+  **+48.2% at k=95** of 1153 (`k/k_max`=0.082), a broad bump over k≈50–200 (+30% to +45%);
+  hirov1's worst error anywhere below k=384 is **+6.1%**. So this is ~8× the teacher's error
+  and specific to the student. Because `k/k_max = 2·Δx/λ`, the fractional position is
+  **grid-independent**: 0.082 ⇒ λ ≈ **70 km** (≈24 fine pixels) on any 3 km grid.
+  **Why the spectral loss never addressed it — quantitatively.** Training patches are
+  512² (`input_shape [1,512,512]`), so the val PSD has **257** wavenumbers and its
+  equal-thirds `spec_mae_{lo,mid,hi}` split falls at **k=85 / k=171**. The defect sits at
+  k ≈ 0.082·256 ≈ **21** — deep in the **lo** third. Both tuning knobs moved weight *away*
+  from it: `min_wavenumber=85` (`xgcaf2rt`) is *exactly* the lo/mid boundary and zeroed the
+  defect band entirely, and `band_gamma` weights ∝ `(k/k_max)^γ`, so γ=1 (`34rg7wii`)
+  **down-weighted the defect band ~12×** relative to Nyquist. The sweep concluded "γ=1 is
+  best on mean but lo becomes the worst band" — that lo cost *is* this defect.
+  **On the GAN question:** the discriminator currently taps a **single, deepest** encoder
+  level — `feature_index=6, resolution=8, all_res=[512,…,8]`, i.e. `disc_feature_depth=0`,
+  so each disc cell covers 64 fine px ≈ **180 km**, ~2.6× coarser than the 70 km defect. So
+  the defect scale is plausibly *under-policed* today, and the multi-scale discriminator
+  (below) is a reasonable candidate — but note it is motivated in this LOG by the **hi-k**
+  winds gap, which is a different scale. **Cheapest decisive test first:** re-run with
+  `--disc-feature-depth 1` or `2` (tap `resolution=16`/`32` ⇒ 32/16 px cells ≈ 90/45 km,
+  straddling the defect) before building a multi-head disc. Complementary and cheaper still:
+  a **non-monotonic band weight** that *lifts* k≈15–40 on the 257-axis instead of tilting
+  toward hi — the "non-monotonic bump" item below, but aimed at **lo**, not hi.
+- **★ TASK — reduce the tail histograms across ranks** (found 2026-07-28 while setting up
+  the single-GPU CONUS eval). `ComparedDynamicTailsHistograms` in `fme/core/histogram.py`
+  performs **no cross-rank reduction**, so on any multi-rank run the logged
+  `histogram/prediction_frac_of_target/*` tail ratios come from **one rank's shard** —
+  on 4 GPUs, a quarter of the samples, and the 99.9999th percentile is exactly where the
+  4× smaller sample hurts most. Verified scope: the histogram is the *only* affected
+  path — `Mean` / `MeanComparison` both return
+  `TensorDictAccumulator.get_distributed_mean()`, so `metrics/crps/*`, `metrics/rmse/*`
+  and `power_spectrum/*` were always reduced correctly; the other `Distributed` users in
+  the downscaling aggregators are `LossVsNoiseAggregator` (training-only `reduce_sum`)
+  and `PairedSampleAggregator` (`gather` for event images). **The shard is contiguous, which
+  makes this a seasonal bias rather than just a smaller sample** — the eval loader builds
+  with `train=False`, so `_get_sampler` (`fme/downscaling/data/config.py:630-637`) returns
+  `ContiguousDistributedSampler`, whose `__iter__` gives rank 0
+  `indices[0:N/num_replicas]`: on 4 ranks over CONUS 2023 that is **1 Jan – early Apr only**,
+  no summer convection. **Magnitude measured** (2026-07-29 single-GPU re-run): the
+  **ground-truth** percentile was understated **8.1% @99.9999** and **21.1% @99.99** — and the
+  99.99th moving *more* than the 99.9999th is the seasonal signature (sample-size loss
+  predicts the reverse). Tail *ratios* largely self-normalize, so past comparative verdicts
+  mostly survive — but not always: hirov1's extreme tail moved 0.936→**0.974**.
+  **Consequences:** (a) absolute tails in every multi-rank eval are lower bounds; (b) more
+  insidiously, **`best_student_tail.ckpt` and `best_histogram_tail.ckpt` were *selected* on a
+  seasonally biased slice**, so every tail-based checkpoint selector in the history above is
+  biased, not merely noisier. **Interim workaround:** run evals on one GPU
+  (`configs/experiments/2026-07-28-hirov1-vs-spectral-conus-1gpu/`) — but it costs **4×**
+  wall clock (12.6 h for hirov1), so this is not standing practice. **Real fix:** add the
+  reduction — durable pipeline change → numbered spec under `../specs/` first, and note it
+  will shift every tail-selected checkpoint, so it interacts with the spec-13 early-stop
+  work below.
 - **★ TASK — spectral-aware early stopping / checkpoint selection** (motivated by
   `xgcaf2rt`). Two coupled problems this run exposed: (a) **wasted compute** — it ran
   to 52k steps but its useful spectral optimum was ~2.6k; `val/crps_mean` is flat to
@@ -173,6 +277,24 @@ point at the standardized reports.
 
 _Reverse-chronological; one line per finding, linking the run report._
 
+- **2026-07-29** — ✅ **Multi-rank tail histograms were measuring *winter only*, not a random
+  quarter — extremes understated 8–21%.** Single-GPU CONUS re-runs of hirov1 (`6eff6ig5`) and
+  the spectral student (`y543b0gf`) against their 4-GPU twins (`j3thqivd` / `x2nyzmzh`)
+  isolate the bug. The eval loader uses **`ContiguousDistributedSampler`** (`train=False`), so
+  rank 0 held the **first** quarter of the record — **1 Jan – early Apr 2023**, no summer
+  convection. The **ground-truth** percentile (same observed data in every run → pure
+  artifact, and bit-identical across both models within each rank count, a clean check) was
+  understated **8.1% @99.9999** and **21.1% @99.99**; the 99.99th moving *more* is the
+  seasonal signature — sample-size loss predicts the reverse. Tail *ratios* mostly
+  self-normalize (shared shard cancels), and CRPS/RMSE/PSD agree to **≤0.3%**, confirming
+  those were always reduced correctly, so the 2026-07-13 **CRPS/PSD** verdict stands. **What
+  does change:** hirov1's extreme tail 0.936→**0.974** (under-produces 2.6%, not 6.4%) — ratio
+  robustness is not a property to assume, and that report's tail rows still rest on an
+  un-rerun baseline arm (`flzvb6tp`). Head-to-head, the 2-step student is within **3.3% CRPS
+  / 8.3% PSD** of full diffusion at ~17× lower per-batch cost and better @99.9999 (0.995 vs
+  0.974), but over-produces **@99.99 by 9.5%** — now its clearest weakness. Cost 4.02× wall
+  clock (12.6 h for hirov1) → fix the reduction rather than repeat the workaround. See
+  [report](reports/2026-07-28-hirov1-vs-spectral-conus-1gpu.md).
 - **2026-07-14** — ➕ **`band_gamma` hi-k tilt is a mild, monotonic positive.** The
   `{0, 0.5, 1}` sweep (`i26sidsm` / `2yhjonz9` / `34rg7wii`) shows, at each run's
   best-sustained spectrum, that tilting the spectral budget toward high-k does exactly

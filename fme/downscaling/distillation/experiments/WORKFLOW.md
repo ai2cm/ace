@@ -129,6 +129,32 @@ Figures (histograms / spectra) are rendered separately from the per-event netCDF
 `scripts/downscaling/utils.fetch_beaker_dataset` →
 `scripts/downscaling/plot_compared_histograms.py` / `plot_beaker_histograms.py`.
 
+**Beyond the scalars — per-band histogram and per-wavenumber spectrum.** The wandb
+scalars (`prediction_frac_of_target`, `mean_abs_norm_bias`) average or sample away
+defects that are localized in magnitude or wavenumber; two real f-distill defects were
+invisible in them (LOG ★ RESEARCH TASKs, 2026-07-30). To look inside, fetch the run's
+`evaluator_maps_and_metrics.nc` and run:
+
+```
+beaker dataset fetch <result-dataset-ULID> \
+    --prefix evaluator_maps_and_metrics.nc -o <dir>
+conda run -n fme python scripts/downscaling/diagnose_eval_histogram_spectrum.py \
+    <a.nc> <b.nc> --check
+```
+
+> ⚠️ **Bin-edge trap.** `ComparedDynamicHistograms` gives target and prediction
+> *independent* dynamic histograms, so **their bin edges differ** (a wider-tailed
+> prediction gets wider bins). Comparing raw per-bin counts, or using one source's edges
+> for both, silently mixes bin widths and produces badly wrong ratios. Compare **mass
+> fractions** computed with each source's own edges — which the script does. Its
+> `--check` recomputes the tail quantile ratios and must reproduce the run's logged
+> `prediction_frac_of_target`; a mismatch means the script is wrong, not the run.
+
+Useful identity when relating a wavenumber to a physical scale: `k/k_max = 2·Δx/λ`, so a
+given wavelength sits at the **same fractional position** on any grid with the same pixel
+size — an eval-grid wavenumber maps directly onto the 512²-patch val PSD (257
+wavenumbers, `spec_mae_{lo,mid,hi}` thirds splitting at k=85/171).
+
 ---
 
 ## Indicator → metric reference
