@@ -23,6 +23,19 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _process_group_timeout() -> timedelta:
+    """Collective-op timeout, 30 minutes unless overridden.
+
+    Some workloads (e.g. full-domain patch-tiled validation generation) can
+    legitimately run a single collective's surrounding computation for
+    longer than 30 minutes; FME_DISTRIBUTED_TIMEOUT_MINUTES raises the
+    watchdog's patience for those jobs without changing the default for
+    everything else.
+    """
+    minutes = float(os.environ.get("FME_DISTRIBUTED_TIMEOUT_MINUTES", "30"))
+    return timedelta(minutes=minutes)
+
+
 class TorchDistributed(DistributedBackend):
     """A non-distributed backend implementation."""
 
@@ -33,13 +46,13 @@ class TorchDistributed(DistributedBackend):
                     torch.distributed.init_process_group(
                         backend="nccl",
                         init_method="env://",
-                        timeout=timedelta(minutes=30),
+                        timeout=_process_group_timeout(),
                     )
                 else:
                     torch.distributed.init_process_group(
                         backend="gloo",
                         init_method="env://",
-                        timeout=timedelta(minutes=30),
+                        timeout=_process_group_timeout(),
                     )
             self.world_size = torch.distributed.get_world_size()
             local_rank = int(os.environ["LOCAL_RANK"])
@@ -57,7 +70,7 @@ class TorchDistributed(DistributedBackend):
                 init_method=f"file://{shared_dist_file}",
                 rank=self.rank,
                 world_size=self.world_size,
-                timeout=timedelta(minutes=30),
+                timeout=_process_group_timeout(),
             )
             if using_gpu():
                 # this assumes one GPU per process in the SLURM setting

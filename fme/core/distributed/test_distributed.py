@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 
 import pytest
 import torch
@@ -9,8 +10,19 @@ from fme.core.distributed import Distributed
 from fme.core.distributed.torch_distributed import (
     _gather_irregular,
     _pad_tensor_at_end,
+    _process_group_timeout,
     _unpad_tensor_at_end,
 )
+
+
+def test_process_group_timeout_default(monkeypatch):
+    monkeypatch.delenv("FME_DISTRIBUTED_TIMEOUT_MINUTES", raising=False)
+    assert _process_group_timeout() == timedelta(minutes=30)
+
+
+def test_process_group_timeout_override(monkeypatch):
+    monkeypatch.setenv("FME_DISTRIBUTED_TIMEOUT_MINUTES", "90")
+    assert _process_group_timeout() == timedelta(minutes=90)
 
 
 @pytest.mark.parametrize(

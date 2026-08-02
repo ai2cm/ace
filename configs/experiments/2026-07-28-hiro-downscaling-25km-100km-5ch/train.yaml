@@ -188,7 +188,16 @@ validation_data:
 coarse_patch_extent_lat: 16
 coarse_patch_extent_lon: 16
 max_epochs: 200
-validate_interval: 20
+# Raised from 20 (2026-08-01): fme.downscaling.train.TrainerConfig has no
+# max_val_batches cap (unlike video_train.py's trainer), so every
+# validation pass runs full generation (generate_n_samples: 2, 18 diffusion
+# steps) over the ENTIRE global patch-tiled validation set -- observed to
+# take ~4 hours per pass (job 01KYX54YVBSW4NXRSP4K6Z3HWN). At
+# validate_interval: 20 that's 11 passes over a 200-epoch run (~44h just on
+# validation); at 50 it's 4 passes (epochs 0/50/100/150). Paired with
+# FME_DISTRIBUTED_TIMEOUT_MINUTES in run.sh so a genuinely slow-but-working
+# pass isn't killed by the (otherwise 30-min) NCCL collective timeout.
+validate_interval: 50
 experiment_dir: /results
 save_checkpoints: true
 logging:
