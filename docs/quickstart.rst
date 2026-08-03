@@ -80,7 +80,7 @@ If you run into configuration issues, you can validate your configuration with
 
 .. code-block:: bash
 
-    python -m fme.ace.validate_config config-evaluator.yaml --config_type inference
+    python -m fme.ace.validate_config config-inference.yaml --config_type inference
 
 .. tip::
 
@@ -88,6 +88,10 @@ If you run into configuration issues, you can validate your configuration with
     ``export FME_USE_MPS=1`` to enable using the `Metal Performance Shaders`_ framework for GPU acceleration. Note this backend is
     not fully featured and it may not work with all inference features or for training. It is recommended to use the latest version
     of torch if using MPS.
+
+The ``inference`` entrypoint also supports splitting a long run into multiple
+segments and overriding configuration parameters from the command line. See
+:ref:`advanced_inference` for some more sophisticated examples.
 
 .. _ACE2-ERA5 Hugging Face page: https://huggingface.co/allenai/ACE2-ERA5
 .. _zarr: https://zarr.readthedocs.io/en/stable/
