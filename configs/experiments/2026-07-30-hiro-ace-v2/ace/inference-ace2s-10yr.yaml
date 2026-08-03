@@ -1,0 +1,38 @@
+experiment_dir: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-coarse-ace2s-10yr-inference
+n_forward_steps: 14600
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+logging:
+  project: ace2som-xshield-tuning
+initial_condition:
+  path: /climate-default/2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - '2014-01-01T00:00:00'
+      - '2014-01-02T00:00:00'
+      - '2014-01-03T00:00:00'
+      - '2014-01-04T00:00:00'
+      - '2014-01-05T00:00:00'
+forcing_loader:
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+    engine: zarr
+  num_data_workers: 16
+aggregator: {}
+data_writer:
+  files:
+  - format:
+      name: zarr
+    label: output_6hourly
+    names:
+    - PRATEsfc
+    - UGRD10m
+    - VGRD10m
+    - PRMSL
+    - TMP2m
+    - air_temperature_3
+    separate_ensemble_members: true
+  save_monthly_files: false
+  save_prediction_files: false
