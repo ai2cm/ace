@@ -1,10 +1,6 @@
-# FLAVOR is `runtime` for the production image, and `devel` for the deps-only
-# image, which needs the nvcc shipped in the devel variant to build the CUDA
-# extensions. This tag provides Python 3.12 on Ubuntu 24.04; keep the torch
-# version in constraints.txt in sync with it.
-ARG PYTORCH_TAG=2.10.0-cuda12.8-cudnn9
-ARG FLAVOR=runtime
-FROM pytorch/pytorch:${PYTORCH_TAG}-${FLAVOR} AS base
+# This tag provides Python 3.12 on Ubuntu 24.04; keep the torch version in
+# constraints.txt in sync with it.
+FROM pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime AS base
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
