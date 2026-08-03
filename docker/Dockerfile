@@ -1,5 +1,3 @@
-# This tag provides Python 3.12 on Ubuntu 24.04; keep the torch version in
-# constraints.txt in sync with it.
 FROM pytorch/pytorch:2.10.0-cuda12.8-cudnn9-runtime AS base
 
 ENV FME_DIR=/full-model
@@ -23,8 +21,6 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
   apt-get update -y && apt-get install google-cloud-cli -y
 
 ENV FORCE_CUDA_EXTENSION=1
-# The image's interpreter is the Ubuntu system Python, which carries the PEP 668
-# externally-managed marker. Installing into it is what we want in a container.
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV UV_BREAK_SYSTEM_PACKAGES=1
 # install python deps
