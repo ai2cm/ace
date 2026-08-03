@@ -2,12 +2,12 @@
 
 set -e
 
-JOB_NAME="ace2s-shieldplus-tuned-xshield-inference-10yr-5ics"
-JOB_GROUP=""
-EXISTING_RESULTS_DATASET="01KWMYV98Q79G2FNY3CE95N2NG"  # tuned from SHiELD+
+JOB_NAME="hiro-v2-inference-2023-global"
+#JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="inference-ace2s-10yr.yaml"
-SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
+CONFIG_FILENAME="inference-global.yaml"
+
+SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
@@ -15,33 +15,40 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
+
+N_NODES=1
+NGPU=8
+
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-#python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
+EXISTING_RESULTS_DATASET=01KTCHVDHY0SATWH9E0AW2PDS6
+wandb_group=""
 
-cd $REPO_ROOT && gantry run \
+#--not-preemptible \
+#     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
+
+#    --dataset $EXISTING_RESULTS_DATASET:hiro-public-ckpt.tar:/checkpoints/best.ckpt \
+
+gantry run \
     --name $JOB_NAME \
-    --task-name $JOB_NAME \
-    --description 'Run ACE2S evaluator' \
-    --beaker-image $IMAGE \
-    --workspace ai2/ace \
-    --priority high \
+    --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
+    --workspace ai2/climate-titan \
+    --priority urgent \
     --cluster ai2/titan \
-    --cluster ai2/jupiter \
-    --cluster ai2/ceres \
+    --beaker-image $IMAGE \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
-    --env WANDB_RUN_GROUP=$JOB_GROUP \
+    --env WANDB_RUN_GROUP=$wandb_group \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_ckpt.tar:/ckpt.tar \
-    --gpus 1 \
-    --shared-memory 50GiB \
+    --dataset $EXISTING_RESULTS_DATASET:bundled_moe_multivariate.ckpt:/ckpt.tar  \
     --weka climate-default:/climate-default \
+    --gpus $NGPU \
+    --shared-memory 400GiB \
     --budget ai2/atec-climate \
-    --no-python \
+    --no-conda \
     --install "pip install --no-deps ." \
     --allow-dirty \
-    -- python -I -m fme.ace.inference $CONFIG_PATH
+    -- torchrun --nproc_per_node $NGPU -m fme.downscaling.inference $CONFIG_PATH
