@@ -29,17 +29,13 @@ from torch.nn import SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core import metrics
-from fme.core.device import using_gpu, using_srun
+from fme.core.device import in_dataloader_worker, using_gpu, using_srun
 
 from ._gloo_patch import patch_gloo_alltoall
 from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
-from .torch_distributed import (
-    _gather_irregular,
-    _in_dataloader_worker,
-    _rank_metadata_from_env,
-)
+from .torch_distributed import _gather_irregular, _rank_metadata_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +101,7 @@ class ModelTorchDistributed(DistributedBackend):
         verbose: bool = False,
     ):
         spatial_size = h_size * w_size
-        if _in_dataloader_worker():
+        if in_dataloader_worker():
             self._rank, self._world_size = _rank_metadata_from_env()
             _check_world_size_divisible(self._world_size, spatial_size)
             self._data_size = self._world_size // spatial_size
@@ -469,5 +465,9 @@ class ModelTorchDistributed(DistributedBackend):
         return thd.DistributedDiscreteContinuousConvS2(*args, **kwargs)
 
     def shutdown(self):
-        logger.debug("Shutting down rank %d", self._rank)
+        # only the log line is guarded: `cleanup` already skips the collective
+        # when the manager is not initialized, and resets its shared state either
+        # way, so returning early here would leave that state behind.
+        if torch.distributed.is_initialized():
+            logger.info("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()
