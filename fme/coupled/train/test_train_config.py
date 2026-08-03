@@ -459,7 +459,6 @@ class TestGetValidationCallback:
                 validation_entries=entries,
                 stepper=stepper,
                 dataset_info=MagicMock(),
-                loss_scaling=MagicMock(),
                 save_per_epoch_diagnostics=False,
                 output_dir="/tmp/out",
             )
