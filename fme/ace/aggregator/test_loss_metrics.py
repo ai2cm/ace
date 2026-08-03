@@ -32,12 +32,12 @@ def test_per_step_loss_aggregator_mismatched_ranks(empty_rank):
     """Ranks recording different key sets reduce without hanging.
 
     Data-parallel rank r records r + 1 batches, each covering steps 0..r with
-    value r + s for step s, so ranks disagree on both the per-step key sets
-    and the per-key record counts; with ``empty_rank`` set, that rank records
-    nothing at all. Means must be count-weighted over all recording ranks.
-    Reductions run over data-parallel replicas (spatial ranks shard a single
-    replica and record identical metrics in practice), so expectations are in
-    terms of data-parallel ranks.
+    value r + s for step s, so ranks disagree on both the per-step key sets and
+    the per-key record counts; with ``empty_rank`` set, that rank records
+    nothing at all. Means must be count-weighted over the recording ranks.
+    Expectations are stated in terms of data-parallel ranks because reductions
+    run over data-parallel replicas — spatial ranks shard a single replica and
+    record identical metrics in practice.
     """
     dist = Distributed.get_instance()
     rank = dist.data_parallel_rank

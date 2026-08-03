@@ -8,10 +8,10 @@ from fme.core.loss import ChannelLossInfo
 class PerStepLossAggregator:
     """Accumulates per-step loss metrics across batches and produces means.
 
-    Ranks may record different key sets — e.g. sparse ``loss_step_N`` keys
-    when the stepper evaluates a per-batch sampled step count, unequal batch
-    counts per rank, or a rank that records no batches at all — so the
-    distributed reduction must not depend on locally-observed keys.
+    The distributed reduction must not depend on locally-observed keys, since
+    ranks can hold different key sets: ``loss_step_N`` keys are sparse when the
+    stepper evaluates a per-batch sampled step count, batch counts per rank can
+    differ, and a rank may record no batches at all.
     """
 
     def __init__(self):
@@ -31,9 +31,8 @@ class PerStepLossAggregator:
         dist = Distributed.get_instance()
         # Every rank must issue an identical sequence of collective calls, so
         # first agree on the global key universe, then reduce dense sum and
-        # count vectors over it. Means are count-weighted: ranks contribute in
-        # proportion to how many batches they recorded for each key, and keys
-        # with a global count of zero are skipped.
+        # count vectors over it. Means are count-weighted, and keys with a
+        # global count of zero are skipped.
         gathered = dist.gather_object(sorted(self._sums.keys()))
         universe: list[str] | None = None
         if gathered is not None:

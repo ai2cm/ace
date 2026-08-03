@@ -76,16 +76,15 @@ class InlineValidationConfig:
         evaluate_all_steps: if True (default), evaluate every forward step in
             the validation data window, logging a dense set of per-step losses.
             If False, evaluate only the steps the train stepper would evaluate
-            for the batch: the stochastically-sampled step count under
-            n_forward_steps_schedule, or the fixed step count otherwise. Under
-            a schedule this makes validation cost commensurate with training
-            cost, but each loss_step_N metric then averages only the batches
-            whose sampled step count exceeded N: with B total validation
-            batches and p the probability of sampling N or fewer steps,
-            loss_step_N averages ~B*(1-p) batches — an unbiased but noisier
-            estimate at long leads, to be interpreted in light of the schedule
-            probabilities. Step draws are seeded identically each epoch, so a
-            lead expected in fewer than ~1 batch may never be logged.
+            for the batch: the sampled step count under
+            n_forward_steps_schedule, or the fixed step count otherwise, which
+            under a schedule makes validation cost commensurate with training
+            cost. Each loss_step_N metric then averages only the batches whose
+            sampled step count exceeded N — of B validation batches, about
+            B*(1-p) where p is the probability of sampling N or fewer steps.
+            Those means stay unbiased but grow noisier at longer leads, and
+            because step draws are seeded identically each epoch, a lead
+            expected in fewer than ~1 batch may never be logged.
     """
 
     loader: DataLoaderConfig

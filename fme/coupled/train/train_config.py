@@ -112,18 +112,16 @@ class InlineValidationConfig:
         evaluate_all_steps: if True (default), evaluate every forward step in
             the validation data window, logging a dense set of per-realm
             per-step losses. If False, evaluate only the steps the coupled
-            train stepper would evaluate for the batch: the
-            stochastically-sampled step counts under a stochastic n_steps
-            loss configuration, or the fixed counts otherwise. Under
-            stochastic sampling this makes validation cost commensurate with
-            training cost, but each per-step loss metric then averages only
-            the batches whose sampled step count reached that step: with B
-            total validation batches and p the probability of not reaching
-            the step, the metric averages ~B*(1-p) batches — an unbiased but
-            noisier estimate at long leads, to be interpreted in light of the
-            sampling probabilities. Step draws are seeded identically each
-            epoch, so a lead expected in fewer than ~1 batch may never be
-            logged.
+            train stepper would evaluate for the batch: the sampled step counts
+            under a stochastic n_steps loss configuration, or the fixed counts
+            otherwise, which under stochastic sampling makes validation cost
+            commensurate with training cost. Each per-step loss metric then
+            averages only the batches whose sampled step count reached that
+            step — of B validation batches, about B*(1-p) where p is the
+            probability of not reaching it. Those means stay unbiased but grow
+            noisier at longer leads, and because step draws are seeded
+            identically each epoch, a lead expected in fewer than ~1 batch may
+            never be logged.
     """
 
     loader: CoupledDataLoaderConfig
