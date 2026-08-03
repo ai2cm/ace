@@ -13,7 +13,6 @@ RUN apt-get update -y && apt-get install -y \
 
 # Install gcloud- used for monthly netcdf data processing script
 # https://cloud.google.com/sdk/docs/install#deb
-# apt-key is gone in Ubuntu 24.04, so dearmor the key into the keyring directly.
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | \
   tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
   curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
