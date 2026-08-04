@@ -59,11 +59,13 @@ this design relies on elsewhere and is not one it relies on here.
 wraps, over a world-wide gloo group, and there is no switch to turn it off. That is
 a deliberate omission rather than an oversight: a supported configuration in which
 the mechanism is disabled is a supported configuration in which the fabric fault
-returns, and adding one remains open to the maintainer. One exchange measured
-630 us at 8 gloo ranks -- on an idle workstation, over loopback, with no figure
-above 8 ranks and nothing asserting it, so treat that as a lower bound of unknown
-looseness rather than a cost. It also removes the run-ahead today's async NCCL
-gradient all-reduce allows, capping a rank's host-side lead at one iteration.
+returns, and adding one remains open to the maintainer -- it is called out as a
+pre-merge decision at the top of the pull request's description rather than left
+here to be found. One exchange measured 630 us at 8 gloo ranks -- on an idle
+workstation, over loopback, with no figure above 8 ranks and nothing asserting it,
+so treat that as a lower bound of unknown looseness rather than a cost. It also
+removes the run-ahead today's async NCCL gradient all-reduce allows, capping a
+rank's host-side lead at one iteration.
 
 **Every deadline the design chooses lives here**, with the one module that
 consumes them, rather than split across the two below it in the layering.
@@ -72,12 +74,25 @@ consumes them, rather than split across the two below it in the layering.
 exits hard.** An exchange that is given up on leaves work in the gloo work queue
 for good, and no call reclaims the group in bounded time -- including interpreter
 finalization, which joins the worker thread that holds it and so waits for the
-wedged peer's socket to close (measured 119.3s against a peer parked 120s on torch
-2.7.1, versus 0.05s with ``os._exit``). So the scope asks the deferral for
-`PendingStop.require_hard_exit`, and the teardown ends in ``os._exit`` once the
-backend is released and the callbacks have run. A caller that means to stop
-cooperatively, time out, and then carry on in the same process is outside what this
-design can bound.
+wedged peer's socket to close; `PendingStop.require_hard_exit` carries the
+measurement. So the scope asks the deferral for that hard exit, and the teardown
+ends in ``os._exit`` once the backend is released and the callbacks have run. A
+caller that means to stop cooperatively, time out, and then carry on in the same
+process is outside what this design can bound.
+
+**Every evidence line this module writes is listed in one place**, in
+`fme.core.distributed.shutdown`'s module docstring, which is where `write_marker`
+lives: the event names, what each means, and what a reader does with it.
+
+**The public name `cooperative_stop` shadows this module**, and that is a known
+wart rather than a considered choice. ``from fme.core.distributed import
+cooperative_stop`` binds the re-exported *function*, so a test that wants to patch
+a module attribute has to reach the module through `importlib.import_module` --
+setting the attribute on the function silently patches nothing, which has cost time
+twice on this branch and is why
+`fme/core/distributed/test_cooperative_stop_exit.py` carries a comment about it at
+its own patch site. Renaming one of the two is the maintainer's option; it was left
+alone because a public-name change is a wider edit than the trap justifies.
 """
 
 import contextlib
@@ -94,13 +109,6 @@ from .stop_agreement import (
 )
 
 logger = logging.getLogger(__name__)
-
-# `index-mismatch` is written once per process rather than once per boundary. The
-# condition it reports -- ranks at different iteration indices -- does not un-happen,
-# and the run it exists to diagnose is one where every rank would otherwise emit one
-# line per batch: tens of thousands of stderr lines per rank on the very run whose
-# log a reader is trying to get through.
-_reported_index_mismatch: bool = False
 
 # Seconds a rank with a local event of its own -- a signal it recorded, or an
 # exception it is raising -- will spend waiting for peers that may never arrive.
@@ -136,6 +144,27 @@ _reported_index_mismatch: bool = False
 # under a second, and a rank whose peers are already waiting returns from the
 # exchange in microseconds. Giving a rank longer to wait for peers means taking it
 # from the checkpoint, since the teardown timeout is fixed.
+#
+# **This arithmetic is derived, not measured.** No test waits out a real budget or a
+# real 20s teardown: the autouse SIGALRM in `conftest.py` is 90s at the longest and
+# 3s under ``--very-fast``, so every driver injects small timeouts instead, and the
+# window being described here is longer than the alarm that would have to bound a
+# test of it. Treat the split as a design intent that CI does not check.
+#
+# **The strongest objection to the split, recorded as an open decision for the
+# maintainer**: the ceiling could be cut to about 5s and the remaining 20s given to
+# the checkpoint instead. The reviewer's argument is that a write already in flight
+# when the signal lands is exactly the case this test is built around --
+# `test_a_stop_at_a_just_written_checkpoint_does_not_write_it_again`, in
+# `fme/core/generics/test_trainer.py` -- and a multi-GB ACE checkpoint takes
+# comfortably more than 7s, so T >= 7 is the *expected* case for a preemption
+# landing inside a periodic write, and the restart checkpoint that
+# `add_post_shutdown_callback` exists for is lost there by construction. What would
+# make a smaller ceiling safe is that `_ABORT_BACKSTOP` already bounds a hung
+# teardown at `teardown_timeout` + 5, so the teardown cannot overrun a short ceiling
+# by more than that. `DEFAULT_TEARDOWN_TIMEOUT` is left at 20.0 here because
+# re-cutting the split is a decision about what the design promises rather than a
+# fix, and it is called out as a pre-merge decision in the pull request description.
 DEFAULT_STOP_AGREEMENT_BUDGET: float = 5.0
 
 # Floors every deadline a rank with a budget passes, and closes three traps.
@@ -235,6 +264,16 @@ class CooperativeStop:
         # `agreement-bound` is written once per rank per loop, at the first
         # boundary a rank passes with a local event of its own
         self._reported_bound = False
+        # `index-mismatch` is written once per *scope* rather than once per boundary
+        # or once per process. Once per boundary would put tens of thousands of
+        # stderr lines per rank on the very run whose log a reader is trying to get
+        # through, since the condition it reports does not un-happen inside one loop.
+        # Once per process was the previous choice and was worse: a fresh
+        # desynchronisation at epoch 50 of a multi-day run would be silent because
+        # epoch 1 had already reported one, and this check is the design's only
+        # self-verification. Per scope gives the same protection against flooding
+        # without going quiet for the rest of the run.
+        self._reported_index_mismatch = False
 
     @property
     def pending(self) -> PendingStop:
@@ -257,9 +296,25 @@ class CooperativeStop:
         `close`'s assignment, because `agreed` is called from the loop body where
         a rank cannot yet know it is about to raise.
 
-        A rank that recorded a signal reports ``SIGNAL`` even while raising: a
-        preemption is what happened to it, and `defer_termination` gives a
-        recorded signal the same precedence when it picks an exit code.
+        **A recorded signal wins over an exception, deliberately, and this makes
+        ``EXCEPTION`` unreachable on the common path.** A rank that was signalled
+        *and* is raising contributes ``SIGNAL``, because when both are present the
+        signal is the root cause: the scheduler signals the whole process group, so
+        the exception a rank is carrying is usually a consequence of a peer having
+        already left -- a ``Connection closed by peer``, most often. The
+        consequence, spelled out because it is not obvious and nothing else says it:
+        the peers of a signalled-and-crashing rank read ``SIGNAL``, so they take
+        `PendingStop.note_peer_stop` and exit ``128 + SIGTERM`` as a clean
+        preemption, `PeerStopRequested` never fires, and no
+        ``stop-agreed reason=EXCEPTION`` line appears anywhere. That is intended.
+        The raising rank itself still exits 1 -- see the ``raising`` branch of
+        `defer_termination`, which preserves the exception's exit code so the
+        traceback is not traded away -- and torchrun surfaces that 1, so the job is
+        visibly failed rather than reported as a clean stop.
+
+        ``EXCEPTION`` therefore reaches a peer only where the raising rank was
+        *not* signalled: an in-process failure such as a NaN in the loss, which is
+        the case the exception rider was built for.
         """
         if self._pending.requested:
             return StopReason.SIGNAL
@@ -279,11 +334,18 @@ class CooperativeStop:
         reach the boundary -- and the usual reason it ran out is that this rank is
         the *late* one, walking out of a multi-second checkpoint write, in which
         case its peers are already blocked in the exchange below and it returns in
-        microseconds.
+        microseconds. It does owe an ``agreement-expired`` line, which is written
+        here rather than in a separate wrapper: an earlier version split the two on
+        the stated grounds that the marker's ``batch=`` field had to be a batch
+        index, and that was never the reason -- `_exchange_label` already names the
+        loop-entry exchange, whose contribution is a loop length rather than an
+        index.
         """
         remaining = self._pending.seconds_remaining()
         if remaining is None:
             return self._no_local_event_deadline
+        if remaining <= 0.0:
+            write_marker("agreement-expired", batch=self._exchange_label())
         if not self._bounded:
             self._report_bound("group-timeout", self._no_local_event_deadline)
             return self._no_local_event_deadline
@@ -323,19 +385,6 @@ class CooperativeStop:
             return "loop-entry"
         return str(self._exchange_index)
 
-    def _boundary_deadline(self, index: int) -> float:
-        """`_deadline`, plus the marker a spent budget owes at a batch boundary.
-
-        Separate from `_deadline` because the marker's ``batch=`` field has to be a
-        batch index, and `assert_equal_loop_length`'s exchange has a loop *length*
-        to contribute instead -- so calling this from there would label a length as
-        a batch.
-        """
-        remaining = self._pending.seconds_remaining()
-        if remaining is not None and remaining <= 0.0:
-            write_marker("agreement-expired", batch=str(index))
-        return self._deadline()
-
     def _report(self, reason: StopReason, high: int, low: int) -> None:
         """Emit what one completed exchange revealed.
 
@@ -343,12 +392,11 @@ class CooperativeStop:
         from a claim the log repeats into a fact the mechanism checked. It is
         **diagnostic only**: a desynchronised run is going to hang anyway, and a
         new mechanism unilaterally terminating healthy-looking jobs on a
-        self-diagnosis is a worse failure mode than the one it reports. It is also
-        reported once per process; see `_reported_index_mismatch`.
+        self-diagnosis is a worse failure mode than the one it reports. It is
+        reported once per scope; see where the flag is declared.
         """
-        global _reported_index_mismatch
-        if high != low and not _reported_index_mismatch:
-            _reported_index_mismatch = True
+        if high != low and not self._reported_index_mismatch:
+            self._reported_index_mismatch = True
             write_marker("index-mismatch", min=str(low), max=str(high))
         if reason is not StopReason.NONE:
             write_marker(
@@ -372,6 +420,24 @@ class CooperativeStop:
         does -- which is why this is a raise rather than the diagnostic the
         ±index check is. An unequal loop length is a precondition failure detected
         before any work is done, where continuing is a guaranteed hang.
+
+        **The two checks are treated oppositely on purpose, and the difference is
+        what a stop is made of.** An index mismatch is diagnostic because the ranks
+        still *agree on whether to stop*: the reduced reason is common to all of
+        them, so the mechanism is working and only its bookkeeping disagrees, and
+        `_report` explains why unilaterally killing a job over a self-diagnosis is
+        worse than reporting it. Unequal loop lengths break the agreement itself --
+        some rank leaves the loop while its peers are still exchanging, so those
+        peers wedge in an exchange nobody will join, which is the exact failure this
+        module exists to prevent. Proceeding is therefore not safe, and a job that
+        would hang is better ended with a message naming the cause.
+
+        If it ever fires on an asymmetry that is genuinely benign -- a deliberately
+        ragged sampler, say -- the fix is not to soften this into a warning, because
+        the wedge is real either way. It is to give the short rank something to
+        contribute at the boundaries its peers still reach, so the ranks keep
+        exchanging the same number of times: pad the short loop, or drop this
+        exchange and have every rank iterate a common length.
 
         This exchange needs `agreed`'s give-up handling and not only its own
         assertion, because a signal can land between `defer_termination` yielding
@@ -444,7 +510,7 @@ class CooperativeStop:
         # this rank was working on. On the ordinary path it makes no difference.
         self._next_index = index + 1
         self._exchange_index = index
-        timeout = self._boundary_deadline(index)
+        timeout = self._deadline()
         try:
             reduced, high, low = self._agreement.exchange(
                 self._local_reason().value, index, timeout
@@ -470,6 +536,26 @@ class CooperativeStop:
             # leave the loop, tear nothing down, and walk into the next collective
             # -- whose peers have gone -- holding an abandoned gloo group, to be
             # SIGKILLed there with its communicators open.
+            #
+            # **Residual, not a defect: this reports `128 + SIGTERM` even where no
+            # preemption happened.** "My peer stopped reaching the boundary" and "my
+            # peer was preempted" are different facts, and only the second is
+            # retryable -- so on a genuine hang (a deadlock, a stuck loader, a NCCL
+            # hang) the first rank to give up hands the launcher a retryable code and
+            # the hang becomes a silent automatic retry. It is left that way because
+            # the common case decides: a preemption in which this rank never received
+            # its own signal is far commoner than a hang, and exiting
+            # non-retryably would convert a retryable preemption into a hard failure,
+            # which loses a job that was going to be restarted anyway.
+            #
+            # A reader tells the two apart from the markers, not the exit code. This
+            # rank writes `agreement-timeout` and then `agreement-abandoned` and no
+            # `stop-agreed` line of its own, which is what distinguishes a give-up
+            # from a peer stop it actually read out of an exchange. Whether that
+            # give-up was a preemption or a hang is then told by whether
+            # `signal-deferred` appears anywhere in the job's log: a preemption
+            # reaches some rank even when it did not reach this one, while a hang
+            # reaches none.
             self._pending.note_peer_stop()
             return True
         reason = StopReason(reduced)
@@ -548,7 +634,7 @@ class CooperativeStop:
         self._pending.arm_budget()
         try:
             reduced, high, low = self._agreement.exchange(
-                self._local_reason().value, index, self._boundary_deadline(index)
+                self._local_reason().value, index, self._deadline()
             )
         except BaseException:
             # the operation stays in gloo's work queue, so this scope owes the
@@ -615,14 +701,12 @@ def _cooperative_scope(
             # And the process may not be left to finalize: the gloo destructor
             # joins the worker thread that still holds the abandoned operation, so
             # `sys.exit` waits for the wedged peer to die. This is the whole of the
-            # design's bound after an abandoned exchange.
-            #
-            # One path does not honour it, and it is the exception rider: a rank
-            # unwinding on an exception is torn down with `exit_process=False` so
-            # that its traceback survives, so it returns rather than exiting and may
-            # then sit in finalization until its peer dies. The traceback is worth
-            # more than the promptness there, and by that point the backend is
-            # released and the callbacks have run, so what is lost is only the time.
+            # design's bound after an abandoned exchange, and **every** path out of
+            # `defer_termination`'s dispatch honours it, the exception rider
+            # included: that branch prints the traceback itself and then hard-exits
+            # with the exception's code, rather than returning and being SIGKILLed in
+            # finalization -- which would hand the launcher a signal death and hold
+            # this rank's GPU allocation until its wedged peer died.
             pending.require_hard_exit()
 
 

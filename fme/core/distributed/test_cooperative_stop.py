@@ -11,7 +11,6 @@ They are unmarked, so they run in every tier including ``--very-fast``, and each
 takes milliseconds.
 """
 
-import importlib
 import logging
 import os
 import signal
@@ -42,12 +41,6 @@ from fme.core.distributed.shutdown import (
 from fme.core.distributed.stop_agreement import StopAgreement, is_deadline_expiry
 
 _BARRIER_TIMEOUT = 5.0
-
-# `from fme.core.distributed import cooperative_stop` binds the re-exported
-# *function* of that name, and setting an attribute on that patches nothing
-cooperative_stop_module = importlib.import_module(
-    "fme.core.distributed.cooperative_stop"
-)
 
 # What gloo says when a peer's process has died and closed its socket, as opposed to
 # when a deadline expired. Copied from a real gloo message rather than invented,
@@ -209,6 +202,19 @@ def _stop(
     return CooperativeStop(pending, agreement, first_index=first_index), pending
 
 
+def _record_signal_without_a_timer(pending: PendingStop) -> None:
+    """Record a signal as `PendingStop.request` does, minus its diagnostic timer.
+
+    `request` also arms `_warn_after` at twice the budget, and for the already-spent
+    budgets below that timer is due the moment it is armed -- so it fires at once and
+    writes ``deferral-overrun`` plus a "GPUs on this node may need to be reset" line
+    into whatever a *later* test happens to be capturing. What those tests are about
+    is the deadline, so the timer is left out rather than raced against.
+    """
+    pending.requested = True
+    pending.arm_budget()
+
+
 def test_stop_is_agreed_at_the_same_index_on_every_logical_rank():
     """Every rank leaves having completed the same number of batches.
 
@@ -226,16 +232,20 @@ def test_stop_is_agreed_at_the_same_index_on_every_logical_rank():
 
     def run(rank: int) -> None:
         stop, pending = _stop(agreement)
-        count = 0
-        for index in range(20):
-            if notice_at.get(rank) == index:
-                pending.request(signal.SIGTERM)
-            count += 1
-            if stop.agreed(index):
-                break
-        completed[rank] = count
-        reasons[rank] = StopReason.SIGNAL if pending.requested else None
-        pending.close()
+        try:
+            count = 0
+            for index in range(20):
+                if notice_at.get(rank) == index:
+                    pending.request(signal.SIGTERM)
+                count += 1
+                if stop.agreed(index):
+                    break
+            completed[rank] = count
+            reasons[rank] = StopReason.SIGNAL if pending.requested else None
+        finally:
+            # even where the body raised: an uncancelled 20s timer outlives this
+            # test and writes into a later test's captured stderr
+            pending.close()
 
     threads = [threading.Thread(target=run, args=(rank,)) for rank in range(world_size)]
     for thread in threads:
@@ -315,7 +325,7 @@ def test_an_expired_budget_exchanges_at_the_floor(capfd):
     """
     agreement = _SpyAgreement()
     stop, pending = _stop(agreement, budget=-1.0)  # already expired when armed
-    pending.request(signal.SIGTERM)
+    _record_signal_without_a_timer(pending)
     try:
         # true, not false: this rank contributed `SIGNAL` and a real `MAX` returns
         # at least that. What the test is about is the deadline, below.
@@ -329,7 +339,7 @@ def test_an_expired_budget_exchanges_at_the_floor(capfd):
     # a sub-millisecond remainder takes the same path rather than degenerating
     sliver = _SpyAgreement()
     stop, pending = _stop(sliver, budget=0.0004)
-    pending.request(signal.SIGTERM)
+    _record_signal_without_a_timer(pending)
     try:
         stop.agreed(8)
     finally:
@@ -340,33 +350,34 @@ def test_an_expired_budget_exchanges_at_the_floor(capfd):
     assert all(timeout > 0.0 for timeout in agreement.timeouts + sliver.timeouts)
 
 
-def test_an_index_mismatch_is_reported_once_and_does_not_force_a_stop(
-    capfd, monkeypatch
-):
+def test_an_index_mismatch_is_reported_once_per_scope_and_forces_no_stop(capfd):
     """The symmetry check is diagnostic only, deliberately, and it says so once.
 
     A desynchronised run is going to hang anyway, and a new mechanism
     unilaterally terminating healthy-looking jobs on a self-diagnosis is a worse
     failure mode than the one it reports.
 
-    Once per process, because the condition does not un-happen and the run it
-    reports is one where every rank would otherwise emit a line per batch -- tens of
-    thousands of them, on exactly the log a reader is trying to get through.
+    Once per *scope*, not once per boundary and not once per process. Per boundary
+    would put a line per batch on exactly the log a reader is trying to get through.
+    Per process -- which this was -- would make a fresh desynchronisation at epoch 50
+    of a multi-day run silent because epoch 1 had already reported one, and this is
+    the design's only self-verification.
     """
-    monkeypatch.setattr(cooperative_stop_module, "_reported_index_mismatch", False)
     agreement = _SpyAgreement(reason=0, high=12, low=11)
     stop, pending = _stop(agreement)
 
     assert stop.agreed(11) is False
     assert stop.agreed(12) is False
-    # a second loop in the same process, which is a second epoch in a real job
+    # a second loop in the same process, which is a second epoch in a real job, and
+    # it reports its own mismatch rather than inheriting the first one's silence
     later, later_pending = _stop(_SpyAgreement(reason=0, high=20, low=19))
     assert later.agreed(19) is False
 
     captured = capfd.readouterr().err
     mismatch = _marker_lines("index-mismatch", captured)
-    assert len(mismatch) == 1
+    assert len(mismatch) == 2, "one line per scope, not one per boundary or process"
     assert "min=11" in mismatch[0] and "max=12" in mismatch[0]
+    assert "min=19" in mismatch[1] and "max=20" in mismatch[1]
     assert _marker_lines("stop-agreed", captured) == []
     pending.close()
     later_pending.close()
@@ -503,6 +514,67 @@ def test_a_peer_exception_raises_rather_than_stopping_quietly():
     assert pending.peer_stop is False, "an exception is not a peer's signal"
 
 
+def test_a_signalled_rank_that_also_raises_contributes_signal_not_exception(capfd):
+    """A recorded signal wins over an exception, so peers read a preemption.
+
+    This is the combination the design says is *usual* -- the scheduler signals the
+    whole process group, so a rank whose peer has already gone is carrying a
+    ``Connection closed by peer`` and has recorded a signal too -- and it was the one
+    combination nothing exercised. The behaviour is deliberate and is what this pins:
+    the signal is the root cause when both are present, so the raising rank
+    contributes ``SIGNAL``, its peers take a clean preemption rather than
+    `PeerStopRequested`, and ``reason=EXCEPTION`` never appears. The raising rank
+    still exits 1 through `defer_termination`'s exception branch, so the job is
+    visibly failed at process level.
+    """
+    spy = _SpyAgreement()
+    stop, pending = _stop(spy, first_index=9)
+    pending.request(signal.SIGTERM)
+    try:
+        stop.close(stop.next_index())
+    finally:
+        pending.close()
+    assert spy.calls[0][0] == StopReason.SIGNAL.value, "the exception won the reason"
+
+    # and against a real `MAX` over two logical ranks, the peer reads a preemption
+    agreement = _LockstepAgreement(2)
+    outcome: dict[str, object] = {}
+
+    def signalled_and_raising() -> None:
+        raising_stop, raising_pending = _stop(agreement, first_index=9)
+        raising_pending.request(signal.SIGTERM)
+        try:
+            # the shape `_cooperative_scope`'s exception rider produces
+            raising_stop.close(raising_stop.next_index())
+        finally:
+            raising_pending.close()
+
+    def peer() -> None:
+        peer_stop, peer_pending = _stop(agreement, first_index=9)
+        try:
+            outcome["left"] = peer_stop.agreed(9)
+        except BaseException as err:  # a thread's exception would be lost
+            outcome["raised"] = err
+        finally:
+            peer_pending.close()
+
+    threads = [
+        threading.Thread(target=signalled_and_raising),
+        threading.Thread(target=peer),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=_BARRIER_TIMEOUT * 2)
+
+    assert "raised" not in outcome, outcome.get("raised")
+    assert outcome["left"] is True
+    agreed = _marker_lines("stop-agreed", capfd.readouterr().err)
+    assert agreed, "neither rank reported the exchange"
+    assert all("reason=SIGNAL" in line for line in agreed), agreed
+    assert not any("reason=EXCEPTION" in line for line in agreed), agreed
+
+
 def test_the_exit_exchange_happens_only_when_a_rank_originates_one():
     """`close` exchanges iff this rank is originating a stop its peers cannot know.
 
@@ -588,7 +660,7 @@ def test_a_give_up_with_no_local_event_dispatches_the_teardown(capfd, monkeypatc
             with defer_termination(budget=1.0) as pending:
                 assert (
                     pending.seconds_remaining() is None
-                ), "a budget is armed, so this is not the no-local-event path"
+                ), "no budget is armed, so this is the no-local-event path"
                 with _cooperative_scope(pending, agreement) as stop:
                     for index in range(10):
                         if stop.agreed(index):
@@ -601,7 +673,7 @@ def test_a_give_up_with_no_local_event_dispatches_the_teardown(capfd, monkeypatc
     assert excinfo.value.code == 128 + signal.SIGTERM
     assert (
         pending.requested is False
-    ), "a signal was recorded, so this is not the no-local-event path"
+    ), "no signal was recorded, so this is the no-local-event path"
     assert pending.peer_stop is True
     stderr = capfd.readouterr().err
     assert len(_marker_lines("agreement-timeout", stderr)) == 1

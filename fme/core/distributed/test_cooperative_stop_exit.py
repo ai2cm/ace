@@ -7,7 +7,7 @@ configuration. And `Distributed.context()` is already entered for the session an
 refuses to nest, while these tests are about what a real entrypoint does inside
 it.
 
-**They are not cheap.** Six torchrun launches, each ``@pytest.mark.serial``, so
+**They are not cheap.** Seven torchrun launches, each ``@pytest.mark.serial``, so
 each holds the xdist write lock for the whole of a ``make test`` run at roughly
 8-15s apiece. That is the price of asserting a process exit code at all; nothing
 cheaper can.
@@ -29,9 +29,11 @@ carries the code.
 **Where the claim is a bound on the exit, the exit is observed from outside.** A
 timestamp a driver writes before leaving measures the *call*, and the call is not
 what can block: an abandoned gloo group makes interpreter finalization wait for the
-wedged peer to die. So `_wait_for_death` watches ``/proc`` for the rank's own pid,
-and the wedged rank holds its socket open until the launcher says the rank under
-test is gone -- otherwise the peer's exit unblocks the very wait being measured.
+wedged peer to die -- see
+`fme.core.distributed.shutdown.PendingStop.require_hard_exit` for the measurement.
+So `_wait_for_death` watches ``/proc`` for the rank's own pid, and the wedged rank
+holds its socket open until the launcher says the rank under test is gone --
+otherwise the peer's exit unblocks the very wait being measured.
 """
 
 import os
@@ -326,9 +328,10 @@ def test_a_wedged_rank_does_not_hold_a_healthy_rank_past_its_budget(tmp_path):
     Rank 0 raises its own SIGTERM rather than waiting for one from outside, so
     that its budget is provably armed before it enters the exchange rank 1 will
     never join. A signal from outside landing a moment later would find rank 0
-    already inside that exchange carrying the default group's own timeout, which
-    different case with a different bound. `test_both_ranks_exit_at_the_same_batch
-    _with_the_backend_released` is where the external signal is the claim.
+    already inside that exchange carrying the default group's own timeout, which is
+    a different case with a different bound; the test named
+    ``test_both_ranks_exit_at_the_same_batch_with_the_backend_released`` in this
+    module is where an external signal is the claim.
 
     **What is timed is rank 0's death, not its call to exit**, and rank 1 holds its
     socket open until that death: an abandoned gloo group is disposed of by
@@ -338,14 +341,13 @@ def test_a_wedged_rank_does_not_hold_a_healthy_rank_past_its_budget(tmp_path):
     had already gone, is a test that cannot observe the thing it appears to bound.
 
     Which of the two assertions does the work is worth being exact about, because
-    the timing one does not. Whether finalization joins that thread or leaks it is
-    not deterministic: measured on torch 2.7.1, a minimal repro that held the group
-    in a local and destroyed both groups took 119.3s against a peer parked for 120s,
-    while *this* shape -- the group held by a module global, only the default group
-    destroyed -- leaked it and died in 4.66s with ``sys.exit`` against 3.02s with
-    ``os._exit``. So the bound below passes either way on this machine today, and
-    the ``hard-exit`` marker is what pins the exit actually being taken hard. The
-    bound is the backstop for the machine where it joins.
+    the timing one does not: whether finalization joins that thread or leaks it is
+    not deterministic, and the figures are in
+    `fme.core.distributed.shutdown.PendingStop.require_hard_exit`, which states them
+    once. This test's shape is the one that leaked, so the bound below passes either
+    way on this machine today and the ``hard-exit`` marker is what pins the exit
+    actually being taken hard. The bound is the backstop for the machine where it
+    joins.
     """
     child = _launch(
         f"""
@@ -536,6 +538,96 @@ def test_a_rank_that_gives_up_with_no_local_event_exits(tmp_path):
     # and with no local event it was never bounded by a budget, so it claims no
     # bound of its own
     assert "fme-stop:agreement-bound" not in stderr, stderr
+    assert (tmp_path / "callback.0").exists(), "the restart checkpoint was lost"
+
+
+@pytest.mark.slow
+@pytest.mark.medium_duration
+@pytest.mark.serial
+def test_a_raising_rank_that_abandons_an_exchange_dies_promptly_with_its_traceback(
+    tmp_path,
+):
+    """The exception rider owes the same hard exit as every other abandonment path.
+
+    Rank 0 raises inside the loop body with no signal anywhere, so its exit exchange
+    is the one its peers cannot answer -- rank 1 has parked before reaching that
+    boundary -- and the exchange is abandoned. Before this the branch returned with
+    ``exit_process=False`` to keep the traceback, which left the rank to block in
+    ``~ProcessGroupGloo()`` during finalization for as long as rank 1 lived and be
+    SIGKILLed there: the launcher would read a signal death rather than a failure,
+    and the rank would hold its GPU allocation throughout.
+
+    So all three claims are asserted together, because dropping any one of them is
+    how the fix regresses: the traceback still reaches stderr, the exit code is the
+    exception's, and the death is bounded by rank 0's own exchange rather than by
+    rank 1's demise -- rank 1 keeps its socket open until the launcher has seen rank
+    0 go, so the bound is genuinely rank 0's.
+    """
+    child = _launch(
+        """
+        import os, sys, time
+        from pathlib import Path
+
+        import torch
+        import torch.distributed
+
+        from fme.core.distributed import (
+            Distributed,
+            add_post_shutdown_callback,
+            cooperative_stop,
+        )
+
+        OUT = Path(sys.argv[1])
+        rank = int(os.environ["RANK"])
+        (OUT / f"pid.{rank}").write_text(str(os.getpid()))
+        leave_at = 2
+        add_post_shutdown_callback(
+            lambda: (OUT / f"callback.{rank}").write_text("ran")
+        )
+        with Distributed.context():
+            with cooperative_stop(budget=1.0) as stop:
+                for index in range(1000):
+                    torch.distributed.all_reduce(torch.ones(1))
+                    time.sleep(0.02)
+                    if index == leave_at:
+                        if rank == 1:
+                            # never reaches the boundary, and keeps its socket open
+                            # until rank 0 is gone, so rank 0's death is rank 0's
+                            give_up_at = time.monotonic() + 20.0
+                            while not (OUT / "dead").exists():
+                                if time.monotonic() > give_up_at:
+                                    break
+                                time.sleep(0.02)
+                            os._exit(0)
+                        (OUT / "raised").write_text(str(time.monotonic()))
+                        raise ValueError("a NaN in the loss")
+                    if stop.agreed(index):
+                        break
+        """,
+        tmp_path,
+    )
+    try:
+        _wait_for_file(tmp_path / "pid.0", child)
+        _wait_for_file(tmp_path / "raised", child)
+        died = _wait_for_death(int((tmp_path / "pid.0").read_text()), tmp_path)
+    except BaseException:
+        (tmp_path / "dead").write_text("go")
+        os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+        raise
+    stderr = _finish(child, tmp_path)
+
+    raised = float((tmp_path / "raised").read_text())
+    # the floored exit exchange plus the teardown and the callbacks, with slack, and
+    # measured against a peer that was still alive
+    assert died - raised < _MIN_DEADLINE + 4.0, died - raised
+    # 1, not `128 + SIGTERM`: no signal was sent, and an exception is a failure
+    assert _marker_fields("hard-exit", stderr, "code") == ["1"], stderr
+    # the only reason the branch used to decline to exit at all
+    assert "Traceback (most recent call last)" in stderr, stderr
+    assert "ValueError: a NaN in the loss" in stderr, stderr
+    # the index rank 0 would have reached, which is the one its peers contribute
+    assert _marker_fields("agreement-abandoned", stderr, "batch") == ["2"], stderr
+    assert len(_marker_fields("shutdown-returned", stderr, "elapsed")) == 1, stderr
     assert (tmp_path / "callback.0").exists(), "the restart checkpoint was lost"
 
 

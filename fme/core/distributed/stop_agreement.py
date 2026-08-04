@@ -33,11 +33,10 @@ The design's bound after an abandoned exchange is the process exiting, not the
 group coming back.
 
 That destructor also runs during ``Py_Finalize``, so "the process exiting" has to
-mean ``os._exit`` and not ``sys.exit``: measured on torch 2.7.1 with a peer parked
-for 120s, a rank that abandoned an exchange and then called ``sys.exit`` died after
-119.3s, when the peer's socket closed, against 0.05s for ``os._exit``. The caller
-that abandons an exchange is the one that owes that hard exit; see
-`fme.core.distributed.cooperative_stop`.
+mean ``os._exit`` and not ``sys.exit``. The measurement behind that is stated once,
+in `fme.core.distributed.shutdown.PendingStop.require_hard_exit`, and referred to
+from here rather than repeated. The caller that abandons an exchange is the one that
+owes the hard exit; see `fme.core.distributed.cooperative_stop`.
 """
 
 import abc
@@ -393,10 +392,11 @@ def build_stop_agreement(world_size: int) -> GlooStopAgreement:
         world_size: Ranks in the group. Not ``ranks``, which is ``new_group``'s
             own parameter for a *list* of ranks; this group spans them all. Checked
             against the group rather than trusted, because it is only ever read back
-            out as the ``world=`` field of an evidence line -- a reader counts
-            ``stop-agreed`` lines against it to find the rank that never reached the
-            boundary, so a value disagreeing with the group would make the absence
-            unreadable, and nothing else would ever notice.
+            out as the ``world=`` field of a ``stop-agreed`` evidence line, which a
+            reader counts lines against -- see the event vocabulary in
+            `fme.core.distributed.shutdown` for that recipe. A value disagreeing with
+            the group would make the missing rank unreadable, and nothing else would
+            ever notice.
 
     Raises:
         ValueError: If ``world_size`` disagrees with the group. A caller bug rather

@@ -101,12 +101,12 @@ def test_a_hard_exit_is_taken_after_the_callbacks_and_not_before(monkeypatch, ca
 
     A caller that has left a gloo group behind asks for `os._exit`, because
     interpreter finalization joins the worker thread still holding the abandoned
-    operation and so waits for the wedged peer to die -- measured at 119.3s against
-    a peer parked for 120s, against 0.05s here. What makes that safe, where the
-    watchdog's hard exit is the fault this module exists to avoid, is *where* it
-    happens: after `shutdown` destroyed the communicators and after the callbacks
-    ran, so nothing is dropped and nothing is skipped. That ordering is the whole
-    claim, so it is what this asserts.
+    operation and so waits for the wedged peer to die; `PendingStop.require_hard_exit`
+    carries the measurement. What makes that safe, where the watchdog's hard exit is
+    the fault this module exists to avoid, is *where* it happens: after `shutdown`
+    destroyed the communicators and after the callbacks ran, so nothing is dropped
+    and nothing is skipped. That ordering is the whole claim, so it is what this
+    asserts.
     """
     events: list[str] = []
     exited: list[int] = []
@@ -174,6 +174,64 @@ def test_a_system_exit_from_a_pending_deferral_takes_the_exit_path(monkeypatch, 
     marker = _marker_lines("hard-exit", capfd.readouterr().err)
     assert len(marker) == 1
     assert f"code={128 + signal.SIGTERM}" in marker[0]
+
+
+def test_a_raising_deferral_that_asked_for_a_hard_exit_takes_one(monkeypatch, capfd):
+    """The exception path owes the hard exit too, and owes the traceback with it.
+
+    `exit_process=False` exists to leave a propagating exception's traceback intact,
+    but on a scope that abandoned a gloo group it also left the rank blocking in
+    finalization until its wedged peer died -- so torchrun SIGKILLed it and the
+    launcher read a signal death rather than a failure. The branch now prints the
+    traceback itself and exits hard with the exception's code, which is the code the
+    propagating exception would have produced anyway.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        # the stubbed `os._exit` falls through to `sys.exit`, which from a `finally`
+        # replaces the original exception -- so the `SystemExit` here is the evidence
+        # that the hard path was taken rather than the returning one
+        with pytest.raises(SystemExit) as excinfo:
+            with defer_termination(budget=1.0) as pending:
+                pending.require_hard_exit()
+                raise ValueError("a NaN in the loss")
+
+    assert exited == [1], "the rank was left to die in interpreter finalization"
+    assert excinfo.value.code == 1
+    assert events == ["shutdown", "callback"], "the hard exit skipped work"
+    stderr = capfd.readouterr().err
+    # the only thing `exit_process=False` was protecting
+    assert "ValueError: a NaN in the loss" in stderr, stderr
+    assert "code=1" in _marker_lines("hard-exit", stderr)[0]
+
+
+def test_a_system_exit_after_an_abandonment_hard_exits_with_the_callers_code(
+    monkeypatch, capfd
+):
+    """A caller's own `sys.exit` after an abandonment gets the hard exit and its code.
+
+    `defer_termination` is documented, exported behaviour, so this branch is reachable
+    by an adopter even though the trainer never takes it: a scope that abandoned an
+    exchange and then left by `sys.exit`, with no signal and no peer stop recorded,
+    previously got neither the hard exit nor an exit code of its own.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=1.0) as pending:
+                pending.require_hard_exit()
+                raise SystemExit(17)  # nothing recorded: not a signal, not a peer
+
+    assert events == ["shutdown"]
+    assert exited == [17], "the caller's own exit code was replaced or not honoured"
+    assert "code=17" in _marker_lines("hard-exit", capfd.readouterr().err)[0]
 
 
 def test_a_marker_field_cannot_break_the_key_value_contract(capfd):

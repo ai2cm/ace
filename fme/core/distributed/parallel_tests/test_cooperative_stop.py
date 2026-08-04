@@ -90,7 +90,14 @@ def _require_a_short_bound() -> None:
     if not timeout_contract_verified():
         pytest.skip(
             f"torch {torch.__version__} has no verified operation-timeout bound, "
-            "so a rank giving up waits the default group's own timeout"
+            "so a rank giving up waits the default group's own timeout. This skip "
+            "removes CI's only coverage of that bound -- nothing else asserts that a "
+            "rank leaving stops waiting for a wedged peer, or that destroying an "
+            "abandoned group returns. If you are here after bumping torch in "
+            "constraints.txt, the action is to re-read `work.wait`'s raise on "
+            "expiry, `kNoTimeout` in `Work.hpp` and the pybind chrono caster's "
+            "millisecond truncation on the new release, then add it to "
+            "`_VERIFIED_TORCH` in fme/core/distributed/stop_agreement.py."
         )
 
 
@@ -131,14 +138,19 @@ def test_every_rank_leaves_the_loop_at_the_same_index():
     notice_at = 5
     with _throwaway_agreement() as agreement:
         pending = PendingStop(budget=10.0)
-        with _cooperative_scope(pending, agreement) as stop:
-            completed = 0
-            for index in range(20):
-                if dist.rank == dist.world_size - 1 and index == notice_at:
-                    pending.request(15)  # SIGTERM, without sending one
-                completed += 1
-                if stop.agreed(index):
-                    break
+        try:
+            with _cooperative_scope(pending, agreement) as stop:
+                completed = 0
+                for index in range(20):
+                    if dist.rank == dist.world_size - 1 and index == notice_at:
+                        pending.request(15)  # SIGTERM, without sending one
+                    completed += 1
+                    if stop.agreed(index):
+                        break
+        finally:
+            # `request` arms a 20s overrun timer; leaving it running writes
+            # `deferral-overrun` into whatever a later test is capturing
+            pending.close()
 
         assert completed == notice_at + 1
         # and the ranks agree on that, rather than each being locally consistent
@@ -313,22 +325,28 @@ def test_a_peer_exception_between_iterations_stops_every_rank(capfd):
 
     def run() -> None:
         pending = PendingStop(budget=10.0)
-        with _cooperative_scope(pending, agreement) as stop:
-            for index in range(10):
-                # the gradient all-reduce
-                every = torch.ones(1, device=get_device())
-                torch.distributed.all_reduce(every)
-                if index == raise_at:
-                    # and the every-hundredth-batch metrics reduction, on the very
-                    # iteration the raise happens, so the raise really is after
-                    # *both* of the body's collectives
-                    gated = torch.ones(1, device=get_device())
-                    torch.distributed.all_reduce(gated)
-                    if dist.rank == raiser:
-                        raise _Boom("something went wrong between iterations")
-                if stop.agreed(index):
-                    break
-        pending.close()
+        # in a `finally`, because every rank leaves this by raising, so the call was
+        # unreachable. Nothing arms a timer on this path today -- `request` is never
+        # called -- but a test that only cancels on the path it does not take is one
+        # edit away from leaking one into a later test's captured stderr.
+        try:
+            with _cooperative_scope(pending, agreement) as stop:
+                for index in range(10):
+                    # the gradient all-reduce
+                    every = torch.ones(1, device=get_device())
+                    torch.distributed.all_reduce(every)
+                    if index == raise_at:
+                        # and the every-hundredth-batch metrics reduction, on the
+                        # very iteration the raise happens, so the raise really is
+                        # after *both* of the body's collectives
+                        gated = torch.ones(1, device=get_device())
+                        torch.distributed.all_reduce(gated)
+                        if dist.rank == raiser:
+                            raise _Boom("something went wrong between iterations")
+                    if stop.agreed(index):
+                        break
+        finally:
+            pending.close()
 
     with _throwaway_agreement() as agreement:
         expected = _Boom if dist.rank == raiser else PeerStopRequested
@@ -392,9 +410,8 @@ def test_unequal_loop_lengths_raise_on_every_rank_at_loop_entry():
     paths, so this is insurance against that construction changing. If it did, the
     short rank would leave the loop and exchange nothing while the long rank sat
     alone in one more exchange with the default group's own timeout on it -- and the
-    ±index
-    diagnostic would be blind to it, comparing values contributed to an exchange
-    only one rank is in.
+    ±index diagnostic would be blind to it, comparing values contributed to an
+    exchange only one rank is in.
 
     Every rank reads the same reduced values, so every rank raises. That is what
     makes this a symmetric precondition failure rather than one rank unilaterally

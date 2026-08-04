@@ -681,7 +681,14 @@ class Trainer:
             # installed.
             self._epochs_trained += 1
             self._current_epoch_num_batches_seen = 0
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
+        # `_epochs_trained` is a count of *complete* epochs, so on a stop it still
+        # names the previous one and writing there would overwrite a completed
+        # epoch's diagnostics with a truncated epoch's. The subdirectory has to name
+        # the epoch the data belongs to, which on a stop is the one that was
+        # truncated -- the next. A resume re-runs that epoch and replaces these with
+        # the complete version, which is the outcome to want.
+        completed_or_truncated_epoch = self._epochs_trained + (1 if stopped else 0)
+        aggregator.flush_diagnostics(subdir=f"epoch_{completed_or_truncated_epoch:04d}")
         return aggregator.get_summary(label="train")
 
     def _save_restart_checkpoints(self):

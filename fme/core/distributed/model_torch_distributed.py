@@ -36,7 +36,7 @@ from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
 from .stop_agreement import SoloStopAgreement, StopAgreement, new_stop_agreement
-from .torch_distributed import _gather_irregular, _rank_metadata_from_env
+from .torch_distributed import _abort_group, _gather_irregular, _rank_metadata_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -313,8 +313,7 @@ class ModelTorchDistributed(DistributedBackend):
         # the **default** group, captured at construction: gloo's `abort()` is an
         # empty default, so this reaches the NCCL communicators and nothing else,
         # and the agreement group is meant to be kept rather than aborted
-        if self._default_group is not None:
-            self._default_group.abort()
+        _abort_group(self._default_group)
 
     def gather(
         self,

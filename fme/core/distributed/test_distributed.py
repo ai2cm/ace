@@ -4,6 +4,7 @@ import subprocess
 import sys
 import textwrap
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import torch
@@ -403,6 +404,42 @@ def test_the_agreement_object_is_created_with_the_backend_on_every_backend():
     """
     backend = NonDistributed()
     assert backend.stop_agreement() is backend.stop_agreement()
+
+
+def test_an_unavailable_abort_is_reported_rather_than_swallowed(capfd):
+    """An unavailable abort and a failed abort must not read the same in a log.
+
+    `ProcessGroup.abort()` is not in every supported release -- `pyproject.toml`
+    declares ``torch>=2.4.0`` while `constraints.txt` pins ``torch==2.8.0`` -- and
+    the only caller is the watchdog, whose ``except BaseException`` would swallow an
+    `AttributeError` exactly as it swallows an abort that was attempted and failed.
+    A reader of a rank that hard-exited would then have no way to tell which
+    happened.
+    """
+
+    class _WithAbort:
+        def __init__(self) -> None:
+            self.aborted = 0
+
+        def abort(self) -> None:
+            self.aborted += 1
+
+    class _WithoutAbort:
+        pass
+
+    available = _WithAbort()
+    torch_distributed._abort_group(cast(Any, available))
+    assert available.aborted == 1
+    assert "fme-stop:watchdog-abort-unavailable" not in capfd.readouterr().err
+
+    torch_distributed._abort_group(cast(Any, _WithoutAbort()))
+    marker = capfd.readouterr().err
+    assert "fme-stop:watchdog-abort-unavailable" in marker, marker
+    assert f"torch={torch.__version__}" in marker, marker
+
+    # and no group at all is neither an abort nor a missing one
+    torch_distributed._abort_group(None)
+    assert "fme-stop:watchdog-abort-unavailable" not in capfd.readouterr().err
 
 
 def test_dataloader_worker_without_launcher_env_raises(monkeypatch):

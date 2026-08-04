@@ -755,16 +755,14 @@ def test_resume_after_interrupted_training_during_epoch(
         n_checkpointed_batches:
     ]
     assert stepper.train_batches_seen == expected_batches
-    # No batch is trained twice, on either path, and that is the improvement
-    # rather than an incidental number moving. The checkpoint is written at a
-    # boundary this rank completed, so the batches it resumes from are exactly the
-    # ones it had not reached -- where before a signal landing inside
-    # `train_on_batch` for batch k+1 recorded "k batches seen" while the
-    # parameters might already carry k+1's update, so k+1 was applied twice.
-    repeated_batches = get_batch_indices(trainer.train_data.loader)[
-        n_checkpointed_batches:n_trained_batches
-    ]
-    assert repeated_batches == []
+    # No batch is trained twice, on either path, and that is the improvement rather
+    # than an incidental number moving. The checkpoint is written at a boundary this
+    # rank completed, so the batches it resumes from are exactly the ones it had not
+    # reached -- where before a signal landing inside `train_on_batch` for batch k+1
+    # recorded "k batches seen" while the parameters might already carry k+1's
+    # update, so k+1 was applied twice. This `isdisjoint` is the whole check: an
+    # earlier version also asserted an empty slice of the loader above it, which was
+    # empty by construction and so could never have failed.
     assert set(stepper.train_batches_seen).isdisjoint(pre_interrupt_batches)
 
 
@@ -798,6 +796,12 @@ def test_a_stop_without_a_handler_does_not_record_a_complete_epoch(tmp_path: str
     `_epochs_trained`, so the resume point skips the rest of the epoch's data
     silently -- worse than the stop failing.
 
+    The truncated epoch's diagnostics are checked in the same place, because they
+    are the other half of the same bookkeeping: `_epochs_trained` counts *complete*
+    epochs, so leaving it alone on a stop means it still names the previous one, and
+    writing the truncated epoch's diagnostics under that name would overwrite a
+    completed epoch's.
+
     The seam is stubbed rather than driven by a signal, because the trainer's own
     bookkeeping is what is under test: a real stop needs a wedged peer or a handler,
     and both would take this out of a single-process test.
@@ -809,6 +813,9 @@ def test_a_stop_without_a_handler_does_not_record_a_complete_epoch(tmp_path: str
         max_epochs=1,
         n_train_batches=20,
     )
+    # a third epoch rather than the first, because the collision only shows once a
+    # completed epoch owns the subdirectory the truncated one would write to
+    trainer._epochs_trained = 2
 
     class _StopsAt:
         """The `cooperative_stop` surface `train_one_epoch` uses, and no more."""
@@ -828,13 +835,20 @@ def test_a_stop_without_a_handler_does_not_record_a_complete_epoch(tmp_path: str
             trainer, "_log_first_batch_metrics", return_value=None
         ),
         unittest.mock.patch("fme.core.generics.trainer.cooperative_stop", stops_at),
+        unittest.mock.patch.object(
+            TrainAggregator, "flush_diagnostics", autospec=True
+        ) as flush,
     ):
         trainer.train_one_epoch()
 
     assert trainer.num_batches_seen == stop_at
     # the pair of these is the resume point, and neither may move on a stop
-    assert trainer._epochs_trained == 0, "a truncated epoch was recorded as complete"
+    assert trainer._epochs_trained == 2, "a truncated epoch was recorded as complete"
     assert trainer._current_epoch_num_batches_seen == stop_at
+    # `epoch_0003`, the epoch that was truncated -- not `epoch_0002`, which the
+    # completed second epoch owns. A resume re-runs the third epoch and replaces
+    # these with the complete version.
+    assert flush.call_args.kwargs == {"subdir": "epoch_0003"}
 
 
 def test_a_stop_at_a_just_written_checkpoint_does_not_write_it_again(tmp_path: str):

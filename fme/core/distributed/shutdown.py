@@ -44,6 +44,65 @@ watchdog, which now aborts the local communicator before its hard exit.
 Deciding *when* a deferred stop is acted on is the caller's, not this module's:
 nothing here knows about process groups or collectives, which is what keeps the
 signal handling testable single-rank and in process.
+
+The ``fme-stop:`` event vocabulary
+----------------------------------
+
+**This is the canonical list of every event any module writes**, kept here because
+this module owns `write_marker`; the other modules point at it rather than
+restating it, and adding an event means adding an entry. Each entry gives the
+writing module, what the event means, and what a reader does with it. Every line
+carries ``rank``, ``local_rank``, ``pid``, ``installed_pid``, ``wall`` and
+``mono`` first, in that order, before the fields named below.
+
+``signal-deferred`` -- this module, `handle_termination_signals`
+    A termination signal was recorded rather than acted on. Its presence on *any*
+    rank is what separates a preemption from a hang.
+``signal-ignored`` -- this module, `handle_termination_signals`
+    A further signal arrived while a stop was already pending. Expected on every
+    real preemption: the scheduler signals the container, then torchrun's agent
+    signals every rank again.
+``shutdown-returned`` -- this module, ``terminate``
+    This rank's collective teardown returned, in ``elapsed``, rather than riding
+    to the scheduler's SIGKILL inside it.
+``hard-exit`` -- this module, ``terminate``
+    The process is ending in ``os._exit`` with ``code``. That code is what a
+    reader has instead of an exit status, no ``SystemExit`` being raised here.
+``deferral-overrun`` -- this module, `_warn_after`
+    A stop stayed pending for twice the budget without reaching a stopping point.
+    This rank may be SIGKILLed with its communicators open, so the node's GPUs may
+    need resetting.
+``watchdog-abort`` -- this module, `_hard_exit_after`
+    The collective teardown overran ``timeout`` and the local communicator is
+    being aborted, so this rank's teardown did not return.
+``watchdog-abort-unavailable`` -- `fme.core.distributed.torch_distributed`
+    The installed torch has no ``ProcessGroup.abort()``, so the watchdog fell
+    straight through to its hard exit. It distinguishes that from an abort that
+    was attempted and failed, which the watchdog would otherwise swallow
+    identically.
+``agreement-bound`` -- `fme.core.distributed.cooperative_stop`
+    Which deadline this rank applied, in ``bound``. ``budget`` is the design's
+    short bound; ``group-timeout`` means it was unavailable on this torch release,
+    so a give-up waits the default group's own timeout -- see
+    `fme.core.distributed.stop_agreement.timeout_contract_verified`.
+``agreement-expired`` -- `fme.core.distributed.cooperative_stop`
+    This rank reached an exchange with its budget already spent, so the floor
+    applied instead. It arrived late, normally out of a checkpoint write.
+``stop-agreed`` -- `fme.core.distributed.cooperative_stop`
+    One exchange completed, carrying ``batch``, ``world`` and ``reason``. **The
+    reader recipe:** count these lines against ``world=`` -- the rank with no line
+    is the one that never reached the boundary.
+``index-mismatch`` -- `fme.core.distributed.cooperative_stop`
+    Ranks contributed different iteration indices, ``min`` and ``max``. Diagnostic
+    only, written once per loop: the loops have desynchronised.
+``agreement-timeout`` -- `fme.core.distributed.cooperative_stop`
+    This rank gave up waiting for a peer that never reached ``batch``. Whether
+    that is a preemption this rank's own signal did not reach or a genuine hang is
+    told by ``signal-deferred`` appearing anywhere in the job's log.
+``agreement-abandoned`` -- `fme.core.distributed.cooperative_stop`
+    The gloo agreement group is held for the life of the process rather than
+    reclaimed. This is the only record of it, and the reason the rank then exits
+    hard.
 """
 
 import contextlib
@@ -54,8 +113,10 @@ import signal
 import sys
 import threading
 import time
+import traceback
 import types
 from collections.abc import Callable, Generator
+from typing import Protocol
 
 from fme.core.device import in_dataloader_worker
 
@@ -111,11 +172,26 @@ _post_shutdown_callbacks: list[Callable[[], None]] = []
 # the right thing everywhere but inside a scope that has a rendezvous of its own.
 _pending_stop: "PendingStop | None" = None
 
+
+class _Terminate(Protocol):
+    """The teardown `handle_termination_signals` publishes.
+
+    A `Protocol` rather than `Callable[..., None]`, which types the positional
+    argument and nothing else: the dispatch in `defer_termination` passes
+    ``exit_process=`` and ``hard=``, and under the looser annotation a misspelled
+    or wrongly-typed keyword there would reach production unchecked.
+    """
+
+    def __call__(
+        self, exit_code: int, *, exit_process: bool = True, hard: bool = False
+    ) -> None: ...
+
+
 # Published by `handle_termination_signals` so that a deferral, which has no
 # access to that function's locals, can run the same teardown the handler would
 # have run. `None` means no handler is installed and there is nothing to tear
 # down -- the state every pytest session is in.
-_terminate: Callable[..., None] | None = None
+_terminate: _Terminate | None = None
 
 # The pid the handler was installed in, so that every marker line can be read
 # against it: a real rank has `pid == installed_pid`, while a fork-started
@@ -354,14 +430,22 @@ class PendingStop:
         """Ask for `os._exit` rather than `sys.exit` once the teardown is done.
 
         For a caller that has left something behind which interpreter finalization
-        cannot dispose of in bounded time. The case this exists for is an abandoned
-        gloo group: ``~ProcessGroupGloo()`` joins the worker thread still holding
-        the abandoned operation, that destructor runs during ``Py_Finalize``, and
-        measured on torch 2.7.1 the wait ends only when the wedged peer's socket
-        closes -- 119.3s against a peer parked for 120s, 24.3s against one parked
-        for 25s, versus 0.05s with `os._exit`. So `sys.exit` hands the rank to
-        torchrun's SIGKILL and the launcher reads a signal death instead of the
-        ``128 + signum`` this module promises.
+        cannot dispose of in bounded time.
+
+        **This is the canonical statement of the measurement the whole hard-exit
+        rule rests on**; every other module and test that needs it refers here
+        rather than restating the figures, so that they cannot drift apart. The case
+        it exists for is an abandoned gloo group: ``~ProcessGroupGloo()`` joins the
+        worker thread still holding the abandoned operation, that destructor runs
+        during ``Py_Finalize``, and measured on torch 2.7.1 the wait ends only when
+        the wedged peer's socket closes -- 119.3s against a peer parked for 120s,
+        24.3s against one parked for 25s, versus 0.05s with `os._exit`. Whether
+        finalization joins that thread or leaks it is not deterministic; the same
+        shape measured through a module global, with only the default group
+        destroyed, leaked it and died in 4.66s under `sys.exit` against 3.02s under
+        `os._exit`. So `sys.exit` can hand the rank to torchrun's SIGKILL, and the
+        launcher then reads a signal death instead of the ``128 + signum`` this
+        module promises.
 
         This does not weaken the rule that a hard exit is the fault to avoid. The
         watchdog's `os._exit` is dangerous because it can drop live communicators
@@ -389,6 +473,40 @@ class PendingStop:
         if overrun is not None:
             # `Timer.cancel` only sets an event, so it cannot raise
             overrun.cancel()
+
+
+def _system_exit_code(code: object) -> int:
+    """The integer ``os._exit`` needs, from a ``SystemExit.code`` that may be anything.
+
+    ``SystemExit.code`` is ``int | str | None`` by CPython's own contract -- the
+    isinstance narrowing here is of a stdlib union this repository does not own, so
+    there is no type to refactor. ``None`` is a clean exit and a string is a message
+    the interpreter would have printed before exiting 1, which is what the hard exit
+    reports instead.
+    """
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return _EXCEPTION_EXIT_CODE
+
+
+def _print_pending_traceback() -> None:
+    """Print the propagating exception to stderr, because nothing else will.
+
+    Reached only where the dispatch below is about to hard-exit while an exception
+    is unwinding: ``os._exit`` runs inside the ``finally`` that is unwinding it, so
+    the exception never reaches the interpreter's own handler and its traceback
+    would be lost. Keeping that traceback is the only reason the ordinary exception
+    path declines to exit at all, so the hard path prints it here rather than
+    trading it away.
+    """
+    try:
+        traceback.print_exc()
+        sys.stderr.flush()
+    except BaseException:
+        # evidence about a failure may not become a second failure during one
+        pass
 
 
 @contextlib.contextmanager
@@ -440,9 +558,12 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
     _pending_stop = pending
     raising = False
     exiting = False
+    # only meaningful once `exiting`; the caller's own code, so that a hard exit
+    # reports what its `sys.exit` asked for rather than a substitute
+    caller_exit_code = _EXCEPTION_EXIT_CODE
     try:
         yield pending
-    except SystemExit:
+    except SystemExit as err:
         # Not `raising`. A caller leaving by `sys.exit` is asking for the very exit
         # the dispatch below performs rather than surfacing a crash, and there is no
         # traceback to protect -- so it takes the exit path, which is the only one
@@ -450,6 +571,7 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
         # when the loop-entry exchange is given up on, since the loop body must not
         # run against peers that are gone.
         exiting = True
+        caller_exit_code = _system_exit_code(err.code)
         raise
     except BaseException:
         raising = True
@@ -482,11 +604,36 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
             # reaches only the watchdog's hard-exit backstop, so it does not restore
             # that distinction where anything outside the process can read it.
             # Masking a crash as a graceful stop would hide the crash, which is the
-            # worse of the two.
-            _terminate(
-                pending.exit_code if pending.requested else _EXCEPTION_EXIT_CODE,
-                exit_process=False,
-            )
+            # worse of the two. `CooperativeStop._local_reason` gives a recorded
+            # signal the opposite precedence, for the reason set out there, and the
+            # two are consistent: the *reason* peers read is the signal, because the
+            # scheduler signalled the whole group, while the *exit code* this rank
+            # reports is the exception's, because its traceback is the new
+            # information.
+            if pending.hard_exit:
+                # Returning here would leave the rank in interpreter finalization
+                # until the wedged peer dies, and torchrun would SIGKILL it inside
+                # the 30s window -- so the launcher would read a signal death, which
+                # is the very loss the paragraph above calls unacceptable in the
+                # other direction. It would also hold this rank's GPU allocation for
+                # that whole window with its backend already destroyed. The
+                # traceback, which is the only thing `exit_process=False` was
+                # protecting, is printed here instead; the exit code is the
+                # exception's, which is what the propagating exception would have
+                # produced anyway.
+                #
+                # A hard exit is safe *here specifically*, where the watchdog's is
+                # not: `_terminate` takes it only after `shutdown` destroyed the
+                # communicators and after the callbacks ran, so no communicator is
+                # dropped and no work is skipped. There is nothing left for
+                # finalization to do but block.
+                _print_pending_traceback()
+                _terminate(_EXCEPTION_EXIT_CODE, hard=True)
+            else:
+                _terminate(
+                    pending.exit_code if pending.requested else _EXCEPTION_EXIT_CODE,
+                    exit_process=False,
+                )
         elif pending.requested:
             # A recorded signal takes precedence over a peer's deliberately: a
             # preemption is not a failure, and `128 + signum` is what the scheduler
@@ -497,8 +644,14 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
         elif exiting:
             # A `sys.exit` of the caller's own, with no stop recorded anywhere: tear
             # the backend down and run the callbacks, then let the caller's own code
-            # reach the interpreter, exactly as the exception path does.
-            _terminate(_EXCEPTION_EXIT_CODE, exit_process=False)
+            # reach the interpreter, exactly as the exception path does -- unless a
+            # hard exit was asked for, in which case returning would leave the rank
+            # in finalization until a wedged peer dies. The caller's own exit code is
+            # carried through, since that is what its `sys.exit` asked for.
+            if pending.hard_exit:
+                _terminate(caller_exit_code, hard=True)
+            else:
+                _terminate(_EXCEPTION_EXIT_CODE, exit_process=False)
 
 
 class _Deadlines:
@@ -568,6 +721,11 @@ def _hard_exit_after(
     ``os._exit`` is unverified, and the abort may fault the fabric sooner rather
     than later, so ``os._exit`` remains as a named backstop and this is reversible
     on the first GPU evidence.
+
+    An abort that is unavailable rather than merely unsuccessful is reported
+    separately, because the ``except BaseException`` below cannot tell the two
+    apart: see ``watchdog-abort-unavailable`` in the event vocabulary and
+    `fme.core.distributed.torch_distributed`, which owns the check.
     """
 
     def give_up() -> None:
