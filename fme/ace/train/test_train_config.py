@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -91,9 +92,15 @@ def _make_train_config(
     inference: InlineInferenceConfig | list[InlineInferenceConfig],
     max_epochs: int = 5,
     validation: InlineValidationConfig | list[InlineValidationConfig] | None = None,
+    evaluate_before_training: bool | None = None,
 ) -> TrainConfig:
     if validation is None:
         validation = _make_validation_config()
+    # Only forward evaluate_before_training when explicitly requested, so that
+    # tests which do not care about it keep seeing the class default.
+    extra_kwargs: dict[str, Any] = {}
+    if evaluate_before_training is not None:
+        extra_kwargs["evaluate_before_training"] = evaluate_before_training
     return TrainConfig(
         experiment_dir=str(tmp_path),
         stepper=_make_stepper_config(),
@@ -107,6 +114,7 @@ def _make_train_config(
         max_epochs=max_epochs,
         save_checkpoint=False,
         inference=inference,
+        **extra_kwargs,
     )
 
 
@@ -247,6 +255,87 @@ def test_get_inference_epoch_sets_different_weighted_epochs_raises(tmp_path):
             ],
             max_epochs=6,
         )
+
+
+def test_epoch_zero_evaluated_regardless_of_max_epochs_parity(tmp_path):
+    # An end-anchored "every other epoch, counting back from the last" request
+    # must still evaluate before training, whether max_epochs is odd or even.
+    odd = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=15,
+        evaluate_before_training=True,
+    )
+    even = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=20,
+        evaluate_before_training=True,
+    )
+    odd_epochs = odd.get_inference_epoch_sets()[0]
+    even_epochs = even.get_inference_epoch_sets()[0]
+    assert 0 in odd_epochs
+    assert 0 in even_epochs
+    assert odd_epochs == {0, 1, 3, 5, 7, 9, 11, 13, 15}
+    assert even_epochs == {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20}
+
+
+def test_evaluate_before_training_does_not_shift_selected_training_epochs(tmp_path):
+    # Asking for a pre-training evaluation adds epoch 0; it must not change
+    # which training epochs the slice picks out.
+    with_epoch_zero = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(step=2))],
+        max_epochs=6,
+        evaluate_before_training=True,
+    )
+    without_epoch_zero = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(step=2))],
+        max_epochs=6,
+        evaluate_before_training=False,
+    )
+    with_zero_epochs = with_epoch_zero.get_inference_epoch_sets()[0]
+    without_zero_epochs = without_epoch_zero.get_inference_epoch_sets()[0]
+    assert with_zero_epochs - {0} == without_zero_epochs
+    assert with_zero_epochs == without_zero_epochs | {0}
+    assert with_zero_epochs == {0, 1, 3, 5}
+    assert without_zero_epochs == {1, 3, 5}
+
+
+def test_epoch_zero_evaluated_even_when_slice_selects_no_training_epochs(tmp_path):
+    # There is no per-entry opt-out of the pre-training evaluation: an entry
+    # whose slice matches no training epoch still runs at epoch 0.
+    config = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=100))],
+        max_epochs=6,
+        evaluate_before_training=True,
+    )
+    assert config.get_inference_epoch_sets() == [{0}]
+
+
+def test_epoch_zero_not_evaluated_without_evaluate_before_training(tmp_path):
+    # Guard on the opposite case: with no pre-training evaluation requested,
+    # epoch 0 must never appear, at either parity of max_epochs.
+    odd = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=15,
+        evaluate_before_training=False,
+    )
+    even = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=20,
+        evaluate_before_training=False,
+    )
+    odd_epochs = odd.get_inference_epoch_sets()[0]
+    even_epochs = even.get_inference_epoch_sets()[0]
+    assert 0 not in odd_epochs
+    assert 0 not in even_epochs
+    assert odd_epochs == {1, 3, 5, 7, 9, 11, 13, 15}
+    assert even_epochs == {2, 4, 6, 8, 10, 12, 14, 16, 18, 20}
 
 
 def test_validation_negative_weight_raises():
