@@ -4,6 +4,7 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 40
+log_train_every_n_batches: 1
 ema:
   decay: 0.999
 inference:

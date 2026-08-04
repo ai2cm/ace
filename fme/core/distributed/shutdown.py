@@ -882,6 +882,12 @@ def handle_termination_signals(
             _run_post_shutdown_callbacks()
         finally:
             phase = _Phase.COMPLETE
+        # Trial-only: separates "the restart write outlasted the launcher's grace
+        # window" from "interpreter finalization blocked afterwards". Absent means
+        # a callback had not returned when the process died.
+        write_marker(
+            "restart-write-returned", elapsed=f"{time.monotonic() - started:.2f}s"
+        )
         if not exit_process:
             return
         if hard:
