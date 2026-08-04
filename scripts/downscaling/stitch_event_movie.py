@@ -234,6 +234,7 @@ def render_event(
     fps: int,
     output_path: Path,
     show_downscaled_track: bool = False,
+    centroid_timestep_lag: int = 1,
 ):
     patches = [load_patch(path, variable, reduction, sample) for _, path in snapshots]
     times = [when for when, _ in snapshots]
@@ -243,7 +244,13 @@ def render_event(
     # crosses the antimeridian (or prime meridian) stays contiguous instead of
     # spanning the whole globe.
     raw_extents = [_edge_extent(p) for p in patches]
+    # Canonicalize into [-180, 180): input data may use the 0-360 netCDF
+    # longitude convention, but cartopy's PlateCarree() imshow transform only
+    # accepts data within +/-180 -- anything further out is silently dropped
+    # (not an error), which is why the data layers can render blank while
+    # coastlines/gridlines (unaffected by this) still show up fine.
     ref_lon = 0.5 * (raw_extents[0][0] + raw_extents[0][1])
+    ref_lon = ((ref_lon + 180.0) % 360.0) - 180.0
     lon_shifts = [
         _unwrap_lon(0.5 * (lon0 + lon1), ref_lon) - 0.5 * (lon0 + lon1)
         for lon0, lon1, _, _ in raw_extents
@@ -348,9 +355,10 @@ def render_event(
             label="Coarse-model track" if show_downscaled_track else None,
         )
         if show_downscaled_track:
+            centroid_end = max(0, i - centroid_timestep_lag + 1)
             ax.plot(
-                downscaled_lon[:i],
-                downscaled_lat[:i],
+                downscaled_lon[:centroid_end],
+                downscaled_lat[:centroid_end],
                 color="magenta",
                 linewidth=1.0,
                 marker="o",
@@ -437,6 +445,13 @@ def parse_args():
         help="Also plot the cyclone track computed from the high-resolution "
         "downscaled PRMSL minimum, alongside the coarse-model track.",
     )
+    parser.add_argument(
+        "--centroid-timestep-lag",
+        type=int,
+        default=1,
+        help="Number of timesteps behind the current frame to show as the most "
+        "recent point on the downscaled centroid track (default: 1).",
+    )
     parser.add_argument("--cmap", default="turbo", help="Colormap (default: turbo).")
     parser.add_argument("--fps", type=int, default=4, help="Frames per second.")
     parser.add_argument(
@@ -488,6 +503,7 @@ def main():
                 fps=args.fps,
                 output_path=output_dir / f"{event_name}_{variable}.{args.format}",
                 show_downscaled_track=args.show_downscaled_track,
+                centroid_timestep_lag=args.centroid_timestep_lag,
             )
 
 
