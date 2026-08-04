@@ -83,3 +83,7 @@ PRETRAIN_DATASETS=(
 # for RS in 0 1; do
 #   run_training "ace-train-config-multi-step-finetuning.yaml" "ace2s-cm4-picontrol-multi-step-finetuning-rs${RS}" --ckpt "${PRETRAIN_DATASETS[$RS]}" "seed=${RS}"
 # done
+
+# Daily control run. 1-step pre-training only; there is no multi-step fine-tuning stage for it.
+# To run a subset of these, comment out the ones you don't want to run.
+run_training "ace-train-config-1-step-pretrain-daily.yaml" "ace2s-cm4-picontrol-daily-1-step-pretrain-rs0"
