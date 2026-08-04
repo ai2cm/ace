@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from . import plotting
 from .plotting import (
     _stitch_data_panels,
     fold_healpix_data,
@@ -110,3 +111,34 @@ def test_plot_paneled_data(shape, img_shape):
     fig = plot_paneled_data(data, diverging=True)
     assert fig.image is not None
     assert np.array_equal(fig.image.size, img_shape)
+
+
+def test_plot_paneled_data_explicit_limits_pass_through(monkeypatch):
+    captured = {}
+
+    def fake_plot_imshow(data, vmin=None, vmax=None, cmap=None, roll_lon=True):
+        captured["vmin"] = vmin
+        captured["vmax"] = vmax
+        return plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap, roll_lon=roll_lon)
+
+    monkeypatch.setattr(plotting, "plot_imshow", fake_plot_imshow)
+    # data contains an extreme outlier that would dominate auto-scaling
+    panel = np.array([[-50.0, 0.5], [0.9, 1.0]])
+    plot_paneled_data([[panel]], diverging=True, vmin=-1.0, vmax=1.0)
+    assert captured["vmin"] == -1.0
+    assert captured["vmax"] == 1.0
+
+
+def test_plot_paneled_data_auto_limits_when_unset(monkeypatch):
+    captured = {}
+
+    def fake_plot_imshow(data, vmin=None, vmax=None, cmap=None, roll_lon=True):
+        captured["vmin"] = vmin
+        captured["vmax"] = vmax
+        return plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap, roll_lon=roll_lon)
+
+    monkeypatch.setattr(plotting, "plot_imshow", fake_plot_imshow)
+    panel = np.array([[0.2, 0.8]])
+    plot_paneled_data([[panel]], diverging=False)
+    assert captured["vmin"] == pytest.approx(0.2)
+    assert captured["vmax"] == pytest.approx(0.8)

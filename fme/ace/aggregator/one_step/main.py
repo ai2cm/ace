@@ -32,6 +32,7 @@ from .build_context import (
 )
 from .map import OneStepMapMetricConfig
 from .reduced import OneStepMeanMetricConfig
+from .skill_map import OneStepSkillMapMetricConfig
 from .snapshot import OneStepSnapshotMetricConfig
 from .spectrum import OneStepSpectrumMetricConfig
 
@@ -41,6 +42,7 @@ OneStepMetricConfig = (
     | OneStepMapMetricConfig
     | OneStepSpectrumMetricConfig
     | OneStepEnsembleMetricConfig
+    | OneStepSkillMapMetricConfig
 )
 
 
@@ -227,6 +229,8 @@ class OneStepAggregatorConfig:
         power_spectrum: Spherical power spectrum metrics.
         snapshot: Snapshot image metrics.
         mean_map: Mean map image metrics.
+        skill_map: Per-grid-cell skill maps (R², RMSE) computed over the sample
+            dimension at the first forecast step.
         ensemble_denorm: Ensemble spread metrics on denormalized data.
         ensemble_norm: Ensemble spread metrics on normalized data.
         per_channel_loss: Whether to accumulate and report per-variable (per-channel)
@@ -252,6 +256,9 @@ class OneStepAggregatorConfig:
     )
     mean_map: OneStepMapMetricConfig = dataclasses.field(
         default_factory=OneStepMapMetricConfig
+    )
+    skill_map: OneStepSkillMapMetricConfig = dataclasses.field(
+        default_factory=OneStepSkillMapMetricConfig
     )
     ensemble_denorm: OneStepEnsembleMetricConfig = dataclasses.field(
         default_factory=lambda: OneStepEnsembleMetricConfig(target="denorm")
@@ -295,6 +302,7 @@ class OneStepAggregatorConfig:
             self.power_spectrum,
             self.snapshot,
             self.mean_map,
+            self.skill_map,
             self.ensemble_denorm,
             self.ensemble_norm,
         ]
