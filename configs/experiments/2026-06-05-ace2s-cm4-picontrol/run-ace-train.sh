@@ -33,6 +33,12 @@ run_training() {
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
 
+  # Extract additional args from config header
+  local extra_args=()
+  while IFS= read -r line; do
+    [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
+  done < "$CONFIG_PATH"
+
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
@@ -43,7 +49,7 @@ run_training() {
     --preemptible \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \
-    --dataset jamesd/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats:/statsdata \
+    "${extra_args[@]}" \
     "${ckpt_arg[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \

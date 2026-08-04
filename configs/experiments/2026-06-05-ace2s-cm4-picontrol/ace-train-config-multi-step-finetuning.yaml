@@ -1,3 +1,4 @@
+# arg: --dataset jamesd/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats:/statsdata
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
