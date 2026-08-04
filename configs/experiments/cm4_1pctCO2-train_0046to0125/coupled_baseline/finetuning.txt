@@ -1,11 +1,35 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
 # Joint stage, resumed from the coupled checkpoint the matching ocean-only row
-# produced. One row per ocean x atmos pairing; each wandb id is filled in from
-# its own ocean-only run before that row is flipped to `train`.
-cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o0a0rs0|ace-samudra-coupled-cm4|FTO_O0A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
-cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|FTO_O0A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
-cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o1a0rs0|ace-samudra-coupled-cm4|FTO_O1A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
-cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o1a2rs0|ace-samudra-coupled-cm4|FTO_O1A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
-cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o2a0rs0|ace-samudra-coupled-cm4|FTO_O2A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
-cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o2a2rs0|ace-samudra-coupled-cm4|FTO_O2A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||30m
+# produced. One row per ocean x atmos pairing, matching
+# pretraining.txt's 9 rows tag-for-tag.
+#
+# Every wandb_id here is a placeholder and MUST stay one until the matching FTO
+# run exists - these ids name the *coupled* (FTO) run, which is a different
+# thing from the component ids in pretraining.txt. Each row needs a DIFFERENT
+# id, so `grep TBD` telling you the file is clean is not the same as the rows
+# being correct; check the tag against the id you paste.
+#
+# Fill a row from its own FTO run's wandb id, then flip that row to `train`.
+# Do not flip a row whose FTO run has not finished: the id would resolve and
+# the job would silently resume from a mid-run checkpoint.
+#
+# NOT YET SUBMITTABLE regardless of the FTO runs: the 2000-iteration LR warmup
+# does not fit this stage's 5 epochs (~1820 iterations, so it ends at 0.91 of
+# the target LR and averages ~0.47). That decision is still open - see
+# 03a-baseline-run-plan.md and 03g-open-decisions.md item 2. The FTO stage is
+# unaffected and can run first either way.
+#
+# results_dataset is deliberately left blank on every row. Blank resolves at
+# submission time via wandb -> Beaker -> jobs[-1].result, which tracks the
+# newest checkpoint; a pinned literal id works once and then silently resumes
+# from a stale epoch. See job_runner/AGENTS.md.
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o0a0rs0|ace-samudra-coupled-cm4|FTO_O0A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o0a1rs0|ace-samudra-coupled-cm4|FTO_O0A1RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o0a2rs0|ace-samudra-coupled-cm4|FTO_O0A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o1a0rs0|ace-samudra-coupled-cm4|FTO_O1A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o1a1rs0|ace-samudra-coupled-cm4|FTO_O1A1RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o1a2rs0|ace-samudra-coupled-cm4|FTO_O1A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o2a0rs0|ace-samudra-coupled-cm4|FTO_O2A0RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o2a1rs0|ace-samudra-coupled-cm4|FTO_O2A1RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h
+cm4_1pctCO2-train_0046to0125-coupled_baseline-ft_fto|o2a2rs0|ace-samudra-coupled-cm4|FTO_O2A2RS0_WANDB_ID_TBD|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0||1h

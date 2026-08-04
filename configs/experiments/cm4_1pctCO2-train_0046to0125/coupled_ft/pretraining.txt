@@ -1,12 +1,26 @@
 group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime
 
-# Single joint stage straight from the fine-tuned uncoupled components — no
-# preceding ocean-only stage — so in the manifest scheme it is a pretraining
+# Single joint stage straight from the fine-tuned uncoupled components - no
+# preceding ocean-only stage - so in the manifest scheme it is a pretraining
 # row. Same pairings, tags, checkpoint type and resourcing as the two-stage
-# lineage; expect one or two of these to be submitted, not all six.
-cm4_1pctCO2-train_0046to0125-coupled_ft|o0a0rs0|ace-samudra-cm4|OCEAN_RS0_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
-cm4_1pctCO2-train_0046to0125-coupled_ft|o0a2rs0|ace-samudra-cm4|OCEAN_RS0_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
-cm4_1pctCO2-train_0046to0125-coupled_ft|o1a0rs0|ace-samudra-cm4|OCEAN_RS1_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
-cm4_1pctCO2-train_0046to0125-coupled_ft|o1a2rs0|ace-samudra-cm4|OCEAN_RS1_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
-cm4_1pctCO2-train_0046to0125-coupled_ft|o2a0rs0|ace-samudra-cm4|OCEAN_RS2_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
-cm4_1pctCO2-train_0046to0125-coupled_ft|o2a2rs0|ace-samudra-cm4|OCEAN_RS2_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|30m
+# lineage. This variant is a recipe probe: expect one or two of these to be
+# submitted, not all nine.
+#
+# Status column, component-run table, and the seed->id derivation are all
+# identical to coupled_baseline/pretraining.txt - see that file's header for
+# the full detail, including why the atmos rs1 rows are `pretraining` rather
+# than `skip` (its FT is still running, and its wandb id already resolves, so
+# a premature flip would silently couple from an unfinished fine-tune).
+#
+# Ready to submit (`skip`): the 4 pairings over ocean rs0/rs1 x atmos rs0/rs2.
+# Gated (`pretraining`): anything involving ocean rs2 (FT not yet submitted)
+# or atmos rs1 (FT at 16 of 25 epochs as of 2026-08-03).
+cm4_1pctCO2-train_0046to0125-coupled_ft|o0a0rs0|ace-samudra-cm4|xalddsui|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o0a1rs0|ace-samudra-cm4|xalddsui|best_inference_ckpt|ace2-cm4-atmos-noLSM|o7o6e32x|best_inference_ckpt|pretraining|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o0a2rs0|ace-samudra-cm4|xalddsui|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o1a0rs0|ace-samudra-cm4|nu9sqwp6|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o1a1rs0|ace-samudra-cm4|nu9sqwp6|best_inference_ckpt|ace2-cm4-atmos-noLSM|o7o6e32x|best_inference_ckpt|pretraining|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o1a2rs0|ace-samudra-cm4|nu9sqwp6|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|train|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o2a0rs0|ace-samudra-cm4|OCEAN_RS2_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|pretraining|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o2a1rs0|ace-samudra-cm4|OCEAN_RS2_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|o7o6e32x|best_inference_ckpt|pretraining|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
+cm4_1pctCO2-train_0046to0125-coupled_ft|o2a2rs0|ace-samudra-cm4|OCEAN_RS2_WANDB_ID_TBD|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|pretraining|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
