@@ -2,6 +2,9 @@ coupled_config_path: configs/E3SMv3-piControl-100yr-coupled.yaml
 coupled_ocean_zarr: /climate-default/2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
 coupled_atmosphere_zarr: /climate-default/2026-07-17-E3SMv3-piControl-105yr-coupled-atmosphere.zarr
 time:
-  timestamp: "0425-01-03T12:00:00"
+  timestamp: 
+    - "0425-01-03T12:00:00"
+    - "0426-01-03T12:00:00"
+    - "0427-01-03T12:00:00"
 output_directory: /climate-default/home/elynn/fme-dataset/v20260717-E3SMv3-piControl-105yr-coupled-IC
 output_prefix: "0151-01-03"

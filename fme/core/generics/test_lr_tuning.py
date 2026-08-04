@@ -1,7 +1,6 @@
 """Tests for run_lr_tuning_trial and LRTuningConfig."""
 
 import copy
-import itertools
 import unittest.mock
 from typing import Any
 
@@ -116,15 +115,11 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
 
 
 def _build_optimization(modules: torch.nn.ModuleList) -> Optimization:
-    return Optimization(
-        parameters=itertools.chain(*[m.parameters() for m in modules]),
+    return OptimizationConfig(
         optimizer_type="Adam",
         lr=0.01,
-        max_epochs=10,
         scheduler=SchedulerConfig(),
-        enable_automatic_mixed_precision=False,
-        kwargs={},
-    )
+    ).build(modules, max_epochs=10)
 
 
 def _make_copy_ema(ema: EMATracker):

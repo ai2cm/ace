@@ -1,4 +1,5 @@
 import os
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -223,6 +224,58 @@ def test_predictor_runs_seam_crossing(tmp_path, cls):
     outputs = generation_model.generate_on_batch_no_target(batch, n_samples=2)
     for value in outputs.values():
         assert value.shape[-2:] == fine_shape
+
+
+def _mock_model_and_data(model_coarse_shape, data_shape):
+    """Mock a built model and GriddedData for the shape check in
+    _get_generation_model, avoiding a real model or dataset build.
+
+    The lower-level check is covered directly in test_composite.py; these tests
+    verify the predict entrypoints wire the shapes into that check.
+    """
+    model = MagicMock()
+    model.coarse_shape = model_coarse_shape
+    # with_rolled_lon is a no-op here; return the same model.
+    model.with_rolled_lon.return_value = model
+    data = MagicMock()
+    data.shape = data_shape
+    return model, data
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_predictor_raises_when_domain_too_small(tmp_path, cls):
+    """The predict entrypoints refuse a region smaller than the model patch."""
+    # data 2x2 coarse is smaller than the (4, 4) model.
+    model, data = _mock_model_and_data((4, 4), (2, 2))
+    kwargs = dict(data=data, model=model, experiment_dir=str(tmp_path), n_samples=2)
+    downscaler = (
+        cls(event_name="evt", **kwargs)
+        if cls is predict.EventDownscaler
+        else cls(**kwargs)
+    )
+    with pytest.raises(ValueError, match="smaller spatial extent"):
+        downscaler._get_generation_model()
+
+
+@pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
+def test_predictor_raises_when_larger_without_patching(tmp_path, cls):
+    """A region larger than the model patch requires patch prediction."""
+    # data 4x8 coarse is larger than the (4, 4) model in lon.
+    model, data = _mock_model_and_data((4, 4), (4, 8))
+    kwargs = dict(
+        data=data,
+        model=model,
+        experiment_dir=str(tmp_path),
+        n_samples=2,
+        patch=PatchPredictionConfig(),  # no patch prediction configured
+    )
+    downscaler = (
+        cls(event_name="evt", **kwargs)
+        if cls is predict.EventDownscaler
+        else cls(**kwargs)
+    )
+    with pytest.raises(ValueError, match="requires patch prediction"):
+        downscaler._get_generation_model()
 
 
 @pytest.mark.medium_duration

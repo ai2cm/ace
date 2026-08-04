@@ -15,8 +15,12 @@ DIR = os.path.abspath(os.path.dirname(__file__))
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 
 
-def test_zonally_periodic_upsample_matches_bilinear_shape():
-    x = torch.randn(2, 3, 8, 16)
+@pytest.mark.parametrize(
+    "img_shape",
+    [(8, 16), (9, 18), (180, 360)],
+)
+def test_zonally_periodic_upsample_matches_bilinear_shape(img_shape):
+    x = torch.randn(2, 3, *img_shape)
     periodic = ZonallyPeriodicBilinearUpsample()(x)
     plain = BilinearUpsample()(x)
     assert periodic.shape == plain.shape
@@ -113,9 +117,9 @@ def test_samudra_normalization(norm):
 
     # Check output shape
     expected_shape = (batch_size, output_channels, height, width)
-    assert (
-        output.shape == expected_shape
-    ), f"Expected output shape {expected_shape}, but got {output.shape}"
+    assert output.shape == expected_shape, (
+        f"Expected output shape {expected_shape}, but got {output.shape}"
+    )
 
     # Check output values
     assert not torch.isnan(output).any(), "Output contains NaN values"

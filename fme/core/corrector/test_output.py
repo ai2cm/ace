@@ -6,6 +6,8 @@ from fme.core.corrector.output import (
     CorrectorOutput,
     build_corrector_diagnostics,
 )
+from fme.core.spatial_mask_provider import SpatialMaskProvider
+from fme.core.spatial_masking import NullSpatialMasking
 
 DEVICE = get_device()
 IMG_SHAPE = (4, 5)
@@ -78,3 +80,24 @@ def test_build_corrector_diagnostics_empty_touched_names():
     corrected = {"a": torch.full(IMG_SHAPE, 5.0, device=DEVICE)}
     diagnostics = build_corrector_diagnostics(snapshot, corrected, [])
     assert diagnostics.delta == {}
+
+
+def test_apply_output_masking_masks_delta_and_returns_new_object():
+    mask = torch.ones(IMG_SHAPE, device=DEVICE)
+    mask[0, 0] = 0.0
+    masking = SpatialMaskProvider({"mask_2d": mask}).build_output_spatial_masker()
+    original = torch.full(IMG_SHAPE, 2.0, device=DEVICE)
+    diagnostics = CorrectorDiagnostics(delta={"a": original.clone()})
+
+    masked = diagnostics.apply_output_masking(masking)
+    assert masked is not diagnostics
+    # input unmutated
+    torch.testing.assert_close(diagnostics.delta["a"], original)
+    # NaN exactly off-mask, unchanged on-mask
+    expected = original.clone()
+    expected[0, 0] = float("nan")
+    torch.testing.assert_close(masked.delta["a"], expected, equal_nan=True)
+
+    # the no-op masking preserves values
+    null_masked = diagnostics.apply_output_masking(NullSpatialMasking())
+    torch.testing.assert_close(null_masked.delta["a"], original)
