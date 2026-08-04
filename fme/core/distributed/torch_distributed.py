@@ -68,10 +68,14 @@ class TorchDistributed(DistributedBackend):
             self.world_size = torch.distributed.get_world_size()
             local_rank = int(os.environ["LOCAL_RANK"])
             self._rank = torch.distributed.get_rank()
-            self._stop_agreement = self._join_stop_agreement()
             if using_gpu():
                 self._device_id = local_rank
                 torch.cuda.set_device(self._device_id)
+            # after the device binding, which the `Distributed` class documents as
+            # coming first. A gloo `new_group` does not touch the device today, so
+            # this is ordering rather than a fix -- and a collective on the wrong
+            # side of a documented ordering is not worth leaving there.
+            self._stop_agreement = self._join_stop_agreement()
         elif using_srun():  # executing with srun
             shared_dist_file = os.environ["SRUN_DIST_FILE_PATH"]
             self._rank = int(os.environ["SLURM_PROCID"])
@@ -84,12 +88,13 @@ class TorchDistributed(DistributedBackend):
                 world_size=self.world_size,
                 timeout=timedelta(minutes=30),
             )
-            self._stop_agreement = self._join_stop_agreement()
             if using_gpu():
                 # this assumes one GPU per process in the SLURM setting
                 # --gpus-per-task=1 --gpu-bind=closest
                 self._device_id = 0
                 torch.cuda.set_device(self._device_id)
+            # after the device binding, for the reason given in the torchrun branch
+            self._stop_agreement = self._join_stop_agreement()
         else:
             raise ValueError(
                 "Distributed backend initialized without torchrun or srun."

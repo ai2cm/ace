@@ -48,6 +48,7 @@ from fme.core.distributed.stop_agreement import (
     GlooStopAgreement,
     build_stop_agreement,
     is_deadline_expiry,
+    timeout_contract_verified,
 )
 
 # Groups this module has finished with and must never let go of. See the module
@@ -73,6 +74,24 @@ def _require_ranks() -> Distributed:
     if dist.world_size == 1:
         pytest.skip(_SKIP_SINGLE_RANK)
     return dist
+
+
+def _require_a_short_bound() -> None:
+    """Skip a test whose bound is a few seconds only where that bound exists.
+
+    On a torch release the timeout behaviours were never read against, `_deadline`
+    returns `no_local_event_deadline()` -- the default group's own timeout, which is
+    tens of minutes in a parallel session -- so a test that arms a budget and expects
+    a short wait does not fail, it *hangs*, and the autouse SIGALRM cannot interrupt
+    a C++ condition-variable wait. `pyproject.toml` declares ``torch>=2.4.0``, so an
+    unverified release is a supported one; CI's image pins 2.8.0 and takes the short
+    path. Every rank reads the same version, so every rank skips together.
+    """
+    if not timeout_contract_verified():
+        pytest.skip(
+            f"torch {torch.__version__} has no verified operation-timeout bound, "
+            "so a rank giving up waits the default group's own timeout"
+        )
 
 
 @contextlib.contextmanager
@@ -143,6 +162,7 @@ def test_agreement_is_bounded_when_a_peer_never_joins(capfd):
     nor shortened afterwards.
     """
     dist = _require_ranks()
+    _require_a_short_bound()
     absent = dist.world_size - 1
     # Above `_MIN_DEADLINE`, so that the *budget* is what bounds the wait, which is
     # what this test is about. A budget under the floor is floored up to it, and
@@ -338,6 +358,7 @@ def test_destroying_an_abandoned_group_returns_without_reclaiming_it(capfd):
     the session, not fail the test.
     """
     dist = _require_ranks()
+    _require_a_short_bound()
     absent = dist.world_size - 1
     with _throwaway_agreement(destroy=False) as agreement:
         if dist.rank == absent:
@@ -403,5 +424,9 @@ def test_the_agreement_group_carries_the_backends_world_size():
     # which would make every stop unilateral and strand exactly the peers the
     # mechanism exists to keep
     assert dist.stop_agreement().world_size == dist.world_size
-    # the same object every call, so nothing issues a second unmatched `new_group`
+    # The backend holds one agreement object for its own lifetime, which is what
+    # `DistributedBackend.stop_agreement` documents. This says nothing about the
+    # cache in `new_stop_agreement` -- it reads the backend's attribute and never
+    # reaches that function; `test_cooperative_stop_exit.py` is where a real second
+    # `init_process_group` in one process exercises the cache.
     assert dist.stop_agreement() is dist.stop_agreement()

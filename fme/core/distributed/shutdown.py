@@ -29,9 +29,12 @@ write it was meant to make room for.
 Tearing down from inside the handler is right everywhere except inside a batch
 loop, where the ranks share a rendezvous they could agree to leave at instead.
 **Only a scope that opens a deferral gets that**, and today that is one training
-loop: a signal arriving during validation, inline inference, or LR tuning is still
-acted on where it lands, and those paths hold collectives of their own. The
-deferral is the mechanism, not a claim about coverage.
+loop -- `fme.core.generics.trainer.Trainer.train_one_epoch`, and not
+`fme/downscaling/train.py`'s `Trainer.train_one_epoch`, which has a batch loop of
+its own and does not open a deferral. A signal arriving during validation, inline
+inference, or LR tuning is still acted on where it lands, and those paths hold
+collectives of their own. The deferral is the mechanism, not a claim about
+coverage.
 
 So this module owns three things: *deferral* -- ``defer_termination`` makes the
 handler record intent rather than act, and performs the teardown when the scope
@@ -70,12 +73,17 @@ TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT
 # SIGKILLs whoever is still alive. That 30s is one budget shared by every rank
 # rather than 30s each, so a slow rank spends its peers' allowance too.
 #
-# 20s of that 30s is this, and `DEFAULT_STOP_AGREEMENT_BUDGET` claims 5s more
-# ahead of it, so the post-shutdown callbacks -- the restart checkpoint -- begin
-# with about 5s left in the worst case. There is no margin beyond that: this is a
-# ceiling for a teardown that normally returns in well under a second, not a slice
-# reserved for it, but a teardown that really does use its 20s leaves the
-# checkpoint a sixth of the window and no more.
+# 20s of that 30s is this. What the agreement ahead of it spends is not a
+# constant: with `DEFAULT_STOP_AGREEMENT_BUDGET` = 5s and a floor of
+# `_MIN_DEADLINE` = 3s under every deadline, a rank whose local event was T
+# seconds before the boundary it next reaches finishes agreeing by max(5, T + 3),
+# so the callbacks -- the restart checkpoint -- begin with min(5, 7 - T) seconds
+# of the window left and with none at all once T >= 7s. The arithmetic is worked
+# out where those two constants are defined.
+#
+# There is no margin beyond that: this is a ceiling for a teardown that normally
+# returns in well under a second, not a slice reserved for it, but a teardown that
+# really does use its 20s leaves the checkpoint a sixth of the window at best.
 #
 # [1]: https://beaker-docs.apps.allenai.org/scheduling/interruption.html#automated-preemption
 DEFAULT_TEARDOWN_TIMEOUT = 20.0
@@ -183,6 +191,28 @@ def clear_pending_stop() -> None:
     _pending_stop = None
 
 
+# Longest field value a marker line will carry. gloo's messages run to a few
+# hundred characters, and a line has to stay far under `PIPE_BUF` for the atomicity
+# `write_marker` describes.
+_MAX_FIELD_LENGTH: int = 160
+
+
+def _field_value(value: str) -> str:
+    """Make one value fit the ``key=value`` contract, whatever it contains.
+
+    The contract is fixed space-separated ``key=value`` pairs, so a value may
+    contain neither a space nor a newline: a torch error message contains both,
+    and passing one through unencoded makes the line unparseable by the very
+    readers these lines exist for -- including the tests' own field parser. Runs of
+    whitespace become a single ``_`` rather than being percent-encoded, because a
+    human reads these lines first.
+    """
+    collapsed = "_".join(value.split())
+    if len(collapsed) <= _MAX_FIELD_LENGTH:
+        return collapsed
+    return collapsed[:_MAX_FIELD_LENGTH] + "..."
+
+
 def write_marker(event: str, **fields: str) -> None:
     """Write one machine-readable evidence line to stderr. Never raises.
 
@@ -205,6 +235,10 @@ def write_marker(event: str, **fields: str) -> None:
     from a parameter, so that callers with no access to the handler's locals --
     timer threads, and the loop-facing layer above this module -- emit lines one
     parser stays valid for. It is ``?`` where no handler is installed.
+
+    Every field value goes through `_field_value`, so the ``key=value`` contract
+    holds for all of them by construction rather than by each caller remembering
+    it. A caller passing a torch error message is the case that needs it.
     """
     try:
         rank = os.environ.get("RANK") or os.environ.get("SLURM_PROCID") or "?"
@@ -220,7 +254,7 @@ def write_marker(event: str, **fields: str) -> None:
             f"installed_pid={installed}",
             f"wall={time.time():.6f}",
             f"mono={time.monotonic():.6f}",
-            *(f"{name}={value}" for name, value in fields.items()),
+            *(f"{name}={_field_value(value)}" for name, value in fields.items()),
         ]
         os.write(2, (" ".join(parts) + "\n").encode())
     except BaseException:
@@ -273,6 +307,9 @@ class PendingStop:
         # `128 + signum`, meaningful once `requested`; until then the convention
         # for a stop that carries no signal number of its own
         self.exit_code = _PEER_STOP_EXIT_CODE
+        # the caller has left something behind that interpreter finalization
+        # cannot dispose of in bounded time; see `require_hard_exit`
+        self.hard_exit = False
         self._deadline: float | None = None
         self._overrun: threading.Timer | None = None
 
@@ -312,6 +349,27 @@ class PendingStop:
     def note_peer_stop(self) -> None:
         """Record that a peer is stopping, so that leaving the scope tears down."""
         self.peer_stop = True
+
+    def require_hard_exit(self) -> None:
+        """Ask for `os._exit` rather than `sys.exit` once the teardown is done.
+
+        For a caller that has left something behind which interpreter finalization
+        cannot dispose of in bounded time. The case this exists for is an abandoned
+        gloo group: ``~ProcessGroupGloo()`` joins the worker thread still holding
+        the abandoned operation, that destructor runs during ``Py_Finalize``, and
+        measured on torch 2.7.1 the wait ends only when the wedged peer's socket
+        closes -- 119.3s against a peer parked for 120s, 24.3s against one parked
+        for 25s, versus 0.05s with `os._exit`. So `sys.exit` hands the rank to
+        torchrun's SIGKILL and the launcher reads a signal death instead of the
+        ``128 + signum`` this module promises.
+
+        This does not weaken the rule that a hard exit is the fault to avoid. The
+        watchdog's `os._exit` is dangerous because it can drop live communicators
+        and skip the callbacks; this one runs *after* `shutdown` destroyed them and
+        *after* the callbacks completed, so nothing is skipped and no communicator
+        is dropped -- there is nothing left for finalization to do but block.
+        """
+        self.hard_exit = True
 
     def seconds_remaining(self) -> float | None:
         """Seconds left in the budget, or ``None`` when no budget is armed.
@@ -381,8 +439,18 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
     pending = PendingStop(budget)
     _pending_stop = pending
     raising = False
+    exiting = False
     try:
         yield pending
+    except SystemExit:
+        # Not `raising`. A caller leaving by `sys.exit` is asking for the very exit
+        # the dispatch below performs rather than surfacing a crash, and there is no
+        # traceback to protect -- so it takes the exit path, which is the only one
+        # that can honour `require_hard_exit`. `cooperative_stop` leaves this way
+        # when the loop-entry exchange is given up on, since the loop body must not
+        # run against peers that are gone.
+        exiting = True
+        raise
     except BaseException:
         raising = True
         raise
@@ -407,10 +475,14 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
             # a signal too. So tear down, run the callbacks, and return, leaving
             # the traceback to reach the interpreter.
             #
-            # The exit code still follows the signal where there was one, because
-            # the only thing it is used for from here is the watchdog's hard-exit
-            # backstop, and a rank asked to stop should report `128 + signum` even
-            # if it is the watchdog that ends it.
+            # What that trades away is the *process's* exit code: a rank that was
+            # preempted and also raised reports 1, and the preempted-versus-failed
+            # distinction is precisely what `128 + signum` carries to the scheduler.
+            # The code passed here still follows the signal, but from this branch it
+            # reaches only the watchdog's hard-exit backstop, so it does not restore
+            # that distinction where anything outside the process can read it.
+            # Masking a crash as a graceful stop would hide the crash, which is the
+            # worse of the two.
             _terminate(
                 pending.exit_code if pending.requested else _EXCEPTION_EXIT_CODE,
                 exit_process=False,
@@ -419,9 +491,14 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
             # A recorded signal takes precedence over a peer's deliberately: a
             # preemption is not a failure, and `128 + signum` is what the scheduler
             # and torchrun expect from a rank asked to stop.
-            _terminate(pending.exit_code)
+            _terminate(pending.exit_code, hard=pending.hard_exit)
         elif pending.peer_stop:
-            _terminate(_PEER_STOP_EXIT_CODE)
+            _terminate(_PEER_STOP_EXIT_CODE, hard=pending.hard_exit)
+        elif exiting:
+            # A `sys.exit` of the caller's own, with no stop recorded anywhere: tear
+            # the backend down and run the callbacks, then let the caller's own code
+            # reach the interpreter, exactly as the exception path does.
+            _terminate(_EXCEPTION_EXIT_CODE, exit_process=False)
 
 
 class _Deadlines:
@@ -613,7 +690,9 @@ def handle_termination_signals(
     installed_pid = os.getpid()
     phase = _Phase.RUNNING
 
-    def terminate(exit_code: int, *, exit_process: bool = True) -> None:
+    def terminate(
+        exit_code: int, *, exit_process: bool = True, hard: bool = False
+    ) -> None:
         """Release the backend, run the callbacks, and exit.
 
         The only teardown implementation there is, reached either from the
@@ -623,6 +702,13 @@ def handle_termination_signals(
         `exit_process=False` is for a caller that is already propagating an
         exception: everything happens except the final `sys.exit`, so the
         exception goes on propagating with its traceback intact.
+
+        `hard` replaces that final `sys.exit` with `os._exit`, for a caller that
+        has left something behind which interpreter finalization cannot dispose of
+        in bounded time -- see `PendingStop.require_hard_exit`, which is the only
+        thing that sets it. It is reached only here, after `shutdown` and after the
+        callbacks, so unlike the watchdog's hard exit it drops no communicator and
+        skips no work.
         """
         nonlocal phase
         phase = _Phase.COLLECTIVE
@@ -638,8 +724,23 @@ def handle_termination_signals(
             _run_post_shutdown_callbacks()
         finally:
             phase = _Phase.COMPLETE
-        if exit_process:
-            sys.exit(exit_code)
+        if not exit_process:
+            return
+        if hard:
+            write_marker("hard-exit", code=str(exit_code))
+            # `os._exit` skips the buffered streams, and the callbacks above are
+            # the code most likely to have written to them
+            for stream in (sys.stdout, sys.stderr):
+                try:
+                    stream.flush()
+                except BaseException:
+                    pass
+            os._exit(exit_code)
+        # reached in production only when `hard` is false; a test that stubbed
+        # `os._exit` out falls through to here rather than carrying on inside the
+        # scope that asked to be left, which is the same guard the handler's own
+        # hard-exit branches carry
+        sys.exit(exit_code)
 
     def handle(signum: int, frame: types.FrameType | None) -> None:
         nonlocal phase
@@ -727,6 +828,7 @@ def handle_termination_signals(
     previous = {sig: signal.getsignal(sig) for sig in TERMINATION_SIGNALS}
     previous_terminate = _terminate
     previous_installed_pid = _installed_pid
+    previous_callbacks = list(_post_shutdown_callbacks)
     _terminate = terminate
     _installed_pid = installed_pid
     for sig in TERMINATION_SIGNALS:
@@ -744,4 +846,10 @@ def handle_termination_signals(
         _pending_stop = None
         for sig, previous_handler in previous.items():
             signal.signal(sig, previous_handler)
-        clear_post_shutdown_callbacks()
+        # restored rather than cleared, for the same reason as the two globals
+        # above: this context claims nesting is legal, and an unconditional clear
+        # would take an outer context's callbacks with it when an inner one exits.
+        # Callbacks registered *inside* this scope are still discarded, which is
+        # what the clear was for -- the registry is process-global and its entries
+        # close over objects this scope's job built.
+        _post_shutdown_callbacks[:] = previous_callbacks

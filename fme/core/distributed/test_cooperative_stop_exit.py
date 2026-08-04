@@ -22,7 +22,16 @@ or a real 20s teardown.
 Ranks' stderr is inherited rather than redirected, so the ``fme-stop:`` marker
 lines land in the launcher's own stderr and are what the assertions read. Exit
 codes come from files the drivers write, because torchrun reports its own status
-rather than each rank's.
+rather than each rank's -- except on the paths that end in `os._exit`, where no
+``SystemExit`` is raised for a driver to catch and the ``hard-exit`` marker is what
+carries the code.
+
+**Where the claim is a bound on the exit, the exit is observed from outside.** A
+timestamp a driver writes before leaving measures the *call*, and the call is not
+what can block: an abandoned gloo group makes interpreter finalization wait for the
+wedged peer to die. So `_wait_for_death` watches ``/proc`` for the rank's own pid,
+and the wedged rank holds its socket open until the launcher says the rank under
+test is gone -- otherwise the peer's exit unblocks the very wait being measured.
 """
 
 import os
@@ -52,13 +61,16 @@ _RANK_ENV = (
 )
 
 # Sized so that the module's *own* diagnostics are what a maintainer sees on a
-# hang, which is the case where a diagnostic is worth most: waiting for readiness
-# and then for the launch is 60s at worst, inside the suite's autouse 90s SIGALRM,
-# so the `AssertionError` texts below fire rather than "Test failed due to
-# timeout". Observed runtime is ~8-15s, so both are still several times the real
-# figure.
-_LAUNCH_TIMEOUT = 40.0
-_READY_TIMEOUT = 20.0
+# hang, which is the case where a diagnostic is worth most. The figure that has to
+# hold is the sum along the longest path of any one test, against the suite's
+# autouse 90s SIGALRM: two readiness waits, one death wait and the launch, i.e.
+# 15 + 15 + 10 + 25 = 65s, leaving 25s of the alarm unspent. Process startup is
+# *inside* the first readiness wait rather than additional to it, since nothing is
+# waited on before the launch. Observed runtime is ~8-15s per test, so each figure
+# is still at least twice the real one.
+_LAUNCH_TIMEOUT = 25.0
+_READY_TIMEOUT = 15.0
+_DEATH_TIMEOUT = 10.0
 
 _SIGTERM_EXIT_CODE = 128 + int(signal.SIGTERM)
 
@@ -128,6 +140,50 @@ def _wait_for_file(path: Path, child: "subprocess.Popen[str]") -> None:
         time.sleep(0.05)
 
 
+def _running(pid: int) -> bool:
+    """Whether ``pid`` is still a live process, a zombie counting as dead.
+
+    The kernel sets ``Z`` when the process exits, and the parent that will reap it is
+    torchrun rather than this process, so waiting for the entry to disappear would
+    time a reap rather than a death.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return False
+    # the executable name is in parentheses and may itself contain spaces, so the
+    # state field is read after the last ``)`` rather than by splitting the line
+    fields = stat.rpartition(")")[2].split()
+    return bool(fields) and fields[0] != "Z"
+
+
+def _wait_for_death(pid: int, tmp_path: Path) -> float:
+    """When ``pid`` stopped running, observed from outside it.
+
+    The thing under test on the abandonment paths is how long the rank takes to
+    *die*, which nothing the rank writes can report: a timestamp written before the
+    exit measures the call, and the call is precisely what can block for as long as
+    a wedged peer lives.
+
+    Writes ``dead`` on the way out, whether or not the rank died in time, because a
+    wedged peer is waiting on that file to leave -- it must not close its socket
+    before this, since doing so would unblock the wait being measured.
+    """
+    give_up_at = time.monotonic() + _DEATH_TIMEOUT
+    try:
+        while _running(pid):
+            if time.monotonic() > give_up_at:
+                raise AssertionError(
+                    f"the rank under test (pid {pid}) was still running "
+                    f"{_DEATH_TIMEOUT:.0f}s after it began leaving, while its peer "
+                    "was still holding its socket open"
+                )
+            time.sleep(0.02)
+        return time.monotonic()
+    finally:
+        (tmp_path / "dead").write_text("go")
+
+
 def _finish(child: "subprocess.Popen[str]", tmp_path: Path) -> str:
     """Wait for the launch to end and return its stderr, killing it if it hangs."""
     pgid = os.getpgid(child.pid)
@@ -168,7 +224,9 @@ def _exit_codes(tmp_path: Path, nproc: int) -> dict[str, str]:
 
 
 # Recording the exit code from inside the driver, because torchrun reports its own
-# status rather than each rank's. Appended to every driver that has one to assert.
+# status rather than each rank's. Only for the drivers whose exit is a `SystemExit`:
+# on the abandonment paths the exit is an `os._exit`, nothing inside the interpreter
+# sees it coming, and the ``hard-exit`` marker is what carries the code instead.
 _RECORD_EXIT = """
         def record_exit(code):
             (OUT / f"exit.{os.environ['RANK']}").write_text(str(code))
@@ -271,6 +329,23 @@ def test_a_wedged_rank_does_not_hold_a_healthy_rank_past_its_budget(tmp_path):
     already inside that exchange carrying the default group's own timeout, which
     different case with a different bound. `test_both_ranks_exit_at_the_same_batch
     _with_the_backend_released` is where the external signal is the claim.
+
+    **What is timed is rank 0's death, not its call to exit**, and rank 1 holds its
+    socket open until that death: an abandoned gloo group is disposed of by
+    ``~ProcessGroupGloo()`` during interpreter finalization, which joins the worker
+    thread still holding the abandoned operation and so ends only when the peer's
+    socket closes. Timing a timestamp written before the exit, against a peer that
+    had already gone, is a test that cannot observe the thing it appears to bound.
+
+    Which of the two assertions does the work is worth being exact about, because
+    the timing one does not. Whether finalization joins that thread or leaks it is
+    not deterministic: measured on torch 2.7.1, a minimal repro that held the group
+    in a local and destroyed both groups took 119.3s against a peer parked for 120s,
+    while *this* shape -- the group held by a module global, only the default group
+    destroyed -- leaked it and died in 4.66s with ``sys.exit`` against 3.02s with
+    ``os._exit``. So the bound below passes either way on this machine today, and
+    the ``hard-exit`` marker is what pins the exit actually being taken hard. The
+    bound is the backstop for the machine where it joins.
     """
     child = _launch(
         f"""
@@ -287,53 +362,63 @@ def test_a_wedged_rank_does_not_hold_a_healthy_rank_past_its_budget(tmp_path):
         )
 
         OUT = Path(sys.argv[1])
-        {_RECORD_EXIT}
         rank = int(os.environ["RANK"])
+        (OUT / f"pid.{{rank}}").write_text(str(os.getpid()))
         wedge_at = 2
         add_post_shutdown_callback(
             lambda: (OUT / f"callback.{{rank}}").write_text("ran")
         )
-        try:
-            with Distributed.context():
-                with cooperative_stop(budget=1.0) as stop:
-                    for index in range(1000):
-                        torch.distributed.all_reduce(torch.ones(1))
-                        time.sleep(0.02)
-                        if index == wedge_at:
-                            if rank == 1:
-                                # the handler can never run, so this rank never
-                                # reaches the boundary below
-                                signal.pthread_sigmask(
-                                    signal.SIG_BLOCK, {{signal.SIGTERM}}
-                                )
-                                while not (OUT / "wedged").exists():
-                                    time.sleep(0.02)
-                                time.sleep(10.0)
-                                # a stand-in for the SIGKILL a real wedged rank
-                                # eventually gets; nothing is asserted about it
-                                os._exit(0)
-                            signal.raise_signal(signal.SIGTERM)
-                            (OUT / "wedged").write_text("go")
-                            (OUT / "started").write_text(str(time.monotonic()))
-                        if stop.agreed(index):
-                            break
-        except SystemExit as err:
-            record_exit(err.code)
-            (OUT / f"done.{{rank}}").write_text(str(time.monotonic()))
-            raise
+        with Distributed.context():
+            with cooperative_stop(budget=1.0) as stop:
+                for index in range(1000):
+                    torch.distributed.all_reduce(torch.ones(1))
+                    time.sleep(0.02)
+                    if index == wedge_at:
+                        if rank == 1:
+                            # the handler can never run, so this rank never
+                            # reaches the boundary below
+                            signal.pthread_sigmask(
+                                signal.SIG_BLOCK, {{signal.SIGTERM}}
+                            )
+                            # and its socket stays open until rank 0 is gone,
+                            # so rank 0's exit is bounded by rank 0 alone
+                            give_up_at = time.monotonic() + 20.0
+                            while not (OUT / "dead").exists():
+                                if time.monotonic() > give_up_at:
+                                    break
+                                time.sleep(0.02)
+                            # a stand-in for the SIGKILL a real wedged rank
+                            # eventually gets; nothing is asserted about it
+                            os._exit(0)
+                        signal.raise_signal(signal.SIGTERM)
+                        (OUT / "started").write_text(str(time.monotonic()))
+                    if stop.agreed(index):
+                        break
         """,
         tmp_path,
     )
+    try:
+        _wait_for_file(tmp_path / "pid.0", child)
+        _wait_for_file(tmp_path / "started", child)
+        died = _wait_for_death(int((tmp_path / "pid.0").read_text()), tmp_path)
+    except BaseException:
+        (tmp_path / "dead").write_text("go")
+        os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+        raise
     stderr = _finish(child, tmp_path)
 
-    assert _exit_codes(tmp_path, 2) == {"0": str(_SIGTERM_EXIT_CODE)}, stderr
     started = float((tmp_path / "started").read_text())
-    done = float((tmp_path / "done.0").read_text())
-    # The deadline that binds plus the teardown, with slack. The driver's 1s budget
-    # is below `_MIN_DEADLINE` and so is floored up to it, which is the figure to
-    # compare against; the point is that it is bounded at all, and that it is
-    # nothing like rank 1's 10s park.
-    assert done - started < _MIN_DEADLINE + 4.0, done - started
+    # The deadline that binds, plus the teardown and the callbacks, with slack. The
+    # driver's 1s budget is below `_MIN_DEADLINE` and so is floored up to it, which
+    # is the figure to compare against; the point is that it is bounded at all, and
+    # that it is nothing like the time rank 1 remains alive.
+    assert died - started < _MIN_DEADLINE + 4.0, died - started
+    # no `SystemExit` reaches the driver on this path -- the exit is hard, because
+    # the group left behind is what makes finalization wait for rank 1 -- so the
+    # code comes off the marker the hard exit writes
+    assert _marker_fields("hard-exit", stderr, "code") == [
+        str(_SIGTERM_EXIT_CODE)
+    ], stderr
     assert _marker_fields("agreement-timeout", stderr, "batch") == ["2"], stderr
     assert _marker_fields("agreement-abandoned", stderr, "batch") == ["2"], stderr
     assert len(_marker_fields("shutdown-returned", stderr, "elapsed")) == 1, stderr
@@ -350,17 +435,21 @@ def test_a_rank_that_gives_up_with_no_local_event_exits(tmp_path):
     No signal is sent anywhere in this test. Rank 1 simply stops reaching the
     boundary and rank 0 gives up waiting for it, holding nothing on its
     `PendingStop` -- no signal, no exception -- which is the state every rank the
-    scheduler's signal did not reach is in. The exit code, observed from outside
-    the interpreter, is the assertion: a rank that merely broke out of the loop
-    would run on into `alternate_shuffle` and the train-evaluation pass, hang there
+    scheduler's signal did not reach is in. The exit, observed from outside the
+    interpreter, is the assertion: a rank that merely broke out of the loop would
+    run on into `alternate_shuffle` and the train-evaluation pass, hang there
     against peers that had gone, and be SIGKILLed with its communicators open.
+
+    Rank 1 stays alive with its socket open until rank 0 is observed dead, for two
+    reasons: so that rank 0 sees a deadline expiry rather than a closed socket, and
+    so that rank 0's death is bounded by rank 0's own exit rather than by rank 1's.
 
     The no-local-event deadline is patched down from the default group's own
     timeout, which is tens of minutes; nothing else about the path is altered, and
     the deadline's *value* is what the tier-1 tests cover.
     """
     child = _launch(
-        f"""
+        """
         import importlib, os, sys, time
         from pathlib import Path
 
@@ -380,41 +469,56 @@ def test_a_rank_that_gives_up_with_no_local_event_exits(tmp_path):
         module.no_local_event_deadline = lambda: 2.0
 
         OUT = Path(sys.argv[1])
-        {_RECORD_EXIT}
         rank = int(os.environ["RANK"])
+        (OUT / f"pid.{rank}").write_text(str(os.getpid()))
         leave_at = 2
         add_post_shutdown_callback(
-            lambda: (OUT / f"callback.{{rank}}").write_text("ran")
+            lambda: (OUT / f"callback.{rank}").write_text("ran")
         )
-        try:
-            with Distributed.context():
-                with cooperative_stop() as stop:
-                    for index in range(1000):
-                        torch.distributed.all_reduce(torch.ones(1))
-                        time.sleep(0.02)
-                        if index == leave_at and rank == 1:
-                            # stops reaching the boundary, while staying alive long
-                            # enough that rank 0 sees a deadline expiry rather than
-                            # a closed socket
-                            time.sleep(8.0)
-                            os._exit(0)
-                        if stop.agreed(index):
-                            break
-                    (OUT / f"loop-exited.{{rank}}").write_text("yes")
-                (OUT / f"scope-exited.{{rank}}").write_text("yes")
-                torch.distributed.all_reduce(torch.ones(1))  # never reached
-                (OUT / f"kept-going.{{rank}}").write_text("yes")
-        except SystemExit as err:
-            record_exit(err.code)
-            raise
+        with Distributed.context():
+            with cooperative_stop() as stop:
+                for index in range(1000):
+                    torch.distributed.all_reduce(torch.ones(1))
+                    time.sleep(0.02)
+                    if index == leave_at and rank == 1:
+                        (OUT / "left").write_text(str(time.monotonic()))
+                        give_up_at = time.monotonic() + 20.0
+                        while not (OUT / "dead").exists():
+                            if time.monotonic() > give_up_at:
+                                break
+                            time.sleep(0.02)
+                        os._exit(0)
+                    if stop.agreed(index):
+                        break
+                (OUT / f"loop-exited.{rank}").write_text("yes")
+            (OUT / f"scope-exited.{rank}").write_text("yes")
+            torch.distributed.all_reduce(torch.ones(1))  # never reached
+            (OUT / f"kept-going.{rank}").write_text("yes")
         """,
         tmp_path,
     )
+    try:
+        _wait_for_file(tmp_path / "pid.0", child)
+        _wait_for_file(tmp_path / "left", child)
+        died = _wait_for_death(int((tmp_path / "pid.0").read_text()), tmp_path)
+    except BaseException:
+        (tmp_path / "dead").write_text("go")
+        os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+        raise
     stderr = _finish(child, tmp_path)
 
+    # the patched 2s deadline, plus the teardown and the callbacks, with slack --
+    # and measured against a peer that was still alive, so it is rank 0's own exit
+    # that is bounded
+    left = float((tmp_path / "left").read_text())
+    assert died - left < 6.0, died - left
     # no signal was sent, so `128 + SIGTERM` here is the peer-stop convention for a
-    # stop that carries no signal number of its own
-    assert _exit_codes(tmp_path, 2) == {"0": str(_SIGTERM_EXIT_CODE)}, stderr
+    # stop that carries no signal number of its own. It comes off the hard exit's
+    # marker because no `SystemExit` is raised on this path: the group rank 0 left
+    # behind is what makes finalization wait for rank 1.
+    assert _marker_fields("hard-exit", stderr, "code") == [
+        str(_SIGTERM_EXIT_CODE)
+    ], stderr
     assert not (
         tmp_path / "kept-going.0"
     ).exists(), "rank 0 left the loop and executed a further collective"
@@ -535,13 +639,21 @@ def test_cooperative_stop_is_adoptable_by_a_bare_batch_loop(tmp_path):
     ],
 )
 def test_the_agreement_group_outlives_the_backend_teardown(tmp_path, backend_env):
-    """The teardown must not reclaim the agreement group.
+    """The teardown must not reclaim the group, and a second world gets a new one.
 
     ``destroy_process_group()`` clears torch's own bookkeeping and drains nothing,
     and gloo's ``shutdown()`` is an empty default -- so whether the call returns
     turns entirely on whether it dropped the last reference to the group. Two
     independent references stop it doing so, and either alone is sufficient: the
     module global in `stop_agreement` and the backend instance's own attribute.
+
+    Then a genuinely second ``init_process_group`` in the same process, which is the
+    state `new_stop_agreement`'s cache is about and the one thing the in-session
+    tests cannot build: they compare identities against ``cast``-faked worlds, so
+    nothing there exercises the predicate against real torch bookkeeping. The cached
+    group belongs to the destroyed world and its gloo context is no part of the new
+    world's, so it must be superseded -- and moved aside rather than released, since
+    releasing it runs the unbounded destructor.
 
     This runs in a subprocess rather than in-session, which is a departure from
     the plan: tearing the session's backend down would leave every later test in
@@ -551,12 +663,14 @@ def test_the_agreement_group_outlives_the_backend_teardown(tmp_path, backend_env
     """
     child = _launch(
         """
-        import sys, weakref
+        import importlib, os, sys, weakref
         from pathlib import Path
 
         import torch.distributed
 
         from fme.core.distributed import Distributed
+
+        module = importlib.import_module("fme.core.distributed.stop_agreement")
 
         OUT = Path(sys.argv[1])
         with Distributed.context():
@@ -567,6 +681,24 @@ def test_the_agreement_group_outlives_the_backend_teardown(tmp_path, backend_env
             dist.shutdown()
             assert not torch.distributed.is_initialized(), "the backend is still up"
             assert alive() is not None, "the agreement group was reclaimed"
+
+            first = module._agreement
+            world_size = int(os.environ["WORLD_SIZE"])
+            torch.distributed.init_process_group(
+                backend="gloo",
+                init_method="file://" + str(OUT / "second-world"),
+                rank=int(os.environ["RANK"]),
+                world_size=world_size,
+            )
+            world = torch.distributed.distributed_c10d._get_default_group()
+            second = module.new_stop_agreement(world_size, world)
+            assert second is not first, "a destroyed world's group was handed back"
+            assert module._leaked == [first], "the superseded group was not kept"
+            assert second.world_size == world_size
+            # and the same world asks for the same group rather than a second
+            # `new_group` some ranks would not match
+            assert module.new_stop_agreement(world_size, world) is second
+
             OUT.joinpath("survived." + str(dist.rank)).write_text("yes")
         """,
         tmp_path,

@@ -573,6 +573,15 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
+        # Whether the loop below was left at an agreed stop rather than at the end
+        # of the epoch's data. With a handler installed the two are told apart by
+        # the process no longer being here -- but `handle_signals=False` (the whole
+        # test session) and `PendingStop.request` without a handler both leave the
+        # loop with nothing registered to tear down, and on those paths the epoch
+        # counters below decide the resume point. Recording a truncated epoch as
+        # complete would skip the rest of its data on resume, which is worse than
+        # the stop failing.
+        stopped = False
         with cooperative_stop(
             # the index the *first* iteration below will pass to `agreed`, so
             # that a rank raising inside it contributes what its peers will
@@ -634,10 +643,13 @@ class Trainer:
                 # their counters and parameters match, no scheduled checkpoint is
                 # skipped, and reaching the decision costs no further loader fetch
                 if stop.agreed(self.num_batches_seen):
-                    # leaving this context tears the backend down and exits, so
-                    # the shuffle, the train-evaluation pass and the epoch
-                    # increment below are skipped -- they are collectives, and
-                    # their peers have left
+                    # Where a handler is installed -- which is every entrypoint --
+                    # leaving this context tears the backend down and exits, so the
+                    # shuffle, the train-evaluation pass and everything below are
+                    # skipped: they are collectives, and their peers have left. The
+                    # flag is for the configurations where that exit does not
+                    # happen; see where it is declared.
+                    stopped = True
                     break
         # evaluate after training on an independent shuffle of the data
         self.train_data.alternate_shuffle()
@@ -660,8 +672,15 @@ class Trainer:
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
         # are recorded to wandb
-        self._epochs_trained += 1
-        self._current_epoch_num_batches_seen = 0
+        if not stopped:
+            # An epoch left at an agreed stop is not a complete epoch, so it is not
+            # counted as one and its batch counter is not cleared: the pair of them
+            # is the resume point, and `_current_epoch_num_batches_seen` is what
+            # `subset_loader` skips by on the way back in. Guarded rather than left
+            # to the exit, because the exit only happens where a handler is
+            # installed.
+            self._epochs_trained += 1
+            self._current_epoch_num_batches_seen = 0
         aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
         return aggregator.get_summary(label="train")
 

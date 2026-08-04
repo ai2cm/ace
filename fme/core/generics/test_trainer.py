@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.distributed.shutdown import handle_termination_signals
+from fme.core.distributed.shutdown import PendingStop, handle_termination_signals
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -784,6 +784,57 @@ def _count_restart_writes(trainer) -> tuple[list[int], Callable[[], None]]:
         return original_write()
 
     return writes, counted
+
+
+def test_a_stop_without_a_handler_does_not_record_a_complete_epoch(tmp_path: str):
+    """A truncated epoch is not a complete one, whether or not the process exits.
+
+    With a handler installed -- every entrypoint -- leaving the cooperative scope on
+    a stop exits, so nothing after the loop runs. With none installed there is
+    nothing registered to tear down and the loop simply falls through, which is the
+    state of the whole pytest session (`handle_signals=False`) and of any caller
+    using the documented `PendingStop.request` without a handler. Counting the epoch
+    as complete there resets `_current_epoch_num_batches_seen` and advances
+    `_epochs_trained`, so the resume point skips the rest of the epoch's data
+    silently -- worse than the stop failing.
+
+    The seam is stubbed rather than driven by a signal, because the trainer's own
+    bookkeeping is what is under test: a real stop needs a wedged peer or a handler,
+    and both would take this out of a single-process test.
+    """
+    stop_at = 3
+    _, trainer = get_trainer(
+        tmp_path,
+        stepper_state={"foo": "bar"},
+        max_epochs=1,
+        n_train_batches=20,
+    )
+
+    class _StopsAt:
+        """The `cooperative_stop` surface `train_one_epoch` uses, and no more."""
+
+        def __init__(self) -> None:
+            self.pending = PendingStop(budget=10.0)
+
+        def agreed(self, index: int) -> bool:
+            return index >= stop_at
+
+    @contextlib.contextmanager
+    def stops_at(**kwargs):
+        yield _StopsAt()
+
+    with (
+        unittest.mock.patch.object(
+            trainer, "_log_first_batch_metrics", return_value=None
+        ),
+        unittest.mock.patch("fme.core.generics.trainer.cooperative_stop", stops_at),
+    ):
+        trainer.train_one_epoch()
+
+    assert trainer.num_batches_seen == stop_at
+    # the pair of these is the resume point, and neither may move on a stop
+    assert trainer._epochs_trained == 0, "a truncated epoch was recorded as complete"
+    assert trainer._current_epoch_num_batches_seen == stop_at
 
 
 def test_a_stop_at_a_just_written_checkpoint_does_not_write_it_again(tmp_path: str):

@@ -31,6 +31,13 @@ been given up on is *held* for the life of the process -- which is also what mak
 ``destroy_process_group()`` return, since it only clears torch's own bookkeeping.
 The design's bound after an abandoned exchange is the process exiting, not the
 group coming back.
+
+That destructor also runs during ``Py_Finalize``, so "the process exiting" has to
+mean ``os._exit`` and not ``sys.exit``: measured on torch 2.7.1 with a peer parked
+for 120s, a rank that abandoned an exchange and then called ``sys.exit`` died after
+119.3s, when the peer's socket closed, against 0.05s for ``os._exit``. The caller
+that abandons an exchange is the one that owes that hard exit; see
+`fme.core.distributed.cooperative_stop`.
 """
 
 import abc
@@ -108,9 +115,23 @@ def timeout_contract_verified() -> bool:
     usual and passes the default group's own timeout where it would have passed a
     short one. That is `main`'s behaviour, not a new failure mode: the ranks still
     leave together, and only the short bound on a rank *giving up* is unavailable.
+
+    A version string this cannot parse reads as unverified for the same reason. The
+    fields are not a documented format -- a nightly, a vendor build or a release
+    candidate can put a suffix where the minor version goes -- and letting
+    ``int()`` raise here would raise from `build_stop_agreement`, i.e. from backend
+    construction, which is exactly the failure this function exists to avoid. It
+    does not warn about that itself -- a predicate called once per loop is the wrong
+    place for a log line, and `warn_if_timeout_contract_unverified` already reports
+    the degradation once per process, naming the version it could not place.
     """
-    major, minor = torch.__version__.split(".")[:2]
-    return (int(major), int(minor)) in _VERIFIED_TORCH
+    major, _, rest = torch.__version__.partition(".")
+    minor, _, _ = rest.partition(".")
+    try:
+        version = (int(major), int(minor))
+    except ValueError:
+        return False
+    return version in _VERIFIED_TORCH
 
 
 def warn_if_timeout_contract_unverified() -> None:
@@ -370,13 +391,31 @@ def build_stop_agreement(world_size: int) -> GlooStopAgreement:
 
     Args:
         world_size: Ranks in the group. Not ``ranks``, which is ``new_group``'s
-            own parameter for a *list* of ranks; this group spans them all.
+            own parameter for a *list* of ranks; this group spans them all. Checked
+            against the group rather than trusted, because it is only ever read back
+            out as the ``world=`` field of an evidence line -- a reader counts
+            ``stop-agreed`` lines against it to find the rank that never reached the
+            boundary, so a value disagreeing with the group would make the absence
+            unreadable, and nothing else would ever notice.
+
+    Raises:
+        ValueError: If ``world_size`` disagrees with the group. A caller bug rather
+            than anything environmental -- every production caller passes the size
+            it has just read from torch -- which is why this may raise where
+            `warn_if_timeout_contract_unverified` may not.
     """
     # here, and not where a deadline is used, because this is the one point every
     # job reaches exactly once. It warns and returns; see
     # `timeout_contract_verified` for why it must not raise.
     warn_if_timeout_contract_unverified()
     group = torch.distributed.new_group(backend="gloo", timeout=GROUP_TIMEOUT)
+    actual = torch.distributed.get_world_size(group)
+    if actual != world_size:
+        raise ValueError(
+            f"the stop agreement group spans the whole world, so it has {actual} "
+            f"ranks, but it was told {world_size}; the evidence lines' `world=` "
+            "field is read off this figure"
+        )
     return GlooStopAgreement(group, world_size)
 
 

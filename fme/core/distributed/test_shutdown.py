@@ -96,6 +96,123 @@ def test_later_callbacks_run_even_if_an_earlier_one_fails():
     assert events == ["callback"]
 
 
+def test_a_hard_exit_is_taken_after_the_callbacks_and_not_before(monkeypatch, capfd):
+    """The hard exit an abandoned group forces must skip nothing.
+
+    A caller that has left a gloo group behind asks for `os._exit`, because
+    interpreter finalization joins the worker thread still holding the abandoned
+    operation and so waits for the wedged peer to die -- measured at 119.3s against
+    a peer parked for 120s, against 0.05s here. What makes that safe, where the
+    watchdog's hard exit is the fault this module exists to avoid, is *where* it
+    happens: after `shutdown` destroyed the communicators and after the callbacks
+    ran, so nothing is dropped and nothing is skipped. That ordering is the whole
+    claim, so it is what this asserts.
+    """
+    events: list[str] = []
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        # the stubbed `os._exit` falls through to the ordinary `sys.exit`, which is
+        # what lets this run in-session at all
+        with pytest.raises(SystemExit) as excinfo:
+            with defer_termination(budget=1.0) as pending:
+                pending.require_hard_exit()
+                signal.raise_signal(signal.SIGTERM)
+
+    assert events == ["shutdown", "callback"]
+    assert exited == [128 + signal.SIGTERM]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+    # and it says so, since a rank that ends this way writes no exit status anyone
+    # inside the process can read
+    hard = _marker_lines("hard-exit", capfd.readouterr().err)
+    assert len(hard) == 1
+    assert f"code={128 + signal.SIGTERM}" in hard[0]
+
+
+def test_a_deferral_left_without_a_pending_stop_does_not_hard_exit(monkeypatch):
+    """`require_hard_exit` is about how to exit, not a reason to exit.
+
+    A scope that asked for it and then reached its end with nothing recorded --
+    a loop that ran to completion after an earlier epoch abandoned an exchange, say
+    -- must exit no more eagerly than one that never asked.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with defer_termination(budget=1.0) as pending:
+            pending.require_hard_exit()
+
+    assert exited == []
+    assert events == []
+
+
+def test_a_system_exit_from_a_pending_deferral_takes_the_exit_path(monkeypatch, capfd):
+    """A caller leaving by `sys.exit` gets the teardown, and the hard exit with it.
+
+    This is how `cooperative_stop` leaves when the loop-entry exchange is given up
+    on: the loop body must not run, and a context manager cannot skip its own body.
+    A `SystemExit` carries no traceback to protect, so unlike a real exception it
+    takes the exit path -- which is the only one that can honour a hard exit.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=1.0) as pending:
+                pending.note_peer_stop()
+                pending.require_hard_exit()
+                raise SystemExit(128 + signal.SIGTERM)
+
+    assert events == ["shutdown"]
+    assert exited == [128 + signal.SIGTERM]
+    marker = _marker_lines("hard-exit", capfd.readouterr().err)
+    assert len(marker) == 1
+    assert f"code={128 + signal.SIGTERM}" in marker[0]
+
+
+def test_a_marker_field_cannot_break_the_key_value_contract(capfd):
+    """A torch error message contains spaces, and a marker line may not.
+
+    The lines are fixed space-separated ``key=value`` pairs, and the readers that
+    matter -- including the tests' own field parsers -- split on whitespace. So the
+    encoding is the writer's job rather than each caller's.
+    """
+    write_marker("agreement-timeout", err="Operation timed out!\nsecond line")
+
+    line = _marker_lines("agreement-timeout", capfd.readouterr().err)[0]
+    fields = dict(part.partition("=")[::2] for part in line.split())
+    assert fields["err"] == "Operation_timed_out!_second_line"
+    assert len(line.splitlines()) == 1
+
+
+def test_an_inner_handler_scope_does_not_discard_an_outer_scopes_callbacks():
+    """Nesting is legal, and leaving an inner scope must not disarm an outer one.
+
+    The restore-on-exit of `_terminate` says nesting is supported; clearing the
+    callback registry unconditionally said the opposite, since an inner scope
+    exiting took the outer job's restart-checkpoint callback with it.
+    """
+    ran: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: None):
+        add_post_shutdown_callback(lambda: ran.append("outer"))
+        with handle_termination_signals(shutdown=lambda: None):
+            add_post_shutdown_callback(lambda: ran.append("inner"))
+        assert ran == []
+        with pytest.raises(SystemExit):
+            signal.raise_signal(signal.SIGTERM)
+
+    # the outer scope's callback survived the inner scope's exit, and the inner
+    # scope's own did not outlive it
+    assert ran == ["outer"]
+
+
 def test_previous_handlers_and_callbacks_are_restored_on_exit():
     original = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
     ran = []

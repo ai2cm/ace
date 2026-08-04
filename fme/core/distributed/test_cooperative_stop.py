@@ -11,7 +11,9 @@ They are unmarked, so they run in every tier including ``--very-fast``, and each
 takes milliseconds.
 """
 
+import importlib
 import logging
+import os
 import signal
 import threading
 import time
@@ -27,6 +29,7 @@ from fme.core.distributed.cooperative_stop import (
     _MIN_DEADLINE,
     CooperativeStop,
     PeerStopRequested,
+    UnequalLoopLength,
     _cooperative_scope,
     no_local_event_deadline,
 )
@@ -36,9 +39,21 @@ from fme.core.distributed.shutdown import (
     defer_termination,
     handle_termination_signals,
 )
-from fme.core.distributed.stop_agreement import StopAgreement
+from fme.core.distributed.stop_agreement import StopAgreement, is_deadline_expiry
 
 _BARRIER_TIMEOUT = 5.0
+
+# `from fme.core.distributed import cooperative_stop` binds the re-exported
+# *function* of that name, and setting an attribute on that patches nothing
+cooperative_stop_module = importlib.import_module(
+    "fme.core.distributed.cooperative_stop"
+)
+
+# What gloo says when a peer's process has died and closed its socket, as opposed to
+# when a deadline expired. Copied from a real gloo message rather than invented,
+# because a substring match on the timeout text is the only thing separating the two
+# and the discrimination is what the tests below are about.
+_PEER_CRASH_MESSAGE = "Connection closed by peer [127.0.0.1]:45678"
 
 # With no default group to read, the no-local-event deadline falls back to the
 # agreement group's own timeout. Read through the function so a test never has to
@@ -106,6 +121,32 @@ class _WedgedPeerAgreement(StopAgreement):
         self.calls.append((reason, index, timeout))
         self._abandoned = True
         raise RuntimeError("Operation timed out!")
+
+
+class _CrashedPeerAgreement(StopAgreement):
+    """Every exchange fails the way one against a *dead* peer does.
+
+    gloo raises the same ``RuntimeError`` type for a deadline expiry and for a
+    peer's socket closing, and the group is abandoned either way -- the message is
+    the only thing that tells them apart.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int, float]] = []
+        self._abandoned = False
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def abandoned(self) -> bool:
+        return self._abandoned
+
+    def exchange(self, reason: int, index: int, timeout: float) -> tuple[int, int, int]:
+        self.calls.append((reason, index, timeout))
+        self._abandoned = True
+        raise RuntimeError(_PEER_CRASH_MESSAGE)
 
 
 class _LockstepAgreement(StopAgreement):
@@ -299,17 +340,28 @@ def test_an_expired_budget_exchanges_at_the_floor(capfd):
     assert all(timeout > 0.0 for timeout in agreement.timeouts + sliver.timeouts)
 
 
-def test_an_index_mismatch_is_reported_and_does_not_force_a_stop(capfd):
-    """The symmetry check is diagnostic only, deliberately.
+def test_an_index_mismatch_is_reported_once_and_does_not_force_a_stop(
+    capfd, monkeypatch
+):
+    """The symmetry check is diagnostic only, deliberately, and it says so once.
 
     A desynchronised run is going to hang anyway, and a new mechanism
     unilaterally terminating healthy-looking jobs on a self-diagnosis is a worse
     failure mode than the one it reports.
+
+    Once per process, because the condition does not un-happen and the run it
+    reports is one where every rank would otherwise emit a line per batch -- tens of
+    thousands of them, on exactly the log a reader is trying to get through.
     """
+    monkeypatch.setattr(cooperative_stop_module, "_reported_index_mismatch", False)
     agreement = _SpyAgreement(reason=0, high=12, low=11)
     stop, pending = _stop(agreement)
 
     assert stop.agreed(11) is False
+    assert stop.agreed(12) is False
+    # a second loop in the same process, which is a second epoch in a real job
+    later, later_pending = _stop(_SpyAgreement(reason=0, high=20, low=19))
+    assert later.agreed(19) is False
 
     captured = capfd.readouterr().err
     mismatch = _marker_lines("index-mismatch", captured)
@@ -317,6 +369,37 @@ def test_an_index_mismatch_is_reported_and_does_not_force_a_stop(capfd):
     assert "min=11" in mismatch[0] and "max=12" in mismatch[0]
     assert _marker_lines("stop-agreed", captured) == []
     pending.close()
+    later_pending.close()
+
+
+def test_a_dead_peer_is_escalated_while_a_wedged_one_is_given_up_on(capfd):
+    """The one discrimination the whole give-up branch turns on, in both directions.
+
+    A false negative escalates a wedge into a crash the job reports as a failure; a
+    false positive masks a real crash as a graceful stop, which is worse. gloo gives
+    both the same exception type, so a substring match on the expiry message is all
+    there is -- and it was asserted only for the expiry.
+    """
+    assert is_deadline_expiry(RuntimeError("Operation timed out!")) is True
+    assert is_deadline_expiry(RuntimeError(_PEER_CRASH_MESSAGE)) is False
+
+    crashed = _CrashedPeerAgreement()
+    stop, pending = _stop(crashed, budget=1.0)
+    pending.request(signal.SIGTERM)
+    try:
+        with pytest.raises(RuntimeError, match="Connection closed by peer"):
+            stop.agreed(3)
+    finally:
+        pending.close()
+
+    # the crash escapes rather than being reported as a rank leaving cooperatively,
+    # so nothing claims a stop was agreed and nothing was noted as a peer's stop
+    stderr = capfd.readouterr().err
+    assert _marker_lines("agreement-timeout", stderr) == []
+    assert _marker_lines("stop-agreed", stderr) == []
+    assert pending.peer_stop is False
+    # but the group is gone either way, so the abandonment is still recorded
+    assert stop.abandoned is True
 
 
 def _world(name: str) -> torch.distributed.ProcessGroup:
@@ -478,7 +561,7 @@ def test_close_never_raises_even_when_the_exchange_does():
     pending.close()
 
 
-def test_a_give_up_with_no_local_event_dispatches_the_teardown(capfd):
+def test_a_give_up_with_no_local_event_dispatches_the_teardown(capfd, monkeypatch):
     """The one path that could leave the loop without tearing anything down.
 
     A rank whose peer never joins gives up on the exchange. If it had recorded a
@@ -488,18 +571,24 @@ def test_a_give_up_with_no_local_event_dispatches_the_teardown(capfd):
     without an explicit record the rank would break out of the loop, tear nothing
     down, and walk into the next collective whose peers have gone.
 
-    The assertion is not on a flag but on the dispatch: `shutdown` ran and a
-    `SystemExit` left the deferral, which is what the caller after the loop never
-    gets to see.
+    The assertion is not on a flag but on the dispatch: `shutdown` ran and the
+    process was exited, which is what the caller after the loop never gets to see.
+    The exit is a *hard* one, because the abandoned group makes interpreter
+    finalization wait for the wedged peer to die; `os._exit` is stubbed here, and
+    `test_cooperative_stop_exit.py` is where the real process death is observed.
     """
     events: list[str] = []
     after: list[str] = []
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
     agreement = _WedgedPeerAgreement()
 
     with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
         with pytest.raises(SystemExit) as excinfo:
             with defer_termination(budget=1.0) as pending:
-                assert pending.seconds_remaining() is None, "no local event"
+                assert (
+                    pending.seconds_remaining() is None
+                ), "a budget is armed, so this is not the no-local-event path"
                 with _cooperative_scope(pending, agreement) as stop:
                     for index in range(10):
                         if stop.agreed(index):
@@ -508,30 +597,78 @@ def test_a_give_up_with_no_local_event_dispatches_the_teardown(capfd):
 
     assert after == [], "the rank left the loop and carried on"
     assert events == ["shutdown"]
+    assert exited == [128 + signal.SIGTERM], "the abandoned group needs a hard exit"
     assert excinfo.value.code == 128 + signal.SIGTERM
-    assert pending.requested is False, "no signal ever reached this rank"
+    assert (
+        pending.requested is False
+    ), "a signal was recorded, so this is not the no-local-event path"
     assert pending.peer_stop is True
     stderr = capfd.readouterr().err
     assert len(_marker_lines("agreement-timeout", stderr)) == 1
     assert len(_marker_lines("agreement-abandoned", stderr)) == 1
 
 
-def test_a_give_up_in_the_loop_entry_exchange_names_no_batch(capfd):
-    """The abandonment marker must not report a batch that does not exist.
+def test_a_give_up_in_the_loop_entry_exchange_stops_without_running_the_loop(capfd):
+    """Loop entry needs the give-up handling the boundary exchange has.
 
-    Reading one past the last index and subtracting gives ``batch=-1`` when the
-    give-up happened in the loop-entry exchange, before any boundary.
+    A signal landing between `defer_termination` yielding and loop entry arms the
+    budget, so this exchange carries a few seconds while unsignalled peers carry the
+    default group's own timeout -- and the window immediately before it respawns the
+    epoch's DataLoader workers, which routinely costs seconds. Without the handling
+    that expiry was a bare `RuntimeError` out of a preemption: exit 1 with a
+    traceback rather than a stop.
+
+    The body must not run either. Its first collective would strand this rank
+    against peers that are not there, which is the fault the module exists to
+    prevent, so the scope leaves by `SystemExit` -- the exit `defer_termination`
+    would have performed for it, with nothing to print.
+
+    The marker's ``batch`` field names the exchange rather than an index, because
+    reading one past the last index and subtracting reported ``batch=-1`` here.
     """
     agreement = _WedgedPeerAgreement()
     pending = PendingStop(budget=1.0)
+    ran: list[str] = []
 
-    with pytest.raises(RuntimeError, match="Operation timed out!"):
+    with pytest.raises(SystemExit) as excinfo:
+        with _cooperative_scope(pending, agreement, loop_length=100):
+            ran.append("the loop body ran against peers that are not there")
+
+    assert ran == []
+    # the peer-stop convention: no signal reached this rank, and the stop still
+    # carries the code a preempted rank reports
+    assert excinfo.value.code == 128 + int(signal.SIGTERM)
+    assert pending.peer_stop is True
+    assert pending.hard_exit is True, "an abandoned group cannot be left to finalize"
+    stderr = capfd.readouterr().err
+    timeout = _marker_lines("agreement-timeout", stderr)
+    assert len(timeout) == 1
+    assert "batch=loop-entry" in timeout[0]
+    # and the message is encoded, so the line is still one parseable field per space
+    assert "err=Operation_timed_out!" in timeout[0]
+    abandoned = _marker_lines("agreement-abandoned", stderr)
+    assert len(abandoned) == 1
+    assert "batch=loop-entry" in abandoned[0]
+    pending.close()
+
+
+def test_an_unequal_loop_length_still_raises_rather_than_stopping(capfd):
+    """The give-up handling at loop entry must not swallow the assertion.
+
+    An unequal loop length is a precondition failure every rank detects from the
+    same reduced values, so every rank raises -- as opposed to a give-up, where this
+    rank alone is leaving.
+    """
+    agreement = _SpyAgreement(high=101, low=99)
+    pending = PendingStop(budget=10.0)
+
+    with pytest.raises(UnequalLoopLength):
         with _cooperative_scope(pending, agreement, loop_length=100):
             pass  # never reached
 
-    abandoned = _marker_lines("agreement-abandoned", capfd.readouterr().err)
-    assert len(abandoned) == 1
-    assert "batch=loop-entry" in abandoned[0]
+    assert pending.peer_stop is False
+    assert pending.hard_exit is False
+    assert _marker_lines("agreement-abandoned", capfd.readouterr().err) == []
     pending.close()
 
 
