@@ -104,6 +104,24 @@ _terminate: Callable[..., None] | None = None
 _installed_pid: int | None = None
 
 
+class StopReason(enum.Enum):
+    """Why a rank is leaving a loop, and the reason code an agreement carries.
+
+    The values are what the agreement's payload transports, so ``MAX`` over them
+    is both a logical OR and a choice of the more serious reason: if any rank
+    recorded a signal every rank reads at least ``1``, and if any rank is
+    unwinding on an exception every rank reads ``2``.
+
+    It lives here rather than beside the agreement so that the agreement stays a
+    torch-only leaf with no dependency on the signal handling: what crosses the
+    wire is the integer value, not the enum.
+    """
+
+    NONE = 0
+    SIGNAL = 1
+    EXCEPTION = 2
+
+
 class _Phase(enum.Enum):
     """How far the teardown has got, which is what a repeated signal turns on."""
 
@@ -138,6 +156,20 @@ def clear_post_shutdown_callbacks() -> None:
     callbacks need to reset it between cases.
     """
     _post_shutdown_callbacks.clear()
+
+
+def clear_pending_stop() -> None:
+    """Discard any registered deferral.
+
+    The counterpart of `clear_post_shutdown_callbacks`, and needed for the same
+    reason: the registry is process-global, and a test session that enters
+    `Distributed.context(handle_signals=False)` installs no handler, so
+    `handle_termination_signals`' own clear-on-exit never runs. A deferral left
+    behind by a failed test would otherwise make the next test's signal deferred
+    to a scope nobody polls.
+    """
+    global _pending_stop
+    _pending_stop = None
 
 
 def write_marker(event: str, **fields: str) -> None:

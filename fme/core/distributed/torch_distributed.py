@@ -18,6 +18,7 @@ from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend
 from .non_distributed import DummyWrapper
+from .stop_agreement import SoloStopAgreement, StopAgreement, new_stop_agreement
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,12 @@ class TorchDistributed(DistributedBackend):
             # device would buy it nothing and leave an idle ~520 MiB CUDA context
             # behind, GiB of it across several persistent worker pools per rank.
             self._rank, self.world_size = _rank_metadata_from_env()
+            # A worker joins no group, so it can agree with nobody -- and must
+            # not, since `new_group` is a collective its rank's real process is
+            # not making. It inherits the parent's group file descriptors
+            # harmlessly, issuing no collectives on them.
+            self._stop_agreement: StopAgreement = SoloStopAgreement()
+            self._default_group: torch.distributed.ProcessGroup | None = None
             return
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if not torch.distributed.is_initialized():
@@ -61,6 +68,7 @@ class TorchDistributed(DistributedBackend):
             self.world_size = torch.distributed.get_world_size()
             local_rank = int(os.environ["LOCAL_RANK"])
             self._rank = torch.distributed.get_rank()
+            self._stop_agreement = self._join_stop_agreement()
             if using_gpu():
                 self._device_id = local_rank
                 torch.cuda.set_device(self._device_id)
@@ -76,6 +84,7 @@ class TorchDistributed(DistributedBackend):
                 world_size=self.world_size,
                 timeout=timedelta(minutes=30),
             )
+            self._stop_agreement = self._join_stop_agreement()
             if using_gpu():
                 # this assumes one GPU per process in the SLURM setting
                 # --gpus-per-task=1 --gpu-bind=closest
@@ -85,6 +94,37 @@ class TorchDistributed(DistributedBackend):
             raise ValueError(
                 "Distributed backend initialized without torchrun or srun."
             )
+
+    def _join_stop_agreement(self) -> StopAgreement:
+        """Join the world-wide agreement group, eagerly and once per process.
+
+        Eagerly because ``new_group`` for gloo is a blocking full-mesh rendezvous,
+        so its creation point has to be one every rank provably reaches; the
+        constructor immediately after ``init_process_group`` is, while a lazy
+        first use inside a training loop is not, a rank there possibly already
+        tearing down. The cost is real and is stated rather than hidden: this
+        becomes the process's first world-wide barrier, so it absorbs the launch
+        jitter ``init_process_group`` does not, inside the window before the
+        termination handler is installed. It is bounded by the same 30 minutes
+        ``init_process_group`` itself carries.
+
+        Once per process because the constructor is reached ad hoc, and a second
+        unmatched ``new_group`` would hang whichever ranks did not make it.
+        """
+        self._default_group = torch.distributed.distributed_c10d._get_default_group()
+        return new_stop_agreement(self.world_size)
+
+    def stop_agreement(self) -> StopAgreement:
+        return self._stop_agreement
+
+    def abort(self) -> None:
+        # `ProcessGroup.abort()` on the group captured at construction, not
+        # `_abort_process_group`: the module-level helper mutates torch's `_world`
+        # and would race the main thread inside `destroy_process_group`, and
+        # looking the default group up again would fail once that call has
+        # cleared the bookkeeping.
+        if self._default_group is not None:
+            self._default_group.abort()
 
     @classmethod
     def is_available(cls) -> bool:

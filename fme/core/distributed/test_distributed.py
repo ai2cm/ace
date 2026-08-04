@@ -14,6 +14,7 @@ from fme import get_device
 from fme.core.distributed import Distributed, model_torch_distributed, torch_distributed
 from fme.core.distributed.external.pnd_manager import DistributedManager
 from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
+from fme.core.distributed.stop_agreement import SoloStopAgreement
 from fme.core.distributed.torch_distributed import (
     TorchDistributed,
     _gather_irregular,
@@ -367,6 +368,17 @@ def test_dataloader_worker_guard_does_not_affect_main_process(
     monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 8)
     monkeypatch.setattr(torch.distributed, "get_rank", lambda: 3)
     monkeypatch.setattr(torch.distributed, "init_process_group", lambda **kwargs: None)
+    # The constructor joins a world-wide gloo agreement group immediately after
+    # `init_process_group`, which this test skips by answering `is_initialized()`
+    # `True`. `new_group` is a real collective and there is no default group here
+    # for it to run on, so it is stubbed alongside `init_process_group` for the
+    # same reason. This test asserts nothing about the agreement group.
+    monkeypatch.setattr(
+        torch_distributed, "new_stop_agreement", lambda world_size: SoloStopAgreement()
+    )
+    monkeypatch.setattr(
+        torch.distributed.distributed_c10d, "_get_default_group", lambda: None
+    )
     set_devices: list[int] = []
     monkeypatch.setattr(torch.cuda, "set_device", set_devices.append)
 

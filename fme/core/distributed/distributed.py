@@ -12,6 +12,7 @@ from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
 from .shutdown import handle_termination_signals
+from .stop_agreement import StopAgreement
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,11 @@ class Distributed:
         try:
             with contextlib.ExitStack() as stack:
                 if handle_signals:
-                    stack.enter_context(handle_termination_signals(instance.shutdown))
+                    stack.enter_context(
+                        handle_termination_signals(
+                            instance.shutdown, abort=instance.abort
+                        )
+                    )
                 yield
         except BaseException:
             # exit immediately to avoid hanging other ranks
@@ -511,6 +516,19 @@ class Distributed:
         buf = torch.zeros(global_shape, dtype=tensor.dtype, device=tensor.device)
         buf[(..., *slices)] = tensor
         return self.spatial_reduce_sum(buf)
+
+    def stop_agreement(self) -> StopAgreement:
+        """The group ranks use to agree on leaving a loop together.
+
+        Reached through `fme.core.distributed.cooperative_stop` rather than
+        directly; it is on this facade so that the loop-facing layer needs
+        nothing but the singleton every entrypoint already has.
+        """
+        return self._distributed.stop_agreement()
+
+    def abort(self) -> None:
+        """Abort this rank's communicators. For the teardown watchdog only."""
+        return self._distributed.abort()
 
     def shutdown(self):
         return self._distributed.shutdown()

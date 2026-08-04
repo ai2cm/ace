@@ -35,6 +35,7 @@ from ._gloo_patch import patch_gloo_alltoall
 from .base import DistributedBackend
 from .external.pnd_manager import DistributedManager
 from .non_distributed import DummyWrapper
+from .stop_agreement import SoloStopAgreement, StopAgreement, new_stop_agreement
 from .torch_distributed import _gather_irregular, _rank_metadata_from_env
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,11 @@ class ModelTorchDistributed(DistributedBackend):
             _check_world_size_divisible(self._world_size, spatial_size)
             self._data_size = self._world_size // spatial_size
             self._data_rank = self._rank // spatial_size
+            # a worker joins no group, so it can agree with nobody -- and must
+            # not, `new_group` being a collective its rank's real process is
+            # not making
+            self._stop_agreement: StopAgreement = SoloStopAgreement()
+            self._default_group: torch.distributed.ProcessGroup | None = None
             return
 
         # Initialize PhysicsNeMo DistributedManager.
@@ -131,6 +137,16 @@ class ModelTorchDistributed(DistributedBackend):
         self._rank = self._dm.rank
         self._local_rank = self._dm.local_rank
         self._world_size = self._dm.world_size
+
+        # The agreement group spans the **world**, not the "data" axis derived
+        # below: the teardown is world-wide -- `DistributedManager.cleanup()`
+        # destroys every group -- so a stop originating on a spatial co-rank has
+        # to reach its data-parallel peers, which anything on `self._data_group`
+        # would not. Created here, after `initialize_mesh` above, because
+        # `new_group` is a collective and every rank has to issue it in the same
+        # order relative to the mesh's own groups.
+        self._default_group = torch.distributed.distributed_c10d._get_default_group()
+        self._stop_agreement = new_stop_agreement(self._world_size)
 
         # Derive per-axis process groups and sizes from the mesh.
         self._data_group = self._dm.get_mesh_group(mesh["data"])
@@ -289,6 +305,16 @@ class ModelTorchDistributed(DistributedBackend):
             tensor, op=torch.distributed.ReduceOp.MAX, group=self._data_group
         )
         return tensor
+
+    def stop_agreement(self) -> StopAgreement:
+        return self._stop_agreement
+
+    def abort(self) -> None:
+        # the **default** group, captured at construction: gloo's `abort()` is an
+        # empty default, so this reaches the NCCL communicators and nothing else,
+        # and the agreement group is meant to be kept rather than aborted
+        if self._default_group is not None:
+            self._default_group.abort()
 
     def gather(
         self,

@@ -8,6 +8,7 @@ from fme.core import metrics
 from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend
+from .stop_agreement import SoloStopAgreement, StopAgreement
 
 T = TypeVar("T")
 
@@ -67,6 +68,15 @@ class NonDistributed(DistributedBackend):
 
     def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor
+
+    def stop_agreement(self) -> StopAgreement:
+        # one rank has nobody to agree with, and `SoloStopAgreement` returns the
+        # caller's own values, so no call site needs a `| None` check
+        return SoloStopAgreement()
+
+    def abort(self) -> None:
+        # no communicators to abort
+        return
 
     def gather(
         self, tensor: torch.Tensor, gather_list: list[torch.Tensor] | None = None

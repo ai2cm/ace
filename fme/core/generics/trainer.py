@@ -63,7 +63,7 @@ import torch
 
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, cooperative_stop
 from fme.core.distributed.shutdown import add_post_shutdown_callback
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
@@ -315,6 +315,12 @@ class Trainer:
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
         self._started_training = False
+        # `train_one_epoch` resets this at the top of every epoch, but the
+        # terminate-time callback below reads it, and a signal can arrive before
+        # any epoch has started -- during startup, or during the validation pass
+        # of a mid-epoch resume, where `_current_epoch_num_batches_seen` is
+        # already non-zero and so does not short-circuit the read
+        self._last_saved_num_batches_seen = self.num_batches_seen
         self._validation_callback: ValidationCallback = validation_callback
         self._inference_callback: InferenceCallback = inference_callback
         self._validate_stepper_callback: ValidateStepper | None = validate_stepper
@@ -325,10 +331,19 @@ class Trainer:
             Runs after the process group has been destroyed, so it must stay
             free of collectives. `save_checkpoint` is root-only and reads local
             state, which satisfies that.
+
+            The third guard is what keeps a stop inside the scheduler's grace
+            period. A signal landing during root's periodic checkpoint write
+            leaves every rank agreeing on the very index that write recorded --
+            the periodic block and the boundary check are adjacent in the loop
+            body -- so without it root would spend another 20s or so reproducing
+            a file that already exists and be SIGKILLed for it. The same
+            predicate guards the epoch-boundary write for the same reason.
             """
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
+                and self.num_batches_seen > self._last_saved_num_batches_seen
             ):
                 if self._in_ema_context:
                     logging.info(
@@ -558,42 +573,64 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
-        for batch in epoch_data:
-            with GlobalTimer():
-                stepped = self.stepper.train_on_batch(batch, self.optimization)
-            self._end_of_batch_callback()
-            self._ema(model=self.stepper.modules)
-            # Step scheduler per-iteration if configured to do so
-            self.optimization.step_scheduler(is_iteration=True)
-            self.num_batches_seen += 1
-            self._current_epoch_num_batches_seen += 1
-            n_samples_seen_since_logging += self.train_data.batch_size
-            metrics_aggregator.record(stepped.get_metrics())
-            if (
-                self.params.log_train_every_n_batches > 0
-                and self.num_batches_seen % self.params.log_train_every_n_batches == 0
-            ):
-                metrics = {
-                    f"batch_{name}": value
-                    for name, value in metrics_aggregator.get_metrics().items()
-                }
-                metrics_aggregator.clear()
-                duration = time.time() - current_time
-                current_time = time.time()
-                samples_per_second = n_samples_seen_since_logging / duration
-                metrics["training_samples_per_second_on_rank_0"] = samples_per_second
-                metrics["lr"] = self.optimization.learning_rate
-                wandb.log(metrics, step=self.num_batches_seen)
-                metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
-                logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
-                n_samples_seen_since_logging = 0
-            if (
-                self._should_save_checkpoints()
-                and self.params.checkpoint_every_n_batches > 0
-                and self.num_batches_seen % self.params.checkpoint_every_n_batches == 0
-            ):
-                self._save_restart_checkpoints()
-                self._last_saved_num_batches_seen = self.num_batches_seen
+        with cooperative_stop(
+            # the index the *first* iteration below will pass to `agreed`, so
+            # that a rank raising inside it contributes what its peers will
+            first_index=self.num_batches_seen + 1,
+            loop_length=len(epoch_data),
+        ) as stop:
+            for batch in epoch_data:
+                with GlobalTimer():
+                    stepped = self.stepper.train_on_batch(batch, self.optimization)
+                self._end_of_batch_callback()
+                self._ema(model=self.stepper.modules)
+                # Step scheduler per-iteration if configured to do so
+                self.optimization.step_scheduler(is_iteration=True)
+                self.num_batches_seen += 1
+                self._current_epoch_num_batches_seen += 1
+                n_samples_seen_since_logging += self.train_data.batch_size
+                metrics_aggregator.record(stepped.get_metrics())
+                if (
+                    self.params.log_train_every_n_batches > 0
+                    and self.num_batches_seen % self.params.log_train_every_n_batches
+                    == 0
+                ):
+                    metrics = {
+                        f"batch_{name}": value
+                        for name, value in metrics_aggregator.get_metrics().items()
+                    }
+                    metrics_aggregator.clear()
+                    duration = time.time() - current_time
+                    current_time = time.time()
+                    samples_per_second = n_samples_seen_since_logging / duration
+                    metrics["training_samples_per_second_on_rank_0"] = (
+                        samples_per_second
+                    )
+                    metrics["lr"] = self.optimization.learning_rate
+                    wandb.log(metrics, step=self.num_batches_seen)
+                    metrics_to_log = {
+                        k: metrics[k] for k in names_to_log if k in metrics
+                    }
+                    logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
+                    n_samples_seen_since_logging = 0
+                if (
+                    self._should_save_checkpoints()
+                    and self.params.checkpoint_every_n_batches > 0
+                    and self.num_batches_seen % self.params.checkpoint_every_n_batches
+                    == 0
+                ):
+                    self._save_restart_checkpoints()
+                    self._last_saved_num_batches_seen = self.num_batches_seen
+                # last in the body, after the counters and after the periodic
+                # checkpoint: the boundary every rank then agrees on is one where
+                # their counters and parameters match, no scheduled checkpoint is
+                # skipped, and reaching the decision costs no further loader fetch
+                if stop.agreed(self.num_batches_seen):
+                    # leaving this context tears the backend down and exits, so
+                    # the shuffle, the train-evaluation pass and the epoch
+                    # increment below are skipped -- they are collectives, and
+                    # their peers have left
+                    break
         # evaluate after training on an independent shuffle of the data
         self.train_data.alternate_shuffle()
         aggregator = self._aggregator_builder.get_train_aggregator()
