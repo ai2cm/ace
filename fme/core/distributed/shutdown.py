@@ -28,6 +28,11 @@ write it was meant to make room for.
 
 Tearing down from inside the handler is right everywhere except inside a batch
 loop, where the ranks share a rendezvous they could agree to leave at instead.
+**Only a scope that opens a deferral gets that**, and today that is one training
+loop: a signal arriving during validation, inline inference, or LR tuning is still
+acted on where it lands, and those paths hold collectives of their own. The
+deferral is the mechanism, not a claim about coverage.
+
 So this module owns three things: *deferral* -- ``defer_termination`` makes the
 handler record intent rather than act, and performs the teardown when the scope
 it guards is left -- the evidence marker writer ``write_marker``, whose lines
@@ -63,8 +68,14 @@ TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT
 # `LocalElasticAgent._shutdown` calls it without an argument
 # (torch/distributed/elastic/agent/server/local_elastic_agent.py:372), then
 # SIGKILLs whoever is still alive. That 30s is one budget shared by every rank
-# rather than 30s each, so a slow rank spends its peers' allowance too. 20s
-# leaves 10s of margin beneath it.
+# rather than 30s each, so a slow rank spends its peers' allowance too.
+#
+# 20s of that 30s is this, and `DEFAULT_STOP_AGREEMENT_BUDGET` claims 5s more
+# ahead of it, so the post-shutdown callbacks -- the restart checkpoint -- begin
+# with about 5s left in the worst case. There is no margin beyond that: this is a
+# ceiling for a teardown that normally returns in well under a second, not a slice
+# reserved for it, but a teardown that really does use its 20s leaves the
+# checkpoint a sixth of the window and no more.
 #
 # [1]: https://beaker-docs.apps.allenai.org/scheduling/interruption.html#automated-preemption
 DEFAULT_TEARDOWN_TIMEOUT = 20.0
@@ -181,8 +192,14 @@ def write_marker(event: str, **fields: str) -> None:
     (which rank failed to reach the stopping point, which rank's teardown did not
     return), so a rank-0 summary cannot serve. ``os.write`` also cannot deadlock
     on the logging lock, which matters because these lines are emitted from
-    signal handlers and timer threads, and a single short write is atomic on a
-    pipe, so several ranks' lines cannot interleave.
+    signal handlers and timer threads.
+
+    One line is one ``write``, which is what keeps several ranks' lines from
+    interleaving -- but only where that guarantee holds: a write under ``PIPE_BUF``
+    (4096 on Linux) is atomic *on a pipe*, while a container that redirects stderr
+    to a regular file relies on ``O_APPEND`` writes not interleaving instead, which
+    is a different promise. Lines here stay far under 4096 bytes, so the stronger
+    case applies wherever it applies at all.
 
     ``installed_pid`` comes from the module-level `_installed_pid` rather than
     from a parameter, so that callers with no access to the handler's locals --
@@ -354,7 +371,13 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
         yield PendingStop(budget)
         return
     if _pending_stop is not None:
-        raise RuntimeError("Nested defer_termination() is not supported.")
+        raise RuntimeError(
+            "Nested defer_termination() is not supported: the registry is "
+            "process-global and only one scope can own the teardown. "
+            "`fme.core.distributed.cooperative_stop` opens one, so two "
+            "cooperative_stop scopes at once -- nested batch loops, most likely -- "
+            "reach here as well."
+        )
     pending = PendingStop(budget)
     _pending_stop = pending
     raising = False
@@ -373,21 +396,32 @@ def defer_termination(budget: float) -> Generator[PendingStop, None, None]:
         pending.close()
         if _terminate is None:
             pass  # no handler installed, so there is nothing to tear down
+        elif raising:
+            # A propagating exception wins, and it wins even over a recorded
+            # signal. `_terminate` raises `SystemExit` from this `finally`, so
+            # exiting here would *replace* the exception -- and the exception this
+            # discards is exactly the one the agreement went out of its way to
+            # surface: a peer's `Connection closed by peer`, re-raised at the
+            # boundary rather than masked as a graceful stop, on a rank that
+            # (because the scheduler signals the whole group) has usually recorded
+            # a signal too. So tear down, run the callbacks, and return, leaving
+            # the traceback to reach the interpreter.
+            #
+            # The exit code still follows the signal where there was one, because
+            # the only thing it is used for from here is the watchdog's hard-exit
+            # backstop, and a rank asked to stop should report `128 + signum` even
+            # if it is the watchdog that ends it.
+            _terminate(
+                pending.exit_code if pending.requested else _EXCEPTION_EXIT_CODE,
+                exit_process=False,
+            )
         elif pending.requested:
-            # A recorded signal takes precedence over an exception deliberately:
-            # a preemption is not a failure, and `128 + signum` is what the
-            # scheduler and torchrun expect from a rank asked to stop. The cost
-            # is that a rank which recorded a signal *and* raised loses the
-            # raise's exit code.
+            # A recorded signal takes precedence over a peer's deliberately: a
+            # preemption is not a failure, and `128 + signum` is what the scheduler
+            # and torchrun expect from a rank asked to stop.
             _terminate(pending.exit_code)
         elif pending.peer_stop:
             _terminate(_PEER_STOP_EXIT_CODE)
-        elif raising:
-            # Tear down and run the callbacks, then let the exception go on
-            # propagating: without this the rank would exit with its
-            # communicators open, and with a `sys.exit` here the traceback that
-            # brought us here would be replaced by an exit code.
-            _terminate(_EXCEPTION_EXIT_CODE, exit_process=False)
 
 
 class _Deadlines:

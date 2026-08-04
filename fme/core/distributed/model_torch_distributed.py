@@ -146,7 +146,7 @@ class ModelTorchDistributed(DistributedBackend):
         # `new_group` is a collective and every rank has to issue it in the same
         # order relative to the mesh's own groups.
         self._default_group = torch.distributed.distributed_c10d._get_default_group()
-        self._stop_agreement = new_stop_agreement(self._world_size)
+        self._stop_agreement = new_stop_agreement(self._world_size, self._default_group)
 
         # Derive per-axis process groups and sizes from the mesh.
         self._data_group = self._dm.get_mesh_group(mesh["data"])

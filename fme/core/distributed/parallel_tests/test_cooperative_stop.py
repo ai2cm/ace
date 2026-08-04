@@ -11,10 +11,9 @@ halves of that are mandatory and neither is tidiness.
 *Throwaway*, because a gloo context that has timed out is in an undefined state,
 so the session's process-wide group must never be the one that fails -- every
 later test in the session would inherit the damage. That is why
-`build_stop_agreement` exists beside `new_stop_agreement`: a cached accessor
-would hand the first test the session's own group and every later test a
-destroyed one, ``destroy_process_group(group)`` on a single group not flipping
-``is_initialized()``.
+`build_stop_agreement` exists beside `new_stop_agreement`: the session's default
+group never changes, so the cache in `new_stop_agreement` would hand every test
+the session's own group, which is exactly the one that must not fail.
 
 *Never released*, because ``destroy_process_group(group)`` reclaims nothing --
 the group *object* dying is what runs ``~ProcessGroupGloo()``, and after a
@@ -38,6 +37,7 @@ import torch.distributed
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.distributed.cooperative_stop import (
+    _MIN_DEADLINE,
     CooperativeStop,
     PeerStopRequested,
     UnequalLoopLength,
@@ -56,7 +56,8 @@ _leak_forever: list[GlooStopAgreement] = []
 
 # Long enough that an exchange every rank really reaches returns inside it, short
 # enough that a mistake becomes a raise rather than a hang the alarm cannot
-# interrupt. Not `NO_LOCAL_EVENT_DEADLINE`, which is 30 minutes.
+# interrupt. Not `no_local_event_deadline()`, which is the default group's own
+# timeout -- tens of minutes.
 _VERIFY_TIMEOUT = 30.0
 
 _SKIP_SINGLE_RANK = "the agreement is only meaningful with more than one rank"
@@ -143,16 +144,21 @@ def test_agreement_is_bounded_when_a_peer_never_joins(capfd):
     """
     dist = _require_ranks()
     absent = dist.world_size - 1
-    budget = 1.0
+    # Above `_MIN_DEADLINE`, so that the *budget* is what bounds the wait, which is
+    # what this test is about. A budget under the floor is floored up to it, and
+    # would also make `PendingStop`'s own overrun warning -- armed at twice the
+    # budget -- fire during a wait that is going to end normally.
+    budget = _MIN_DEADLINE + 1.0
     with _throwaway_agreement() as agreement:
         if dist.rank == absent:
             return  # never joins, as a wedged rank never does
 
         # `work.wait` must *raise* on expiry rather than return `False`. The whole
         # bound rests on that, and it is a private torch behaviour rather than a
-        # documented one, so it is asserted rather than assumed.
+        # documented one, so it is asserted rather than assumed. Passed straight to
+        # `exchange`, so no floor applies and the probe stays short.
         with pytest.raises(RuntimeError) as caught:
-            agreement.exchange(0, 0, budget)
+            agreement.exchange(0, 0, 1.0)
         assert is_deadline_expiry(caught.value), caught.value
 
         pending = PendingStop(budget=budget)
@@ -338,7 +344,9 @@ def test_destroying_an_abandoned_group_returns_without_reclaiming_it(capfd):
             torch.distributed.destroy_process_group(agreement.group)
             return  # never joins, so it has nothing to give up on
 
-        pending = PendingStop(budget=1.0)
+        # above `_MIN_DEADLINE`, for the reason given in
+        # `test_agreement_is_bounded_when_a_peer_never_joins`
+        pending = PendingStop(budget=_MIN_DEADLINE + 1.0)
         pending.request(15)
         with _cooperative_scope(pending, agreement) as stop:
             assert stop.agreed(2) is True
@@ -362,7 +370,8 @@ def test_unequal_loop_lengths_raise_on_every_rank_at_loop_entry():
     An unequal per-rank batch count holds by construction today on both sampler
     paths, so this is insurance against that construction changing. If it did, the
     short rank would leave the loop and exchange nothing while the long rank sat
-    alone in one more exchange with the group's 30 minutes on it -- and the ±index
+    alone in one more exchange with the default group's own timeout on it -- and the
+    ±index
     diagnostic would be blind to it, comparing values contributed to an exchange
     only one rank is in.
 

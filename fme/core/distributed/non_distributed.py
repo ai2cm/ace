@@ -32,6 +32,15 @@ class DummyWrapper(torch.nn.Module):
 class NonDistributed(DistributedBackend):
     """A non-distributed backend implementation."""
 
+    def __init__(self) -> None:
+        # one object for the life of the backend, because `stop_agreement`'s
+        # contract is that the object is created with the backend and not
+        # destroyed with it -- which the real backends implement and multi-rank
+        # tests assert. Harmless to return a fresh one here, but a contract stated
+        # one way and implemented two ways is how the harmless case stops being
+        # harmless.
+        self._stop_agreement = SoloStopAgreement()
+
     @property
     def rank(self) -> int:
         """Global rank of this process."""
@@ -72,7 +81,7 @@ class NonDistributed(DistributedBackend):
     def stop_agreement(self) -> StopAgreement:
         # one rank has nobody to agree with, and `SoloStopAgreement` returns the
         # caller's own values, so no call site needs a `| None` check
-        return SoloStopAgreement()
+        return self._stop_agreement
 
     def abort(self) -> None:
         # no communicators to abort

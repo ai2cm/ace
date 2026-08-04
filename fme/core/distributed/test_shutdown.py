@@ -565,6 +565,30 @@ def test_an_exception_inside_a_deferral_tears_down_without_masking_it():
     assert events == ["shutdown", "callback"]
 
 
+def test_a_signalled_rank_that_also_raises_keeps_the_exception():
+    """A propagating exception survives the dispatch, even beside a recorded signal.
+
+    This is the common case rather than a corner: the scheduler signals the whole
+    process group, so a rank whose peer *crashed* has usually recorded a signal
+    too -- and the exception it is carrying is the ``Connection closed by peer``
+    that the boundary exchange went out of its way to re-raise instead of masking
+    as a graceful stop. Exiting `128 + signum` from the dispatch would throw that
+    away and report a clean preemption.
+    """
+    events = []
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(RuntimeError, match="Connection closed by peer"):
+            with defer_termination(budget=1.0) as pending:
+                signal.raise_signal(signal.SIGTERM)
+                assert pending.requested
+                raise RuntimeError("Connection closed by peer")
+
+    # the teardown still happened; only the `sys.exit` was withheld
+    assert events == ["shutdown", "callback"]
+
+
 def test_a_deferral_that_never_stops_writes_one_diagnostic_line(capfd):
     """A rank that never reaches a stopping point must not go unrecorded.
 

@@ -7,12 +7,17 @@ configuration. And `Distributed.context()` is already entered for the session an
 refuses to nest, while these tests are about what a real entrypoint does inside
 it.
 
+**They are not cheap.** Six torchrun launches, each ``@pytest.mark.serial``, so
+each holds the xdist write lock for the whole of a ``make test`` run at roughly
+8-15s apiece. That is the price of asserting a process exit code at all; nothing
+cheaper can.
+
 So each writes a driver to ``tmp_path`` and launches it under ``torchrun``, the
 way `test_shutdown_dataloader.py` does: ``start_new_session=True`` as torchrun
 launches a rank, and ``os.killpg`` where the claim is about a scheduler signalling
 a container. ``FME_FORCE_CPU=1`` throughout, so gloo, so they run on the CPU job
-too. Every timeout is injected small: no driver waits out a real 10s budget or a
-real 20s teardown.
+too. Every timeout is injected small: no driver waits out a real agreement budget
+or a real 20s teardown.
 
 Ranks' stderr is inherited rather than redirected, so the ``fme-stop:`` marker
 lines land in the launcher's own stderr and are what the assertions read. Exit
@@ -30,6 +35,8 @@ from pathlib import Path
 
 import pytest
 
+from fme.core.distributed.cooperative_stop import _MIN_DEADLINE
+
 # torchrun's own environment would send the driver's ranks down a rendezvous that
 # is not theirs; the launcher below is the one that sets these.
 _RANK_ENV = (
@@ -44,10 +51,14 @@ _RANK_ENV = (
     "SLURM_NTASKS",
 )
 
-# Generous, because it only decides which diagnostic a hang produces: the suite's
-# autouse 90s alarm fires first either way. Observed runtime is ~8-15s.
-_LAUNCH_TIMEOUT = 60.0
-_READY_TIMEOUT = 40.0
+# Sized so that the module's *own* diagnostics are what a maintainer sees on a
+# hang, which is the case where a diagnostic is worth most: waiting for readiness
+# and then for the launch is 60s at worst, inside the suite's autouse 90s SIGALRM,
+# so the `AssertionError` texts below fire rather than "Test failed due to
+# timeout". Observed runtime is ~8-15s, so both are still several times the real
+# figure.
+_LAUNCH_TIMEOUT = 40.0
+_READY_TIMEOUT = 20.0
 
 _SIGTERM_EXIT_CODE = 128 + int(signal.SIGTERM)
 
@@ -257,7 +268,7 @@ def test_a_wedged_rank_does_not_hold_a_healthy_rank_past_its_budget(tmp_path):
     Rank 0 raises its own SIGTERM rather than waiting for one from outside, so
     that its budget is provably armed before it enters the exchange rank 1 will
     never join. A signal from outside landing a moment later would find rank 0
-    already inside that exchange carrying the group's 30 minutes, which is a
+    already inside that exchange carrying the default group's own timeout, which
     different case with a different bound. `test_both_ranks_exit_at_the_same_batch
     _with_the_backend_released` is where the external signal is the claim.
     """
@@ -297,7 +308,7 @@ def test_a_wedged_rank_does_not_hold_a_healthy_rank_past_its_budget(tmp_path):
                                 )
                                 while not (OUT / "wedged").exists():
                                     time.sleep(0.02)
-                                time.sleep(6.0)
+                                time.sleep(10.0)
                                 # a stand-in for the SIGKILL a real wedged rank
                                 # eventually gets; nothing is asserted about it
                                 os._exit(0)
@@ -318,13 +329,109 @@ def test_a_wedged_rank_does_not_hold_a_healthy_rank_past_its_budget(tmp_path):
     assert _exit_codes(tmp_path, 2) == {"0": str(_SIGTERM_EXIT_CODE)}, stderr
     started = float((tmp_path / "started").read_text())
     done = float((tmp_path / "done.0").read_text())
-    # budget + teardown, with slack. The point is that it is bounded at all, and
-    # that it is nothing like rank 1's 6s park.
-    assert done - started < 5.0, done - started
+    # The deadline that binds plus the teardown, with slack. The driver's 1s budget
+    # is below `_MIN_DEADLINE` and so is floored up to it, which is the figure to
+    # compare against; the point is that it is bounded at all, and that it is
+    # nothing like rank 1's 10s park.
+    assert done - started < _MIN_DEADLINE + 4.0, done - started
     assert _marker_fields("agreement-timeout", stderr, "batch") == ["2"], stderr
     assert _marker_fields("agreement-abandoned", stderr, "batch") == ["2"], stderr
     assert len(_marker_fields("shutdown-returned", stderr, "elapsed")) == 1, stderr
     assert "did not complete" not in stderr
+    assert (tmp_path / "callback.0").exists(), "the restart checkpoint was lost"
+
+
+@pytest.mark.slow
+@pytest.mark.medium_duration
+@pytest.mark.serial
+def test_a_rank_that_gives_up_with_no_local_event_exits(tmp_path):
+    """The give-up path must end in an exit even with nothing recorded locally.
+
+    No signal is sent anywhere in this test. Rank 1 simply stops reaching the
+    boundary and rank 0 gives up waiting for it, holding nothing on its
+    `PendingStop` -- no signal, no exception -- which is the state every rank the
+    scheduler's signal did not reach is in. The exit code, observed from outside
+    the interpreter, is the assertion: a rank that merely broke out of the loop
+    would run on into `alternate_shuffle` and the train-evaluation pass, hang there
+    against peers that had gone, and be SIGKILLed with its communicators open.
+
+    The no-local-event deadline is patched down from the default group's own
+    timeout, which is tens of minutes; nothing else about the path is altered, and
+    the deadline's *value* is what the tier-1 tests cover.
+    """
+    child = _launch(
+        f"""
+        import importlib, os, sys, time
+        from pathlib import Path
+
+        import torch
+        import torch.distributed
+
+        from fme.core.distributed import (
+            Distributed,
+            add_post_shutdown_callback,
+            cooperative_stop,
+        )
+
+        # `import ... as` would bind the re-exported *function* of the same name,
+        # and setting an attribute on that silently patches nothing
+        module = importlib.import_module("fme.core.distributed.cooperative_stop")
+        # tens of minutes otherwise, which is the whole point of that deadline
+        module.no_local_event_deadline = lambda: 2.0
+
+        OUT = Path(sys.argv[1])
+        {_RECORD_EXIT}
+        rank = int(os.environ["RANK"])
+        leave_at = 2
+        add_post_shutdown_callback(
+            lambda: (OUT / f"callback.{{rank}}").write_text("ran")
+        )
+        try:
+            with Distributed.context():
+                with cooperative_stop() as stop:
+                    for index in range(1000):
+                        torch.distributed.all_reduce(torch.ones(1))
+                        time.sleep(0.02)
+                        if index == leave_at and rank == 1:
+                            # stops reaching the boundary, while staying alive long
+                            # enough that rank 0 sees a deadline expiry rather than
+                            # a closed socket
+                            time.sleep(8.0)
+                            os._exit(0)
+                        if stop.agreed(index):
+                            break
+                    (OUT / f"loop-exited.{{rank}}").write_text("yes")
+                (OUT / f"scope-exited.{{rank}}").write_text("yes")
+                torch.distributed.all_reduce(torch.ones(1))  # never reached
+                (OUT / f"kept-going.{{rank}}").write_text("yes")
+        except SystemExit as err:
+            record_exit(err.code)
+            raise
+        """,
+        tmp_path,
+    )
+    stderr = _finish(child, tmp_path)
+
+    # no signal was sent, so `128 + SIGTERM` here is the peer-stop convention for a
+    # stop that carries no signal number of its own
+    assert _exit_codes(tmp_path, 2) == {"0": str(_SIGTERM_EXIT_CODE)}, stderr
+    assert not (
+        tmp_path / "kept-going.0"
+    ).exists(), "rank 0 left the loop and executed a further collective"
+    assert not (
+        tmp_path / "scope-exited.0"
+    ).exists(), "leaving the cooperative scope did not dispatch the teardown"
+    assert (tmp_path / "loop-exited.0").exists(), stderr
+    assert _marker_fields("agreement-timeout", stderr, "batch") == ["2"], stderr
+    assert _marker_fields("agreement-abandoned", stderr, "batch") == ["2"], stderr
+    assert len(_marker_fields("shutdown-returned", stderr, "elapsed")) == 1, stderr
+    # No signal is sent by this test. Rank 1 may still record one -- the agent
+    # SIGTERMs it once rank 0 exits non-zero -- but rank 0, the rank under test,
+    # must have given up with nothing of its own recorded, which is the whole point.
+    assert "0" not in _marker_fields("signal-deferred", stderr, "rank"), stderr
+    # and with no local event it was never bounded by a budget, so it claims no
+    # bound of its own
+    assert "fme-stop:agreement-bound" not in stderr, stderr
     assert (tmp_path / "callback.0").exists(), "the restart checkpoint was lost"
 
 

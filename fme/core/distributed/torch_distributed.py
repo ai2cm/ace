@@ -112,7 +112,7 @@ class TorchDistributed(DistributedBackend):
         unmatched ``new_group`` would hang whichever ranks did not make it.
         """
         self._default_group = torch.distributed.distributed_c10d._get_default_group()
-        return new_stop_agreement(self.world_size)
+        return new_stop_agreement(self.world_size, self._default_group)
 
     def stop_agreement(self) -> StopAgreement:
         return self._stop_agreement

@@ -2,6 +2,7 @@ import contextlib
 import os
 import signal
 import unittest.mock
+from collections.abc import Callable
 from typing import Any, Literal, TypeVar, cast
 
 import numpy as np
@@ -767,15 +768,34 @@ def test_resume_after_interrupted_training_during_epoch(
     assert set(stepper.train_batches_seen).isdisjoint(pre_interrupt_batches)
 
 
+def _count_restart_writes(trainer) -> tuple[list[int], Callable[[], None]]:
+    """Record ``num_batches_seen`` at every restart-checkpoint write.
+
+    Returns the list and the side effect to patch `_save_restart_checkpoints`
+    with, which counts both the periodic write and the terminate-time callback's --
+    they are the same method, and which of the two wrote is the thing the two tests
+    below distinguish.
+    """
+    writes: list[int] = []
+    original_write = trainer._save_restart_checkpoints
+
+    def counted() -> None:
+        writes.append(trainer.num_batches_seen)
+        return original_write()
+
+    return writes, counted
+
+
 def test_a_stop_at_a_just_written_checkpoint_does_not_write_it_again(tmp_path: str):
     """The restart write is skipped when the periodic one already made that file.
 
-    This is what keeps a preemption landing inside root's periodic checkpoint
-    write inside the scheduler's grace period. The boundary every rank then agrees
-    on is the very index that write recorded -- the periodic block and the boundary
-    check are adjacent in the loop body -- so writing again would spend another
-    multi-GB `torch.save` reproducing a file that already exists, and be SIGKILLed
-    for it.
+    This is what keeps a preemption landing *inside* root's periodic checkpoint
+    write inside the scheduler's grace period. The handler cannot run while the
+    main thread is inside `torch.save`, so the write completes and the signal is
+    recorded after it -- and the boundary every rank then agrees on is the very
+    index that write recorded, the periodic block and the boundary check being
+    adjacent in the loop body. Writing again would spend another multi-GB
+    `torch.save` reproducing a file that already exists, and be SIGKILLed for it.
     """
     checkpoint_every_n_batches = 5
     _, trainer = get_trainer(
@@ -786,12 +806,56 @@ def test_a_stop_at_a_just_written_checkpoint_does_not_write_it_again(tmp_path: s
         n_train_batches=checkpoint_every_n_batches * 4,
         checkpoint_every_n_batches=checkpoint_every_n_batches,
     )
-    writes = []
-    original_write = trainer._save_restart_checkpoints
+    writes, counted = _count_restart_writes(trainer)
 
-    def counted():
-        writes.append(trainer.num_batches_seen)
-        return original_write()
+    def write_then_signal() -> None:
+        counted()
+        # where a signal arriving during the write is delivered: not before it, the
+        # handler being unable to run while the main thread is inside `torch.save`
+        signal.raise_signal(signal.SIGTERM)
+
+    with (
+        unittest.mock.patch.object(
+            trainer, "_log_first_batch_metrics", return_value=None
+        ),
+        unittest.mock.patch.object(
+            trainer, "_save_restart_checkpoints", side_effect=write_then_signal
+        ),
+        handle_termination_signals(shutdown=lambda: None),
+    ):
+        with pytest.raises(SystemExit):
+            trainer.train()
+
+    # the periodic write, and nothing after it: the terminate-time callback found
+    # `num_batches_seen` equal to what the periodic write had already recorded
+    assert writes == [checkpoint_every_n_batches]
+    assert trainer._last_saved_num_batches_seen == checkpoint_every_n_batches
+
+
+def test_a_periodic_checkpoint_is_skipped_once_a_stop_is_pending(tmp_path: str):
+    """A multi-GB write between the signal and the boundary is skipped, not waited on.
+
+    A periodic checkpoint inside the deferral and *before* the boundary delays the
+    agreed stop by the whole `torch.save`, which is the largest single contributor
+    to a rank arriving late -- and it is redundant: the boundary the ranks are about
+    to agree on is the very index it would record, and the terminate-time restart
+    checkpoint records that after the teardown, which is where slow work belongs.
+
+    So the file is written exactly once either way. What changes is which side of
+    `destroy_process_group` the write happens on, and
+    `_last_saved_num_batches_seen` is what says: the periodic block sets it and the
+    callback does not.
+    """
+    checkpoint_every_n_batches = 5
+    _, trainer = get_trainer(
+        tmp_path,
+        stepper_state={"foo": "bar"},
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=1,
+        n_train_batches=checkpoint_every_n_batches * 4,
+        checkpoint_every_n_batches=checkpoint_every_n_batches,
+    )
+    writes, counted = _count_restart_writes(trainer)
 
     with (
         unittest.mock.patch.object(
@@ -801,15 +865,17 @@ def test_a_stop_at_a_just_written_checkpoint_does_not_write_it_again(tmp_path: s
             trainer, "_save_restart_checkpoints", side_effect=counted
         ),
     ):
-        # the signal lands in the batch whose end the periodic write happens at
+        # the signal lands at the start of the batch the periodic write is due at
+        # the end of, so the write is scheduled *and* a stop is already pending
         with preempt_after_calls_patch(
             trainer.stepper, "train_on_batch", checkpoint_every_n_batches
         ):
             trainer.train()
 
-    # the periodic write, and nothing after it: the terminate-time callback found
-    # `num_batches_seen` equal to what the periodic write had already recorded
     assert writes == [checkpoint_every_n_batches]
+    assert (
+        trainer._last_saved_num_batches_seen == 0
+    ), "the periodic write ran, so the stop waited out a torch.save it did not need"
 
 
 @pytest.mark.parametrize("evaluate_before_training", [True, False])

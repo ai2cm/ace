@@ -618,6 +618,14 @@ class Trainer:
                     and self.params.checkpoint_every_n_batches > 0
                     and self.num_batches_seen % self.params.checkpoint_every_n_batches
                     == 0
+                    # A multi-GB `torch.save` between the signal and the boundary
+                    # delays the agreed stop by the whole write, and the write is
+                    # redundant: the boundary the ranks are about to agree on is
+                    # this very index, and the terminate-time restart checkpoint
+                    # records it after the teardown -- which is where slow work
+                    # belongs. Skipping leaves `_last_saved_num_batches_seen`
+                    # behind, which is what makes that callback write.
+                    and not stop.pending.requested
                 ):
                     self._save_restart_checkpoints()
                     self._last_saved_num_batches_seen = self.num_batches_seen
