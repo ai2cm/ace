@@ -60,8 +60,13 @@ run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre
 
 # run_training "ace-train-config-multi-step-finetuning.yaml" "$base_name-era5-multi-step-fine-tuning-rs0"
 
-# Daily baseline. 1-step pre-training only; there is no multi-step fine-tuning stage for it.
+# Daily baseline: 1-step pre-training, then multi-step fine-tuning from its checkpoint.
+# The fine-tuning config takes the pre-training job's beaker dataset id in its
+# `# arg: --dataset ...:/weights` header.
 # To run a subset of these, comment out the ones you don't want to run
 # and if needed use `--allow-dirty` in the gantry run command above.
 run_training "ace-train-config-1-step-pretrain-daily.yaml" \
   "$base_name-era5-daily-1-step-pre-training-rs0" "ace2s-era5-daily"
+
+run_training "ace-train-config-multi-step-finetuning-daily.yaml" \
+  "$base_name-era5-daily-multi-step-fine-tuning-rs0" "ace2s-era5-daily"
