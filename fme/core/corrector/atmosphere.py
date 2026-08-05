@@ -25,6 +25,28 @@ from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+@dataclasses.dataclass
+class RayleighDamping:
+    timestep_seconds: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        timescales = {
+            "eastward_wind_0": 5 * 86400.0,
+            "northward_wind_0": 5 * 86400.0,
+        }
+        out: TensorDict = {}
+        for name, timescale in timescales.items():
+            rayleigh_tendency = -gen_data[name] / timescale
+            out[name] = gen_data[name] + self.timestep_seconds * rayleigh_tendency
+        return out, corrector_state
+
+
 class AreaWeightedMean(Protocol):
     def __call__(
         self, data: torch.Tensor, keepdim: bool = False, name: str | None = None
@@ -339,6 +361,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     keep_gradient=self.keep_gradient_through_clamps,
                 )
             )
+        corrections.append(RayleighDamping(timestep_seconds))
         if self.conserve_dry_air:
             if fme.get_device() == torch.device("mps", 0):
                 precision = torch.float32
