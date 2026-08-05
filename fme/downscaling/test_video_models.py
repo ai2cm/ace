@@ -6,6 +6,7 @@ import torch
 import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.device import get_device
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.rand import set_seed
@@ -33,11 +34,13 @@ def _times(n):
 
 
 def _video_item(n_times, height, width):
-    data = {v: torch.rand(n_times, height, width) for v in OUT_NAMES}
+    data = {
+        v: torch.rand(n_times, height, width, device=get_device()) for v in OUT_NAMES
+    }
     time = _times(n_times)
     coords = LatLonCoordinates(
-        lat=torch.linspace(-10.0, 10.0, height),
-        lon=torch.linspace(0.0, 30.0, width),
+        lat=torch.linspace(-10.0, 10.0, height, device=get_device()),
+        lon=torch.linspace(0.0, 30.0, width, device=get_device()),
     )
     doy, sod = compute_calendar_features(time)
     return VideoBatchItem(data, time, coords, doy, sod)
@@ -138,8 +141,12 @@ def test_train_on_batch_supports_per_channel_noise():
     assert outputs.sigma is not None
     assert outputs.sigma.shape == (2, 2)
     sigma_min, sigma_max = config.generation_sigma_bounds(outputs.sigma.device)
-    assert torch.allclose(sigma_min, torch.tensor([0.002, 0.005]))
-    assert torch.allclose(sigma_max, torch.tensor([150.0, 2000.0]))
+    assert torch.allclose(
+        sigma_min, torch.tensor([0.002, 0.005], device=sigma_min.device)
+    )
+    assert torch.allclose(
+        sigma_max, torch.tensor([150.0, 2000.0], device=sigma_max.device)
+    )
 
 
 def test_per_channel_sigma_data():
