@@ -1,0 +1,51 @@
+# 40-year coupled inference (2920 x 5-day ocean steps) from the three ICx3-train
+# initial conditions in v20260717-E3SMv3-piControl-105yr-coupled-IC
+# (0425-01-03, 0426-01-03, 0427-01-03 at 12:00), forced by the repeating 1-year
+# SOLIN file in the same directory.
+experiment_dir: /results
+n_coupled_steps: 2920
+coupled_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-e3smv3
+  entity: ai2cm
+forcing_loader:
+  atmosphere:
+    dataset:
+      data_path: /climate-default/home/elynn/fme-dataset/v20260717-E3SMv3-piControl-105yr-coupled-IC
+      file_pattern: atmosphere-forcing-1yr.nc
+      # Supplies the atmosphere forcing window (SOLIN, LANDFRAC, PHIS) and the
+      # ak/bk vertical coordinate. 1460 6-hourly steps = one noleap year starting
+      # 0425-01-03 12:00, i.e. the first ICx3-train initial time. The last IC is
+      # 2 years in, so 40 years of inference spans 42 years of forcing; 43
+      # repeats also covers the trailing initial-condition step.
+      n_repeats: 43
+  ocean:
+    dataset:
+      data_path: /climate-default
+      file_pattern: 2026-06-02-E3SMv3-piControl-105yr-coupled-ocean.zarr
+      engine: zarr
+      # Needed for the single ocean forcing window variable, sea_surface_fraction.
+      # ocean-forcing.nc in the IC directory cannot serve this role: it is purely
+      # time-invariant, and a forcing dataset requires a time coordinate. The 105
+      # years here cover a 40-year run from the latest IC without repeating.
+      n_repeats: 1
+  num_data_workers: 1
+initial_condition:
+  ocean:
+    path: /climate-default/home/elynn/fme-dataset/v20260717-E3SMv3-piControl-105yr-coupled-IC/SamudrACE-E3SMv3-ICx3-train_ocean_ic.nc
+  atmosphere:
+    path: /climate-default/home/elynn/fme-dataset/v20260717-E3SMv3-piControl-105yr-coupled-IC/SamudrACE-E3SMv3-ICx3-train_atmosphere_ic.nc
+  start_indices:
+    first: 0
+    n_initial_conditions: 3
