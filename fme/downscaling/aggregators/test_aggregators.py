@@ -250,6 +250,57 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
         assert isinstance(value, wandb.Image)
 
 
+def test_loss_vs_noise_aggregator_all_channels_totals_sum_across_channels():
+    """With a shared (non-channelwise) sigma, the "all_channels" total is a
+    per-sample SUM across channels, not a mean -- this changed from the
+    pre-existing mean behavior when per-channel sigma binning was added, so
+    the "all_channels" wandb curve is on a different scale than runs logged
+    before this change. This test locks in the new (sum) semantics.
+    """
+    aggregator = LossVsNoiseAggregator(n_bins=8)
+    outputs = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([1.0, 1.0], device=get_device()),  # shared, same bin
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 3.0], device=get_device()),
+            "y": torch.tensor([2.0, 5.0], device=get_device()),
+        },
+    )
+
+    aggregator.record_batch(outputs)
+
+    # sum, not mean, across channels per sample: (1+2) + (3+5) = 11
+    assert aggregator._total_sum.sum().item() == pytest.approx(11.0)
+    assert int(aggregator._total_count.sum().item()) == 2
+    # per-channel totals are unaffected by the all_channels aggregation mode
+    assert aggregator._channel_sum["x"].sum().item() == pytest.approx(4.0)
+    assert aggregator._channel_sum["y"].sum().item() == pytest.approx(7.0)
+
+
+def test_loss_vs_noise_aggregator_accepts_channelwise_sigma():
+    aggregator = LossVsNoiseAggregator(n_bins=8)
+    outputs = ModelOutputs(
+        prediction={},
+        target={},
+        latent_steps=[],
+        loss=torch.tensor(0.0, device=get_device()),
+        sigma=torch.tensor([[0.1, 1000.0], [1.0, 2000.0]], device=get_device()),
+        per_sample_channel_loss={
+            "x": torch.tensor([1.0, 2.0], device=get_device()),
+            "prate": torch.tensor([3.0, 4.0], device=get_device()),
+        },
+    )
+
+    aggregator.record_batch(outputs)
+
+    assert int(aggregator._total_count.sum().item()) == 4
+    assert int(aggregator._channel_count["x"].sum().item()) == 2
+    assert int(aggregator._channel_count["prate"].sum().item()) == 2
+
+
 @pytest.mark.parametrize("n_latent_steps", [0, 2])
 def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
     downscale_factor = 2
