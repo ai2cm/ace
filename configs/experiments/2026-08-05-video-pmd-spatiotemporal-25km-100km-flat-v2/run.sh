@@ -46,7 +46,7 @@ cd "$REPO_ROOT"
 
 DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
-gantry run \
+gantry run --allow-dirty \
     --name "$JOB_NAME" \
     --description 'Spatiotemporal video PMD v2: stage-1 temporal infilling + stage-2 spatial downscaling (25km/100km), 5 channels, flat/independent noise, no subset training, global, patch-trained, endpoint-only coarse conditioning. 4x GPU DDP on titan (weka). Fresh run, not resumed.' \
     --workspace "$WORKSPACE" \
