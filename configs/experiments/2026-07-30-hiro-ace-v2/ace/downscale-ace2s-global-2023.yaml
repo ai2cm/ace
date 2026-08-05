@@ -1,0 +1,51 @@
+experiment_dir: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-05-hiro-ace2s-downscale-global-2023-ic0000
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  #mixture_of_experts_path: /ckpt.tar
+  denoising_expert_configs:
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_low_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+          air_temperature_at_two_meters: TMP2m
+      sigma_min: 0.005
+      sigma_max: 200.0
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_high_sigma/best.ckpt
+        rename:
+          eastward_wind_at_ten_meters: UGRD10m
+          northward_wind_at_ten_meters: VGRD10m
+          air_temperature_at_two_meters: TMP2m
+      sigma_min: 200.0
+      sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+    - data_path: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-coarse-ace2s-10yr-inference
+      file_pattern: output_6hourly_predictions_ic0000.zarr
+      engine: zarr
+  batch_size: 8
+  num_data_workers: 2
+  strict_ensemble: false
+outputs:
+  - name: "global_ace2s_downscaled_2023"
+    save_vars: ["PRATEsfc", "UGRD10m", "VGRD10m", "PRMSL"]
+    n_ens: 1
+    max_samples_per_gpu: 32
+    time_range:
+      start_time: "2023-01-01T00:00:00"
+      stop_time: "2023-12-31T18:00:00"
+    lat_extent:
+      start: -65.0
+      stop: 65.0
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
