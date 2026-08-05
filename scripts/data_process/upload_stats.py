@@ -4,7 +4,6 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Dict, Optional
 
 import click
 import dacite
@@ -36,10 +35,10 @@ def copy(source: str, destination: str):
 
 @dataclasses.dataclass
 class Config:
-    runs: Dict[str, str]
+    runs: dict[str, str]
     data_output_directory: str
     stats: StatsConfig
-    time_coarsen: Optional[TimeCoarsenConfig] = None
+    time_coarsen: TimeCoarsenConfig | None = None
 
 
 @dataclasses.dataclass
@@ -59,7 +58,7 @@ class UploadSpec:
 
 
 def _describe(
-    config: Config, data_directory: str, coarsen_factor: Optional[int] = None
+    config: Config, data_directory: str, coarsen_factor: int | None = None
 ) -> str:
     runs = [run for run in config.runs if run not in config.stats.exclude_runs]
     run_names = ", ".join(runs)
@@ -76,7 +75,12 @@ def _describe(
 
 def _upload_specs(config: Config) -> list[UploadSpec]:
     specs = []
-    if config.stats.beaker_dataset is not None:
+    if config.stats.beaker_dataset is None:
+        logging.warning(
+            "No stats.beaker_dataset configured; stats at "
+            f"{config.stats.output_directory} will not be uploaded."
+        )
+    else:
         specs.append(
             UploadSpec(
                 beaker_dataset=config.stats.beaker_dataset,

@@ -90,17 +90,20 @@ def test_valid_create_coupled_ic_config(filename):
     )
 
 
+NATIVE_DATA_DIRECTORY = "gs://bucket/native-6hourly"
 NATIVE_STATS_DIRECTORY = "gs://bucket/native-stats"
 COARSENED_STATS_DIRECTORY = "gs://bucket/native-daily-stats"
 COARSENED_DATA_DIRECTORY = "gs://bucket/native-daily"
+COARSEN_CLAUSE = "Time coarsened by a factor of"
 
 
 def _upload_stats_config(
     stats_beaker_dataset: str | None = "native-stats",
     time_coarsen_beaker_dataset: str | None = None,
     include_time_coarsen: bool = False,
+    exclude_runs: list[str] | None = None,
 ) -> UploadStatsConfig:
-    stats = {
+    stats: dict = {
         "output_directory": NATIVE_STATS_DIRECTORY,
         "data_type": "CM4",
         "start_date": "0151-01-01T06:00:00",
@@ -108,9 +111,11 @@ def _upload_stats_config(
     }
     if stats_beaker_dataset is not None:
         stats["beaker_dataset"] = stats_beaker_dataset
+    if exclude_runs is not None:
+        stats["exclude_runs"] = exclude_runs
     config_data: dict = {
         "runs": {"run-a": "", "run-b": ""},
-        "data_output_directory": "gs://bucket",
+        "data_output_directory": NATIVE_DATA_DIRECTORY,
         "stats": stats,
     }
     if include_time_coarsen:
@@ -130,9 +135,16 @@ def test_upload_specs_native_only():
     assert len(specs) == 1
     assert specs[0].beaker_dataset == "native-stats"
     assert specs[0].combined_directory == NATIVE_STATS_DIRECTORY + "/combined/"
-    assert "gs://bucket" in specs[0].description
+    assert NATIVE_DATA_DIRECTORY in specs[0].description
     assert "run-a, run-b" in specs[0].description
     assert "0151-01-01T06:00:00" in specs[0].description
+    assert COARSEN_CLAUSE not in specs[0].description
+
+
+def test_upload_specs_description_omits_excluded_runs():
+    specs = _upload_specs(_upload_stats_config(exclude_runs=["run-b"]))
+    assert "run-a" in specs[0].description
+    assert "run-b" not in specs[0].description
 
 
 def test_upload_specs_skips_time_coarsened_without_beaker_dataset():
@@ -154,7 +166,8 @@ def test_upload_specs_includes_time_coarsened_dataset():
     coarsened = specs[1]
     assert coarsened.combined_directory == COARSENED_STATS_DIRECTORY + "/combined/"
     assert COARSENED_DATA_DIRECTORY in coarsened.description
-    assert "factor of 4" in coarsened.description
+    assert NATIVE_DATA_DIRECTORY not in coarsened.description
+    assert f"{COARSEN_CLAUSE} 4" in coarsened.description
 
 
 def test_upload_specs_time_coarsened_only():
