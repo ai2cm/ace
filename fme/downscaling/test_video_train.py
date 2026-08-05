@@ -1,3 +1,5 @@
+import pytest
+
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.ema import EMAConfig
 from fme.core.logging_utils import LoggingConfig
@@ -58,6 +60,7 @@ def _trainer_config(tmp_path):
     )
 
 
+@pytest.mark.medium_duration
 def test_video_trainer_runs_and_checkpoints(tmp_path):
     config = _trainer_config(tmp_path)
     trainer = config.build()
@@ -74,6 +77,7 @@ def test_video_trainer_runs_and_checkpoints(tmp_path):
     assert os.path.isfile(os.path.join(config.checkpoint_dir, "best.ckpt"))
 
 
+@pytest.mark.medium_duration
 def test_video_trainer_resume(tmp_path):
     config = _trainer_config(tmp_path)
     trainer = config.build()

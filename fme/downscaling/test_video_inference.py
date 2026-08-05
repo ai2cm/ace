@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from fme.core.device import get_device
@@ -14,6 +15,7 @@ def _bare_module(model) -> torch.nn.Module:
     return getattr(model.module, "module", model.module)
 
 
+@pytest.mark.medium_duration
 def test_load_video_model_round_trip(tmp_path):
     """``video_inference.load_video_model`` is the actual production
     checkpoint->inference path (distinct from, and previously untested by,
