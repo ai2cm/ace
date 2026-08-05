@@ -63,7 +63,7 @@ from fme.coupled.requirements import (
     CoupledPrognosticStateDataRequirements,
     CoupledTrainDataRequirements,
 )
-from fme.coupled.typing_ import CoupledNames, CoupledOptionalInt, CoupledTensorMapping
+from fme.coupled.typing_ import CoupledNames, CoupledOptionalInt
 
 
 @dataclasses.dataclass
@@ -1554,13 +1554,6 @@ class CoupledStepperTrainLoss:
         self._selected_realm: Literal["ocean", "atmosphere"] | None = None
         self._is_training: bool = True
 
-    @property
-    def effective_loss_scaling(self) -> CoupledTensorMapping:
-        return CoupledTensorMapping(
-            ocean=self._loss_objs["ocean"].effective_loss_scaling,
-            atmosphere=self._loss_objs["atmosphere"].effective_loss_scaling,
-        )
-
     def sample_from_rng(self) -> None:
         """Draw this batch's per-component rollout window and the
         single-component selection, in the required order.
@@ -2022,10 +2015,6 @@ class CoupledTrainStepper(
     @property
     def atmosphere(self) -> Stepper:
         return self._stepper.atmosphere
-
-    @property
-    def effective_loss_scaling(self) -> CoupledTensorMapping:
-        return self._loss.effective_loss_scaling
 
     @property
     def modules(self) -> nn.ModuleList:
