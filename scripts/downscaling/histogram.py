@@ -1,15 +1,15 @@
-import xarray as xr
-import numpy as np
-import dask
-import dask.array as da
-from dask.diagnostics import ProgressBar
-import matplotlib.pyplot as plt
 import argparse
 import os
 import re
-import cftime
 from datetime import datetime
 
+import cftime
+import dask
+import dask.array as da
+import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+from dask.diagnostics import ProgressBar
 
 WIND_SPEED = "wind_speed"
 # 10m wind component name pairs, tried in order against the dataset
@@ -17,6 +17,12 @@ WIND_COMPONENT_NAMES = (
     ("UGRD10m", "VGRD10m"),
     ("eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"),
 )
+
+# ProgressBar defaults to redrawing every 0.1s via a bare "\r" with no
+# newline; when stdout is a file rather than a tty, those redraws never
+# overwrite each other and instead pile up into one enormous line, so the
+# update interval is widened to keep periodic progress without the bloat.
+PROGRESS_BAR_UPDATE_INTERVAL_SECONDS = 3
 
 TIME_FORMAT = "%Y%m%d:%H%M"
 # strptime accepts fewer digits than the format implies ("2013011:1200" parses
@@ -26,9 +32,7 @@ TIME_PATTERN = re.compile(r"^\d{8}:\d{4}$")
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Compute histograms over dataset"
-    )
+    parser = argparse.ArgumentParser(description="Compute histograms over dataset")
     parser.add_argument(
         "path",
         help="zarr dataset path",
@@ -36,8 +40,13 @@ def parse_args():
     parser.add_argument(
         "--variables",
         nargs="+",
-        default=["PRATEsfc", "eastward_wind_at_ten_meters",
-                 "northward_wind_at_ten_meters", "PRMSL", "wind_speed"],
+        default=[
+            "PRATEsfc",
+            "eastward_wind_at_ten_meters",
+            "northward_wind_at_ten_meters",
+            "PRMSL",
+            "wind_speed",
+        ],
         help="Variables to compute histograms for",
     )
     parser.add_argument(
@@ -52,6 +61,12 @@ def parse_args():
     parser.add_argument(
         "--stop-time",
         default=None,
+    )
+    parser.add_argument(
+        "--progress-interval",
+        type=float,
+        default=PROGRESS_BAR_UPDATE_INTERVAL_SECONDS,
+        help="Seconds between progress bar updates",
     )
     args = parser.parse_args()
     return args
@@ -80,7 +95,10 @@ def add_wind_speed(ds: xr.Dataset) -> tuple[xr.Dataset, tuple[str, str]]:
 
 
 def compute_histograms(
-    ds: xr.Dataset, variables: list[str], bins: dict[str, np.ndarray]
+    ds: xr.Dataset,
+    variables: list[str],
+    bins: dict[str, np.ndarray],
+    progress_interval: float = PROGRESS_BAR_UPDATE_INTERVAL_SECONDS,
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Histograms for ``variables`` in a single pass over the data.
 
@@ -88,10 +106,8 @@ def compute_histograms(
     them (e.g. the wind components read by both ``wind_speed`` and its own
     component histograms) are read once rather than once per variable.
     """
-    counts = {
-        var: da.histogram(ds[var].data, bins=bins[var])[0] for var in variables
-    }
-    with ProgressBar():
+    counts = {var: da.histogram(ds[var].data, bins=bins[var])[0] for var in variables}
+    with ProgressBar(dt=progress_interval):
         (counts,) = dask.compute(counts)
     # bins are explicit edges, so they are the edges da.histogram would return
     return {var: (counts[var], bins[var]) for var in variables}
@@ -143,7 +159,8 @@ def save_histogram(
 
 
 def estimate_bins(
-    data: xr.DataArray, nbins: int = 500, stretch_factor: float = 6) -> np.ndarray:
+    data: xr.DataArray, nbins: int = 500, stretch_factor: float = 6
+) -> np.ndarray:
     data_0 = data.isel(time=0)
     data_min, data_max = dask.compute(data_0.min(), data_0.max())
     center = (float(data_min) + float(data_max)) / 2
@@ -152,8 +169,7 @@ def estimate_bins(
 
 
 def str_to_datetime(time_str: str) -> datetime:
-    """Parse a "YYYYMMDD:HHMM" timestamp, e.g. "20130101:1200" -> 2013-01-01 12:00.
-    """
+    """Parse a "YYYYMMDD:HHMM" timestamp, e.g. "20130101:1200" -> 2013-01-01 12:00."""
     if not TIME_PATTERN.match(time_str):
         raise ValueError(
             f"{time_str!r} is not a YYYYMMDD:HHMM timestamp, e.g. 20130101:1200"
@@ -162,8 +178,7 @@ def str_to_datetime(time_str: str) -> datetime:
 
 
 def on_dataset_calendar(time: datetime, ds: xr.Dataset) -> datetime | cftime.datetime:
-    """``time`` rebuilt on ``ds``'s own calendar, so it can index ``ds.time``.
-    """
+    """``time`` rebuilt on ``ds``'s own calendar, so it can index ``ds.time``."""
     index = ds.indexes["time"]
     if not isinstance(index, xr.CFTimeIndex):
         return time
@@ -180,15 +195,17 @@ def on_dataset_calendar(time: datetime, ds: xr.Dataset) -> datetime | cftime.dat
 def main():
     args = parse_args()
     ds = xr.open_zarr(args.path)
-    
+
     t_min = (
-        args.start_time if args.start_time is None
+        args.start_time
+        if args.start_time is None
         else on_dataset_calendar(str_to_datetime(args.start_time), ds)
     )
     t_max = (
-        args.stop_time if args.stop_time is None
+        args.stop_time
+        if args.stop_time is None
         else on_dataset_calendar(str_to_datetime(args.stop_time), ds)
-    ) 
+    )
     time_index = ds.indexes["time"]
     ds = ds.sel(time=slice(t_min, t_max))
     if ds.sizes["time"] == 0:
@@ -221,13 +238,21 @@ def main():
         print(f"computing bins for {', '.join(group)}...")
         bins = {var: estimate_bins(ds[var]) for var in group}
         print(f"computing histograms for {', '.join(group)}...")
-        histograms = compute_histograms(ds, group, bins)
+        histograms = compute_histograms(
+            ds, group, bins, progress_interval=args.progress_interval
+        )
 
         for var, (var_counts, var_edges) in histograms.items():
-            save_histogram(var_counts, var_edges, var, args.output_dir, units=ds[var].attrs.get("units", ""))
+            save_histogram(
+                var_counts,
+                var_edges,
+                var,
+                args.output_dir,
+                units=ds[var].attrs.get("units", ""),
+            )
 
     print("done")
 
 
 if __name__ == "__main__":
-    main()  
+    main()
