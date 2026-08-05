@@ -8,16 +8,20 @@ and only interior frames are denoised -- the two endpoints are pinned exactly
 to their true fine values (temporal-only, prior behavior).
 
 When ``coarse_normalization`` is set, the model also conditions on a
-coarser-resolution clip of the same frames (``batch.coarse``), and the
-baseline becomes that clip bicubic-upsampled to the fine grid:
-- ``endpoints_observed=True`` (default): bias-corrected so it still exactly
-  reproduces the true fine endpoints -- combining CorrDiff-style spatial
-  residual diffusion with the endpoint-conditioned temporal residual.
+coarser-resolution clip of the same frames (``batch.coarse``):
+- ``endpoints_observed=True`` (default): the baseline is unchanged -- still
+  the pure temporal linear interpolation of the observed fine endpoints,
+  with no coarse contribution at all. Coarse only enters via conditioning,
+  and only at the two observed endpoint frames (masked to zero, with an
+  "observed" mask channel, at every interior frame) -- it never leaks into
+  interior frames through either the baseline or the conditioning.
 - ``endpoints_observed=False``: pure coarse-to-fine mode. No frame has
   fine-resolution truth available (e.g. deploying on a continuously-running
   coarse emulator with no sparse high-res anchors): the baseline is exactly
-  ``upsample(coarse)`` with no fine value entering it, nothing is pinned, and
-  every frame -- including the former "endpoints" -- is diffused.
+  ``upsample(coarse)`` with no fine value entering it, nothing is pinned,
+  every frame -- including the former "endpoints" -- is diffused, and the
+  full per-frame coarse clip (unmasked) is used as conditioning, since it's
+  the only conditioning source available in this mode.
 """
 
 import dataclasses
@@ -229,11 +233,16 @@ class VideoDiffusionModelConfig:
     # Optional spatial downscaling. When set, the model additionally
     # conditions on a coarser-resolution clip of the same out_names/frames
     # (``batch.coarse``, bicubic-upsampled per frame to the fine grid -- see
-    # ``_upsample_coarse_clip``) and predicts the residual against that
-    # upsampled coarse field (bias-corrected by the endpoint residual, see
-    # ``VideoDiffusionModel.train_on_batch``) instead of the pure temporal
-    # baseline. None (default) reproduces the exact prior temporal-only
-    # behavior, where ``batch.coarse`` is ignored entirely.
+    # ``_upsample_coarse_clip``). With ``endpoints_observed=True`` (default),
+    # the baseline stays the pure temporal interpolation of the fine
+    # endpoints -- coarse enters only as conditioning, and only at the two
+    # observed endpoint frames (masked to zero elsewhere, with its own
+    # observed-mask channel -- see ``VideoDiffusionModel._conditioning``);
+    # it never reaches interior frames. With ``endpoints_observed=False``,
+    # coarse is the only conditioning source and the baseline is the full
+    # per-frame ``upsample(coarse)`` clip (see ``_spatiotemporal_baseline``).
+    # None (default) reproduces the exact prior temporal-only behavior,
+    # where ``batch.coarse`` is ignored entirely.
     coarse_normalization: NormalizationConfig | None = None
     # Whether the two endpoint frames are real fine-resolution ground truth
     # (default, matches all prior behavior): they're pinned exactly in the
@@ -390,7 +399,9 @@ class VideoDiffusionModelConfig:
                     f"by n_heads={self.n_heads}."
                 )
         if self.temporal_noise_correlation not in (
-            "independent", "brownian_bridge", "per_channel"
+            "independent",
+            "brownian_bridge",
+            "per_channel",
         ):
             raise ValueError(
                 "temporal_noise_correlation must be 'independent', "
@@ -411,7 +422,8 @@ class VideoDiffusionModelConfig:
                     f"missing {sorted(missing)}, unexpected {sorted(extra)}."
                 )
             bad_kernels = {
-                k for k in self.per_channel_noise_kernel.values()
+                k
+                for k in self.per_channel_noise_kernel.values()
                 if k not in ("independent", "brownian_bridge", "ou", "rbf")
             }
             if bad_kernels:
@@ -420,7 +432,8 @@ class VideoDiffusionModelConfig:
                     f"'brownian_bridge', 'ou', or 'rbf', got {sorted(bad_kernels)}."
                 )
             needs_length_scale = {
-                name for name, k in self.per_channel_noise_kernel.items()
+                name
+                for name, k in self.per_channel_noise_kernel.items()
                 if k in ("ou", "rbf")
             }
             have_length_scale = set(self.per_channel_kernel_length_scale or {})
@@ -431,7 +444,8 @@ class VideoDiffusionModelConfig:
                     f"ou/rbf channels: {sorted(missing_ell)}."
                 )
             bad_ell = {
-                name: ell for name, ell in (self.per_channel_kernel_length_scale or {}).items()
+                name: ell
+                for name, ell in (self.per_channel_kernel_length_scale or {}).items()
                 if ell <= 0.0
             }
             if bad_ell:
@@ -630,7 +644,11 @@ class VideoDiffusionModelConfig:
         n_channels = len(self.out_names)
         # noisy residual (C) + log-sigma (C), plus conditioning:
         #  - endpoint values (C) + observed mask (1), only if endpoints_observed
-        #  - upsampled coarse clip (C), only if spatial downscaling is enabled
+        #  - upsampled coarse clip (C), only if spatial downscaling is enabled;
+        #    +1 more for its own observed-mask channel when endpoints_observed
+        #    (coarse is endpoint-masked the same way as the fine block in that
+        #    mode -- see _conditioning -- otherwise it's the full unmasked
+        #    per-frame clip with no mask channel needed)
         # endpoints_observed=False requires coarse_normalizer set (validated in
         # __post_init__), so in_channels is always well-defined.
         in_channels = 2 * n_channels
@@ -638,6 +656,8 @@ class VideoDiffusionModelConfig:
             in_channels += n_channels + 1
         if coarse_normalizer is not None:
             in_channels += n_channels
+            if self.endpoints_observed:
+                in_channels += 1  # coarse-observed mask channel
         if self.backbone == "songunet":
             from fme.downscaling.modules.video_song_unet import VideoSongUNet
 
@@ -725,7 +745,8 @@ def _per_channel_mixing_tensor(
     length_scale_map: dict[str, float] | None,
 ) -> torch.Tensor:
     """``(C, T, T)`` stacked per-channel mixing matrices, ordered by
-    ``out_names`` -- each channel's own kernel/length-scale choice."""
+    ``out_names`` -- each channel's own kernel/length-scale choice.
+    """
     mats = [
         _channel_mixing_matrix(
             tau, kernel_map[name], (length_scale_map or {}).get(name)
@@ -797,7 +818,9 @@ class VideoDiffusionModel:
                 self._full_tau
             ).to(get_device())
         elif self._per_channel_noise:
-            assert config.per_channel_noise_kernel is not None  # validated in __post_init__
+            assert (
+                config.per_channel_noise_kernel is not None
+            )  # validated in __post_init__
             self._noise_mixing = _per_channel_mixing_tensor(
                 self._full_tau,
                 out_names,
@@ -989,19 +1012,42 @@ class VideoDiffusionModel:
     ) -> torch.Tensor:
         """Observed-endpoint values + a binary observed mask channel (only
         when ``self.endpoints_observed``; no fine value of any kind enters
-        the conditioning otherwise), plus the upsampled coarse clip (all
-        frames) when spatial downscaling is enabled.
+        the conditioning otherwise), plus the upsampled coarse clip.
+
+        With ``self.endpoints_observed``, the coarse clip is masked the same
+        way as the fine endpoint values above -- zeroed at interior frames,
+        real only at the two endpoints -- with its own observed-mask channel
+        (so the network can distinguish a genuine near-zero endpoint coarse
+        value from the zeroed interior placeholder). This is the ONLY place
+        coarse conditioning enters in that mode now -- the baseline no
+        longer uses coarse at interior frames either, see
+        ``_spatiotemporal_baseline``. With ``endpoints_observed=False``
+        there's no pinned endpoint to align coarse with, so the full
+        per-frame coarse clip is used unmasked, as before -- that mode
+        requires continuous coarse (it's the only conditioning source; see
+        ``VideoDiffusionModelConfig.endpoints_observed``'s docstring).
         """
         parts = []
+        observed = 1.0 - interior_mask
         if self.endpoints_observed:
-            observed = 1.0 - interior_mask
             observed_values = clip * observed
             mask_channel = observed.expand(
                 clip.shape[0], 1, -1, clip.shape[-2], clip.shape[-1]
             )
             parts.extend([observed_values, mask_channel])
         if coarse_upsampled is not None:
-            parts.append(coarse_upsampled)
+            if self.endpoints_observed:
+                coarse_observed_values = coarse_upsampled * observed
+                coarse_mask_channel = observed.expand(
+                    coarse_upsampled.shape[0],
+                    1,
+                    -1,
+                    coarse_upsampled.shape[-2],
+                    coarse_upsampled.shape[-1],
+                )
+                parts.extend([coarse_observed_values, coarse_mask_channel])
+            else:
+                parts.append(coarse_upsampled)
         return torch.cat(parts, dim=CHANNEL_AXIS)
 
     def _calendar_inputs(self, batch_fine):
@@ -1034,26 +1080,23 @@ class VideoDiffusionModel:
     ) -> torch.Tensor:
         """Per-frame baseline used to form the diffused residual.
 
-        Three cases:
-        - No spatial downscaling: the pure temporal linear interpolation of
-          the observed endpoints (prior behavior).
-        - Spatial downscaling + endpoints_observed: the upsampled coarse
-          field at every frame, bias-corrected by linearly interpolating the
-          *endpoint* residual (fine - upsampled coarse) across the clip -- so
-          it still exactly reproduces the true fine endpoints (required for
-          pinning), while using the real coarse observation (not a temporal
-          guess) at interior frames.
-        - Spatial downscaling, endpoints_observed=False: pure
-          upsample(coarse) at every frame, with NO use of ``clip`` (the fine
-          truth) at all -- there's nothing to bias-correct against or pin to.
+        Two cases:
+        - ``endpoints_observed`` (default, regardless of whether spatial
+          downscaling is enabled): the pure temporal linear interpolation of
+          the observed fine endpoints. ``coarse_upsampled`` is ignored here
+          -- coarse/LR conditioning only enters via ``_conditioning``'s
+          endpoint-masked coarse block now, not the baseline, so it can
+          never leak into interior frames through this path.
+        - ``endpoints_observed=False``: pure ``upsample(coarse)`` at every
+          frame, with NO use of ``clip`` (the fine truth) at all -- there's
+          nothing to bias-correct against or pin to, and coarse is the only
+          conditioning source (``coarse_normalization`` is required to be
+          set in this mode, per ``__post_init__``, so ``coarse_upsampled``
+          is never ``None`` here).
         """
-        if coarse_upsampled is None:
+        if self.endpoints_observed:
             return _linear_interp_endpoints(clip, tau)
-        if not self.endpoints_observed:
-            return coarse_upsampled
-        return coarse_upsampled + _linear_interp_endpoints(
-            clip - coarse_upsampled, tau
-        )
+        return coarse_upsampled
 
     def _endpoint_super_resolution(
         self,
@@ -1098,9 +1141,7 @@ class VideoDiffusionModel:
                 conditioned.latents, coarse_endpoints, conditioned.sigma
             )
             assert self.endpoint_sr_loss is not None
-            [loss_component] = self.endpoint_sr_loss(
-                denoised_residual, target_residual
-            )
+            [loss_component] = self.endpoint_sr_loss(denoised_residual, target_residual)
             loss_a = torch.mean(conditioned.weight * loss_component.loss)
             sr_residual = denoised_residual.detach()
         else:

@@ -24,8 +24,11 @@ from fme.downscaling.noise import (
     LogUniformNoiseDistribution,
 )
 from fme.downscaling.video_models import (
+    CHANNEL_AXIS,
     EndpointSuperResolutionConfig,
     VideoDiffusionModelConfig,
+    _interior_mask,
+    _linear_interp_endpoints,
     _upsample_coarse_clip,
 )
 
@@ -97,9 +100,9 @@ def test_upsample_coarse_clip_groups_channels_by_frame():
         for t in range(n_times):
             frame = coarse[b, :, t]  # (C, H, W): this frame's own channels
             expected = interpolate_2d(frame.unsqueeze(0), factor).squeeze(0)
-            assert torch.allclose(result[b, :, t], expected, atol=1e-5), (
-                f"frame mismatch at batch={b}, time={t}"
-            )
+            assert torch.allclose(
+                result[b, :, t], expected, atol=1e-5
+            ), f"frame mismatch at batch={b}, time={t}"
 
 
 def _model(n_times, temporal_noise_correlation="independent", **config_kwargs):
@@ -252,11 +255,82 @@ def test_spatial_downscaling_widens_input_channels():
     n_times = 5
     model = _spatial_model(n_times)
     n_channels = len(OUT_NAMES)
-    # adds a 4th block of C channels (upsampled coarse clip) vs. the temporal-only 3C+1
-    expected_in_channels = 4 * n_channels + 1
+    # adds a 4th block of C channels (endpoint-masked coarse clip) plus its
+    # own observed-mask channel vs. the temporal-only 3C+1
+    expected_in_channels = 4 * n_channels + 2
     net = model.module.module.model
     in_conv = net.in_conv.conv
     assert in_conv.in_channels == expected_in_channels + net.calendar.out_channels
+
+
+def test_spatial_downscaling_baseline_ignores_interior_coarse():
+    # endpoints_observed=True (default): the baseline must not depend on
+    # coarse at all -- coarse only enters via _conditioning now, masked to
+    # the endpoints. Perturbing only the interior frames of coarse must
+    # leave the baseline unchanged, and it must equal the pure temporal
+    # interpolation of the fine endpoints directly.
+    n_times, height, width = 5, 4, 4
+    model = _spatial_model(n_times)
+    clip = torch.randn(2, len(OUT_NAMES), n_times, height, width)
+    tau = model._tau_for_indices(None)
+
+    coarse_a = torch.randn(2, len(OUT_NAMES), n_times, height, width)
+    coarse_b = coarse_a.clone()
+    coarse_b[:, :, 1:-1] = torch.randn_like(coarse_b[:, :, 1:-1])
+
+    baseline_a = model._spatiotemporal_baseline(clip, coarse_a, tau)
+    baseline_b = model._spatiotemporal_baseline(clip, coarse_b, tau)
+    assert torch.equal(baseline_a, baseline_b)
+
+    expected = _linear_interp_endpoints(clip, tau)
+    assert torch.equal(baseline_a, expected)
+    assert not torch.equal(baseline_a, coarse_a)
+
+
+def test_spatial_downscaling_conditioning_masks_coarse_to_endpoints():
+    # endpoints_observed=True: the coarse conditioning block must be exactly
+    # zero (value and mask channel) at interior frames, and reproduce the
+    # true coarse_upsampled values (with mask=1) at the two endpoints.
+    n_times, height, width = 5, 4, 4
+    n_channels = len(OUT_NAMES)
+    model = _spatial_model(n_times)
+    clip = torch.randn(2, n_channels, n_times, height, width)
+    coarse_upsampled = torch.randn(2, n_channels, n_times, height, width)
+    interior = _interior_mask(n_times, clip.device, model.endpoints_observed)
+
+    condition = model._conditioning(clip, interior, coarse_upsampled)
+    # layout: fine observed values (C) + fine mask (1) + coarse observed
+    # values (C) + coarse mask (1)
+    coarse_values = condition[:, n_channels + 1 : 2 * n_channels + 1]
+    coarse_mask = condition[:, 2 * n_channels + 1 : 2 * n_channels + 2]
+
+    assert torch.equal(
+        coarse_values[:, :, 1:-1], torch.zeros_like(coarse_values[:, :, 1:-1])
+    )
+    assert torch.equal(
+        coarse_mask[:, :, 1:-1], torch.zeros_like(coarse_mask[:, :, 1:-1])
+    )
+    for t in (0, n_times - 1):
+        assert torch.equal(coarse_values[:, :, t], coarse_upsampled[:, :, t])
+    assert torch.equal(
+        coarse_mask[:, :, [0, -1]], torch.ones_like(coarse_mask[:, :, [0, -1]])
+    )
+
+
+def test_pure_coarse_to_fine_conditioning_uses_full_unmasked_coarse():
+    # endpoints_observed=False regression guard: the coarse block stays the
+    # full unmasked per-frame clip, with no extra mask channel, since it's
+    # the only conditioning source in this mode.
+    n_times, height, width = 5, 4, 4
+    n_channels = len(OUT_NAMES)
+    model = _pure_coarse_to_fine_model(n_times)
+    clip = torch.randn(2, n_channels, n_times, height, width)
+    coarse_upsampled = torch.randn(2, n_channels, n_times, height, width)
+    interior = _interior_mask(n_times, clip.device, model.endpoints_observed)
+
+    condition = model._conditioning(clip, interior, coarse_upsampled)
+    assert condition.shape[CHANNEL_AXIS] == n_channels
+    assert torch.equal(condition, coarse_upsampled)
 
 
 def test_spatial_downscaling_train_on_batch_runs_and_backprops():

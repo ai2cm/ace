@@ -1,0 +1,276 @@
+# Stage 2: spatiotemporal video PMD, TWO-STAGE mode, v2 -- endpoint-only
+# coarse conditioning (2026-08-05). Fresh training run, replacing
+# ../2026-07-24-video-pmd-spatiotemporal-25km-100km/ (v1: continuous
+# per-frame coarse conditioning, discovered 2026-08-03 to not match the
+# intended "endpoint-conditioned" design -- LR/coarse was leaking into every
+# interior frame via both the baseline and the conditioning, not just the
+# two observed endpoints). Fixed in fme/downscaling/video_models.py
+# (_spatiotemporal_baseline no longer touches coarse at all;
+# _conditioning's coarse block is now masked to the two endpoint frames the
+# same way the fine block already was, with its own observed-mask channel)
+# -- see that file's module docstring and
+# VideoDiffusionModelConfig.coarse_normalization/endpoints_observed
+# docstrings for the exact new semantics. in_channels changed as a result,
+# so v1's checkpoint is architecturally incompatible; this is a from-scratch
+# run, not a resume.
+#
+# Everything else (two-stage stage-A/stage-B design, patch size, noise
+# schedule, normalization stats, data paths) is unchanged from v1 -- see
+# that config's header comment for the full provenance/tuning history
+# (OOM/hang debugging, stage-A architecture choice, etc.), still accurate
+# for this run.
+#
+# NO real fine-resolution (25km) truth is available as model input at either
+# training or deployment time for the "endpoint" frames -- only the coarse
+# (100km) trajectory is assumed continuously available (e.g. from ACE2S).
+# Instead of disabling endpoint pinning entirely, a HiRO-style 2D
+# residual-diffusion super-resolution sub-model ("stage A",
+# model.endpoint_super_resolution) generates a fine-resolution estimate of
+# the two endpoint frames from the coarse endpoint frames alone; THAT
+# estimate is what gets pinned into the video-diffusion ("stage B")
+# conditioning/baseline. Stage A is supervised by its own denoising loss
+# against the TRUE fine endpoints, with NO gradient from stage B's loss
+# flowing back into it (detached at the handoff). Both stages' losses are
+# computed and backpropagated in one `train_on_batch` call -- see
+# VideoDiffusionModelConfig.endpoint_super_resolution's docstring in
+# fme/downscaling/video_models.py.
+#
+# Flat/simple baseline for stage B: flat per-channel noise
+# (temporal_noise_correlation: independent), no subset training / no
+# marginal-consistency loss for THIS config (see the OU variant,
+# ../2026-08-05-video-pmd-spatiotemporal-25km-100km-ou-v2/, for that noise
+# kernel).
+#
+# Data: 2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr on weka
+# (/climate-default/2026-06-25-temporal-diffusion). downscale_factor =
+# 720/180 = 1440/360 = 4.
+#
+# Patch size: coarse_patch_extent_lat/lon (44, 72) -> 176x288 fine patches,
+# reused verbatim from v1, where this was confirmed NOT to OOM on 4x GPU
+# titan hardware and NOT to change per-frame coarse-vs-endpoint-only memory
+# footprint (the conditioning tensor's channel count grew by 1, negligible).
+#
+# sigma_data_by_channel / training_noise_distributions / sigma_min|max_by_channel
+# below (stage B's) are carried over unchanged from v1 -- not recomputed for
+# the new endpoint-only-coarse residual (interior-frame residual scale
+# should be materially the same, since the baseline formula for interior
+# frames is unchanged: pure temporal interpolation of the fine endpoints,
+# same as before -- only the *conditioning* changed, not the target
+# residual itself). Recompute with toy/compute_residual_std.py if training
+# behaves unexpectedly.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20
+max_test_batches: 50
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-25km-100km-spatiotemporal-twostage-5ch-flat-v2
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+coarse_patch_extent_lat: 44
+coarse_patch_extent_lon: 72
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 4  # global across ranks (4 GPUs x 1 sample/GPU) -- see v1's "things to tune"
+  # No sample_with_replacement cap: with 20 patches/raw batch (4x5 grid),
+  # one epoch over the full train loader is ~820 raw batches x 20 = ~16400
+  # steps. Add a cap here if that's too slow once you've measured
+  # wall-clock/epoch.
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  # True (the default; explicit here for clarity): the two endpoint frames
+  # ARE pinned in stage B's output -- but to stage A's generated estimate,
+  # not real fine truth (there is none) -- see endpoint_super_resolution
+  # below and the header comment.
+  endpoints_observed: true
+  # Stage A: HiRO-style 2D endpoint super-resolution -- see header comment
+  # for the architecture/schedule provenance and the coarse_shape coupling
+  # to coarse_patch_extent_lat/lon above.
+  endpoint_super_resolution:
+    module:
+      type: unet_diffusion_song
+      config:
+        model_channels: 64
+        channel_mult: [1, 2, 2, 2]
+        attn_resolutions: []
+    loss:
+      type: MSE
+    training_noise_distribution:
+      p_mean: -1.2
+      p_std: 1.8
+    coarse_shape: [176, 288]  # fine patch size = coarse_patch_extent_lat/lon * downscale_factor(4)
+    sigma_min: 0.002
+    sigma_max: 150.0
+    churn: 0.0
+    num_diffusion_generation_steps: 18
+    loss_weight: 1.0
+  # Flat/independent noise (no temporal correlation) -- see header comment.
+  # subset_augmentation_prob and marginal_consistency_weight are left at
+  # their 0.0 defaults (matches the earlier "no subset training" request;
+  # both are compatible with endpoint_super_resolution if you want them back).
+  temporal_noise_correlation: independent
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+    air_temperature_at_two_meters:
+      p_mean: -1.96
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+    air_temperature_at_two_meters: 0.1403
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+    air_temperature_at_two_meters: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+    air_temperature_at_two_meters: 22.4
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # fine (25km), train-only, global domain -- toy/compute_norm_stats_25km.py
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074   # log1p(PRATEsfc * 86400) space, matching log_transform_channels
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:  # coarse (100km), train-only, global domain -- reused verbatim
+    # from the stage-1 config above: verified 2026-07-24 that the 100km
+    # store is byte-identical to the dataset those stats were computed from.
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
