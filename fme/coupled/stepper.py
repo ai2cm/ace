@@ -295,12 +295,12 @@ class CoupledStepperConfig:
 
         # calculate forcing sets
         self._ocean_forcing_exogenous_names = list(
-            set(self.ocean.stepper.input_only_names).difference(
+            self.ocean.stepper.input_only_names.difference(
                 self.atmosphere.stepper.output_names
             )
         )
         unfiltered_atmosphere_forcing_names = list(
-            set(self.atmosphere.stepper.input_only_names).difference(
+            self.atmosphere.stepper.input_only_names.difference(
                 self.ocean.stepper.output_names
             )
         )
@@ -322,7 +322,7 @@ class CoupledStepperConfig:
             )
         )
         self._atmosphere_to_ocean_forcing_names = list(
-            set(self.ocean.stepper.input_only_names).intersection(
+            self.ocean.stepper.input_only_names.intersection(
                 self.atmosphere.stepper.output_names
             )
         )
@@ -335,14 +335,14 @@ class CoupledStepperConfig:
             )
 
         self._ocean_to_atmosphere_forcing_names = list(
-            set(self.atmosphere.stepper.input_only_names)
-            .intersection(self.ocean.stepper.output_names)
-            .union(extra_forcings_names)
+            self.atmosphere.stepper.input_only_names.intersection(
+                self.ocean.stepper.output_names
+            ).union(extra_forcings_names)
         )
 
         # calculate names for each component's data requirements
         unfiltered_all_atmosphere_names = list(
-            set(self.atmosphere.stepper.all_names).difference(
+            self.atmosphere.stepper.all_names.difference(
                 self.ocean.stepper.output_names
             )
         )
@@ -357,7 +357,7 @@ class CoupledStepperConfig:
             self._all_atmosphere_names = unfiltered_all_atmosphere_names
         # NOTE: this removes "shared" forcings from the ocean data requirements
         self._all_ocean_names = list(
-            set(self.ocean.stepper.all_names).difference(self._all_atmosphere_names)
+            self.ocean.stepper.all_names.difference(self._all_atmosphere_names)
         )
         if self.ocean_fraction_prediction is not None:
             # NOTE: land_fraciton is necessary to derive sea_ice_fraction from
@@ -555,9 +555,9 @@ class CoupledStepperConfig:
 
         # ocean diagnostics cannot be used as atmosphere inputs
         ocean_diags_as_atmos_forcings = list(
-            set(self.atmosphere.stepper.input_only_names)
-            .intersection(self.ocean.stepper.output_names)
-            .difference(self.ocean.stepper.input_names)
+            self.atmosphere.stepper.input_only_names.intersection(
+                self.ocean.stepper.output_names
+            ).difference(self.ocean.stepper.input_names)
         )
         if len(ocean_diags_as_atmos_forcings) > 0:
             raise ValueError(
@@ -569,7 +569,7 @@ class CoupledStepperConfig:
         # all ocean inputs that are atmosphere outputs must be "next step"
         # forcings according to the ocean stepper config
         atmosphere_to_ocean_forcing_names = list(
-            set(self.ocean.stepper.input_only_names).intersection(
+            self.ocean.stepper.input_only_names.intersection(
                 self.atmosphere.stepper.output_names
             )
         )
