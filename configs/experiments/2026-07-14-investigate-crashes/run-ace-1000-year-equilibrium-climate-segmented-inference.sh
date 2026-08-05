@@ -43,7 +43,7 @@ declare -A MODELS=( \
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-for seed in {0..4}; do
+for seed in {5..5}; do
     for model in "${!MODELS[@]}"; do
         dataset_id="${MODELS[$model]}"
 
