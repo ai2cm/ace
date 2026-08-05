@@ -32,7 +32,7 @@ cd "$REPO_ROOT"
 
 DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
-gantry run \
+gantry run --allow-dirty \
     --name "$JOB_NAME" \
     --description 'Video PMD spatiotemporal test-set inference, region 2/4 (lat -44..44, lon 180..360), 4-member ensemble, OU per-channel noise, 5 channels, 25km/100km. 4x GPU DDP on titan.' \
     --workspace "$WORKSPACE" \
