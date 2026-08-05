@@ -18,6 +18,9 @@ WIND_COMPONENT_NAMES = (
     ("eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"),
 )
 
+# latitude dimension names, tried in order against the dataset
+LAT_DIM_NAMES = ("lat", "latitude", "grid_yt")
+
 # ProgressBar redraws via a bare "\r" with no newline, intended for a tty to
 # overwrite in place. Log streaming (e.g. beaker/gantry) is line-buffered on
 # "\n", so those redraws never surface at all until the one real newline
@@ -90,6 +93,14 @@ def parse_args():
         default=PROGRESS_BAR_UPDATE_INTERVAL_SECONDS,
         help="Seconds between progress bar updates",
     )
+    parser.add_argument(
+        "--lat-range",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="Limit the dataset to latitudes in [MIN, MAX]",
+    )
     args = parser.parse_args()
     return args
 
@@ -103,6 +114,19 @@ def find_wind_components(ds: xr.Dataset) -> tuple[str, str]:
         f"cannot derive {WIND_SPEED!r}: no 10m wind component pair in dataset, "
         f"looked for {' and '.join(map(str, WIND_COMPONENT_NAMES))}"
     )
+
+
+def find_lat_dim(ds: xr.Dataset) -> str:
+    """Name of the latitude dimension in ``ds``."""
+    for name in LAT_DIM_NAMES:
+        if name in ds.dims:
+            return name
+    raise ValueError(f"no latitude dimension in dataset, looked for {LAT_DIM_NAMES}")
+
+
+def select_lat_range(ds: xr.Dataset, lat_min: float, lat_max: float) -> xr.Dataset:
+    dim = find_lat_dim(ds)
+    return ds.sel({dim: slice(lat_min, lat_max)})
 
 
 def add_wind_speed(ds: xr.Dataset) -> tuple[xr.Dataset, tuple[str, str]]:
@@ -217,6 +241,10 @@ def on_dataset_calendar(time: datetime, ds: xr.Dataset) -> datetime | cftime.dat
 def main():
     args = parse_args()
     ds = xr.open_zarr(args.path)
+
+    if args.lat_range is not None:
+        lat_min, lat_max = args.lat_range
+        ds = select_lat_range(ds, lat_min, lat_max)
 
     t_min = (
         args.start_time

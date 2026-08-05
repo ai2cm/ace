@@ -33,7 +33,10 @@ submit_histogram_job() {
         -- bash -c "pip install 'dask[array]' && python '$HISTOGRAM_SCRIPT' '$ZARR_PATH' \
             --progress-interval 120 \
             --output-dir '$OUTPUT_DIR' \
-            --variables ${variables[*]}"
+            --variables ${variables[*]} \
+            --lat-range -65 65 \
+            --start-time 20230101:0000 \
+            --stop-time 20231231:1800"
 }
 
 submit_histogram_job "hiro-histograms-precip-mslp-reference-2023" PRATEsfc PRMSL

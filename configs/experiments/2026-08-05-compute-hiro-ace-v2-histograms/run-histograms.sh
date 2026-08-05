@@ -7,7 +7,7 @@ cd "$REPO_ROOT"
 
 DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
-HISTOGRAM_SCRIPT="/climate-default/home/annak/ace/scripts/downscaling/histogram.py"
+HISTOGRAM_SCRIPT="scripts/downscaling/histogram.py"
 ZARR_PATH="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/global_perfect_prediction.zarr"
 OUTPUT_DIR="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/prediction_histograms"
 
@@ -32,6 +32,7 @@ submit_histogram_job() {
         -- bash -c "pip install 'dask[array]' && python '$HISTOGRAM_SCRIPT' '$ZARR_PATH' \
             --progress-interval 120 \
             --output-dir '$OUTPUT_DIR' \
+            --lat-range -65 65 \
             --variables ${variables[*]}"
 }
 
