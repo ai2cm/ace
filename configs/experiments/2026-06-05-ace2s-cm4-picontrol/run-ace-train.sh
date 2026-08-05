@@ -18,10 +18,12 @@ run_training() {
   shift 2
 
   local ckpt_dataset=""
+  local job_group="$JOB_GROUP"
   local override_args=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --ckpt) ckpt_dataset="$2"; shift 2 ;;
+      --group) job_group="$2"; shift 2 ;;
       *) override_args+=("$1"); shift ;;
     esac
   done
@@ -54,7 +56,7 @@ run_training() {
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
-    --env WANDB_RUN_GROUP="$JOB_GROUP" \
+    --env WANDB_RUN_GROUP="$job_group" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
@@ -86,4 +88,5 @@ PRETRAIN_DATASETS=(
 
 # Daily control run. 1-step pre-training only; there is no multi-step fine-tuning stage for it.
 # To run a subset of these, comment out the ones you don't want to run.
-run_training "ace-train-config-1-step-pretrain-daily.yaml" "ace2s-cm4-picontrol-daily-1-step-pretrain-rs0"
+run_training "ace-train-config-1-step-pretrain-daily.yaml" "ace2s-cm4-picontrol-daily-1-step-pretrain-rs0" \
+  --group "ace2s-cm4-picontrol-daily"
