@@ -56,3 +56,15 @@ the inline-inference cadence (every 2 epochs). Consequences to be aware of at
 review: 80 epochs at 6h is ~4× the optimizer steps (and ~4× the wall time) of
 a daily arm, per-epoch EMA/LR-schedule shapes differ in step terms, and the
 per-inference cost is also ~4×.
+
+## Loader concurrency: arms 1, 7, 9 differ from arms 2, 3, 6
+
+Arms 1, 7 and 9 were host-RAM OOM-killed in the first launch wave and were
+relaunched on 2026-08-05 with `num_data_workers: 8 → 4` on every loader
+(training, validation, all five inference) and the training loader's
+`prefetch_factor: 4 → 2`. Arms 2, 3 and 6 still carry the original `8` / `4`
+because they were not relaunched, so the wave is not uniform in these two
+knobs. Both are dataloader concurrency/queue-depth settings: the sample order
+comes from the seeded distributed sampler, not the worker count, so they are
+expected to be results-neutral and to affect only host memory and IO
+throughput. Batch sizes and `forward_steps_in_memory` are unchanged.
