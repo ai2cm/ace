@@ -18,11 +18,33 @@ WIND_COMPONENT_NAMES = (
     ("eastward_wind_at_ten_meters", "northward_wind_at_ten_meters"),
 )
 
-# ProgressBar defaults to redrawing every 0.1s via a bare "\r" with no
-# newline; when stdout is a file rather than a tty, those redraws never
-# overwrite each other and instead pile up into one enormous line, so the
-# update interval is widened to keep periodic progress without the bloat.
+# ProgressBar redraws via a bare "\r" with no newline, intended for a tty to
+# overwrite in place. Log streaming (e.g. beaker/gantry) is line-buffered on
+# "\n", so those redraws never surface at all until the one real newline
+# ProgressBar writes at completion. LineProgressBar below writes a real "\n"
+# each update instead, so periodic progress actually appears in the log.
 PROGRESS_BAR_UPDATE_INTERVAL_SECONDS = 3
+
+
+class LineProgressBar(ProgressBar):
+    """``ProgressBar`` variant that writes a real newline per update.
+
+    ``ProgressBar`` writes "\\r[bar] | X% Completed | elapsed" with no
+    newline between updates, relying on a tty to overwrite the line in
+    place. Piped through line-buffered log streaming, none of that surfaces
+    until the single "\\n" ``ProgressBar`` writes at completion, so nothing
+    appears in the log until the whole computation is done.
+    """
+
+    def _draw_bar(self, frac, elapsed):
+        from dask.utils import format_time
+
+        percent = int(100 * frac)
+        msg = f"{percent}% Completed | {format_time(elapsed)}\n"
+        if self._file is not None:
+            self._file.write(msg)
+            self._file.flush()
+
 
 TIME_FORMAT = "%Y%m%d:%H%M"
 # strptime accepts fewer digits than the format implies ("2013011:1200" parses
@@ -107,7 +129,7 @@ def compute_histograms(
     component histograms) are read once rather than once per variable.
     """
     counts = {var: da.histogram(ds[var].data, bins=bins[var])[0] for var in variables}
-    with ProgressBar(dt=progress_interval):
+    with LineProgressBar(dt=progress_interval):
         (counts,) = dask.compute(counts)
     # bins are explicit edges, so they are the edges da.histogram would return
     return {var: (counts[var], bins[var]) for var in variables}
