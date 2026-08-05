@@ -5,10 +5,14 @@ models, matching the runner/infrastructure pattern of ``scripts/era5/``.
 
 The ocean and atmosphere are processed in two independent Beam streams
 (one per source dataset, mirroring ``scripts/era5/``) that write to the
-same output zarr store.  Because the 3-hourly atmosphere times are
-validated up front to exactly interleave the 6-hourly ocean times, the
-streams align purely by integer chunk offsets — no per-chunk time
-matching is needed.
+same output zarr store.  Each keeps its own native time-labeling
+convention — the ocean's interval-CENTER labeling and the atmosphere's
+interval-END labeling, matching the convention used for all other
+datasets in this repo, rather than conforming one to the other.
+``_align_times`` restricts both datasets up front to only the times
+where they correspond (see its docstring), so the two Beam streams
+still align purely by integer chunk offsets, with no per-chunk time
+matching needed.
 
 The pipeline always emits data at the ocean model's native 6-hourly
 cadence — no time coarsening happens here.  Coarser products (daily,
@@ -54,6 +58,7 @@ from typing import Sequence
 
 import apache_beam as beam
 import numpy as np
+import pandas as pd
 import xarray as xr
 import xarray_beam as xbeam
 import xesmf as xe
@@ -67,8 +72,6 @@ from zarr.storage import ObjectStore
 
 OCEAN_TIME_STEP = 6  # hours between ocean output timesteps
 ATMO_TIME_STEP = 3  # hours between atmosphere output timesteps
-# Half the atmosphere cadence, as minutes to stay integral (90 = 3h/2).
-_ATMO_HALF_STEP = np.timedelta64(ATMO_TIME_STEP * 30, "m")
 DEFAULT_OUTPUT_GRID = "F90"
 VDIM = "z_l"  # vertical dimension name after cleaning
 
@@ -445,18 +448,17 @@ def open_ocean(variables: list[str], start_time, end_time) -> xr.Dataset:
     return ds.sel(time=slice(start_time, end_time))
 
 
-def open_atmo(variables: list[str], start_time, end_time) -> xr.Dataset:
-    """Open atmosphere variables from FV3 zarr store (lazy, no Dask)."""
+def open_atmo(variables: list[str]) -> xr.Dataset:
+    """Open atmosphere variables from FV3 zarr store (lazy, no Dask).
+
+    Returns the full available time range — unlike ``open_ocean``, no
+    time bound is applied here; ``_align_times`` restricts this to the
+    times needed once the ocean dataset's own range is known.  The raw
+    FV3 interval-average fields' native interval-END time labeling is
+    left as-is (see ``_align_times`` and ``_process_atmo_chunk``).
+    """
     ds = _open_ufs_zarr(URL_ATMO)
     ds = ds.rename({"grid_xt": "lon", "grid_yt": "lat"})[variables]
-    ds = ds.sel(time=slice(start_time, end_time))
-
-    # FV3's interval-average fields are labeled at the END of their 3h
-    # averaging window; shift to the window CENTER (the ocean stream's
-    # convention, see OCEAN_TIME_STEP usage) so that a plain
-    # coarsen(...).mean() lands exactly on the ocean output times
-    # downstream (see _process_atmo_chunk and _validate_time_alignment).
-    ds = ds.assign_coords(time=ds.time - _ATMO_HALF_STEP)
 
     # Drop stray non-dimension coordinates that pollute downstream
     # coarsen steps and the output encoding.
@@ -495,28 +497,34 @@ def _clean_ocean_dataset(ds: xr.Dataset) -> xr.Dataset:
     return ds
 
 
-def _validate_time_alignment(ocean_times, atmo_times) -> None:
-    """Check that the atmosphere times exactly interleave the ocean times.
+def _align_times(
+    ds_ocean: xr.Dataset, ds_atmo: xr.Dataset
+) -> tuple[xr.Dataset, xr.Dataset]:
+    """Restrict both datasets to only the times where they align.
 
-    Both streams use a window-CENTER time convention (see open_atmo):
-    ocean time T's 6h window is covered by the atmosphere pair centered
-    at T minus/plus half the atmosphere cadence.  Verifying this
-    correspondence once up front lets the two Beam streams align purely
-    by integer chunk offsets, with no per-chunk time matching.
+    Ocean and atmosphere each keep their own native time-labeling
+    convention; for each ocean time, the corresponding atmosphere times
+    are that time and the one atmosphere cadence before it.
     """
-    if len(atmo_times) != 2 * len(ocean_times):
-        raise ValueError(
-            f"Expected exactly {2 * len(ocean_times)} atmosphere timesteps "
-            f"(2 per ocean timestep), got {len(atmo_times)}."
-        )
-    for i, ocean_time in enumerate(ocean_times):
-        expected = (ocean_time - _ATMO_HALF_STEP, ocean_time + _ATMO_HALF_STEP)
-        actual = (atmo_times[2 * i], atmo_times[2 * i + 1])
-        if actual != expected:
-            raise ValueError(
-                f"Atmosphere times {actual} do not cover ocean time "
-                f"{ocean_time}; expected {expected}."
-            )
+    ocean_times = ds_ocean.indexes["time"]
+    atmosphere_times = ds_atmo.indexes["time"]
+
+    aligned_ocean_times = []
+    aligned_atmo_times = []
+
+    for time in ocean_times:
+        atmo_time_1 = time - np.timedelta64(ATMO_TIME_STEP, "h")
+        atmo_time_2 = time
+
+        if atmo_time_1 in atmosphere_times and atmo_time_2 in atmosphere_times:
+            aligned_ocean_times.append(time)
+            aligned_atmo_times.append(atmo_time_1)
+            aligned_atmo_times.append(atmo_time_2)
+
+    aligned_ocean_times = pd.Index(aligned_ocean_times)
+    aligned_atmo_times = pd.Index(aligned_atmo_times)
+
+    return ds_ocean.sel(time=aligned_ocean_times), ds_atmo.sel(time=aligned_atmo_times)
 
 
 # ---------------------------------------------------------------------------
@@ -750,8 +758,8 @@ def _process_atmo_chunk(
 
     Receives a loaded (in-memory) Dataset whose 3-hourly times pairwise
     cover the 6-hourly ocean times of the corresponding output chunk
-    (validated up front by ``_validate_time_alignment``), and returns
-    the processed output Dataset at that 6-hourly ocean cadence.
+    (see ``_align_times``), and returns the processed output Dataset at
+    that 6-hourly ocean cadence.
     """
     xr.set_options(keep_attrs=True)
 
@@ -773,14 +781,10 @@ def _process_atmo_chunk(
 
     # Average consecutive pairs of 3h fields → 6h, before horizontal
     # regridding, to minimize how much data passes through the
-    # expensive conservative regridder.  Records are already
-    # center-labeled (see open_atmo) half the atmo cadence apart, so
-    # averaging labels lands exactly on the ocean stream's output time
-    # — no manual relabeling needed.  coarsen is preferred over resample
-    # because the atmo data is regularly spaced and coarsen always
-    # produces equal-sized groups (resample can create uneven bins at
-    # boundaries).
+    # expensive conservative regridder.  Label interval averages with
+    # the time at the end of each interval.
     ds = ds_atmo.coarsen(time=2, boundary="trim").mean()
+    ds = ds.assign_coords(time=ds_atmo.time.isel(time=slice(1, None, 2)))
 
     # --- Horizontal regridding ---
     ds = _regrid_dataset(
@@ -1201,6 +1205,25 @@ def main():
     logging.info("Opening datasets")
 
     ds_ocean = open_ocean(OCEAN_LOAD_VARS, start_time, end_time)
+    ds_ocean = _clean_ocean_dataset(ds_ocean)
+    logging.info("Ocean dataset: %s", dict(ds_ocean.sizes))
+
+    atmo_load_vars = (
+        list(ATMO_FORCING_VARS.keys())
+        + list(ICE_VARS.keys())
+        + FROZEN_PRECIP_ACCUM_VARS
+    )
+    ds_atmo = open_atmo(atmo_load_vars)
+
+    # Ocean and atmosphere each keep their own native time-labeling
+    # convention; restrict both to only the times where they
+    # correspond.  After this, the two Beam streams correspond purely
+    # by integer chunk offsets: ocean offset i and atmosphere offset
+    # 2*i both contribute to output offset i.
+    ds_ocean, ds_atmo = _align_times(ds_ocean, ds_atmo)
+    logging.info("Ocean dataset (aligned): %s", dict(ds_ocean.sizes))
+    logging.info("Atmo dataset (aligned): %s", dict(ds_atmo.sizes))
+
     # Truncate to a multiple of process_time_chunksize so every chunk has
     # exactly the same number of timesteps.
     n_ocean = ds_ocean.sizes["time"]
@@ -1215,28 +1238,7 @@ def main():
             n_ocean - n_usable,
         )
         ds_ocean = ds_ocean.isel(time=slice(0, n_usable))
-    ds_ocean = _clean_ocean_dataset(ds_ocean)
-    logging.info("Ocean dataset: %s", dict(ds_ocean.sizes))
-
-    # Atmosphere: 3-hourly data covering the same interval as the ocean.
-    # Ocean time T (a center-labeled 6h average) is covered, in the raw
-    # store's END-labeled convention, by the atmosphere records at T and
-    # T+3h (open_atmo re-centers these internally), so the requested
-    # range extends one atmosphere timestep past the last ocean time.
-    ocean_times = ds_ocean.time.values
-    atmo_load_vars = (
-        list(ATMO_FORCING_VARS.keys())
-        + list(ICE_VARS.keys())
-        + FROZEN_PRECIP_ACCUM_VARS
-    )
-    atmo_end = ocean_times[-1] + np.timedelta64(ATMO_TIME_STEP, "h")
-    ds_atmo = open_atmo(atmo_load_vars, ocean_times[0], atmo_end)
-    logging.info("Atmo dataset: %s", dict(ds_atmo.sizes))
-
-    # With aligned times, the two Beam streams correspond purely by
-    # integer chunk offsets: ocean offset i and atmosphere offset 2*i
-    # both contribute to output offset i.
-    _validate_time_alignment(ocean_times, ds_atmo.time.values)
+        ds_atmo = ds_atmo.isel(time=slice(0, 2 * n_usable))
 
     # --- Build template ---
     logging.info("Generating template")
