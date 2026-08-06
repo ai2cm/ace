@@ -1,0 +1,71 @@
+# Full test-set frame-by-frame inference for the HiRO-ACE-style spatial
+# downscaling baseline (100km -> 25km, 5ch), training job v6
+# (01KZ1WGMKRX6AKWWQXB8JJWRZP, succeeded 2026-08-03). Feeds every coarse
+# (LR) test-period frame through the trained model and writes every
+# generated fine (HR) frame to a single (time, ensemble, lat, lon) zarr --
+# unlike video_inference.py (used for the PMD spatiotemporal models), this
+# uses fme.downscaling.inference, the production tool for the plain
+# single-frame DiffusionModel. It has a real PatchPredictor
+# (divide_generation + composite_prediction below) that tiles the full
+# global domain into the model's trained 16x16-coarse-pixel patches and
+# composites them back together -- so, unlike the PMD video model (which
+# has no attention tiling and OOM'd on full-global in
+# ../2026-07-24-video-pmd-spatiotemporal-25km-100km-test-inference/), this
+# can run genuinely global in one job, no regional splitting needed.
+#
+# Checkpoint: ema_ckpt.tar (the LATEST-epoch EMA weights, not
+# best/best_histogram_tail -- matches validate_using_ema: true used during
+# training, and mirrors the convention used for the PMD video-inference
+# configs of using the current/latest checkpoint rather than a
+# best-selected one), mounted from training job v6's result dataset
+# 01KZ1WGMM2SQR6WSV0R3F3EM47.
+#
+# n_ens: 1 -- this is for visual/frame-by-frame inspection (does the model
+# track the LR sequence coherently frame to frame?), not uncertainty
+# quantification, so a single realization per frame is what's wanted here.
+# Bump this (and switch to CRPS-style eval) if/when this becomes about
+# scoring probabilistic skill instead.
+model:
+  checkpoint_path: /checkpoint/checkpoints/ema_ckpt.tar
+experiment_dir: /results
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-temporal-interp
+  name: hiro-downscaling-25km-100km-global-5ch-v6-test-inference
+  entity: ai2cm
+data:
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 4
+  num_data_workers: 4
+  strict_ensemble: false
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+outputs:
+  - name: test-2023-2024
+    n_ens: 1
+    max_samples_per_gpu: 8
+    save_vars:
+      - PRATEsfc
+      - air_temperature_at_two_meters
+      - PRMSL
+      - eastward_wind_at_ten_meters
+      - northward_wind_at_ten_meters
+    time_range:
+      start_time: "2023-01-01"
+      stop_time: "2024-01-04"
+    lat_extent:
+      start: -88
+      stop: 88
+    lon_extent:
+      start: 0
+      stop: 360
