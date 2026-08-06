@@ -96,7 +96,6 @@ class InlineValidationConfig:
         self,
         name: str,
         dataset_info: DatasetInfo,
-        loss_scaling: dict[str, torch.Tensor] | None,
         loss_names: Sequence[str] | None,
         save_per_epoch_diagnostics: bool,
         output_dir: str,
@@ -104,7 +103,6 @@ class InlineValidationConfig:
         def factory():
             return self.aggregator.build(
                 dataset_info=dataset_info,
-                loss_scaling=loss_scaling,
                 save_diagnostics=save_per_epoch_diagnostics,
                 output_dir=os.path.join(output_dir, name),
                 channel_mean_names=loss_names,
@@ -221,7 +219,6 @@ def _get_validation_callback(
     validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
     stepper: TrainStepperABC,
     dataset_info: DatasetInfo,
-    loss_scaling: dict[str, torch.Tensor] | None,
     loss_names: Sequence[str] | None,
     save_per_epoch_diagnostics: bool,
     output_dir: str,
@@ -233,7 +230,6 @@ def _get_validation_callback(
             aggregator_factory=entry_config.build_aggregator_factory(
                 name=name,
                 dataset_info=dataset_info,
-                loss_scaling=loss_scaling,
                 loss_names=loss_names,
                 save_per_epoch_diagnostics=save_per_epoch_diagnostics,
                 output_dir=output_dir,
@@ -248,7 +244,6 @@ def _get_validation_callback(
 def _get_validate_stepper_callback(
     validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
     dataset_info: DatasetInfo,
-    loss_scaling: dict[str, torch.Tensor] | None,
     loss_names: Sequence[str] | None,
     validate_using_ema: bool,
 ) -> ValidateStepper:
@@ -263,7 +258,6 @@ def _get_validate_stepper_callback(
             data.set_epoch(epoch)
             aggregator = entry_config.aggregator.build(
                 dataset_info=dataset_info,
-                loss_scaling=loss_scaling,
                 save_diagnostics=False,
                 output_dir="",
                 channel_mean_names=loss_names,
@@ -730,14 +724,12 @@ class TrainConfig:
             modules=stepper.modules, base_weights=stepper.get_base_weights()
         )
 
-        loss_scaling = stepper.effective_loss_scaling
         loss_names = stepper.loss_names
         updated_dataset_info = dataset_info.update_variable_metadata(variable_metadata)
         aggregator_builder = AggregatorBuilder(
             train_config=self.train_aggregator,
             dataset_info=updated_dataset_info,
             output_dir=self.output_dir,
-            loss_scaling=loss_scaling,
             channel_mean_names=loss_names,
             save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
         )
@@ -746,7 +738,6 @@ class TrainConfig:
             validation_entries=validation_entries,
             stepper=stepper,
             dataset_info=updated_dataset_info,
-            loss_scaling=loss_scaling,
             loss_names=loss_names,
             save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=self.output_dir,
@@ -757,7 +748,6 @@ class TrainConfig:
             validate_stepper = _get_validate_stepper_callback(
                 validation_entries=validation_entries,
                 dataset_info=updated_dataset_info,
-                loss_scaling=loss_scaling,
                 loss_names=loss_names,
                 validate_using_ema=self.validate_using_ema,
             )
@@ -793,13 +783,11 @@ class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
         train_config: TrainAggregatorConfig,
         dataset_info: DatasetInfo,
         output_dir: str,
-        loss_scaling: dict[str, torch.Tensor] | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.train_config = train_config
         self.dataset_info = dataset_info
-        self.loss_scaling = loss_scaling
         self.channel_mean_names = channel_mean_names
         self.output_dir = output_dir
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics

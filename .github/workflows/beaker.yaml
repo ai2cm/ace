@@ -24,7 +24,7 @@ jobs:
       BEAKER_CHECKPOINT_TEST_DATASET: elynn/ci-inference
       WANDB_PROJECT: ace-ci-tests
       WANDB_ENTITY: ai2cm
-      PYTHON_VERSION: "3.11"
+      PYTHON_VERSION: "3.12"
     steps:
       - name: Checkout repo
         uses: actions/checkout@v6
