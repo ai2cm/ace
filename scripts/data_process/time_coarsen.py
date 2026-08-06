@@ -12,7 +12,7 @@ import xarray as xr
 import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from get_stats import StatsConfig
+from get_stats import StatsConfig, store_path
 
 try:
     import dask  # noqa: F401
@@ -74,6 +74,10 @@ class TimeCoarsenConfig:
     )
     input_time_slice: TimeSlice = dataclasses.field(default_factory=TimeSlice)
 
+    def store(self, run_name: str) -> str:
+        """Zarr store holding a run's coarsened data."""
+        return store_path(self.data_output_directory, run_name)
+
 
 @dataclasses.dataclass
 class Config:
@@ -82,17 +86,25 @@ class Config:
     stats: StatsConfig
     time_coarsen: TimeCoarsenConfig
 
+    def run_names(self) -> list[str]:
+        """Names of the configured runs, in the order they are declared."""
+        return list(self.runs)
+
+    def raw_store(self, run_name: str) -> str:
+        """Zarr store holding the native-resolution data for a run."""
+        return store_path(self.data_output_directory, run_name)
+
+    def coarsened_store(self, run_name: str) -> str:
+        """Zarr store holding the time-coarsened data for a run."""
+        return self.time_coarsen.store(run_name)
+
 
 def main(config: Config, run: int, dry_run: bool = False):
     logging.basicConfig(level=logging.INFO)
-    run_name = list(config.runs.keys())[run]
-    if config.data_output_directory.endswith("/"):
-        config.data_output_directory = config.data_output_directory[:-1]
-    input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
-    output_zarr = config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
+    run_name = config.run_names()[run]
     process_path_pair(
-        input_path=input_zarr,
-        output_path=output_zarr,
+        input_path=config.raw_store(run_name),
+        output_path=config.coarsened_store(run_name),
         config=config.time_coarsen,
         dry_run=dry_run,
     )
