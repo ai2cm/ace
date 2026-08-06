@@ -46,6 +46,8 @@ def make_job(
     scheduled=0,
     started=0,
     replica_size=0,
+    replica_group_id="",
+    environment_id="",
     workspace_id=WORKSPACE_ID,
 ):
     """Build a pb2.Job mirroring the shape Beaker returns for a live job."""
@@ -56,6 +58,7 @@ def make_job(
         workspace_id=workspace_id,
         task_id="task-1",
         workload_id="workload-1",
+        environment_id=environment_id,
     )
     job.container_spec.resource_request.gpu_count = gpu_count
     for key, value in (env or {}).items():
@@ -72,6 +75,8 @@ def make_job(
         )
     if replica_size:
         job.system_details.replica_group_details.size = replica_size
+    if replica_group_id:
+        job.system_details.replica_group_details.id = replica_group_id
 
     job.status.created.seconds = created
     if scheduled:
@@ -223,11 +228,38 @@ def test_fetch_reads_a_job_with_no_cluster_constraint():
     assert view.budget_clusters(LIMITS) == tuple(LIMITS)
 
 
-def test_fetch_reads_replica_group_size():
-    client = FakeClient([make_job(replica_size=4, env={"CM_PRIORITY": "high"})])
+def test_fetch_reads_the_replica_group_so_ranks_group_together():
+    client = FakeClient(
+        [
+            make_job(
+                job_id=f"rank-{rank}",
+                replica_size=4,
+                replica_group_id="rg-1",
+                env={"CM_PRIORITY": "high"},
+            )
+            for rank in range(4)
+        ]
+    )
+    views = fetch_jobs(client, "ai2/ace")
+    assert {view.replica_group_size for view in views} == {4}
+    assert {view.group_key for view in views} == {"rg-1"}
+    # A rank is individually manageable; the group decides whether it moves.
+    assert all(view.managed_cluster(LIMITS) == "ai2/jupiter" for view in views)
+
+
+def test_a_lone_job_is_its_own_group():
+    client = FakeClient([make_job(job_id="solo", env={"CM_PRIORITY": "high"})])
     (view,) = fetch_jobs(client, "ai2/ace")
-    assert view.replica_group_size == 4
-    assert view.managed_cluster(LIMITS) is None
+    assert view.group_key == "solo"
+
+
+def test_fetch_marks_an_interactive_session():
+    # A session carries an environment id; a batch job does not.
+    client = FakeClient(
+        [make_job(job_id="session", environment_id="env-1"), make_job(job_id="batch")]
+    )
+    sessions = {view.id: view.is_session for view in fetch_jobs(client, "ai2/ace")}
+    assert sessions == {"session": True, "batch": False}
 
 
 def test_fetch_counts_a_cpu_only_job_as_one_slot():

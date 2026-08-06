@@ -14,6 +14,7 @@ pytest.importorskip("beaker", reason="beaker-py is not a core fme dependency")
 
 from balance import (  # noqa: E402
     HIGH,
+    IMMEDIATE,
     LOW,
     NORMAL,
     URGENT,
@@ -39,6 +40,8 @@ def job(
     queued_at=0.0,
     placed_at=None,
     replica_group_size=0,
+    replica_group_id="",
+    is_session=False,
     name="job",
     author="jeremym",
 ):
@@ -56,7 +59,17 @@ def job(
         queued_at=queued_at,
         placed_at=placed_at,
         replica_group_size=replica_group_size,
+        replica_group_id=replica_group_id,
+        is_session=is_session,
     )
+
+
+def group(count=4, group_id="rg-1", **kwargs):
+    """Build the ranks of one replica group, all sharing a spec."""
+    return [
+        job(replica_group_size=count, replica_group_id=group_id, **kwargs)
+        for _ in range(count)
+    ]
 
 
 def placed(**kwargs):
@@ -95,15 +108,42 @@ def charged_clusters(job_view: JobView) -> tuple[str, ...]:
 def usage(jobs, limits=LIMITS) -> dict[str, int]:
     used = dict.fromkeys(limits, 0)
     for job_view in jobs:
-        if job_view.priority == URGENT:
+        # immediate outranks urgent, so it occupies a slot just the same.
+        if job_view.priority in (URGENT, IMMEDIATE):
             for cluster in charged_clusters(job_view):
                 used[cluster] += job_view.slots
     return used
 
 
+def modifiable(jobs, limits=LIMITS) -> set[str]:
+    """Ids of jobs the balancer may change, restated from the rules.
+
+    A rank of a replica group is modifiable only as part of a whole group that
+    is uniformly manageable and entirely present, since the group is granted
+    urgent all-or-nothing.
+    """
+    groups: dict[str, list[JobView]] = {}
+    for j in jobs:
+        key = j.replica_group_id if j.replica_group_size > 1 else j.id
+        groups.setdefault(key or j.id, []).append(j)
+    allowed: set[str] = set()
+    for members in groups.values():
+        if any(m.managed_cluster(limits) is None for m in members):
+            continue
+        if len({m.cm_priority for m in members}) != 1:
+            continue
+        if len({m.clusters[0] for m in members}) != 1:
+            continue
+        if len(members) < max(m.replica_group_size for m in members):
+            continue
+        allowed.update(m.id for m in members)
+    return allowed
+
+
 def unmanaged_charge(jobs, limits=LIMITS) -> dict[str, int]:
-    """Urgent slots held by jobs the balancer cannot modify."""
-    return usage([j for j in jobs if j.managed_cluster(limits) is None], limits)
+    """Allocated slots held by jobs the balancer cannot modify."""
+    allowed = modifiable(jobs, limits)
+    return usage([j for j in jobs if j.id not in allowed], limits)
 
 
 def apply(jobs: list[JobView], actions: list[Action]) -> list[JobView]:
@@ -335,11 +375,96 @@ def test_jobs_on_unbudgeted_clusters_are_left_alone():
     assert decide([saturn], LIMITS) == []
 
 
-def test_replica_group_members_are_not_managed():
-    # Granting urgent to some ranks and not others wastes the slots granted,
-    # and it is unconfirmed whether the priority RPC is per-job or per-source.
-    ranks = [job(cm_priority=HIGH, slots=8, replica_group_size=4) for _ in range(4)]
+# --- replica groups ---------------------------------------------------------
+
+
+def test_replica_group_ranks_are_granted_together():
+    ranks = group(4, cm_priority=HIGH, slots=8)
+    assert changes(decide(ranks, LIMITS)) == {rank.id: URGENT for rank in ranks}
+
+
+def test_a_replica_group_is_granted_all_or_nothing():
+    # 5 x 16 = 80 against 72: four ranks would fit, but a group cannot be split
+    # to fit, so every rank gives up urgent rather than stranding 64 slots on a
+    # job that still cannot start.
+    ranks = group(5, priority=URGENT, cm_priority=HIGH, slots=16)
+    assert changes(decide(ranks, LIMITS)) == {rank.id: HIGH for rank in ranks}
+
+
+def test_a_replica_group_is_charged_as_the_sum_of_its_ranks():
+    big = group(4, group_id="big", cm_priority=HIGH, slots=16)
+    small = job(cm_priority=NORMAL, slots=16)
+    # The 64-slot group wins its level first, leaving 8 — too few for the
+    # 16-slot normal job behind it.
+    result = changes(decide([*big, small], LIMITS))
+    assert result == {**{rank.id: URGENT for rank in big}, small.id: NORMAL}
+
+
+def test_a_replica_group_with_an_unlabelled_rank_is_left_alone():
+    ranks = group(3, cm_priority=HIGH)
+    ranks.append(job(cm_priority=None, replica_group_size=4, replica_group_id="rg-1"))
     assert decide(ranks, LIMITS) == []
+
+
+def test_a_replica_group_whose_ranks_disagree_on_their_label_is_left_alone():
+    ranks = group(3, cm_priority=HIGH)
+    ranks.append(job(cm_priority=LOW, replica_group_size=4, replica_group_id="rg-1"))
+    assert decide(ranks, LIMITS) == []
+
+
+def test_a_partially_visible_replica_group_is_left_alone():
+    # fetch_jobs reads only unfinished jobs in one workspace, so a group can
+    # come back short. Granting the visible ranks would half-grant the real one.
+    assert decide(group(4, group_id="rg-1")[:3], LIMITS) == []
+
+
+def test_a_replica_group_with_a_placed_rank_below_urgent_is_not_promoted():
+    # Beaker cannot raise the placed rank, so granting urgent would split the
+    # group. It is excluded from the walk instead.
+    ranks = [
+        placed(
+            priority=HIGH,
+            cm_priority=URGENT,
+            replica_group_size=2,
+            replica_group_id="rg-1",
+            slots=8,
+        ),
+        job(
+            priority=HIGH,
+            cm_priority=URGENT,
+            replica_group_size=2,
+            replica_group_id="rg-1",
+            slots=8,
+        ),
+    ]
+    contender = job(cm_priority=NORMAL, slots=8)
+    result = changes(decide([*ranks, contender], {"ai2/jupiter": 8}))
+    assert result == {contender.id: URGENT}
+
+
+# --- sessions and immediate priority ----------------------------------------
+
+
+def test_an_interactive_session_is_never_modified():
+    session = job(priority=URGENT, cm_priority=LOW, is_session=True, slots=8)
+    assert decide([session], {"ai2/jupiter": 0}) == []
+
+
+def test_an_interactive_session_still_consumes_the_allocation():
+    session = job(priority=URGENT, cm_priority=None, is_session=True, slots=72)
+    contender = job(priority=URGENT, cm_priority=HIGH, slots=8)
+    assert changes(decide([session, contender], LIMITS)) == {contender.id: HIGH}
+
+
+def test_an_immediate_job_is_never_demoted():
+    urgent_now = job(priority=IMMEDIATE, cm_priority=LOW, slots=8)
+    assert decide([urgent_now], {"ai2/jupiter": 0}) == []
+
+
+def test_an_immediate_job_consumes_the_allocation():
+    urgent_now = job(priority=IMMEDIATE, cm_priority=None, slots=72)
+    contender = job(priority=URGENT, cm_priority=HIGH, slots=8)
+    assert changes(decide([urgent_now, contender], LIMITS)) == {contender.id: HIGH}
 
 
 # --- fitting ----------------------------------------------------------------
@@ -390,9 +515,14 @@ def test_tied_jobs_are_broken_deterministically_by_id():
 
 
 def random_population(rng: random.Random) -> list[JobView]:
+    """Build a random workspace of lone jobs, replica groups and sessions.
+
+    Ranks of a group share a spec but vary in placement, and a group is
+    occasionally emitted short a rank or with one rank's label perturbed, so
+    the uniformly-manageable check is genuinely exercised.
+    """
     jobs = []
-    for _ in range(rng.randint(0, 40)):
-        is_placed = rng.random() < 0.5
+    for index in range(rng.randint(0, 25)):
         clusters = rng.choice(
             [
                 ("ai2/jupiter",),
@@ -402,23 +532,42 @@ def random_population(rng: random.Random) -> list[JobView]:
                 (),  # unconstrained: could land anywhere
             ]
         )
-        # A placed job may be running, or scheduled and still initializing.
-        assigned = None
-        if is_placed and clusters and rng.random() < 0.9:
-            assigned = rng.choice(clusters)
-        jobs.append(
-            job(
-                priority=rng.choice([LOW, NORMAL, HIGH, URGENT]),
-                cm_priority=rng.choice([None, LOW, NORMAL, HIGH, URGENT]),
-                slots=rng.choice([1, 2, 4, 8, 16, 40]),
-                clusters=clusters,
-                is_placed=is_placed,
-                assigned_cluster=assigned,
-                placed_at=float(rng.randint(1, 10_000)) if is_placed else None,
-                queued_at=float(rng.randint(1, 100)),  # ties are common
-                replica_group_size=rng.choice([0, 0, 0, 4]),
+        size = rng.choice([0, 0, 0, 4])
+        shared = {
+            "cm_priority": rng.choice([None, LOW, NORMAL, HIGH, URGENT]),
+            "slots": rng.choice([1, 2, 4, 8, 16, 40]),
+            "clusters": clusters,
+            "replica_group_size": size,
+            "replica_group_id": f"rg-{index}" if size else "",
+            "is_session": rng.random() < 0.1,
+        }
+        priority = rng.choice([LOW, NORMAL, HIGH, URGENT, IMMEDIATE])
+        ranks = max(1, size)
+        if size and rng.random() < 0.2:
+            ranks -= 1  # a group we can only partly see
+        for rank in range(ranks):
+            is_placed = rng.random() < 0.5
+            # A placed job may be running, or scheduled and still initializing.
+            assigned = None
+            if is_placed and clusters and rng.random() < 0.9:
+                assigned = rng.choice(clusters)
+            overrides = {}
+            if size and rank == 0 and rng.random() < 0.15:
+                overrides["cm_priority"] = rng.choice([None, LOW, URGENT])
+            jobs.append(
+                job(
+                    **{**shared, **overrides},
+                    priority=(
+                        rng.choice([LOW, NORMAL, HIGH, URGENT, IMMEDIATE])
+                        if rng.random() < 0.15
+                        else priority
+                    ),
+                    is_placed=is_placed,
+                    assigned_cluster=assigned,
+                    placed_at=float(rng.randint(1, 10_000)) if is_placed else None,
+                    queued_at=float(rng.randint(1, 100)),  # ties are common
+                )
             )
-        )
     return jobs
 
 
@@ -487,10 +636,44 @@ def test_only_labelled_manageable_jobs_are_ever_modified(seed):
     for action in decide(jobs, LIMITS):
         assert action.job.cm_priority is not None
         assert action.job.managed_cluster(LIMITS) is not None
-        assert action.job.replica_group_size <= 1
+        assert action.job.id in modifiable(jobs)
+        assert not action.job.is_session
+        assert action.from_priority != IMMEDIATE
+        assert action.to_priority != IMMEDIATE
         # Beaker refuses to raise a placed job; we must never try.
         if action.job.is_placed:
             assert action.to_priority < action.from_priority
+
+
+def half_urgent(members) -> bool:
+    holders = sum(1 for member in members if member.priority == URGENT)
+    return 0 < holders < len(members)
+
+
+@pytest.mark.parametrize("seed", range(300))
+def test_a_replica_group_never_half_holds_urgent(seed):
+    """The guarantee group granularity exists for.
+
+    A group holding urgent on only some ranks cannot start until every rank is
+    placed, so it waits at the priority of its lowest rank while the granted
+    ranks hold slots the allocation has already spent.
+
+    Splits *below* urgent are left alone deliberately: they cost the allocation
+    nothing, and raising a queued rank whose siblings are stuck at a lower
+    priority is what gets the group placed.
+    """
+    rng = random.Random(seed)
+    jobs = random_population(rng)
+    after = {j.id: j for j in apply(jobs, decide(jobs, LIMITS))}
+    groups: dict[str, list[JobView]] = {}
+    for j in jobs:
+        if j.replica_group_size > 1 and j.replica_group_id:
+            groups.setdefault(j.replica_group_id, []).append(j)
+    for group_id, members in groups.items():
+        if half_urgent(members):
+            continue  # the balancer did not create this, and may not own it
+        settled = [after[m.id] for m in members]
+        assert not half_urgent(settled), f"{group_id} was left half-urgent"
 
 
 @pytest.mark.parametrize("seed", range(300))
@@ -509,17 +692,26 @@ def test_random_population_reaches_the_states_that_matter():
         "unconstrained": 0,
         "initializing": 0,
         "replica": 0,
+        "replica_managed": 0,
+        "session": 0,
+        "immediate": 0,
         "demotion": 0,
         "promotion": 0,
         "over_before": 0,
     }
     for seed in range(300):
         jobs = random_population(random.Random(seed))
+        allowed = modifiable(jobs)
         seen["unconstrained"] += sum(1 for j in jobs if not j.clusters)
         seen["initializing"] += sum(
             1 for j in jobs if j.is_placed and j.assigned_cluster is None
         )
         seen["replica"] += sum(1 for j in jobs if j.replica_group_size > 1)
+        seen["replica_managed"] += sum(
+            1 for j in jobs if j.replica_group_size > 1 and j.id in allowed
+        )
+        seen["session"] += sum(1 for j in jobs if j.is_session)
+        seen["immediate"] += sum(1 for j in jobs if j.priority == IMMEDIATE)
         actions = decide(jobs, LIMITS)
         seen["demotion"] += sum(1 for a in actions if a.is_demotion)
         seen["promotion"] += sum(1 for a in actions if not a.is_demotion)

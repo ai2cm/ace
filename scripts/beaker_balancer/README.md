@@ -32,13 +32,18 @@ count per pass:
   to one cluster if you want it balanced. Most `ai2/ace` jobs today target
   `titan+jupiter`, so expect this to be the common case during adoption.
 - **It targets a cluster with no allocation** (`ai2/saturn`, `ai2/ceres`).
-- **It is part of a replica group.** The allocation walk would grant urgent to
-  some ranks and not others, which for a synchronised-start group wastes the
-  slots it did grant. It is also unconfirmed whether `UpdateJobSourcePriority`
-  acts per job or per source; if per source, one call would move every replica.
+- **It is an interactive session.** There is a person attached to it, and
+  taking their priority away mid-session is not the script's call.
+- **It is at `immediate` priority.** Beaker requires a human-supplied reason for
+  `immediate`, so it represents a deliberate decision the balancer should not
+  quietly undo. `immediate` is not an accepted `CM_PRIORITY` value either: it is
+  not something the script may hand out.
 - **It has landed on a node the script cannot resolve to a cluster.** Its slots
   are then charged to every budget as a precaution, which is inconsistent with
   managing it against one.
+
+Sessions and `immediate` jobs still count against the allocation — see
+[Accounting](#accounting).
 
 ### What may surprise you
 
@@ -55,33 +60,61 @@ count per pass:
   a `CM_PRIORITY` level, the job that has held its GPUs longest is the first to
   lose urgent, on the grounds that it has already had its turn.
 
+## Replica groups
+
+Beaker runs a multi-node job as one job per rank. The balancer decides for the
+whole **replica group** at once and grants urgent all-or-nothing. A lone job is
+simply a group of one.
+
+A half-granted group is the worst available outcome: it cannot start until every
+rank is placed, so it waits at the priority of its lowest rank while the granted
+ranks hold slots the allocation has already spent. A four-rank group needing 80
+slots against 72 free therefore gets nothing, rather than stranding 64 slots on
+a job that still cannot run.
+
+A group is managed only if *every* rank is: one unlabelled rank, one session, or
+one at `immediate` makes the whole group untouchable. The same applies if the
+ranks disagree about their `CM_PRIORITY`, or if the group comes back short —
+only unfinished jobs in one workspace are read, so granting the ranks that
+happen to be visible would half-grant the real group. Skipped groups are counted
+in the log.
+
+Splits *below* urgent are left alone deliberately. They cost the allocation
+nothing, and raising a queued rank whose siblings are stuck at a lower priority
+is what gets the group placed.
+
+The grouping is keyed on the replica group rather than the workload, since one
+workload can hold independent tasks that have no reason to move together.
+
 ## What it does
 
 Each pass recomputes the whole allocation from scratch and applies the
 difference:
 
-1. Read every unfinished job in the workspace.
-2. Subtract the slots held at urgent by jobs it cannot modify. Those are a
-   fixed charge; only what is left is available.
-3. Walk the managed jobs in `CM_PRIORITY` order, granting urgent while the
-   job's cluster has room.
-4. Set every managed job to urgent if granted, or to its resting priority if
+1. Read every unfinished job in the workspace and group it with its ranks.
+2. Subtract the slots held at urgent or `immediate` by jobs it cannot modify.
+   Those are a fixed charge; only what is left is available.
+3. Walk the managed groups in `CM_PRIORITY` order, granting urgent while the
+   group's cluster has room for all of it.
+4. Set every managed group to urgent if granted, or to its resting priority if
    not.
 
 Recomputing rather than adjusting incrementally is what makes step 3 work: a
-`high` job is always considered before any `normal` job, so it never has to
-wait for slots a lesser job already took. If `normal` jobs are holding urgent
+`high` group is always considered before any `normal` one, so it never has to
+wait for slots a lesser one already took. If `normal` jobs are holding urgent
 slots that a `high` job needs, they are dropped to make room.
 
-Within one `CM_PRIORITY` level, urgent is granted to running jobs that already
-hold it first — so a queued job always gives up its slot before a running one —
-ordered so the job that has held a GPU longest is the first to lose it. Queued
-jobs follow, longest-waiting first. The two orderings use different clocks:
-time on GPU for running jobs, and time since entering the queue for queued
-ones. The queue clock resets when a job is preempted and requeued, so a job
-that has been bounced does not keep seniority it no longer has.
+Within one `CM_PRIORITY` level, urgent is granted to running groups that already
+hold it first — so a queued group always gives up its slot before a running one
+— ordered so the group that has held its GPUs longest is the first to lose it.
+Queued groups follow, longest-waiting first. The two orderings use different
+clocks: time on GPU for running groups, and time since entering the queue for
+queued ones. A group's queue clock is that of its *latest* rank, because it
+cannot start until the last one is placed; since the clock resets when a rank is
+preempted and requeued, a group that has been bounced does not keep seniority it
+no longer has.
 
-A job too large for the remaining slots is skipped and smaller ones behind it
+A group too large for the remaining slots is skipped and smaller ones behind it
 still get a chance. Nothing is reserved for it, because a level that could not
 fit has already taken everything it was entitled to.
 
@@ -100,13 +133,17 @@ BeakerPermissionsError: cannot increase priority for running job "01K..."
 ```
 
 So a job that starts at `high` stays there for life, even if urgent slots free
-up later. Such a job is also excluded from the allocation walk — granting it
-urgent on paper would displace jobs that *can* be promoted, for no benefit. If
-it is preempted and returns to the queue it becomes eligible again, at its
-proper rank.
+up later. A group with a placed rank below urgent is also excluded from the
+allocation walk — granting it urgent on paper would displace groups that *can*
+be promoted, for no benefit, and it could not be brought wholly to urgent
+anyway. If it is preempted and returns to the queue it becomes eligible again,
+at its proper rank.
 
 The practical consequence: **submit at the priority you want, and let the
 balancer take it away** rather than hoping to be raised later.
+
+**It never touches an interactive session or an `immediate` job**, in either
+direction.
 
 ## Accounting
 
@@ -114,6 +151,14 @@ A job that has landed counts only against the cluster it is on. A *queued*
 urgent job counts at full weight against every cluster it could land on.
 Nothing outranks urgent and nothing can preempt it, so a queued urgent job is a
 committed future occupant, not a maybe.
+
+`immediate` counts the same as urgent: it outranks urgent, so the slot is just
+as occupied. Interactive sessions count too.
+
+Sessions and `immediate` jobs are counted but never reclaimable, so a pass can
+be unable to get within the allocation no matter what it does. Each pass logs
+how many slots per cluster are held that way, so that shows up as a fact rather
+than as a balancer that appears not to be working.
 
 ## Running it
 
@@ -163,8 +208,10 @@ collects cleanly.
 `test_balance.py` covers the decision logic, including randomised populations
 asserting the invariants that matter: a pass never pushes usage above the
 allocation, *any prefix* of a pass stays within it, a second pass is always a
-no-op (so cron cannot flap jobs), and only labelled, manageable jobs are ever
-touched — never raising a placed one. Those tests compute usage with an oracle
+no-op (so cron cannot flap jobs), a replica group is never left holding urgent
+on only some of its ranks, sessions and `immediate` jobs are never touched, and
+only labelled, manageable jobs are ever modified — never raising a placed one.
+Those tests compute usage with an oracle
 written independently of the production accounting, so a bug in the accounting
 cannot hide behind itself; a further test asserts the random populations
 actually reach the states that matter, so the suite cannot quietly go vacuous.

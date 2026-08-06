@@ -7,7 +7,13 @@ the allocation, favouring the jobs we care about most.
 
 A job opts in by setting the ``CM_PRIORITY`` environment variable to one of
 ``low``, ``normal``, ``high`` or ``urgent``. Jobs without it are never modified,
-but their urgent slot usage still counts against the allocation.
+but their urgent slot usage still counts against the allocation. So do
+interactive sessions and jobs at ``immediate`` priority, neither of which the
+balancer will touch.
+
+Decisions are made per *replica group*, not per job: Beaker runs a multi-node
+job as one job per rank, and a group granted urgent on only some ranks holds
+slots it cannot use.
 
 Run ``python balance.py --dry-run`` to see what a pass would do.
 """
@@ -39,11 +45,28 @@ LOW = pb2.JOB_PRIORITY_LOW
 NORMAL = pb2.JOB_PRIORITY_NORMAL
 HIGH = pb2.JOB_PRIORITY_HIGH
 URGENT = pb2.JOB_PRIORITY_URGENT
+IMMEDIATE = pb2.JOB_PRIORITY_IMMEDIATE
 
+#: ``immediate`` is deliberately absent: Beaker requires a human-supplied
+#: reason for it, so it is not something the balancer may hand out.
 PRIORITY_BY_NAME = {"low": LOW, "normal": NORMAL, "high": HIGH, "urgent": URGENT}
 NAME_BY_PRIORITY = {value: name for name, value in PRIORITY_BY_NAME.items()}
+NAME_BY_PRIORITY[IMMEDIATE] = "immediate"
+
+#: Priorities that occupy a slot in the allocation. ``immediate`` outranks
+#: ``urgent``, so a job holding one is just as much an occupant.
+ALLOCATED_PRIORITIES = (URGENT, IMMEDIATE)
 
 _CLUSTER_CONSTRAINT = pb2.JOB_PLACEMENT_CONSTRAINT_TYPE_CLUSTER
+
+# Why a job may not be modified. Identity-compared, so a caller can tell an
+# expected state apart from one worth warning about.
+UNLABELLED = "does not set CM_PRIORITY"
+SESSION = "is an interactive session"
+AT_IMMEDIATE = "is at immediate priority, which only a human sets"
+MULTI_CLUSTER = "targets more than one cluster"
+NO_ALLOCATION = "targets a cluster with no allocation"
+UNRESOLVED_CLUSTER = "landed on a node that cannot be resolved to a cluster"
 
 
 def resting_priority(cm_priority: int) -> int:
@@ -83,11 +106,28 @@ class JobView:
     placed_at: float | None
     #: Size of the job's replica group, or 0 when it is a lone job.
     replica_group_size: int = 0
+    #: Identifies the replicas that must start together. Empty for a lone job.
+    replica_group_id: str = ""
+    #: An interactive session has a person attached to it, so its priority is
+    #: never ours to change.
+    is_session: bool = False
 
     @property
     def is_queued(self) -> bool:
         """Whether the job is still waiting, and so may have its priority raised."""
         return not self.is_placed
+
+    @property
+    def holds_allocation(self) -> bool:
+        """Whether this job currently occupies a slot in the allocation."""
+        return self.priority in ALLOCATED_PRIORITIES
+
+    @property
+    def group_key(self) -> str:
+        """What this job is decided along with: its replica group, or itself."""
+        if self.replica_group_size > 1 and self.replica_group_id:
+            return self.replica_group_id
+        return self.id
 
     def budget_clusters(self, limits: dict[str, int]) -> tuple[str, ...]:
         """Clusters whose allocation this job consumes while it is urgent.
@@ -112,6 +152,35 @@ class JobView:
             candidates = self.clusters
         return tuple(cluster for cluster in candidates if cluster in limits)
 
+    def unmanaged_reason(self, limits: dict[str, int]) -> str | None:
+        """Why the balancer may not change this job, or None if it may.
+
+        Returns one of the module-level reason constants, so a caller can tell
+        an expected state apart from one worth warning about.
+
+        Replica group members are *not* excluded here. They are decided as a
+        group rather than individually, which is what stops the walk granting
+        urgent to some ranks and not others; see ``ReplicaGroup``.
+        """
+        if self.cm_priority is None:
+            return UNLABELLED
+        if self.is_session:
+            return SESSION
+        if self.priority == IMMEDIATE:
+            return AT_IMMEDIATE
+        if len(self.clusters) != 1:
+            return MULTI_CLUSTER
+        if self.clusters[0] not in limits:
+            return NO_ALLOCATION
+        # A job is only managed when its slots are charged to exactly the
+        # cluster it is pinned to. A placed job whose node could not be
+        # resolved is charged to every budget as a precaution, and managing it
+        # would let the walk hand out slots on one cluster while the accounting
+        # spent them on all of them.
+        if self.budget_clusters(limits) != (self.clusters[0],):
+            return UNRESOLVED_CLUSTER
+        return None
+
     def managed_cluster(self, limits: dict[str, int]) -> str | None:
         """The single budgeted cluster this job may be modified against.
 
@@ -119,22 +188,8 @@ class JobView:
         cluster. A job eligible for several could land on any of them, and
         Beaker offers no way to pin it, so its effect on a given allocation is
         not knowable in advance.
-
-        Replica group members are excluded: the walk would happily grant urgent
-        to some ranks and not others, which for a synchronised-start group
-        wastes the slots it did grant.
-
-        A job is also only managed when its slots are charged to exactly the
-        cluster it is pinned to. A placed job whose node could not be resolved
-        is charged to every budget as a precaution, and managing it would let
-        the walk hand out slots on one cluster while the accounting spent them
-        on all of them.
         """
-        if self.cm_priority is None or self.replica_group_size > 1:
-            return None
-        if len(self.clusters) != 1 or self.clusters[0] not in limits:
-            return None
-        if self.budget_clusters(limits) != (self.clusters[0],):
+        if self.unmanaged_reason(limits) is not None:
             return None
         return self.clusters[0]
 
@@ -162,101 +217,188 @@ class Action:
         )
 
 
-def _grant_order(jobs: Sequence[JobView]) -> list[JobView]:
-    """Order jobs within one CM_PRIORITY level by who should keep urgent.
+@dataclass(frozen=True)
+class ReplicaGroup:
+    """Jobs that must start together, granted or denied urgent as a unit.
 
-    Placed jobs that already hold urgent come first, so a queued job is always
-    given up before a running one at the same level. Among them the job that has
-    held its slots longest sorts last, so it is the first to lose urgent. Queued
-    jobs follow, longest-waiting first.
+    Beaker runs a multi-node job as one job per replica. Granting urgent to
+    some ranks and not others is the worst available outcome: the group cannot
+    start until every rank is placed, so it waits at the priority of its lowest
+    rank while the granted ranks hold slots the allocation has already spent.
 
-    Both clocks are whole seconds and a launch wave shares one, so the job id
+    A lone job is a group of one, so the walk has a single kind of candidate.
+    """
+
+    id: str
+    jobs: tuple[JobView, ...]
+    cluster: str
+    cm_priority: int
+
+    @property
+    def slots(self) -> int:
+        return sum(job.slots for job in self.jobs)
+
+    @property
+    def is_queued(self) -> bool:
+        return all(job.is_queued for job in self.jobs)
+
+    @property
+    def is_placed(self) -> bool:
+        return not self.is_queued
+
+    @property
+    def holds_urgent(self) -> bool:
+        return all(job.priority == URGENT for job in self.jobs)
+
+    @property
+    def placed_at(self) -> float:
+        """When the group first took slots."""
+        return min((job.placed_at or 0.0) for job in self.jobs)
+
+    @property
+    def queued_at(self) -> float:
+        """When the group last became wholly queued.
+
+        The latest of its ranks, not the earliest: the group cannot start until
+        the last one is placed. Since the clock resets when a rank is preempted
+        and requeued, a group that has been bounced does not keep seniority it
+        no longer has.
+        """
+        return max(job.queued_at for job in self.jobs)
+
+
+def group_jobs(
+    jobs: Sequence[JobView], limits: dict[str, int]
+) -> tuple[list[ReplicaGroup], list[JobView]]:
+    """Split jobs into manageable groups and jobs charged but left alone.
+
+    A group is manageable only if *every* rank is individually manageable and
+    they agree on their label and cluster. One rank the balancer may not touch
+    would otherwise leave the group at mixed priorities, which is exactly what
+    deciding as a group is meant to prevent.
+
+    A group is also left alone unless every rank is present. ``fetch_jobs``
+    reads only unfinished jobs in one workspace, so a group can come back
+    partial; granting urgent to the ranks that happen to be visible would
+    half-grant the real group.
+    """
+    by_group: dict[str, list[JobView]] = {}
+    for job in jobs:
+        by_group.setdefault(job.group_key, []).append(job)
+
+    managed: list[ReplicaGroup] = []
+    fixed: list[JobView] = []
+    for group_id, members in by_group.items():
+        clusters = {job.managed_cluster(limits) for job in members}
+        labels = {job.cm_priority for job in members}
+        # A single non-None value in each means every rank is manageable and
+        # they agree; anything else leaves the group untouched.
+        cluster = clusters.pop() if len(clusters) == 1 else None
+        label = labels.pop() if len(labels) == 1 else None
+        expected = max(job.replica_group_size for job in members)
+        if cluster is None or label is None or len(members) < expected:
+            fixed.extend(members)
+            continue
+        managed.append(
+            ReplicaGroup(
+                id=group_id,
+                jobs=tuple(members),
+                cluster=cluster,
+                cm_priority=label,
+            )
+        )
+    return managed, fixed
+
+
+def _grant_order(groups: Sequence[ReplicaGroup]) -> list[ReplicaGroup]:
+    """Order groups within one CM_PRIORITY level by who should keep urgent.
+
+    Placed groups that already hold urgent come first, so a queued group is
+    always given up before a running one at the same level. Among them the
+    group that has held its slots longest sorts last, so it is the first to
+    lose urgent. Queued groups follow, longest-waiting first.
+
+    Both clocks are whole seconds and a launch wave shares one, so the group id
     breaks ties: without it the order would fall through to whatever sequence
     Beaker happened to list the jobs in, and the pass would not be reproducible.
     """
-    placed = [job for job in jobs if job.is_placed]
-    queued = [job for job in jobs if job.is_queued]
+    placed = [group for group in groups if group.is_placed]
+    queued = [group for group in groups if group.is_queued]
     # placed_at descending == shortest time holding slots first.
-    placed.sort(key=lambda job: (-(job.placed_at or 0.0), job.id))
+    placed.sort(key=lambda group: (-group.placed_at, group.id))
     # queued_at ascending == longest time waiting first.
-    queued.sort(key=lambda job: (job.queued_at, job.id))
+    queued.sort(key=lambda group: (group.queued_at, group.id))
     return placed + queued
 
 
-def _eligible_for_urgent(job: JobView) -> bool:
-    """Whether a job could hold urgent after this pass.
+def _eligible_for_urgent(group: ReplicaGroup) -> bool:
+    """Whether a group could hold urgent after this pass.
 
-    Beaker refuses to raise the priority of a job it has already placed, so such
-    a job can never be promoted unless it is already urgent. Including one in
-    the allocation would displace jobs that can actually be promoted.
+    Beaker refuses to raise the priority of a job it has already placed, so a
+    group with a placed rank below urgent can never be brought wholly to
+    urgent. Including one in the allocation would displace groups that can
+    actually be promoted.
     """
-    return job.priority == URGENT or job.is_queued
+    return group.holds_urgent or group.is_queued
 
 
 def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
     """Compute the priority changes that bring urgent usage within allocation.
 
     The desired allocation is recomputed from scratch on every pass rather than
-    adjusted incrementally: candidates are walked in CM_PRIORITY order and
-    granted urgent while their cluster has slots left. Because the walk starts
-    clean, a high-priority job is always considered before a lower-priority one
-    and never has to wait for slots a lesser job already took.
+    adjusted incrementally: candidate groups are walked in CM_PRIORITY order
+    and granted urgent while their cluster has slots left. Because the walk
+    starts clean, a high-priority group is always considered before a
+    lower-priority one and never has to wait for slots a lesser one took.
     """
-    all_jobs = list(jobs)
-    # Resolve each managed job's cluster and label once. managed_cluster only
-    # returns a cluster when cm_priority is set, so the label is known here.
-    managed: list[tuple[JobView, str, int]] = []
-    for job in all_jobs:
-        cluster = job.managed_cluster(limits)
-        if cluster is not None and job.cm_priority is not None:
-            managed.append((job, cluster, job.cm_priority))
-    managed_ids = {job.id for job, _, _ in managed}
+    groups, fixed = group_jobs(list(jobs), limits)
 
-    # Slots held at urgent by jobs the balancer will not touch. These are a
-    # fixed charge against the allocation; only what is left over is ours to
-    # hand out.
+    # Slots held at urgent or immediate by jobs the balancer will not touch.
+    # These are a fixed charge against the allocation; only what is left over
+    # is ours to hand out.
     remaining = dict(limits)
-    for job in all_jobs:
-        if job.id in managed_ids or job.priority != URGENT:
+    for job in fixed:
+        if not job.holds_allocation:
             continue
         for charged in job.budget_clusters(limits):
             remaining[charged] -= job.slots
 
     granted: set[str] = set()
-    by_level: dict[int, list[tuple[JobView, str]]] = {}
-    for job, cluster, level in managed:
-        by_level.setdefault(level, []).append((job, cluster))
+    by_level: dict[int, list[ReplicaGroup]] = {}
+    for group in groups:
+        by_level.setdefault(group.cm_priority, []).append(group)
 
     for level in sorted(by_level, reverse=True):
-        candidates = {job.id: cluster for job, cluster in by_level[level]}
-        for job in _grant_order([job for job, _ in by_level[level]]):
-            if not _eligible_for_urgent(job):
+        for group in _grant_order(by_level[level]):
+            if not _eligible_for_urgent(group):
                 continue
-            cluster = candidates[job.id]
-            # First fit: a job too large for what is left is skipped and smaller
-            # ones behind it still get a chance. Nothing is reserved for it,
-            # because a higher level that could not fit has already taken
-            # everything it was entitled to.
-            if job.slots <= remaining[cluster]:
-                granted.add(job.id)
-                remaining[cluster] -= job.slots
+            # First fit: a group too large for what is left is skipped and
+            # smaller ones behind it still get a chance. Nothing is reserved
+            # for it, because a higher level that could not fit has already
+            # taken everything it was entitled to.
+            if group.slots <= remaining[group.cluster]:
+                granted.add(group.id)
+                remaining[group.cluster] -= group.slots
 
     actions = []
-    for job, _, level in managed:
-        desired = URGENT if job.id in granted else resting_priority(level)
-        if desired == job.priority:
-            continue
-        if job.is_placed and desired > job.priority:
-            # Beaker rejects this; skip rather than log a failure every pass.
-            LOGGER.debug(
-                "%s is placed at %s and cannot be raised to %s",
-                job.id,
-                NAME_BY_PRIORITY.get(job.priority),
-                NAME_BY_PRIORITY.get(desired),
-            )
-            continue
-        reason = "grant urgent slot" if desired == URGENT else "release urgent slot"
-        actions.append(Action(job, job.priority, desired, reason))
+    for group in groups:
+        desired = URGENT if group.id in granted else resting_priority(group.cm_priority)
+        for job in group.jobs:
+            if desired == job.priority:
+                continue
+            if job.is_placed and desired > job.priority:
+                # Beaker rejects this; skip rather than log a failure every
+                # pass. A group is only granted urgent when every rank can get
+                # there, so this never splits a granted group.
+                LOGGER.debug(
+                    "%s is placed at %s and cannot be raised to %s",
+                    job.id,
+                    NAME_BY_PRIORITY.get(job.priority),
+                    NAME_BY_PRIORITY.get(desired),
+                )
+                continue
+            reason = "grant urgent slot" if desired == URGENT else "release urgent slot"
+            actions.append(Action(job, job.priority, desired, reason))
 
     # Demotions first, so that any prefix of a partially applied pass is still
     # within allocation. A promotion applied before the demotion paying for it
@@ -347,6 +489,9 @@ def fetch_jobs(
                 queued_at=float(job.status.created.seconds),
                 placed_at=float(placed_at) if is_placed and placed_at else None,
                 replica_group_size=job.system_details.replica_group_details.size,
+                replica_group_id=job.system_details.replica_group_details.id,
+                # Only an interactive session carries an environment.
+                is_session=bool(job.environment_id),
             )
         )
     return views
@@ -363,9 +508,10 @@ def set_priority(client: Beaker, job_id: str, priority: int) -> None:
 
 
 def urgent_usage(jobs: Sequence[JobView], limits: dict[str, int]) -> dict[str, int]:
+    """Slots occupied per cluster, counting immediate alongside urgent."""
     used = dict.fromkeys(limits, 0)
     for job in jobs:
-        if job.priority != URGENT:
+        if not job.holds_allocation:
             continue
         for cluster in job.budget_clusters(limits):
             used[cluster] += job.slots
@@ -380,6 +526,38 @@ def report_usage(jobs: Sequence[JobView], limits: dict[str, int], label: str) ->
     LOGGER.info("urgent slots %s: %s", label, summary)
 
 
+def report_unreclaimable(jobs: Sequence[JobView], limits: dict[str, int]) -> None:
+    """Break out allocated slots the balancer can never reclaim.
+
+    Sessions and immediate-priority jobs count against the allocation but are
+    never demoted, so a pass can be unable to get within the allocation no
+    matter what it does. Reporting them makes that a visible fact rather than a
+    balancer that appears not to be working.
+    """
+    sessions = dict.fromkeys(limits, 0)
+    immediate = dict.fromkeys(limits, 0)
+    for job in jobs:
+        if not job.holds_allocation:
+            continue
+        for cluster in job.budget_clusters(limits):
+            if job.is_session:
+                sessions[cluster] += job.slots
+            elif job.priority == IMMEDIATE:
+                immediate[cluster] += job.slots
+    for cluster in limits:
+        notes = []
+        if sessions[cluster]:
+            notes.append(f"{sessions[cluster]} in interactive sessions")
+        if immediate[cluster]:
+            notes.append(f"{immediate[cluster]} at immediate priority")
+        if notes:
+            LOGGER.info(
+                "%s: %s — counted against the allocation, never reclaimable",
+                cluster,
+                "; ".join(notes),
+            )
+
+
 def report_unmanageable(jobs: Sequence[JobView], limits: dict[str, int]) -> None:
     """Summarise opted-in jobs the balancer cannot act on.
 
@@ -390,16 +568,37 @@ def report_unmanageable(jobs: Sequence[JobView], limits: dict[str, int]) -> None
     reasons: Counter[str] = Counter()
     examples: dict[str, str] = {}
     for job in jobs:
-        if job.cm_priority is None or job.managed_cluster(limits) is not None:
+        why = job.unmanaged_reason(limits)
+        if why is None or why is UNLABELLED:
             continue
-        if job.replica_group_size > 1:
-            reason = "in a replica group"
-        elif len(job.clusters) != 1:
+        if why is MULTI_CLUSTER:
             reason = f"targets {len(job.clusters)} clusters"
-        else:
+        elif why is NO_ALLOCATION:
             reason = f"targets {job.clusters[0]}, which has no allocation"
+        else:
+            reason = why
         reasons[reason] += 1
         examples.setdefault(reason, job.id)
+
+    # A group left alone as a whole is not visible per job, since each rank may
+    # be individually fine.
+    managed_ids = {
+        job.id for group in group_jobs(jobs, limits)[0] for job in group.jobs
+    }
+    skipped_groups = {
+        job.group_key
+        for job in jobs
+        if job.replica_group_size > 1
+        and job.id not in managed_ids
+        and job.unmanaged_reason(limits) is None
+    }
+    if skipped_groups:
+        LOGGER.warning(
+            "%d replica group(s) left alone because their ranks are not "
+            "uniformly manageable (e.g. %s)",
+            len(skipped_groups),
+            sorted(skipped_groups)[0],
+        )
     for reason, count in sorted(reasons.items()):
         LOGGER.warning(
             "%d job(s) set %s but cannot be managed: %s (e.g. %s)",
@@ -421,6 +620,7 @@ def run_pass(
     jobs = fetch_jobs(client, workspace, node_cache)
     LOGGER.info("read %d unfinished jobs in %s", len(jobs), workspace)
     report_usage(jobs, limits, "before")
+    report_unreclaimable(jobs, limits)
     report_unmanageable(jobs, limits)
 
     actions = decide(jobs, limits)
