@@ -7,14 +7,14 @@ import xarray as xr
 
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.downscaling.data.config import PairedDataLoaderConfig
-from fme.downscaling.data.datasets import (
+from fme.downscaling.data.config import PairedVideoLoaderConfig
+from fme.downscaling.data.utils import ClosedInterval
+from fme.downscaling.data.video_datasets import (
     PairedVideoBatchData,
     VideoBatchData,
     VideoBatchItem,
+    compute_calendar_features,
 )
-from fme.downscaling.data.time_encoding import compute_calendar_features
-from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.test_utils import data_paths_helper
 
@@ -91,7 +91,7 @@ def test_video_batch_data_from_sequence():
 
 
 def _video_config(paths, **kwargs):
-    return PairedDataLoaderConfig(
+    return PairedVideoLoaderConfig(
         fine=[XarrayDataConfig(paths.fine)],
         coarse=[XarrayDataConfig(paths.coarse)],
         batch_size=1,

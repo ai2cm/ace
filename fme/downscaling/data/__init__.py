@@ -2,6 +2,7 @@ from .config import (
     ContiguousDistributedSampler,
     DataLoaderConfig,
     PairedDataLoaderConfig,
+    PairedVideoLoaderConfig,
     enforce_lat_bounds,
 )
 from .datasets import (
@@ -11,17 +12,9 @@ from .datasets import (
     PairedBatchData,
     PairedBatchItem,
     PairedGriddedData,
-    PairedVideoBatchData,
-    PairedVideoBatchItem,
-    PairedVideoGriddedData,
     RegionSamplingConfig,
-    VideoBatchData,
-    VideoBatchItem,
-    VideoBatchItemDatasetAdapter,
-    VideoFineCoarsePairedDataset,
 )
 from .static import StaticInput, StaticInputs, load_coords_from_path, load_static_inputs
-from .time_encoding import compute_calendar_features
 from .utils import (
     BatchedLatLonCoordinates,
     ClosedInterval,
@@ -32,4 +25,14 @@ from .utils import (
     find_roll_anchor,
     roll_lon_coords,
     scale_tuple,
+)
+from .video_datasets import (
+    PairedVideoBatchData,
+    PairedVideoBatchItem,
+    PairedVideoGriddedData,
+    VideoBatchData,
+    VideoBatchItem,
+    VideoBatchItemDatasetAdapter,
+    VideoFineCoarsePairedDataset,
+    compute_calendar_features,
 )
