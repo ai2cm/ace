@@ -829,3 +829,57 @@ def test_sfnonet_two_branch_local_blocks_end_to_end():
         assert branch.kernel_size == 9  # lmax basis functions on a 9-lat grid
         assert branch.weight.grad is not None
         assert not torch.all(branch.weight.grad == 0)
+
+
+@pytest.mark.parametrize("checkpointing", [0, 1, 2, 3])
+def test_all_parameters_receive_gradients_under_checkpointing(checkpointing: int):
+    """Gradient checkpointing must not silently detach part of the network.
+
+    The encoder's input is the raw input tensor, which does not require grad,
+    and torch's reentrant checkpoint builds no backward graph into a segment
+    whose inputs all lack requires_grad. A reentrant ``checkpoint(self.encoder,
+    x)`` therefore leaves the encoder's parameters with no gradient at all:
+    silently on one device, and as a DistributedDataParallel unused-parameter
+    error on several.
+    """
+    device = get_device()
+    n_samples = 4
+    img_shape = (9, 18)
+    params = SFNONetConfig(
+        embed_dim=16,
+        num_layers=2,
+        filter_type="linear",
+        checkpointing=checkpointing,
+    )
+    model = get_lat_lon_sfnonet(
+        params=params,
+        img_shape=img_shape,
+        in_chans=2,
+        out_chans=3,
+        context_config=ContextConfig(
+            embed_dim_scalar=0,
+            embed_dim_labels=0,
+            embed_dim_noise=0,
+            embed_dim_pos=0,
+        ),
+    ).to(device)
+    x = torch.randn(n_samples, 2, *img_shape, device=device)
+    assert not x.requires_grad, "the regression this guards needs a grad-free input"
+    context = Context(
+        embedding_scalar=torch.zeros(n_samples, 0, device=device),
+        labels=torch.zeros(n_samples, 0, device=device),
+        noise=None,
+        embedding_pos=None,
+    )
+    model(x, context).square().mean().backward()
+
+    missing = [
+        name
+        for name, param in model.named_parameters()
+        if param.requires_grad
+        and (param.grad is None or bool(torch.all(param.grad == 0)))
+    ]
+    assert missing == [], (
+        f"checkpointing={checkpointing} left parameters without a gradient: "
+        f"{missing}"
+    )
