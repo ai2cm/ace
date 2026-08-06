@@ -10,10 +10,13 @@ running mean), and reports RMSE/MAE/ACC by lead month.
 Lead month ``k`` is the calendar month ``k`` months after the IC month — the
 same lead definition as ``nino34_lead_k``.
 
-By default each rollout builds its own monthly climatology for pred and target
-(separately), matching ``RegionalIndexAggregator`` in inference. Optional
-``linear_detrend`` + ``shared_truth_climatology`` reproduce the MLP label
-recipe but distort lead-dependent RMSE when applied to short rollouts.
+Anomalies use one monthly climatology, pooled over every rollout in the year
+job and estimated from the target, for both prediction and target. Giving the
+prediction its own climatology (``--separate-climatology``) is not a valid ACC
+definition here: each rollout only spans ~2 years, so a calendar month occurs
+twice and the resulting "anomaly" is half the difference between the two
+occurrences. That mixes lead-1 skill with lead-13 drift and collapses lead-1
+ACC from ~0.93 to ~0.5.
 """
 
 from __future__ import annotations
@@ -30,6 +33,18 @@ import xarray as xr
 N_LEADS = 12
 NINO34_LAT_BOUNDS = (-5.0, 5.0)
 NINO34_LON_BOUNDS = (190.0, 240.0)  # degrees east, 0-360 convention
+# monthly_mean rollouts may pad short tails with 0; exclude from climo/leads
+MIN_VALID_BOX_SST_K = 250.0
+MAX_VALID_BOX_SST_K = 320.0
+
+
+def _valid_box_sst(values: np.ndarray) -> np.ndarray:
+    """Return box-mean SST with non-physical/padded values replaced by NaN."""
+    out = np.asarray(values, dtype=np.float64)
+    valid = (out >= MIN_VALID_BOX_SST_K) & (out <= MAX_VALID_BOX_SST_K)
+    out = out.copy()
+    out[~valid] = np.nan
+    return out
 
 
 def nino_box_weighted_mean(
@@ -143,7 +158,7 @@ def _per_series_climatology(
     values_1d: np.ndarray, months: np.ndarray
 ) -> dict[int, float]:
     """Per-calendar-month climatology from one rollout's box-mean series."""
-    values = np.asarray(values_1d, dtype=np.float64)
+    values = _valid_box_sst(values_1d)
     months = np.asarray(months, dtype=np.int64)
     climatology: dict[int, float] = {}
     for month in range(1, 13):
@@ -179,6 +194,7 @@ def _index_lookup(
     climatology: dict[int, float] | None = None,
 ) -> dict[int, float]:
     """Ym -> monthly (optionally smoothed) anomaly index for one forecast."""
+    values_1d = _valid_box_sst(values_1d)
     if climatology is None:
         climatology = _per_series_climatology(values_1d, months)
     ym = years * 12 + (months - 1)
@@ -213,7 +229,7 @@ def diagnose(
     output_dir: Path,
     *,
     linear_detrend: bool = False,
-    shared_truth_climatology: bool = False,
+    shared_truth_climatology: bool = True,
     n_running_months: int = 1,
     checkpoint_dataset: str = "",
     write_plots: bool = True,
@@ -408,9 +424,12 @@ def main() -> None:
         help="Subtract a linear trend from each rollout's box mean before anomalies.",
     )
     parser.add_argument(
-        "--shared-truth-climatology",
+        "--separate-climatology",
         action="store_true",
-        help="Use one truth climatology pooled across all ICs (MLP label style).",
+        help=(
+            "Give the prediction its own climatology instead of sharing the "
+            "target's. Contaminates short rollouts; see module docstring."
+        ),
     )
     parser.add_argument(
         "--running-mean-months",
@@ -423,7 +442,7 @@ def main() -> None:
         args.input_dir,
         args.output_dir,
         linear_detrend=args.linear_detrend,
-        shared_truth_climatology=args.shared_truth_climatology,
+        shared_truth_climatology=not args.separate_climatology,
         n_running_months=args.running_mean_months,
         checkpoint_dataset=args.checkpoint_dataset,
     )
