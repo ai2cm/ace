@@ -64,7 +64,51 @@ def _linear_interp_endpoints(
 
 @dataclasses.dataclass
 class VideoDiffusionModelConfig:
-    """Configuration for the temporal-interpolation video diffusion model."""
+    """
+    Configuration for the temporal-interpolation video diffusion model.
+
+    Parameters:
+        out_names: Output (and input) variable names, in channel order.
+        n_timesteps: Number of frames per clip (>= 3: two endpoints + interior).
+        normalization: Per-channel normalization statistics.
+        sigma_min: Min noise level for generation.
+        sigma_max: Max noise level for generation.
+        churn: The amount of stochasticity during generation.
+        num_diffusion_generation_steps: Number of diffusion generation steps.
+        model_channels: Base channel width of the backbone.
+        n_heads: Number of attention heads.
+        num_freqs: Number of Fourier frequencies for the embeddings.
+        noise_embedding_type: "positional" or "fourier" (simple backbone only).
+        channel_mult: Channel multiplier per U-Net resolution level.
+        num_blocks: Number of residual blocks per resolution level.
+        attention_levels: Resolution levels with spatial attention.
+        temporal_attention_levels: Resolution levels with temporal attention;
+            None applies it everywhere.
+        backbone: "simple" (periodic VideoUNet) or "songunet" (SongUNetv2).
+        img_resolution: [H, W]; required for the songunet backbone.
+        attn_resolutions: Attention resolutions, for the songunet backbone.
+        training_noise_distribution: Noise distribution for training.
+        training_noise_distributions: Per-channel noise distribution for
+            training, keyed by out_names.
+        sigma_min_by_channel: Per-channel override of sigma_min.
+        sigma_max_by_channel: Per-channel override of sigma_max.
+        sigma_data_by_channel: Per-channel EDM sigma_data (residual std);
+            unset channels default to 1.0.
+        loss_weight_exponent: Exponent of the EDM noise-level loss weighting.
+        log_transform_channels: Channels modeled via log1p(x * scale), mapped
+            to their scale.
+        temporal_noise_correlation: "independent", "brownian_bridge", or
+            "per_channel" residual noise.
+        per_channel_noise_kernel: Per-channel kernel, for "per_channel"
+            correlation.
+        per_channel_kernel_length_scale: Kernel length scale for "ou"/"rbf"
+            channels, normalized to [0, 1] over the clip window.
+        subset_augmentation_prob: Fraction of batches trained on a random
+            interior subset instead of the full grid.
+        subset_min_interior: Minimum interior frames kept when subsetted.
+        marginal_consistency_weight: Weight of the marginal-consistency loss
+            (video PMD L_marg); 0 disables it.
+    """
 
     out_names: list[str]
     n_timesteps: int
@@ -76,17 +120,13 @@ class VideoDiffusionModelConfig:
     model_channels: int = 64
     n_heads: int = 4
     num_freqs: int = 4
-    # log-noise embedding for the simple backbone: "positional" or "fourier".
     noise_embedding_type: str = "positional"
-    # Multi-scale U-Net: one channel multiplier per resolution level (0 = finest).
     channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2])
     num_blocks: int = 2
-    # spatial attention levels; temporal attention defaults to all levels (None).
     attention_levels: list[int] = dataclasses.field(default_factory=lambda: [1, 2])
     temporal_attention_levels: list[int] | None = None
-    # backbone: "simple" (periodic VideoUNet) or "songunet" (SongUNetv2).
     backbone: str = "simple"
-    img_resolution: list[int] | None = None  # [H, W], required for songunet
+    img_resolution: list[int] | None = None
     attn_resolutions: list[int] | None = None
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
@@ -96,44 +136,14 @@ class VideoDiffusionModelConfig:
     ) = None
     sigma_min_by_channel: dict[str, float] | None = None
     sigma_max_by_channel: dict[str, float] | None = None
-    # Per-channel EDM sigma_data (std of the diffused residual). Channels left
-    # unset default to 1.0. Setting it to the measured residual std per channel
-    # fixes the preconditioning/loss weighting for residual diffusion.
     sigma_data_by_channel: dict[str, float] | None = None
     loss_weight_exponent: float = 1.0
-    # Channels modeled in log space via log1p(x*scale); maps channel to scale.
     log_transform_channels: dict[str, float] | None = None
-    # Temporal correlation of the residual noise: "independent" (per-frame white
-    # noise, default), "brownian_bridge" (endpoint-pinned time-correlated noise,
-    # same kernel for every channel), or "per_channel" (a different kernel per
-    # channel, via per_channel_noise_kernel/per_channel_kernel_length_scale below
-    # -- e.g. matching each channel to whichever of bridge/OU/RBF best fits its
-    # real temporal correlation, see toy/process_residual_bridge_report.md).
     temporal_noise_correlation: str = "independent"
-    # Required iff temporal_noise_correlation == "per_channel": maps every
-    # out_names entry to "independent", "brownian_bridge", "ou", or "rbf".
     per_channel_noise_kernel: dict[str, str] | None = None
-    # Required iff per_channel_noise_kernel has any "ou"/"rbf" entries: maps
-    # those channels to their kernel length scale, in the same normalized
-    # [0, 1]-over-the-full-window units as uniform_frame_times (i.e. hours /
-    # total_window_hours, NOT raw hours -- e.g. an empirically-fit 12.9h OU
-    # length scale over a 24h window is 12.9/24 = 0.5375 here).
     per_channel_kernel_length_scale: dict[str, float] | None = None
-    # Fraction of training batches trained on a random subset of interior frames
-    # (the two endpoints are always kept) instead of the full uniform grid, so the
-    # model learns to answer variable query sets and stays consistent across them.
-    # 0.0 (default) trains only on the full grid -- exact prior behavior.
     subset_augmentation_prob: float = 0.0
-    # Minimum number of interior frames to keep when a batch is subsetted.
     subset_min_interior: int = 1
-    # Weight of the marginal-consistency loss (video PMD L_marg). When > 0, each
-    # training step runs a second pass on a random strict subset of the (possibly
-    # augmentation-subset) interior frames -- sharing the first pass's noised
-    # inputs on the shared frames -- and penalizes disagreement between the first
-    # pass's prediction restricted to the subset and the subset-native prediction.
-    # May be combined with subset_augmentation_prob (holds subset exposure fixed
-    # while toggling the loss). 0.0 (default) disables it (single pass, exact
-    # prior behavior).
     marginal_consistency_weight: float = 0.0
 
     def __post_init__(self):
@@ -272,11 +282,7 @@ class VideoDiffusionModelConfig:
                 f"{self.marginal_consistency_weight}."
             )
         if self.marginal_consistency_weight > 0.0:
-            # The full grid must admit a strict interior subset (keep in
-            # [subset_min_interior, n_interior - 1]), so n_interior >=
-            # subset_min_interior + 1. May be combined with subset_augmentation:
-            # when an augmented batch is too small to form a strict subset the
-            # consistency pass is skipped for that batch (see train_on_batch).
+            # requires a strict interior subset: n_interior >= subset_min_interior + 1
             if self.n_timesteps - 2 < self.subset_min_interior + 1:
                 raise ValueError(
                     "marginal_consistency_weight > 0 needs n_timesteps >= "
@@ -463,7 +469,21 @@ def _per_channel_mixing_tensor(
     return torch.stack(mats, dim=0)
 
 
+@dataclasses.dataclass
+class VideoModelOutputs(ModelOutputs):
+    """``ModelOutputs`` plus the video-PMD marginal-consistency loss term
+    (logging only; not part of the optimized loss field).
+    """
+
+    marginal_consistency_loss: torch.Tensor | None = None
+
+
 class VideoDiffusionModel:
+    """Built model wrapping the backbone network, normalizer, and EDM
+    preconditioning for ``VideoDiffusionModelConfig``. Construct via
+    ``VideoDiffusionModelConfig.build()``.
+    """
+
     def __init__(
         self,
         config: VideoDiffusionModelConfig,
@@ -694,14 +714,13 @@ class VideoDiffusionModel:
             lon.to(get_device()),
         )
 
-    def train_on_batch(self, batch: PairedVideoBatchData, optimizer) -> ModelOutputs:
+    def train_on_batch(
+        self, batch: PairedVideoBatchData, optimizer
+    ) -> VideoModelOutputs:
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
         day_of_year, second_of_day, lon = self._calendar_inputs(fine)
 
-        # Optionally train on a random subset of interior frames (endpoints kept)
-        # so the model learns to answer variable query sets; the bridge noise and
-        # baseline follow the subset's true times, i.e. the full-window marginal.
         idx = self._sample_training_subset_indices(clip.shape[2], clip.device)
         if idx is not None:
             clip = clip.index_select(2, idx)
@@ -719,13 +738,9 @@ class VideoDiffusionModel:
 
         sigma = self.config.sample_training_noise(batch_size, clip.device)
         sigma = sigma.reshape(batch_size, -1, 1, 1, 1)
-        # Gaussian noise on interior frames only
         noise = self._sample_residual_noise(residual, mixing)
         noised = residual + noise * sigma * interior
 
-        # ``idx`` (or None for the full grid) is exactly the frames' true grid
-        # positions, so the temporal attention's relative bias reflects real
-        # spacing rather than packed-contiguous order.
         denoised = self.module(
             noised, condition, sigma, day_of_year, second_of_day, lon, frame_index=idx
         )
@@ -737,17 +752,12 @@ class VideoDiffusionModel:
         n_interior_elems = interior.expand_as(sq_err).sum()
         loss = (weight * sq_err).sum() / n_interior_elems
 
-        # Marginal-consistency loss: a second pass on a random strict subset of
-        # the (full) interior frames, sharing the SAME noised inputs, sigma, and
-        # conditioning on the shared frames (obtained by slicing the full pass, so
-        # the only difference is the query set). We add the subset's own diffusion
-        # loss plus a penalty tying the full-pass prediction, restricted to the
-        # subset, to the subset-native prediction on the shared interior frames.
+        # Second pass on a subset sharing the full pass's noised inputs: adds the
+        # subset's own diffusion loss plus a penalty between the two passes'
+        # predictions on the shared frames.
         marginal_loss: torch.Tensor | None = None
         total_loss = loss
-        # A strict interior subset needs at least subset_min_interior + 1 interior
-        # frames; an augmentation-shrunk batch may fall below that, so skip the
-        # consistency pass for it rather than fail.
+        # an augmentation-shrunk batch may already be below the subset floor
         can_subset = n_times - 2 >= self.config.subset_min_interior + 1
         if self._marginal_consistency_weight > 0.0 and can_subset:
             sub = self._sample_consistency_subset_indices(n_times, clip.device)
@@ -806,7 +816,7 @@ class VideoDiffusionModel:
             k: fine.data[k] if idx is None else fine.data[k].index_select(1, idx)
             for k in self.out_names
         }
-        return ModelOutputs(
+        return VideoModelOutputs(
             prediction=prediction,
             target=target,
             loss=total_loss,
