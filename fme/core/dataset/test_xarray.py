@@ -570,6 +570,67 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     assert data["constant_scalar_var"].shape == (15, 4, 8)
 
 
+def _count_file_opens_while_reading(
+    monkeypatch, dataset: XarrayDataset, indices: Sequence[int]
+) -> int:
+    """Number of times the dataset opens a file while reading the samples."""
+    n_opens = 0
+    original = XarrayDataset._open_file
+
+    def counting_open_file(self, idx):
+        nonlocal n_opens
+        n_opens += 1
+        return original(self, idx)
+
+    monkeypatch.setattr(XarrayDataset, "_open_file", counting_open_file)
+    for idx in indices:
+        dataset[idx]
+    return n_opens
+
+
+def test_time_invariant_variables_do_not_open_files_per_sample(
+    mock_monthly_netcdfs, monkeypatch
+):
+    """Requesting time-invariant variables should not add per-sample file opens.
+
+    They are loaded once at construction, so reading samples costs the same
+    number of file opens whether or not they were requested.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    names = mock_data.var_names
+    # samples spread across the underlying monthly files
+    indices = [0, 100, 400, 700, 0]
+
+    without = xarray_dataset_constructor(config, list(names.time_dependent_names), 2)
+    with_invariant = xarray_dataset_constructor(config, names.all_names, 2)
+
+    n_without = _count_file_opens_while_reading(monkeypatch, without, indices)
+    n_with = _count_file_opens_while_reading(monkeypatch, with_invariant, indices)
+
+    assert n_with == n_without
+
+
+def test_time_invariant_variable_values_match_source(mock_monthly_netcdfs):
+    """Caching must not change the values that are returned."""
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 3)
+    source = xr.open_dataset(
+        mock_data.tmpdir / f"{mock_data.start_times[0].strftime('%Y%m%d%H')}.nc",
+        decode_times=False,
+        decode_timedelta=False,
+    )
+    # read several samples spanning different files to confirm the cached
+    # tensor is not mutated or aliased between reads
+    for idx in [0, 250, 500, 0]:
+        data = dataset[idx][0]
+        expected = torch.as_tensor(source["constant_var"].values)
+        np.testing.assert_array_equal(data["constant_var"][0].numpy(), expected.numpy())
+        assert data["constant_var"].shape == (3, 4, 8)
+    source.close()
+
+
 def _get_repeat_dataset(
     mock_data: MockData, n_timesteps: int, n_repeats: int
 ) -> XarrayDataset:
