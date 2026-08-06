@@ -5,7 +5,7 @@ from fme.core.ema import EMAConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.data.config import PairedDataLoaderConfig
+from fme.downscaling.data.config import PairedVideoLoaderConfig
 from fme.downscaling.data.utils import ClosedInterval
 from fme.downscaling.test_utils import data_paths_helper
 from fme.downscaling.video_models import VideoDiffusionModelConfig
@@ -16,7 +16,7 @@ N_TIMESTEPS = 5
 
 
 def _data_config(paths):
-    return PairedDataLoaderConfig(
+    return PairedVideoLoaderConfig(
         fine=[XarrayDataConfig(paths.fine)],
         coarse=[XarrayDataConfig(paths.fine)],  # temporal-only: same store
         batch_size=2,
