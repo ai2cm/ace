@@ -6,8 +6,17 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-bhenn1983}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
 JOB_GROUP="ace2s-cm4-picontrol"
+CLUSTER="${CLUSTER:-ai2/jupiter}"
+
+# train_loader.batch_size is a global batch split across ranks, so more ranks means
+# less activation memory per GPU for the same math. 4 ranks fits titan's 180 GiB
+# B200s; jupiter's 80 GiB H100s need 8.
+case "$CLUSTER" in
+  ai2/titan) N_GPUS=4 ;;
+  ai2/jupiter) N_GPUS=8 ;;
+  *) echo "no GPU-memory profile for cluster $CLUSTER" >&2; exit 1 ;;
+esac
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -49,7 +58,7 @@ run_training() {
     --workspace ai2/ace \
     --priority high \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster "$CLUSTER" \
     --weka climate-default:/climate-default \
     "${extra_args[@]}" \
     "${ckpt_arg[@]}" \
@@ -57,6 +66,7 @@ run_training() {
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP="$job_group" \
+    --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
