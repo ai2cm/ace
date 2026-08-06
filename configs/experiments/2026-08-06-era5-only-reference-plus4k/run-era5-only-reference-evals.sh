@@ -6,10 +6,10 @@
 # Why this wave exists. The combined-training report compared its arms' ERA5-case
 # +4 K response against one ERA5-only emulator, `shared-t-append-clipped`
 # (wandb ww3nugpp). That model is NOT close to the joint recipe: 60 epochs
-# against 240, filter_num_groups 1 against 16 (and no spectral_ratio),
-# hand-tuned per-variable loss weights, and `remove_global_mean: false` in its
-# network normalization. Review asked for the closest available ERA5-only run
-# instead.
+# against 240, filter_num_groups 1 against 16 (and no spectral_ratio), and
+# hand-tuned per-variable loss weights. It also predates the current
+# normalization config -- it sets a `remove_global_mean` key that no longer
+# exists in ace. Review asked for the closest available ERA5-only run instead.
 #
 # The closest is `train-4deg-daily-v2-era5-only-no-residual-resume400k`
 # (wandb znnaox7t). Against the joint arms it matches on: NoiseConditionedSFNO,
