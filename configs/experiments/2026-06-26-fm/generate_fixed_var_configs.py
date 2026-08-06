@@ -2,15 +2,15 @@
 
 Sibling to generate_orography_configs.py: the same experiment, but instead of
 swapping which grid supplies ``HGTsfc`` it holds a single input variable fixed
-at its own dataset's precomputed time mean for the whole rollout. One eval
-suite is generated per variable in the run's ``in_names``, so a run's suite set
-answers "how much does this model rely on each of its inputs varying?".
+at a precomputed time mean for the whole rollout. One eval suite is generated
+per variable in the run's ``in_names``, so a run's suite set answers "how much
+does this model rely on each of its inputs varying?".
 
 Each inference entry gets:
 
-  - ``loader.dataset.constant_field_override`` pointing at the time-mean store
-    of that entry's *own* dataset, so the dataset serves that variable's time
-    mean unchanged at every timestep, and
+  - ``loader.dataset.constant_field_override`` pointing at a time-mean store,
+    so the dataset serves that variable's time mean unchanged at every
+    timestep, and
   - ``stepper_override.prescribed_prognostic_names: [name]`` when the variable
     is prognostic, so the stepper overwrites its own prediction with that field
     on every step instead of evolving it freely.
@@ -19,15 +19,33 @@ Forcing-only variables (in ``in_names`` but not ``out_names``) get no stepper
 override: the model never predicts them, so the dataset's value is all it ever
 sees, and ``prescribed_prognostic_names`` rejects names outside ``out_names``.
 
-Sourcing the time mean from each entry's own dataset rather than from a fixed
-grid keeps this experiment about the loss of variability alone, unlike the
-orography grid swap which deliberately mixes grids.
+Two variants of every suite are generated, differing only in *which* dataset's
+time mean is served (``--variant`` selects which are written):
+
+``own``
+    The time mean of the entry's own dataset. The served field is the right
+    field for that dataset, only stripped of its variability, so a metric shift
+    measures the loss of variability alone.
+
+``swapped``
+    The time mean of the *other* dataset -- ERA5 entries are served the C96
+    mean and both C96 entries (AMIP ensemble and constant-CO2) are served the
+    ERA5 mean. This deliberately confounds the loss of variability with a
+    change of grid and climatology, the way the orography grid swap does; the
+    ``own`` suite is the baseline that confound is read against.
+
+Both variants set ``prescribed_prognostic_names`` identically, so a swapped
+suite differs from its own-dataset counterpart by exactly one path: a
+prognostic variable is pinned to the foreign climatology for the whole rollout
+while its metrics are still scored against its own dataset's target.
 
 ``land_fraction``, ``ocean_fraction`` and ``HGTsfc`` are already time-invariant
-in these datasets, so holding them at their time mean is a numerical no-op.
-Their suites are generated anyway: they cover ``in_names`` without special
-cases and act as null controls, where any metric shift is pipeline noise rather
-than a real effect.
+in these datasets, so under ``own`` holding them at their time mean is a
+numerical no-op; their suites act as null controls there, where any metric
+shift is pipeline noise rather than a real effect. Under ``swapped`` they are
+real perturbations, since the two grids genuinely disagree about them -- the
+swapped ``HGTsfc`` suite reaches the orography experiment's grid swap by a
+different route and cross-checks it.
 
 Generated for the FM (multi-dataset) runs only; the single-dataset runs are not
 part of this experiment.
@@ -65,8 +83,14 @@ FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX = f"{_EVAL_SUITE_CONFIG_PREFIX}fixed-"
 # "fixed-variable training run" or dataset to record.
 FIXED_VAR_CHECKPOINT_SUFFIXES = ("-bestinf",)
 
-# Precomputed time-mean store for each inference dataset, keyed by the
-# (data_path, file_pattern) pair the inference entries use, on the same weka
+# Suite variants, distinguished by whose time mean each inference entry is
+# served (see the module docstring). The variant is part of the suite filename
+# for every variant but `own`, whose names predate this distinction.
+VARIANTS = ("own", "swapped")
+DEFAULT_VARIANT = "both"
+VARIANT_FILENAME_PARTS = {"own": "", "swapped": "swapped-"}
+
+# Precomputed time-mean store for each inference dataset, on the same weka
 # mount the training configs read their normalization statistics from. These
 # are the per-source subdirectories (not `combined/`), matching the
 # subdirectory each grid's training config already uses for centering/scaling.
@@ -81,21 +105,27 @@ _C96_TIME_MEAN = (
     "2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-"
     "dataset-stats/ic_0001/time-mean.nc"
 )
+
+# Time-mean store per variant for each inference dataset, keyed by the
+# (data_path, file_pattern) pair the inference entries use. Holding both
+# variants in one table means a new inference dataset cannot be taught to one
+# variant and forgotten by the other; `swapped` is the mean of the dataset on
+# the other grid, which for both C96 datasets is ERA5's.
 TIME_MEAN_PATHS = {
     (
         "/climate-default",
         "2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr",
-    ): _ERA5_TIME_MEAN,
+    ): {"own": _ERA5_TIME_MEAN, "swapped": _C96_TIME_MEAN},
     (
         "/climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-"
         "ensemble-dataset",
         "ic_0001.zarr",
-    ): _C96_TIME_MEAN,
+    ): {"own": _C96_TIME_MEAN, "swapped": _ERA5_TIME_MEAN},
     (
         "/climate-default/2026-07-01-vertically-resolved-c96-4deg-daily-shield-amip-"
         "constant-co2-dataset",
         "AMIP-constant-CO2.zarr",
-    ): _C96_TIME_MEAN,
+    ): {"own": _C96_TIME_MEAN, "swapped": _ERA5_TIME_MEAN},
 }
 
 
@@ -104,8 +134,8 @@ def _is_fm_run(run_name: str) -> bool:
     return run_name.removeprefix(WANDB_PREFIX).startswith("nc-sfno-fm")
 
 
-def _time_mean_path(dataset: dict) -> str:
-    """Return the time-mean store matching `dataset`'s own source."""
+def _time_mean_path(dataset: dict, variant: str) -> str:
+    """Return the `variant` time-mean store for `dataset`'s source."""
     if "data_path" not in dataset:
         raise ValueError(
             f"Dataset {dataset!r} is not a plain data_path-keyed dict; "
@@ -117,15 +147,15 @@ def _time_mean_path(dataset: dict) -> str:
             f"No time-mean store recorded for inference dataset {key!r}; "
             f"known datasets: {sorted(TIME_MEAN_PATHS)}."
         )
-    return TIME_MEAN_PATHS[key]
+    return TIME_MEAN_PATHS[key][variant]
 
 
-def _apply_fixed_var_override(dataset: dict, name: str) -> dict:
-    """Return `dataset` with `name` served from its own time mean."""
+def _apply_fixed_var_override(dataset: dict, name: str, variant: str) -> dict:
+    """Return `dataset` with `name` served from the `variant` time mean."""
     return {
         **copy.deepcopy(dataset),
         "constant_field_override": {
-            "path": _time_mean_path(dataset),
+            "path": _time_mean_path(dataset, variant),
             "names": [name],
         },
     }
@@ -148,16 +178,18 @@ def _fixed_var_names(
 
 
 def source_config_to_fixed_var_eval_suite_config(
-    config_filename: str, name: str
+    config_filename: str, name: str, variant: str = "own"
 ) -> str:
     suffix = pathlib.Path(config_filename).stem.removeprefix(CONFIG_PREFIX)
-    return f"{FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX}{name}-{suffix}.yaml"
+    variant_part = VARIANT_FILENAME_PARTS[variant]
+    return f"{FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX}{variant_part}{name}-{suffix}.yaml"
 
 
 def generate_fixed_var_eval_configs(
     source_path: pathlib.Path,
     source_map: dict[str, str],
     variables: list[str] | None,
+    variants: tuple[str, ...],
     inference_names: list[str] | None,
     checkpoint_path: str,
     existing_only: bool,
@@ -182,31 +214,36 @@ def generate_fixed_var_eval_configs(
     out_names = set(train_cfg["stepper"]["step"]["config"]["out_names"])
 
     for name in _fixed_var_names(train_cfg, variables, source_run_name):
-        cfg = _build_eval_suite_config(
-            train_cfg=train_cfg,
-            inference_names=inference_names,
-            checkpoint_path=checkpoint_path,
-        )
-        for entry in cfg["inferences"]:
-            entry_cfg = entry["config"]
-            loader = entry_cfg["loader"]
-            loader["dataset"] = _apply_fixed_var_override(loader["dataset"], name)
-            if name in out_names:
-                entry_cfg["stepper_override"] = {"prescribed_prognostic_names": [name]}
-        out_path = RUN_CONFIGS_DIR / source_config_to_fixed_var_eval_suite_config(
-            source_path.name, name
-        )
-        _write_config(
-            cfg,
-            out_path,
-            source_run_name,
-            source_dataset_id,
-            existing_only,
-            wandb_run_names,
-            eval_run_name_base=eval_suite_config_to_run_name(out_path.name),
-            checkpoint_suffixes=FIXED_VAR_CHECKPOINT_SUFFIXES,
-            wandb_finished_summaries=wandb_finished_summaries,
-        )
+        for variant in variants:
+            cfg = _build_eval_suite_config(
+                train_cfg=train_cfg,
+                inference_names=inference_names,
+                checkpoint_path=checkpoint_path,
+            )
+            for entry in cfg["inferences"]:
+                entry_cfg = entry["config"]
+                loader = entry_cfg["loader"]
+                loader["dataset"] = _apply_fixed_var_override(
+                    loader["dataset"], name, variant
+                )
+                if name in out_names:
+                    entry_cfg["stepper_override"] = {
+                        "prescribed_prognostic_names": [name]
+                    }
+            out_path = RUN_CONFIGS_DIR / source_config_to_fixed_var_eval_suite_config(
+                source_path.name, name, variant
+            )
+            _write_config(
+                cfg,
+                out_path,
+                source_run_name,
+                source_dataset_id,
+                existing_only,
+                wandb_run_names,
+                eval_run_name_base=eval_suite_config_to_run_name(out_path.name),
+                checkpoint_suffixes=FIXED_VAR_CHECKPOINT_SUFFIXES,
+                wandb_finished_summaries=wandb_finished_summaries,
+            )
 
 
 def select_source_configs(
@@ -256,6 +293,16 @@ def main() -> None:
         help=(
             "Input variable name(s) to hold fixed, one suite each "
             "(default: every variable in the run's in_names)."
+        ),
+    )
+    parser.add_argument(
+        "--variant",
+        choices=(*VARIANTS, "both"),
+        default=DEFAULT_VARIANT,
+        help=(
+            "Whose time mean each held variable is served from: 'own' for the "
+            "entry's own dataset, 'swapped' for the dataset on the other grid "
+            f"(default: {DEFAULT_VARIANT})."
         ),
     )
     parser.add_argument(
@@ -319,12 +366,14 @@ def main() -> None:
         print(f"Found {len(wandb_finished_summaries)} finished run names.")
 
     source_configs = select_source_configs(args.version, args.base_config)
+    variants = VARIANTS if args.variant == "both" else (args.variant,)
 
     for source_path in source_configs:
         generate_fixed_var_eval_configs(
             source_path=source_path,
             source_map=source_map,
             variables=args.variable,
+            variants=variants,
             inference_names=args.inference_name,
             checkpoint_path=args.checkpoint_path,
             existing_only=args.existing_only,
