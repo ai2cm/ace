@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import datetime
+import functools
 from collections.abc import Hashable, MutableMapping, Sequence
 from typing import Literal
 
@@ -94,28 +95,42 @@ def _broadcast_array_to_tensor(
     return torch.broadcast_to(tensor, shape)
 
 
-async def _get_item(group, name, selection):
-    async_array = await group.getitem(name)
-    if len(async_array.shape) != len(selection):
-        if len(async_array.shape) != 1:
+def _get_array_selection(
+    name: str, shape: tuple[int, ...], selection: tuple[slice | int, ...]
+) -> tuple[slice | int, ...] | slice | int:
+    """Resolve the selection to apply to an array with the given shape."""
+    if len(shape) != len(selection):
+        if len(shape) != 1:
             raise ValueError(
                 f"Index selection slices/indices were provided as {selection} "
-                f"but array {name} has {len(async_array.shape)} dimensions. "
+                f"but array {name} has {len(shape)} dimensions. "
             )
-        else:
-            # 1d scalar arrays are sliced along time dim
-            array_selection = selection[0]
-    else:
-        array_selection = selection
-    return await async_array.getitem(array_selection)
+        # 1d scalar arrays are sliced along time dim
+        return selection[0]
+    return selection
 
 
-async def _get_items(url, names, selection):
-    async_group = await zarr.api.asynchronous.open(store=url)
-    coroutines = []
-    for name in names:
-        coroutines.append(_get_item(async_group, name, selection))
-    return await asyncio.gather(*coroutines)
+# Opening a group and getting an array from it each read the corresponding
+# zarr.json, so without caching every sample re-reads one metadata document per
+# requested variable. The cached objects hold metadata and a store reference,
+# and the set of keys is fixed by the configured datasets (files x variables),
+# so these do not grow without bound at runtime.
+@functools.cache
+def _open_async_group(path: str):
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(zarr.api.asynchronous.open(store=path))
+
+
+@functools.cache
+def _get_async_array(path: str, name: str):
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(_open_async_group(path).getitem(name))
+
+
+async def _get_items(arrays_and_selections):
+    return await asyncio.gather(
+        *(array.getitem(selection) for array, selection in arrays_and_selections)
+    )
 
 
 def _load_all_variables_zarr_async(
@@ -127,8 +142,16 @@ def _load_all_variables_zarr_async(
 
     Assumes that the time dimension is the first dimension in the dataset.
     """
+    # arrays are resolved before gathering so that the metadata reads hit the
+    # cache instead of being repeated on every call
+    arrays_and_selections = []
+    for name in variables:
+        async_array = _get_async_array(path, name)
+        arrays_and_selections.append(
+            (async_array, _get_array_selection(name, async_array.shape, selection))
+        )
     loop = asyncio.get_event_loop()
-    arrays = loop.run_until_complete(_get_items(path, variables, selection))
+    arrays = loop.run_until_complete(_get_items(arrays_and_selections))
     return {k: v for k, v in zip(variables, arrays)}
 
 
