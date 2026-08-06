@@ -1,5 +1,6 @@
 import dataclasses
 from collections.abc import Sequence
+from typing import final
 
 import torch
 from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
@@ -23,10 +24,6 @@ from fme.downscaling.data.datasets import (
     HorizontalSubsetDataset,
     PairedBatchData,
     PairedGriddedData,
-    PairedVideoBatchData,
-    PairedVideoGriddedData,
-    VideoBatchItemDatasetAdapter,
-    VideoFineCoarsePairedDataset,
 )
 from fme.downscaling.data.utils import (
     ClosedInterval,
@@ -35,6 +32,12 @@ from fme.downscaling.data.utils import (
     find_roll_anchor_from_interval,
     get_latlon_coords_from_properties,
     roll_lon_coords,
+)
+from fme.downscaling.data.video_datasets import (
+    PairedVideoBatchData,
+    PairedVideoGriddedData,
+    VideoBatchItemDatasetAdapter,
+    VideoFineCoarsePairedDataset,
 )
 from fme.downscaling.requirements import DataRequirements
 
@@ -452,8 +455,6 @@ class PairedDataLoaderConfig:
     topography: str | None = None
     sample_with_replacement: int | None = None
     drop_last: bool = False
-    n_timesteps: int = 1
-    time_stride: int | None = None
 
     def __post_init__(self):
         enforce_lat_bounds(self.lat_extent)
@@ -463,20 +464,8 @@ class PairedDataLoaderConfig:
                 "will be removed in a future release. `StaticInputs` are now stored "
                 "within the model when it is first built and trained."
             )
-        if self.n_timesteps < 1:
-            raise ValueError(f"n_timesteps must be >= 1, got {self.n_timesteps}.")
-        if self.time_stride is not None and self.time_stride < 1:
-            raise ValueError(f"time_stride must be >= 1, got {self.time_stride}.")
 
-    @property
-    def clip_start_stride(self) -> int:
-        """Frames between consecutive video-clip starts; defaults to
-        ``n_timesteps - 1`` (clips sharing only their boundary frame).
-        """
-        if self.time_stride is not None:
-            return self.time_stride
-        return max(1, self.n_timesteps - 1)
-
+    @final
     def _first_data_config(
         self,
         config: XarrayDataConfig | MergeNoConcatDatasetConfig,
@@ -486,9 +475,11 @@ class PairedDataLoaderConfig:
             return config
         return config.merge[0]
 
+    @final
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
+    @final
     def _mp_context(self):
         mp_context = None
         if self.num_data_workers == 0:
@@ -504,11 +495,13 @@ class PairedDataLoaderConfig:
         return mp_context
 
     @property
+    @final
     def coarse_full_config(
         self,
     ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         return _full_configs(self.coarse)
 
+    @final
     def build(
         self,
         train: bool,
@@ -623,6 +616,72 @@ class PairedDataLoaderConfig:
             coarse_extent_latlon_coords=example.coarse.latlon_coordinates,
         )
 
+    @final
+    def _get_sampler(
+        self, dataset: Dataset, dist: Distributed, train: bool, drop_last: bool = False
+    ) -> RandomSampler | DistributedSampler | None:
+        # Use RandomSampler with replacement for both distributed and
+        # non-distributed cases
+        if self.sample_with_replacement is not None:
+            local_sample_with_replacement_dataset_size = (
+                self.sample_with_replacement // dist.world_size
+            )
+            return RandomSampler(
+                dataset,
+                num_samples=local_sample_with_replacement_dataset_size,
+                replacement=True,
+            )
+        if dist.is_distributed():
+            if train:
+                sampler = DistributedSampler(
+                    dataset, shuffle=train, drop_last=drop_last
+                )
+            else:
+                sampler = ContiguousDistributedSampler(dataset, drop_last=drop_last)
+        else:
+            sampler = None
+
+        return sampler
+
+
+@dataclasses.dataclass
+class PairedVideoLoaderConfig(PairedDataLoaderConfig):
+    """
+    Configuration for loading video (temporal) downscaling data: fixed-length
+    clips of ``n_timesteps`` consecutive frames with an explicit leading time
+    axis, built from the same fine/coarse loading machinery as
+    ``PairedDataLoaderConfig`` (see its docstring for the args inherited
+    below).
+
+    Args:
+        n_timesteps: Number of consecutive frames in each clip.
+        time_stride: Frames between consecutive clip starts. Defaults to
+            ``n_timesteps - 1`` (clips overlapping by exactly one shared
+            boundary frame). Set to 1 for a full sliding window over every
+            possible clip start; set higher to skip clip starts and reduce
+            the number of samples.
+    """
+
+    n_timesteps: int = 1
+    time_stride: int | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.n_timesteps < 1:
+            raise ValueError(f"n_timesteps must be >= 1, got {self.n_timesteps}.")
+        if self.time_stride is not None and self.time_stride < 1:
+            raise ValueError(f"time_stride must be >= 1, got {self.time_stride}.")
+
+    @property
+    def clip_start_stride(self) -> int:
+        """Frames between consecutive video-clip starts; defaults to
+        ``n_timesteps - 1`` (clips sharing only their boundary frame).
+        """
+        if self.time_stride is not None:
+            return self.time_stride
+        return max(1, self.n_timesteps - 1)
+
+    @final
     def build_video(
         self,
         train: bool,
@@ -736,29 +795,3 @@ class PairedDataLoaderConfig:
             all_times=all_times,
             fine_coords=get_latlon_coords_from_properties(properties_fine),
         )
-
-    def _get_sampler(
-        self, dataset: Dataset, dist: Distributed, train: bool, drop_last: bool = False
-    ) -> RandomSampler | DistributedSampler | None:
-        # Use RandomSampler with replacement for both distributed and
-        # non-distributed cases
-        if self.sample_with_replacement is not None:
-            local_sample_with_replacement_dataset_size = (
-                self.sample_with_replacement // dist.world_size
-            )
-            return RandomSampler(
-                dataset,
-                num_samples=local_sample_with_replacement_dataset_size,
-                replacement=True,
-            )
-        if dist.is_distributed():
-            if train:
-                sampler = DistributedSampler(
-                    dataset, shuffle=train, drop_last=drop_last
-                )
-            else:
-                sampler = ContiguousDistributedSampler(dataset, drop_last=drop_last)
-        else:
-            sampler = None
-
-        return sampler
