@@ -23,7 +23,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators.main import LossVsNoiseAggregator
-from fme.downscaling.data import PairedDataLoaderConfig, PairedVideoBatchData
+from fme.downscaling.data import PairedVideoBatchData, PairedVideoLoaderConfig
 from fme.downscaling.video_models import (
     VideoDiffusionModelConfig,
     _linear_interp_endpoints,
@@ -105,13 +105,13 @@ class VideoTrainerConfig:
 
     model: VideoDiffusionModelConfig
     optimization: OptimizationConfig
-    train_data: PairedDataLoaderConfig
-    validation_data: PairedDataLoaderConfig
+    train_data: PairedVideoLoaderConfig
+    validation_data: PairedVideoLoaderConfig
     max_epochs: int
     experiment_dir: str
     logging: LoggingConfig
     # Optional held-out test split, evaluated every test_interval epochs.
-    test_data: PairedDataLoaderConfig | None = None
+    test_data: PairedVideoLoaderConfig | None = None
     test_interval: int = 10
     save_checkpoints: bool = True
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
