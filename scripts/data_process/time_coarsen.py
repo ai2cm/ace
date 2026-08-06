@@ -12,7 +12,7 @@ import xarray as xr
 import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from get_stats import StatsConfig
+from get_stats import StatsConfig, store_path
 
 try:
     import dask  # noqa: F401
@@ -86,13 +86,9 @@ class Config:
 def main(config: Config, run: int, dry_run: bool = False):
     logging.basicConfig(level=logging.INFO)
     run_name = list(config.runs.keys())[run]
-    if config.data_output_directory.endswith("/"):
-        config.data_output_directory = config.data_output_directory[:-1]
-    input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
-    output_zarr = config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
     process_path_pair(
-        input_path=input_zarr,
-        output_path=output_zarr,
+        input_path=store_path(config.data_output_directory, run_name),
+        output_path=store_path(config.time_coarsen.data_output_directory, run_name),
         config=config.time_coarsen,
         dry_run=dry_run,
     )

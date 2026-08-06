@@ -95,12 +95,46 @@ class TimeCoarsenConfig:
     stats_output_directory: str
 
 
+def store_path(directory: str, run_name: str) -> str:
+    """Path of the zarr store holding a run's data within an output directory."""
+    return directory.rstrip("/") + "/" + run_name + ".zarr"
+
+
+def stats_path(directory: str, run_name: str) -> str:
+    """Path of the directory holding a run's stats within an output directory."""
+    return directory.rstrip("/") + "/" + run_name
+
+
 @dataclasses.dataclass
 class Config:
     runs: dict[str, str]
     data_output_directory: str
     stats: StatsConfig
     time_coarsen: TimeCoarsenConfig | None = None
+
+    def run_names(self) -> list[str]:
+        """Names of the configured runs, in the order they are declared."""
+        return list(self.runs)
+
+    def raw_store(self, run_name: str) -> str:
+        """Zarr store holding the native-resolution data for a run."""
+        return store_path(self.data_output_directory, run_name)
+
+    def raw_stats_directory(self, run_name: str) -> str:
+        """Directory holding the native-resolution stats for a run."""
+        return stats_path(self.stats.output_directory, run_name)
+
+    def coarsened_store(self, run_name: str) -> str:
+        """Zarr store holding the time-coarsened data for a run."""
+        if self.time_coarsen is None:
+            raise ValueError("No time_coarsen section is configured.")
+        return store_path(self.time_coarsen.data_output_directory, run_name)
+
+    def coarsened_stats_directory(self, run_name: str) -> str:
+        """Directory holding the time-coarsened stats for a run."""
+        if self.time_coarsen is None:
+            raise ValueError("No time_coarsen section is configured.")
+        return stats_path(self.time_coarsen.stats_output_directory, run_name)
 
 
 def _out_dir_exists(out_dir: str) -> bool:
@@ -257,31 +291,21 @@ def main(config_yaml: str, run: int, debug: bool):
     with open(config_yaml, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
     config = dacite.from_dict(data_class=Config, data=config_data)
-    run_name = list(config.runs.keys())[run]
+    run_name = config.run_names()[run]
     if run_name in config.stats.exclude_runs:
         logging.info(f"Skipping run {run_name}")
         return
-    if config.data_output_directory.endswith("/"):
-        config.data_output_directory = config.data_output_directory[:-1]
-    input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
-    out_dir = config.stats.output_directory + "/" + run_name
     get_stats(
         config=config.stats,
-        input_zarr=input_zarr,
-        out_dir=out_dir,
+        input_zarr=config.raw_store(run_name),
+        out_dir=config.raw_stats_directory(run_name),
         debug=debug,
     )
     if config.time_coarsen is not None:
-        time_coarsened_zarr = (
-            config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
-        )
-        time_coarsened_out_dir = (
-            config.time_coarsen.stats_output_directory + "/" + run_name
-        )
         get_stats(
             config=config.stats,
-            input_zarr=time_coarsened_zarr,
-            out_dir=time_coarsened_out_dir,
+            input_zarr=config.coarsened_store(run_name),
+            out_dir=config.coarsened_stats_directory(run_name),
             debug=debug,
         )
 
