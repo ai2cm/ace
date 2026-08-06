@@ -9,7 +9,9 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 HISTOGRAM_SCRIPT="scripts/downscaling/histogram.py"
 #ZARR_PATH="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/global_perfect_prediction.zarr"
-ZARR_PATH="/climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr"
+#ZARR_PATH="/climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr"
+ZARR_PATH="/climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data/instantaneous_surface_and_sea_level_pressure_3km.zarr"
+
 OUTPUT_DIR="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/reference_histograms"
 
 submit_histogram_job() {
@@ -39,5 +41,7 @@ submit_histogram_job() {
             --stop-time 20231231:1800"
 }
 
-submit_histogram_job "hiro-histograms-precip-mslp-reference-2023" PRATEsfc PRMSL
-submit_histogram_job "hiro-histograms-wind-reference-2023" eastward_wind_at_ten_meters northward_wind_at_ten_meters wind_speed
+submit_histogram_job "hiro-histograms-prmsl-reference-2023" PRMSL
+#submit_histogram_job "hiro-histograms-prate-reference-2023" PRATEsfc
+
+#submit_histogram_job "hiro-histograms-wind-reference-2023" eastward_wind_at_ten_meters northward_wind_at_ten_meters wind_speed
