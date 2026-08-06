@@ -2,7 +2,8 @@
 # Full test-set frame-by-frame inference for hiro-downscaling-25km-100km-global-5ch-v6:
 # global (patch-tiled, not regionally split -- see inference.yaml header),
 # single-realization (n_ens=1) generation over the full held-out test period
-# (2023-01-01 .. 2024-01-04), via gantry + torchrun DDP on ai2/titan. Reads
+# (2023-01-01 .. 2024-01-04), via gantry + torchrun DDP on ai2/jupiter (h100 --
+# this model is small enough not to need b200). Reads
 # data from weka, reads the trained checkpoint from its Beaker result
 # dataset, writes the output zarr to the job's /results (becomes a Beaker
 # result dataset -- no shared-weka write needed).
@@ -22,7 +23,8 @@ set -e
 JOB_NAME="hiro-downscaling-25km-100km-global-5ch-v6-test-inference"
 CONFIG_FILENAME="inference.yaml"
 WORKSPACE="ai2/climate-titan"
-CLUSTER="ai2/titan"
+CLUSTER="ai2/jupiter"  # h100 -- this model is tiny (16x16-coarse-pixel patches),
+                        # doesn't need b200s; jupiter is the standard ai2 h100 cluster
 N_GPUS=4
 CHECKPOINT_DATASET="01KZ1WGMM2SQR6WSV0R3F3EM47"
 WANDB_SECRET="CHLOE_WANDB_API_KEY"
@@ -36,7 +38,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run \
     --name "$JOB_NAME" \
-    --description 'HiRO-ACE-style spatial downscaling (100km->25km, 5ch) full test-set frame-by-frame inference, global patch-tiled, n_ens=1, using fme.downscaling.inference (production tool with real patch compositing). 4x GPU DDP on titan.' \
+    --description 'HiRO-ACE-style spatial downscaling (100km->25km, 5ch) full test-set frame-by-frame inference, global patch-tiled, n_ens=1, using fme.downscaling.inference (production tool with real patch compositing). 4x GPU DDP on jupiter (h100).' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
