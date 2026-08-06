@@ -4,6 +4,7 @@ These exercise ``decide`` against constructed job lists, so no Beaker calls are
 made. The Beaker-facing layer is covered in ``test_beaker_io.py``.
 """
 
+import copy
 import itertools
 import random
 from dataclasses import replace
@@ -599,16 +600,18 @@ def test_a_pass_always_converges(seed):
 
 
 @pytest.mark.parametrize("seed", range(300))
-def test_converges_even_when_every_action_fails(seed):
-    """A pass whose calls all fail must not change what the next pass decides.
+def test_decide_does_not_mutate_the_jobs_it_is_given(seed):
+    """decide reads the world; run_pass is what changes it.
 
-    The permission fail-soft path means actions can silently not happen; the
-    balancer must simply retry the same thing rather than escalate.
+    This is what makes a pass whose calls all fail decide the same thing again
+    rather than escalate. The failure behaviour itself is tested against
+    run_pass, where the applying actually happens.
     """
     rng = random.Random(seed)
     jobs = random_population(rng)
-    first = decide(jobs, LIMITS)
-    assert decide(jobs, LIMITS) == first
+    before = copy.deepcopy(jobs)
+    decide(jobs, LIMITS)
+    assert jobs == before
 
 
 @pytest.mark.parametrize("seed", range(300))

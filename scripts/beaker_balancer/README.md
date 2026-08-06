@@ -86,6 +86,15 @@ is what gets the group placed.
 The grouping is keyed on the replica group rather than the workload, since one
 workload can hold independent tasks that have no reason to move together.
 
+Deciding for the group is only half of it: the ranks are still raised one call
+at a time, so a refusal partway through would split the group anyway. A refused
+rank therefore abandons the rest of the group's grant instead of spending more
+slots on a job that cannot start. Ranks already raised keep urgent — the next
+pass re-decides from what is really there and either finishes the group or takes
+it back, which is cheaper than a rollback that can fail in its own turn. In
+practice permission is per owner and every rank shares one, so the first rank
+fails and nothing is spent.
+
 ## What it does
 
 Each pass recomputes the whole allocation from scratch and applies the
@@ -192,8 +201,16 @@ is a few seconds against the current workspace).
 It runs as whoever's token is in the environment and modifies teammates' jobs
 too. A job it lacks permission to change is logged and skipped rather than
 failing the pass, so watch the log the first time it runs against jobs it does
-not own. Demotions are attempted before promotions, so a pass that dies partway
-through is never left over allocation.
+not own.
+
+Such a refusal is why demotions are attempted before promotions, and why a
+refused demotion also *defers* the grant it was paying for. Ordering alone makes
+any prefix of a pass safe, but a refusal does not end the pass — it skips one
+call and carries on — so what lands is an arbitrary subset. Granting urgent
+after the demotion paying for it was refused would end the pass over the
+allocation. The deferral is per cluster and lasts one pass: the next one
+recomputes from the state that really exists. A group is deferred whole, since
+it is granted whole.
 
 ## Tests
 
@@ -216,8 +233,14 @@ written independently of the production accounting, so a bug in the accounting
 cannot hide behind itself; a further test asserts the random populations
 actually reach the states that matter, so the suite cannot quietly go vacuous.
 
+Those invariants are all properties of `decide`, which assumes every call it
+plans succeeds. The ones that only exist once calls can fail belong to
+`run_pass` and are tested there.
+
 `test_beaker_io.py` drives the Beaker-facing layer against a fake client built
 from real protobuf messages, covering environment-variable and
 placement-constraint parsing, org-qualified cluster resolution, the
 scheduled-but-not-started case, slot accounting, dry-run, action ordering, and
-fail-soft behaviour.
+fail-soft behaviour. Its randomised passes make an arbitrary subset of the calls
+fail and assert the pass still never ends above the allocation — the property
+that the ordering alone does not buy.

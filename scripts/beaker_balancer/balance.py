@@ -199,6 +199,8 @@ class Action:
     """A priority change the balancer intends to make."""
 
     job: JobView
+    #: The budgeted cluster this change is accounted against.
+    cluster: str
     from_priority: int
     to_priority: int
     reason: str
@@ -206,6 +208,16 @@ class Action:
     @property
     def is_demotion(self) -> bool:
         return self.to_priority < self.from_priority
+
+    @property
+    def frees_slots(self) -> bool:
+        """Whether applying this change returns slots to the allocation."""
+        return self.from_priority == URGENT and self.to_priority != URGENT
+
+    @property
+    def takes_slots(self) -> bool:
+        """Whether applying this change spends slots from the allocation."""
+        return self.to_priority == URGENT and self.from_priority != URGENT
 
     def describe(self) -> str:
         return (
@@ -398,7 +410,7 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
                 )
                 continue
             reason = "grant urgent slot" if desired == URGENT else "release urgent slot"
-            actions.append(Action(job, job.priority, desired, reason))
+            actions.append(Action(job, group.cluster, job.priority, desired, reason))
 
     # Demotions first, so that any prefix of a partially applied pass is still
     # within allocation. A promotion applied before the demotion paying for it
@@ -430,8 +442,8 @@ def _cluster_of_node(
     written org-qualified, so the two have to be reconciled or placed jobs match
     no budget and their slots go uncounted.
 
-    Failures are cached too: a node that cannot be resolved would otherwise be
-    retried on every job in every pass.
+    Failures are cached too, so one unresolvable node is not retried for every
+    job sitting on it. ``fetch_jobs`` drops them between passes.
     """
     if node_id not in cache:
         try:
@@ -450,6 +462,14 @@ def fetch_jobs(
     """Read every unfinished job in a workspace into JobView form."""
     workspace = client.workspace.get(workspace_name)
     node_clusters: dict[str, str | None] = {} if node_cache is None else node_cache
+    # Failures are cached within a pass so one bad node is not retried for every
+    # job on it, but they are dropped between passes. A job whose node cannot be
+    # resolved is charged to every budget, so a single transient Beaker error
+    # would otherwise hold it there for the life of an --interval process --
+    # under-granting the allocation, and silently, since the warning is logged
+    # only the first time.
+    for stale in [node for node, cluster in node_clusters.items() if cluster is None]:
+        del node_clusters[stale]
     views = []
     for job in client.job.list(finalized=False):
         if job.workspace_id != workspace.id:
@@ -630,15 +650,55 @@ def run_pass(
 
     applied = 0
     changed: dict[str, int] = {}
+    # Slots a refused demotion failed to free, per cluster. Ordering demotions
+    # first makes any *prefix* of a pass safe, but a failure does not stop the
+    # pass -- it skips one action and carries on -- so what lands is an
+    # arbitrary subset, and the subset that matters is exactly the documented
+    # fail-soft case. Granting urgent after the demotion paying for it was
+    # refused ends the pass over allocation. Such a grant is deferred to the
+    # next pass, which recomputes from the state that really exists. The
+    # deficit is per cluster, so a stuck job on one does not stall the other.
+    deficit: Counter[str] = Counter()
+    # What each replica group is waiting to be granted. A group is granted all
+    # or nothing, so it has to be deferred all or nothing too.
+    wanted: Counter[str] = Counter()
+    for action in actions:
+        if action.takes_slots:
+            wanted[action.job.group_key] += action.job.slots
+    # Groups whose grant this pass has given up on.
+    abandoned: set[str] = set()
+
     for action in actions:
         if dry_run:
             LOGGER.info("would change %s", action.describe())
             continue
+        if action.takes_slots:
+            if action.job.group_key in abandoned:
+                continue
+            if deficit[action.cluster] > 0:
+                deficit[action.cluster] -= wanted[action.job.group_key]
+                abandoned.add(action.job.group_key)
+                LOGGER.warning(
+                    "not granting urgent to %s: a demotion on %s was refused, "
+                    "so the slots paying for it are still held",
+                    action.job.group_key,
+                    action.cluster,
+                )
+                continue
         try:
             set_priority(client, action.job.id, action.to_priority)
         except BeakerError as err:
             # Most likely a job owned by someone whose jobs we cannot modify.
             # One unreachable job should not stop the rest of the pass.
+            if action.frees_slots:
+                deficit[action.cluster] += action.job.slots
+            if action.takes_slots:
+                # Stop before splitting the group any further. Permission is
+                # per owner and every rank shares one, so in practice this
+                # fires on the first rank and spends nothing. A rank already
+                # granted is left for the next pass to finish or undo, rather
+                # than adding a rollback path that can fail in its turn.
+                abandoned.add(action.job.group_key)
             LOGGER.warning(
                 "could not change %s (owner %s): %s",
                 action.job.id,

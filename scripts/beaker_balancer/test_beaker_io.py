@@ -6,6 +6,8 @@ parsing and mutation paths are covered without touching a live workspace.
 """
 
 import logging
+import random
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +25,7 @@ from balance import (  # noqa: E402
     parse_limits,
     run_pass,
     set_priority,
+    urgent_usage,
     validate_limits,
 )
 from beaker import beaker_pb2 as pb2  # noqa: E402
@@ -446,6 +449,200 @@ def test_run_pass_reports_usage_after_applying(caplog):
     messages = [r.getMessage() for r in caplog.records]
     assert any("urgent slots before: ai2/jupiter 0/72" in m for m in messages)
     assert any("urgent slots after: ai2/jupiter 8/72" in m for m in messages)
+
+
+# --- partially applied passes -----------------------------------------------
+#
+# Ordering demotions first makes any prefix of a pass safe, but a failure skips
+# one action and carries on, so what lands is an arbitrary subset. These cover
+# the subset that matters: the one where the demotion paying for a grant is the
+# call that failed.
+
+
+def _holder(job_id, cm, cluster="ai2/jupiter", **kwargs):
+    """A placed job holding urgent, i.e. one the balancer can demote."""
+    return _labelled(
+        job_id,
+        cm,
+        priority=pb2.JOB_PRIORITY_URGENT,
+        clusters=(cluster,),
+        node_id="node-jup" if cluster == "ai2/jupiter" else "node-tit",
+        started=100,
+        **kwargs,
+    )
+
+
+NODES = {"node-jup": ("jupiter", "ai2"), "node-tit": ("titan", "ai2")}
+
+
+def test_a_refused_demotion_defers_the_grant_it_was_paying_for(caplog):
+    # The whole point: without this the pass ends at 16/8, and says so.
+    client = FakeClient(
+        [
+            _holder("theirs", "normal", author="yyexela"),
+            _labelled("mine", "high"),
+        ],
+        node_clusters=NODES,
+        fail_on={"theirs"},
+    )
+    with caplog.at_level(logging.INFO):
+        applied = run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+    assert applied == 0
+    assert client.priority_calls == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("urgent slots after: ai2/jupiter 8/8" in m for m in messages)
+    assert any("not granting urgent to mine" in m for m in messages)
+
+
+def test_a_refused_demotion_on_one_cluster_does_not_stall_the_other():
+    client = FakeClient(
+        [
+            _holder("theirs", "normal", author="yyexela"),
+            _labelled("mine", "high"),
+            _labelled("elsewhere", "high", clusters=("ai2/titan",)),
+        ],
+        node_clusters=NODES,
+        fail_on={"theirs"},
+    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8, "ai2/titan": 8}, dry_run=False)
+    assert client.priority_calls == [("elsewhere", URGENT)]
+
+
+def test_a_deferred_grant_is_retried_once_the_demotion_lands():
+    jobs = [_holder("theirs", "normal", author="yyexela"), _labelled("mine", "high")]
+    client = FakeClient(jobs, node_clusters=NODES, fail_on={"theirs"})
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+    assert client.priority_calls == []
+
+    # Next pass, with permission no longer refused: both halves go through.
+    client = FakeClient(jobs, node_clusters=NODES)
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+    assert client.priority_calls == [("theirs", NORMAL), ("mine", URGENT)]
+
+
+def test_only_the_grant_the_deficit_pays_for_is_deferred():
+    # An 8-slot demotion refused must not defer 32 slots' worth of grants.
+    client = FakeClient(
+        [
+            _holder("theirs", "normal", author="yyexela", gpu_count=8),
+            _labelled("small", "high", gpu_count=8),
+            _labelled("also", "high", gpu_count=8),
+        ],
+        node_clusters=NODES,
+        fail_on={"theirs"},
+    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 16}, dry_run=False)
+    # 16 - 8 held by the refusal leaves room for exactly one of the two.
+    assert client.priority_calls == [("also", URGENT)]
+
+
+def test_a_refused_rank_stops_the_rest_of_its_group_being_granted():
+    """A group that cannot be granted whole stops rather than spending more.
+
+    The ranks granted before the refusal keep urgent: the next pass re-decides
+    from what is really there and either finishes the group or takes it back,
+    which is cheaper than a rollback that can fail in its turn. Permission is
+    per owner and every rank shares one, so in practice the first rank fails
+    and nothing is spent at all.
+    """
+    ranks = [
+        _labelled(f"rank-{i}", "high", replica_size=4, replica_group_id="rg-1")
+        for i in range(4)
+    ]
+    client = FakeClient(ranks, node_clusters=NODES, fail_on={"rank-2"})
+    run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert [job_id for job_id, _ in client.priority_calls] == ["rank-0", "rank-1"]
+
+
+def test_a_replica_group_grant_is_deferred_as_a_unit():
+    client = FakeClient(
+        [
+            _holder("theirs", "normal", author="yyexela", gpu_count=8),
+            *[
+                _labelled(
+                    f"rank-{i}",
+                    "high",
+                    gpu_count=8,
+                    replica_size=2,
+                    replica_group_id="rg-1",
+                )
+                for i in range(2)
+            ],
+        ],
+        node_clusters=NODES,
+        fail_on={"theirs"},
+    )
+    # 16 for the group leaves nothing for the holder, so the holder must be
+    # demoted to pay for it -- and that is the call that is refused.
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 16}, dry_run=False)
+    assert client.priority_calls == []
+
+
+def test_negative_node_cache_is_dropped_between_passes():
+    # A transient error must not charge a job to every budget indefinitely.
+    jobs = [make_job(node_id="flaky", started=5000)]
+    client = FakeClient(jobs)
+    cache: dict[str, str | None] = {}
+    (view,) = fetch_jobs(client, "ai2/ace", cache)
+    assert view.assigned_cluster is None
+    assert view.budget_clusters(LIMITS) == tuple(LIMITS)
+
+    client._node_clusters["flaky"] = ("jupiter", "ai2")
+    (view,) = fetch_jobs(client, "ai2/ace", cache)
+    assert view.assigned_cluster == "ai2/jupiter"
+
+
+@pytest.mark.parametrize("seed", range(200))
+def test_a_pass_never_ends_over_allocation_however_calls_fail(seed):
+    """Any subset of a pass landing must leave us no worse than we started.
+
+    Every job here is manageable and single-cluster, so nothing unreclaimable
+    is propping the usage up: an overshoot could only be the balancer's doing.
+    """
+    rng = random.Random(seed)
+    limits = {"ai2/jupiter": 32, "ai2/titan": 16}
+    jobs = []
+    for i in range(rng.randrange(1, 10)):
+        cluster = rng.choice(list(limits))
+        placed = rng.random() < 0.5
+        jobs.append(
+            _labelled(
+                f"job-{i}",
+                rng.choice(["low", "normal", "high", "urgent"]),
+                priority=rng.choice(
+                    [
+                        pb2.JOB_PRIORITY_LOW,
+                        pb2.JOB_PRIORITY_NORMAL,
+                        pb2.JOB_PRIORITY_HIGH,
+                        pb2.JOB_PRIORITY_URGENT,
+                    ]
+                ),
+                gpu_count=rng.choice([1, 8, 16]),
+                clusters=(cluster,),
+                node_id=("node-jup" if cluster == "ai2/jupiter" else "node-tit")
+                if placed
+                else "",
+                started=100 + i if placed else 0,
+                created=100 + i,
+            )
+        )
+    fail_on = {job.id for job in jobs if rng.random() < 0.5}
+
+    client = FakeClient(jobs, node_clusters=NODES, fail_on=fail_on)
+    before = fetch_jobs(client, "ai2/ace")
+    run_pass(client, "ai2/ace", limits, dry_run=False)
+
+    landed = dict(client.priority_calls)
+    after = [
+        replace(view, priority=landed[view.id]) if view.id in landed else view
+        for view in before
+    ]
+    start = urgent_usage(before, limits)
+    end = urgent_usage(after, limits)
+    for cluster, limit in limits.items():
+        assert end[cluster] <= max(
+            limit, start[cluster]
+        ), f"{cluster}: {start[cluster]} -> {end[cluster]}, limit {limit}"
 
 
 # --- configuration ----------------------------------------------------------
