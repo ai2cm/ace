@@ -18,6 +18,8 @@ from fme.core.coordinates import (
 
 SLICE_NONE = slice(None)
 
+ZARRS_CODEC_PIPELINE = "zarrs.ZarrsCodecPipeline"
+
 
 def accumulate_labels(labels: list[set[str] | None]) -> set[str] | None:
     """
@@ -124,7 +126,13 @@ def _open_async_group(path: str):
 @functools.cache
 def _get_async_array(path: str, name: str):
     loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_open_async_group(path).getitem(name))
+    # zarrs decodes chunks in Rust and does its own chunk IO, rather than going
+    # through zarr-python's per-chunk buffer and store handling. The pipeline is
+    # bound to an array when it is opened, so setting it here applies it to the
+    # arrays read for training data without changing the pipeline used
+    # elsewhere, such as by the inference data writers.
+    with zarr.config.set({"codec_pipeline.path": ZARRS_CODEC_PIPELINE}):
+        return loop.run_until_complete(_open_async_group(path).getitem(name))
 
 
 async def _get_items(arrays_and_selections):
