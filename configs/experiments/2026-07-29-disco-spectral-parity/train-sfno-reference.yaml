@@ -6,7 +6,11 @@ validate_using_ema: true
 ema_checkpoint_save_epochs:
   start: 5
   step: 5
-max_epochs: 120
+# 20 epochs, not the recipe's 120: a first pass to see how the two arms
+# behave. There is no LR scheduler (constant 1e-4, no warmup) and
+# n_forward_steps is a scalar, so this is exactly the first 20 epochs of
+# the full run -- nothing is rescaled by the shorter horizon.
+max_epochs: 20
 ema:
   decay: 0.999
 train_aggregator:
