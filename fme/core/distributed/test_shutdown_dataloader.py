@@ -6,6 +6,7 @@ process group to signal, so it carries a driver script and process plumbing
 that the unit tests there do not.
 """
 
+import multiprocessing
 import os
 import signal
 import subprocess
@@ -45,11 +46,16 @@ _DRIVER = textwrap.dedent(
 
 
     def record(event, detail=""):
+        # Readers poll by filename and `open(path, "w")` publishes the name
+        # before the detail, so rename in. The temp name must not start with
+        # the event, or they match it.
         path = os.path.join(MARKER_DIR, f"{event}.{os.getpid()}")
-        with open(path, "w") as f:
+        partial = os.path.join(MARKER_DIR, f".partial.{event}.{os.getpid()}")
+        with open(partial, "w") as f:
             f.write(detail)
             f.flush()
             os.fsync(f.fileno())
+        os.replace(partial, path)
 
 
     def started_worker_pids():
@@ -151,6 +157,9 @@ _SETTLE = 2.0
 
 _HANDLER_QUALNAME = "handle_termination_signals.<locals>.handle"
 
+# The driver is a separate interpreter of the same build, so its default matches.
+_DEFAULT_START_METHOD = multiprocessing.get_start_method()
+
 
 def _markers(marker_dir: str, event: str) -> dict[str, str]:
     """Map pid to detail for every marker file recording `event`."""
@@ -192,6 +201,13 @@ def _kill_group(pgid: int) -> None:
 
 
 @pytest.mark.medium_duration
+@pytest.mark.skipif(
+    _DEFAULT_START_METHOD != "fork",
+    reason=(
+        f"DataLoader workers default to {_DEFAULT_START_METHOD} here, so no "
+        "worker inherits the handler this test checks is declined"
+    ),
+)
 def test_dataloader_workers_do_not_tear_down_when_the_group_is_signalled(tmp_path):
     """Only the process that installed the handler may run the teardown.
 

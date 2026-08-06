@@ -1064,6 +1064,24 @@ def _get_stepper(
     return config.get_stepper(dataset_info)
 
 
+def test_stepper_config_input_only_and_all_names_are_sets():
+    """Regression test for #579: input_only_names/all_names are unordered
+    and should be typed and returned as set[str], not list[str]."""
+    in_names = ["a", "b", "c"]
+    out_names = ["b", "d"]
+    config = _get_stepper_config(in_names, out_names)
+
+    assert isinstance(config.input_only_names, set)
+    assert config.input_only_names == {"a", "c"}
+
+    assert isinstance(config.all_names, set)
+    assert config.all_names == {"a", "b", "c", "d"}
+
+    # base config values represent ML channel order and must stay list[str]
+    assert isinstance(config.input_names, list)
+    assert isinstance(config.output_names, list)
+
+
 def _init_train_stepper(
     stepper: Stepper | None = None,
     **train_config_kwargs,
