@@ -175,3 +175,24 @@ run_training "train-4deg-daily-era5-finetune-modern.yaml" "train-4deg-daily-era5
 # which fine-tuned a residual model from the no-residual donor jnlquua6.
 # research: tasks/2026-07-21-launch-the-no-residual-modern-recipe-straight-fine-tune-arm-residual-ablation.
 run_training "train-4deg-daily-era5-finetune-modern-no-residual.yaml" "train-4deg-daily-era5-finetune-modern-no-residual-rs0" 1
+
+# =============================================================================
+# INTERPOLATE-CONSISTENT relaunch of the two arms the +4K response report uses.
+#
+# The donor pre-trains set ocean.interpolate: true; both fine-tune configs
+# omitted the key, so OceanConfig's default (false) applied and the fine-tune
+# changed how SST is prescribed (ocean_fraction-weighted blend -> hard
+# prescription where ocean_fraction >= 0.5). The +4K perturbation is delivered
+# through that prescriber and the flag rides the checkpoint into every
+# downstream response eval, so donor and fine-tune were not measured under the
+# same SST forcing. These two arms set interpolate: true and change nothing
+# else; they supersede reproduction-rs0 / modern-no-residual-rs0 above for the
+# report. Launch with:  ./run-train.sh interp
+# research: tasks/2026-08-06-relaunch-straight-finetune-arms-with-consistent-ocean-interpolate.
+# =============================================================================
+
+# --- reproduction (paper-arch) arm, interpolate-consistent, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-era5-finetune-reproduction-interp.yaml" "train-4deg-daily-era5-finetune-reproduction-interp-rs0" 1
+
+# --- modern NO-RESIDUAL arm, interpolate-consistent, seed 0 (1 GPU) ---
+run_training "train-4deg-daily-era5-finetune-modern-no-residual-interp.yaml" "train-4deg-daily-era5-finetune-modern-no-residual-interp-rs0" 1
