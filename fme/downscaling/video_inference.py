@@ -36,7 +36,7 @@ from fme.core.ema import EMATracker
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.writer import ZarrWriter
-from fme.downscaling.data import PairedDataLoaderConfig
+from fme.downscaling.data import PairedVideoLoaderConfig
 from fme.downscaling.inference.zarr_utils import determine_zarr_chunks
 from fme.downscaling.video_models import VideoDiffusionModel, VideoDiffusionModelConfig
 
@@ -101,7 +101,7 @@ def load_video_model(
 
 
 def _reference_time_and_attrs(
-    data_config: PairedDataLoaderConfig, out_names: list[str]
+    data_config: PairedVideoLoaderConfig, out_names: list[str]
 ) -> tuple[np.ndarray, dict[str, dict[str, str]]]:
     """Read the input zarr's own time coordinate + variable attrs for the test
     subset, so the output's timestamps and metadata match the input exactly.
@@ -135,7 +135,7 @@ class VideoInferenceConfig:
 
     checkpoint_path: str
     model: VideoDiffusionModelConfig
-    data: PairedDataLoaderConfig
+    data: PairedVideoLoaderConfig
     output_path: str
     experiment_dir: str
     logging: LoggingConfig
