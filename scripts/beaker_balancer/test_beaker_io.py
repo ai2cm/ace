@@ -14,6 +14,7 @@ import pytest
 
 pytest.importorskip("beaker", reason="beaker-py is not a core fme dependency")
 
+import balance  # noqa: E402
 from balance import (  # noqa: E402
     HIGH,
     LOW,
@@ -442,6 +443,55 @@ def test_multi_cluster_labelled_jobs_are_reported_once_in_aggregate(caplog):
     assert "5 job(s)" in warnings[0].getMessage()
 
 
+def test_unreclaimable_slots_are_broken_out_per_cluster(caplog):
+    # A pass can be stuck above the allocation through no fault of its own. The
+    # log has to say so, or it reads as a balancer that is not working.
+    client = FakeClient(
+        [
+            make_job(
+                job_id="session",
+                environment_id="env-1",
+                priority=pb2.JOB_PRIORITY_URGENT,
+                gpu_count=8,
+                node_id="node-jup",
+                started=100,
+            ),
+            make_job(
+                job_id="immediate",
+                priority=pb2.JOB_PRIORITY_IMMEDIATE,
+                gpu_count=16,
+                node_id="node-jup",
+                started=100,
+            ),
+        ],
+        node_clusters=NODES,
+    )
+    with caplog.at_level(logging.INFO):
+        run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "ai2/jupiter: 8 in interactive sessions; 16 at immediate priority" in m
+        for m in messages
+    )
+    assert client.priority_calls == []
+
+
+def test_a_replica_group_left_alone_is_reported(caplog):
+    # Each rank is individually fine, so this is invisible in the per-job
+    # counts: without its own line the group would be skipped silently.
+    ranks = [
+        _labelled(f"rank-{i}", "high", replica_size=4, replica_group_id="rg-1")
+        for i in range(3)
+    ]
+    ranks.append(make_job(job_id="rank-3", replica_size=4, replica_group_id="rg-1"))
+    client = FakeClient(ranks)
+    with caplog.at_level(logging.WARNING):
+        run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert client.priority_calls == []
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("1 replica group(s) left alone" in m and "rg-1" in m for m in warnings)
+
+
 def test_run_pass_reports_usage_after_applying(caplog):
     client = FakeClient([_labelled("a", "high", gpu_count=8)])
     with caplog.at_level(logging.INFO):
@@ -578,6 +628,37 @@ def test_a_replica_group_grant_is_deferred_as_a_unit():
     assert client.priority_calls == []
 
 
+def test_a_deferred_group_repays_the_deficit_with_all_of_its_slots():
+    # A group is deferred whole, so it stops spending everything it was going to
+    # spend -- not just the one rank that reached the check. Deferring further
+    # grants after that would strand slots the refusal did not actually hold.
+    client = FakeClient(
+        [
+            _holder("theirs", "normal", author="yyexela", gpu_count=16),
+            *[
+                _labelled(
+                    f"rank-{i}",
+                    "high",
+                    gpu_count=8,
+                    replica_size=4,
+                    replica_group_id="rg-1",
+                    created=100,
+                )
+                for i in range(4)
+            ],
+            _labelled("lone", "high", gpu_count=8, created=200),
+        ],
+        node_clusters=NODES,
+        fail_on={"theirs"},
+    )
+    # 32 for the group and 8 for the lone job fill the 40, so the 16-slot holder
+    # must be demoted to pay for them -- and that is the call that is refused.
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 40}, dry_run=False)
+    # Abandoning the group frees 32 against a 16-slot deficit, so the lone job
+    # still fits and must not be deferred with it.
+    assert client.priority_calls == [("lone", URGENT)]
+
+
 def test_negative_node_cache_is_dropped_between_passes():
     # A transient error must not charge a job to every budget indefinitely.
     jobs = [make_job(node_id="flaky", started=5000)]
@@ -664,7 +745,7 @@ def test_limits_can_add_a_new_cluster():
 
 
 @pytest.mark.parametrize(
-    "bad", ["ai2/jupiter", "ai2/jupiter=", "ai2/jupiter=lots", "=8"]
+    "bad", ["ai2/jupiter", "ai2/jupiter=", "ai2/jupiter=lots", "=8", "ai2/jupiter=-8"]
 )
 def test_a_malformed_limit_is_rejected(bad):
     # Silently ignoring this would run the balancer against a wrong allocation.
@@ -681,3 +762,66 @@ def test_an_unknown_cluster_name_is_rejected_at_startup():
 
 def test_valid_cluster_names_pass_validation():
     validate_limits(FakeClient([]), LIMITS)
+
+
+# --- the entrypoint ---------------------------------------------------------
+
+
+class _Stop(Exception):
+    """Breaks out of the --interval loop, which otherwise never returns."""
+
+
+def _with_client(monkeypatch, client):
+    monkeypatch.setattr(balance, "Beaker", SimpleNamespace(from_env=lambda: client))
+
+
+def test_one_pass_is_run_and_returned_from_by_default(monkeypatch):
+    client = FakeClient([_labelled("a", "high")])
+    _with_client(monkeypatch, client)
+    monkeypatch.setattr(balance.time, "sleep", lambda seconds: pytest.fail("looped"))
+    assert balance.main(["--dry-run"]) == 0
+    assert client.priority_calls == []
+
+
+def test_a_malformed_limit_exits_before_touching_beaker(monkeypatch):
+    monkeypatch.setattr(
+        balance, "Beaker", SimpleNamespace(from_env=lambda: pytest.fail("connected"))
+    )
+    with pytest.raises(SystemExit):
+        balance.main(["--limit", "ai2/jupiter"])
+
+
+def test_a_failed_pass_is_not_swallowed_without_an_interval(monkeypatch):
+    # A one-shot run must report failure rather than exit 0 having done nothing.
+    _with_client(monkeypatch, FakeClient([]))
+    monkeypatch.setattr(
+        balance, "run_pass", lambda *a, **k: (_ for _ in ()).throw(BeakerError("down"))
+    )
+    with pytest.raises(BeakerError):
+        balance.main([])
+
+
+def test_a_transient_beaker_error_does_not_kill_an_interval_loop(monkeypatch, caplog):
+    # The failure mode this guards is a cron balancer that quietly stops
+    # balancing after one bad poll.
+    _with_client(monkeypatch, FakeClient([]))
+    passes = []
+
+    def flaky(*args, **kwargs):
+        passes.append(1)
+        if len(passes) == 1:
+            raise BeakerError("beaker is down")
+        return 0
+
+    monkeypatch.setattr(balance, "run_pass", flaky)
+
+    def sleeper(seconds):
+        assert seconds == 5.0
+        if len(passes) >= 2:
+            raise _Stop
+
+    monkeypatch.setattr(balance.time, "sleep", sleeper)
+    with caplog.at_level(logging.ERROR), pytest.raises(_Stop):
+        balance.main(["--interval", "5"])
+    assert len(passes) == 2
+    assert "pass failed" in caplog.text

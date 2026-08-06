@@ -52,6 +52,12 @@ Sessions and `immediate` jobs still count against the allocation — see
   eligible. If you label a job `low` to be a good citizen, it may still be made
   unpreemptible and charged to the team allocation. It is simply the first to
   be dropped when the allocation gets tight.
+- **A queued job below its `CM_PRIORITY` is raised to it, grant or no grant.**
+  The resting priority is where the label says the job belongs, so the balancer
+  moves it there in both directions. Submitting at `low` with `CM_PRIORITY=high`
+  therefore gets you `high`, not `low`, once a pass has seen the job. This costs
+  the allocation nothing — only `urgent` is budgeted — but it does change how the
+  job is scheduled against everyone else's.
 - **A demotion is permanent for the life of that run.** Beaker will not raise
   the priority of a job it has already placed, so a job the balancer drops
   during a busy spell stays down even after the spell passes. It becomes
@@ -233,6 +239,11 @@ written independently of the production accounting, so a bug in the accounting
 cannot hide behind itself; a further test asserts the random populations
 actually reach the states that matter, so the suite cannot quietly go vacuous.
 
+Those invariants are one-sided — never *above* the allocation — and a balancer
+that granted nothing would satisfy every one of them, so one more asserts the
+other half: any candidate group left below urgent was left there because it did
+not fit in what remained, not because the walk overlooked it.
+
 Those invariants are all properties of `decide`, which assumes every call it
 plans succeeds. The ones that only exist once calls can fail belong to
 `run_pass` and are tested there.
@@ -240,7 +251,8 @@ plans succeeds. The ones that only exist once calls can fail belong to
 `test_beaker_io.py` drives the Beaker-facing layer against a fake client built
 from real protobuf messages, covering environment-variable and
 placement-constraint parsing, org-qualified cluster resolution, the
-scheduled-but-not-started case, slot accounting, dry-run, action ordering, and
-fail-soft behaviour. Its randomised passes make an arbitrary subset of the calls
+scheduled-but-not-started case, slot accounting, dry-run, action ordering,
+fail-soft behaviour, the per-pass reports, and the entrypoint's one-shot and
+`--interval` modes. Its randomised passes make an arbitrary subset of the calls
 fail and assert the pass still never ends above the allocation — the property
 that the ordering alone does not buy.

@@ -443,6 +443,99 @@ def test_a_replica_group_with_a_placed_rank_below_urgent_is_not_promoted():
     assert result == {contender.id: URGENT}
 
 
+# --- resolving a group that is already half-urgent ---------------------------
+#
+# run_pass leaves this state behind deliberately: a rank refused partway through
+# a grant abandons the rest of the group, and the ranks already raised keep
+# urgent for the next pass to "finish or take back". These pin that next pass.
+
+
+def test_an_inherited_half_urgent_group_is_completed_when_it_fits():
+    ranks = group(4, cm_priority=HIGH, slots=8)
+    ranks[0] = replace(ranks[0], priority=URGENT)
+    ranks[1] = replace(ranks[1], priority=URGENT)
+    result = changes(decide(ranks, LIMITS))
+    assert result == {ranks[2].id: URGENT, ranks[3].id: URGENT}
+
+
+def test_an_inherited_half_urgent_group_is_taken_back_when_it_no_longer_fits():
+    ranks = group(4, cm_priority=HIGH, slots=8)
+    ranks[0] = replace(ranks[0], priority=URGENT)
+    ranks[1] = replace(ranks[1], priority=URGENT)
+    result = changes(decide(ranks, {"ai2/jupiter": 16}))
+    assert result == {ranks[0].id: HIGH, ranks[1].id: HIGH}
+
+
+def test_an_inherited_half_urgent_group_with_a_placed_rank_is_taken_back():
+    # The placed rank can never be raised, so the group can never be completed.
+    # It must lose the urgent it holds rather than keep it indefinitely.
+    ranks = group(4, cm_priority=HIGH, slots=8)
+    ranks[0] = replace(ranks[0], priority=URGENT)
+    ranks[1] = replace(ranks[1], priority=URGENT)
+    ranks[2] = replace(
+        ranks[2], is_placed=True, placed_at=100.0, assigned_cluster="ai2/jupiter"
+    )
+    result = changes(decide(ranks, LIMITS))
+    assert result == {ranks[0].id: HIGH, ranks[1].id: HIGH}
+
+
+# --- group clocks -----------------------------------------------------------
+
+
+def test_a_group_waits_from_its_latest_rank():
+    # A group cannot start until its last rank is placed, and the clock resets
+    # when a rank is preempted, so a bounced group must not keep seniority it no
+    # longer has: the rank that was requeued sets the whole group's wait.
+    bounced = group(2, group_id="bounced", cm_priority=HIGH, slots=8)
+    bounced[0] = replace(bounced[0], queued_at=100.0)
+    bounced[1] = replace(bounced[1], queued_at=900.0)
+    steady = group(2, group_id="steady", cm_priority=HIGH, slots=8, queued_at=500.0)
+    result = changes(decide([*bounced, *steady], {"ai2/jupiter": 16}))
+    assert result == {rank.id: URGENT for rank in steady}
+
+
+def test_a_group_holds_its_slots_from_its_earliest_rank():
+    # Longest-held loses urgent first, and a group has held slots since its
+    # first rank landed, not its last.
+    early = group(2, group_id="early", priority=URGENT, cm_priority=HIGH, slots=8)
+    early[0] = replace(
+        early[0], is_placed=True, placed_at=100.0, assigned_cluster="ai2/jupiter"
+    )
+    early[1] = replace(
+        early[1], is_placed=True, placed_at=900.0, assigned_cluster="ai2/jupiter"
+    )
+    late = group(2, group_id="late", priority=URGENT, cm_priority=HIGH, slots=8)
+    late = [
+        replace(rank, is_placed=True, placed_at=500.0, assigned_cluster="ai2/jupiter")
+        for rank in late
+    ]
+    result = changes(decide([*early, *late], {"ai2/jupiter": 16}))
+    assert result == {rank.id: HIGH for rank in early}
+
+
+# --- what a change is reported as -------------------------------------------
+
+
+def test_a_job_raised_to_its_label_is_not_reported_as_releasing_a_slot():
+    # A queued job submitted below its CM_PRIORITY is raised to it even when it
+    # is granted nothing. The log is the only window on a cron process, so it
+    # must not claim an urgent slot changed hands.
+    hog = job(priority=URGENT, cm_priority=None, slots=72)
+    below = job(priority=LOW, cm_priority=HIGH, slots=8)
+    (action,) = decide([hog, below], LIMITS)
+    assert (action.from_priority, action.to_priority) == (LOW, HIGH)
+    assert action.reason == "settle at resting priority"
+
+
+def test_granting_and_releasing_are_reported_as_such():
+    granted = job(priority=HIGH, cm_priority=HIGH, slots=8)
+    (grant,) = decide([granted], LIMITS)
+    assert grant.reason == "grant urgent slot"
+    released = placed(priority=URGENT, cm_priority=HIGH, slots=8)
+    (release,) = decide([released], {"ai2/jupiter": 0})
+    assert release.reason == "release urgent slot"
+
+
 # --- sessions and immediate priority ----------------------------------------
 
 
@@ -687,6 +780,52 @@ def test_a_job_is_never_left_above_urgent_or_below_its_label(seed):
         cm_priority = action.job.cm_priority
         assert cm_priority is not None
         assert action.to_priority in (URGENT, resting_priority(cm_priority))
+
+
+def grantable_groups(jobs, limits=LIMITS) -> dict[str, list[JobView]]:
+    """Groups that could hold urgent after a pass, restated from the rules.
+
+    A group is a candidate only if the balancer may move it at all, and only if
+    every rank could reach urgent: Beaker will not raise a job it has placed, so
+    a group with a placed rank below urgent is out.
+    """
+    allowed = modifiable(jobs, limits)
+    groups: dict[str, list[JobView]] = {}
+    for j in jobs:
+        if j.id not in allowed:
+            continue
+        key = j.replica_group_id if j.replica_group_size > 1 else j.id
+        groups.setdefault(key or j.id, []).append(j)
+    return {
+        key: members
+        for key, members in groups.items()
+        if all(m.priority == URGENT for m in members)
+        or all(not m.is_placed for m in members)
+    }
+
+
+@pytest.mark.parametrize("seed", range(300))
+def test_the_allocation_is_not_left_unspent(seed):
+    """The other half of the guarantee: a pass must also *use* the allocation.
+
+    Every other property here is one-sided -- never above the limit -- so a
+    balancer that granted nothing at all would satisfy them. This asserts the
+    walk is maximal: any candidate group left below urgent was left there
+    because it did not fit in what remained, not because it was overlooked.
+    """
+    rng = random.Random(seed)
+    jobs = random_population(rng)
+    after = {j.id: j for j in apply(jobs, decide(jobs, LIMITS))}
+    used = usage(list(after.values()))
+    for key, members in grantable_groups(jobs).items():
+        if all(after[m.id].priority == URGENT for m in members):
+            continue
+        cluster = members[0].clusters[0]
+        slots = sum(m.slots for m in members)
+        headroom = LIMITS[cluster] - used[cluster]
+        assert (
+            slots > headroom
+        ), f"{key} needed {slots} on {cluster} and {headroom} were left unspent"
 
 
 def test_random_population_reaches_the_states_that_matter():

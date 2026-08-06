@@ -354,6 +354,21 @@ def _eligible_for_urgent(group: ReplicaGroup) -> bool:
     return group.holds_urgent or group.is_queued
 
 
+def _reason(job: JobView, desired: int) -> str:
+    """Why a job is being moved, in terms of the allocation.
+
+    A job that neither takes nor gives up an urgent slot is only being put where
+    its label says it rests -- a queued job submitted below its ``CM_PRIORITY``
+    is raised to it. Describing that as releasing a slot would report a change
+    to the allocation that did not happen.
+    """
+    if desired == URGENT:
+        return "grant urgent slot"
+    if job.priority == URGENT:
+        return "release urgent slot"
+    return "settle at resting priority"
+
+
 def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
     """Compute the priority changes that bring urgent usage within allocation.
 
@@ -409,8 +424,9 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
                     NAME_BY_PRIORITY.get(desired),
                 )
                 continue
-            reason = "grant urgent slot" if desired == URGENT else "release urgent slot"
-            actions.append(Action(job, group.cluster, job.priority, desired, reason))
+            actions.append(
+                Action(job, group.cluster, job.priority, desired, _reason(job, desired))
+            )
 
     # Demotions first, so that any prefix of a partially applied pass is still
     # within allocation. A promotion applied before the demotion paying for it
@@ -518,6 +534,13 @@ def fetch_jobs(
 
 
 def set_priority(client: Beaker, job_id: str, priority: int) -> None:
+    """Change one job's priority. The only call the balancer makes that mutates.
+
+    ``beaker-py`` exposes no wrapper for ``UpdateJobSourcePriority``, so the rpc
+    is issued directly through the private ``RpcMethod``. A beaker-py upgrade
+    can therefore break this import, and CI will not notice: it does not install
+    beaker-py, so both test modules skip. Run the tests locally after upgrading.
+    """
     service = client.job
     service.rpc_request(
         RpcMethod(service.service.UpdateJobSourcePriority),
