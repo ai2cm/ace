@@ -148,3 +148,11 @@ run_training "arm3-50-50-ec.yaml"                  "ace2s-bakeoff-6h-arm3-50-50-
 run_training "arm6-80-10-sp10-ec.yaml"             "ace2s-bakeoff-6h-arm6-80-10-sp10-ec-rs0"             4
 run_training "arm7-90-0-sp10-ec.yaml"              "ace2s-bakeoff-6h-arm7-90-0-sp10-ec-rs0"              4
 run_training "arm9-90-0-sp10-ec-whiten-g0.5.yaml"  "ace2s-bakeoff-6h-arm9-90-0-sp10-ec-whiten-g0.5-rs0"  4
+
+# Continuation of arm 3 from its epoch-69 checkpoint after the 2026-08-05 NCCL
+# watchdog death, on the reduced loader config. The job name is deliberately the
+# ORIGINAL run's wandb name: with resume_wandb the run id is kept but WANDB_NAME
+# overwrites the display name, so any other name would rename the original run.
+# Beaker auto-suffixes the colliding experiment name. Launch with the filter
+# `./run-train.sh resume-e69`, which matches this config filename alone.
+run_training "arm3-50-50-ec-resume-e69.yaml"       "ace2s-bakeoff-6h-arm3-50-50-ec-rs0"                  4

@@ -62,9 +62,11 @@ per-inference cost is also ~4×.
 Arms 1, 7 and 9 were host-RAM OOM-killed in the first launch wave and were
 relaunched on 2026-08-05 with `num_data_workers: 8 → 4` on every loader
 (training, validation, all five inference) and the training loader's
-`prefetch_factor: 4 → 2`. Arms 2, 3 and 6 still carry the original `8` / `4`
-because they were not relaunched, so the wave is not uniform in these two
-knobs. Both are dataloader concurrency/queue-depth settings: the sample order
+`prefetch_factor: 4 → 2`. Arm 3 joined them on 2026-08-06 via
+`arm3-50-50-ec-resume-e69.yaml`, a continuation from its epoch-69 checkpoint
+after an NCCL watchdog death, carrying the same two knobs — so its epochs 0–69
+ran at `8`/`4` and 70–80 at `4`/`2`. Arms 2 and 6 still carry the original
+`8` / `4`, so the wave is not uniform in these two knobs. Both are dataloader concurrency/queue-depth settings: the sample order
 comes from the seeded distributed sampler, not the worker count, so they are
 expected to be results-neutral and to affect only host memory and IO
 throughput. Batch sizes and `forward_steps_in_memory` are unchanged.
