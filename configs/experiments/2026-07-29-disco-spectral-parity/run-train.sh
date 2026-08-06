@@ -158,7 +158,12 @@ run_training() {
 # order. The DISCO arm needs it: at a local batch of 8 its contraction
 # activations run to ~190 GiB even with checkpointing. Both arms get the same
 # GPU count so wall-clock and optimization conditions stay comparable.
+#
+# -r2: the first launch of both arms died 50 s into epoch 1 on a DDP
+# unused-parameter error. checkpointing >= 1 wrapped the encoder in a reentrant
+# gradient checkpoint whose only input does not require grad, so the encoder
+# got no gradient at all. Fixed in c3e95295c; these are the reruns.
 # =============================================================================
 
-run_training "train-sfno-reference.yaml" "train-4deg-daily-disco-parity-sfno-reference-rs0" 8
-run_training "train-disco.yaml" "train-4deg-daily-disco-parity-disco-rs0" 8
+run_training "train-sfno-reference.yaml" "train-4deg-daily-disco-parity-sfno-reference-rs0-r2" 8
+run_training "train-disco.yaml" "train-4deg-daily-disco-parity-disco-rs0-r2" 8
