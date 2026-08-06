@@ -81,6 +81,16 @@ Raw source datasets and associated variables
 - {MODEL_LEVEL_STORE}:
     - {", ".join(RAW_VARIABLE_SOURCES[MODEL_LEVEL_STORE])}
 
+For consistency with the format of GFS analysis, the latitude is sorted to be
+in ascending order (rather than descending in the case of ERA5), and the
+hybrid coordinate is defined such that pressure in a column at a level k is
+given by:
+
+    p(k) = P0 * a(k) + ps * b(k),
+
+where P0 is equal to 100000.0 Pa, a(k) and b(k) define the hybrid coordinate,
+and ps is the surface pressure for the column.
+
 Citation for ARCO ERA5 dataset
 ------------------------------
 
@@ -105,6 +115,7 @@ Hersbach, H., Bell, B., Berrisford, P., Hirahara, S., Horányi, A.,
     Change Service (C3S) Data Store (CDS). (Accessed on DD-MM-YYYY)
 """
 FILENAME_PATTERN = "%Y%m%d_%HZ.nc"
+P0 = 100000.0  # Scale hyai by 1 / P0 for consistency with GFS analysis definition.
 
 
 def get_raw_data(timestamp: pd.Timestamp) -> xr.Dataset:
@@ -133,6 +144,7 @@ def get_hybrid_coefficients(ds: xr.Dataset) -> tuple[xr.DataArray, xr.DataArray]
     hybi = np.array(pv[n_hybrid_interfaces:])
     hyai = xr.DataArray(hyai, dims=[HYBRID_LEVEL_INTERFACE_DIMENSION])
     hybi = xr.DataArray(hybi, dims=[HYBRID_LEVEL_INTERFACE_DIMENSION])
+    hyai = hyai / P0  # Adjust for consistency with GFS analysis.
     return hyai, hybi
 
 
@@ -167,6 +179,8 @@ def get_nudging_data(timestamp: pd.Timestamp) -> xr.Dataset:
     nudging_data = nudging_data.rename(DIMENSION_RENAME)
     nudging_data = nudging_data.convert_calendar(SHIELD_CALENDAR, TIME_DIMENSION)
     nudging_data = nudging_data.assign_attrs(history=HISTORY_ATTRIBUTE)
+    # Ensure latitude is ascending.
+    nudging_data = nudging_data.sortby(LATITUDE_DIMENSION)
     return nudging_data
 
 
