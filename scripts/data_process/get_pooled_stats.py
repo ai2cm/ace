@@ -1,5 +1,5 @@
 # Computes pooled normalization statistics over N datasets defined in a single
-# config file (see `stats_config.yaml`). Each entry is a zarr store (or a
+# config file (see `configs/stats_config.yaml`). Each entry is a zarr store (or a
 # directory of stores, e.g. an ensemble of `ic_XXXX.zarr` members) plus a time
 # slice; the slice applies to every store the entry resolves to, and the same
 # store may appear multiple times with different slices. Each store gets its own
@@ -18,9 +18,9 @@
 #
 # Usage:
 #   # launch a CPU beaker job that reads the data and writes the stats:
-#   python get_pooled_stats.py submit stats_config.yaml gs://bucket/out-dir
+#   python get_pooled_stats.py submit configs/stats_config.yaml gs://bucket/out-dir
 #   # or run the calculation directly (needs data access + deps):
-#   python get_pooled_stats.py compute stats_config.yaml gs://bucket/out-dir
+#   python get_pooled_stats.py compute configs/stats_config.yaml gs://bucket/out-dir
 
 import argparse
 import dataclasses
