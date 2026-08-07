@@ -247,6 +247,12 @@ e3smv2_1deg_climSST_dataset:
 era5_1deg_stats_beaker_dataset:
 	./compute_stats.sh --config configs/era5-1deg-8layer-1940-2025.yaml
 
+# Time-coarsens the existing 1deg 6-hourly store to daily. Does not pass
+# --dataset, so the 6-hourly source is never rewritten.
+.PHONY: era5_1deg_daily_dataset
+era5_1deg_daily_dataset:
+	./compute_dataset.sh --time-coarsen --stats --config configs/era5-1deg-8layer-daily-1940-2025.yaml
+
 .PHONY: era5_1deg_16layer_stats_beaker_dataset
 era5_1deg_16layer_stats_beaker_dataset:
 	./compute_stats.sh --config configs/era5-1deg-16layer-1940-2022.yaml
