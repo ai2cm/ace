@@ -89,6 +89,11 @@ run_training() {
   local config_filename="$1"
   local job_name="$2"
   local N_GPUS="${3:-1}"
+  # Space-separated cluster list; the default is what the two parity arms were
+  # launched on, so omitting it reproduces their placement exactly.
+  local CLUSTERS="${4:-ai2/jupiter ai2/titan}"
+  # Beaker submission priority. Defaults to what the two parity arms used.
+  local PRIORITY="${5:-high}"
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   should_run "$config_filename" "$job_name" || { echo "skip (filter): $job_name"; return 0; }
@@ -114,14 +119,20 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  # One --cluster flag per entry in CLUSTERS.
+  local cluster_args=()
+  local cluster
+  for cluster in $CLUSTERS; do
+    cluster_args+=(--cluster "$cluster")
+  done
+
   gantry run \
     --name "$job_name" \
     --description 'Run ACE training' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
-    --priority high \
-    --cluster ai2/jupiter \
-    --cluster ai2/titan \
+    --priority "$PRIORITY" \
+    "${cluster_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -167,3 +178,20 @@ run_training() {
 
 run_training "train-sfno-reference.yaml" "train-4deg-daily-disco-parity-sfno-reference-rs0-r2" 8
 run_training "train-disco.yaml" "train-4deg-daily-disco-parity-disco-rs0-r2" 8
+
+# -----------------------------------------------------------------------------
+# Third arm: the same two-branch DISCO filter at a quarter-globe support radius
+# (theta_cutoff pi/4 rather than pi), the first point on the receptive-field
+# knob the spectral filter cannot provide. kernel_shape drops 2lmax -> [45, 1]
+# (K = 90 -> 23) as a CONSEQUENCE of the 4x smaller radius, holding the radial
+# bump spacing fixed at ~2 deg; see the config for the full rationale.
+#
+# Not a parity arm: at pi/4 the filter cannot span the per-l profiles by
+# construction, so it is not expected to reproduce dhconv.
+#
+# jupiter only, submitted at urgent. Note the two priorities are unrelated:
+# `urgent` is the beaker scheduling priority, while the config's
+# `# arg: --env CM_PRIORITY=low` is metadata for mcgibbon's balancer script,
+# marking this as the arm to yield first.
+# -----------------------------------------------------------------------------
+run_training "train-disco-theta-quarter.yaml" "train-4deg-daily-disco-parity-disco-theta-quarter-rs0" 8 "ai2/jupiter" "urgent"
