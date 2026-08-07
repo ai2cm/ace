@@ -97,7 +97,6 @@ for case in "${CASES[@]}"; do
         --shared-memory 20GiB \
         --weka climate-default:/climate-default \
         --system-python \
-        --min-runtime 8h \
         --install "pip install --no-deps ." \
         -- /bin/bash -c "\
             python -I -m fme.ace.inference $CONFIG_PATH --override $spin_up_overrides \
