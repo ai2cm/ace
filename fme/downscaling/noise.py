@@ -69,13 +69,6 @@ def brownian_bridge_mixing_matrix(tau: torch.Tensor) -> torch.Tensor:
     """Temporal mixing matrix for endpoint-pinned, `Brownian-bridge`_-correlated
     noise.
 
-    Given the normalized frame times ``tau`` (1-D, length ``T``, with
-    ``tau[0] == 0`` and ``tau[-1] == 1`` marking the pinned endpoints and the
-    interior strictly inside ``(0, 1)``), returns a ``(T, T)`` matrix ``M`` such
-    that white noise ``Z ~ N(0, I)`` mixed along the time axis as ``E = M @ Z``
-    has a Brownian-bridge *correlation* structure across the interior frames and
-    is exactly zero on the two endpoint frames.
-
     .. _Brownian-bridge: https://en.wikipedia.org/wiki/Brownian_bridge
 
     Because every entry depends only on its own pair ``(tau_i, tau_j)``, the

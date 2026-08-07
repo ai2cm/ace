@@ -112,6 +112,42 @@ def test_train_on_batch_runs_and_backprops_songunet_backbone():
     assert outputs.prediction["var0"].shape == (2, n_times, height, width)
 
 
+def test_attn_resolutions_empty_list_disables_non_bottleneck_attention():
+    """An explicit ``attn_resolutions=[]`` must actually disable songunet
+    attention at the regular resolution levels, not silently fall back to
+    the default (the previous ``self.attn_resolutions or [default_attn]``
+    treated `[]` and `None` the same way). SongUNetv2's bottleneck block
+    always gets attention (``bottleneck_attention`` defaults to ``True``
+    and isn't exposed here), so the empty case still has exactly one
+    temporal-attention module rather than zero.
+    """
+    n_times, height, width = 5, 8, 8
+
+    def n_temporal_blocks(**kwargs):
+        model = _model(
+            n_times, backbone="songunet", img_resolution=[height, width], **kwargs
+        )
+        bare = getattr(model.module, "module", model.module)
+        return len(bare.model._temporal)
+
+    assert n_temporal_blocks(attn_resolutions=[]) == 1
+    assert n_temporal_blocks() > 1
+
+
+def test_use_apex_gn_requires_songunet_backbone():
+    with pytest.raises(ValueError, match="only used with the songunet backbone"):
+        _model(5, use_apex_gn=True)
+
+
+def test_use_apex_gn_requires_gpu():
+    from fme.core.device import using_gpu
+
+    if using_gpu():
+        pytest.skip("use_apex_gn is valid on GPU; nothing to assert here")
+    with pytest.raises(ValueError, match="requires a GPU"):
+        _model(5, backbone="songunet", img_resolution=[8, 8], use_apex_gn=True)
+
+
 def test_train_on_batch_supports_per_channel_noise():
     n_times, height, width = 5, 8, 8
     config = VideoDiffusionModelConfig(
@@ -250,7 +286,7 @@ def test_invalid_temporal_noise_correlation_rejected():
             normalization=NormalizationConfig(
                 means={"var0": 0.0, "var1": 0.0}, stds={"var0": 1.0, "var1": 1.0}
             ),
-            temporal_noise_correlation="bridge",
+            temporal_noise_correlation="bridge",  # type: ignore[arg-type]
         )
 
 
