@@ -2,22 +2,20 @@
 
 set -e
 
-DATE="2026-07-22"
+DATE="2026-08-07"
 WANDB_USERNAME=spencerc_ai2
 CONFIG_FILENAME="ace-som-1000-year-inference-config-with-stratospheric-output.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
-
-GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-07-14-crash-investigation/example-0002"
 
 INITIAL_CONDITION_ROOT=/climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
 INITIAL_CONDITION_TIME=2032-01-01T00:00:00
 
 declare -A INITIAL_CONDITION_DATASETS
 INITIAL_CONDITION_DATASETS=( \
-    ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
-    ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
-    ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
+    # ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
+    # ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
+    # ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
     ["4xCO2"]="${INITIAL_CONDITION_ROOT}/4xCO2-ic_0005.zarr" \
 )
 
@@ -33,16 +31,13 @@ declare -A MODELS=( \
     [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
 )
 
-GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-07-14-crash-investigation"
+GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-08-07-crash-investigation-with-Rayleigh-damping"
 SEGMENT_LENGTH=182621
 CASES=( \
-    # "full-energy-conserving-rs0,2xCO2,4,176091,01KY2Y1KHDG38PB98DKDN0ZDHQ,ai2/jupiter,example-0003" \
-    # "full-energy-conserving-rs0,3xCO2,3,397322,01KY02N19VKSX3NHQEA0W9AK5M,ai2/jupiter,example-0004" \
-    # "full-energy-conserving-rs0,3xCO2,4,266500,01KY2Y1K2YZP8JHXP09Y63F5T1,ai2/jupiter,example-0005" \
-    # "full-energy-conserving-rs0,4xCO2,4,537191,01KY02N8ZMGTVRP5EWVGTEZJZ5,ai2/jupiter,example-0006" \
-    # "full-energy-conserving-rs0,4xCO2,1,402639,01KYAXJJR5201C4935274E1B40,ai2/titan,example-0007" \
-    "full-energy-conserving-rs0,3xCO2,0,142667,01KYCH3N3V8F4YFQ2C1QA3JFY1,ai2/titan,example-0008" \
-    "full-energy-conserving-rs0,4xCO2,0,1036857,01KYCH2XPEV24YNTXPTVNZAJJJ,ai2/titan,example-0009" \
+    "full-energy-conserving-rs0,4xCO2,0,498415,01KZCSW6MV219D2R29P7H7PH00,ai2/titan,example-0001" \
+    "full-energy-conserving-rs0,4xCO2,1,37793,01KZCSW6WG3CYW6VXF3GN3X4Y9,ai2/titan,example-0002" \
+    "full-energy-conserving-rs0,4xCO2,2,412145,01KZCSW6S00PBCR2QJWNM8PWFM,ai2/titan,example-0003" \
+    "full-energy-conserving-rs0,4xCO2,5,1192075,01KZCSWKV062H0NYQ22KWB0DZ5,ai2/titan,example-0004" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -81,7 +76,7 @@ for case in "${CASES[@]}"; do
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $main_overrides
 
-    job_name="${DATE}-${model}-${climate}-seed-${seed}-1000-year-equilibrium-climate-inference-output-around-crash"
+    job_name="${DATE}-${model}-${climate}-seed-${seed}-1000-year-equilibrium-climate-inference-rayleigh-damping-output-around-crash"
     gantry run \
         --name $job_name \
         --description 'Run inference with ACE' \
