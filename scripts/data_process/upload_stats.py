@@ -40,6 +40,15 @@ class Config:
     stats: StatsConfig
     time_coarsen: TimeCoarsenConfig | None = None
 
+    def __post_init__(self):
+        if self.stats.beaker_dataset is None and (
+            self.time_coarsen is None or self.time_coarsen.beaker_dataset is None
+        ):
+            raise ValueError(
+                "No Beaker dataset to upload. Set stats.beaker_dataset, or set "
+                "time_coarsen.beaker_dataset to upload only the time-coarsened stats."
+            )
+
 
 @dataclasses.dataclass
 class UploadSpec:
@@ -150,9 +159,6 @@ def main(config_yaml: str):
     config = dacite.from_dict(data_class=Config, data=config_data)
 
     specs = _upload_specs(config)
-    if not specs:
-        logging.info("No Beaker datasets configured for upload.")
-        return
 
     # imported here so we don't need to install beaker for the tests
     from beaker import Beaker

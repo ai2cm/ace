@@ -182,8 +182,11 @@ def test_upload_specs_time_coarsened_only():
     assert specs[0].combined_directory == COARSENED_STATS_DIRECTORY + "/combined/"
 
 
-def test_upload_specs_no_datasets_requested():
-    specs = _upload_specs(
+def test_upload_config_rejects_no_datasets_requested():
+    with pytest.raises(ValueError, match="No Beaker dataset to upload"):
         _upload_stats_config(stats_beaker_dataset=None, include_time_coarsen=True)
-    )
-    assert specs == []
+
+
+def test_upload_config_rejects_no_datasets_without_time_coarsen():
+    with pytest.raises(ValueError, match="No Beaker dataset to upload"):
+        _upload_stats_config(stats_beaker_dataset=None)
