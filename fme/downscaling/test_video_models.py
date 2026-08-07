@@ -482,6 +482,150 @@ def test_pure_coarse_to_fine_generate_runs_and_does_not_pin_endpoints():
     assert not torch.allclose(out[:, 0, 0], out[:, 1, 0], atol=1e-4)
 
 
+def _coarse_endpoints_only_model(n_times, **config_kwargs):
+    return _spatial_model(
+        n_times, endpoints_observed=False, coarse_endpoints_only=True, **config_kwargs
+    )
+
+
+def test_coarse_endpoints_only_rejected_when_endpoints_observed():
+    with pytest.raises(ValueError, match="coarse_endpoints_only"):
+        _spatial_model(5, coarse_endpoints_only=True)
+
+
+def test_coarse_endpoints_only_narrows_input_channels():
+    n_times = 5
+    model = _coarse_endpoints_only_model(n_times)
+    n_channels = len(OUT_NAMES)
+    # noisy residual (C) + endpoint-masked coarse condition (C) + its own
+    # mask (1) + log-sigma (C) = 3C+1 -- no fine-endpoint block since no
+    # frame is ever pinned, but the coarse block still gets a mask channel
+    # (it's endpoint-masked here, unlike the continuous pure-coarse-to-fine
+    # mode's unmasked full-clip conditioning).
+    expected_in_channels = 3 * n_channels + 1
+    net = model.module.module.model
+    in_conv = net.in_conv.conv
+    assert in_conv.in_channels == expected_in_channels + net.calendar.out_channels
+
+
+def test_coarse_endpoints_only_baseline_interpolates_coarse_endpoints():
+    # The baseline must ignore the fine clip entirely (no fine truth exists)
+    # and must ignore interior coarse frames (only the two endpoints are
+    # ever available in this deployment scenario) -- it's the linear
+    # interpolation of the coarse-upsampled endpoints, not a pinned/
+    # continuous value.
+    n_times, height, width = 5, 4, 4
+    model = _coarse_endpoints_only_model(n_times)
+    tau = model._tau_for_indices(None)
+    random_clip = torch.randn(2, len(OUT_NAMES), n_times, height, width)
+
+    coarse_a = torch.randn(2, len(OUT_NAMES), n_times, height, width)
+    coarse_b = coarse_a.clone()
+    coarse_b[:, :, 1:-1] = torch.randn_like(coarse_b[:, :, 1:-1])
+
+    baseline_a = model._spatiotemporal_baseline(random_clip, coarse_a, tau)
+    baseline_b = model._spatiotemporal_baseline(random_clip, coarse_b, tau)
+    assert torch.equal(baseline_a, baseline_b)
+
+    expected = _linear_interp_endpoints(coarse_a, tau)
+    assert torch.equal(baseline_a, expected)
+    assert not torch.equal(baseline_a, coarse_a)
+
+
+def test_coarse_endpoints_only_conditioning_masks_coarse_to_endpoints():
+    # Same masking behavior as endpoints_observed=True's coarse block, but
+    # with NO fine block at all (no fine value of any kind exists here).
+    n_times, height, width = 5, 4, 4
+    n_channels = len(OUT_NAMES)
+    model = _coarse_endpoints_only_model(n_times)
+    clip = torch.randn(2, n_channels, n_times, height, width)
+    coarse_upsampled = torch.randn(2, n_channels, n_times, height, width)
+    interior = _interior_mask(n_times, clip.device, model.endpoints_observed)
+    assert torch.equal(interior, torch.ones_like(interior))  # nothing pinned
+
+    condition = model._conditioning(clip, interior, coarse_upsampled)
+    assert condition.shape[CHANNEL_AXIS] == n_channels + 1  # coarse values + mask
+    coarse_values = condition[:, :n_channels]
+    coarse_mask = condition[:, n_channels : n_channels + 1]
+
+    assert torch.equal(
+        coarse_values[:, :, 1:-1], torch.zeros_like(coarse_values[:, :, 1:-1])
+    )
+    assert torch.equal(
+        coarse_mask[:, :, 1:-1], torch.zeros_like(coarse_mask[:, :, 1:-1])
+    )
+    for t in (0, n_times - 1):
+        assert torch.equal(coarse_values[:, :, t], coarse_upsampled[:, :, t])
+    assert torch.equal(
+        coarse_mask[:, :, [0, -1]], torch.ones_like(coarse_mask[:, :, [0, -1]])
+    )
+
+
+def test_coarse_endpoints_only_train_on_batch_runs_and_backprops():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _coarse_endpoints_only_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.loss.requires_grad
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert outputs.prediction["var0"].shape == (2, n_times, fine_height, fine_width)
+
+
+@pytest.mark.parametrize(
+    "kernel_kwargs",
+    [
+        {},
+        {
+            "temporal_noise_correlation": "per_channel",
+            "per_channel_noise_kernel": {"var0": "ou", "var1": "ou"},
+            "per_channel_kernel_length_scale": {"var0": 0.3, "var1": 0.3},
+        },
+    ],
+    ids=["independent", "ou"],
+)
+def test_coarse_endpoints_only_generate_runs_and_does_not_pin_endpoints(
+    kernel_kwargs,
+):
+    # Also covers the "does OU actually denoise the endpoints at generation
+    # time" question directly: _video_edm_sample's `mask` is all-ones in this
+    # mode (nothing pinned), so every `* mask` in the sampler loop is a
+    # no-op there -- the endpoints go through the SAME full num_steps
+    # iterative denoising as every interior frame, seeded from the (now
+    # correctly nonzero, per the noise-mixing fix) OU-correlated initial
+    # noise. If they were still being frozen/pinned, repeated samples would
+    # be identical at the endpoints; they are not (checked below).
+    n_times, fine_height, fine_width, factor = 9, 8, 8, 2
+    model = _coarse_endpoints_only_model(n_times, **kernel_kwargs)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    generated = model.generate(batch, n_samples=3)
+    out = generated["var0"]
+    assert out.shape == (2, 3, n_times, fine_height, fine_width)
+    assert torch.isfinite(out).all()
+
+    # endpoints are diffused (not pinned), same as continuous pure-coarse-to-fine.
+    truth = batch.fine.data["var0"]
+    assert not torch.allclose(out[:, 0, 0], truth[:, 0], atol=1e-4)
+    assert not torch.allclose(out[:, 0, 0], out[:, 1, 0], atol=1e-4)
+
+
 def test_spatial_downscaling_rejects_non_integer_scale_factor():
     n_times = 5
     model = _spatial_model(n_times)
@@ -793,6 +937,32 @@ def test_independent_noise_is_uncorrelated_in_time():
     flat = model._sample_residual_noise(like)[:, 0, :, 0, 0]
     emp_cov = (flat.T @ flat) / flat.shape[0]
     assert torch.allclose(emp_cov, torch.eye(n_times), atol=0.05)
+
+
+def test_pure_coarse_to_fine_ou_kernel_noises_endpoints():
+    # Regression guard: ou/rbf mixing matrices used to always zero the
+    # endpoint rows regardless of endpoints_observed (correct only when
+    # endpoints are pinned). With endpoints_observed=False every frame,
+    # including the former endpoints, is diffused and must get real,
+    # nonzero training noise -- otherwise the model never sees a noised
+    # endpoint during training despite generation starting from pure noise
+    # there, and the endpoints would never gain any detail.
+    n_times = 9
+    model = _pure_coarse_to_fine_model(
+        n_times,
+        temporal_noise_correlation="per_channel",
+        per_channel_noise_kernel={"var0": "ou", "var1": "ou"},
+        per_channel_kernel_length_scale={"var0": 0.3, "var1": 0.3},
+    )
+    set_seed(0)
+    like = torch.empty(20000, len(OUT_NAMES), n_times, 1, 1)
+    noise = model._sample_residual_noise(like)
+    flat = noise[:, 0, :, 0, 0]
+    emp_cov = (flat.T @ flat) / flat.shape[0]
+    # no frame -- including the endpoints -- has zero noise.
+    assert (emp_cov.diagonal() > 0.5).all()
+    # the endpoint is correlated with its neighbor, same as any other frame.
+    assert emp_cov[0, 1].abs() > 0.05
 
 
 def test_invalid_temporal_noise_correlation_rejected():

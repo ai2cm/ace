@@ -5,6 +5,7 @@ from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
     brownian_bridge_mixing_matrix,
+    ou_mixing_matrix,
     uniform_frame_times,
 )
 
@@ -71,3 +72,29 @@ def test_brownian_bridge_subset_matches_full_grid_marginal():
 def test_brownian_bridge_mixing_matrix_requires_interior():
     with pytest.raises(ValueError, match="at least 3 frames"):
         brownian_bridge_mixing_matrix(uniform_frame_times(2))
+
+
+def _ou_corr(tau, length_scale):
+    s, t = tau.reshape(-1, 1), tau.reshape(1, -1)
+    return torch.exp(-torch.abs(s - t) / length_scale).to(torch.float32)
+
+
+@pytest.mark.parametrize("n_timesteps", [3, 5, 9])
+def test_ou_mixing_matrix_pin_endpoints_true_zeros_endpoints(n_timesteps):
+    tau = uniform_frame_times(n_timesteps)
+    mixing = ou_mixing_matrix(tau, length_scale=0.3)  # pin_endpoints=True default
+    cov = mixing @ mixing.T
+    assert torch.allclose(cov[0], torch.zeros(n_timesteps))
+    assert torch.allclose(cov[-1], torch.zeros(n_timesteps))
+
+
+@pytest.mark.parametrize("n_timesteps", [3, 5, 9])
+def test_ou_mixing_matrix_pin_endpoints_false_correlates_all_frames(n_timesteps):
+    tau = uniform_frame_times(n_timesteps)
+    length_scale = 0.3
+    mixing = ou_mixing_matrix(tau, length_scale, pin_endpoints=False)
+    assert mixing.shape == (n_timesteps, n_timesteps)
+    cov = mixing @ mixing.T
+    # every frame, including the endpoints, carries real noise.
+    assert (cov.diagonal() > 0).all()
+    assert torch.allclose(cov, _ou_corr(tau, length_scale), atol=1e-4)
