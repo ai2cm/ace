@@ -28,6 +28,7 @@ Why use **fme**?
    downscaling_inference
    evaluator_config
    coupled
+   advanced_inference
    gcs_access
    builder
    modules
