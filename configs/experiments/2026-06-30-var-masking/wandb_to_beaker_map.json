@@ -127,5 +127,8 @@
   "ace2-var-mask-nc-sfno-era5-gmroff-mask0-seed0-v5": "01KYT0321Z2HDM74GB14K1TTTP",
   "ace2-var-mask-nc-sfno-era5-gmroff-mask20-seed0-v5": "01KYT8Z29C5P12KEBBJGVQEWR0",
   "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed0-v5": "01KYT03626K6052STYJKTZTQKG",
-  "ace2-var-mask-nc-sfno-era5-gmron-mask20-seed0-v5": "01KYT8YZZZGKGJFFK6TNJ64SFN"
+  "ace2-var-mask-nc-sfno-era5-gmron-mask20-seed0-v5": "01KYT8YZZZGKGJFFK6TNJ64SFN",
+  "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed2-v5": "01KYWXQH0XT66EHXVRJ5N9HC4S",
+  "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed4-v5": "01KYWZSDXZKYSRNADC59YQM5G5",
+  "ace2-var-mask-nc-sfno-era5-gmron-mask20-seed2-v5": "01KYWZKTWXBVPEC9V1Z25GHYFG"
 }

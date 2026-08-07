@@ -17,6 +17,13 @@ An eval config is written for every training run that has finished in wandb
 -wandb``, eval configs whose evaluator runs have themselves already finished are
 deleted instead, leaving only the eval runs not yet finished.
 
+Deletion here requires all of a config's evaluator runs to have reached
+``finished``; submit_eval_jobs.py's ``--skip-evaluated`` instead treats
+still-running (and queued) evaluator runs as already handled.  The two
+predicates differ on purpose: skipping a job is cheap and reversible, so it
+errs towards never double-submitting, whereas deleting a config throws away
+the file you would need to resubmit from if an in-flight job later crashed.
+
 The generated suite configs are written into ``run_configs/`` (alongside the
 training and cooldown configs), where run-ace-eval.sh reads them.
 """
@@ -152,7 +159,15 @@ def _build_eval_suite_config(
 
 
 @functools.cache
-def _fetch_wandb_run_states(project: str) -> dict[str, str]:
+def fetch_wandb_run_states(project: str) -> dict[str, str]:
+    """Wandb run name -> state for every run in ``project``.
+
+    Training and evaluator runs share a project, so one (cached) fetch serves
+    both. Callers apply their own predicate to the states; see
+    ``_finished_run_names`` here and ``IN_FLIGHT_STATES`` in
+    submit_eval_jobs.py for the two that exist, and the module docstring for
+    why they differ.
+    """
     import wandb  # lazy import: only needed when wandb lookups are required
 
     print(f"Fetching run names from {WANDB_ENTITY}/{project}...")
@@ -163,10 +178,14 @@ def _fetch_wandb_run_states(project: str) -> dict[str, str]:
     return states
 
 
-def _fetch_wandb_run_names(project: str) -> set[str]:
+def _finished_run_names(project: str) -> set[str]:
+    """Runs that have finished. Deliberately excludes in-flight runs: deleting
+    an eval config is destructive, so it waits for certainty (see the module
+    docstring).
+    """
     return {
         name
-        for name, state in _fetch_wandb_run_states(project).items()
+        for name, state in fetch_wandb_run_states(project).items()
         if state == "finished"
     }
 
@@ -181,7 +200,7 @@ def _write_config(
     delete_if_in_wandb: bool = False,
 ) -> None:
     if delete_if_in_wandb:
-        wandb_run_names = _fetch_wandb_run_names(project)
+        wandb_run_names = _finished_run_names(project)
         base_run_name = eval_suite_config_to_run_name(out_path.name)
         expected_runs = {
             f"{base_run_name}{suffix}" for suffix in CHECKPOINT_RUN_SUFFIXES
@@ -214,7 +233,7 @@ def delete_eval_configs_in_wandb(project: str) -> None:
     (e.g. -v1, -v2, -v3 and -v4) regardless of which training configs currently
     sit in the directory or whether they appear in the beaker map.
     """
-    wandb_run_names = _fetch_wandb_run_names(project)
+    wandb_run_names = _finished_run_names(project)
     eval_configs = sorted(RUN_CONFIGS_DIR.glob(f"{EVAL_SUITE_CONFIG_PREFIX}*.yaml"))
     for out_path in eval_configs:
         base_run_name = eval_suite_config_to_run_name(out_path.name)
@@ -239,7 +258,7 @@ def generate_eval_config(
     source_run_name = config_name_to_run_name(config_name)
     source_dataset_id = source_map.get(source_run_name)
     if source_dataset_id is None:
-        run_state = _fetch_wandb_run_states(WANDB_PROJECT).get(source_run_name)
+        run_state = fetch_wandb_run_states(WANDB_PROJECT).get(source_run_name)
         if run_state == "finished":
             raise KeyError(
                 f"Run {source_run_name!r} is finished in wandb but has no "
