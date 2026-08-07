@@ -6,6 +6,8 @@ from typing import TypeVar
 import torch
 import torch.nn as nn
 
+from .stop_agreement import StopAgreement
+
 T = TypeVar("T")
 
 
@@ -57,6 +59,33 @@ class DistributedBackend(ABC):
 
     @abstractmethod
     def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor | None: ...
+
+    @abstractmethod
+    def stop_agreement(self) -> StopAgreement:
+        """The group ranks use to agree on leaving a loop together.
+
+        It must be **world-wide**, which is why it is not `reduce_max`: that is
+        data-parallel-only under a spatially-parallel backend, while the teardown
+        is world-wide, so reusing it would let a stop originating on a spatial
+        co-rank never reach its data-parallel peers.
+
+        Created with the backend and **not** destroyed with it. ``shutdown()`` is
+        a no-op on a gloo group and its destructor is unbounded, so the group is
+        held for the life of the process and disposed of by the process's exit.
+        """
+        ...
+
+    @abstractmethod
+    def abort(self) -> None:
+        """Abort this rank's communicators, for the teardown watchdog.
+
+        Called only when the collective teardown has overrun its deadline, in
+        place of dropping the communicators by a hard exit. It targets the
+        **default** group and never the agreement group: gloo's ``abort()`` is an
+        empty default, so this is NCCL-only in effect, and aborting the agreement
+        group would achieve nothing while the design needs it kept anyway.
+        """
+        ...
 
     @abstractmethod
     def gather(

@@ -2,6 +2,7 @@ import contextlib
 import os
 import signal
 import unittest.mock
+from collections.abc import Callable
 from typing import Any, Literal, TypeVar, cast
 
 import numpy as np
@@ -9,7 +10,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
-from fme.core.distributed.shutdown import handle_termination_signals
+from fme.core.distributed.shutdown import PendingStop, handle_termination_signals
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -585,10 +586,18 @@ def fail_after_calls_patch(object, method: str, call_count: int):
 
     with unittest.mock.patch.object(object, method) as mock:
         mock.side_effect = wrapper
-        try:
-            yield mock
-        except TrainingInterrupted:
-            pass
+        # The handler is installed here for the same reason `preempt_after_calls
+        # _patch` installs it: `Distributed.context()` installs it around every
+        # entrypoint's whole job, so a run without it is a configuration that does
+        # not exist in production. It matters to an *exception* now that leaving a
+        # cooperative loop on one tears the backend down and runs the
+        # terminate-time callbacks; without a handler installed there is nothing
+        # registered to tear down, so the exception path would be silently inert.
+        with handle_termination_signals(shutdown=lambda: None):
+            try:
+                yield mock
+            except TrainingInterrupted:
+                pass
 
 
 @contextlib.contextmanager
@@ -679,15 +688,21 @@ def test_resume_after_interrupted_training_during_epoch(
     checkpoint_every_n_batches = 20
     batches_before_interrupt = 25
     if interrupt_method == "preempt":
-        # saves checkpoint gracefully during interrupt
-        n_checkpointed_batches = batches_before_interrupt
+        # The signal is recorded rather than acted on, so the batch it landed in
+        # runs to completion and the loop stops at the boundary *after* it. Before
+        # the cooperative stop the handler tore the backend down from inside
+        # `train_on_batch`, abandoning that batch, so 25 completed rather than 26.
+        n_trained_batches = batches_before_interrupt + 1
     else:
-        # exception leads to immediate termination without checkpointing
-        n_checkpointed_batches = (
-            batches_before_interrupt
-            // checkpoint_every_n_batches
-            * checkpoint_every_n_batches
-        )
+        # The exception is raised before `train_on_batch` does any work, so the
+        # batch it landed in is never trained.
+        n_trained_batches = batches_before_interrupt
+    # The checkpoint records exactly the batches that completed, on both paths.
+    # For the exception path that is new: leaving the loop's context now tears the
+    # backend down and runs the terminate-time callback, where before an exception
+    # bypassed both and the last *periodic* checkpoint -- 20 batches -- was all
+    # that survived.
+    n_checkpointed_batches = n_trained_batches
     n_train_batches = batches_before_interrupt * 2  # > batches_before_interrupt
     stepper_state = {"foo": "bar"}
     config, trainer = get_trainer(
@@ -714,10 +729,10 @@ def test_resume_after_interrupted_training_during_epoch(
         get_batch_indices(trainer.train_data.subset_loader(n_checkpointed_batches))
         == get_batch_indices(trainer.train_data.loader)[n_checkpointed_batches:]
     )  # check test subset_loader is implemented correctly
-    assert len(pre_interrupt_batches) == batches_before_interrupt
+    assert len(pre_interrupt_batches) == n_trained_batches
     assert (
         pre_interrupt_batches
-        == get_batch_indices(trainer.train_data.loader)[:batches_before_interrupt]
+        == get_batch_indices(trainer.train_data.loader)[:n_trained_batches]
     )
     paths = CheckpointPaths(config.checkpoint_dir)
     assert os.path.exists(paths.latest_checkpoint_path)
@@ -742,12 +757,192 @@ def test_resume_after_interrupted_training_during_epoch(
         n_checkpointed_batches:
     ]
     assert stepper.train_batches_seen == expected_batches
-    repeated_batches = get_batch_indices(trainer.train_data.loader)[
-        n_checkpointed_batches : batches_before_interrupt + 1
-    ]
-    assert set(stepper.train_batches_seen).intersection(repeated_batches) == set(
-        repeated_batches
+    # No batch is trained twice, on either path, and that is the improvement rather
+    # than an incidental number moving. The checkpoint is written at a boundary this
+    # rank completed, so the batches it resumes from are exactly the ones it had not
+    # reached -- where before a signal landing inside `train_on_batch` for batch k+1
+    # recorded "k batches seen" while the parameters might already carry k+1's
+    # update, so k+1 was applied twice. This `isdisjoint` is the whole check: an
+    # earlier version also asserted an empty slice of the loader above it, which was
+    # empty by construction and so could never have failed.
+    assert set(stepper.train_batches_seen).isdisjoint(pre_interrupt_batches)
+
+
+def _count_restart_writes(trainer) -> tuple[list[int], Callable[[], None]]:
+    """Record ``num_batches_seen`` at every restart-checkpoint write.
+
+    Returns the list and the side effect to patch `_save_restart_checkpoints`
+    with, which counts both the periodic write and the terminate-time callback's --
+    they are the same method, and which of the two wrote is the thing the two tests
+    below distinguish.
+    """
+    writes: list[int] = []
+    original_write = trainer._save_restart_checkpoints
+
+    def counted() -> None:
+        writes.append(trainer.num_batches_seen)
+        return original_write()
+
+    return writes, counted
+
+
+def test_a_stop_without_a_handler_does_not_record_a_complete_epoch(tmp_path: str):
+    """A truncated epoch is not a complete one, whether or not the process exits.
+
+    With a handler installed -- every entrypoint -- leaving the cooperative scope on
+    a stop exits, so nothing after the loop runs. With none installed there is
+    nothing registered to tear down and the loop simply falls through, which is the
+    state of the whole pytest session (`handle_signals=False`) and of any caller
+    using the documented `PendingStop.request` without a handler. Counting the epoch
+    as complete there resets `_current_epoch_num_batches_seen` and advances
+    `_epochs_trained`, so the resume point skips the rest of the epoch's data
+    silently -- worse than the stop failing.
+
+    The truncated epoch's diagnostics are checked in the same place, because they
+    are the other half of the same bookkeeping: `_epochs_trained` counts *complete*
+    epochs, so leaving it alone on a stop means it still names the previous one, and
+    writing the truncated epoch's diagnostics under that name would overwrite a
+    completed epoch's.
+
+    The seam is stubbed rather than driven by a signal, because the trainer's own
+    bookkeeping is what is under test: a real stop needs a wedged peer or a handler,
+    and both would take this out of a single-process test.
+    """
+    stop_at = 3
+    _, trainer = get_trainer(
+        tmp_path,
+        stepper_state={"foo": "bar"},
+        max_epochs=1,
+        n_train_batches=20,
     )
+    # a third epoch rather than the first, because the collision only shows once a
+    # completed epoch owns the subdirectory the truncated one would write to
+    trainer._epochs_trained = 2
+
+    class _StopsAt:
+        """The `cooperative_stop` surface `train_one_epoch` uses, and no more."""
+
+        def __init__(self) -> None:
+            self.pending = PendingStop(budget=10.0)
+
+        def agreed(self, index: int) -> bool:
+            return index >= stop_at
+
+    @contextlib.contextmanager
+    def stops_at(**kwargs):
+        yield _StopsAt()
+
+    with (
+        unittest.mock.patch.object(
+            trainer, "_log_first_batch_metrics", return_value=None
+        ),
+        unittest.mock.patch("fme.core.generics.trainer.cooperative_stop", stops_at),
+        unittest.mock.patch.object(
+            TrainAggregator, "flush_diagnostics", autospec=True
+        ) as flush,
+    ):
+        trainer.train_one_epoch()
+
+    assert trainer.num_batches_seen == stop_at
+    # the pair of these is the resume point, and neither may move on a stop
+    assert trainer._epochs_trained == 2, "a truncated epoch was recorded as complete"
+    assert trainer._current_epoch_num_batches_seen == stop_at
+    # `epoch_0003`, the epoch that was truncated -- not `epoch_0002`, which the
+    # completed second epoch owns. A resume re-runs the third epoch and replaces
+    # these with the complete version.
+    assert flush.call_args.kwargs == {"subdir": "epoch_0003"}
+
+
+def test_a_stop_at_a_just_written_checkpoint_does_not_write_it_again(tmp_path: str):
+    """The restart write is skipped when the periodic one already made that file.
+
+    This is what keeps a preemption landing *inside* root's periodic checkpoint
+    write inside the scheduler's grace period. The handler cannot run while the
+    main thread is inside `torch.save`, so the write completes and the signal is
+    recorded after it -- and the boundary every rank then agrees on is the very
+    index that write recorded, the periodic block and the boundary check being
+    adjacent in the loop body. Writing again would spend another multi-GB
+    `torch.save` reproducing a file that already exists, and be SIGKILLed for it.
+    """
+    checkpoint_every_n_batches = 5
+    _, trainer = get_trainer(
+        tmp_path,
+        stepper_state={"foo": "bar"},
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=1,
+        n_train_batches=checkpoint_every_n_batches * 4,
+        checkpoint_every_n_batches=checkpoint_every_n_batches,
+    )
+    writes, counted = _count_restart_writes(trainer)
+
+    def write_then_signal() -> None:
+        counted()
+        # where a signal arriving during the write is delivered: not before it, the
+        # handler being unable to run while the main thread is inside `torch.save`
+        signal.raise_signal(signal.SIGTERM)
+
+    with (
+        unittest.mock.patch.object(
+            trainer, "_log_first_batch_metrics", return_value=None
+        ),
+        unittest.mock.patch.object(
+            trainer, "_save_restart_checkpoints", side_effect=write_then_signal
+        ),
+        handle_termination_signals(shutdown=lambda: None),
+    ):
+        with pytest.raises(SystemExit):
+            trainer.train()
+
+    # the periodic write, and nothing after it: the terminate-time callback found
+    # `num_batches_seen` equal to what the periodic write had already recorded
+    assert writes == [checkpoint_every_n_batches]
+    assert trainer._last_saved_num_batches_seen == checkpoint_every_n_batches
+
+
+def test_a_periodic_checkpoint_is_skipped_once_a_stop_is_pending(tmp_path: str):
+    """A multi-GB write between the signal and the boundary is skipped, not waited on.
+
+    A periodic checkpoint inside the deferral and *before* the boundary delays the
+    agreed stop by the whole `torch.save`, which is the largest single contributor
+    to a rank arriving late -- and it is redundant: the boundary the ranks are about
+    to agree on is the very index it would record, and the terminate-time restart
+    checkpoint records that after the teardown, which is where slow work belongs.
+
+    So the file is written exactly once either way. What changes is which side of
+    `destroy_process_group` the write happens on, and
+    `_last_saved_num_batches_seen` is what says: the periodic block sets it and the
+    callback does not.
+    """
+    checkpoint_every_n_batches = 5
+    _, trainer = get_trainer(
+        tmp_path,
+        stepper_state={"foo": "bar"},
+        checkpoint_save_epochs=Slice(start=0, stop=0),
+        max_epochs=1,
+        n_train_batches=checkpoint_every_n_batches * 4,
+        checkpoint_every_n_batches=checkpoint_every_n_batches,
+    )
+    writes, counted = _count_restart_writes(trainer)
+
+    with (
+        unittest.mock.patch.object(
+            trainer, "_log_first_batch_metrics", return_value=None
+        ),
+        unittest.mock.patch.object(
+            trainer, "_save_restart_checkpoints", side_effect=counted
+        ),
+    ):
+        # the signal lands at the start of the batch the periodic write is due at
+        # the end of, so the write is scheduled *and* a stop is already pending
+        with preempt_after_calls_patch(
+            trainer.stepper, "train_on_batch", checkpoint_every_n_batches
+        ):
+            trainer.train()
+
+    assert writes == [checkpoint_every_n_batches]
+    assert (
+        trainer._last_saved_num_batches_seen == 0
+    ), "the periodic write ran, so the stop waited out a torch.save it did not need"
 
 
 @pytest.mark.parametrize("evaluate_before_training", [True, False])

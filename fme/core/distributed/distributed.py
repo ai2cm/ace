@@ -7,11 +7,13 @@ from typing import TypeVar
 import torch
 
 from fme.core import metrics
+from fme.core.device import in_dataloader_worker
 
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
 from .shutdown import handle_termination_signals
+from .stop_agreement import SoloStopAgreement, StopAgreement
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,8 @@ class Distributed:
             self._distributed = NonDistributed()
         self._seed = 0
         self._force_non_distributed = force_non_distributed
+        # only ever set in a DataLoader worker; see `stop_agreement`
+        self._worker_stop_agreement: StopAgreement | None = None
 
     @classmethod
     @contextlib.contextmanager
@@ -92,7 +96,11 @@ class Distributed:
         try:
             with contextlib.ExitStack() as stack:
                 if handle_signals:
-                    stack.enter_context(handle_termination_signals(instance.shutdown))
+                    stack.enter_context(
+                        handle_termination_signals(
+                            instance.shutdown, abort=instance.abort
+                        )
+                    )
                 yield
         except BaseException:
             # exit immediately to avoid hanging other ranks
@@ -511,6 +519,35 @@ class Distributed:
         buf = torch.zeros(global_shape, dtype=tensor.dtype, device=tensor.device)
         buf[(..., *slices)] = tensor
         return self.spatial_reduce_sum(buf)
+
+    def stop_agreement(self) -> StopAgreement:
+        """The group ranks use to agree on leaving a loop together.
+
+        Reached through `fme.core.distributed.cooperative_stop` rather than
+        directly; it is on this facade so that the loop-facing layer needs
+        nothing but the singleton every entrypoint already has.
+
+        A DataLoader worker gets `SoloStopAgreement`, whatever the backend holds.
+        The backends' own guard runs at *construction*, so it catches a spawn- or
+        forkserver-started worker and misses a fork-started one -- the default start
+        method -- which inherits the constructed backend and with it the parent's
+        real gloo group. Issuing a collective on that from a worker would be an
+        unmatched operation on a group its rank's real process is using.
+        `defer_termination` and `handle_termination_signals` each carry the same
+        guard for the same reason; this was the entry point relying on nobody
+        calling it.
+        """
+        if in_dataloader_worker():
+            if self._worker_stop_agreement is None:
+                # one object for the life of the worker, as
+                # `DistributedBackend.stop_agreement` documents
+                self._worker_stop_agreement = SoloStopAgreement()
+            return self._worker_stop_agreement
+        return self._distributed.stop_agreement()
+
+    def abort(self) -> None:
+        """Abort this rank's communicators. For the teardown watchdog only."""
+        return self._distributed.abort()
 
     def shutdown(self):
         return self._distributed.shutdown()

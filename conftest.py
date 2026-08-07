@@ -190,15 +190,22 @@ def reset_global_timer():
 
 @pytest.fixture(autouse=True)
 def reset_post_shutdown_callbacks():
-    # the registry is process-global and nothing clears it between tests -- the
-    # session-scoped context above installs no handler, so its usual
+    # both registries are process-global and nothing clears them between tests --
+    # the session-scoped context above installs no handler, so its usual
     # clear-on-exit never runs either. Without this, every Trainer built by an
-    # earlier test would still be called on a signal raised by a later one
-    from fme.core.distributed.shutdown import clear_post_shutdown_callbacks
+    # earlier test would still be called on a signal raised by a later one, and a
+    # deferral left behind by a failed test would make a later test's signal
+    # deferred to a scope nobody polls
+    from fme.core.distributed.shutdown import (
+        clear_pending_stop,
+        clear_post_shutdown_callbacks,
+    )
 
     clear_post_shutdown_callbacks()
+    clear_pending_stop()
     yield
     clear_post_shutdown_callbacks()
+    clear_pending_stop()
 
 
 @pytest.fixture(autouse=True)
