@@ -1,21 +1,24 @@
-version: "2025-10-21"
-family_name: cm4-1pctCO2-140yr-no-smoothing-coupled
-output_directory: /climate-default
+version: "2026-07-15"
+family_name: om4-1pctco2-1deg-coupled
+output_directory: gs://vcm-ml-intermediate
 
 coupled_datasets:
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:
     precomputed_sea_ice_mask:
-      zarr_path: /climate-default/2025-10-20-cm4-piControl-200yr-no-smoothing-coupled-ocean.zarr
+      zarr_path: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
     ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
     ocean_extra_fill_values:
       UI: 0.0
       VI: 0.0
     surface_flux_window_avg:
       window_timedelta: 120h
-      first_timestamp: "0211-01-03T12:00:00"
-      last_timestamp: "0350-12-29T12:00:00"
+      # The ocean store labels its 5-day intervals at the interval end, so the
+      # flux windows are right-labeled at those same instants (no midpoint
+      # shift): each window (t - 120h, t] ends at an ocean timestep t.
+      first_timestamp: "0001-01-06T00:00:00"
+      last_timestamp: "0141-01-01T00:00:00"
       subset_names:
         - DLWRFsfc
         - DSWRFsfc
@@ -28,29 +31,26 @@ coupled_datasets:
         - northward_surface_wind_stress
         - total_frozen_precipitation_rate
   coupled_sea_ice:
-    window_avg:
-      window_timedelta: 120h
-      first_timestamp: "0211-01-06T00:00:00"
-      shift_timestamps_to_avg_interval_midpoint: true
+    # No window_avg and no sea_ice input dataset: the sea ice fraction is
+    # sourced from the ocean store's native 5-daily fields and forward-filled
+    # onto the atmosphere's 6-hourly time index.
     include_ts: true
+    use_atmosphere_sea_ice_fraction_fallback: false
   output_writer:
     n_dask_workers: 32
 
 input_datasets:
   climate_data_type: "CM4"
   atmosphere:
-    zarr_path: /climate-default/2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
-    time_chunk_size: 500
+    zarr_path: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+    time_chunk_size: 360
     extra_fields:
       names_and_prefixes: ["ak_", "bk_"]
-  sea_ice:
-    zarr_path: /climate-default/2025-09-16-cm4-1pctCO2-140yr-sea-ice.zarr
-    time_chunk_size: 500
   ocean:
-    zarr_path: /climate-default/2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing.zarr
-    time_chunk_size: 25
+    zarr_path: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+    time_chunk_size: 365
     extra_fields:
       names_and_prefixes: ["idepth_", "mask_", "deptho"]
   stats:
-    atmosphere_dir: /climate-default/2025-06-18-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-stats/combined
-    ocean_dir: /climate-default/2025-10-16-cm4-1pctCO2-140yr-ocean-no-smoothing-stats
+    atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-stats/combined
+    ocean_dir: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-1deg-ocean-5daily-stats
