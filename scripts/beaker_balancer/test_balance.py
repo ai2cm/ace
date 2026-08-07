@@ -22,7 +22,6 @@ from balance import (  # noqa: E402
     Action,
     JobView,
     decide,
-    remember_priorities,
     resting_priority,
 )
 
@@ -160,70 +159,10 @@ def apply(jobs: list[JobView], actions: list[Action]) -> list[JobView]:
 # --- resting priority -------------------------------------------------------
 
 
-def test_a_job_below_urgent_is_already_resting():
-    # Whatever it is at now is what its owner last chose, so there is nothing
-    # to remember and nothing to restore.
-    for priority in (LOW, NORMAL, HIGH):
-        assert resting_priority(job(priority=priority), {}) == priority
-
-
-def test_a_job_at_urgent_rests_where_it_was_last_seen():
-    raised = job(priority=URGENT)
-    assert resting_priority(raised, {raised.id: NORMAL}) == NORMAL
-
-
-def test_an_unremembered_urgent_job_falls_back_to_high():
-    # Submitted at urgent, or first seen there after the memory was lost.
-    # Resting at urgent would defeat the allocation.
-    assert resting_priority(job(priority=URGENT), {}) == HIGH
-
-
-def test_a_manual_change_becomes_the_new_resting_priority():
-    # The owner moved the job by hand since the last pass. It is below urgent,
-    # so what they chose wins over anything remembered from before.
-    edited = job(priority=LOW)
-    assert resting_priority(edited, {edited.id: HIGH}) == LOW
-
-
-# --- what is carried between passes -----------------------------------------
-
-
-def test_only_jobs_at_urgent_need_remembering():
-    resting = job(priority=NORMAL)
-    raised = job(priority=URGENT)
-    assert remember_priorities([resting, raised], {raised.id: LOW}) == {
-        resting.id: NORMAL,
-        raised.id: LOW,
-    }
-
-
-def test_an_unlabelled_job_is_not_remembered():
-    # The balancer never modifies it, so it never has to restore it either.
-    assert remember_priorities([job(priority=NORMAL, cm_priority=None)], {}) == {}
-
-
-def test_a_finished_job_is_forgotten():
-    # Jobs are evicted by simply not appearing in the pass that carries them.
-    gone = job(priority=URGENT)
-    assert remember_priorities([], {gone.id: LOW}) == {}
-
-
-def test_a_requeued_job_inherits_what_its_ancestor_rested_at():
-    # Preemption gives the job a new id, and Beaker hands it back at the
-    # priority the balancer set on its source rather than the submitted one.
-    # Without this the job would ratchet up to the high fallback every time it
-    # was preempted.
-    original = job(priority=URGENT)
-    requeued = replace(job(priority=URGENT), retry_ancestor_id=original.id)
-    carried = remember_priorities([requeued], {original.id: LOW})
-    assert carried == {requeued.id: LOW}
-
-
-def test_a_remembered_job_is_not_overwritten_by_its_ancestor():
-    original = job(priority=URGENT)
-    requeued = replace(job(priority=URGENT), retry_ancestor_id=original.id)
-    carried = remember_priorities([requeued], {original.id: LOW, requeued.id: NORMAL})
-    assert carried == {requeued.id: NORMAL}
+def test_resting_priority_drops_urgent_to_high():
+    assert resting_priority(URGENT) == HIGH
+    assert resting_priority(HIGH) == HIGH
+    assert resting_priority(LOW) == LOW
 
 
 # --- promotion --------------------------------------------------------------
@@ -252,18 +191,9 @@ def test_higher_cm_priority_is_granted_first():
 
 
 def test_job_is_moved_to_its_resting_priority_when_not_granted():
-    raised = job(priority=URGENT, cm_priority=LOW, slots=8)
+    mislabelled = job(priority=HIGH, cm_priority=LOW, slots=8)
     hog = job(priority=URGENT, cm_priority=None, slots=72)
-    result = changes(decide([hog, raised], LIMITS, {raised.id: LOW}))
-    assert result == {raised.id: LOW}
-
-
-def test_a_job_that_is_not_granted_and_not_at_urgent_is_left_alone():
-    # It is already resting. Under a label-derived resting priority this job
-    # would be dragged to NORMAL for no gain to the allocation.
-    settled = job(priority=HIGH, cm_priority=NORMAL, slots=8)
-    hog = job(priority=URGENT, cm_priority=None, slots=72)
-    assert decide([hog, settled], LIMITS) == []
+    assert changes(decide([hog, mislabelled], LIMITS)) == {mislabelled.id: LOW}
 
 
 @pytest.mark.parametrize("cm_priority", [LOW, NORMAL, HIGH, URGENT])
@@ -278,7 +208,7 @@ def test_any_labelled_job_can_be_granted_an_urgent_slot(cm_priority):
 def test_over_allocation_demotes_lowest_cm_priority_first():
     keep = placed(priority=URGENT, cm_priority=HIGH, slots=64)
     drop = placed(priority=URGENT, cm_priority=LOW, slots=8)
-    result = changes(decide([keep, drop], {"ai2/jupiter": 64}, {drop.id: LOW}))
+    result = changes(decide([keep, drop], {"ai2/jupiter": 64}))
     assert result == {drop.id: LOW}
 
 
@@ -303,17 +233,9 @@ def test_longest_queued_job_is_promoted_first():
     assert result == {old.id: URGENT}
 
 
-def test_a_demoted_job_returns_to_where_it_was_raised_from():
-    over = placed(priority=URGENT, cm_priority=HIGH, slots=8)
-    result = changes(decide([over], {"ai2/jupiter": 0}, {over.id: LOW}))
-    assert result == {over.id: LOW}
-
-
-def test_a_demoted_job_with_nothing_remembered_falls_back_to_high():
-    # Either submitted at urgent, or first seen there after the memory was
-    # lost. Its owner never chose anything lower for us to put it back to.
+def test_demoted_job_returns_to_its_own_label_not_to_high():
     over = placed(priority=URGENT, cm_priority=LOW, slots=8)
-    assert changes(decide([over], {"ai2/jupiter": 0})) == {over.id: HIGH}
+    assert changes(decide([over], {"ai2/jupiter": 0})) == {over.id: LOW}
 
 
 def test_demotions_are_ordered_before_promotions():
@@ -476,8 +398,7 @@ def test_a_replica_group_is_charged_as_the_sum_of_its_ranks():
     # The 64-slot group wins its level first, leaving 8 — too few for the
     # 16-slot normal job behind it.
     result = changes(decide([*big, small], LIMITS))
-    # The normal job is left where it is: it is already resting below urgent.
-    assert result == {rank.id: URGENT for rank in big}
+    assert result == {**{rank.id: URGENT for rank in big}, small.id: NORMAL}
 
 
 def test_a_replica_group_with_an_unlabelled_rank_is_left_alone():
@@ -595,21 +516,15 @@ def test_a_group_holds_its_slots_from_its_earliest_rank():
 # --- what a change is reported as -------------------------------------------
 
 
-@pytest.mark.parametrize("seed", range(300))
-def test_every_change_moves_a_job_onto_or_off_an_urgent_slot(seed):
-    # The balancer's whole remit. A job resting below urgent is left where its
-    # owner put it, so there is no third kind of change -- which is also why
-    # the reason a change is logged under can be read off the movement alone.
-    rng = random.Random(seed)
-    jobs = random_population(rng)
-    remembered = {
-        j.id: rng.choice([LOW, NORMAL, HIGH]) for j in jobs if rng.random() < 0.5
-    }
-    for action in decide(jobs, LIMITS, remembered):
-        assert action.takes_slots != action.frees_slots
-        assert action.reason == (
-            "grant urgent slot" if action.takes_slots else "release urgent slot"
-        )
+def test_a_job_raised_to_its_label_is_not_reported_as_releasing_a_slot():
+    # A queued job submitted below its CM_PRIORITY is raised to it even when it
+    # is granted nothing. The log is the only window on a cron process, so it
+    # must not claim an urgent slot changed hands.
+    hog = job(priority=URGENT, cm_priority=None, slots=72)
+    below = job(priority=LOW, cm_priority=HIGH, slots=8)
+    (action,) = decide([hog, below], LIMITS)
+    assert (action.from_priority, action.to_priority) == (LOW, HIGH)
+    assert action.reason == "settle at resting priority"
 
 
 def test_granting_and_releasing_are_reported_as_such():
@@ -666,8 +581,7 @@ def test_a_blocked_level_does_not_reserve_slots_for_itself():
 def test_higher_level_job_displaces_lower_level_urgent_jobs():
     holders = [placed(priority=URGENT, cm_priority=NORMAL, slots=4) for _ in range(2)]
     contender = job(cm_priority=HIGH, slots=8)
-    remembered = {holder.id: NORMAL for holder in holders}
-    result = changes(decide([*holders, contender], {"ai2/jupiter": 8}, remembered))
+    result = changes(decide([*holders, contender], {"ai2/jupiter": 8}))
     assert result == {
         holders[0].id: NORMAL,
         holders[1].id: NORMAL,
@@ -859,17 +773,13 @@ def test_a_replica_group_never_half_holds_urgent(seed):
 
 
 @pytest.mark.parametrize("seed", range(300))
-def test_a_job_is_only_ever_left_at_urgent_or_where_it_was_resting(seed):
+def test_a_job_is_never_left_above_urgent_or_below_its_label(seed):
     rng = random.Random(seed)
     jobs = random_population(rng)
-    remembered = {
-        j.id: rng.choice([LOW, NORMAL, HIGH]) for j in jobs if rng.random() < 0.5
-    }
-    for action in decide(jobs, LIMITS, remembered):
-        assert action.job.cm_priority is not None
-        assert action.to_priority in (URGENT, resting_priority(action.job, remembered))
-        # Nothing is ever left at immediate, which only a human hands out.
-        assert action.to_priority != IMMEDIATE
+    for action in decide(jobs, LIMITS):
+        cm_priority = action.job.cm_priority
+        assert cm_priority is not None
+        assert action.to_priority in (URGENT, resting_priority(cm_priority))
 
 
 def grantable_groups(jobs, limits=LIMITS) -> dict[str, list[JobView]]:
