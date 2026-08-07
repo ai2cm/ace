@@ -51,8 +51,8 @@ reweighted with the same whitening operator the energy score uses.
 Recovered from Troy's run `nzccs8zd`
 (https://wandb.ai/ai2cm/ace/runs/nzccs8zd): NoiseConditionedSFNO
 (embed_dim 512, 8 layers, spectral_ratio 0.125, isotropic noise,
-`clip_latent_global_means` off), residual prediction, EnsembleLoss
-(n_ensemble 2, n_forward_steps 1), shared global-mean removal, dry-air +
+`clip_latent_global_means` off), EnsembleLoss
+(n_ensemble 2, n_forward_steps 1), dry-air +
 moisture-budget correction, EMA 0.999, FusedAdam lr 1e-4, batch_size 8.
 40 inputs / 51 outputs: the four near-surface fields (TMP2m, Q2m,
 UGRD10m, VGRD10m) are output-only diagnostics, not inputs, and the model
@@ -91,3 +91,45 @@ boundary falls in 2021–2025, so capping the final segment at 2022 needs no
 new split. This yields 14 `subset` segments in `train_loader`. Validation
 is 1996–1997 (a held-out gap year pair between the two train blocks),
 unchanged.
+
+## Correction (2026-08-07): residual prediction and global-mean removal
+
+The "Base recipe" section above previously credited the donor run
+[nzccs8zd](https://wandb.ai/ai2cm/ace/runs/nzccs8zd) with "residual
+prediction" and "shared global-mean removal". **Both were wrong.** That run's
+config sets neither key — it is the main ERA5 baseline recipe with exactly two
+architecture knobs changed, `filter_num_groups: 16` and
+`spectral_ratio: 0.125`, which is what its name records
+(`ace2s-era5-daily-spectral-groups-16-ratio-0.125-1-step-pre-training-rs0`).
+
+These eight arms carry `residual_prediction: true` and a shared
+`global_mean_removal` block because they adopted the 4°/daily **v2**
+architecture block wholesale rather than building base + those two knobs;
+their `stepper.step.config.builder.config` is byte-for-byte v2's, minus
+`clip_latent_global_means`. The 6h subset dropped `global_mean_removal` on
+2026-07-29 and `residual_prediction` on 2026-08-07; these daily arms are
+finished and are left as they ran.
+
+## Residual ablation arm (2026-08-07)
+
+`arm1-90-10-ec-nores.yaml` is `arm1-90-10-ec.yaml` with
+`residual_prediction: true → false` **and** the `global_mean_removal` block
+removed — the two settings that reached the daily wave from the 4°/daily v2
+architecture block and that the donor
+[nzccs8zd](https://wandb.ai/ai2cm/ace/runs/nzccs8zd) does not set. It tests
+whether this wave's small-scale precipitation power deficit
+([reports#51](https://github.com/ai2cm/reports/pull/51)) is caused by residual
+prediction.
+
+Against the completed arm 1
+([qhv9zf95](https://wandb.ai/ai2cm/ace/runs/qhv9zf95)) this is therefore a
+**two-knob** diff, residual and GMR, so a change in the precipitation spectrum
+is attributable to the pair rather than to residual prediction alone
+(Jeremy's call, 2026-08-07: run the ablation on the corrected recipe rather
+than hold GMR to match the old arm). The `8`/`4` loader knobs are unchanged.
+It runs on 8 GPUs where qhv9zf95 ran on 4; `batch_size: 8` is the global batch
+(`dist.local_batch_size` divides by rank count), so the effective batch and
+gradient are unchanged.
+
+The eight arms above are complete — launch this one alone:
+`./run-train.sh nores`.

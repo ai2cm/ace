@@ -143,21 +143,12 @@ run_training() {
 
 # Launch targets. Add a run_training call per arm; use the config filter arg to
 # launch a subset instead of commenting lines out:  ./run-train.sh <substring>
-run_training "arm1-90-10-ec.yaml"             "ace2s-bakeoff-arm1-90-10-ec-rs0"             4
-run_training "arm2-90-10-noec.yaml"           "ace2s-bakeoff-arm2-90-10-noec-rs0"           4
-run_training "arm3-50-50-ec.yaml"             "ace2s-bakeoff-arm3-50-50-ec-rs0"             4
-run_training "arm4-90-10-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm4-90-10-ec-whiten-g0.5-rs0" 4
-run_training "arm5-50-50-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm5-50-50-ec-whiten-g0.5-rs0" 4
-run_training "arm6-80-10-sp10-ec.yaml"        "ace2s-bakeoff-arm6-80-10-sp10-ec-rs0"        4
-run_training "arm7-90-0-sp10-ec.yaml"         "ace2s-bakeoff-arm7-90-0-sp10-ec-rs0"         4
-run_training "arm8-80-10-sp10-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm8-80-10-sp10-ec-whiten-g0.5-rs0" 4
-
-# Residual ablation on the daily wave (added 2026-08-07, GMR dropped same day).
-# arm1 with residual_prediction: false AND the global_mean_removal block
-# removed, to test whether that wave's small-scale precipitation power deficit
-# (reports#51) is caused by residual prediction. Against the completed arm 1
-# (wandb qhv9zf95) that is a TWO-knob diff, residual + GMR: neither belongs to
-# the bake-off base recipe, since the donor nzccs8zd sets neither. The 8/4
-# loader knobs are unchanged.
-# The eight arms above are COMPLETE — launch this alone:  ./run-train.sh nores
-run_training "arm1-90-10-ec-nores.yaml"       "ace2s-bakeoff-arm1-90-10-ec-nores-nogmr-rs0"       8
+# The "-nores" suffix distinguishes this wave from the superseded residual wave
+# (2026-07-29 .. 2026-08-07), whose runs carried the same names. Every arm starts
+# from scratch: no checkpoint from the residual wave is loadable on this recipe.
+run_training "arm1-90-10-ec.yaml"                  "ace2s-bakeoff-6h-arm1-90-10-ec-nores-rs0"                  8
+run_training "arm2-90-10-noec.yaml"                "ace2s-bakeoff-6h-arm2-90-10-noec-nores-rs0"                8
+run_training "arm3-50-50-ec.yaml"                  "ace2s-bakeoff-6h-arm3-50-50-ec-nores-rs0"                  8
+run_training "arm6-80-10-sp10-ec.yaml"             "ace2s-bakeoff-6h-arm6-80-10-sp10-ec-nores-rs0"             8
+run_training "arm7-90-0-sp10-ec.yaml"              "ace2s-bakeoff-6h-arm7-90-0-sp10-ec-nores-rs0"              8
+run_training "arm9-90-0-sp10-ec-whiten-g0.5.yaml"  "ace2s-bakeoff-6h-arm9-90-0-sp10-ec-whiten-g0.5-nores-rs0"  8
