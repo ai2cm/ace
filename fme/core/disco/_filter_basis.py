@@ -4,11 +4,14 @@
 
 import abc
 import math
-from typing import final
+from typing import Literal, final
 
 import torch
 
 from ._cache import lru_cache
+
+BasisType = Literal["morlet", "isotropic morlet", "piecewise linear", "zernike"]
+BasisNormMode = Literal["none", "mean", "individual", "support"]
 
 
 def _circle_dist(x1: torch.Tensor, x2: torch.Tensor):
@@ -49,6 +52,21 @@ class FilterBasis(metaclass=abc.ABCMeta):
     def kernel_size(self):
         raise NotImplementedError
 
+    @property
+    @abc.abstractmethod
+    def is_isotropic(self) -> bool:
+        """Whether every basis function depends on the radius alone.
+
+        When True, no basis function references the azimuthal angle, so *any*
+        learned linear combination is isotropic (radially symmetric) and the
+        resulting convolution multiplies each spherical-harmonic coefficient by
+        a real number depending only on the total wavenumber. Consumers that
+        rely on that property (see ``LocalFilter``) check this rather than
+        pattern-matching on ``basis_type``, because for some families it
+        depends on ``kernel_shape``.
+        """
+        raise NotImplementedError
+
     @abc.abstractmethod
     def compute_support_vals(self, r: torch.Tensor, phi: torch.Tensor, r_cutoff: float):
         raise NotImplementedError
@@ -69,6 +87,52 @@ def get_filter_basis(
         return ZernikeFilterBasis(kernel_shape=kernel_shape)
     else:
         raise ValueError(f"Unknown basis_type {basis_type}")
+
+
+#: Heuristic scaling of a basis family's support radius, relative to the grid
+#: spacing, when ``theta_cutoff`` is not given explicitly.
+_THETA_CUTOFF_FACTOR = {
+    "piecewise linear": 0.5,
+    "morlet": 0.5,
+    "isotropic morlet": 0.5,
+    "zernike": math.sqrt(2.0),
+}
+
+
+def compute_cutoff_radius(
+    nlat: int, kernel_shape: int | tuple[int, ...] | list[int], basis_type: str
+) -> float:
+    """Heuristic DISCO support radius, scaling with the radial mode count.
+
+    Grows the radius with the number of radial modes so each mode spans roughly
+    one grid cell. This is a locality heuristic, not a property of the basis:
+    reproducing a global operator needs an explicit ``theta_cutoff`` instead.
+    """
+    # kernel_shape is a scalar for radius-only families and a sequence for
+    # tensor-product ones; both spell the radial mode count first.
+    n_radial = kernel_shape if isinstance(kernel_shape, int) else kernel_shape[0]
+    return (n_radial + 1) * _THETA_CUTOFF_FACTOR[basis_type] * math.pi / float(nlat - 1)
+
+
+def kernel_shape_for_basis_count(count: int, basis_type: str) -> tuple[int, ...]:
+    """The ``kernel_shape`` giving exactly ``count`` radius-only basis functions.
+
+    Only defined for families that can be made purely radial, since a count of
+    basis functions is only a meaningful target when each one contributes one
+    degree of freedom to the radial profile. Raises for anisotropic families,
+    where the count is a product of radial and azimuthal modes.
+    """
+    if basis_type == "isotropic morlet":
+        return (count,)
+    if basis_type == "piecewise linear":
+        # kernel_size = (n // 2) + n % 2 for kernel_shape (n, 1).
+        return (2 * count - 1, 1)
+    raise ValueError(
+        f"basis_type {basis_type!r} has no purely radial form, so a basis "
+        f"function count of {count} does not determine its kernel_shape. Use "
+        "'isotropic morlet' or 'piecewise linear', or give kernel_shape "
+        "explicitly."
+    )
 
 
 class PiecewiseLinearFilterBasis(FilterBasis):
@@ -93,6 +157,11 @@ class PiecewiseLinearFilterBasis(FilterBasis):
         return (self.kernel_shape[0] // 2) * self.kernel_shape[1] + self.kernel_shape[
             0
         ] % 2
+
+    @property
+    def is_isotropic(self) -> bool:
+        # A single azimuthal bin selects the radius-only support path below.
+        return self.kernel_shape[1] == 1
 
     def _compute_support_vals_isotropic(
         self, r: torch.Tensor, phi: torch.Tensor, r_cutoff: float
@@ -185,6 +254,13 @@ class MorletFilterBasis(FilterBasis):
     def kernel_size(self):
         return self.kernel_shape[0] * self.kernel_shape[1]
 
+    @property
+    def is_isotropic(self) -> bool:
+        # Never: the harmonics are Cartesian in (x, y) = r * (sin phi, cos phi),
+        # so even kernel_shape (n, 1) retains a y-harmonic that depends on phi.
+        # Use IsotropicMorletFilterBasis for a radius-only Morlet family.
+        return False
+
     def hann_window(self, r: torch.Tensor, width: float = 1.0):
         return torch.cos(0.5 * torch.pi * r / width) ** 2
 
@@ -255,6 +331,10 @@ class IsotropicMorletFilterBasis(FilterBasis):
     def kernel_size(self) -> int:
         return self.kernel_shape
 
+    @property
+    def is_isotropic(self) -> bool:
+        return True
+
     def compute_support_vals(
         self,
         r: torch.Tensor,
@@ -304,6 +384,11 @@ class ZernikeFilterBasis(FilterBasis):
     @property
     def kernel_size(self):
         return (self.kernel_shape * (self.kernel_shape + 1)) // 2
+
+    @property
+    def is_isotropic(self) -> bool:
+        # Zernike polynomials with azimuthal order m != 0 carry cos/sin(m phi).
+        return False
 
     def zernikeradial(self, r: torch.Tensor, n: torch.Tensor, m: torch.Tensor):
         out = torch.zeros_like(r)

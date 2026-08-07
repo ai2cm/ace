@@ -5,11 +5,12 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.disco import compute_cutoff_radius
 from fme.core.testing.regression import validate_tensor
 
 from .layers import Context, ContextConfig
 from .localnet import LocalNetConfig, get_lat_lon_localnet
-from .sfnonet import DiscreteContinuousConvS2, _compute_cutoff_radius
+from .sfnonet import DiscreteContinuousConvS2
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -285,7 +286,7 @@ def test_isotropic_disco_conv_commutes_with_latitude_reflection():
     lat_dim = 2  # dimension index for latitude in (batch, channel, lat, lon)
 
     def make_disco_conv(basis_type):
-        theta_cutoff = 2 * _compute_cutoff_radius(
+        theta_cutoff = 2 * compute_cutoff_radius(
             nlat=img_shape[0],
             kernel_shape=kernel_shape,
             basis_type=basis_type,
