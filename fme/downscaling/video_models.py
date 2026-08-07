@@ -5,10 +5,11 @@ only interior frames are denoised. Operates on the fine clip only.
 """
 
 import dataclasses
+from typing import Literal
 
 import torch
 
-from fme.core.device import get_device
+from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.packer import Packer
@@ -86,7 +87,10 @@ class VideoDiffusionModelConfig:
             None applies it everywhere.
         backbone: "simple" (periodic VideoUNet) or "songunet" (SongUNetv2).
         img_resolution: [H, W]; required for the songunet backbone.
-        attn_resolutions: Attention resolutions, for the songunet backbone.
+        attn_resolutions: Attention resolutions, for the songunet backbone. None
+            defaults to the coarsest resolution; pass [] for no attention.
+        use_apex_gn: Use Apex GroupNorm (songunet backbone only); faster on
+            GPUs where Apex is installed (e.g. B200s), but requires a GPU.
         training_noise_distribution: Noise distribution for training.
         training_noise_distributions: Per-channel noise distribution for
             training, keyed by out_names.
@@ -120,14 +124,15 @@ class VideoDiffusionModelConfig:
     model_channels: int = 64
     n_heads: int = 4
     num_freqs: int = 4
-    noise_embedding_type: str = "positional"
+    noise_embedding_type: Literal["positional", "fourier"] = "positional"
     channel_mult: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 2])
     num_blocks: int = 2
     attention_levels: list[int] = dataclasses.field(default_factory=lambda: [1, 2])
     temporal_attention_levels: list[int] | None = None
-    backbone: str = "simple"
+    backbone: Literal["simple", "songunet"] = "simple"
     img_resolution: list[int] | None = None
     attn_resolutions: list[int] | None = None
+    use_apex_gn: bool = False
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
     ) = None
@@ -139,8 +144,12 @@ class VideoDiffusionModelConfig:
     sigma_data_by_channel: dict[str, float] | None = None
     loss_weight_exponent: float = 1.0
     log_transform_channels: dict[str, float] | None = None
-    temporal_noise_correlation: str = "independent"
-    per_channel_noise_kernel: dict[str, str] | None = None
+    temporal_noise_correlation: Literal[
+        "independent", "brownian_bridge", "per_channel"
+    ] = "independent"
+    per_channel_noise_kernel: (
+        dict[str, Literal["independent", "brownian_bridge", "ou", "rbf"]] | None
+    ) = None
     per_channel_kernel_length_scale: dict[str, float] | None = None
     subset_augmentation_prob: float = 0.0
     subset_min_interior: int = 1
@@ -300,6 +309,11 @@ class VideoDiffusionModelConfig:
             )
         if self.backbone == "songunet" and self.img_resolution is None:
             raise ValueError("songunet backbone requires img_resolution [H, W].")
+        if self.use_apex_gn:
+            if self.backbone != "songunet":
+                raise ValueError("use_apex_gn is only used with the songunet backbone.")
+            if not using_gpu():
+                raise ValueError("use_apex_gn requires a GPU.")
 
     @property
     def noise_distribution(self) -> NoiseDistribution:
@@ -387,6 +401,11 @@ class VideoDiffusionModelConfig:
                 # unreachable: __post_init__ already enforces this
                 raise ValueError("songunet backbone requires img_resolution [H, W].")
             default_attn = self.img_resolution[0] >> (len(self.channel_mult) - 1)
+            attn_resolutions = (
+                [default_attn]
+                if self.attn_resolutions is None
+                else self.attn_resolutions
+            )
             net = VideoSongUNet(
                 in_channels=in_channels,
                 out_channels=n_channels,
@@ -396,8 +415,9 @@ class VideoDiffusionModelConfig:
                 channel_mult=tuple(self.channel_mult),
                 num_blocks=self.num_blocks,
                 n_heads=self.n_heads,
-                attn_resolutions=tuple(self.attn_resolutions or [default_attn]),
+                attn_resolutions=tuple(attn_resolutions),
                 num_freqs=self.num_freqs,
+                use_apex_gn=self.use_apex_gn,
             )
         else:
             net = VideoUNet(
@@ -422,7 +442,9 @@ class VideoDiffusionModelConfig:
 
 
 def _channel_mixing_matrix(
-    tau: torch.Tensor, kernel: str, length_scale: float | None
+    tau: torch.Tensor,
+    kernel: Literal["independent", "brownian_bridge", "ou", "rbf"],
+    length_scale: float | None,
 ) -> torch.Tensor:
     """``(T, T)`` mixing matrix for one channel's chosen kernel -- the
     per-channel building block for ``temporal_noise_correlation ==
@@ -454,7 +476,7 @@ def _channel_mixing_matrix(
 def _per_channel_mixing_tensor(
     tau: torch.Tensor,
     out_names: list[str],
-    kernel_map: dict[str, str],
+    kernel_map: dict[str, Literal["independent", "brownian_bridge", "ou", "rbf"]],
     length_scale_map: dict[str, float] | None,
 ) -> torch.Tensor:
     """``(C, T, T)`` stacked per-channel mixing matrices, ordered by

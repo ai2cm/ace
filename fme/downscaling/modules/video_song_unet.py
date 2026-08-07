@@ -25,6 +25,7 @@ class VideoSongUNet(nn.Module):
         attn_resolutions: tuple[int, ...] = (22,),
         num_freqs: int = 4,
         periodic: bool = True,
+        use_apex_gn: bool = False,
     ):
         super().__init__()
         self.seq_length = seq_length
@@ -37,7 +38,7 @@ class VideoSongUNet(nn.Module):
             channel_mult=list(channel_mult),
             num_blocks=num_blocks,
             attn_resolutions=list(attn_resolutions),
-            use_apex_gn=False,
+            use_apex_gn=use_apex_gn,
         )
         if periodic:
             for m in self.unet.modules():

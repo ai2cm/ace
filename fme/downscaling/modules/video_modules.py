@@ -5,6 +5,7 @@ and temporal attention, wrapped in EDM preconditioning (Karras 2022).
 """
 
 import math
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -21,7 +22,9 @@ class NoiseEmbedding(nn.Module):
     mapped through an MLP -- matches HiRO/SongUNet noise conditioning.
     """
 
-    def __init__(self, dim: int, embedding_type: str = "positional"):
+    def __init__(
+        self, dim: int, embedding_type: Literal["positional", "fourier"] = "positional"
+    ):
         super().__init__()
         if dim % 2 != 0:
             raise ValueError("NoiseEmbedding dim must be even.")
@@ -315,7 +318,7 @@ class VideoUNet(nn.Module):
         attention_levels: tuple[int, ...] = (1, 2),
         temporal_attention_levels: tuple[int, ...] | None = None,
         num_freqs: int = 4,
-        noise_embedding_type: str = "positional",
+        noise_embedding_type: Literal["positional", "fourier"] = "positional",
     ):
         super().__init__()
         self.levels = len(channel_mult)
