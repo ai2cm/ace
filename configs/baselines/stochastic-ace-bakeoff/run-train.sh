@@ -119,13 +119,13 @@ run_training() {
     --description 'Run ACE training' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
-    --priority high \
+    --priority urgent \
     --cluster ai2/jupiter \
-    --cluster ai2/titan \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
+    --env CM_PRIORITY=high \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
@@ -151,3 +151,12 @@ run_training "arm5-50-50-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm5-50-50-ec-white
 run_training "arm6-80-10-sp10-ec.yaml"        "ace2s-bakeoff-arm6-80-10-sp10-ec-rs0"        4
 run_training "arm7-90-0-sp10-ec.yaml"         "ace2s-bakeoff-arm7-90-0-sp10-ec-rs0"         4
 run_training "arm8-80-10-sp10-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm8-80-10-sp10-ec-whiten-g0.5-rs0" 4
+
+# Residual ablation on the daily wave (added 2026-08-07). arm1 with
+# residual_prediction: false and NOTHING else changed — a strict one-knob A/B
+# against the completed arm 1 (wandb qhv9zf95) to test whether that wave's
+# small-scale precipitation power deficit is caused by residual prediction.
+# global_mean_removal and the 8/4 loader knobs are deliberately KEPT so the
+# comparison stays one-knob.
+# The eight arms above are COMPLETE — launch this alone:  ./run-train.sh nores
+run_training "arm1-90-10-ec-nores.yaml"       "ace2s-bakeoff-arm1-90-10-ec-nores-rs0"       8

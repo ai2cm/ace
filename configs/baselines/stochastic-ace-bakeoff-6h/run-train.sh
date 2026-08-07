@@ -118,13 +118,14 @@ run_training() {
     --name "$job_name" \
     --description 'Run ACE training' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority urgent \
-    --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
+    --env CM_PRIORITY=high \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
@@ -142,17 +143,12 @@ run_training() {
 
 # Launch targets. Add a run_training call per arm; use the config filter arg to
 # launch a subset instead of commenting lines out:  ./run-train.sh <substring>
-run_training "arm1-90-10-ec.yaml"                  "ace2s-bakeoff-6h-arm1-90-10-ec-rs0"                  4
-run_training "arm2-90-10-noec.yaml"                "ace2s-bakeoff-6h-arm2-90-10-noec-rs0"                4
-run_training "arm3-50-50-ec.yaml"                  "ace2s-bakeoff-6h-arm3-50-50-ec-rs0"                  4
-run_training "arm6-80-10-sp10-ec.yaml"             "ace2s-bakeoff-6h-arm6-80-10-sp10-ec-rs0"             4
-run_training "arm7-90-0-sp10-ec.yaml"              "ace2s-bakeoff-6h-arm7-90-0-sp10-ec-rs0"              4
-run_training "arm9-90-0-sp10-ec-whiten-g0.5.yaml"  "ace2s-bakeoff-6h-arm9-90-0-sp10-ec-whiten-g0.5-rs0"  4
-
-# Continuation of arm 3 from its epoch-69 checkpoint after the 2026-08-05 NCCL
-# watchdog death, on the reduced loader config. The job name is deliberately the
-# ORIGINAL run's wandb name: with resume_wandb the run id is kept but WANDB_NAME
-# overwrites the display name, so any other name would rename the original run.
-# Beaker auto-suffixes the colliding experiment name. Launch with the filter
-# `./run-train.sh resume-e69`, which matches this config filename alone.
-run_training "arm3-50-50-ec-resume-e69.yaml"       "ace2s-bakeoff-6h-arm3-50-50-ec-rs0"                  4
+# The "-nores" suffix distinguishes this wave from the superseded residual wave
+# (2026-07-29 .. 2026-08-07), whose runs carried the same names. Every arm starts
+# from scratch: no checkpoint from the residual wave is loadable on this recipe.
+run_training "arm1-90-10-ec.yaml"                  "ace2s-bakeoff-6h-arm1-90-10-ec-nores-rs0"                  8
+run_training "arm2-90-10-noec.yaml"                "ace2s-bakeoff-6h-arm2-90-10-noec-nores-rs0"                8
+run_training "arm3-50-50-ec.yaml"                  "ace2s-bakeoff-6h-arm3-50-50-ec-nores-rs0"                  8
+run_training "arm6-80-10-sp10-ec.yaml"             "ace2s-bakeoff-6h-arm6-80-10-sp10-ec-nores-rs0"             8
+run_training "arm7-90-0-sp10-ec.yaml"              "ace2s-bakeoff-6h-arm7-90-0-sp10-ec-nores-rs0"              8
+run_training "arm9-90-0-sp10-ec-whiten-g0.5.yaml"  "ace2s-bakeoff-6h-arm9-90-0-sp10-ec-whiten-g0.5-nores-rs0"  8

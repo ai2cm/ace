@@ -437,7 +437,7 @@ stepper:
   step:
     type: single_module
     config:
-      residual_prediction: true
+      residual_prediction: false
       builder:
         type: NoiseConditionedSFNO
         config:

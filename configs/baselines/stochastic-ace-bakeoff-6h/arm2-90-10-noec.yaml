@@ -37,7 +37,7 @@ inference:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
-      num_data_workers: 8
+      num_data_workers: 4
     aggregator:
       step_means:
         - step: 20
@@ -119,7 +119,7 @@ inference:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
-      num_data_workers: 8
+      num_data_workers: 4
     aggregator:
       step_means:
         - step: 20
@@ -163,7 +163,7 @@ inference:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
-      num_data_workers: 8
+      num_data_workers: 4
     aggregator:
       step_means:
         - step: 20
@@ -221,7 +221,7 @@ inference:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
-      num_data_workers: 8
+      num_data_workers: 4
     aggregator:
       step_means:
         - step: 20
@@ -282,7 +282,7 @@ inference:
         data_path: /climate-default/
         file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
         engine: zarr
-      num_data_workers: 8
+      num_data_workers: 4
     aggregator:
       step_means: []
       ensembles: []
@@ -306,8 +306,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 8
-  num_data_workers: 8
-  prefetch_factor: 4
+  num_data_workers: 4
+  prefetch_factor: 2
   time_buffer: 1
   dataset:
     strict: false
@@ -399,7 +399,7 @@ train_loader:
 validation:
   loader:
     batch_size: 32
-    num_data_workers: 8
+    num_data_workers: 4
     prefetch_factor: 2
     time_buffer: 3
     dataset:
@@ -433,7 +433,7 @@ stepper:
   step:
     type: single_module
     config:
-      residual_prediction: true
+      residual_prediction: false
       builder:
         type: NoiseConditionedSFNO
         config:
