@@ -91,6 +91,15 @@ class VideoDiffusionModelConfig:
             defaults to the coarsest resolution; pass [] for no attention.
         use_apex_gn: Use Apex GroupNorm (songunet backbone only); faster on
             GPUs where Apex is installed (e.g. B200s), but requires a GPU.
+        channel_mult_emb, channel_mult_noise, dropout, songunet_embedding_type,
+            encoder_type, decoder_type, resample_filter, checkpoint_level,
+            additive_pos_embed, bottleneck_attention, act, profile_mode,
+            amp_mode: Songunet-only; passed through to SongUNetv2 (see its
+            docstring).
+        label_dim, augment_dim: Songunet-only; must be 0, since this backbone
+            never supplies class_labels/augment_labels.
+        label_dropout: Songunet-only; passed through, but inert while
+            label_dim is forced to 0.
         training_noise_distribution: Noise distribution for training.
         training_noise_distributions: Per-channel noise distribution for
             training, keyed by out_names.
@@ -133,6 +142,22 @@ class VideoDiffusionModelConfig:
     img_resolution: list[int] | None = None
     attn_resolutions: list[int] | None = None
     use_apex_gn: bool = False
+    channel_mult_emb: int = 4
+    channel_mult_noise: int = 1
+    dropout: float = 0.10
+    songunet_embedding_type: Literal["positional", "fourier", "zero"] = "positional"
+    encoder_type: Literal["standard", "skip", "residual"] = "standard"
+    decoder_type: Literal["standard", "skip"] = "standard"
+    resample_filter: list[int] = dataclasses.field(default_factory=lambda: [1, 1])
+    checkpoint_level: int = 0
+    additive_pos_embed: bool = False
+    bottleneck_attention: bool = True
+    act: str = "silu"
+    profile_mode: bool = False
+    amp_mode: bool = True
+    label_dim: int = 0
+    augment_dim: int = 0
+    label_dropout: float = 0.0
     training_noise_distribution: (
         LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
     ) = None
@@ -314,6 +339,18 @@ class VideoDiffusionModelConfig:
                 raise ValueError("use_apex_gn is only used with the songunet backbone.")
             if not using_gpu():
                 raise ValueError("use_apex_gn requires a GPU.")
+        if self.label_dim != 0:
+            raise ValueError(
+                "label_dim is not supported: VideoDiffusionModel never supplies "
+                "class_labels, so a nonzero label_dim would build an unusable "
+                "class-conditioning layer."
+            )
+        if self.augment_dim != 0:
+            raise ValueError(
+                "augment_dim is not supported: VideoDiffusionModel never supplies "
+                "augment_labels, so a nonzero augment_dim would build an unusable "
+                "augmentation-conditioning layer."
+            )
 
     @property
     def noise_distribution(self) -> NoiseDistribution:
@@ -413,11 +450,25 @@ class VideoDiffusionModelConfig:
                 seq_length=self.n_timesteps,
                 model_channels=self.model_channels,
                 channel_mult=tuple(self.channel_mult),
+                channel_mult_emb=self.channel_mult_emb,
+                channel_mult_noise=self.channel_mult_noise,
                 num_blocks=self.num_blocks,
                 n_heads=self.n_heads,
                 attn_resolutions=tuple(attn_resolutions),
                 num_freqs=self.num_freqs,
+                dropout=self.dropout,
+                label_dropout=self.label_dropout,
+                embedding_type=self.songunet_embedding_type,
+                encoder_type=self.encoder_type,
+                decoder_type=self.decoder_type,
+                resample_filter=tuple(self.resample_filter),
+                checkpoint_level=self.checkpoint_level,
+                additive_pos_embed=self.additive_pos_embed,
+                bottleneck_attention=self.bottleneck_attention,
                 use_apex_gn=self.use_apex_gn,
+                act=self.act,
+                profile_mode=self.profile_mode,
+                amp_mode=self.amp_mode,
             )
         else:
             net = VideoUNet(

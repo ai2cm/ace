@@ -148,6 +148,51 @@ def test_use_apex_gn_requires_gpu():
         _model(5, backbone="songunet", img_resolution=[8, 8], use_apex_gn=True)
 
 
+def test_label_dim_rejected():
+    with pytest.raises(ValueError, match="label_dim is not supported"):
+        _model(5, label_dim=2)
+
+
+def test_augment_dim_rejected():
+    with pytest.raises(ValueError, match="augment_dim is not supported"):
+        _model(5, augment_dim=2)
+
+
+def test_train_on_batch_runs_with_non_default_songunet_args():
+    """Smoke-test every SongUNetv2 pass-through arg together (non-default
+    values where possible) so a keyword typo or signature mismatch in the
+    VideoDiffusionModelConfig -> VideoSongUNet -> SongUNetv2 chain isn't silent.
+    """
+    n_times, height, width = 5, 8, 8
+    model = _model(
+        n_times,
+        backbone="songunet",
+        img_resolution=[height, width],
+        channel_mult_emb=2,
+        channel_mult_noise=2,
+        dropout=0.0,
+        label_dropout=0.5,
+        songunet_embedding_type="fourier",
+        encoder_type="residual",
+        decoder_type="skip",
+        checkpoint_level=1,
+        additive_pos_embed=True,
+        bottleneck_attention=False,
+        act="relu",
+        profile_mode=False,
+        amp_mode=False,
+    )
+    batch = _paired_batch(batch_size=2, n_times=n_times, height=height, width=width)
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.loss.requires_grad
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
+
+
 def test_train_on_batch_supports_per_channel_noise():
     n_times, height, width = 5, 8, 8
     config = VideoDiffusionModelConfig(

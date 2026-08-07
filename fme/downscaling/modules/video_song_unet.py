@@ -2,6 +2,8 @@
 attention injected via forward hooks on the attention-resolution ``UNetBlock``s.
 """
 
+from typing import Literal
+
 import torch
 import torch.nn as nn
 
@@ -20,12 +22,26 @@ class VideoSongUNet(nn.Module):
         seq_length: int,
         model_channels: int = 128,
         channel_mult: tuple[int, ...] = (1, 2, 2, 2),
+        channel_mult_emb: int = 4,
+        channel_mult_noise: int = 1,
         num_blocks: int = 2,
         n_heads: int = 8,
         attn_resolutions: tuple[int, ...] = (22,),
         num_freqs: int = 4,
         periodic: bool = True,
+        dropout: float = 0.10,
+        label_dropout: float = 0.0,
+        embedding_type: Literal["fourier", "positional", "zero"] = "positional",
+        encoder_type: Literal["standard", "skip", "residual"] = "standard",
+        decoder_type: Literal["standard", "skip"] = "standard",
+        resample_filter: tuple[int, ...] = (1, 1),
+        checkpoint_level: int = 0,
+        additive_pos_embed: bool = False,
+        bottleneck_attention: bool = True,
         use_apex_gn: bool = False,
+        act: str = "silu",
+        profile_mode: bool = False,
+        amp_mode: bool = True,
     ):
         super().__init__()
         self.seq_length = seq_length
@@ -36,9 +52,23 @@ class VideoSongUNet(nn.Module):
             out_channels=out_channels,
             model_channels=model_channels,
             channel_mult=list(channel_mult),
+            channel_mult_emb=channel_mult_emb,
+            channel_mult_noise=channel_mult_noise,
             num_blocks=num_blocks,
             attn_resolutions=list(attn_resolutions),
+            dropout=dropout,
+            label_dropout=label_dropout,
+            embedding_type=embedding_type,
+            encoder_type=encoder_type,
+            decoder_type=decoder_type,
+            resample_filter=list(resample_filter),
+            checkpoint_level=checkpoint_level,
+            additive_pos_embed=additive_pos_embed,
+            bottleneck_attention=bottleneck_attention,
             use_apex_gn=use_apex_gn,
+            act=act,
+            profile_mode=profile_mode,
+            amp_mode=amp_mode,
         )
         if periodic:
             for m in self.unet.modules():
