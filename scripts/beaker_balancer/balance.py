@@ -41,6 +41,14 @@ CM_PRIORITY_ENV = "CM_PRIORITY"
 #: from this mapping have no allocation and are left alone entirely.
 DEFAULT_CLUSTER_LIMITS = {"ai2/jupiter": 72, "ai2/titan": 32}
 
+#: Workspaces whose jobs spend the same allocation but are never modified. The
+#: allocation is the team's, not one workspace's, so slots held here have to be
+#: subtracted before any are handed out -- otherwise the balancer grants urgent
+#: against slots that are already occupied. ``CM_PRIORITY`` is not read in
+#: these: opting in is what makes a job the balancer's to move, and nothing
+#: here is.
+DEFAULT_OBSERVED_WORKSPACES = ("ai2/climate-titan",)
+
 LOW = pb2.JOB_PRIORITY_LOW
 NORMAL = pb2.JOB_PRIORITY_NORMAL
 HIGH = pb2.JOB_PRIORITY_HIGH
@@ -62,6 +70,7 @@ _CLUSTER_CONSTRAINT = pb2.JOB_PLACEMENT_CONSTRAINT_TYPE_CLUSTER
 # Why a job may not be modified. Identity-compared, so a caller can tell an
 # expected state apart from one worth warning about.
 UNLABELLED = "does not set CM_PRIORITY"
+OBSERVED = "is in an observed workspace, which is counted but never modified"
 SESSION = "is an interactive session"
 AT_IMMEDIATE = "is at immediate priority, which only a human sets"
 MULTI_CLUSTER = "targets more than one cluster"
@@ -111,6 +120,11 @@ class JobView:
     #: An interactive session has a person attached to it, so its priority is
     #: never ours to change.
     is_session: bool = False
+    #: The workspace the job is in, for reporting.
+    workspace: str = ""
+    #: Whether the job is only being watched: its slots are counted against the
+    #: allocation, but it is never modified and its CM_PRIORITY is not read.
+    is_observed: bool = False
 
     @property
     def is_queued(self) -> bool:
@@ -162,6 +176,8 @@ class JobView:
         group rather than individually, which is what stops the walk granting
         urgent to some ranks and not others; see ``ReplicaGroup``.
         """
+        if self.is_observed:
+            return OBSERVED
         if self.cm_priority is None:
             return UNLABELLED
         if self.is_session:
@@ -473,10 +489,24 @@ def _cluster_of_node(
 
 
 def fetch_jobs(
-    client: Beaker, workspace_name: str, node_cache: dict[str, str | None] | None = None
+    client: Beaker,
+    workspace_name: str,
+    node_cache: dict[str, str | None] | None = None,
+    observed: Sequence[str] = (),
 ) -> list[JobView]:
-    """Read every unfinished job in a workspace into JobView form."""
+    """Read every unfinished job in the managed and observed workspaces.
+
+    Jobs from an observed workspace are marked ``is_observed``: their slots are
+    counted against the allocation but they are never modified, and their
+    ``CM_PRIORITY`` is not read -- setting it in a workspace the balancer does
+    not manage would otherwise look like it did something.
+    """
     workspace = client.workspace.get(workspace_name)
+    # One listing covers the whole org, so watching another workspace costs a
+    # name lookup rather than a second pass over the jobs.
+    names = {workspace.id: workspace_name}
+    for name in observed or ():
+        names.setdefault(client.workspace.get(name).id, name)
     node_clusters: dict[str, str | None] = {} if node_cache is None else node_cache
     # Failures are cached within a pass so one bad node is not retried for every
     # job on it, but they are dropped between passes. A job whose node cannot be
@@ -488,14 +518,17 @@ def fetch_jobs(
         del node_clusters[stale]
     views = []
     for job in client.job.list(finalized=False):
-        if job.workspace_id != workspace.id:
+        if job.workspace_id not in names:
             continue
-        env = {
-            var.name: var.literal for var in job.container_spec.environment_variables
-        }
+        is_observed = job.workspace_id != workspace.id
         cm_priority = None
-        if CM_PRIORITY_ENV in env:
-            cm_priority = parse_cm_priority(env[CM_PRIORITY_ENV], job.id)
+        if not is_observed:
+            env = {
+                var.name: var.literal
+                for var in job.container_spec.environment_variables
+            }
+            if CM_PRIORITY_ENV in env:
+                cm_priority = parse_cm_priority(env[CM_PRIORITY_ENV], job.id)
 
         clusters = tuple(
             value
@@ -528,6 +561,8 @@ def fetch_jobs(
                 replica_group_id=job.system_details.replica_group_details.id,
                 # Only an interactive session carries an environment.
                 is_session=bool(job.environment_id),
+                workspace=names[job.workspace_id],
+                is_observed=is_observed,
             )
         )
     return views
@@ -572,18 +607,24 @@ def report_usage(jobs: Sequence[JobView], limits: dict[str, int], label: str) ->
 def report_unreclaimable(jobs: Sequence[JobView], limits: dict[str, int]) -> None:
     """Break out allocated slots the balancer can never reclaim.
 
-    Sessions and immediate-priority jobs count against the allocation but are
-    never demoted, so a pass can be unable to get within the allocation no
-    matter what it does. Reporting them makes that a visible fact rather than a
-    balancer that appears not to be working.
+    Sessions, immediate-priority jobs and jobs in an observed workspace count
+    against the allocation but are never demoted, so a pass can be unable to get
+    within the allocation no matter what it does. Reporting them makes that a
+    visible fact rather than a balancer that appears not to be working.
     """
     sessions = dict.fromkeys(limits, 0)
     immediate = dict.fromkeys(limits, 0)
+    elsewhere: dict[str, Counter[str]] = {cluster: Counter() for cluster in limits}
     for job in jobs:
         if not job.holds_allocation:
             continue
         for cluster in job.budget_clusters(limits):
-            if job.is_session:
+            # Checked first: a session or immediate job in an observed
+            # workspace is unreclaimable because of where it is, and reporting
+            # it under its own workspace is what makes the number add up.
+            if job.is_observed:
+                elsewhere[cluster][job.workspace] += job.slots
+            elif job.is_session:
                 sessions[cluster] += job.slots
             elif job.priority == IMMEDIATE:
                 immediate[cluster] += job.slots
@@ -593,6 +634,8 @@ def report_unreclaimable(jobs: Sequence[JobView], limits: dict[str, int]) -> Non
             notes.append(f"{sessions[cluster]} in interactive sessions")
         if immediate[cluster]:
             notes.append(f"{immediate[cluster]} at immediate priority")
+        for workspace, slots in sorted(elsewhere[cluster].items()):
+            notes.append(f"{slots} in {workspace}")
         if notes:
             LOGGER.info(
                 "%s: %s — counted against the allocation, never reclaimable",
@@ -612,7 +655,9 @@ def report_unmanageable(jobs: Sequence[JobView], limits: dict[str, int]) -> None
     examples: dict[str, str] = {}
     for job in jobs:
         why = job.unmanaged_reason(limits)
-        if why is None or why is UNLABELLED:
+        # An observed job is reported as held slots, not as a job that failed
+        # to be managed: it was never a candidate, and there can be many.
+        if why is None or why is UNLABELLED or why is OBSERVED:
             continue
         if why is MULTI_CLUSTER:
             reason = f"targets {len(job.clusters)} clusters"
@@ -658,10 +703,17 @@ def run_pass(
     limits: dict[str, int],
     dry_run: bool,
     node_cache: dict[str, str | None] | None = None,
+    observed: Sequence[str] = (),
 ) -> int:
     """Run one balancing pass. Returns the number of changes applied."""
-    jobs = fetch_jobs(client, workspace, node_cache)
-    LOGGER.info("read %d unfinished jobs in %s", len(jobs), workspace)
+    jobs = fetch_jobs(client, workspace, node_cache, observed)
+    watched = sum(1 for job in jobs if job.is_observed)
+    LOGGER.info(
+        "read %d unfinished jobs in %s%s",
+        len(jobs) - watched,
+        workspace,
+        f", and {watched} watched in {', '.join(observed)}" if watched else "",
+    )
     report_usage(jobs, limits, "before")
     report_unreclaimable(jobs, limits)
     report_unmanageable(jobs, limits)
@@ -767,6 +819,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="keep running, pausing this long between passes (default: one pass)",
     )
     parser.add_argument(
+        "--observe",
+        action="append",
+        metavar="WORKSPACE",
+        help="also count this workspace's urgent slots against the allocation, "
+        "without ever modifying its jobs; repeatable. Replaces the default: "
+        + ", ".join(DEFAULT_OBSERVED_WORKSPACES),
+    )
+    parser.add_argument(
+        "--no-observe",
+        action="store_true",
+        help="count only the managed workspace's slots",
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true", help="include debug logging"
     )
     return parser
@@ -800,6 +865,20 @@ def validate_limits(client: Beaker, limits: dict[str, int]) -> None:
             raise SystemExit(f"unknown cluster {cluster!r} in allocation: {err}")
 
 
+def validate_workspaces(client: Beaker, workspaces: Sequence[str]) -> None:
+    """Check every workspace name resolves.
+
+    A typo in an observed workspace counts nothing and looks exactly like a
+    workspace holding no urgent slots, so the balancer would quietly hand out
+    the allocation twice.
+    """
+    for workspace in workspaces:
+        try:
+            client.workspace.get(workspace)
+        except BeakerError as err:
+            raise SystemExit(f"unknown workspace {workspace!r}: {err}")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -814,13 +893,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     LOGGER.info(
         "allocation: %s", ", ".join(f"{k}={v} slots" for k, v in limits.items())
     )
+    observed: tuple[str, ...] = ()
+    if not args.no_observe:
+        observed = tuple(args.observe or DEFAULT_OBSERVED_WORKSPACES)
+    if observed:
+        LOGGER.info("also counting, but never modifying: %s", ", ".join(observed))
 
     client = Beaker.from_env()
     validate_limits(client, limits)
+    validate_workspaces(client, [args.workspace, *observed])
     node_cache: dict[str, str | None] = {}
     while True:
         try:
-            run_pass(client, args.workspace, limits, args.dry_run, node_cache)
+            run_pass(client, args.workspace, limits, args.dry_run, node_cache, observed)
         except BeakerError:
             if args.interval is None:
                 raise

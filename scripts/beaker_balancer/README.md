@@ -7,6 +7,10 @@ without anyone having to hand-manage priorities.
 Our allocation is **72 GPU slots on `ai2/jupiter` and 32 on `ai2/titan`**. A
 Beaker slot is one GPU; a CPU-only job counts as one slot.
 
+The allocation is the team's, not one workspace's. The balancer manages
+`ai2/ace` and also counts the urgent slots held in `ai2/climate-titan`, without
+ever modifying anything there — see [Other workspaces](#other-workspaces).
+
 ## Opting a job in
 
 Set `CM_PRIORITY` on the job to `low`, `normal`, `high` or `urgent`:
@@ -106,7 +110,8 @@ fails and nothing is spent.
 Each pass recomputes the whole allocation from scratch and applies the
 difference:
 
-1. Read every unfinished job in the workspace and group it with its ranks.
+1. Read every unfinished job in the managed and observed workspaces, and group
+   it with its ranks.
 2. Subtract the slots held at urgent or `immediate` by jobs it cannot modify.
    Those are a fixed charge; only what is left is available.
 3. Walk the managed groups in `CM_PRIORITY` order, granting urgent while the
@@ -170,10 +175,43 @@ committed future occupant, not a maybe.
 `immediate` counts the same as urgent: it outranks urgent, so the slot is just
 as occupied. Interactive sessions count too.
 
-Sessions and `immediate` jobs are counted but never reclaimable, so a pass can
-be unable to get within the allocation no matter what it does. Each pass logs
-how many slots per cluster are held that way, so that shows up as a fact rather
-than as a balancer that appears not to be working.
+Sessions, `immediate` jobs and everything in an observed workspace are counted
+but never reclaimable, so a pass can be unable to get within the allocation no
+matter what it does. Each pass logs how many slots per cluster are held that
+way, broken out by cause, so that shows up as a fact rather than as a balancer
+that appears not to be working:
+
+```
+urgent slots before: ai2/jupiter 12/72, ai2/titan 33/32
+ai2/jupiter: 4 in ai2/climate-titan — counted against the allocation, never reclaimable
+ai2/titan: 33 in ai2/climate-titan — counted against the allocation, never reclaimable
+no changes needed
+```
+
+## Other workspaces
+
+The balancer manages one workspace (`--workspace`, default `ai2/ace`) and
+*observes* others (`--observe`, default `ai2/climate-titan`). An observed
+workspace's jobs are counted against the allocation exactly as our own are, and
+are never modified.
+
+Counting them is the point: the allocation is shared, so slots held elsewhere
+have to be subtracted before any are handed out. Without this the balancer would
+grant urgent against slots that are already occupied — handing out the same
+allocation twice.
+
+`CM_PRIORITY` is not read in an observed workspace. Opting in is what makes a
+job the balancer's to move, and nothing there is, so honouring the label would
+make setting it look like it had done something. Observed jobs are reported as
+held slots rather than as jobs that failed to be managed.
+
+Reading one workspace or several costs the same: Beaker returns the whole org's
+unfinished jobs in one call and the balancer filters them, so observing another
+workspace adds a name lookup, not a second pass.
+
+Use `--no-observe` to count only the managed workspace. Names given to
+`--observe` are checked at startup, since a typo would count nothing and look
+exactly like a workspace holding no urgent slots.
 
 ## Running it
 
@@ -187,10 +225,11 @@ python balance.py --interval 180     # keep running, one pass every 3 minutes
 ```
 
 Useful flags: `--workspace` (default `ai2/ace`), `--limit CLUSTER=SLOTS`
-(repeatable; merges into the default allocation rather than replacing it), `-v`
-for debug logging. Cluster names in `--limit` are checked against Beaker at
-startup, since a typo would otherwise manage nothing and look exactly like a
-quiet cluster.
+(repeatable; merges into the default allocation rather than replacing it),
+`--observe WORKSPACE` / `--no-observe` (see [Other
+workspaces](#other-workspaces)), `-v` for debug logging. Cluster names in
+`--limit` are checked against Beaker at startup, since a typo would otherwise
+manage nothing and look exactly like a quiet cluster.
 
 A pass is stateless and converges, so it is safe to run from cron. Note that
 cron does not read your shell profile, so `BEAKER_TOKEN` has to be supplied
@@ -253,6 +292,9 @@ from real protobuf messages, covering environment-variable and
 placement-constraint parsing, org-qualified cluster resolution, the
 scheduled-but-not-started case, slot accounting, dry-run, action ordering,
 fail-soft behaviour, the per-pass reports, and the entrypoint's one-shot and
-`--interval` modes. Its randomised passes make an arbitrary subset of the calls
+`--interval` modes. Observed workspaces are covered on both halves of what they
+are for: their slots reduce what our own jobs are granted, and no call is ever
+made against them — including when they are holding the whole allocation and we
+are over it. Its randomised passes make an arbitrary subset of the calls
 fail and assert the pass still never ends above the allocation — the property
 that the ordering alone does not buy.

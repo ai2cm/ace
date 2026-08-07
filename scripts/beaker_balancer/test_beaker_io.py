@@ -33,6 +33,8 @@ from beaker import beaker_pb2 as pb2  # noqa: E402
 from beaker.exceptions import BeakerError  # noqa: E402
 
 WORKSPACE_ID = "ws-ace"
+OBSERVED_ID = "ws-climate-titan"
+WORKSPACE_IDS = {"ai2/ace": WORKSPACE_ID, "ai2/climate-titan": OBSERVED_ID}
 LIMITS = {"ai2/jupiter": 72, "ai2/titan": 32}
 
 
@@ -100,7 +102,14 @@ def make_job(
 class FakeClient:
     """Stands in for beaker.Beaker over the surface the balancer uses."""
 
-    def __init__(self, jobs, node_clusters=None, fail_on=(), unknown_clusters=()):
+    def __init__(
+        self,
+        jobs,
+        node_clusters=None,
+        fail_on=(),
+        unknown_clusters=(),
+        unknown_workspaces=(),
+    ):
         self._jobs = list(jobs)
         # node id -> (bare cluster name, org name)
         self._node_clusters = node_clusters or {"node-jup": ("jupiter", "ai2")}
@@ -126,12 +135,17 @@ class FakeClient:
                 assert request.reason, "a reason should be recorded on every change"
                 return pb2.UpdateJobSourcePriorityResponse()
 
+        self._unknown_workspaces = set(unknown_workspaces)
         self.job = _JobService()
-        self.workspace = SimpleNamespace(
-            get=lambda name: SimpleNamespace(id=WORKSPACE_ID, name=name)
-        )
+        self.workspace = SimpleNamespace(get=self._get_workspace)
         self.node = SimpleNamespace(get=self._get_node)
         self.cluster = SimpleNamespace(get=self._get_cluster)
+
+    def _get_workspace(self, name):
+        if name in self._unknown_workspaces:
+            raise BeakerError(f"no such workspace {name}")
+        # Every workspace gets its own id, so a job can be attributed to one.
+        return SimpleNamespace(id=WORKSPACE_IDS.get(name, name), name=name)
 
     def _get_node(self, node_id):
         self.node_lookups.append(node_id)
@@ -825,3 +839,164 @@ def test_a_transient_beaker_error_does_not_kill_an_interval_loop(monkeypatch, ca
         balance.main(["--interval", "5"])
     assert len(passes) == 2
     assert "pass failed" in caplog.text
+
+
+# --- workspaces that are counted but never modified -------------------------
+
+OBSERVE = ("ai2/climate-titan",)
+
+
+def _elsewhere(job_id, **kwargs):
+    """A job in the observed workspace."""
+    kwargs.setdefault("workspace_id", OBSERVED_ID)
+    return make_job(job_id=job_id, **kwargs)
+
+
+def test_an_observed_workspaces_jobs_are_read_and_marked():
+    client = FakeClient([_labelled("mine", "high"), _elsewhere("theirs")])
+    mine, theirs = fetch_jobs(client, "ai2/ace", observed=OBSERVE)
+    assert (mine.workspace, mine.is_observed) == ("ai2/ace", False)
+    assert (theirs.workspace, theirs.is_observed) == ("ai2/climate-titan", True)
+
+
+def test_an_observed_job_is_not_read_for_cm_priority():
+    # Opting in is what makes a job ours to move, and nothing there is. Reading
+    # the label would make setting it look like it did something.
+    client = FakeClient([_elsewhere("theirs", env={"CM_PRIORITY": "urgent"})])
+    (view,) = fetch_jobs(client, "ai2/ace", observed=OBSERVE)
+    assert view.cm_priority is None
+    assert view.unmanaged_reason(LIMITS) is balance.OBSERVED
+
+
+def test_a_third_workspace_is_still_ignored_entirely():
+    client = FakeClient(
+        [_labelled("mine", "high"), make_job(job_id="other", workspace_id="ws-other")]
+    )
+    views = fetch_jobs(client, "ai2/ace", observed=OBSERVE)
+    assert [view.id for view in views] == ["mine"]
+
+
+def test_an_observed_jobs_urgent_slots_count_against_the_allocation():
+    client = FakeClient(
+        [_elsewhere("theirs", priority=pb2.JOB_PRIORITY_URGENT, gpu_count=8)]
+    )
+    views = fetch_jobs(client, "ai2/ace", observed=OBSERVE)
+    assert urgent_usage(views, LIMITS)["ai2/jupiter"] == 8
+
+
+def test_an_observed_job_takes_slots_away_from_ours():
+    # The whole point: the allocation is the team's, not one workspace's.
+    client = FakeClient(
+        [
+            _elsewhere("theirs", priority=pb2.JOB_PRIORITY_URGENT, gpu_count=8),
+            _labelled("mine", "high", gpu_count=8),
+        ]
+    )
+    applied = run_pass(
+        client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False, observed=OBSERVE
+    )
+    assert applied == 0
+    assert client.priority_calls == []
+
+
+def test_an_observed_job_is_never_modified_even_when_over_allocation():
+    # It is holding the entire allocation and we are over it; it is still not
+    # ours to touch.
+    client = FakeClient(
+        [_elsewhere("theirs", priority=pb2.JOB_PRIORITY_URGENT, gpu_count=8)]
+    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False, observed=OBSERVE)
+    assert client.priority_calls == []
+
+
+def test_ours_is_still_balanced_around_an_observed_job():
+    client = FakeClient(
+        [
+            _elsewhere("theirs", priority=pb2.JOB_PRIORITY_URGENT, gpu_count=8),
+            _labelled("mine", "high", gpu_count=8),
+        ]
+    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 16}, dry_run=False, observed=OBSERVE)
+    assert client.priority_calls == [("mine", URGENT)]
+
+
+def test_observed_slots_are_reported_under_their_workspace(caplog):
+    # Otherwise the log reads "8/8, no changes needed" with nothing saying why.
+    client = FakeClient(
+        [_elsewhere("theirs", priority=pb2.JOB_PRIORITY_URGENT, gpu_count=8)]
+    )
+    with caplog.at_level(logging.INFO):
+        run_pass(client, "ai2/ace", LIMITS, dry_run=False, observed=OBSERVE)
+    assert "8 in ai2/climate-titan" in caplog.text
+    assert "never reclaimable" in caplog.text
+
+
+def test_observed_jobs_are_not_reported_as_failures_to_manage(caplog):
+    client = FakeClient([_elsewhere("theirs", clusters=("ai2/jupiter", "ai2/titan"))])
+    with caplog.at_level(logging.WARNING):
+        run_pass(client, "ai2/ace", LIMITS, dry_run=False, observed=OBSERVE)
+    assert "cannot be managed" not in caplog.text
+
+
+def test_the_pass_says_how_many_jobs_it_is_only_watching(caplog):
+    client = FakeClient([_labelled("mine", "high"), _elsewhere("theirs")])
+    with caplog.at_level(logging.INFO):
+        run_pass(client, "ai2/ace", LIMITS, dry_run=False, observed=OBSERVE)
+    assert "read 1 unfinished jobs in ai2/ace" in caplog.text
+    assert "1 watched in ai2/climate-titan" in caplog.text
+
+
+def test_an_observed_replica_group_is_counted_but_left_alone():
+    ranks = [
+        _elsewhere(
+            f"rank-{i}",
+            priority=pb2.JOB_PRIORITY_URGENT,
+            gpu_count=8,
+            replica_size=2,
+            replica_group_id="rg-theirs",
+        )
+        for i in range(2)
+    ]
+    client = FakeClient(ranks)
+    views = fetch_jobs(client, "ai2/ace", observed=OBSERVE)
+    assert urgent_usage(views, LIMITS)["ai2/jupiter"] == 16
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False, observed=OBSERVE)
+    assert client.priority_calls == []
+
+
+def test_a_misspelled_observed_workspace_fails_at_startup(monkeypatch):
+    # Counting nothing looks exactly like a workspace holding no urgent slots,
+    # so the allocation would quietly be handed out twice.
+    client = FakeClient([], unknown_workspaces={"ai2/climat-titan"})
+    _with_client(monkeypatch, client)
+    with pytest.raises(SystemExit, match="unknown workspace 'ai2/climat-titan'"):
+        balance.main(["--observe", "ai2/climat-titan"])
+
+
+def test_climate_titan_is_observed_by_default(monkeypatch):
+    # With no flag at all. If observing had to be asked for, the allocation
+    # would be handed out twice until someone remembered to ask.
+    client = FakeClient(
+        [
+            _elsewhere("theirs", priority=pb2.JOB_PRIORITY_URGENT, gpu_count=8),
+            _labelled("mine", "high", gpu_count=8),
+        ]
+    )
+    _with_client(monkeypatch, client)
+    assert balance.main(["--limit", "ai2/jupiter=8"]) == 0
+    # Theirs holds the whole allocation, so ours is not granted anything.
+    assert client.priority_calls == []
+    assert balance.DEFAULT_OBSERVED_WORKSPACES == ("ai2/climate-titan",)
+
+
+def test_no_observe_counts_only_our_own_workspace(monkeypatch):
+    client = FakeClient(
+        [
+            _elsewhere("theirs", priority=pb2.JOB_PRIORITY_URGENT, gpu_count=8),
+            _labelled("mine", "high", gpu_count=8),
+        ]
+    )
+    _with_client(monkeypatch, client)
+    # Without the observed workspace's 8 slots counted, ours fits.
+    assert balance.main(["--limit", "ai2/jupiter=8", "--no-observe"]) == 0
+    assert client.priority_calls == [("mine", URGENT)]
