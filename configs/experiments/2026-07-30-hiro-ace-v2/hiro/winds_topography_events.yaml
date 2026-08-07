@@ -1,0 +1,87 @@
+experiment_dir: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-07-hiro-perfect-pred-events
+n_samples: 2
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  denoising_expert_configs:
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_low_sigma/best.ckpt
+      sigma_min: 0.005
+      sigma_max: 200.0
+    - checkpoint_config:
+        checkpoint_path: /checkpoints_high_sigma/best.ckpt
+      sigma_min: 200.0
+      sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        #start_time: '2023-01-01T00:00:00'
+        start: 0
+        stop: 2
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start: 0
+        stop: 2
+        #start_time: '2023-01-01T00:00:00'
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+      subset:
+        #start_time: '2023-01-01T00:00:00'
+        start: 0
+        stop: 2
+    - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+      subset:
+        #start_time: '2023-01-01T00:00:00'
+        start: 0
+        stop: 2
+  lat_extent:
+    start: 0
+    stop: 16
+  lon_extent:
+    start: 0
+    stop: 16
+  batch_size: 2
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm
+events:
+- name: santa_ana_winds_20230212T1800
+  date: 2023-02-12T18:00
+  lat_extent:
+    start: 25
+    stop: 41
+  lon_extent:
+    start: 235
+    stop: 251
+  save_generated_samples: true
+  n_samples: 16
+- name: cold_katabatic_20230209T1800
+  date: 2023-02-09T18:00
+  lat_extent:
+    start: 40
+    stop: 56
+  lon_extent:
+    start: 232
+    stop: 248
+  save_generated_samples: true
+  n_samples: 16
