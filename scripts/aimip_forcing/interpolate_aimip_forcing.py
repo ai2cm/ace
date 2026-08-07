@@ -24,6 +24,15 @@ EXISTING_ERA5_FORCING_VARIABLES = [
 ]
 START_TIME = "1978-10-01T00:00:00"
 END_TIME = "2024-12-31T18:00:00"
+DEFAULT_FREQ = "6h"
+# The submitted six-hourly workflow's ERA5 forcing source ends in 2022, so the
+# time coordinate is extended and insolation (DSWRFtoa) is repeated to cover
+# 2023-2024. A forcing source (e.g. the daily 1-degree zarr) that already spans
+# the full [start, end] window disables both by passing an empty --extension-start,
+# in which case the source's own time coordinate and DSWRFtoa are used directly.
+DEFAULT_EXTENSION_START = "2023-01-01T00:00:00"
+DEFAULT_REPEAT_SOURCE_START = "2020-12-31T00:00:00"
+DEFAULT_REPEAT_SOURCE_END = "2022-12-31T18:00:00"
 
 
 def open_aimip_forcing_data(
@@ -100,6 +109,7 @@ def get_time_coordinate(
     existing_time_coordinate: xr.DataArray,
     extension_start: str,
     extension_end: str,
+    freq: str = DEFAULT_FREQ,
 ) -> xr.DataArray:
     """
     Extends the existing time coordinate using a numeric coordinate
@@ -110,7 +120,7 @@ def get_time_coordinate(
         xr.date_range(
             start=extension_start,
             end=extension_end,
-            freq="6h",
+            freq=freq,
             use_cftime=False,
         ).values,
         dims=["time"],
@@ -133,6 +143,7 @@ def get_repeated_insolation(
     end_repeat: str,
     source_start: str,
     source_end: str,
+    freq: str = DEFAULT_FREQ,
 ):
     """
     Get repeated insolation data for the period beyond the end of the existing ERA5 data
@@ -144,7 +155,7 @@ def get_repeated_insolation(
     new_time_coordinate = xr.date_range(
         start=start_repeat,
         end=end_repeat,
-        freq="6h",
+        freq=freq,
         use_cftime=False,
     )
 
@@ -197,12 +208,47 @@ def write_output_zarr(ds: xr.Dataset, output_data_file: str):
     default=ACE2_ERA5_DATA,
     help="Path to ACE2 ERA5 data in GCS.",
 )
+@click.option(
+    "--freq",
+    type=str,
+    default=DEFAULT_FREQ,
+    help=(
+        "Time step of the output forcing, e.g. '6h' for the submitted "
+        "six-hourly model or '1D' for the daily model."
+    ),
+)
+@click.option(
+    "--extension-start",
+    type=str,
+    default=DEFAULT_EXTENSION_START,
+    help=(
+        "Start of the synthetic period appended beyond the ERA5 forcing "
+        "source's coverage; over it, insolation is repeated. Pass an empty "
+        "string to disable when the source already spans the full window."
+    ),
+)
+@click.option(
+    "--repeat-source-start",
+    type=str,
+    default=DEFAULT_REPEAT_SOURCE_START,
+    help="Start of the insolation window repeated over the extension period.",
+)
+@click.option(
+    "--repeat-source-end",
+    type=str,
+    default=DEFAULT_REPEAT_SOURCE_END,
+    help="End of the insolation window repeated over the extension period.",
+)
 def main(
     input_data_file: str,
     output_data_file: str,
     ace2_era5_gcs_data: str,
     start_time: str,
     end_time: str,
+    freq: str,
+    extension_start: str,
+    repeat_source_start: str,
+    repeat_source_end: str,
 ):
     logging.basicConfig(level=logging.INFO)
     monthly_aimip_forcing = open_aimip_forcing_data(input_data_file)
@@ -218,11 +264,17 @@ def main(
         end_time,
     )
 
-    time_coord = get_time_coordinate(
-        existing_era5_forcing.time.drop_vars("time"),
-        extension_start="2023-01-01T00:00:00",
-        extension_end=end_time,
-    )
+    if extension_start:
+        time_coord = get_time_coordinate(
+            existing_era5_forcing.time.drop_vars("time"),
+            extension_start=extension_start,
+            extension_end=end_time,
+            freq=freq,
+        )
+    else:
+        # The forcing source already spans the full window, so use its own time
+        # coordinate directly with no synthetic extension or repeated insolation.
+        time_coord = existing_era5_forcing.time.drop_vars("time")
 
     logging.info("Interpolating AIMIP forcing data to ACE2-ERA5 time coordinate.")
     interpolated_aimip_forcing = monthly_aimip_forcing.interp(time=time_coord)
@@ -232,21 +284,24 @@ def main(
     ].where(sst_mask)
 
     logging.info("Merging interpolated AIMIP forcing with existing ERA5 forcing.")
-    repeated_era5_forcing_DSWRFtoa = get_repeated_insolation(
-        existing_era5_forcing.DSWRFtoa,
-        start_repeat="2023-01-01T00:00:00",
-        end_repeat=end_time,
-        source_start="2020-12-31T00:00:00",
-        source_end="2022-12-31T18:00:00",
-    )
-
-    era5_forcing_DSWRFtoa = xr.concat(
-        [
+    if extension_start:
+        repeated_era5_forcing_DSWRFtoa = get_repeated_insolation(
             existing_era5_forcing.DSWRFtoa,
-            repeated_era5_forcing_DSWRFtoa,
-        ],
-        dim="time",
-    )
+            start_repeat=extension_start,
+            end_repeat=end_time,
+            source_start=repeat_source_start,
+            source_end=repeat_source_end,
+            freq=freq,
+        )
+        era5_forcing_DSWRFtoa = xr.concat(
+            [
+                existing_era5_forcing.DSWRFtoa,
+                repeated_era5_forcing_DSWRFtoa,
+            ],
+            dim="time",
+        )
+    else:
+        era5_forcing_DSWRFtoa = existing_era5_forcing.DSWRFtoa
 
     logging.info("Finalizing interpolated AIMIP forcing data.")
     interpolated_forcing = xr.merge(
