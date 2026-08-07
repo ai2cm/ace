@@ -30,11 +30,13 @@ the point.
 Things that stop a job being managed, each reported in the log as an aggregate
 count per pass:
 
-- **It targets more than one cluster.** Beaker offers no way to pin a queued
-  job to a cluster, so a job eligible for both jupiter and titan could consume
-  either allocation and there is no way to know which in advance. Pin your job
-  to one cluster if you want it balanced. Most `ai2/ace` jobs today target
-  `titan+jupiter`, so expect this to be the common case during adoption.
+- **It is still queued and targets more than one cluster.** Beaker offers no
+  way to pin a queued job, so a job eligible for both jupiter and titan could
+  consume either allocation and there is no way to know which in advance. This
+  stops applying the moment it lands: a running job occupies one cluster, is
+  charged to that one alone, and is balanced against it whatever it was
+  submitted eligible for. Most `ai2/ace` jobs target `titan+jupiter`, so during
+  adoption expect them to be unmanaged while queued and managed once running.
 - **It targets a cluster with no allocation** (`ai2/saturn`, `ai2/ceres`).
 - **It is an interactive session.** There is a person attached to it, and
   taking their priority away mid-session is not the script's call.
@@ -84,7 +86,9 @@ a job that still cannot run.
 
 A group is managed only if *every* rank is: one unlabelled rank, one session, or
 one at `immediate` makes the whole group untouchable. The same applies if the
-ranks disagree about their `CM_PRIORITY`, or if the group comes back short —
+ranks disagree about their `CM_PRIORITY` or about the cluster they are charged
+to — a group split across two clusters spends two budgets at once, so it can be
+neither granted nor reclaimed as one — or if the group comes back short —
 only unfinished jobs in one workspace are read, so granting the ranks that
 happen to be visible would half-grant the real group. Skipped groups are counted
 in the log.
@@ -171,6 +175,14 @@ A job that has landed counts only against the cluster it is on. A *queued*
 urgent job counts at full weight against every cluster it could land on.
 Nothing outranks urgent and nothing can preempt it, so a queued urgent job is a
 committed future occupant, not a maybe.
+
+Being charged to one cluster and being balanced against it are the same
+question, so they are answered the same way: a placed job is managed against
+the cluster it landed on. It could in principle be preempted and come back
+somewhere else, but then it is queued again and the next pass treats it as
+ambiguous once more. The alternative — leaving a running job unmanaged because
+of a constraint that no longer decides anything — means its slots can be seen
+but never reclaimed.
 
 `immediate` counts the same as urgent: it outranks urgent, so the slot is just
 as occupied. Interactive sessions count too.

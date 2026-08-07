@@ -184,30 +184,34 @@ class JobView:
             return SESSION
         if self.priority == IMMEDIATE:
             return AT_IMMEDIATE
-        if len(self.clusters) != 1:
-            return MULTI_CLUSTER
-        if self.clusters[0] not in limits:
-            return NO_ALLOCATION
-        # A job is only managed when its slots are charged to exactly the
-        # cluster it is pinned to. A placed job whose node could not be
-        # resolved is charged to every budget as a precaution, and managing it
-        # would let the walk hand out slots on one cluster while the accounting
-        # spent them on all of them.
-        if self.budget_clusters(limits) != (self.clusters[0],):
+        # A placed job is pinned in fact. It occupies one cluster and is
+        # charged to that one alone, whatever it was submitted eligible for, so
+        # what it was eligible for stops being a reason not to touch it. Only a
+        # placed job whose node cannot be resolved is still charged to every
+        # budget, and managing that would let the walk hand out slots on one
+        # cluster while the accounting spent them on all of them.
+        if self.is_placed and self.assigned_cluster is None:
             return UNRESOLVED_CLUSTER
+        # A queued job is the ambiguous case: Beaker offers no way to pin one,
+        # so a job eligible for several could consume any of their allocations
+        # and there is no way to know which in advance.
+        if not self.is_placed and len(self.clusters) != 1:
+            return MULTI_CLUSTER
+        if not self.budget_clusters(limits):
+            return NO_ALLOCATION
         return None
 
     def managed_cluster(self, limits: dict[str, int]) -> str | None:
         """The single budgeted cluster this job may be modified against.
 
-        The balancer only ever changes jobs pinned to exactly one budgeted
-        cluster. A job eligible for several could land on any of them, and
-        Beaker offers no way to pin it, so its effect on a given allocation is
-        not knowable in advance.
+        The one its slots are charged to, which for a placed job is the one it
+        landed on. ``unmanaged_reason`` admits a job only when that is exactly
+        one budgeted cluster, so the walk can never hand out slots on one
+        cluster while the accounting spends them on another.
         """
         if self.unmanaged_reason(limits) is not None:
             return None
-        return self.clusters[0]
+        return self.budget_clusters(limits)[0]
 
 
 @dataclass(frozen=True)

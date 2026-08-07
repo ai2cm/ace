@@ -133,7 +133,11 @@ def modifiable(jobs, limits=LIMITS) -> set[str]:
             continue
         if len({m.cm_priority for m in members}) != 1:
             continue
-        if len({m.clusters[0] for m in members}) != 1:
+        # Ranks must agree on the cluster their slots are charged to -- which
+        # for a placed rank is the one it landed on, not what it was submitted
+        # eligible for. A group split across clusters cannot be granted
+        # coherently: its slots come out of two different budgets.
+        if len({charged_clusters(m) for m in members}) != 1:
             continue
         if len(members) < max(m.replica_group_size for m in members):
             continue
@@ -861,3 +865,102 @@ def test_random_population_reaches_the_states_that_matter():
         seen["over_before"] += any(before[c] > LIMITS[c] for c in LIMITS)
     for state, count in seen.items():
         assert count > 10, f"{state} only reached {count} times"
+
+
+# --- a placed job is pinned to the cluster it landed on ----------------------
+
+
+def test_a_placed_job_is_managed_against_the_cluster_it_landed_on():
+    # Submitted eligible for both, now running on jupiter. It is charged to
+    # jupiter alone, so it is jupiter's to reclaim.
+    running = placed(
+        priority=URGENT,
+        cm_priority=NORMAL,
+        slots=8,
+        clusters=("ai2/titan", "ai2/jupiter"),
+        assigned_cluster="ai2/jupiter",
+    )
+    assert running.budget_clusters(LIMITS) == ("ai2/jupiter",)
+    assert running.managed_cluster(LIMITS) == "ai2/jupiter"
+    assert changes(decide([running], {"ai2/jupiter": 0, "ai2/titan": 32})) == {
+        running.id: NORMAL
+    }
+
+
+def test_a_placed_multi_cluster_job_can_be_displaced_by_a_queued_one():
+    # The reclaim path this unlocks: without it the queued job waits forever
+    # behind slots the balancer could see but not take back.
+    holder = placed(
+        priority=URGENT,
+        cm_priority=NORMAL,
+        slots=8,
+        clusters=("ai2/titan", "ai2/jupiter"),
+        assigned_cluster="ai2/jupiter",
+    )
+    contender = job(cm_priority=HIGH, slots=8, clusters=("ai2/jupiter",))
+    result = changes(decide([holder, contender], {"ai2/jupiter": 8}))
+    assert result == {holder.id: NORMAL, contender.id: URGENT}
+
+
+def test_a_queued_multi_cluster_job_is_still_left_alone():
+    # Beaker offers no way to pin a queued job, so which allocation it will
+    # consume is genuinely unknowable.
+    queued = job(
+        priority=URGENT, cm_priority=LOW, clusters=("ai2/titan", "ai2/jupiter")
+    )
+    assert queued.managed_cluster(LIMITS) is None
+    assert decide([queued], {"ai2/jupiter": 0, "ai2/titan": 0}) == []
+
+
+def test_a_placed_job_on_an_unbudgeted_cluster_is_left_alone():
+    stray = placed(
+        priority=URGENT,
+        cm_priority=HIGH,
+        clusters=("ai2/saturn", "ai2/jupiter"),
+        assigned_cluster="ai2/saturn",
+    )
+    assert stray.managed_cluster(LIMITS) is None
+    assert decide([stray], LIMITS) == []
+
+
+def test_a_placed_job_whose_node_is_unresolved_is_still_left_alone():
+    # Charged to every budget as a precaution, so managing it against one would
+    # hand out slots the accounting had spent on both.
+    unresolved = job(
+        priority=URGENT,
+        cm_priority=HIGH,
+        clusters=("ai2/titan", "ai2/jupiter"),
+        is_placed=True,
+        assigned_cluster=None,
+        placed_at=100.0,
+    )
+    assert unresolved.budget_clusters(LIMITS) == BUDGETED
+    assert unresolved.managed_cluster(LIMITS) is None
+    assert decide([unresolved], {"ai2/jupiter": 0, "ai2/titan": 0}) == []
+
+
+def test_a_replica_group_split_across_clusters_is_left_alone():
+    # Its slots come out of two budgets at once, so it cannot be granted or
+    # reclaimed coherently as one group.
+    ranks = group(2, group_id="split", cm_priority=HIGH, slots=8, priority=URGENT)
+    ranks = [
+        replace(rank, is_placed=True, placed_at=100.0, assigned_cluster=cluster)
+        for rank, cluster in zip(ranks, ("ai2/jupiter", "ai2/titan"))
+    ]
+    assert decide(ranks, {"ai2/jupiter": 0, "ai2/titan": 0}) == []
+
+
+def test_a_replica_group_placed_on_one_cluster_is_managed():
+    ranks = group(
+        2,
+        group_id="together",
+        cm_priority=NORMAL,
+        slots=8,
+        priority=URGENT,
+        clusters=("ai2/titan", "ai2/jupiter"),
+    )
+    ranks = [
+        replace(rank, is_placed=True, placed_at=100.0, assigned_cluster="ai2/jupiter")
+        for rank in ranks
+    ]
+    assert changes(decide(ranks, {"ai2/jupiter": 0})) == {r.id: NORMAL for r in ranks}
