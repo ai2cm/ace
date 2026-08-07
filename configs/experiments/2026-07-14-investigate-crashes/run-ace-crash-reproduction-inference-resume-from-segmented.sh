@@ -82,7 +82,7 @@ for case in "${CASES[@]}"; do
         --description 'Run inference with ACE' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
-        --priority high \
+        --priority low \
         --cluster $cluster \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
