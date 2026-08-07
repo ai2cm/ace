@@ -87,13 +87,19 @@ class MapAggregator:
     def _get_data(self) -> tuple[TensorMapping, TensorMapping]:
         dist = Distributed.get_instance()
         gen, target = {}, {}
+        # reduce_mean's all_reduce mutates its argument in place, so reduce a clone
+        # to keep this getter idempotent -- it is called once for the netCDF dataset
+        # and once for the wandb logs, and re-reducing the stored accumulators would
+        # inflate the maps by total_ranks.
         for name in sorted(list(self._gen_data.keys())):
             gen[name] = (
-                (dist.reduce_mean(self._gen_data[name]) / self._n_batches).cpu().numpy()
+                (dist.reduce_mean(self._gen_data[name].clone()) / self._n_batches)
+                .cpu()
+                .numpy()
             )
         for name in sorted(list(self._target_data.keys())):
             target[name] = (
-                (dist.reduce_mean(self._target_data[name]) / self._n_batches)
+                (dist.reduce_mean(self._target_data[name].clone()) / self._n_batches)
                 .cpu()
                 .numpy()
             )
