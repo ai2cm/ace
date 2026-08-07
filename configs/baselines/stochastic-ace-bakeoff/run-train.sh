@@ -152,11 +152,12 @@ run_training "arm6-80-10-sp10-ec.yaml"        "ace2s-bakeoff-arm6-80-10-sp10-ec-
 run_training "arm7-90-0-sp10-ec.yaml"         "ace2s-bakeoff-arm7-90-0-sp10-ec-rs0"         4
 run_training "arm8-80-10-sp10-ec-whiten-g0.5.yaml" "ace2s-bakeoff-arm8-80-10-sp10-ec-whiten-g0.5-rs0" 4
 
-# Residual ablation on the daily wave (added 2026-08-07). arm1 with
-# residual_prediction: false and NOTHING else changed — a strict one-knob A/B
-# against the completed arm 1 (wandb qhv9zf95) to test whether that wave's
-# small-scale precipitation power deficit is caused by residual prediction.
-# global_mean_removal and the 8/4 loader knobs are deliberately KEPT so the
-# comparison stays one-knob.
+# Residual ablation on the daily wave (added 2026-08-07, GMR dropped same day).
+# arm1 with residual_prediction: false AND the global_mean_removal block
+# removed, to test whether that wave's small-scale precipitation power deficit
+# (reports#51) is caused by residual prediction. Against the completed arm 1
+# (wandb qhv9zf95) that is a TWO-knob diff, residual + GMR: neither belongs to
+# the bake-off base recipe, since the donor nzccs8zd sets neither. The 8/4
+# loader knobs are unchanged.
 # The eight arms above are COMPLETE — launch this alone:  ./run-train.sh nores
-run_training "arm1-90-10-ec-nores.yaml"       "ace2s-bakeoff-arm1-90-10-ec-nores-rs0"       8
+run_training "arm1-90-10-ec-nores.yaml"       "ace2s-bakeoff-arm1-90-10-ec-nores-nogmr-rs0"       8

@@ -113,17 +113,21 @@ finished and are left as they ran.
 ## Residual ablation arm (2026-08-07)
 
 `arm1-90-10-ec-nores.yaml` is `arm1-90-10-ec.yaml` with
-`residual_prediction: true → false` and **nothing else** — one line, verified
-by diff. It is a strict one-knob A/B against the completed arm 1
-([qhv9zf95](https://wandb.ai/ai2cm/ace/runs/qhv9zf95)) testing whether this
-wave's small-scale precipitation power deficit
+`residual_prediction: true → false` **and** the `global_mean_removal` block
+removed — the two settings that reached the daily wave from the 4°/daily v2
+architecture block and that the donor
+[nzccs8zd](https://wandb.ai/ai2cm/ace/runs/nzccs8zd) does not set. It tests
+whether this wave's small-scale precipitation power deficit
 ([reports#51](https://github.com/ai2cm/reports/pull/51)) is caused by residual
 prediction.
 
-`global_mean_removal` and the `8`/`4` loader knobs are deliberately **kept**,
-matching qhv9zf95, so the comparison stays one-knob — this arm is a diagnostic
-against the daily wave, not a member of the corrected 6h recipe. It runs on
-8 GPUs where qhv9zf95 ran on 4; `batch_size: 8` is the global batch
+Against the completed arm 1
+([qhv9zf95](https://wandb.ai/ai2cm/ace/runs/qhv9zf95)) this is therefore a
+**two-knob** diff, residual and GMR, so a change in the precipitation spectrum
+is attributable to the pair rather than to residual prediction alone
+(Jeremy's call, 2026-08-07: run the ablation on the corrected recipe rather
+than hold GMR to match the old arm). The `8`/`4` loader knobs are unchanged.
+It runs on 8 GPUs where qhv9zf95 ran on 4; `batch_size: 8` is the global batch
 (`dist.local_batch_size` divides by rank count), so the effective batch and
 gradient are unchanged.
 
