@@ -54,10 +54,9 @@ from .evaluator import resolve_variable_metadata
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
 # Truncated to hour precision: segment start times in existing runs have always
-# been at least 6h apart, so finer precision would just add visual noise. Pass a
-# more precise segment_label_format (e.g. "segment_%Y%m%dT%H%M%S") if that stops
-# holding.
-DEFAULT_SEGMENT_LABEL_FORMAT = "segment_%Y%m%dT%H"
+# been at least 6h apart, so finer precision would just add visual noise. We can
+# reconsider if this changes.
+SEGMENT_LABEL_FORMAT = "segment_%Y%m%dT%H"
 
 
 @dataclasses.dataclass
@@ -342,7 +341,6 @@ def main(
     yaml_config: str,
     segments: int | None = None,
     override_dotlist: Sequence[str] | None = None,
-    segment_label_format: str = DEFAULT_SEGMENT_LABEL_FORMAT,
 ):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
@@ -356,7 +354,7 @@ def main(
             with GlobalTimer():
                 return run_inference_from_config(config)
         else:
-            run_segmented_inference(config, segments, segment_label_format)
+            run_segmented_inference(config, segments)
 
 
 def run_inference_from_config(config: InferenceConfig):
@@ -493,33 +491,27 @@ def _get_segment_label(
     timestep: datetime.timedelta,
     segment: int,
     n_forward_steps: int,
-    segment_label_format: str,
 ) -> str:
     segment_length = n_forward_steps * timestep
     current_start_time = initialization_time + segment * segment_length
-    current_label = current_start_time.strftime(segment_label_format)
+    current_label = current_start_time.strftime(SEGMENT_LABEL_FORMAT)
 
     if segment > 0:
         previous_start_time = initialization_time + (segment - 1) * segment_length
-        previous_label = previous_start_time.strftime(segment_label_format)
+        previous_label = previous_start_time.strftime(SEGMENT_LABEL_FORMAT)
         if previous_label == current_label:
             raise ValueError(
                 f"Consecutive segments have the same label ({previous_label!r} "
                 f"and {current_label!r}), meaning the current segment would "
-                f"overwrite the previous segment. Please use a more precise "
-                f"--segment-label-format than the current one "
-                f"({segment_label_format!r}) when submitting your segmented "
-                f"run to avoid this error."
+                f"overwrite the previous segment. Please open an issue on "
+                f"GitHub if having greater temporal precision in segmented run "
+                f"directory labels is an important use-case for you."
             )
 
     return current_label
 
 
-def run_segmented_inference(
-    config: InferenceConfig,
-    segments: int,
-    segment_label_format: str = DEFAULT_SEGMENT_LABEL_FORMAT,
-):
+def run_segmented_inference(config: InferenceConfig, segments: int):
     """Run inference in multiple segments.
 
     Args:
@@ -527,13 +519,6 @@ def run_segmented_inference(
             provided initial condition configuration will only be used for the first
             segment.
         segments: total number of segments desired. Only missing segments will be run.
-        segment_label_format: strftime format used to render each segment's start
-            time—specifically, the start time of the first (or only) ensemble
-            member—into its directory/wandb-run label. Defaults to hour precision,
-            which is truncated (not rounded), so distinct segment start times that
-            share an hour would collide; pass a more precise format
-            (e.g. ``"segment_%Y%m%dT%H%M%S"``) if that's a concern for your timestep
-            or initial condition time.
 
     Note:
         This is useful when running very long simulations or when saving a large
@@ -573,7 +558,6 @@ def run_segmented_inference(
             timestep,
             segment,
             n_forward_steps,
-            segment_label_format,
         )
         segment_dir = os.path.join(config.experiment_dir, segment_label)
         restart_path = os.path.join(segment_dir, "restart.nc")

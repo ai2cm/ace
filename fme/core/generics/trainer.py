@@ -54,8 +54,6 @@ import dataclasses
 import gc
 import logging
 import os
-import signal
-import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -66,6 +64,7 @@ import torch
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
+from fme.core.distributed.shutdown import add_post_shutdown_callback
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -217,18 +216,6 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
 
 
-def chain_signal_handler(sig, handler):
-    prev_handler = signal.getsignal(sig)
-
-    def on_sig(signum, frame):
-        handler(signum, frame)
-        if callable(prev_handler):
-            prev_handler(signum, frame)
-        sys.exit(1)
-
-    signal.signal(sig, on_sig)
-
-
 class Trainer:
     def __init__(
         self,
@@ -332,8 +319,13 @@ class Trainer:
         self._inference_callback: InferenceCallback = inference_callback
         self._validate_stepper_callback: ValidateStepper | None = validate_stepper
 
-        def on_terminate(signum, frame):
-            dist = Distributed.get_instance()
+        def save_restart_checkpoints_on_terminate():
+            """Preserve mid-epoch progress when the job is preempted.
+
+            Runs after the process group has been destroyed, so it must stay
+            free of collectives. `save_checkpoint` is root-only and reads local
+            state, which satisfies that.
+            """
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
@@ -349,10 +341,8 @@ class Trainer:
                     )
                 else:
                     self._save_restart_checkpoints()
-            dist.shutdown()
 
-        chain_signal_handler(signal.SIGTERM, on_terminate)
-        chain_signal_handler(signal.SIGINT, on_terminate)
+        add_post_shutdown_callback(save_restart_checkpoints_on_terminate)
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -796,12 +786,16 @@ class ValidationTask(Generic[BD, TO]):
             preserving the existing per-epoch construction semantics.
         weight: Contribution weight for the combined validation loss. Zero means
             the task runs but does not contribute to the metric.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
     """
 
     name: str
     data: GriddedDataABC[BD]
     aggregator_factory: Callable[[], AggregatorABC[TO]]
     weight: float = 0.0
+    evaluate_all_steps: bool = True
 
 
 def build_validation_callback(
@@ -823,6 +817,7 @@ def build_validation_callback(
                 label=task.name,
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
+                evaluate_all_steps=task.evaluate_all_steps,
             )
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:

@@ -23,12 +23,30 @@ class PerStepLossAggregator:
 
     def get_logs(self, label: str) -> dict[str, float]:
         dist = Distributed.get_instance()
+        # Ranks may record different keys, so agree on the global key set
+        # before reducing; that way every rank issues the same collectives.
+        gathered = dist.gather_object(sorted(self._sums.keys()))
+        universe: list[str] | None = None
+        if gathered is not None:
+            universe = sorted(set().union(*gathered))
+        keys: list[str] = dist.scatter_object(universe)
+        if len(keys) == 0:
+            return {}
+        device = get_device()
+        sums = torch.zeros(len(keys), device=device)
+        counts = torch.zeros(len(keys), device=device)
+        for i, key in enumerate(keys):
+            if key in self._sums:
+                sums[i] = self._sums[key].to(device)
+                counts[i] = self._counts[key]
+        sums = dist.reduce_sum(sums)
+        counts = dist.reduce_sum(counts)
         logs: dict[str, float] = {}
-        for key in sorted(self._sums.keys()):
-            count = self._counts[key]
-            logs[f"{label}/mean/{key}"] = float(
-                dist.reduce_mean(self._sums[key] / count).cpu().numpy()
-            )
+        for key, key_sum, key_count in zip(
+            keys, sums.cpu().tolist(), counts.cpu().tolist()
+        ):
+            if key_count > 0:
+                logs[f"{label}/mean/{key}"] = key_sum / key_count
         return logs
 
 

@@ -1,7 +1,7 @@
 from fme.core.cli import get_parser
 from fme.core.distributed.distributed import Distributed
 
-from .inference import DEFAULT_SEGMENT_LABEL_FORMAT, main
+from .inference import main
 
 if __name__ == "__main__":
     parser = get_parser()
@@ -17,23 +17,10 @@ if __name__ == "__main__":
             "to change."
         ),
     )
-    parser.add_argument(
-        "--segment-label-format",
-        type=str,
-        default=DEFAULT_SEGMENT_LABEL_FORMAT,
-        help=(
-            "strftime format used to render each segment's start time into its "
-            "folder/wandb-run label. Only used when --segments is provided. "
-            "Defaults to hour precision; pass a more precise format (e.g. "
-            "'segment_%%Y%%m%%dT%%H%%M%%S') if the timestep or initial "
-            "condition time require it."
-        ),
-    )
     args = parser.parse_args()
     with Distributed.context():
         main(
             args.yaml_config,
             segments=args.segments,
             override_dotlist=args.override,
-            segment_label_format=args.segment_label_format,
         )
