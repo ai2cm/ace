@@ -90,10 +90,15 @@ class TimeCoarsenConfig:
     Attributes:
         data_output_directory: Directory to save the coarsened datasets as zarr stores.
         stats_output_directory: Directory to save the stats of the coarsened datasets.
+        factor: Factor by which the time dimension is coarsened.
+        beaker_dataset: Name of the Beaker dataset to create from the coarsened stats.
+            If None, the coarsened stats are not uploaded to Beaker.
     """
 
     data_output_directory: str
     stats_output_directory: str
+    factor: int
+    beaker_dataset: str | None = None
 
 
 @dataclasses.dataclass
