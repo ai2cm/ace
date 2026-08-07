@@ -15,18 +15,26 @@ Decisions are made per *replica group*, not per job: Beaker runs a multi-node
 job as one job per rank, and a group granted urgent on only some ranks holds
 slots it cannot use.
 
+A job that is not granted an urgent slot is returned to the priority it was
+last seen at before the balancer raised it. Beaker keeps no record of that, so
+the balancer keeps its own -- see ``load_state``.
+
 Run ``python balance.py --dry-run`` to see what a pass would do.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
 import sys
+import tempfile
 import time
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from beaker import Beaker
 from beaker import beaker_pb2 as pb2
@@ -57,6 +65,18 @@ NAME_BY_PRIORITY[IMMEDIATE] = "immediate"
 #: ``urgent``, so a job holding one is just as much an occupant.
 ALLOCATED_PRIORITIES = (URGENT, IMMEDIATE)
 
+#: Priorities a job may be left resting at. ``urgent`` is excluded because
+#: resting there would defeat the allocation, and ``immediate`` because the
+#: balancer never hands it out.
+RESTABLE_PRIORITIES = (LOW, NORMAL, HIGH)
+
+#: Where the remembered resting priorities are kept between passes.
+DEFAULT_STATE_PATH = Path.home() / ".cache" / "beaker_balancer" / "resting.json"
+
+#: Bumped if the state file's shape ever changes; an unrecognised version is
+#: discarded rather than misread.
+STATE_VERSION = 1
+
 _CLUSTER_CONSTRAINT = pb2.JOB_PLACEMENT_CONSTRAINT_TYPE_CLUSTER
 
 # Why a job may not be modified. Identity-compared, so a caller can tell an
@@ -69,13 +89,64 @@ NO_ALLOCATION = "targets a cluster with no allocation"
 UNRESOLVED_CLUSTER = "landed on a node that cannot be resolved to a cluster"
 
 
-def resting_priority(cm_priority: int) -> int:
-    """Priority a job falls back to when it is not granted an urgent slot.
+def load_state(path: Path) -> dict[str, int]:
+    """Read the remembered resting priorities, or start empty.
 
-    Jobs labelled ``urgent`` rest at ``high``: resting at urgent would defeat
-    the purpose of the allocation.
+    Never raises: a balancer that will not run because its cache is unreadable
+    is worse than one that forgets. Forgetting is bounded -- an unknown job at
+    urgent falls back to ``high`` -- so a corrupt or missing file costs fidelity
+    for the jobs currently at urgent and nothing else.
     """
-    return HIGH if cm_priority == URGENT else cm_priority
+    try:
+        with open(path) as handle:
+            state = json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as err:
+        LOGGER.warning("could not read %s, starting with no memory: %s", path, err)
+        return {}
+    if not isinstance(state, dict) or state.get("version") != STATE_VERSION:
+        LOGGER.warning("ignoring %s: not a version %d state file", path, STATE_VERSION)
+        return {}
+    resting = state.get("resting")
+    if not isinstance(resting, dict):
+        LOGGER.warning("ignoring %s: no resting priorities in it", path)
+        return {}
+    return {
+        job_id: priority
+        for job_id, priority in resting.items()
+        if isinstance(job_id, str) and priority in RESTABLE_PRIORITIES
+    }
+
+
+def save_state(path: Path, resting: Mapping[str, int]) -> None:
+    """Write the remembered resting priorities, replacing the file atomically.
+
+    Never raises, for the same reason as ``load_state``: by the time this is
+    called the pass has already decided, and failing here would turn a full
+    disk into a balancer that stops balancing.
+
+    The replace is atomic so that a second balancer, or a process killed
+    mid-write, finds either the old file or the new one and never a half of
+    each. Two balancers still overwrite each other, but the loser only loses
+    memory, which costs the ``high`` fallback rather than correctness: the
+    allocation arithmetic does not depend on where a demoted job lands.
+    """
+    state = {"version": STATE_VERSION, "resting": dict(resting)}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(
+            "w", dir=path.parent, prefix=path.name, suffix=".tmp", delete=False
+        )
+        try:
+            with handle:
+                json.dump(state, handle)
+            os.replace(handle.name, path)
+        except BaseException:
+            os.unlink(handle.name)
+            raise
+    except OSError as err:
+        LOGGER.warning("could not write %s; the next pass starts fresh: %s", path, err)
 
 
 @dataclass(frozen=True)
@@ -111,6 +182,10 @@ class JobView:
     #: An interactive session has a person attached to it, so its priority is
     #: never ours to change.
     is_session: bool = False
+    #: The job this one was requeued from after a preemption, if any. Beaker
+    #: gives the retry a new id, so this is the only link back to what the
+    #: balancer remembered about the original.
+    retry_ancestor_id: str = ""
 
     @property
     def is_queued(self) -> bool:
@@ -192,6 +267,52 @@ class JobView:
         if self.unmanaged_reason(limits) is not None:
             return None
         return self.clusters[0]
+
+
+def resting_priority(job: JobView, remembered: Mapping[str, int]) -> int:
+    """Priority a job falls back to when it is not granted an urgent slot.
+
+    Where the user last had it, so that the balancer's only lasting effect on a
+    job is whether it held an urgent slot. A job sitting below urgent is already
+    resting: whatever it is at now is what its owner last chose, including a
+    change they made by hand since the previous pass. Only a job at urgent needs
+    memory, since raising it destroyed the record of where it came from.
+
+    ``high`` is the fallback for a job at urgent that has never been seen lower
+    -- submitted at urgent, or first seen there after the memory was lost.
+    Resting at urgent would defeat the purpose of the allocation.
+    """
+    if job.priority in RESTABLE_PRIORITIES:
+        return job.priority
+    return remembered.get(job.id, HIGH)
+
+
+def remember_priorities(
+    jobs: Iterable[JobView], remembered: Mapping[str, int]
+) -> dict[str, int]:
+    """Carry each opted-in job's pre-urgent priority into the next pass.
+
+    Called with what Beaker reports *before* a pass applies anything, so a job
+    the balancer is about to raise is recorded where its owner left it.
+
+    Jobs absent from this pass are dropped, which is how finished jobs are
+    evicted. A preempted job returns under a new id, and the priority Beaker
+    gives it back is the one the balancer set on its source rather than the one
+    it was submitted at, so the memory follows ``retry_ancestor_id``: without
+    that, every preemption of a granted job would ratchet it up to the ``high``
+    fallback.
+    """
+    updated: dict[str, int] = {}
+    for job in jobs:
+        if job.cm_priority is None:
+            continue  # never modified, so never restored
+        if job.priority in RESTABLE_PRIORITIES:
+            updated[job.id] = job.priority
+        elif job.id in remembered:
+            updated[job.id] = remembered[job.id]
+        elif job.retry_ancestor_id in remembered:
+            updated[job.id] = remembered[job.retry_ancestor_id]
+    return updated
 
 
 @dataclass(frozen=True)
@@ -354,22 +475,21 @@ def _eligible_for_urgent(group: ReplicaGroup) -> bool:
     return group.holds_urgent or group.is_queued
 
 
-def _reason(job: JobView, desired: int) -> str:
+def _reason(desired: int) -> str:
     """Why a job is being moved, in terms of the allocation.
 
-    A job that neither takes nor gives up an urgent slot is only being put where
-    its label says it rests -- a queued job submitted below its ``CM_PRIORITY``
-    is raised to it. Describing that as releasing a slot would report a change
-    to the allocation that did not happen.
+    Every change is one or the other: a job resting below urgent is left where
+    it is, so the balancer's only moves are onto an urgent slot and back off
+    again.
     """
-    if desired == URGENT:
-        return "grant urgent slot"
-    if job.priority == URGENT:
-        return "release urgent slot"
-    return "settle at resting priority"
+    return "grant urgent slot" if desired == URGENT else "release urgent slot"
 
 
-def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
+def decide(
+    jobs: Iterable[JobView],
+    limits: dict[str, int],
+    remembered: Mapping[str, int] | None = None,
+) -> list[Action]:
     """Compute the priority changes that bring urgent usage within allocation.
 
     The desired allocation is recomputed from scratch on every pass rather than
@@ -377,7 +497,12 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
     and granted urgent while their cluster has slots left. Because the walk
     starts clean, a high-priority group is always considered before a
     lower-priority one and never has to wait for slots a lesser one took.
+
+    ``remembered`` maps job id to the priority it was last seen at below urgent
+    (see ``remember_priorities``); a job missing from it that is currently at
+    urgent falls back to ``high``.
     """
+    remembered = {} if remembered is None else remembered
     groups, fixed = group_jobs(list(jobs), limits)
 
     # Slots held at urgent or immediate by jobs the balancer will not touch.
@@ -409,8 +534,12 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
 
     actions = []
     for group in groups:
-        desired = URGENT if group.id in granted else resting_priority(group.cm_priority)
+        is_granted = group.id in granted
         for job in group.jobs:
+            # Resting is per job, not per group: each rank goes back to where
+            # its own owner left it. A group is still granted all or nothing,
+            # so this never splits one.
+            desired = URGENT if is_granted else resting_priority(job, remembered)
             if desired == job.priority:
                 continue
             if job.is_placed and desired > job.priority:
@@ -425,7 +554,7 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
                 )
                 continue
             actions.append(
-                Action(job, group.cluster, job.priority, desired, _reason(job, desired))
+                Action(job, group.cluster, job.priority, desired, _reason(desired))
             )
 
     # Demotions first, so that any prefix of a partially applied pass is still
@@ -528,6 +657,7 @@ def fetch_jobs(
                 replica_group_id=job.system_details.replica_group_details.id,
                 # Only an interactive session carries an environment.
                 is_session=bool(job.environment_id),
+                retry_ancestor_id=job.retry_ancestor_id,
             )
         )
     return views
@@ -658,15 +788,25 @@ def run_pass(
     limits: dict[str, int],
     dry_run: bool,
     node_cache: dict[str, str | None] | None = None,
+    state_path: Path | None = None,
 ) -> int:
     """Run one balancing pass. Returns the number of changes applied."""
+    state_path = DEFAULT_STATE_PATH if state_path is None else state_path
     jobs = fetch_jobs(client, workspace, node_cache)
     LOGGER.info("read %d unfinished jobs in %s", len(jobs), workspace)
     report_usage(jobs, limits, "before")
     report_unreclaimable(jobs, limits)
     report_unmanageable(jobs, limits)
 
-    actions = decide(jobs, limits)
+    # Recorded from what Beaker reports now, and written before anything is
+    # applied: a job about to be raised has to be remembered where its owner
+    # left it, and the record has to survive the pass dying halfway through.
+    # A dry run writes nothing, so that reporting a pass cannot change one.
+    remembered = remember_priorities(jobs, load_state(state_path))
+    if not dry_run:
+        save_state(state_path, remembered)
+
+    actions = decide(jobs, limits, remembered)
     if not actions:
         LOGGER.info("no changes needed")
         return 0
@@ -767,6 +907,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="keep running, pausing this long between passes (default: one pass)",
     )
     parser.add_argument(
+        "--state",
+        type=Path,
+        default=DEFAULT_STATE_PATH,
+        help="where to remember the priority each job rests at when it is not "
+        f"granted an urgent slot (default: {DEFAULT_STATE_PATH})",
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true", help="include debug logging"
     )
     return parser
@@ -820,7 +967,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     node_cache: dict[str, str | None] = {}
     while True:
         try:
-            run_pass(client, args.workspace, limits, args.dry_run, node_cache)
+            run_pass(
+                client,
+                args.workspace,
+                limits,
+                args.dry_run,
+                node_cache,
+                args.state,
+            )
         except BeakerError:
             if args.interval is None:
                 raise

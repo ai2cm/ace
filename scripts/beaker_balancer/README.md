@@ -18,10 +18,10 @@ gantry run --env CM_PRIORITY=high ...
 The balancer only modifies jobs that set it. Jobs that don't are left alone
 entirely, though their urgent slots still count against the allocation.
 
-`CM_PRIORITY` is both a ranking and a resting place. It decides who gets a
-scarce urgent slot first, and what a job falls back to when it doesn't get one.
-A job labelled `urgent` rests at `high`, since resting at urgent would defeat
-the point.
+`CM_PRIORITY` is a ranking, and only a ranking: it decides who gets a scarce
+urgent slot first. It does not say what priority your job runs at. Submit at
+the priority you want; the balancer's only effect is whether you also hold an
+urgent slot, and it puts you back where you were when you don't.
 
 Things that stop a job being managed, each reported in the log as an aggregate
 count per pass:
@@ -52,12 +52,6 @@ Sessions and `immediate` jobs still count against the allocation — see
   eligible. If you label a job `low` to be a good citizen, it may still be made
   unpreemptible and charged to the team allocation. It is simply the first to
   be dropped when the allocation gets tight.
-- **A queued job below its `CM_PRIORITY` is raised to it, grant or no grant.**
-  The resting priority is where the label says the job belongs, so the balancer
-  moves it there in both directions. Submitting at `low` with `CM_PRIORITY=high`
-  therefore gets you `high`, not `low`, once a pass has seen the job. This costs
-  the allocation nothing — only `urgent` is budgeted — but it does change how the
-  job is scheduled against everyone else's.
 - **A demotion is permanent for the life of that run.** Beaker will not raise
   the priority of a job it has already placed, so a job the balancer drops
   during a busy spell stays down even after the spell passes. It becomes
@@ -65,6 +59,36 @@ Sessions and `immediate` jobs still count against the allocation — see
 - **Demotion deliberately targets the job with the most work at risk.** Within
   a `CM_PRIORITY` level, the job that has held its GPUs longest is the first to
   lose urgent, on the grounds that it has already had its turn.
+
+## Where a job goes when it gives up its slot
+
+Back to the priority it was last seen at below urgent — where you submitted it,
+or wherever you last moved it to by hand. The balancer's only lasting effect on
+a job is whether it held an urgent slot.
+
+Beaker keeps no record of that. A job carries one priority, `UpdateJobSourcePriority`
+overwrites it in place, and job events log scheduling rather than priority
+changes, so raising a job destroys the only evidence of where it came from. The
+balancer therefore keeps its own note, in a small JSON file (`--state`, by
+default `~/.cache/beaker_balancer/resting.json`).
+
+Consequences worth knowing:
+
+- **A job that is already resting is never touched.** If it is below urgent, it
+  is where its owner wants it, so the only changes the balancer ever makes are
+  onto an urgent slot and back off again.
+- **Move a job by hand and the balancer adopts it.** Whatever you set it to is
+  what it goes back to next time it gives up a slot. Except at urgent: setting
+  a job to urgent yourself only makes it a candidate, and it is dropped again if
+  the allocation cannot cover it.
+- **Lose the file and jobs currently at urgent fall back to `high`.** That is
+  also where a job goes if it was submitted at urgent and never seen lower.
+  Nothing else degrades: the allocation arithmetic does not depend on it, so a
+  lost, corrupt or unwritable file is logged and the pass carries on.
+- **A preempted job keeps its place.** Beaker requeues it under a new id, at the
+  priority the balancer set rather than the one it was submitted at, so the note
+  follows `retry_ancestor_id`. Without that, every preemption of a granted job
+  would ratchet it up to the `high` fallback.
 
 ## Replica groups
 
@@ -111,8 +135,8 @@ difference:
    Those are a fixed charge; only what is left is available.
 3. Walk the managed groups in `CM_PRIORITY` order, granting urgent while the
    group's cluster has room for all of it.
-4. Set every managed group to urgent if granted, or to its resting priority if
-   not.
+4. Set every managed group to urgent if granted, or back to where its ranks
+   were resting if not.
 
 Recomputing rather than adjusting incrementally is what makes step 3 work: a
 `high` group is always considered before any `normal` one, so it never has to
@@ -187,22 +211,25 @@ python balance.py --interval 180     # keep running, one pass every 3 minutes
 ```
 
 Useful flags: `--workspace` (default `ai2/ace`), `--limit CLUSTER=SLOTS`
-(repeatable; merges into the default allocation rather than replacing it), `-v`
-for debug logging. Cluster names in `--limit` are checked against Beaker at
-startup, since a typo would otherwise manage nothing and look exactly like a
-quiet cluster.
+(repeatable; merges into the default allocation rather than replacing it),
+`--state` (where to keep the remembered resting priorities), `-v` for debug
+logging. Cluster names in `--limit` are checked against Beaker at startup, since
+a typo would otherwise manage nothing and look exactly like a quiet cluster.
 
-A pass is stateless and converges, so it is safe to run from cron. Note that
-cron does not read your shell profile, so `BEAKER_TOKEN` has to be supplied
-explicitly:
+Each pass recomputes what it wants from the live workspace, so it converges and
+is safe to run from cron. Note that cron reads neither your shell profile nor
+necessarily the same `HOME`, so `BEAKER_TOKEN` has to be supplied explicitly and
+`--state` is worth pinning rather than left to default:
 
 ```cron
 BEAKER_TOKEN=...
-*/3 * * * * /path/to/python /path/to/balance.py >> /var/log/beaker_balancer.log 2>&1
+*/3 * * * * /path/to/python /path/to/balance.py --state ~/.cache/beaker_balancer/resting.json >> /var/log/beaker_balancer.log 2>&1
 ```
 
 There is no lockfile, so pick an interval comfortably longer than a pass (a pass
-is a few seconds against the current workspace).
+is a few seconds against the current workspace). Two balancers sharing a state
+file overwrite each other's notes rather than corrupting the file; the loser
+forgets, which costs the `high` fallback and nothing else.
 
 It runs as whoever's token is in the environment and modifies teammates' jobs
 too. A job it lacks permission to change is logged and skipped rather than
@@ -244,6 +271,10 @@ that granted nothing would satisfy every one of them, so one more asserts the
 other half: any candidate group left below urgent was left there because it did
 not fit in what remained, not because the walk overlooked it.
 
+One more says what the balancer is *for*: every change it makes moves a job
+onto an urgent slot or off one, never anywhere else. That is what makes the
+reason each change is logged under readable off the movement alone.
+
 Those invariants are all properties of `decide`, which assumes every call it
 plans succeeds. The ones that only exist once calls can fail belong to
 `run_pass` and are tested there.
@@ -253,6 +284,9 @@ from real protobuf messages, covering environment-variable and
 placement-constraint parsing, org-qualified cluster resolution, the
 scheduled-but-not-started case, slot accounting, dry-run, action ordering,
 fail-soft behaviour, the per-pass reports, and the entrypoint's one-shot and
-`--interval` modes. Its randomised passes make an arbitrary subset of the calls
+`--interval` modes. The resting-priority memory is covered across *pairs* of
+passes, since it only exists to carry something from one to the next: a job is
+put back where it was raised from, a hand-made change is adopted, a preemption
+does not lose the note, and a bad state file is survived. Its randomised passes make an arbitrary subset of the calls
 fail and assert the pass still never ends above the allocation — the property
 that the ordering alone does not buy.

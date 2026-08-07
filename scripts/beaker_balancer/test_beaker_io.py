@@ -5,6 +5,7 @@ These build real protobuf messages of the shapes Beaker returns and drive
 parsing and mutation paths are covered without touching a live workspace.
 """
 
+import json
 import logging
 import random
 from dataclasses import replace
@@ -36,6 +37,19 @@ WORKSPACE_ID = "ws-ace"
 LIMITS = {"ai2/jupiter": 72, "ai2/titan": 32}
 
 
+@pytest.fixture(autouse=True)
+def state_in_tmp_path(tmp_path, monkeypatch):
+    """Keep every pass's remembered resting priorities inside the test.
+
+    ``run_pass`` defaults to a real path under the user's home directory, so
+    without this the suite would read and overwrite the memory of a balancer
+    actually running on this machine -- and leak state between tests.
+    """
+    path = tmp_path / "resting.json"
+    monkeypatch.setattr(balance, "DEFAULT_STATE_PATH", path)
+    return path
+
+
 def make_job(
     job_id="job-1",
     name="train",
@@ -53,6 +67,7 @@ def make_job(
     replica_group_id="",
     environment_id="",
     workspace_id=WORKSPACE_ID,
+    retry_ancestor_id="",
 ):
     """Build a pb2.Job mirroring the shape Beaker returns for a live job."""
     job = pb2.Job(
@@ -63,6 +78,7 @@ def make_job(
         task_id="task-1",
         workload_id="workload-1",
         environment_id=environment_id,
+        retry_ancestor_id=retry_ancestor_id,
     )
     job.container_spec.resource_request.gpu_count = gpu_count
     for key, value in (env or {}).items():
@@ -411,7 +427,9 @@ def test_demotions_are_attempted_before_promotions():
         ]
     )
     run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
-    assert client.priority_calls == [("holder", NORMAL), ("contender", URGENT)]
+    # The holder was already at urgent when this balancer first saw it, so
+    # there is nothing remembered to put it back to and it falls back to high.
+    assert client.priority_calls == [("holder", HIGH), ("contender", URGENT)]
 
 
 def test_run_pass_is_idempotent():
@@ -567,7 +585,7 @@ def test_a_deferred_grant_is_retried_once_the_demotion_lands():
     # Next pass, with permission no longer refused: both halves go through.
     client = FakeClient(jobs, node_clusters=NODES)
     run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
-    assert client.priority_calls == [("theirs", NORMAL), ("mine", URGENT)]
+    assert client.priority_calls == [("theirs", HIGH), ("mine", URGENT)]
 
 
 def test_only_the_grant_the_deficit_pays_for_is_deferred():
@@ -825,3 +843,147 @@ def test_a_transient_beaker_error_does_not_kill_an_interval_loop(monkeypatch, ca
         balance.main(["--interval", "5"])
     assert len(passes) == 2
     assert "pass failed" in caplog.text
+
+
+# --- remembering where a job rests, across passes ---------------------------
+
+
+def test_a_job_is_returned_to_the_priority_it_was_raised_from(state_in_tmp_path):
+    """The point of the memory: give the slot back, leave everything else.
+
+    The first pass raises a ``normal`` job to urgent. By the second the
+    allocation has gone, and the job must land back on ``normal`` -- where its
+    owner submitted it -- rather than on the ``high`` fallback.
+    """
+    submitted = _labelled("mine", "high", priority=pb2.JOB_PRIORITY_NORMAL)
+    client = FakeClient([submitted])
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+    assert client.priority_calls == [("mine", URGENT)]
+
+    raised = _labelled(
+        "mine",
+        "high",
+        priority=pb2.JOB_PRIORITY_URGENT,
+        node_id="node-jup",
+        started=100,
+    )
+    client = FakeClient([raised])
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False)
+    assert client.priority_calls == [("mine", NORMAL)]
+
+
+def test_a_manual_change_is_adopted_as_the_new_resting_priority(state_in_tmp_path):
+    # The owner dropped the job to low between passes. That is now where it
+    # belongs, overriding the normal recorded when the balancer first saw it.
+    client = FakeClient([_labelled("mine", "high", priority=pb2.JOB_PRIORITY_NORMAL)])
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+
+    client = FakeClient([_labelled("mine", "high", priority=pb2.JOB_PRIORITY_LOW)])
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+    assert client.priority_calls == [("mine", URGENT)]
+
+    raised = _holder("mine", "high")
+    client = FakeClient([raised], node_clusters=NODES)
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False)
+    assert client.priority_calls == [("mine", LOW)]
+
+
+def test_a_requeued_job_is_not_ratcheted_up_by_preemption(state_in_tmp_path):
+    """A preempted job comes back at the priority the balancer set, not its own.
+
+    Beaker gives the retry a new id, so without following ``retry_ancestor_id``
+    every preemption would lose the submitted priority and leave the job at the
+    ``high`` fallback -- ratcheting the whole workspace up over time.
+    """
+    client = FakeClient([_labelled("first", "high", priority=pb2.JOB_PRIORITY_LOW)])
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8}, dry_run=False)
+    assert client.priority_calls == [("first", URGENT)]
+
+    # Preempted, requeued under a new id, handed back at urgent by the source.
+    retry = _labelled(
+        "second", "high", priority=pb2.JOB_PRIORITY_URGENT, retry_ancestor_id="first"
+    )
+    client = FakeClient([retry])
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False)
+    assert client.priority_calls == [("second", LOW)]
+
+
+def test_a_finished_job_is_dropped_from_the_state_file(state_in_tmp_path):
+    client = FakeClient([_labelled("mine", "high", priority=pb2.JOB_PRIORITY_NORMAL)])
+    run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert "mine" in json.loads(state_in_tmp_path.read_text())["resting"]
+
+    run_pass(FakeClient([]), "ai2/ace", LIMITS, dry_run=False)
+    assert json.loads(state_in_tmp_path.read_text())["resting"] == {}
+
+
+def test_a_dry_run_does_not_write_the_state_file(state_in_tmp_path):
+    # Reporting a pass must not change what a real one would then do.
+    client = FakeClient([_labelled("mine", "high", priority=pb2.JOB_PRIORITY_NORMAL)])
+    run_pass(client, "ai2/ace", LIMITS, dry_run=True)
+    assert not state_in_tmp_path.exists()
+
+
+def test_an_unreadable_state_file_does_not_stop_a_pass(state_in_tmp_path, caplog):
+    # Forgetting costs the high fallback; refusing to run costs the allocation.
+    state_in_tmp_path.write_text("{not json")
+    client = FakeClient([_holder("mine", "high")], node_clusters=NODES)
+    with caplog.at_level(logging.WARNING):
+        run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False)
+    assert client.priority_calls == [("mine", HIGH)]
+    assert "could not read" in caplog.text
+
+
+def test_an_unwritable_state_file_does_not_stop_a_pass(state_in_tmp_path, caplog):
+    state_in_tmp_path.parent.joinpath("resting.json").mkdir()
+    client = FakeClient([_labelled("mine", "high")])
+    with caplog.at_level(logging.WARNING):
+        applied = run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert applied == 1
+    assert "could not write" in caplog.text
+
+
+def test_state_from_a_future_version_is_ignored(state_in_tmp_path, caplog):
+    state_in_tmp_path.write_text(json.dumps({"version": 99, "resting": {"mine": LOW}}))
+    client = FakeClient([_holder("mine", "high")], node_clusters=NODES)
+    with caplog.at_level(logging.WARNING):
+        run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False)
+    assert client.priority_calls == [("mine", HIGH)]
+
+
+def test_a_nonsense_priority_in_the_state_file_is_ignored(state_in_tmp_path):
+    # Never restore a job to urgent or immediate, whatever the file claims.
+    state_in_tmp_path.write_text(
+        json.dumps({"version": 1, "resting": {"mine": URGENT, "other": 99}})
+    )
+    client = FakeClient([_holder("mine", "high")], node_clusters=NODES)
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 0}, dry_run=False)
+    assert client.priority_calls == [("mine", HIGH)]
+
+
+def test_the_state_is_written_before_any_change_is_applied(
+    state_in_tmp_path, monkeypatch
+):
+    """A pass that dies midway must still have recorded what it saw.
+
+    The record is what lets the next pass put the job back; taking it after the
+    fact would read the priority this pass had just imposed.
+    """
+    client = FakeClient([_labelled("mine", "high", priority=pb2.JOB_PRIORITY_NORMAL)])
+    seen = {}
+
+    def crash(*args, **kwargs):
+        seen.update(json.loads(state_in_tmp_path.read_text())["resting"])
+        raise BeakerError("died midway")
+
+    monkeypatch.setattr(client.job, "rpc_request", crash)
+    run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert seen == {"mine": NORMAL}
+
+
+def test_the_state_path_is_taken_from_the_command_line(tmp_path, monkeypatch):
+    chosen = tmp_path / "elsewhere" / "resting.json"
+    client = FakeClient([_labelled("mine", "high", priority=pb2.JOB_PRIORITY_NORMAL)])
+    _with_client(monkeypatch, client)
+    assert balance.main(["--state", str(chosen)]) == 0
+    assert json.loads(chosen.read_text())["resting"] == {"mine": NORMAL}
