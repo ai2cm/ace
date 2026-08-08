@@ -78,5 +78,7 @@ run_training() {
     ${override_args:+--override "${override_args[@]}"}
 }
 
-# 1-step pre-training only, matching the daily control it is compared against.
-run_training "cm4-snow-prognostic-1-step-pretrain-daily.yaml" "ace2s-snowprog-cm4-daily-1-step-pretrain-rs0" "seed=0"
+# 1-step pre-training only, matching the daily controls these are compared against.
+# To run a subset, comment out the ones you don't want.
+run_training "cm4-snow-prognostic-1-step-pretrain-daily.yaml"  "ace2s-snowprog-cm4-daily-1-step-pretrain-rs0"  "seed=0"
+run_training "era5-snow-prognostic-1-step-pretrain-daily.yaml" "ace2s-snowprog-era5-daily-1-step-pretrain-rs0" "seed=0"
