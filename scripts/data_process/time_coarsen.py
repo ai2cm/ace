@@ -171,13 +171,19 @@ def coarsen(ds: xr.Dataset, config: TimeCoarsenConfig) -> xr.Dataset:
     ds_snapshot = ds[config.snapshot_names].isel(
         time=slice(config.factor - 1, None, config.factor)
     )
-    ds_window = (
-        ds[config.window_names]
-        .coarsen(time=config.factor, boundary="trim")
-        .mean()
-        .drop("time")
-    )  # use time of snapshots
-    ds_coarsened = xr.merge([ds_snapshot, ds_window, ds_constants])
+    if config.window_names:
+        ds_window = (
+            ds[config.window_names]
+            .coarsen(time=config.factor, boundary="trim")
+            .mean()
+            .drop("time")
+        )  # use time of snapshots
+        ds_coarsened = xr.merge([ds_snapshot, ds_window, ds_constants])
+    else:
+        # No window (time-averaged) variables, e.g. a snapshot-only pressure-level
+        # dataset: skip the coarsen on an empty selection (which would raise on the
+        # missing time dimension).
+        ds_coarsened = xr.merge([ds_snapshot, ds_constants])
     _set_attributes(ds_coarsened, ds.attrs, config)
     return ds_coarsened
 
