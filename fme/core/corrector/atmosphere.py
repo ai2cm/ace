@@ -25,9 +25,50 @@ from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+# Hard-coded e-folding damping timescale, in seconds, applied to the
+# truncation wavenumber by SpectralHyperdiffusion. This is a quick
+# experiment hack -- there is currently no way to plumb corrector
+# properties through at inference time, so the strength is not
+# user-configurable. Chosen to match the default hyperdiffusion timescale
+# in Isca's spectral dynamical core:
+# https://github.com/ExeClim/Isca/blob/a290bc376d84d0ee83adbb80eb374b9f629c3534/src/atmos_spectral/model/spectral_dynamics.F90#L183
+_SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS = 8640.0  # 1/10th of a day
+
+
 @dataclasses.dataclass
-class RayleighDamping:
+class SpectralHyperdiffusion:
+    """Fourth-order (hyperviscosity) diffusive smoothing of specific_total_water_0.
+
+    Implemented via the spherical harmonic transform: each degree ``l`` of the
+    field's spectral decomposition is damped at a rate proportional to
+    ``(l * (l + 1)) ** 2``, normalized so that the truncation wavenumber (the
+    highest resolved degree) decays with
+    ``_SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS``. This makes the
+    correction scale-selective -- it targets the smallest resolved scales
+    while leaving synoptic-scale structure nearly untouched -- unlike plain
+    (second-order) diffusion, which damps all scales. The global mean
+    (``l == 0``) is unaffected, since its eigenvalue is zero.
+
+    The filter is applied as an exact exponential decay of each mode's
+    spectral coefficient over one step, which is unconditionally stable
+    regardless of how strong the diffusion is relative to the timestep
+    (unlike an explicit forward-Euler tendency).
+    """
+
     timestep_seconds: float
+    sht: torch.nn.Module
+    isht: torch.nn.Module
+
+    def __post_init__(self):
+        lmax = self.sht.lmax
+        l = torch.arange(lmax, dtype=torch.float32, device=fme.get_device())
+        eigenvalue = l * (l + 1)
+        normalized_eigenvalue = eigenvalue / eigenvalue[-1]
+        decay_rate = (
+            normalized_eigenvalue**2
+            / _SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS
+        )
+        self._decay = torch.exp(-self.timestep_seconds * decay_rate)[:, None]
 
     def __call__(
         self,
@@ -36,15 +77,9 @@ class RayleighDamping:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        timescales = {
-            "eastward_wind_0": 5 * 86400.0,
-            "northward_wind_0": 5 * 86400.0,
-        }
-        out: TensorDict = {}
-        for name, timescale in timescales.items():
-            rayleigh_tendency = -gen_data[name] / timescale
-            out[name] = gen_data[name] + self.timestep_seconds * rayleigh_tendency
-        return out, corrector_state
+        field = gen_data["specific_total_water_0"]
+        coeffs = self.sht(field) * self._decay.to(device=field.device)
+        return {"specific_total_water_0": self.isht(coeffs)}, corrector_state
 
 
 class AreaWeightedMean(Protocol):
@@ -316,6 +351,17 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             clamp with a straight-through estimator: the forward value is still
             clamped to be non-negative, but gradient flows as if the clamp had
             not happened, so clamped-negative cells still get a learning signal.
+
+    Note:
+        A scale-selective (fourth-order hyperviscosity) diffusive smoothing of
+        ``specific_total_water_0`` is always applied, right after
+        ``force_positive_names``, implemented via the spherical harmonic
+        transform with a hard-coded e-folding timescale at the truncation
+        wavenumber (see ``_SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS``).
+        This is an experiment-only hack (not user-configurable, and requires
+        a lat-lon grid with ``specific_total_water_0`` present) -- it should
+        be made opt-in before this corrector sees any use outside of the
+        experiment it was added for.
     """
 
     conserve_dry_air: bool = False
@@ -361,7 +407,13 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     keep_gradient=self.keep_gradient_through_clamps,
                 )
             )
-        corrections.append(RayleighDamping(timestep_seconds))
+        corrections.append(
+            SpectralHyperdiffusion(
+                timestep_seconds=timestep_seconds,
+                sht=gridded_operations.get_real_sht(),
+                isht=gridded_operations.get_real_isht(),
+            )
+        )
         if self.conserve_dry_air:
             if fme.get_device() == torch.device("mps", 0):
                 precision = torch.float32

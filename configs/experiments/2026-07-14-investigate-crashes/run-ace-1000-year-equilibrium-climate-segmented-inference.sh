@@ -2,7 +2,7 @@
 
 set -e
 
-DATE="2026-07-20"
+DATE="2026-08-08"
 WANDB_USERNAME=spencerc_ai2
 CONFIG_FILENAME="ace-som-1000-year-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -43,7 +43,7 @@ declare -A MODELS=( \
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-for seed in {5..5}; do
+for seed in {0..5}; do
     for model in "${!MODELS[@]}"; do
         dataset_id="${MODELS[$model]}"
 
@@ -59,7 +59,7 @@ for seed in {5..5}; do
             "
             python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $override
 
-            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-inference-rayleigh-damping-seed-${seed}"
+            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-inference-q0-hyperdiffusion-seed-${seed}"
             gantry run \
                 --name $job_name \
                 --description 'Run inference with ACE' \
