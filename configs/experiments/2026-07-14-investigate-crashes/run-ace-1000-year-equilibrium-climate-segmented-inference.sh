@@ -59,13 +59,13 @@ for seed in {0..5}; do
             "
             python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $override
 
-            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-inference-q0-hyperdiffusion-seed-${seed}"
+            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-q0-hyperdiffusion-seed-${seed}"
             gantry run \
                 --name $job_name \
                 --description 'Run inference with ACE' \
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-                --workspace ai2/ace \
-                --priority high \
+                --workspace ai2/climate-titan \
+                --priority urgent \
                 --cluster ai2/titan \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
@@ -79,7 +79,6 @@ for seed in {0..5}; do
                 --shared-memory 20GiB \
                 --weka climate-default:/climate-default \
                 --system-python \
-                --min-runtime 8h \
                 --install "pip install --no-deps ." \
                 -- python -I -m fme.ace.inference $CONFIG_PATH --override $override --segments 8
         done
