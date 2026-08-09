@@ -32,7 +32,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 # user-configurable. Chosen to match the default hyperdiffusion timescale
 # in Isca's spectral dynamical core:
 # https://github.com/ExeClim/Isca/blob/a290bc376d84d0ee83adbb80eb374b9f629c3534/src/atmos_spectral/model/spectral_dynamics.F90#L183
-_SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS = 8640.0  # 1/10th of a day
+_SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS = 864.0  # 1/100th of a day
 
 
 @dataclasses.dataclass
