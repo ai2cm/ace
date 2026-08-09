@@ -10,6 +10,7 @@ import torch
 import xarray as xr
 
 from fme.core.device import move_tensordict_to_device
+from fme.core.field_transform import FieldTransformConfig, transform_config_from_dict
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -32,6 +33,10 @@ class NormalizationConfig:
         fill_nans_on_denormalize: Whether to fill NaNs during denormalization. If
             true, on denormalization NaNs in the normalized input become global means in
             the denormalized output.
+        transforms: Mapping from variable names to pointwise invertible
+            transforms applied before the mean/std normalization and inverted
+            after denormalization. The means and stds for a transformed
+            variable must be computed in the transformed space.
     """
 
     global_means_path: str | pathlib.Path | None = None
@@ -40,6 +45,9 @@ class NormalizationConfig:
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
+    transforms: Mapping[str, FieldTransformConfig] = dataclasses.field(
+        default_factory=dict
+    )
 
     def __post_init__(self):
         using_path = (
@@ -80,13 +88,15 @@ class NormalizationConfig:
             self.stds = stds
             self.global_means_path = None
             self.global_stds_path = None
+        for transform in self.transforms.values():
+            transform.load()
 
     def build(self, names: list[str]):
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
         if using_path:
-            return get_normalizer(
+            normalizer = get_normalizer(
                 global_means_path=self.global_means_path,
                 global_stds_path=self.global_stds_path,
                 names=names,
@@ -96,12 +106,23 @@ class NormalizationConfig:
         else:
             means = {k: torch.tensor(self.means[k]) for k in names}
             stds = {k: torch.tensor(self.stds[k]) for k in names}
-            return StandardNormalizer(
+            normalizer = StandardNormalizer(
                 means=means,
                 stds=stds,
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
             )
+        if len(self.transforms) > 0:
+            for transform in self.transforms.values():
+                transform.load()
+            return TransformedNormalizer(
+                means=normalizer.means,
+                stds=normalizer.stds,
+                fill_nans_on_normalize=self.fill_nans_on_normalize,
+                fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+                transform_configs=dict(self.transforms),
+            )
+        return normalizer
 
 
 class NormalizeFn(Protocol):
@@ -194,6 +215,18 @@ class StandardNormalizer:
             k: torch.tensor(v, dtype=torch.float) for k, v in state["means"].items()
         }
         stds = {k: torch.tensor(v, dtype=torch.float) for k, v in state["stds"].items()}
+        transforms_state = state.get("transforms")
+        if transforms_state:
+            return TransformedNormalizer(
+                means=means,
+                stds=stds,
+                transform_configs={
+                    k: transform_config_from_dict(v)
+                    for k, v in transforms_state.items()
+                },
+                fill_nans_on_normalize=state.get("fill_nans_on_normalize", False),
+                fill_nans_on_denormalize=state.get("fill_nans_on_denormalize", False),
+            )
         return cls(
             means=means,
             stds=stds,
@@ -207,7 +240,67 @@ class StandardNormalizer:
             stds={k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
             fill_nans_on_normalize=self.fill_nans_on_normalize,
             fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+            transforms=dict(self.transform_configs),
         )
+
+    @property
+    def transform_configs(self) -> Mapping[str, FieldTransformConfig]:
+        return {}
+
+
+class TransformedNormalizer(StandardNormalizer):
+    """A StandardNormalizer that applies pointwise invertible transforms to
+    selected fields before the mean/std normalization and inverts them after
+    denormalization. The means and stds for transformed fields are statistics
+    of the transformed space.
+
+    When ``apply_mean=False`` (used to scale differences of fields), the
+    transform is skipped: a difference is not a state, so only the std
+    scaling applies.
+    """
+
+    def __init__(
+        self,
+        means: TensorDict,
+        stds: TensorDict,
+        transform_configs: Mapping[str, FieldTransformConfig],
+        fill_nans_on_normalize: bool = False,
+        fill_nans_on_denormalize: bool = False,
+    ):
+        super().__init__(
+            means=means,
+            stds=stds,
+            fill_nans_on_normalize=fill_nans_on_normalize,
+            fill_nans_on_denormalize=fill_nans_on_denormalize,
+        )
+        self._transform_configs = dict(transform_configs)
+        self._transforms = {k: c.build() for k, c in self._transform_configs.items()}
+
+    @property
+    def transform_configs(self) -> Mapping[str, FieldTransformConfig]:
+        return self._transform_configs
+
+    def normalize(self, tensors: TensorMapping, apply_mean: bool = True) -> TensorDict:
+        if apply_mean:
+            tensors = {
+                k: (self._transforms[k].forward(v) if k in self._transforms else v)
+                for k, v in tensors.items()
+            }
+        return super().normalize(tensors, apply_mean=apply_mean)
+
+    def denormalize(self, tensors: TensorMapping) -> TensorDict:
+        result = super().denormalize(tensors)
+        for k, transform in self._transforms.items():
+            if k in result:
+                result[k] = transform.inverse(result[k])
+        return result
+
+    def get_state(self):
+        state = super().get_state()
+        state["transforms"] = {
+            k: dataclasses.asdict(c) for k, c in self._transform_configs.items()
+        }
+        return state
 
 
 def _normalize(
@@ -306,6 +399,16 @@ def _combine_normalizers(
     means, stds = copy(base_normalizer.means), copy(base_normalizer.stds)
     means.update(override_normalizer.means)
     stds.update(override_normalizer.stds)
+    transforms = dict(base_normalizer.transform_configs)
+    transforms.update(override_normalizer.transform_configs)
+    if len(transforms) > 0:
+        return TransformedNormalizer(
+            means=means,
+            stds=stds,
+            transform_configs=transforms,
+            fill_nans_on_normalize=base_normalizer.fill_nans_on_normalize,
+            fill_nans_on_denormalize=base_normalizer.fill_nans_on_denormalize,
+        )
     return StandardNormalizer(
         means=means,
         stds=stds,
