@@ -55,14 +55,10 @@ class LossVsNoiseAggregator:
     """
     Aggregates binned diffusion losses as a function of sampled noise level.
 
-    The "all_channels" total is a per-sample SUM across channels when sigma is
-    shared (not channelwise) -- with channelwise sigma, no such sum is
-    well-defined, since each (sample, channel) pair can land in a different
-    noise bin, so each is instead recorded as its own independent point. Note
-    this differs from this class's pre-per-channel-sigma-support behavior, in
-    which "all_channels" was a per-sample MEAN across channels: the
-    "all_channels" wandb curve is not directly comparable in scale to runs
-    logged before that change.
+    Every (sample, channel) pair is its own independent point, binned at its
+    own noise level. With shared (non-channelwise) sigma, that's the same
+    sigma value for every channel of a sample, so the "all_channels" total is
+    a per-(sample, channel) mean, not a per-sample sum.
     """
 
     def __init__(
@@ -116,9 +112,11 @@ class LossVsNoiseAggregator:
         sigma = outputs.sigma.detach()
         if torch.any(sigma <= 0):
             raise ValueError("Sigma must be strictly positive for log10 binning")
+        if sigma.dim() not in (1, 2):
+            raise ValueError(
+                "Expected sigma to have shape (batch,) or (batch, channel)"
+            )
 
-        channelwise = sigma.dim() == 2
-        per_sample_total: torch.Tensor | None = None
         for i, (name, loss) in enumerate(outputs.per_sample_channel_loss.items()):
             # Register every channel up front (regardless of whether any sample
             # falls in the sigma range) so that under DDP all ranks accumulate
@@ -132,14 +130,12 @@ class LossVsNoiseAggregator:
                 self._channel_count[name] = torch.zeros(
                     self._n_bins, dtype=torch.int64, device=get_device()
                 )
-            if sigma.dim() == 1:
-                channel_sigma = sigma.flatten()
-            elif sigma.dim() == 2:
-                channel_sigma = sigma[:, i].flatten()
-            else:
-                raise ValueError(
-                    "Expected sigma to have shape (batch,) or (batch, channel)"
-                )
+            # Shared sigma broadcasts to every channel, so each (sample, channel)
+            # pair is always its own independent point, binned at its own noise
+            # level -- with shared sigma that's just the same level per sample.
+            channel_sigma = (
+                sigma.flatten() if sigma.dim() == 1 else sigma[:, i].flatten()
+            )
             channel_loss = loss.detach().flatten()
             if channel_loss.shape != channel_sigma.shape:
                 raise ValueError(
@@ -155,26 +151,7 @@ class LossVsNoiseAggregator:
                 self._accumulate(
                     values=channel_loss[in_range], bin_indices=bin_indices, name=name
                 )
-                if channelwise:
-                    self._total_sum.scatter_add_(0, bin_indices, channel_loss[in_range])
-                    self._total_count.scatter_add_(
-                        0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
-                    )
-            if not channelwise:
-                per_sample_total = (
-                    channel_loss
-                    if per_sample_total is None
-                    else per_sample_total + channel_loss
-                )
-
-        if not channelwise and per_sample_total is not None:
-            log_sigma = torch.log10(sigma.flatten())
-            in_range = (log_sigma >= self._log10_sigma_min) & (
-                log_sigma <= self._log10_sigma_max
-            )
-            if torch.any(in_range):
-                bin_indices = torch.bucketize(log_sigma[in_range], self._inner_edges)
-                self._total_sum.scatter_add_(0, bin_indices, per_sample_total[in_range])
+                self._total_sum.scatter_add_(0, bin_indices, channel_loss[in_range])
                 self._total_count.scatter_add_(
                     0, bin_indices, torch.ones_like(bin_indices, dtype=torch.int64)
                 )
