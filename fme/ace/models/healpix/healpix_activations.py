@@ -19,7 +19,7 @@
 
 import dataclasses
 
-import torch as th
+import torch
 import torch.nn as nn
 
 
@@ -30,11 +30,9 @@ class CappedGELUConfig:
 
     Parameters:
         cap_value: Cap value for the GELU function, default is 10.
-        enable_nhwc: Flag to enable NHWC data format, default is False.
     """
 
     cap_value: int = 10
-    enable_nhwc: bool = False
 
     def build(self) -> nn.Module:
         """
@@ -53,7 +51,7 @@ class CappedGELU(nn.Module):
     Example
     -------
     >>> capped_gelu_func = modulus.models.layers.CappedGELU()
-    >>> input = th.Tensor([[-2,-1],[0,1],[2,3]])
+    >>> input = torch.Tensor([[-2,-1],[0,1],[2,3]])
     >>> capped_gelu_func(input)
     tensor([[-0.0455, -0.1587],
             [ 0.0000,  0.8413],
@@ -65,12 +63,12 @@ class CappedGELU(nn.Module):
         """
         Args:
             cap_value: Maximum that values will be capped at
-            **kwargs: Keyword arguments to be passed to the `th.nn.GELU` function
+            **kwargs: Keyword arguments to be passed to the `torch.nn.GELU` function
         """
 
         super().__init__()
-        self.add_module("gelu", th.nn.GELU(**kwargs))
-        self.register_buffer("cap", th.tensor(cap_value, dtype=th.float32))
+        self.add_module("gelu", torch.nn.GELU(**kwargs))
+        self.register_buffer("cap", torch.tensor(cap_value, dtype=torch.float32))
 
     def forward(self, inputs):
         """
@@ -83,5 +81,5 @@ class CappedGELU(nn.Module):
         x = self.gelu(inputs)
         # Convert cap to a scalar value for clamping (ignores grad)
         cap_value = self.cap.item()
-        x = th.clamp(x, max=cap_value)
+        x = torch.clamp(x, max=cap_value)
         return x

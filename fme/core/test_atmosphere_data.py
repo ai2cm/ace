@@ -6,7 +6,7 @@ from fme.core.atmosphere_data import (
     _height_at_interface,
     compute_layer_thickness,
 )
-from fme.core.constants import LATENT_HEAT_OF_FREEZING
+from fme.core.constants import LATENT_HEAT_OF_FREEZING, LATENT_HEAT_OF_VAPORIZATION
 
 
 def test_compute_layer_thickness():
@@ -242,6 +242,66 @@ def test_frozen_precipitation_rate(fields, expected_sum):
 
     result = atmosphere_data.frozen_precipitation_rate
     torch.testing.assert_close(result, expected, check_dtype=False)
+
+
+def test_modified_data_empty_before_any_write():
+    shape = (2, 4)
+    atmosphere_data = AtmosphereData({"PRESsfc": torch.ones(shape)})
+    assert atmosphere_data.modified_data == {}
+
+
+def test_modified_data_records_concrete_key():
+    shape = (2, 4)
+    new_pressure = 2 * torch.ones(shape)
+    atmosphere_data = AtmosphereData({"PRESsfc": torch.ones(shape)})
+    atmosphere_data.set_surface_pressure(new_pressure)
+    modified = atmosphere_data.modified_data
+    assert set(modified) == {"PRESsfc"}
+    torch.testing.assert_close(modified["PRESsfc"], new_pressure)
+
+
+def test_modified_data_records_storage_key_not_standard_name():
+    # set_evaporation_rate writes the latent heat flux field, so the recorded
+    # key must be the concrete storage key, not "evaporation_rate".
+    shape = (2, 4)
+    atmosphere_data = AtmosphereData({"LHTFLsfc": torch.ones(shape)})
+    evaporation = 3 * torch.ones(shape)
+    atmosphere_data.set_evaporation_rate(evaporation)
+    modified = atmosphere_data.modified_data
+    assert set(modified) == {"LHTFLsfc"}
+    torch.testing.assert_close(
+        modified["LHTFLsfc"], evaporation * LATENT_HEAT_OF_VAPORIZATION
+    )
+
+
+def test_modified_data_records_multiple_writes():
+    shape = (2, 4)
+    atmosphere_data = AtmosphereData(
+        {
+            "PRESsfc": torch.ones(shape),
+            "PRATEsfc": torch.ones(shape),
+            "tendency_of_total_water_path_due_to_advection": torch.ones(shape),
+        }
+    )
+    atmosphere_data.set_precipitation_rate(2 * torch.ones(shape))
+    atmosphere_data.set_tendency_of_total_water_path_due_to_advection(
+        3 * torch.ones(shape)
+    )
+    modified = atmosphere_data.modified_data
+    assert set(modified) == {
+        "PRATEsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    }
+
+
+def test_modified_data_returns_references():
+    # The contract is out-of-place correction: modified_data returns the live
+    # tensors, not clones, so the caller diffs them against its own snapshot.
+    shape = (2, 4)
+    new_pressure = 2 * torch.ones(shape)
+    atmosphere_data = AtmosphereData({"PRESsfc": torch.ones(shape)})
+    atmosphere_data.set_surface_pressure(new_pressure)
+    assert atmosphere_data.modified_data["PRESsfc"] is atmosphere_data.data["PRESsfc"]
 
 
 def test_windspeed_at_10m():

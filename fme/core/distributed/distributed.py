@@ -11,6 +11,7 @@ from fme.core import metrics
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
+from .shutdown import handle_termination_signals
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -65,20 +66,34 @@ class Distributed:
 
     @classmethod
     @contextlib.contextmanager
-    def context(cls) -> Generator[None, None, None]:
+    def context(cls, handle_signals: bool = True) -> Generator[None, None, None]:
         """
         Context manager for initializing and shutting down the distributed backend.
 
         This should generally be used at the top level of the training script to
         wrap the entire training process, to ensure proper initialization and
         shutdown of the distributed backend.
+
+        Termination signals are handled for the lifetime of the context, so that
+        a preempted job tears the backend down instead of dropping its NVLink
+        peers. See `fme.core.distributed.shutdown`.
+
+        Args:
+            handle_signals: Install the termination handler. Pass `False` only
+                when something else owns the process's response to SIGTERM and
+                SIGINT -- the test suite, which wraps the whole session in this
+                context and needs Ctrl-C to keep interrupting pytest rather than
+                becoming a caught teardown. Every entrypoint wants the default.
         """
         if cls._entered:
             raise RuntimeError("Nested Distributed.context() is not supported.")
         cls._entered = True
         instance = cls.get_instance()
         try:
-            yield
+            with contextlib.ExitStack() as stack:
+                if handle_signals:
+                    stack.enter_context(handle_termination_signals(instance.shutdown))
+                yield
         except BaseException:
             # exit immediately to avoid hanging other ranks
             # the OS should clean up resources based on the non-zero exit
@@ -436,6 +451,9 @@ class Distributed:
 
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return self._distributed.spatial_reduce_sum(tensor)
+
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        return self._distributed.broadcast_spatial(tensor)
 
     def weighted_mean(
         self,

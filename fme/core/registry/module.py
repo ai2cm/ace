@@ -156,6 +156,10 @@ class ModuleSelector:
                 f"got {self.type} (available: {CONDITIONAL_BUILDERS})"
             )
         self._instance = self.registry.get(self.type, self.config)
+        # Normalize config to include the built ModuleConfig's default values,
+        # so that defaults are captured when the config is serialized (e.g.
+        # logged to Weights & Biases). See issue #596.
+        self.config = dataclasses.asdict(self._instance)
 
     @property
     def module_config(self) -> ModuleConfig:

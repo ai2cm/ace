@@ -103,3 +103,28 @@ def test_area_weighted_reduced_metric_empty():
     )
     metrics = metric.get()
     assert torch.isnan(metrics["anything"])
+
+
+def test_get_channel_mean_excludes_all_nan_target_channels():
+    """A variable whose target is entirely NaN (e.g. filled by
+    allow_missing_variables) is excluded from the channel mean."""
+    metric = AreaWeightedReducedMetric(
+        device=DEVICE, compute_metric=mock_area_weighted_metric
+    )
+    target = {
+        "a": torch.zeros(1, 1, device=DEVICE),
+        "b": torch.zeros(1, 1, device=DEVICE),
+        # "c" is missing from the data: entirely-NaN target.
+        "c": torch.full((1, 1), torch.nan, device=DEVICE),
+    }
+    gen = {
+        "a": torch.full((1, 1), 2.0, device=DEVICE),  # metric = 2
+        "b": torch.full((1, 1), 4.0, device=DEVICE),  # metric = 4
+        "c": torch.ones(1, 1, device=DEVICE),  # metric = NaN (target is NaN)
+    }
+    metric.record(target, gen)
+
+    # channel mean over the two valid-target channels; "c" excluded.
+    torch.testing.assert_close(
+        metric.get_channel_mean(), torch.tensor(3.0, device=DEVICE)
+    )
