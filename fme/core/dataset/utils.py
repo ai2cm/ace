@@ -122,11 +122,9 @@ def _get_array_selection(
     return selection
 
 
-# Opening a group and getting an array from it each read the corresponding
-# zarr.json, so without caching every sample re-reads one metadata document per
-# requested variable. The cached objects hold metadata and a store reference,
-# and the set of keys is fixed by the configured datasets (files x variables),
-# so these do not grow without bound at runtime.
+# Cache the opened zarr group and arrays to avoid repeated metadata reads when
+# loading multiple time slices from the same zarr store. Assumes that the zarr store is
+# not modified between calls.
 @functools.cache
 def _open_async_group(path: str):
     loop = asyncio.get_event_loop()
