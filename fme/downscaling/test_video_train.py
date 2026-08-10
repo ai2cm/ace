@@ -1,4 +1,8 @@
+import os
+
+import dacite
 import pytest
+import yaml
 
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.ema import EMAConfig
@@ -71,8 +75,6 @@ def test_video_trainer_runs_and_checkpoints(tmp_path):
     assert trainer.startEpoch == 2
     assert trainer.num_batches_seen > 0
     assert trainer.best_valid_loss < float("inf")
-    import os
-
     assert os.path.isfile(os.path.join(config.checkpoint_dir, "latest.ckpt"))
     assert os.path.isfile(os.path.join(config.checkpoint_dir, "best.ckpt"))
 
@@ -91,3 +93,40 @@ def test_video_trainer_resume(tmp_path):
     assert resumed.num_batches_seen == seen
     assert resumed.startEpoch == epoch
     assert resumed.best_valid_loss == trainer.best_valid_loss
+
+
+@pytest.mark.medium_duration
+def test_video_train_xshield_smoke_config_runs(tmp_path):
+    """Integration test for configs/video_train_xshield_smoke.yaml: loads it
+    through the same dacite path as video_train.py's CLI, with local
+    synthetic data swapped in for the real GCS X-SHiELD store the config's
+    manual smoke-run (see its header comment) points at.
+    """
+    paths = data_paths_helper(
+        tmp_path,
+        num_timesteps=18,
+        rename={
+            "var0": "eastward_wind_at_ten_meters",
+            "var1": "northward_wind_at_ten_meters",
+            "HGTsfc": "PRMSL",
+        },
+    )
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    with open(f"{this_dir}/configs/video_train_xshield_smoke.yaml") as f:
+        config_dict = yaml.safe_load(f)
+
+    experiment_dir = tmp_path / "output"
+    experiment_dir.mkdir()
+    config_dict["experiment_dir"] = str(experiment_dir)
+    for section in ("train_data", "validation_data"):
+        config_dict[section]["fine"] = [{"data_path": str(paths.fine)}]
+        config_dict[section]["coarse"] = [{"data_path": str(paths.fine)}]
+
+    config = dacite.from_dict(
+        data_class=VideoTrainerConfig,
+        data=config_dict,
+        config=dacite.Config(strict=True),
+    )
+    trainer = config.build()
+    trainer.train()
+    assert trainer.num_batches_seen > 0
