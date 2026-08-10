@@ -189,19 +189,6 @@ def reset_global_timer():
 
 
 @pytest.fixture(autouse=True)
-def reset_post_shutdown_callbacks():
-    # the registry is process-global and nothing clears it between tests -- the
-    # session-scoped context above installs no handler, so its usual
-    # clear-on-exit never runs either. Without this, every Trainer built by an
-    # earlier test would still be called on a signal raised by a later one
-    from fme.core.distributed.shutdown import clear_post_shutdown_callbacks
-
-    clear_post_shutdown_callbacks()
-    yield
-    clear_post_shutdown_callbacks()
-
-
-@pytest.fixture(autouse=True)
 def mock_gc_collect(monkeypatch):
     def mock_collect(*args, **kwargs):
         pass

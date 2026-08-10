@@ -257,6 +257,13 @@ class TorchDistributed(DistributedBackend):
         logger.info(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
 
+    def abort(self):
+        if not torch.distributed.is_initialized():
+            return
+        # aborts every process group's communicators; NCCL's abort is designed
+        # to be called from a second thread while collectives are in flight
+        torch.distributed.distributed_c10d._abort_process_group()
+
 
 def _gather_irregular(
     tensor: torch.Tensor,

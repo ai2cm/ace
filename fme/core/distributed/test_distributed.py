@@ -23,33 +23,33 @@ from fme.core.distributed.torch_distributed import (
 
 
 @pytest.mark.medium_duration
-def test_context_tears_down_the_backend_on_sigterm():
+def test_context_aborts_the_backend_on_sigterm():
     """Every entrypoint wraps its work in `Distributed.context()`.
 
-    Handling the signal here rather than in the Trainer is what puts a graceful
-    teardown on the inference and evaluation paths, and on the startup phase of
-    training before the Trainer exists.
+    Handling the signal here rather than in the Trainer is what covers the
+    inference and evaluation paths, and the startup phase of training before
+    the Trainer exists.
 
     Runs in a subprocess because the test session is itself already inside a
-    `Distributed.context()`, which refuses to nest.
+    `Distributed.context()`, which refuses to nest, and because the abort ends
+    in `os._exit`.
     """
     program = textwrap.dedent(
         """
-        import signal
+        import signal, threading
         from fme.core.distributed import Distributed
-        from fme.core.distributed.shutdown import add_post_shutdown_callback
 
-        Distributed.get_instance().shutdown = lambda: print("shutdown")
+        Distributed.get_instance().abort = lambda: print("abort", flush=True)
         with Distributed.context():
-            add_post_shutdown_callback(lambda: print("callback"))
             signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()  # the listener must end the process
         """
     )
     result = subprocess.run(
         [sys.executable, "-c", program], capture_output=True, timeout=120, text=True
     )
 
-    assert result.stdout.split() == ["shutdown", "callback"]
+    assert result.stdout.split() == ["abort"], result.stderr
     assert result.returncode == 128 + signal.SIGTERM
 
 
@@ -124,6 +124,42 @@ def test_model_shutdown_still_cleans_up_when_the_process_group_is_gone(monkeypat
     ModelTorchDistributed.shutdown(SimpleNamespace(_rank=0))  # type: ignore[arg-type]
 
     assert cleaned == ["cleanup"]
+
+
+@pytest.mark.parametrize("backend_cls", [TorchDistributed, ModelTorchDistributed])
+def test_abort_is_a_noop_when_the_process_group_is_gone(monkeypatch, backend_cls):
+    """A termination signal can arrive during the normal end-of-run teardown.
+
+    `_abort_process_group` raises when there is no group left, which would turn
+    the pre-exit abort into a logged failure on the way out.
+    """
+    aborted = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        torch.distributed.distributed_c10d,
+        "_abort_process_group",
+        lambda *args: aborted.append(args),
+    )
+
+    backend_cls.abort(SimpleNamespace(_rank=0))  # type: ignore[arg-type]
+
+    assert aborted == []
+
+
+@pytest.mark.parametrize("backend_cls", [TorchDistributed, ModelTorchDistributed])
+def test_abort_aborts_every_process_group(monkeypatch, backend_cls):
+    aborted = []
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(
+        torch.distributed.distributed_c10d,
+        "_abort_process_group",
+        lambda *args: aborted.append(args),
+    )
+
+    backend_cls.abort(SimpleNamespace(_rank=0))  # type: ignore[arg-type]
+
+    # called with no group: aborts all process groups, mesh subgroups included
+    assert aborted == [()]
 
 
 @pytest.mark.parametrize(
