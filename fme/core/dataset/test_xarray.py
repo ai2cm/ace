@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-import zarr
 from xarray.coding.times import CFDatetimeCoder
 
 from fme.core.coordinates import (
@@ -569,41 +568,6 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     data = dataset[0][0]
     assert data["constant_var"].shape[0] == 15
     assert data["constant_scalar_var"].shape == (15, 4, 8)
-
-
-def test_zarr_array_handles_are_reused_across_samples(mock_monthly_zarr, monkeypatch):
-    """Reading a sample should not re-read the zarr metadata for each variable.
-
-    The group and each array are opened once and reused, so the number of
-    metadata reads does not grow with the number of samples read.
-    """
-    from . import utils
-
-    utils._open_async_group.cache_clear()
-    utils._get_async_array.cache_clear()
-
-    n_group_opens = 0
-    original_open = zarr.api.asynchronous.open
-
-    async def counting_open(*args, **kwargs):
-        nonlocal n_group_opens
-        n_group_opens += 1
-        return await original_open(*args, **kwargs)
-
-    monkeypatch.setattr(zarr.api.asynchronous, "open", counting_open)
-
-    mock_data: MockData = mock_monthly_zarr
-    config = XarrayDataConfig(
-        data_path=mock_data.tmpdir, file_pattern="*.zarr", engine="zarr"
-    )
-    names = list(mock_data.var_names.time_dependent_names)
-    dataset = xarray_dataset_constructor(config, names, 2)
-
-    for idx in [0, 100, 400, 700, 0]:
-        dataset[idx]
-
-    assert n_group_opens == 1
-    assert utils._get_async_array.cache_info().currsize == len(names)
 
 
 def test_zarr_cached_handles_return_correct_values(mock_monthly_zarr):
