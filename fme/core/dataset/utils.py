@@ -136,7 +136,8 @@ def _open_async_group(path: str):
 @functools.cache
 def _get_async_array(path: str, name: str):
     loop = asyncio.get_event_loop()
-    return loop.run_until_complete(_open_async_group(path).getitem(name))
+    with zarr.config.set({"codec_pipeline.path": ZARRS_CODEC_PIPELINE}):
+        return loop.run_until_complete(_open_async_group(path).getitem(name))
 
 
 async def _get_items(arrays_and_selections):
