@@ -59,7 +59,7 @@ data:
     #stop: 295.0
     start: 0
     stop: 16
-  batch_size: 1
+  batch_size: 8
   num_data_workers: 2
   strict_ensemble: false
 logging:
