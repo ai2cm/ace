@@ -38,11 +38,18 @@ run_training() {
   # CM_PRIORITY is read by the beaker priority balancer, not by fme: high by
   # default, overridable per arm by a "# arg: --env CM_PRIORITY=low" config
   # header. gantry rejects a duplicated --env, so the default is dropped when
-  # the config supplies its own.
-  local cm_priority_args=(--env CM_PRIORITY=high)
-  if [[ "${extra_args[*]:-}" == *CM_PRIORITY=* ]]; then
-    cm_priority_args=()
-  fi
+  # the config supplies its own. Only a value right after --env (or the fused
+  # --env=NAME=value form) counts, so a lookalike name (MY_CM_PRIORITY=…), a
+  # quoted header, or the string appearing in some other flag's value keeps the
+  # default instead of silently leaving the job with no usable label.
+  local cm_priority_args=(--env CM_PRIORITY=high) arg prev=""
+  for arg in "${extra_args[@]}"; do
+    if [[ ("$prev" == --env && "$arg" == CM_PRIORITY=*) || "$arg" == --env=CM_PRIORITY=* ]]; then
+      cm_priority_args=()
+      break
+    fi
+    prev="$arg"
+  done
 
   gantry run \
     --name "$job_name" \
