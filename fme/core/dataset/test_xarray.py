@@ -628,8 +628,8 @@ def test_zarr_cached_handles_return_correct_values(mock_monthly_zarr):
                 data[name].shape,
             )
             np.testing.assert_array_equal(data[name].numpy(), expected)
-            
-            
+
+
 def _count_file_opens_while_reading(
     monkeypatch, dataset: XarrayDataset, indices: Sequence[int]
 ) -> int:
