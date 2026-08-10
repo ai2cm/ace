@@ -144,3 +144,17 @@ run_training "ace-train-config-1-step-pretrain-fg16-sr0p125.yaml" \
 
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-1-step-pre-training-rs0" 4
+
+# 3-step BPTT fine-tunes of the two completed control cells (added 2026-08-10).
+# The screen's standard fine-tune recipe (mostly-1-step, last-step-only,
+# detached) moved small-scale precipitation power only marginally and both of
+# its control fine-tunes died; these replace it with a fixed 3-step rollout,
+# the loss on all 3 steps, and BPTT (use_gradient_accumulation: false).
+# The two bottleneck cells' fine-tunes wait on their pretrains finishing.
+# The pretrain arms above are LIVE -- launch these alone:
+#   ./run-train.sh ft3-bptt
+run_training "ace-train-config-ft3-bptt.yaml" \
+  "ace2s-era5-ft3-bptt-multi-step-fine-tuning-rs0" 8
+
+run_training "ace-train-config-ft3-bptt-daily.yaml" \
+  "ace2s-era5-daily-ft3-bptt-multi-step-fine-tuning-rs0" 8
