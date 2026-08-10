@@ -570,6 +570,30 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     assert data["constant_scalar_var"].shape == (15, 4, 8)
 
 
+def test_zarr_cached_handles_return_correct_values(mock_monthly_zarr):
+    """Cached handles must return the same data as the underlying store."""
+    mock_data: MockData = mock_monthly_zarr
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir, file_pattern="*.zarr", engine="zarr"
+    )
+    names = list(mock_data.var_names.time_dependent_names)
+    dataset = xarray_dataset_constructor(config, names, 3)
+    source = xr.open_dataset(
+        mock_data.tmpdir / "data.zarr", engine="zarr", decode_timedelta=False
+    )
+    # repeat an index to confirm cached handles are not stateful across reads
+    for idx in [0, 250, 500, 0]:
+        data = dataset[idx][0]
+        for name in names:
+            expected = source[name].isel(time=slice(idx, idx + 3)).values
+            # scalar-per-time variables are broadcast over the spatial dims
+            expected = np.broadcast_to(
+                expected.reshape(expected.shape + (1,) * (3 - expected.ndim)),
+                data[name].shape,
+            )
+            np.testing.assert_array_equal(data[name].numpy(), expected)
+
+
 def _count_file_opens_while_reading(
     monkeypatch, dataset: XarrayDataset, indices: Sequence[int]
 ) -> int:
