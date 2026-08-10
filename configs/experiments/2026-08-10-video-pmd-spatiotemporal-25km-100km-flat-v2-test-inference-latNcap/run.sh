@@ -20,7 +20,7 @@ JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2-test-inference-
 CONFIG_FILENAME="video_inference.yaml"
 WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/titan"
-N_GPUS=4
+N_GPUS=2
 CHECKPOINT_DATASET="01KZ9JHJ9JWXMSQQKRTA6EEECW"
 WANDB_SECRET="CHLOE_WANDB_API_KEY"
 
@@ -33,7 +33,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run --allow-dirty \
     --name "$JOB_NAME" \
-    --description 'Video PMD spatiotemporal v2 test-set inference, NORTHERN polar cap, lat 44..88, full longitude, 4-member ensemble, flat/independent noise, 5 channels, 25km/100km, LR-endpoints-in/HR-full-out. Checkpoint is epoch 41/200 (crashed, not resumed -- see yaml header). 4x GPU DDP on titan.' \
+    --description 'Video PMD spatiotemporal v2 test-set inference, NORTHERN polar cap, lat 44..88, full longitude, 4-member ensemble, flat/independent noise, 5 channels, 25km/100km, LR-endpoints-in/HR-full-out. Checkpoint is epoch 41/200 (crashed, not resumed -- see yaml header). 2x GPU DDP on titan.' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
