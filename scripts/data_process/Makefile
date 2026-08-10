@@ -255,6 +255,10 @@ era5_1deg_16layer_stats_beaker_dataset:
 era5_2deg_stats_beaker_dataset:
 	./compute_stats.sh --config configs/era5-2deg-8layer-1940-2025.yaml
 
+.PHONY: ufs_replay_ocean_stats
+ufs_replay_ocean_stats:
+	./compute_stats.sh --config configs/ufs-replay-ocean-1deg-19level.yaml
+
 .PHONY: compute_cm4_trial_run_atmosphere_dataset
 compute_cm4_trial_run_atmosphere_dataset:
 	python -u compute_dataset.py \
