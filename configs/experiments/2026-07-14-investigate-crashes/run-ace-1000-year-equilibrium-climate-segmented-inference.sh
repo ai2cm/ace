@@ -67,7 +67,7 @@ for seed in {0..5}; do
                 --workspace ai2/ace \
                 --priority high \
                 --cluster ai2/titan \
-                --env CM_PRIORITY high \
+                --env CM_PRIORITY=high \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
                 --env WANDB_JOB_TYPE=inference \
