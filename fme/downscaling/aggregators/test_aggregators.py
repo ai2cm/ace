@@ -251,11 +251,8 @@ def test_loss_vs_noise_aggregator_get_wandb(prefix: str):
 
 
 def test_loss_vs_noise_aggregator_all_channels_totals_sum_across_channels():
-    """With a shared (non-channelwise) sigma, the "all_channels" total is a
-    per-sample SUM across channels, not a mean -- this changed from the
-    pre-existing mean behavior when per-channel sigma binning was added, so
-    the "all_channels" wandb curve is on a different scale than runs logged
-    before this change. This test locks in the new (sum) semantics.
+    """Locks in the sum (not mean) all_channels semantics for shared sigma,
+    see LossVsNoiseAggregator's docstring.
     """
     aggregator = LossVsNoiseAggregator(n_bins=8)
     outputs = ModelOutputs(

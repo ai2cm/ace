@@ -117,10 +117,6 @@ class LossVsNoiseAggregator:
         if torch.any(sigma <= 0):
             raise ValueError("Sigma must be strictly positive for log10 binning")
 
-        # With a shared per-sample sigma every channel falls in the same bin, so
-        # the all_channels total is one observation per sample (summed across
-        # channels). With channelwise sigma each (sample, channel) is its own
-        # point binned at its own noise level.
         channelwise = sigma.dim() == 2
         per_sample_total: torch.Tensor | None = None
         for i, (name, loss) in enumerate(outputs.per_sample_channel_loss.items()):
