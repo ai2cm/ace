@@ -70,8 +70,7 @@ def load_video_model(
     checkpoint contains -- but ``DummyWrapper`` does *not* override those
     methods, so loading directly into ``model.module`` only works under DDP.
     Loading into ``getattr(model.module, "module", model.module)`` instead
-    reaches the raw net directly in both cases (mirrors the proven pattern in
-    ``toy/eval_video_ckpt.py``).
+    reaches the raw net directly in both cases.
     """
     model = model_config.build()
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -179,8 +178,7 @@ def run_inference(config: VideoInferenceConfig) -> None:
     # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),
     # generated everywhere else. If the dataloader's drop_last truncates the
     # final partial batch, the tail of this array is simply never written and
-    # will show up as a gap (fill value) in the output -- see run.sh / README
-    # verification notes.
+    # will show up as a gap (fill value) in the output.
     frame_source = np.ones(n_time, dtype=np.int8)
     frame_source[0::clip_stride] = 0
 
