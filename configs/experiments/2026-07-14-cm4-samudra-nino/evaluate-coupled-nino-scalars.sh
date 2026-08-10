@@ -14,7 +14,6 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 COMPACT_SCRIPT="${SCRIPT_PATH}/compact_nino_scalar_forecasts.py"
-BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 # Single GPU: raw netCDF writers are not multi-rank safe (all ranks open the
 # same /results path). Matches evaluate-nino-scalars.sh.
 N_GPUS=1
@@ -23,10 +22,34 @@ cd "$REPO_ROOT"
 
 read -r -a config_filenames <<< "$CONFIG_FILENAMES"
 
+# Gantry runs the pushed commit, not the working tree, so a file that exists
+# locally but is uncommitted or unpushed is simply absent on the worker. Fail
+# here instead of after the job has queued and started.
+check_shipped() {
+    local path=$1
+    if ! git cat-file -e "HEAD:$path" 2>/dev/null; then
+        echo "ERROR: $path is not committed at HEAD; the worker will not see it." >&2
+        exit 1
+    fi
+    if ! git diff --quiet HEAD -- "$path"; then
+        echo "ERROR: $path has uncommitted changes that will not be shipped." >&2
+        exit 1
+    fi
+}
+
+if [[ -z $(git branch -r --contains HEAD 2>/dev/null) ]]; then
+    echo "ERROR: HEAD is not on any remote branch; push before launching." >&2
+    exit 1
+fi
+
+check_shipped "$COMPACT_SCRIPT"
 for config_filename in "${config_filenames[@]}"; do
+    check_shipped "${SCRIPT_PATH}/${config_filename}"
     python -m fme.coupled.validate_config --config_type evaluator \
         "${SCRIPT_PATH}/${config_filename}"
 done
+
+BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 
 run_eval() {
     local config_filename=$1
