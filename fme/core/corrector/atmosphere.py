@@ -36,6 +36,36 @@ _SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS = 8640.0  # 1/10th of a day
 
 
 @dataclasses.dataclass
+class RayleighDamping:
+    """Linear (Rayleigh) damping of the horizontal wind components.
+
+    Relaxes eastward_wind_0 and northward_wind_0 back toward zero with a
+    hard-coded e-folding timescale, applied as an explicit forward-Euler
+    tendency over one step. This is an experiment-only hack -- like
+    SpectralHyperdiffusion below, it is not user-configurable.
+    """
+
+    timestep_seconds: float
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ) -> tuple[TensorDict, CorrectorState | None]:
+        timescales = {
+            "eastward_wind_0": 5 * 86400.0,
+            "northward_wind_0": 5 * 86400.0,
+        }
+        out: TensorDict = {}
+        for name, timescale in timescales.items():
+            rayleigh_tendency = -gen_data[name] / timescale
+            out[name] = gen_data[name] + self.timestep_seconds * rayleigh_tendency
+        return out, corrector_state
+
+
+@dataclasses.dataclass
 class SpectralHyperdiffusion:
     """Fourth-order (hyperviscosity) diffusive smoothing of specific_total_water_0.
 
@@ -353,15 +383,17 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             not happened, so clamped-negative cells still get a learning signal.
 
     Note:
-        A scale-selective (fourth-order hyperviscosity) diffusive smoothing of
-        ``specific_total_water_0`` is always applied, right after
-        ``force_positive_names``, implemented via the spherical harmonic
-        transform with a hard-coded e-folding timescale at the truncation
-        wavenumber (see ``_SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS``).
-        This is an experiment-only hack (not user-configurable, and requires
-        a lat-lon grid with ``specific_total_water_0`` present) -- it should
+        Two corrections are always applied, right after ``force_positive_names``:
+        Rayleigh damping of ``eastward_wind_0`` and ``northward_wind_0`` toward
+        zero, and a scale-selective (fourth-order hyperviscosity) diffusive
+        smoothing of ``specific_total_water_0``, implemented via the spherical
+        harmonic transform with a hard-coded e-folding timescale at the
+        truncation wavenumber (see
+        ``_SPECIFIC_TOTAL_WATER_DIFFUSION_TIMESCALE_SECONDS``). These are
+        experiment-only hacks (not user-configurable, and the latter requires
+        a lat-lon grid with ``specific_total_water_0`` present) -- they should
         be made opt-in before this corrector sees any use outside of the
-        experiment it was added for.
+        experiment they were added for.
     """
 
     conserve_dry_air: bool = False
@@ -407,6 +439,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     keep_gradient=self.keep_gradient_through_clamps,
                 )
             )
+        corrections.append(RayleighDamping(timestep_seconds))
         corrections.append(
             SpectralHyperdiffusion(
                 timestep_seconds=timestep_seconds,
