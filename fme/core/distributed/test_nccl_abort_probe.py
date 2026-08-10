@@ -12,5 +12,12 @@ requires_two_gpus = pytest.mark.skipif(
 @pytest.mark.slow
 @pytest.mark.serial
 @requires_two_gpus
-def test_sigterm_abort_releases_wedged_rank_and_fabric_survives(tmp_path):
-    assert run_probe(nproc=2, work_dir=tmp_path)
+def test_abort_on_sigterm_during_live_collectives(tmp_path):
+    assert run_probe(nproc=2, work_dir=tmp_path, scenarios=("healthy",))
+
+
+@pytest.mark.slow
+@pytest.mark.serial
+@requires_two_gpus
+def test_abort_on_sigterm_releases_wedged_rank(tmp_path):
+    assert run_probe(nproc=2, work_dir=tmp_path, scenarios=("wedge",))

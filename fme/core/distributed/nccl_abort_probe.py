@@ -1,13 +1,16 @@
 """Empirical probe: on SIGTERM, does aborting the NCCL communicators from a
-non-main thread release a rank wedged inside a collective, and leave the GPU
-fabric healthy after every rank has exited?
+non-main thread quiesce this rank's fabric traffic, and leave the GPU fabric
+healthy after every rank has exited?
 
 This is the load-bearing question for replacing the collective teardown of
-ai2cm/ace#1398 with communicator abort. The scenario reproduces the preemption
-state that cordons nodes: rank 0 abandons a collective its peers have entered,
-so the peers' main threads are blocked in a stream sync and cannot service a
-signal; SIGTERM then arrives at every rank, as it does when the scheduler
-preempts the job.
+ai2cm/ace#1398 with communicator abort. Two scenarios, each followed by a
+fresh NCCL job on the same GPUs as a fabric health check:
+
+- ``healthy``: every rank is in a live all-reduce loop when SIGTERM arrives —
+  the common preemption, where the abort races an active collective.
+- ``wedge``: rank 0 abandons a collective its peers have entered, so the
+  peers' main threads are blocked in a stream sync and cannot service a
+  signal — the pathological preemption that cordons nodes today.
 
 Run directly on a multi-GPU machine::
 
@@ -20,6 +23,7 @@ on NVSwitch nodes. Do not run it on a shared node.
 
 import argparse
 import os
+import platform
 import shutil
 import signal
 import socket
@@ -36,6 +40,9 @@ import torch.distributed as dist
 
 _PREFIX = "abort-probe:"
 _NEVER = 3600.0
+# 32 MiB, comparable to a DDP gradient bucket: large enough for the
+# Simple/NVLS protocols a training job uses, not the small-message LL path.
+_TENSOR_NUMEL = 1 << 23
 
 
 def _mark(message: str) -> None:
@@ -84,8 +91,27 @@ def _init_nccl() -> tuple[int, torch.Tensor]:
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
     dist.init_process_group("nccl", timeout=timedelta(minutes=5))
-    tensor = torch.ones(1 << 16, device=torch.device("cuda", local_rank))
+    tensor = torch.ones(_TENSOR_NUMEL, device=torch.device("cuda", local_rank))
     return rank, tensor
+
+
+def _run_healthy_worker(ready_dir: Path, grace: float, abort_comms: bool) -> None:
+    rank = int(os.environ["RANK"])
+    _install_sigterm_listener(rank, grace, abort_comms)
+    rank, tensor = _init_nccl()
+    iterations = 0
+    while True:
+        try:
+            tensor.fill_(1.0)
+            dist.all_reduce(tensor)
+            torch.cuda.synchronize()
+        except BaseException as exc:
+            _mark(f"rank {rank} loop raised {type(exc).__name__} after abort")
+            time.sleep(_NEVER)  # the listener owns the exit
+        iterations += 1
+        if iterations == 3:
+            _mark(f"rank {rank} loop running")
+            (ready_dir / f"looping_rank{rank}").touch()
 
 
 def _run_wedge_worker(ready_dir: Path, grace: float, abort_comms: bool) -> None:
@@ -157,31 +183,47 @@ def _print_log(title: str, log_path: Path) -> str:
     return text
 
 
-def _print_topology() -> None:
+def _print_node_info(moment: str) -> None:
+    node_id = os.environ.get("BEAKER_NODE_ID", "")
+    sys.stdout.write(f"\n----- node ({moment}) -----\n")
+    sys.stdout.write(f"hostname: {platform.node()}  BEAKER_NODE_ID: {node_id}\n")
     nvidia_smi = shutil.which("nvidia-smi")
-    if nvidia_smi is None:
-        return
-    result = subprocess.run(
-        [nvidia_smi, "topo", "-m"], capture_output=True, text=True, check=False
-    )
-    sys.stdout.write(f"\n----- GPU topology -----\n{result.stdout}\n")
+    if nvidia_smi is not None:
+        # topology tells us whether a pass is fabric evidence (P2P/NVLink) or
+        # only mechanism evidence; link error counters catch a fault that a
+        # succeeding healthcheck job would mask
+        for args in (["topo", "-m"], ["nvlink", "-e"]):
+            result = subprocess.run(
+                [nvidia_smi, *args], capture_output=True, text=True, check=False
+            )
+            sys.stdout.write(f"\n$ nvidia-smi {' '.join(args)}\n{result.stdout}\n")
     sys.stdout.flush()
 
 
-def _run_wedge_job(
-    nproc: int, grace: float, abort_comms: bool, work_dir: Path
-) -> tuple[str, list[str]]:
-    """Run the wedge scenario, SIGTERM it, and return (log text, failures)."""
+def _expected_ready(scenario: str, nproc: int) -> set[str]:
+    if scenario == "healthy":
+        return {f"looping_rank{rank}" for rank in range(nproc)}
+    ready = {f"warmup_rank{rank}" for rank in range(nproc)}
+    return ready | {f"wedging_rank{rank}" for rank in range(1, nproc)}
+
+
+def _run_scenario_job(
+    scenario: str, nproc: int, grace: float, abort_comms: bool, work_dir: Path
+) -> list[str]:
+    """Run one preemption scenario, SIGTERM it, and return failures."""
     failures: list[str] = []
     ready_dir = work_dir / "ready"
     ready_dir.mkdir()
-    log_path = work_dir / "wedge.log"
-    script_args = ["--role=wedge", f"--ready-dir={ready_dir}", f"--grace={grace}"]
+    log_path = work_dir / f"{scenario}.log"
+    script_args = [
+        f"--role={scenario}",
+        f"--ready-dir={ready_dir}",
+        f"--grace={grace}",
+    ]
     if not abort_comms:
         script_args.append("--no-abort")
     env = os.environ | {"NCCL_DEBUG": "INFO"}  # shows which transport was used
-    expected_ready = {f"warmup_rank{rank}" for rank in range(nproc)}
-    expected_ready |= {f"wedging_rank{rank}" for rank in range(1, nproc)}
+    expected_ready = _expected_ready(scenario, nproc)
     with open(log_path, "wb") as log:
         proc = subprocess.Popen(
             _torchrun_command(nproc, script_args),
@@ -197,11 +239,11 @@ def _run_wedge_job(
                     break
                 time.sleep(0.5)
             if proc.poll() is not None:
-                failures.append("wedge job exited before it was signalled")
+                failures.append(f"{scenario} job exited before it was signalled")
             elif not expected_ready <= {path.name for path in ready_dir.iterdir()}:
-                failures.append("wedge job did not reach the wedge in 120s")
+                failures.append(f"{scenario} job did not reach readiness in 120s")
             else:
-                time.sleep(2.0)  # let the wedged ranks block in the stream sync
+                time.sleep(2.0)  # let the ranks settle into the scenario
                 # SIGTERM to torchrun, which forwards it to every rank -- the
                 # same path a scheduler preemption takes.
                 proc.send_signal(signal.SIGTERM)
@@ -210,17 +252,21 @@ def _run_wedge_job(
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
-    log_text = _print_log("wedge job log", log_path)
-    if not failures:
-        for rank in range(nproc):
-            for event in ["listener received SIGTERM", "exiting 143"] + (
-                ["abort returned"] if abort_comms else []
-            ):
-                if f"rank {rank} {event}" not in log_text:
-                    failures.append(f"rank {rank}: no '{event}' marker")
+    log_text = _print_log(f"{scenario} job log", log_path)
+    if failures:
+        return failures
+    for rank in range(nproc):
+        for event in ["listener received SIGTERM", "exiting 143"] + (
+            ["abort returned"] if abort_comms else []
+        ):
+            if f"rank {rank} {event}" not in log_text:
+                failures.append(f"{scenario}: rank {rank}: no '{event}' marker")
+    if scenario == "wedge":
         for rank in range(1, nproc):
             if f"rank {rank} main thread released from wedge" not in log_text:
-                failures.append(f"rank {rank}: main thread never released from wedge")
+                failures.append(
+                    f"wedge: rank {rank}: main thread never released from wedge"
+                )
     if not failures and abort_comms:
         # The fault condition is a process dying while a peer's kernel still
         # holds mappings into its memory, so no rank may exit before every
@@ -233,13 +279,13 @@ def _run_wedge_job(
         )
         if first_exit < last_abort:
             failures.append(
-                "a rank exited before every abort had returned; "
+                f"{scenario}: a rank exited before every abort had returned; "
                 "the grace period is too short"
             )
-    return log_text, failures
+    return failures
 
 
-def _run_healthcheck_job(nproc: int, work_dir: Path) -> list[str]:
+def _run_healthcheck_job(scenario: str, nproc: int, work_dir: Path) -> list[str]:
     """Run a fresh NCCL job on the same GPUs and return failures."""
     failures: list[str] = []
     log_path = work_dir / "healthcheck.log"
@@ -250,27 +296,38 @@ def _run_healthcheck_job(nproc: int, work_dir: Path) -> list[str]:
             stderr=subprocess.STDOUT,
         )
         try:
-            returncode = proc.wait(timeout=180.0)
+            returncode: int | None = proc.wait(timeout=180.0)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
             returncode = None
-    log_text = _print_log("healthcheck job log", log_path)
+    log_text = _print_log(f"healthcheck log (after {scenario})", log_path)
     if returncode != 0:
-        failures.append(f"healthcheck job failed with returncode {returncode}")
+        failures.append(
+            f"healthcheck after {scenario} failed with returncode {returncode}"
+        )
     for rank in range(nproc):
         if f"rank {rank} healthcheck ok" not in log_text:
-            failures.append(f"rank {rank}: no healthcheck marker")
+            failures.append(f"healthcheck after {scenario}: no rank {rank} marker")
     return failures
 
 
 def run_probe(
-    nproc: int, work_dir: Path, grace: float = 3.0, abort_comms: bool = True
+    nproc: int,
+    work_dir: Path,
+    grace: float = 3.0,
+    abort_comms: bool = True,
+    scenarios: tuple[str, ...] = ("healthy", "wedge"),
 ) -> bool:
-    """Run the full probe; print a verdict and return whether it passed."""
-    _print_topology()
-    _, failures = _run_wedge_job(nproc, grace, abort_comms, work_dir)
-    failures += _run_healthcheck_job(nproc, work_dir)
+    """Run each scenario plus its fabric health check; return whether all passed."""
+    _print_node_info("start")
+    failures: list[str] = []
+    for scenario in scenarios:
+        scenario_dir = work_dir / scenario
+        scenario_dir.mkdir()
+        failures += _run_scenario_job(scenario, nproc, grace, abort_comms, scenario_dir)
+        failures += _run_healthcheck_job(scenario, nproc, scenario_dir)
+    _print_node_info("end")
     if failures:
         for failure in failures:
             sys.stdout.write(f"{_PREFIX} FAILURE: {failure}\n")
@@ -278,8 +335,8 @@ def run_probe(
     else:
         sys.stdout.write(
             f"{_PREFIX} VERDICT: PASS -- every rank saw SIGTERM on the listener "
-            "thread, wedged ranks were released, and a fresh NCCL job on the "
-            "same GPUs succeeded\n"
+            "thread and aborted before any rank exited, and a fresh NCCL job on "
+            f"the same GPUs succeeded after each of: {', '.join(scenarios)}\n"
         )
     sys.stdout.flush()
     return not failures
@@ -288,17 +345,22 @@ def run_probe(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--role", choices=["driver", "wedge", "healthcheck"], default="driver"
+        "--role",
+        choices=["driver", "healthy", "wedge", "healthcheck"],
+        default="driver",
     )
     parser.add_argument("--nproc", type=int, default=torch.cuda.device_count())
     parser.add_argument("--grace", type=float, default=3.0)
     parser.add_argument(
         "--no-abort",
         action="store_true",
-        help="control arm reproducing the fabric fault; do not " "run on a shared node",
+        help="control arm reproducing the fabric fault; do not run on a " "shared node",
     )
     parser.add_argument("--ready-dir", type=Path, default=None)
     args = parser.parse_args()
+    if args.role == "healthy":
+        _run_healthy_worker(args.ready_dir, args.grace, not args.no_abort)
+        return 0
     if args.role == "wedge":
         _run_wedge_worker(args.ready_dir, args.grace, not args.no_abort)
         return 0
@@ -307,8 +369,11 @@ def main() -> int:
         return 0
     if args.nproc < 2:
         raise SystemExit("the probe needs at least two GPUs")
+    scenarios = ("wedge",) if args.no_abort else ("healthy", "wedge")
     with tempfile.TemporaryDirectory() as work_dir:
-        passed = run_probe(args.nproc, Path(work_dir), args.grace, not args.no_abort)
+        passed = run_probe(
+            args.nproc, Path(work_dir), args.grace, not args.no_abort, scenarios
+        )
     return 0 if passed else 1
 
 
