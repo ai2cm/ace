@@ -228,6 +228,11 @@ class InlineInferenceConfig:
                 atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
                 save_diagnostics=save_per_epoch_diagnostics,
                 output_dir=os.path.join(output_dir, name),
+                # inline validation reuses the aggregator across batches whose
+                # windows do not tile one contiguous time series, so per-step
+                # series aggregators must not be built (as in
+                # fme/ace/train/train_config.py)
+                enable_time_series=False,
             )
 
         return factory

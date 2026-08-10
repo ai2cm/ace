@@ -2,10 +2,9 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import TypeVar
 
-import numpy as np
-
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.labels import LabelEncoding
+from fme.core.step.step_diagnostics import StepDiagnostics
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
@@ -154,6 +153,23 @@ class CoupledBatchData:
         self.atmosphere_data = self.atmosphere_data.pin_memory()
         return self
 
+    def with_step_diagnostics(
+        self,
+        ocean: StepDiagnostics | None,
+        atmosphere: StepDiagnostics | None,
+    ) -> "CoupledBatchData":
+        """Return a copy with each realm's BatchData carrying that realm's
+        step-diagnostics series. Each series must be aligned with its realm's
+        time axis, so attach only after any time-changing operations
+        (``BatchData`` raises on them once diagnostics are attached).
+        """
+        return CoupledBatchData(
+            ocean_data=dataclasses.replace(self.ocean_data, step_diagnostics=ocean),
+            atmosphere_data=dataclasses.replace(
+                self.atmosphere_data, step_diagnostics=atmosphere
+            ),
+        )
+
 
 @dataclasses.dataclass
 class CoupledPairedData:
@@ -171,30 +187,13 @@ class CoupledPairedData:
         prediction: CoupledBatchData,
         reference: CoupledBatchData,
     ) -> "CoupledPairedData":
-        if not np.all(
-            prediction.ocean_data.time.values == reference.ocean_data.time.values
-        ):
-            raise ValueError(
-                "Prediction and target ocean time coordinate must be the same."
-            )
-        if not np.all(
-            prediction.atmosphere_data.time.values
-            == reference.atmosphere_data.time.values
-        ):
-            raise ValueError(
-                "Prediction and target atmosphere time coordinate must be the same."
-            )
         return CoupledPairedData(
-            ocean_data=PairedData(
-                prediction=prediction.ocean_data.data,
-                reference=reference.ocean_data.data,
-                time=prediction.ocean_data.time,
-                labels=prediction.ocean_data.labels,
+            ocean_data=PairedData.from_batch_data(
+                prediction=prediction.ocean_data,
+                reference=reference.ocean_data,
             ),
-            atmosphere_data=PairedData(
-                prediction=prediction.atmosphere_data.data,
-                reference=reference.atmosphere_data.data,
-                time=prediction.atmosphere_data.time,
-                labels=prediction.atmosphere_data.labels,
+            atmosphere_data=PairedData.from_batch_data(
+                prediction=prediction.atmosphere_data,
+                reference=reference.atmosphere_data,
             ),
         )

@@ -20,6 +20,7 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
@@ -1210,6 +1211,8 @@ def get_stepper_config(
     ocean_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
+    ocean_corrector: CorrectorSelector | None = None,
+    atmosphere_corrector: CorrectorSelector | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1234,6 +1237,14 @@ def get_stepper_config(
     ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
     atmosphere_prescribed = list(atmosphere_prescribed_prognostic_names or [])
 
+    if ocean_corrector is None:
+        ocean_corrector = CorrectorSelector("ocean_corrector", {})
+    atmosphere_corrector_config: AtmosphereCorrectorConfig | CorrectorSelector
+    if atmosphere_corrector is None:
+        atmosphere_corrector_config = AtmosphereCorrectorConfig()
+    else:
+        atmosphere_corrector_config = atmosphere_corrector
+
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta=atmosphere_timedelta,
@@ -1254,6 +1265,7 @@ def get_stepper_config(
                                 ocean_fraction_name=ocean_fraction_name,
                             ),
                             input_dropout=atmosphere_input_dropout,
+                            corrector=atmosphere_corrector_config,
                         ),
                     ),
                 ),
@@ -1274,7 +1286,7 @@ def get_stepper_config(
                             normalization=trivial_network_and_loss_normalization(
                                 ocean_norm_names
                             ),
-                            corrector=CorrectorSelector("ocean_corrector", {}),
+                            corrector=ocean_corrector,
                         ),
                     ),
                 ),
@@ -2487,3 +2499,157 @@ def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
         assert {len(keys) for keys in atmos_key_sets} == {1, 4}
         for keys in atmos_key_sets:
             assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}
+
+
+def _get_coupler_and_ic_for_step_diagnostics(
+    ocean_offset: float | None,
+    atmosphere_offset: float | None,
+    n_forward_times_ocean: int = 2,
+    n_forward_times_atmosphere: int = 4,
+    n_samples: int = 2,
+):
+    """Build a coupler and initial condition for step-diagnostics tests,
+    injecting a constant-offset corrector on each realm whose offset is
+    not None. The atmosphere corrector targets "a_prog" rather than the
+    prescribed surface-temperature variable, which the SST prescription
+    (running after the corrector) forbids.
+    """
+    from fme.core.corrector.registry import CorrectionSequence
+    from fme.core.corrector.test_registry import ConstantOffsetCorrection
+    from fme.core.step.single_module import SingleModuleStep
+
+    coupler, coupled_data, _, _ = get_stepper_and_batch(
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["a_prog", "surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["a_prog", "surface_temperature"],
+        n_forward_times_ocean=n_forward_times_ocean,
+        n_forward_times_atmosphere=n_forward_times_atmosphere,
+        n_samples=n_samples,
+    )
+    if ocean_offset is not None:
+        assert isinstance(coupler.ocean._step_obj, SingleModuleStep)
+        coupler.ocean._step_obj._corrector = CorrectionSequence(
+            [ConstantOffsetCorrection("sst", ocean_offset)]
+        )
+    if atmosphere_offset is not None:
+        assert isinstance(coupler.atmosphere._step_obj, SingleModuleStep)
+        coupler.atmosphere._step_obj._corrector = CorrectionSequence(
+            [ConstantOffsetCorrection("a_prog", atmosphere_offset)]
+        )
+    data = coupled_data.data
+    ic = CoupledPrognosticState(
+        ocean_data=data.ocean_data.get_start(
+            coupler.ocean.prognostic_names, n_ic_timesteps=1
+        ),
+        atmosphere_data=data.atmosphere_data.get_start(
+            coupler.atmosphere.prognostic_names, n_ic_timesteps=1
+        ),
+    )
+    return coupler, data, ic
+
+
+@pytest.mark.parametrize("corrected_realm", ["ocean", "atmosphere"])
+def test_predict_paired_attaches_step_diagnostics_for_corrected_realm(
+    corrected_realm: str,
+):
+    offset = 1.5
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=offset if corrected_realm == "ocean" else None,
+        atmosphere_offset=offset if corrected_realm == "atmosphere" else None,
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    if corrected_realm == "ocean":
+        corrected, silent = paired_data.ocean_data, paired_data.atmosphere_data
+        name, n_steps = "sst", 2
+    else:
+        corrected, silent = paired_data.atmosphere_data, paired_data.ocean_data
+        name, n_steps = "a_prog", 4
+    assert silent.step_diagnostics is None
+    assert corrected.step_diagnostics is not None
+    assert set(corrected.step_diagnostics.delta) == {name}
+    delta = corrected.step_diagnostics.delta[name]
+    # forward-step aligned with that realm's prediction series
+    assert delta.shape == corrected.prediction[name].shape
+    assert delta.shape[1] == n_steps
+    torch.testing.assert_close(delta, torch.full_like(delta, offset))
+
+
+def test_predict_paired_step_diagnostics_both_realms():
+    ocean_offset, atmosphere_offset = 1.5, -0.5
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=ocean_offset,
+        atmosphere_offset=atmosphere_offset,
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    ocean_diagnostics = paired_data.ocean_data.step_diagnostics
+    atmos_diagnostics = paired_data.atmosphere_data.step_diagnostics
+    assert ocean_diagnostics is not None
+    assert atmos_diagnostics is not None
+    ocean_delta = ocean_diagnostics.delta["sst"]
+    atmos_delta = atmos_diagnostics.delta["a_prog"]
+    # each realm's own step count: outer ocean steps vs inner atmosphere steps
+    assert ocean_delta.shape[1] == 2
+    assert atmos_delta.shape[1] == 4
+    torch.testing.assert_close(ocean_delta, torch.full_like(ocean_delta, ocean_offset))
+    torch.testing.assert_close(
+        atmos_delta, torch.full_like(atmos_delta, atmosphere_offset)
+    )
+
+
+def test_predict_attaches_step_diagnostics():
+    # CoupledStepper.predict has no production call sites today (only
+    # predict_paired is used), but _predict now serves both and the attach
+    # ordering (after get_end) is easy to break.
+    offset = 2.0
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=offset, atmosphere_offset=None
+    )
+    prediction, prognostic_state = coupler.predict(initial_condition=ic, forcing=data)
+    assert prediction.ocean_data.step_diagnostics is not None
+    delta = prediction.ocean_data.step_diagnostics.delta["sst"]
+    torch.testing.assert_close(delta, torch.full_like(delta, offset))
+    assert prediction.atmosphere_data.step_diagnostics is None
+    # the prognostic state is taken before the attach and stays usable
+    ocean_end = prognostic_state.ocean_data.as_batch_data()
+    assert ocean_end.n_timesteps == 1
+    assert set(ocean_end.data) == set(coupler.ocean.prognostic_names)
+
+
+def test_predict_paired_without_corrector_has_no_step_diagnostics():
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=None, atmosphere_offset=None
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    assert paired_data.ocean_data.step_diagnostics is None
+    assert paired_data.atmosphere_data.step_diagnostics is None
+
+
+def test_predict_paired_step_diagnostics_zero_for_unchanged_variable():
+    # a corrector that declares a name but leaves it unchanged still yields a
+    # non-None series of exact zeros (declared-names semantics)
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=0.0, atmosphere_offset=None
+    )
+    paired_data, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    ocean_diagnostics = paired_data.ocean_data.step_diagnostics
+    assert ocean_diagnostics is not None
+    delta = ocean_diagnostics.delta["sst"]
+    torch.testing.assert_close(delta, torch.zeros_like(delta))
+
+
+def test_prediction_generator_yields_corrector_diagnostics():
+    ocean_offset, atmosphere_offset = 1.5, -0.5
+    coupler, data, ic = _get_coupler_and_ic_for_step_diagnostics(
+        ocean_offset=ocean_offset,
+        atmosphere_offset=atmosphere_offset,
+    )
+    predictions = list(coupler.get_prediction_generator(ic, data, NullOptimization()))
+    assert {x.realm for x in predictions} == {"ocean", "atmosphere"}
+    for prediction in predictions:
+        if prediction.realm == "ocean":
+            name, offset = "sst", ocean_offset
+        else:
+            name, offset = "a_prog", atmosphere_offset
+        delta = prediction.corrector_diagnostics.delta[name]
+        torch.testing.assert_close(delta, torch.full_like(delta, offset))

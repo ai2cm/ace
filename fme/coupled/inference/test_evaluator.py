@@ -15,6 +15,7 @@ from fme.ace.stepper import StepperOverrideConfig
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.inference import (
@@ -103,6 +104,18 @@ def test_load_stepper_config_ocean_prescribed_override_updates_forcing_window(
     assert "thetao_18" in ocean_reqs.names
 
 
+def seed_negative_values(data_path: str, name: str) -> None:
+    """Overwrite a variable on disk with the negation of its values (the mock
+    data is uniform in [0, 1), so the result is negative on-mask; NaN-masked
+    points stay NaN). A ``force_positive`` clamp only bites where the value is
+    already negative, so this makes such a corrector produce a nonzero delta.
+    """
+    with xr.open_dataset(data_path, decode_times=False, decode_timedelta=False) as ds:
+        ds = ds.load()
+    ds[name] = -ds[name]
+    ds.to_netcdf(data_path)
+
+
 def save_coupled_stepper(
     base_dir: pathlib.Path,
     ocean_in_names: list[str],
@@ -116,6 +129,8 @@ def save_coupled_stepper(
     save_standalone_component_checkpoints: bool = False,
     ocean_timedelta: str = "2D",
     atmosphere_timedelta: str = "1D",
+    ocean_corrector: CorrectorSelector | None = None,
+    atmosphere_corrector: CorrectorSelector | None = None,
 ) -> str | StandaloneComponentCheckpointsConfig:
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
@@ -127,6 +142,8 @@ def save_coupled_stepper(
         ocean_fraction_name=ocean_fraction_name,
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
+        ocean_corrector=ocean_corrector,
+        atmosphere_corrector=atmosphere_corrector,
     )
     if save_standalone_component_checkpoints:
         ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)
@@ -298,6 +315,7 @@ def inference_helper(
             rmse_key = f"inference/mean/weighted_rmse/{var}"
             logs_with_rmse = [log for log in wandb_logs if rmse_key in log]
             assert len(logs_with_rmse) > 0, f"No RMSE logged for {var}"
+    return wandb_logs
 
 
 def _create_dataset_info_for_stepper(
@@ -544,3 +562,82 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         checkpoint_path=str(stepper_path),
         mock_data=mock_data,
     )
+
+
+def _run_evaluator_with_ocean_corrector(
+    tmp_path: pathlib.Path,
+    ocean_corrector: CorrectorSelector | None,
+):
+    ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
+    ocean_out_names = ["o_prog", "sst", "o_diag"]
+    atmos_in_names = ["a_prog", "surface_temperature", "ocean_fraction"]
+    atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
+    n_coupled_steps = 2
+    n_initial_conditions = 1
+    dataset_info, mock_data = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=n_coupled_steps,
+        n_initial_conditions=n_initial_conditions,
+        data_dir=tmp_path / "stepper_data",
+    )
+    if ocean_corrector is not None:
+        seed_negative_values(
+            os.path.join(mock_data.ocean.data_dir, "data.nc"), "o_prog"
+        )
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        ocean_timedelta=mock_data.ocean.timedelta,
+        atmosphere_timedelta=mock_data.atmosphere.timedelta,
+        ocean_corrector=ocean_corrector,
+    )
+    return inference_helper(
+        tmp_path=tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=n_coupled_steps,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=n_initial_conditions,
+        checkpoint_path=checkpoint_path,
+        mock_data=mock_data,
+    )
+
+
+@pytest.mark.medium_duration
+def test_evaluator_logs_correction_metrics_per_realm(tmp_path: pathlib.Path):
+    wandb_logs = _run_evaluator_with_ocean_corrector(
+        tmp_path,
+        ocean_corrector=CorrectorSelector(
+            "ocean_corrector", {"force_positive_names": ["o_prog"]}
+        ),
+    )
+    magnitude_key = "inference/time_mean_norm/correction_magnitude/o_prog"
+    logs_with_magnitude = [log for log in wandb_logs if magnitude_key in log]
+    assert len(logs_with_magnitude) > 0
+    # the negative-seeded data makes the force_positive clamp fire, so the
+    # logged correction magnitude is nonzero
+    for log in logs_with_magnitude:
+        assert log[magnitude_key] > 0.0
+    # the corrector-less atmosphere logs no correction metrics
+    all_keys = {key for log in wandb_logs for key in log}
+    correction_keys = {key for key in all_keys if "correction" in key}
+    assert correction_keys
+    assert all("o_prog" in key for key in correction_keys)
+
+
+@pytest.mark.medium_duration
+def test_evaluator_logs_no_correction_metrics_without_corrector(
+    tmp_path: pathlib.Path,
+):
+    wandb_logs = _run_evaluator_with_ocean_corrector(tmp_path, ocean_corrector=None)
+    all_keys = {key for log in wandb_logs for key in log}
+    assert not any("correction" in key for key in all_keys)
