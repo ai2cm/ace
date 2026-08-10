@@ -62,16 +62,28 @@ def _get_indexers(
     return tuple(indexers)
 
 
+def as_alignable_tensor(
+    variable: xr.Variable,
+    dims: Sequence[Hashable],
+) -> torch.tensor:
+    """Load data from variable as a tensor with a singleton axis for each of the
+    given dims that the variable does not have.
+
+    The result is not yet broadcast to a particular shape, so it does not depend
+    on the length of the time dimension and can be reused across samples.
+    """
+    arr = variable.values
+    indexers = _get_indexers(variable, dims)
+    return torch.as_tensor(arr[indexers])
+
+
 def as_broadcasted_tensor(
     variable: xr.Variable,
     dims: Sequence[Hashable],
     shape: Sequence[int],
 ) -> torch.tensor:
     """Load data from variable and broadcast to tensor with the given shape."""
-    arr = variable.values
-    indexers = _get_indexers(variable, dims)
-    tensor = torch.as_tensor(arr[indexers])
-    return torch.broadcast_to(tensor, shape)
+    return torch.broadcast_to(as_alignable_tensor(variable, dims), shape)
 
 
 def _broadcast_array_to_tensor(
@@ -112,11 +124,9 @@ def _get_array_selection(
     return selection
 
 
-# Opening a group and getting an array from it each read the corresponding
-# zarr.json, so without caching every sample re-reads one metadata document per
-# requested variable. The cached objects hold metadata and a store reference,
-# and the set of keys is fixed by the configured datasets (files x variables),
-# so these do not grow without bound at runtime.
+# Cache the opened zarr group and arrays to avoid repeated metadata reads when
+# loading multiple time slices from the same zarr store. Assumes that the zarr store is
+# not modified between calls.
 @functools.cache
 def _open_async_group(path: str):
     loop = asyncio.get_event_loop()
@@ -126,13 +136,7 @@ def _open_async_group(path: str):
 @functools.cache
 def _get_async_array(path: str, name: str):
     loop = asyncio.get_event_loop()
-    # zarrs decodes chunks in Rust and does its own chunk IO, rather than going
-    # through zarr-python's per-chunk buffer and store handling. The pipeline is
-    # bound to an array when it is opened, so setting it here applies it to the
-    # arrays read for training data without changing the pipeline used
-    # elsewhere, such as by the inference data writers.
-    with zarr.config.set({"codec_pipeline.path": ZARRS_CODEC_PIPELINE}):
-        return loop.run_until_complete(_open_async_group(path).getitem(name))
+    return loop.run_until_complete(_open_async_group(path).getitem(name))
 
 
 async def _get_items(arrays_and_selections):

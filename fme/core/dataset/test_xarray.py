@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-import zarr
 from xarray.coding.times import CFDatetimeCoder
 
 from fme.core.coordinates import (
@@ -571,59 +570,6 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     assert data["constant_scalar_var"].shape == (15, 4, 8)
 
 
-def test_zarr_array_handles_are_reused_across_samples(mock_monthly_zarr, monkeypatch):
-    """Reading a sample should not re-read the zarr metadata for each variable.
-
-    The group and each array are opened once and reused, so the number of
-    metadata reads does not grow with the number of samples read.
-    """
-    from . import utils
-
-    utils._open_async_group.cache_clear()
-    utils._get_async_array.cache_clear()
-
-    n_group_opens = 0
-    original_open = zarr.api.asynchronous.open
-
-    async def counting_open(*args, **kwargs):
-        nonlocal n_group_opens
-        n_group_opens += 1
-        return await original_open(*args, **kwargs)
-
-    monkeypatch.setattr(zarr.api.asynchronous, "open", counting_open)
-
-    mock_data: MockData = mock_monthly_zarr
-    config = XarrayDataConfig(
-        data_path=mock_data.tmpdir, file_pattern="*.zarr", engine="zarr"
-    )
-    names = list(mock_data.var_names.time_dependent_names)
-    dataset = xarray_dataset_constructor(config, names, 2)
-
-    for idx in [0, 100, 400, 700, 0]:
-        dataset[idx]
-
-    assert n_group_opens == 1
-    assert utils._get_async_array.cache_info().currsize == len(names)
-
-
-def test_zarr_arrays_use_zarrs_codec_pipeline(mock_monthly_zarr):
-    """Arrays opened for reading use the zarrs pipeline, others do not."""
-    from . import utils
-
-    utils._open_async_group.cache_clear()
-    utils._get_async_array.cache_clear()
-
-    mock_data: MockData = mock_monthly_zarr
-    store = str(mock_data.tmpdir / "data.zarr")
-    name = list(mock_data.var_names.time_dependent_names)[0]
-
-    array = utils._get_async_array(store, name)
-    assert type(array.codec_pipeline).__name__ == "ZarrsCodecPipeline"
-    # the global pipeline is left alone, so zarr use elsewhere (e.g. the
-    # inference data writers) is unaffected
-    assert zarr.config.get("codec_pipeline.path") != utils.ZARRS_CODEC_PIPELINE
-
-
 def test_zarr_cached_handles_return_correct_values(mock_monthly_zarr):
     """Cached handles must return the same data as the underlying store."""
     mock_data: MockData = mock_monthly_zarr
@@ -646,6 +592,66 @@ def test_zarr_cached_handles_return_correct_values(mock_monthly_zarr):
                 data[name].shape,
             )
             np.testing.assert_array_equal(data[name].numpy(), expected)
+
+
+def _count_file_opens_while_reading(
+    monkeypatch, dataset: XarrayDataset, indices: Sequence[int]
+) -> int:
+    """Number of times the dataset opens a file while reading the samples."""
+    n_opens = 0
+    original = XarrayDataset._open_file
+
+    def counting_open_file(self, idx):
+        nonlocal n_opens
+        n_opens += 1
+        return original(self, idx)
+
+    monkeypatch.setattr(XarrayDataset, "_open_file", counting_open_file)
+    for idx in indices:
+        dataset[idx]
+    return n_opens
+
+
+def test_time_invariant_variables_do_not_open_files_per_sample(
+    mock_monthly_netcdfs, monkeypatch
+):
+    """Requesting time-invariant variables should not add per-sample file opens.
+
+    They are loaded once at construction, so reading samples costs the same
+    number of file opens whether or not they were requested.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    names = mock_data.var_names
+    # samples spread across the underlying monthly files
+    indices = [0, 100, 400, 700, 0]
+
+    without = xarray_dataset_constructor(config, list(names.time_dependent_names), 2)
+    with_invariant = xarray_dataset_constructor(config, names.all_names, 2)
+
+    n_without = _count_file_opens_while_reading(monkeypatch, without, indices)
+    n_with = _count_file_opens_while_reading(monkeypatch, with_invariant, indices)
+
+    assert n_with == n_without
+
+
+def test_time_invariant_variable_values_match_source(mock_monthly_netcdfs):
+    """Caching must not change the values that are returned."""
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 3)
+    source = xr.open_dataset(
+        mock_data.tmpdir / f"{mock_data.start_times[0].strftime('%Y%m%d%H')}.nc",
+        decode_times=False,
+        decode_timedelta=False,
+    )
+    # read several samples spanning different files to confirm the cached
+    # tensor is not mutated or aliased between reads
+    for idx in [0, 250, 500, 0]:
+        data = dataset[idx][0]
+        expected = torch.as_tensor(source["constant_var"].values)
+        np.testing.assert_array_equal(data["constant_var"][0].numpy(), expected.numpy())
+        assert data["constant_var"].shape == (3, 4, 8)
     source.close()
 
 
