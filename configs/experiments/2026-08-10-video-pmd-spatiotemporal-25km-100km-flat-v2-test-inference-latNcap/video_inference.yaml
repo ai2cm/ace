@@ -1,0 +1,173 @@
+# Test-set inference for video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2,
+# region: NORTHERN polar cap, lat 44..88, full longitude. One of 4 regions tiling the full modeled domain (lat
+# -88..88, lon 0..360) -- same tiling as the v1 test-inference configs (see
+# ../2026-08-03-video-pmd-spatiotemporal-25km-100km-flat-test-inference-latNcap/
+# and ../2026-07-24-video-pmd-spatiotemporal-25km-100km-test-inference/ for
+# the boundary-alignment verification against the real fine/coarse
+# coordinate arrays; unchanged here since the model's spatial architecture
+# didn't change between v1 and v2).
+#
+# IMPORTANT CHECKPOINT CAVEAT: v2 training (experiment 01KZ9JHJ9B0B0PNC57TCVE477M)
+# crashed at epoch 41/200 due to an infra failure on ai2/titan around
+# 2026-08-09 23:00-2026-08-10 00:30 (NCCL watchdog hang for flat, SIGINT for
+# ou -- see that experiment's logs; both models crashed within the same
+# ~2h window, pointing to a shared cluster incident, not a code/data bug).
+# Per explicit instruction this does NOT wait for a resumed/completed
+# training run -- it runs inference directly against the crashed run's
+# checkpoints/latest.ckpt (epoch 41/200, ~20% of the planned schedule).
+# Treat these results as preliminary/undertrained, not representative of
+# the final v2 model.
+#
+# LR-endpoints-in/HR-full-out: endpoints_observed=true with
+# endpoint_super_resolution set means the two 100km (LR) endpoint frames are
+# the ONLY input this model ever needs -- stage A super-resolves them to a
+# generated 25km (HR) estimate from coarse alone (no true fine data used at
+# inference), stage B then jointly diffuses the full 9-frame HR series
+# conditioned on that generated endpoint (masked to zero at interior
+# frames). See fme/downscaling/video_models.py's module docstring and
+# VideoDiffusionModel._endpoint_super_resolution's docstring for the full
+# architecture trace. 4-member ensemble (n_ensemble: 4) for real
+# spread/CRPS scoring, matching v1's convention.
+#
+# Checkpoint dataset: 01KZ9JHJ9JWXMSQQKRTA6EEECW
+checkpoint_path: /checkpoint/checkpoints/latest.ckpt
+experiment_dir: /results
+output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/test-2023-2024-ens4-region-lat44to88-lon0to360.zarr
+n_ensemble: 4
+ensemble_chunk_size: 1
+use_ema: true
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-temporal-interp
+  name: video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2-test-inference-latNcap
+  entity: ai2cm
+data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  # NORTHERN polar cap, lat 44..88, full longitude.
+  lat_extent:
+    start: 44
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  endpoints_observed: true
+  endpoint_super_resolution:
+    module:
+      type: unet_diffusion_song
+      config:
+        model_channels: 64
+        channel_mult: [1, 2, 2, 2]
+        attn_resolutions: []
+    loss:
+      type: MSE
+    training_noise_distribution:
+      p_mean: -1.2
+      p_std: 1.8
+    coarse_shape: [176, 288]
+    sigma_min: 0.002
+    sigma_max: 150.0
+    churn: 0.0
+    num_diffusion_generation_steps: 18
+    loss_weight: 1.0
+  temporal_noise_correlation: independent
+  log_transform_channels:
+    PRATEsfc: 86400.0
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+    air_temperature_at_two_meters:
+      p_mean: -1.96
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+    air_temperature_at_two_meters: 0.1403
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+    air_temperature_at_two_meters: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+    air_temperature_at_two_meters: 22.4
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
