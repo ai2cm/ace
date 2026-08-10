@@ -24,13 +24,13 @@ data:
       subset:
         #start_time: '2023-01-01T00:00:00'
         start: 0
-        stop: 2
+        stop: 4
     - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
       file_pattern: prmsl_100km.zarr
       engine: zarr
       subset:
         start: 0
-        stop: 2
+        stop: 4
         #start_time: '2023-01-01T00:00:00'
   fine:
   - merge:
@@ -40,14 +40,14 @@ data:
       subset:
         #start_time: '2023-01-01T00:00:00'
         start: 0
-        stop: 2
+        stop: 4
     - data_path:  /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
       file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
       engine: zarr
       subset:
         #start_time: '2023-01-01T00:00:00'
         start: 0
-        stop: 2
+        stop:  4
   # CONUS
   lat_extent:
     start: 0
