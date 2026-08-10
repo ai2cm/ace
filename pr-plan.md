@@ -35,6 +35,10 @@ correction-metrics aggregator per realm in the coupled inference configs.
   `fme/ace/aggregator/inference/step_diagnostics.py` hard-codes `dims = ("lat", "lon")`, so a
   realm whose horizontal dims differ would break. Splitting the field later is a
   config-breaking change; accepted, because the split has no use today.
+- **No new writer config surface.** The existing per-realm
+  `DataWriterConfig.save_step_diagnostics` is the whole writer interface; turning the files
+  on for both realms is two YAML edits in two places. Decided: acceptable — no coupled-level
+  convenience flag.
 - **The two normalizer arguments mirror the `fme.ace` signature they wrap.**
   `fme/ace/aggregator/inference/main.py`'s `InferenceAggregatorConfig.build` takes
   `normalize: NormalizeFn | None = None`, so the coupled version takes one optional
@@ -218,6 +222,16 @@ class CoupledPairedData:
         # prediction.n_ensemble (silently defaulting to 1) where the ace helper
         # forwards it. Called out because it is a behavior change beyond diagnostics
         # carriage — see the test for it below.
+        #
+        # Verified inert today: no coupled predict_paired call site passes a batch
+        # with n_ensemble > 1. Coupled ensemble inference (n_ensemble_per_ic)
+        # broadcasts only the initial condition, so the forcing windows — whose
+        # n_ensemble the prediction inherits in _process_prediction_generator_list —
+        # keep n_ensemble=1; the n_ensemble=2 CRPS broadcast happens only inside
+        # CoupledTrainStepper.train_on_batch, which is also the path validation
+        # loss takes (fme/core/generics/validation.py) and never reaches
+        # predict_paired. So the byte-for-byte defaults claim holds; the fix
+        # matters only for a future ensemble-aware coupled predict path.
         ...
 ```
 
@@ -365,16 +379,6 @@ def test_predict_paired_step_diagnostics_both_realms():
     # each with that realm's own step count and offset value.
     ...
 
-def test_predict_paired_regression_against_baseline():
-    # GOAL: regression guard on the values, since carriage is unconditional and
-    # there is no runtime toggle to A/B against. Pin prediction values and the
-    # returned prognostic state with validate_tensor_dict
-    # (fme/core/testing/regression.py) against a committed .pt baseline, with a
-    # corrector installed and compute_derived_variables=True, so the prepend /
-    # compute-derived / remove-initial-condition path is exercised.
-    # The baseline is generated on main, before the carriage lands.
-    ...
-
 def test_predict_attaches_step_diagnostics():
     # GOAL: the non-paired predict path attaches the same per-realm series and
     # still returns a usable prognostic state (the attach happens after get_end).
@@ -400,6 +404,10 @@ def test_prediction_generator_yields_corrector_diagnostics():
     # corrector_diagnostics, for both the inner atmosphere and outer ocean yields.
     ...
 ```
+
+Deliberately no `.pt` values-regression baseline: the carriage adds a new field and changes
+no prediction arithmetic, and the `_predict` / `get_end` refactor is exercised by every
+existing `predict` / `predict_paired` test plus the exact-value diagnostics tests above.
 
 ### `fme/coupled/data_loading/test_batch_data.py` (new)
 
@@ -467,9 +475,11 @@ is real setup work, not an "extend the existing test" one-liner. `test_inference
 The ocean-side corrector should be `OceanCorrectorConfig(force_positive_names=[...])`: it is
 the only ocean corrector option that works on the synthetic single-level test data (the
 sea-ice, surface-energy-flux, and ocean-heat-content corrections all need extra fields).
-Because a `force_positive` clamp only bites where the value is already negative, the test
-data must be seeded to make the clamp fire, or the assertion has to accept the all-zero
-series from the semantics above — pick one explicitly when writing the test.
+Because a `force_positive` clamp only bites where the value is already negative, seed the
+test data with negative values in the force-positive variable so the clamp fires and the
+end-to-end assertions see a nonzero delta reach the writer and aggregator. (The all-zero
+semantics is already pinned by the unit-level zeros test above; do not fall back to
+asserting the zero series here.)
 
 ### `fme/coupled/inference/test_inference.py` (modified)
 
@@ -500,13 +510,3 @@ def test_evaluator_logs_no_correction_metrics_without_corrector(tmp_path):
     # key set contains no correction keys at all.
     ...
 ```
-
----
-
-## Open questions
-
-- **Should the writer flag be surfaced any differently?** This PR adds no writer config
-  surface, relying on the existing per-realm `DataWriterConfig.save_step_diagnostics`. That
-  means turning the files on for both realms is two YAML edits in two places. Acceptable, or
-  worth a coupled-level convenience flag? (Not the same granularity question as the
-  aggregator config above — this one asks for *less* per-realm surface, not more.)
