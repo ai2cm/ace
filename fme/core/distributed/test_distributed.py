@@ -39,7 +39,10 @@ def test_context_aborts_the_backend_on_sigterm():
         import signal, threading
         from fme.core.distributed import Distributed
 
-        Distributed.get_instance().abort = lambda: print("abort", flush=True)
+        instance = Distributed.get_instance()
+        instance.abort = lambda: print("abort", flush=True)
+        # the listener is only installed for real multi-rank jobs
+        instance.is_distributed = lambda: True
         with Distributed.context():
             signal.raise_signal(signal.SIGTERM)
             threading.Event().wait()  # the listener must end the process
@@ -51,6 +54,35 @@ def test_context_aborts_the_backend_on_sigterm():
 
     assert result.stdout.split() == ["abort"], result.stderr
     assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_context_leaves_signals_alone_when_not_distributed():
+    """A single process has no peers to protect.
+
+    Ctrl-C should keep raising KeyboardInterrupt -- with a traceback, `finally`
+    blocks and atexit hooks intact -- rather than becoming an abort-and-exit.
+    """
+    program = textwrap.dedent(
+        """
+        import signal
+        from fme.core.distributed import Distributed
+
+        before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
+        with Distributed.context():
+            during = (
+                signal.getsignal(signal.SIGTERM),
+                signal.getsignal(signal.SIGINT),
+            )
+        print(before == during)
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, timeout=120, text=True
+    )
+
+    assert result.stdout.split() == ["True"], result.stderr
+    assert result.returncode == 0
 
 
 @pytest.mark.medium_duration

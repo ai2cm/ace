@@ -23,6 +23,12 @@ Run directly on a multi-GPU machine::
 The ``--no-abort`` arm reproduces today's failure (a rank exits while a peer's
 kernel still polls its memory over NVLink) and is expected to fault the fabric
 on NVSwitch nodes. Do not run it on a shared node.
+
+The probe is deliberately torch-only, with its own inline copy of the
+signal-listener mechanism, so it runs standalone on a deps-only image with no
+fme install. It therefore guards torch/NCCL abort behavior, not
+``fme.core.distributed.shutdown``'s implementation of the same mechanism;
+regressions in that module are covered by its own tests.
 """
 
 import argparse
@@ -329,9 +335,12 @@ def _run_healthcheck_job(scenario: str, nproc: int, work_dir: Path) -> list[str]
         try:
             returncode: int | None = proc.wait(timeout=180.0)
         except subprocess.TimeoutExpired:
+            returncode = None
+        finally:
+            # unconditional: an interrupt (the test suite's timeout alarm, most
+            # likely) must not orphan a torchrun tree holding every GPU
             proc.kill()
             proc.wait()
-            returncode = None
     log_text = _print_log(f"healthcheck log (after {scenario})", log_path)
     if returncode != 0:
         failures.append(
@@ -385,7 +394,7 @@ def main() -> int:
     parser.add_argument(
         "--no-abort",
         action="store_true",
-        help="control arm reproducing the fabric fault; do not run on a " "shared node",
+        help="control arm reproducing the fabric fault; do not run on a shared node",
     )
     parser.add_argument("--ready-dir", type=Path, default=None)
     args = parser.parse_args()

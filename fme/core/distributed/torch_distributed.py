@@ -260,8 +260,12 @@ class TorchDistributed(DistributedBackend):
     def abort(self):
         if not torch.distributed.is_initialized():
             return
-        # aborts every process group's communicators; NCCL's abort is designed
-        # to be called from a second thread while collectives are in flight
+        # Aborts every process group's communicators; NCCL's abort is designed
+        # to be called from a second thread while collectives are in flight.
+        # torch suggests turning TORCH_NCCL_ASYNC_ERROR_HANDLING off around
+        # this call so its watchdog cannot abort concurrently; we leave the
+        # default because ace's 30-minute collective timeout cannot expire
+        # inside the seconds-long window between this abort and the exit.
         torch.distributed.distributed_c10d._abort_process_group()
 
 

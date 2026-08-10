@@ -11,7 +11,7 @@ from fme.core import metrics
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
-from .shutdown import DEFAULT_GRACE_PERIOD, handle_termination_signals
+from .shutdown import handle_termination_signals
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,9 @@ class Distributed:
 
         Termination signals are handled for the lifetime of the context, so that
         a preempted job aborts its communicators before exiting instead of
-        dropping its NVLink peers. See `fme.core.distributed.shutdown`.
+        dropping its NVLink peers. See `fme.core.distributed.shutdown`. A
+        single-process job has no peers to protect and keeps the default signal
+        behavior (Ctrl-C raises KeyboardInterrupt and unwinds normally).
 
         Args:
             handle_signals: Install the termination listener. Pass `False` only
@@ -91,25 +93,18 @@ class Distributed:
         instance = cls.get_instance()
         try:
             with contextlib.ExitStack() as stack:
-                if handle_signals:
-                    stack.enter_context(
-                        handle_termination_signals(
-                            instance.abort,
-                            # with no peers there is nothing to wait for
-                            grace_period=(
-                                DEFAULT_GRACE_PERIOD
-                                if instance.is_distributed()
-                                else 0.0
-                            ),
-                        )
-                    )
-                yield
-        except BaseException:
-            # exit immediately to avoid hanging other ranks
-            # the OS should clean up resources based on the non-zero exit
-            raise  # re-raise the exception to avoid masking it
-        else:  # if no exception is raised, let root finish cleanup
-            instance.shutdown()
+                if handle_signals and instance.is_distributed():
+                    stack.enter_context(handle_termination_signals(instance.abort))
+                try:
+                    yield
+                except BaseException:
+                    # exit immediately to avoid hanging other ranks
+                    # the OS should clean up resources based on the non-zero exit
+                    raise  # re-raise the exception to avoid masking it
+                else:  # if no exception is raised, let root finish cleanup
+                    # inside the stack: the teardown is itself a collective, so
+                    # it must run while the listener still protects the process
+                    instance.shutdown()
         finally:
             cls._entered = False
 

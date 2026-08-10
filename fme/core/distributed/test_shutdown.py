@@ -153,6 +153,38 @@ def test_exit_waits_out_the_grace_period():
 
 
 @pytest.mark.medium_duration
+def test_a_main_thread_released_by_the_abort_cannot_exit_first():
+    """Leaving the context must block until the listener has exited.
+
+    Aborting the communicators *releases* a main thread that was blocked in a
+    collective, which then raises out of the training loop and unwinds. If
+    that unwind escaped the context, the process would exit with the
+    exception's code, before the grace period -- losing both the fabric
+    guarantee and the preemption exit code.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import handle_termination_signals
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        with handle_termination_signals(abort=abort, grace_period=1.0):
+            signal.raise_signal(signal.SIGTERM)
+            released.wait()  # blocked "in the collective" until the abort
+            raise RuntimeError("rank unwinding after its collective died")
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
 def test_forked_child_does_not_trigger_the_parent_abort():
     """A signal delivered to a fork-started worker must stay the worker's.
 

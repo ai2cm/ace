@@ -86,6 +86,9 @@ _DRIVER = textwrap.dedent(
     # production code.
     backend_abort = dist.abort
     dist.abort = lambda: (record("abort"), backend_abort())
+    # the context only installs the listener for real multi-rank jobs, and this
+    # driver is a single process standing in for one rank of one
+    dist.is_distributed = lambda: True
 
     # the real entrypoint context, so the listener is installed by production
     # code rather than by the test
