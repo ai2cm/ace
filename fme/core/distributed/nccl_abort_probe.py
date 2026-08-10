@@ -3,14 +3,18 @@ non-main thread quiesce this rank's fabric traffic, and leave the GPU fabric
 healthy after every rank has exited?
 
 This is the load-bearing question for replacing the collective teardown of
-ai2cm/ace#1398 with communicator abort. Two scenarios, each followed by a
-fresh NCCL job on the same GPUs as a fabric health check:
+ai2cm/ace#1398 with communicator abort. Both scenarios run a real
+DistributedDataParallel training loop, so the collectives in flight are DDP's
+bucketed gradient all-reduces, issued from autograd hooks on side streams as
+in production. Each is followed by a fresh NCCL job on the same GPUs as a
+fabric health check:
 
-- ``healthy``: every rank is in a live all-reduce loop when SIGTERM arrives —
-  the common preemption, where the abort races an active collective.
-- ``wedge``: rank 0 abandons a collective its peers have entered, so the
-  peers' main threads are blocked in a stream sync and cannot service a
-  signal — the pathological preemption that cordons nodes today.
+- ``healthy``: every rank is mid training loop when SIGTERM arrives — the
+  common preemption, where the abort races active collectives.
+- ``wedge``: rank 0 stops training while its peers run ``backward()``, whose
+  gradient all-reduces it never joins, so the peers' main threads are blocked
+  in a stream sync and cannot service a signal — the pathological preemption
+  that cordons nodes today.
 
 Run directly on a multi-GPU machine::
 
@@ -43,6 +47,11 @@ _NEVER = 3600.0
 # 32 MiB, comparable to a DDP gradient bucket: large enough for the
 # Simple/NVLS protocols a training job uses, not the small-message LL path.
 _TENSOR_NUMEL = 1 << 23
+# ~17M parameters -> ~67 MB of gradients, several DDP buckets at the default
+# 25 MB bucket cap.
+_MODEL_WIDTH = 2048
+_MODEL_DEPTH = 4
+_BATCH_SIZE = 8
 
 
 def _mark(message: str) -> None:
@@ -95,16 +104,40 @@ def _init_nccl() -> tuple[int, torch.Tensor]:
     return rank, tensor
 
 
+def _training_setup() -> (
+    tuple[int, torch.nn.Module, torch.optim.Optimizer, torch.Tensor]
+):
+    rank, _ = _init_nccl()
+    device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
+    layers: list[torch.nn.Module] = []
+    for _ in range(_MODEL_DEPTH):
+        layers.extend([torch.nn.Linear(_MODEL_WIDTH, _MODEL_WIDTH), torch.nn.GELU()])
+    model = torch.nn.parallel.DistributedDataParallel(
+        torch.nn.Sequential(*layers).to(device), device_ids=[device.index]
+    )
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
+    batch = torch.randn(_BATCH_SIZE, _MODEL_WIDTH, device=device)
+    return rank, model, optimizer, batch
+
+
+def _training_step(
+    model: torch.nn.Module, optimizer: torch.optim.Optimizer, batch: torch.Tensor
+) -> None:
+    optimizer.zero_grad()
+    loss = model(batch).square().mean()
+    loss.backward()
+    optimizer.step()
+    torch.cuda.synchronize()
+
+
 def _run_healthy_worker(ready_dir: Path, grace: float, abort_comms: bool) -> None:
     rank = int(os.environ["RANK"])
     _install_sigterm_listener(rank, grace, abort_comms)
-    rank, tensor = _init_nccl()
+    rank, model, optimizer, batch = _training_setup()
     iterations = 0
     while True:
         try:
-            tensor.fill_(1.0)
-            dist.all_reduce(tensor)
-            torch.cuda.synchronize()
+            _training_step(model, optimizer, batch)
         except BaseException as exc:
             _mark(f"rank {rank} loop raised {type(exc).__name__} after abort")
             time.sleep(_NEVER)  # the listener owns the exit
@@ -121,22 +154,20 @@ def _run_wedge_worker(ready_dir: Path, grace: float, abort_comms: bool) -> None:
         # kernels are still polling its memory.
         grace = 1.0 if rank == 0 else 10.0
     _install_sigterm_listener(rank, grace, abort_comms)
-    rank, tensor = _init_nccl()
+    rank, model, optimizer, batch = _training_setup()
     for _ in range(3):
-        dist.all_reduce(tensor)
-    torch.cuda.synchronize()
+        _training_step(model, optimizer, batch)
     _mark(f"rank {rank} warmup complete")
     (ready_dir / f"warmup_rank{rank}").touch()
     if rank == 0:
         # Stand in for the rank that left the training loop first: its peers
-        # enter a collective this rank never joins.
+        # run a backward whose gradient all-reduces this rank never joins.
         time.sleep(_NEVER)
     else:
         (ready_dir / f"wedging_rank{rank}").touch()
-        _mark(f"rank {rank} entering wedge all-reduce")
+        _mark(f"rank {rank} entering wedge backward")
         try:
-            dist.all_reduce(tensor)
-            torch.cuda.synchronize()
+            _training_step(model, optimizer, batch)
             _mark(f"rank {rank} main thread released from wedge")
         except BaseException as exc:
             _mark(
