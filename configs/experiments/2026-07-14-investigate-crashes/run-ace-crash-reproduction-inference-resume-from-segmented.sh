@@ -2,7 +2,7 @@
 
 set -e
 
-DATE="2026-08-07"
+DATE="2026-08-10"
 WANDB_USERNAME=spencerc_ai2
 CONFIG_FILENAME="ace-som-1000-year-inference-config-with-stratospheric-output.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -31,13 +31,14 @@ declare -A MODELS=( \
     [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
 )
 
-GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-08-07-crash-investigation-with-Rayleigh-damping"
+GCS_ROOT="gs://vcm-ml-experiments/spencerc/2026-08-08-crash-investigation-with-q0-hyperdiffusion"
 SEGMENT_LENGTH=182621
 CASES=( \
-    "full-energy-conserving-rs0,4xCO2,0,498415,01KZCSW6MV219D2R29P7H7PH00,ai2/titan,example-0001" \
-    "full-energy-conserving-rs0,4xCO2,1,37793,01KZCSW6WG3CYW6VXF3GN3X4Y9,ai2/titan,example-0002" \
-    "full-energy-conserving-rs0,4xCO2,2,412145,01KZCSW6S00PBCR2QJWNM8PWFM,ai2/titan,example-0003" \
-    "full-energy-conserving-rs0,4xCO2,5,1192075,01KZCSWKV062H0NYQ22KWB0DZ5,ai2/titan,example-0004" \
+    "full-energy-conserving-rs0,4xCO2,0,304671,01KZH1W1TC1MYJM5YXNGFMH190,ai2/titan,example-0001" \
+    "full-energy-conserving-rs0,4xCO2,1,1324269,01KZH1W9CRYWJNRRYREQYY980V,ai2/titan,example-0002" \
+    "full-energy-conserving-rs0,4xCO2,3,394064,01KZH1WQGWA4CX2TWJH0YAF02J,ai2/titan,example-0003" \
+    "full-energy-conserving-rs0,4xCO2,4,462619,01KZH1WYK3WWP7JBSZW1A1C56T,ai2/titan,example-0004" \
+    "full-energy-conserving-rs0,4xCO2,5,532765,01KZH1X5Z6YX342VHT4BGAN99C,ai2/titan,example-0005" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -76,13 +77,13 @@ for case in "${CASES[@]}"; do
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $main_overrides
 
-    job_name="${DATE}-${model}-${climate}-seed-${seed}-1000-year-equilibrium-climate-inference-rayleigh-damping-output-around-crash"
+    job_name="${DATE}-${model}-${climate}-seed-${seed}-1000-year-equilibrium-climate-inference-q0-hyperdiffusion-output-around-crash"
     gantry run \
         --name $job_name \
         --description 'Run inference with ACE' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-        --workspace ai2/ace \
-        --priority low \
+        --workspace ai2/climate-titan \
+        --priority urgent \
         --cluster $cluster \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
