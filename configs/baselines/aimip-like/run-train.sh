@@ -35,6 +35,15 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  # CM_PRIORITY is read by the beaker priority balancer, not by fme: high by
+  # default, overridable per arm by a "# arg: --env CM_PRIORITY=low" config
+  # header. gantry rejects a duplicated --env, so the default is dropped when
+  # the config supplies its own.
+  local cm_priority_args=(--env CM_PRIORITY=high)
+  if [[ "${extra_args[*]:-}" == *CM_PRIORITY=* ]]; then
+    cm_priority_args=()
+  fi
+
   gantry run \
     --name "$job_name" \
     --description 'Run ACE training (AIMIP-like baseline)' \
@@ -45,7 +54,7 @@ run_training() {
     --env WANDB_NAME="$job_name" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_JOB_TYPE=training \
-    --env CM_PRIORITY=high \
+    "${cm_priority_args[@]}" \
     --env WANDB_RUN_GROUP= \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
