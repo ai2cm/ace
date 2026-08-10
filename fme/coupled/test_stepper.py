@@ -2421,3 +2421,69 @@ def test_single_component_validation_loss_is_single_component_and_reproducible()
     second = _eval_sequence()
     assert first == second
     assert set(first) == {"ocean", "atmosphere"}
+
+
+@pytest.mark.parametrize("evaluate_all_steps", [False, True])
+def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
+    evaluate_all_steps,
+):
+    """Sparse vs. dense per-realm per-step metrics under stochastic n_steps.
+
+    The atmosphere samples its per-batch step count; with
+    evaluate_all_steps=False only the sampled contiguous step range carries
+    metrics (varying across batches), while True yields metrics for every
+    available step in every batch. The ocean has no sampler, so its metrics
+    are dense either way.
+    """
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
+
+    torch.manual_seed(0)
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=4, probability=0.5),
+                ]
+            ),
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=3,
+    )
+    train_stepper.set_eval()
+    train_stepper.seed_eval(0)
+
+    ocean_key_sets = []
+    atmos_key_sets = []
+    for _ in range(12):
+        stepped = train_stepper.train_on_batch(
+            data=coupled_data.data,
+            optimization=NullOptimization(),
+            evaluate_all_steps=evaluate_all_steps,
+        )
+        ocean_key_sets.append({k for k in stepped.ocean.metrics if "_step_" in k})
+        atmos_key_sets.append({k for k in stepped.atmosphere.metrics if "_step_" in k})
+
+    dense_ocean = {f"loss/ocean_step_{step}" for step in range(2)}
+    dense_atmos = {f"loss/atmosphere_step_{step}" for step in range(4)}
+    assert all(keys == dense_ocean for keys in ocean_key_sets)
+    if evaluate_all_steps:
+        assert all(keys == dense_atmos for keys in atmos_key_sets)
+    else:
+        assert {len(keys) for keys in atmos_key_sets} == {1, 4}
+        for keys in atmos_key_sets:
+            assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}

@@ -1,0 +1,10 @@
+apache_beam[gcp]==2.71.0
+cftime
+dask
+gcsfs
+numpy
+obstore
+scipy
+xarray==2026.2.0
+xarray_beam==0.11.5
+zarr==3.1.5
