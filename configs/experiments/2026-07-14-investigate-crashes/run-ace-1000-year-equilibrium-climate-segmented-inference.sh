@@ -59,14 +59,15 @@ for seed in {0..5}; do
             "
             python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $override
 
-            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-q0-hyperdiffusion-seed-${seed}"
+            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-rayleigh-damping-q0-hyperdiffusion-seed-${seed}"
             gantry run \
                 --name $job_name \
                 --description 'Run inference with ACE' \
                 --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
-                --workspace ai2/climate-titan \
-                --priority urgent \
+                --workspace ai2/ace \
+                --priority high \
                 --cluster ai2/titan \
+                --env CM_PRIORITY high \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
                 --env WANDB_JOB_TYPE=inference \
