@@ -33,7 +33,9 @@ PAYLOAD_PATH="${SCRIPT_DIR}/run_inference.py"
 # Cheap local check that the payload at least parses.
 python -m py_compile "$PAYLOAD_PATH"
 
-PAYLOAD_B64=$(base64 -w0 "$PAYLOAD_PATH")
+# GNU coreutils takes -w0; BSD/macOS base64 has no -w and never wraps when
+# reading a file with -i, so strip newlines defensively.
+PAYLOAD_B64=$(base64 -w0 "$PAYLOAD_PATH" 2>/dev/null || base64 -i "$PAYLOAD_PATH" | tr -d '\n')
 
 CLONE_DIR=$(mktemp -d)
 trap 'rm -rf "$CLONE_DIR"' EXIT
