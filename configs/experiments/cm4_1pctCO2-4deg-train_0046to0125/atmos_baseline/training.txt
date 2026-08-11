@@ -3,6 +3,6 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 cm4_1pctCO2-4deg-train_0046to0125-atmos_baseline|rs0|skip|high|h100|2|600GiB|3|ai2/ace|seed=0
 cm4_1pctCO2-4deg-train_0046to0125-atmos_baseline|rs1|skip|high|h100|2|600GiB|3|ai2/ace|seed=1
 cm4_1pctCO2-4deg-train_0046to0125-atmos_baseline|rs2|skip|high|h100|2|600GiB|3|ai2/ace|seed=2
-cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs0|train|high|h100|2|600GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.embed_dim=512
-cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs1|train|high|h100|2|600GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.embed_dim=512
-cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs2|train|high|h100|2|600GiB|3|ai2/ace|seed=2 stepper.step.config.builder.config.embed_dim=512
+cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs0|train|high|h100|4|600GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.embed_dim=512
+cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs1|train|high|h100|4|600GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.embed_dim=512
+cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs2|train|high|h100|4|600GiB|3|ai2/ace|seed=2 stepper.step.config.builder.config.embed_dim=512
