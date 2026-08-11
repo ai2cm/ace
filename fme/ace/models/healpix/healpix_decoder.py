@@ -62,65 +62,36 @@ class UNetDecoderConfig:
         Returns:
             UNet Decoder model.
         """
-        return UNetDecoder(
-            conv_block=self.conv_block,
-            up_sampling_block=self.up_sampling_block,
-            output_layer=self.output_layer,
-            n_channels=self.n_channels,
-            n_layers=self.n_layers,
-            output_channels=output_channels,
-            dilations=self.dilations,
-            ctx=ctx,
-        )
-
-
-class UNetDecoder(nn.Module):
-    """Generic UNetDecoder that can be applied to arbitrary meshes."""
-
-    def __init__(
-        self,
-        conv_block: ConvBlockConfig,
-        up_sampling_block: UpsamplingBlockConfig,
-        output_layer: ConvBlockConfig,
-        n_channels: Sequence = (64, 32, 16),
-        n_layers: Sequence = (1, 2, 2),
-        output_channels: int = 1,
-        dilations: Optional[list] = None,
-        ctx: HEALPixBuildContext | None = None,
-    ):
-        """
-        Initialize the UNetDecoder.
-
-        Args:
-            conv_block: Configuration for the convolutional block.
-            up_sampling_block: Configuration for the upsampling block.
-            output_layer: Configuration for the output layer.
-            n_channels: Sequence specifying the number of channels in each decoder layer.
-            n_layers: Sequence specifying the number of layers in each block.
-            output_channels: Number of output channels.
-            dilations: List of dilations to use for the convolutional blocks.
-            ctx: Shared HEALPix runtime settings for all child modules.
-        """
-        super().__init__()
-        build_ctx = ctx or HEALPixBuildContext()
-        self.channel_dim = 1
-
-        if dilations is None:
-            dilations = [1 for _ in range(len(n_channels))]
-
-        nside_levels = build_ctx.nside_levels
-        if nside_levels is not None and len(nside_levels) != len(n_channels):
+        nside_levels = ctx.nside_levels
+        if nside_levels is not None and len(nside_levels) != len(self.n_channels):
             raise ValueError(
                 f"nside length must match decoder levels; got {len(nside_levels)} "
-                f"vs {len(n_channels)}"
+                f"vs {len(self.n_channels)}"
             )
+        return self._build(output_channels, ctx=ctx)
 
-        conv_tpl = conv_block
-        up_tpl = up_sampling_block
-        up_factor = up_tpl.stride
+    def _build(
+        self,
+        output_channels: int,
+        *,
+        ctx: HEALPixBuildContext,
+    ) -> "UNetDecoder":
+        """Construct the ordered per-level decoder modules plus output layer.
+
+        Builds one :class:`DecoderLevel` per level (threading channel counts and
+        validating the nside upsample ratios) and the output layer, then passes
+        the built modules to :class:`UNetDecoder`.
+        """
+        dilations = self.dilations
+        if dilations is None:
+            dilations = [1 for _ in range(len(self.n_channels))]
+
+        nside_levels = ctx.nside_levels
+        up_factor = self.up_sampling_block.stride
+        n_channels = self.n_channels
         n_levels = len(n_channels)
 
-        self.decoder = []
+        decoder: list[DecoderLevel] = []
         for n, curr_channel in enumerate(n_channels):
             up_sample_module = None
             level_nside = (
@@ -136,10 +107,10 @@ class UNetDecoder(nn.Module):
                             f"must equal nside[{n_levels - n}] * upsample factor "
                             f"({up_factor}), but nside[{n_levels - n}]={before}"
                         )
-                up_sample_module = up_tpl.build(
+                up_sample_module = self.up_sampling_block.build(
                     in_channels=curr_channel,
                     out_channels=curr_channel,
-                    ctx=build_ctx.layer(
+                    ctx=ctx.layer(
                         n_levels - n,
                         nside_after=level_nside,
                     ),
@@ -149,47 +120,97 @@ class UNetDecoder(nn.Module):
                 n_channels[n + 1] if n < len(n_channels) - 1 else n_channels[-1]
             )
 
-            conv_module = conv_tpl.build(
+            conv_module = self.conv_block.build(
                 in_channels=curr_channel * 2 if n > 0 else curr_channel,
                 out_channels=next_channel,
                 latent_channels=curr_channel,
                 dilation=dilations[n],
-                n_layers=n_layers[n],
-                ctx=build_ctx.layer(n_levels - 1 - n),
+                n_layers=self.n_layers[n],
+                ctx=ctx.layer(n_levels - 1 - n),
             )
 
-            self.decoder.append(
-                nn.ModuleDict(
-                    {
-                        "upsamp": up_sample_module,
-                        "conv": conv_module,
-                    }
-                )
-            )
+            decoder.append(DecoderLevel(upsamp=up_sample_module, conv=conv_module))
 
-        self.decoder = nn.ModuleList(self.decoder)
-
-        self.output_layer = output_layer.build(
+        output_layer = self.output_layer.build(
             in_channels=curr_channel,
             out_channels=output_channels,
             dilation=dilations[-1],
-            ctx=build_ctx.layer(0),
+            ctx=ctx.layer(0),
         )
+
+        return UNetDecoder(
+            decoder=decoder,
+            output_layer=output_layer,
+        )
+
+
+class DecoderLevel(nn.Module):
+    """One decoder level: optional upsample + skip-concat, then a conv block.
+
+    The deepest level (built first, ``upsamp is None``) receives the encoder
+    bottleneck and applies only its conv block. Each shallower level upsamples
+    the running activation, concatenates the matching encoder skip connection
+    along the channel dimension, then applies its conv block. Bundling the
+    upsample and conv into one module keeps this per-level branching structure
+    with the module that runs it, so :class:`UNetDecoder.forward` never reaches
+    into the level's internals.
+    """
+
+    def __init__(self, upsamp: Optional[nn.Module], conv: nn.Module):
+        super().__init__()
+        self.upsamp = upsamp
+        self.conv = conv
+        self.channel_dim = 1
+
+    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Running activation from the deeper level.
+            skip: Matching encoder skip connection (unused when ``upsamp`` is
+                ``None``, i.e. the deepest level).
+        """
+        if self.upsamp is not None:
+            x = torch.cat([self.upsamp(x), skip], dim=self.channel_dim)
+        return self.conv(x)
+
+
+class UNetDecoder(nn.Module):
+    """Applies the decoder levels deepest-to-shallowest, then the output layer.
+
+    Receives the ordered per-level :class:`DecoderLevel` modules and the output
+    layer already built by :meth:`UNetDecoderConfig._build`; it constructs
+    nothing itself, so it is directly constructible from its signature and its
+    ``forward`` needs no knowledge of how the levels were assembled.
+    """
+
+    def __init__(
+        self,
+        decoder: list[DecoderLevel],
+        output_layer: nn.Module,
+    ):
+        """
+        Args:
+            decoder: Ordered per-level :class:`DecoderLevel` modules built by
+                :meth:`UNetDecoderConfig._build`; wrapped in an
+                ``nn.ModuleList`` here for submodule registration.
+            output_layer: Final output-projection module.
+        """
+        super().__init__()
+        self.decoder = nn.ModuleList(decoder)
+        self.output_layer = output_layer
 
     def forward(self, inputs: Sequence[torch.Tensor]) -> torch.Tensor:
         """
         Forward pass of the UNetDecoder.
 
         Args:
-            inputs: Sequence of tensors, one for each decoder level.
+            inputs: Sequence of tensors, one per decoder level (encoder outputs,
+                shallow-to-deep).
 
         Returns:
             The decoded values.
         """
         x = inputs[-1]
-        for n, layer in enumerate(self.decoder):
-            if layer["upsamp"] is not None:
-                up = layer["upsamp"](x)
-                x = torch.cat([up, inputs[-1 - n]], dim=self.channel_dim)
-            x = layer["conv"](x)
+        for n, level in enumerate(self.decoder):
+            x = level(x, inputs[-1 - n])
         return self.output_layer(x)
