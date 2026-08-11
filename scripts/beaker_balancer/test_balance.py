@@ -129,11 +129,11 @@ def modifiable(jobs, limits=LIMITS) -> set[str]:
         groups.setdefault(key or j.id, []).append(j)
     allowed: set[str] = set()
     for members in groups.values():
-        if any(m.managed_cluster(limits) is None for m in members):
+        if any(m.unmanaged_reason(limits) is not None for m in members):
             continue
         if len({m.cm_priority for m in members}) != 1:
             continue
-        # Ranks must agree on the cluster their slots are charged to -- which
+        # Ranks must agree on the clusters their slots are charged to -- which
         # for a placed rank is the one it landed on, not what it was submitted
         # eligible for. A group split across clusters cannot be granted
         # coherently: its slots come out of two different budgets.
@@ -290,9 +290,41 @@ def test_placed_non_urgent_job_does_not_displace_others():
 # --- accounting -------------------------------------------------------------
 
 
-def test_multi_cluster_jobs_are_never_modified():
-    both = job(clusters=("ai2/titan", "ai2/jupiter"), cm_priority=URGENT)
-    assert decide([both], LIMITS) == []
+def test_a_queued_multi_cluster_job_is_promoted_when_both_clusters_have_room():
+    both = job(clusters=("ai2/titan", "ai2/jupiter"), cm_priority=HIGH)
+    result = changes(decide([both], LIMITS))
+    assert result == {both.id: URGENT}
+
+
+def test_a_queued_multi_cluster_job_is_not_promoted_when_one_cluster_is_full():
+    both = job(clusters=("ai2/titan", "ai2/jupiter"), cm_priority=HIGH, slots=8)
+    hog = job(priority=URGENT, cm_priority=None, slots=32, clusters=("ai2/titan",))
+    result = decide([both, hog], LIMITS)
+    assert result == []
+
+
+def test_a_queued_multi_cluster_urgent_job_is_demoted_from_both_clusters():
+    both = job(
+        priority=URGENT,
+        cm_priority=LOW,
+        slots=8,
+        clusters=("ai2/titan", "ai2/jupiter"),
+    )
+    result = changes(decide([both], {"ai2/jupiter": 0, "ai2/titan": 0}))
+    assert result == {both.id: LOW}
+
+
+def test_promoting_a_queued_multi_cluster_job_charges_both_clusters():
+    both = job(
+        cm_priority=HIGH,
+        slots=32,
+        clusters=("ai2/titan", "ai2/jupiter"),
+    )
+    on_titan = job(cm_priority=NORMAL, slots=8, clusters=("ai2/titan",))
+    result = changes(decide([both, on_titan], LIMITS))
+    # both takes 32 from titan (fills it) and 32 from jupiter; on_titan doesn't
+    # fit on titan anymore.
+    assert result == {both.id: URGENT, on_titan.id: NORMAL}
 
 
 def test_queued_multi_cluster_urgent_job_counts_against_every_cluster():
@@ -334,7 +366,7 @@ def test_placed_job_with_unresolvable_cluster_is_not_managed():
         placed_at=100.0,
         slots=8,
     )
-    assert unknown.managed_cluster(LIMITS) is None
+    assert unknown.managed_clusters(LIMITS) is None
     assert decide([unknown], LIMITS) == []
 
 
@@ -347,7 +379,7 @@ def test_placed_job_on_its_pinned_cluster_is_managed():
         placed_at=100.0,
         slots=8,
     )
-    assert on_titan.managed_cluster(LIMITS) == "ai2/titan"
+    assert on_titan.managed_clusters(LIMITS) == ("ai2/titan",)
 
 
 def test_assigned_multi_cluster_job_counts_only_where_it_landed():
@@ -735,7 +767,7 @@ def test_only_labelled_manageable_jobs_are_ever_modified(seed):
     jobs = random_population(rng)
     for action in decide(jobs, LIMITS):
         assert action.job.cm_priority is not None
-        assert action.job.managed_cluster(LIMITS) is not None
+        assert action.job.managed_clusters(LIMITS) is not None
         assert action.job.id in modifiable(jobs)
         assert not action.job.is_session
         assert action.from_priority != IMMEDIATE
@@ -816,6 +848,10 @@ def test_the_allocation_is_not_left_unspent(seed):
     balancer that granted nothing at all would satisfy them. This asserts the
     walk is maximal: any candidate group left below urgent was left there
     because it did not fit in what remained, not because it was overlooked.
+
+    A multi-cluster group must fit on *every* cluster it could land on: the
+    pessimistic grant commits the allocation on each. So a group left out needs
+    only one cluster too tight to justify it.
     """
     rng = random.Random(seed)
     jobs = random_population(rng)
@@ -824,12 +860,12 @@ def test_the_allocation_is_not_left_unspent(seed):
     for key, members in grantable_groups(jobs).items():
         if all(after[m.id].priority == URGENT for m in members):
             continue
-        cluster = members[0].clusters[0]
+        clusters = charged_clusters(members[0])
         slots = sum(m.slots for m in members)
-        headroom = LIMITS[cluster] - used[cluster]
-        assert (
-            slots > headroom
-        ), f"{key} needed {slots} on {cluster} and {headroom} were left unspent"
+        assert any(slots > LIMITS[c] - used[c] for c in clusters), (
+            f"{key} needed {slots} on {clusters} and all had room: "
+            + ", ".join(f"{c}={LIMITS[c] - used[c]}" for c in clusters)
+        )
 
 
 def test_random_population_reaches_the_states_that_matter():
@@ -839,6 +875,7 @@ def test_random_population_reaches_the_states_that_matter():
         "initializing": 0,
         "replica": 0,
         "replica_managed": 0,
+        "multi_cluster_managed": 0,
         "session": 0,
         "immediate": 0,
         "demotion": 0,
@@ -855,6 +892,9 @@ def test_random_population_reaches_the_states_that_matter():
         seen["replica"] += sum(1 for j in jobs if j.replica_group_size > 1)
         seen["replica_managed"] += sum(
             1 for j in jobs if j.replica_group_size > 1 and j.id in allowed
+        )
+        seen["multi_cluster_managed"] += sum(
+            1 for j in jobs if len(j.clusters) > 1 and j.id in allowed
         )
         seen["session"] += sum(1 for j in jobs if j.is_session)
         seen["immediate"] += sum(1 for j in jobs if j.priority == IMMEDIATE)
@@ -881,7 +921,7 @@ def test_a_placed_job_is_managed_against_the_cluster_it_landed_on():
         assigned_cluster="ai2/jupiter",
     )
     assert running.budget_clusters(LIMITS) == ("ai2/jupiter",)
-    assert running.managed_cluster(LIMITS) == "ai2/jupiter"
+    assert running.managed_clusters(LIMITS) == ("ai2/jupiter",)
     assert changes(decide([running], {"ai2/jupiter": 0, "ai2/titan": 32})) == {
         running.id: NORMAL
     }
@@ -902,14 +942,13 @@ def test_a_placed_multi_cluster_job_can_be_displaced_by_a_queued_one():
     assert result == {holder.id: NORMAL, contender.id: URGENT}
 
 
-def test_a_queued_multi_cluster_job_is_still_left_alone():
-    # Beaker offers no way to pin a queued job, so which allocation it will
-    # consume is genuinely unknowable.
+def test_a_queued_multi_cluster_job_is_managed_pessimistically():
     queued = job(
         priority=URGENT, cm_priority=LOW, clusters=("ai2/titan", "ai2/jupiter")
     )
-    assert queued.managed_cluster(LIMITS) is None
-    assert decide([queued], {"ai2/jupiter": 0, "ai2/titan": 0}) == []
+    assert queued.managed_clusters(LIMITS) == ("ai2/titan", "ai2/jupiter")
+    result = changes(decide([queued], {"ai2/jupiter": 0, "ai2/titan": 0}))
+    assert result == {queued.id: LOW}
 
 
 def test_a_placed_job_on_an_unbudgeted_cluster_is_left_alone():
@@ -919,7 +958,7 @@ def test_a_placed_job_on_an_unbudgeted_cluster_is_left_alone():
         clusters=("ai2/saturn", "ai2/jupiter"),
         assigned_cluster="ai2/saturn",
     )
-    assert stray.managed_cluster(LIMITS) is None
+    assert stray.managed_clusters(LIMITS) is None
     assert decide([stray], LIMITS) == []
 
 
@@ -935,7 +974,7 @@ def test_a_placed_job_whose_node_is_unresolved_is_still_left_alone():
         placed_at=100.0,
     )
     assert unresolved.budget_clusters(LIMITS) == BUDGETED
-    assert unresolved.managed_cluster(LIMITS) is None
+    assert unresolved.managed_clusters(LIMITS) is None
     assert decide([unresolved], {"ai2/jupiter": 0, "ai2/titan": 0}) == []
 
 

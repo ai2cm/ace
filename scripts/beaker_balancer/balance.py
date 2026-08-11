@@ -73,7 +73,6 @@ UNLABELLED = "does not set CM_PRIORITY"
 OBSERVED = "is in an observed workspace, which is counted but never modified"
 SESSION = "is an interactive session"
 AT_IMMEDIATE = "is at immediate priority, which only a human sets"
-MULTI_CLUSTER = "targets more than one cluster"
 NO_ALLOCATION = "targets a cluster with no allocation"
 UNRESOLVED_CLUSTER = "landed on a node that cannot be resolved to a cluster"
 
@@ -192,26 +191,21 @@ class JobView:
         # cluster while the accounting spent them on all of them.
         if self.is_placed and self.assigned_cluster is None:
             return UNRESOLVED_CLUSTER
-        # A queued job is the ambiguous case: Beaker offers no way to pin one,
-        # so a job eligible for several could consume any of their allocations
-        # and there is no way to know which in advance.
-        if not self.is_placed and len(self.clusters) != 1:
-            return MULTI_CLUSTER
         if not self.budget_clusters(limits):
             return NO_ALLOCATION
         return None
 
-    def managed_cluster(self, limits: dict[str, int]) -> str | None:
-        """The single budgeted cluster this job may be modified against.
+    def managed_clusters(self, limits: dict[str, int]) -> tuple[str, ...] | None:
+        """The budgeted clusters this job is managed against, or None.
 
-        The one its slots are charged to, which for a placed job is the one it
-        landed on. ``unmanaged_reason`` admits a job only when that is exactly
-        one budgeted cluster, so the walk can never hand out slots on one
-        cluster while the accounting spends them on another.
+        For a placed job, a single cluster: the one it landed on. For a queued
+        job, every budgeted cluster it could land on: granting it urgent
+        commits the allocation on each, so the pass must check and charge all
+        of them.
         """
         if self.unmanaged_reason(limits) is not None:
             return None
-        return self.budget_clusters(limits)[0]
+        return self.budget_clusters(limits)
 
 
 @dataclass(frozen=True)
@@ -219,8 +213,8 @@ class Action:
     """A priority change the balancer intends to make."""
 
     job: JobView
-    #: The budgeted cluster this change is accounted against.
-    cluster: str
+    #: The budgeted clusters this change is accounted against.
+    clusters: tuple[str, ...]
     from_priority: int
     to_priority: int
     reason: str
@@ -263,7 +257,7 @@ class ReplicaGroup:
 
     id: str
     jobs: tuple[JobView, ...]
-    cluster: str
+    clusters: tuple[str, ...]
     cm_priority: int
 
     @property
@@ -321,21 +315,21 @@ def group_jobs(
     managed: list[ReplicaGroup] = []
     fixed: list[JobView] = []
     for group_id, members in by_group.items():
-        clusters = {job.managed_cluster(limits) for job in members}
+        cluster_tuples = {job.managed_clusters(limits) for job in members}
         labels = {job.cm_priority for job in members}
         # A single non-None value in each means every rank is manageable and
         # they agree; anything else leaves the group untouched.
-        cluster = clusters.pop() if len(clusters) == 1 else None
+        clusters = cluster_tuples.pop() if len(cluster_tuples) == 1 else None
         label = labels.pop() if len(labels) == 1 else None
         expected = max(job.replica_group_size for job in members)
-        if cluster is None or label is None or len(members) < expected:
+        if clusters is None or label is None or len(members) < expected:
             fixed.extend(members)
             continue
         managed.append(
             ReplicaGroup(
                 id=group_id,
                 jobs=tuple(members),
-                cluster=cluster,
+                clusters=clusters,
                 cm_priority=label,
             )
         )
@@ -422,10 +416,13 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
             # First fit: a group too large for what is left is skipped and
             # smaller ones behind it still get a chance. Nothing is reserved
             # for it, because a higher level that could not fit has already
-            # taken everything it was entitled to.
-            if group.slots <= remaining[group.cluster]:
+            # taken everything it was entitled to. A multi-cluster group must
+            # fit on every cluster it could land on: granting it urgent commits
+            # the allocation on each, and nothing can preempt an urgent job.
+            if all(group.slots <= remaining[c] for c in group.clusters):
                 granted.add(group.id)
-                remaining[group.cluster] -= group.slots
+                for c in group.clusters:
+                    remaining[c] -= group.slots
 
     actions = []
     for group in groups:
@@ -444,9 +441,8 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
                     NAME_BY_PRIORITY.get(desired),
                 )
                 continue
-            actions.append(
-                Action(job, group.cluster, job.priority, desired, _reason(job, desired))
-            )
+            reason = _reason(job, desired)
+            actions.append(Action(job, group.clusters, job.priority, desired, reason))
 
     # Demotions first, so that any prefix of a partially applied pass is still
     # within allocation. A promotion applied before the demotion paying for it
@@ -663,9 +659,7 @@ def report_unmanageable(jobs: Sequence[JobView], limits: dict[str, int]) -> None
         # to be managed: it was never a candidate, and there can be many.
         if why is None or why is UNLABELLED or why is OBSERVED:
             continue
-        if why is MULTI_CLUSTER:
-            reason = f"targets {len(job.clusters)} clusters"
-        elif why is NO_ALLOCATION:
+        if why is NO_ALLOCATION:
             reason = f"targets {job.clusters[0]}, which has no allocation"
         else:
             reason = why
@@ -754,14 +748,16 @@ def run_pass(
         if action.takes_slots:
             if action.job.group_key in abandoned:
                 continue
-            if deficit[action.cluster] > 0:
-                deficit[action.cluster] -= wanted[action.job.group_key]
+            deficient = [c for c in action.clusters if deficit[c] > 0]
+            if deficient:
+                for c in action.clusters:
+                    deficit[c] -= wanted[action.job.group_key]
                 abandoned.add(action.job.group_key)
                 LOGGER.warning(
                     "not granting urgent to %s: a demotion on %s was refused, "
                     "so the slots paying for it are still held",
                     action.job.group_key,
-                    action.cluster,
+                    ", ".join(deficient),
                 )
                 continue
         try:
@@ -770,7 +766,8 @@ def run_pass(
             # Most likely a job owned by someone whose jobs we cannot modify.
             # One unreachable job should not stop the rest of the pass.
             if action.frees_slots:
-                deficit[action.cluster] += action.job.slots
+                for c in action.clusters:
+                    deficit[c] += action.job.slots
             if action.takes_slots:
                 # Stop before splitting the group any further. Permission is
                 # per owner and every rank shares one, so in practice this
