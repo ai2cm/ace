@@ -24,23 +24,26 @@ earth2studio SamudrACE port (`../e2s/`) is validated.
 `experiment_dir: /results`, gantry's default Beaker result-dataset directory,
 so all outputs land in the job's result dataset. The prediction writers save
 per-step NetCDF for atmosphere (6-hourly) and ocean (cycle boundaries, i.e.
-5-daily) with full coordinates and timestamps, covering the comparison
-fields (atmosphere 2m temperature, 10m winds, surface temperature; ocean SST
-and sea-ice fraction) plus everything else the checkpoint predicts. Monthly
-files are also saved.
+5-daily) with full coordinates and timestamps; monthly files are also saved.
+Comparison fields covered (plus everything else the checkpoint predicts):
+
+- atmosphere 2m temperature
+- atmosphere 10m winds
+- atmosphere surface temperature
+- ocean SST
+- ocean sea-ice fraction
 
 ## Environment / install
 
 No `--beaker-image`: gantry installs the environment from the cloned repo at
 the tag with `--system-python` and a pip `--install` command. The tag's
 `pyproject.toml` is a plain setuptools package whose deps install cleanly from
-PyPI, so no deps-only image is needed for a one-off inference job.
+PyPI.
 
 **GPU wheel pin.** fme's `torch>=2.4.0` resolves on PyPI to torch 2.13, which
 is a **CUDA 13** build (`nvidia-cudnn-cu13`, `nvidia-nccl-cu13`, ...). The ai2
 A100 nodes run driver 570.124.06 / CUDA 12.8 and CUDA 13 needs r580+, so
-`torch.cuda.is_available()` is False there — this is what made the
-earth2studio-side job (`../e2s/`) run on CPU. `submit.sh` therefore installs
+`torch.cuda.is_available()` is False there. `submit.sh` therefore installs
 `torch==2.9.1` from `https://download.pytorch.org/whl/cu128` before
 `pip install .` (2.9.1 satisfies `torch>=2.4.0`, so the project install leaves
 it in place), and the install step prints `torch.__version__`,

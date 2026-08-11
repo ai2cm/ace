@@ -25,10 +25,9 @@ in `../fme/`.
 `SAMUDRACE_DEVICE` now defaults to `cuda`, not "cuda if available". If CUDA is
 unavailable (or `SAMUDRACE_DEVICE=cpu`), the payload raises before loading the
 checkpoint unless `SAMUDRACE_ALLOW_CPU=1` is set; the error names the torch
-version and the CUDA version it was built for. This is deliberate: the first
-submission of this job silently ran on CPU for 15 minutes at ~37 min/epoch of
-progress before being cancelled, because the old default quietly degraded when
-`torch.cuda.is_available()` returned False (see "GPU wheel pin" below).
+version and the CUDA version it was built for. This is deliberate: the old
+default quietly degraded to CPU when `torch.cuda.is_available()` returned
+False (see "GPU wheel pin" below).
 
 ## GPU wheel pin
 
@@ -91,24 +90,23 @@ equivalents into the `earth2studio.run` namespace before calling
 `run.deterministic`; nothing else in the workflow needs changing. The zarr
 backend itself is fine: it creates coordinate arrays with the incoming numpy
 dtype, and `datetime64[s]` round-trips through zarr and xarray unchanged
-(verified). A NetCDF backend would not have been a safe default here, since
-its coordinate handling normalises datetimes to nanoseconds.
+(verified).
 
 ## Environment / install
 
 No `--beaker-image`: gantry installs from the cloned repo with
 `--system-python` and a pip `--install` command (see "GPU wheel pin" above for
-the torch pin that precedes `pip install '.[samudrace]'`). The repo is
-uv-managed, but the `samudrace` extra is plain PEP 621 metadata resolvable by
-pip — `fme==2026.4.0`, `pandas`, `scipy`, plus base deps, all PyPI releases,
-with no `[tool.uv.sources]` git pins in play (the `[tool.uv]` extra conflicts
-only matter when several extras are installed at once, and torch-harmonics
-comes from fme's own pin). Using pip keeps the flags identical in shape to the
-reference-side job in `../fme/` and avoids depending on gantry's uv support or on
-`uv sync` + `uv run` wrapping the entrypoint. If pip resolution turns out to
-diverge from `uv.lock` on the GPU image, the fallback is
-`--install "uv sync --frozen --extra samudrace"` with the entrypoint prefixed
-by `uv run`.
+the torch pin that precedes `pip install '.[samudrace]'`).
+
+- The repo is uv-managed, but the `samudrace` extra is plain PEP 621 metadata
+  resolvable by pip — `fme==2026.4.0`, `pandas`, `scipy`, plus base deps, all
+  PyPI releases, with no `[tool.uv.sources]` git pins in play
+  (torch-harmonics comes from fme's own pin).
+- Pip keeps the flags identical in shape to the reference-side job in
+  `../fme/`.
+- Fallback if pip resolution diverges from `uv.lock` on the GPU image:
+  `--install "uv sync --frozen --extra samudrace"` with the entrypoint
+  prefixed by `uv run`.
 
 ## Payload delivery
 
@@ -136,8 +134,7 @@ The job is submitted with `--min-runtime 2h` (gantry >= 3.5) rather than
 3.7.0 and is rejected if combined with `--min-runtime`, so it is removed
 entirely. `--min-runtime` guarantees the job runs for at least the given
 duration before Beaker may preempt it; `--priority high` is unchanged and
-orthogonal (the first submission was repeatedly preempted by `urgent`-priority
-jobs, which `--min-runtime` is exactly the guard for).
+orthogonal.
 
 ## Expected runtime
 
