@@ -311,13 +311,7 @@ def main() -> None:
 
     # Match the fme inference entrypoint (fme/coupled/inference/inference.py),
     # which enables cuDNN autotuning on GPU. earth2studio calls the stepper
-    # directly and never runs that entrypoint, so without this the flag keeps
-    # its torch default of False and cuDNN selects convolution algorithms by
-    # heuristic rather than by timing. The dilated convolutions in the Samudra
-    # ocean network then land on a different algorithm than the reference run,
-    # which is the source of the ~1.5e-3 K sst difference at the first coupled
-    # step. The 1x1 convolutions in the SFNO atmosphere are unaffected --
-    # they dispatch as GEMMs, and the atmosphere matched bit-for-bit.
+    # directly and never runs that entrypoint.
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
 
