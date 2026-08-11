@@ -343,7 +343,6 @@ def test_build_aggregator_factory_passes_config():
         factory = config.build_aggregator_factory(
             name="val",
             dataset_info=MagicMock(),
-            loss_scaling=MagicMock(),
             save_per_epoch_diagnostics=False,
             output_dir="/tmp/out",
         )
@@ -433,7 +432,6 @@ class TestGetValidationCallback:
                 validation_entries=entries,
                 stepper=stepper,
                 dataset_info=MagicMock(),
-                loss_scaling=MagicMock(),
                 save_per_epoch_diagnostics=False,
                 output_dir="/tmp/out",
             )
@@ -461,7 +459,6 @@ class TestGetValidationCallback:
                 validation_entries=entries,
                 stepper=stepper,
                 dataset_info=MagicMock(),
-                loss_scaling=MagicMock(),
                 save_per_epoch_diagnostics=False,
                 output_dir="/tmp/out",
             )

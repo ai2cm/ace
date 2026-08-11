@@ -55,7 +55,7 @@ from fme.coupled.stepper import (
     CoupledTrainStepper,
     CoupledTrainStepperConfig,
 )
-from fme.coupled.typing_ import CoupledOptionalInt, CoupledTensorMapping
+from fme.coupled.typing_ import CoupledOptionalInt
 
 
 def _validate_n_steps(
@@ -109,21 +109,12 @@ class InlineValidationConfig:
             "val_0", changing its wandb keys and output directory.
         weight: weight for this validation's loss in the combined checkpoint
             selection metric. Must be non-negative.
-        evaluate_all_steps: if True (default), evaluate every forward step in
-            the validation data window, logging a dense set of per-realm
-            per-step losses. If False, evaluate only the steps the coupled
-            train stepper would evaluate for the batch: the
-            stochastically-sampled step counts under a stochastic n_steps
-            loss configuration, or the fixed counts otherwise. Under
-            stochastic sampling this makes validation cost commensurate with
-            training cost, but each per-step loss metric then averages only
-            the batches whose sampled step count reached that step: with B
-            total validation batches and p the probability of not reaching
-            the step, the metric averages ~B*(1-p) batches — an unbiased but
-            noisier estimate at long leads, to be interpreted in light of the
-            sampling probabilities. Step draws are seeded identically each
-            epoch, so a lead expected in fewer than ~1 batch may never be
-            logged.
+        evaluate_all_steps: whether to evaluate every forward step in the
+            validation data window. If False, evaluate only the steps the
+            coupled train stepper would evaluate for the batch, which under a
+            stochastic n_steps loss configuration keeps validation cost near
+            training cost, at the price of averaging each per-step loss over
+            only the batches that reached its step.
     """
 
     loader: CoupledDataLoaderConfig
@@ -144,14 +135,12 @@ class InlineValidationConfig:
         self,
         name: str,
         dataset_info: CoupledDatasetInfo,
-        loss_scaling: CoupledTensorMapping,
         save_per_epoch_diagnostics: bool,
         output_dir: str,
     ) -> Callable[[], OneStepAggregator]:
         def factory():
             return OneStepAggregator(
                 dataset_info=dataset_info,
-                loss_scaling=loss_scaling,
                 save_diagnostics=save_per_epoch_diagnostics,
                 output_dir=os.path.join(output_dir, name),
                 config=self.aggregator,
@@ -248,7 +237,6 @@ def _get_validation_callback(
     validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
     stepper: TrainStepperABC,
     dataset_info: CoupledDatasetInfo,
-    loss_scaling: CoupledTensorMapping,
     save_per_epoch_diagnostics: bool,
     output_dir: str,
 ) -> ValidationCallback:
@@ -259,7 +247,6 @@ def _get_validation_callback(
             aggregator_factory=entry_config.build_aggregator_factory(
                 name=name,
                 dataset_info=dataset_info,
-                loss_scaling=loss_scaling,
                 save_per_epoch_diagnostics=save_per_epoch_diagnostics,
                 output_dir=output_dir,
             ),
@@ -274,7 +261,6 @@ def _get_validation_callback(
 def _get_validate_stepper_callback(
     validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
     dataset_info: CoupledDatasetInfo,
-    loss_scaling: CoupledTensorMapping,
     validate_using_ema: bool,
 ) -> ValidateStepper:
     # LR tuning passes trial stepper/EMA instances distinct from the Trainer's
@@ -290,7 +276,6 @@ def _get_validate_stepper_callback(
                 dataset_info=dataset_info,
                 save_diagnostics=False,
                 output_dir="",
-                loss_scaling=loss_scaling,
                 config=entry_config.aggregator,
             )
             run_validation_loop(
@@ -643,10 +628,8 @@ class TrainConfig:
         stepper = self._get_stepper(train_data.dataset_info)
         end_of_batch_ops = self._get_end_of_batch_ops(stepper.modules)
 
-        loss_scaling = stepper.effective_loss_scaling
         aggregator_builder = CoupledAggregatorBuilder(
             dataset_info=dataset_info,
-            loss_scaling=loss_scaling,
             save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=self.output_dir,
         )
@@ -655,7 +638,6 @@ class TrainConfig:
             validation_entries=validation_entries,
             stepper=stepper,
             dataset_info=dataset_info,
-            loss_scaling=loss_scaling,
             save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=self.output_dir,
         )
@@ -665,7 +647,6 @@ class TrainConfig:
             validate_stepper = _get_validate_stepper_callback(
                 validation_entries=validation_entries,
                 dataset_info=dataset_info,
-                loss_scaling=loss_scaling,
                 validate_using_ema=self.validate_using_ema,
             )
 
@@ -719,12 +700,10 @@ class CoupledAggregatorBuilder(AggregatorBuilderABC[CoupledTrainOutput]):
         self,
         dataset_info: CoupledDatasetInfo,
         output_dir: str,
-        loss_scaling: CoupledTensorMapping,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.dataset_info = dataset_info
         self.output_dir = output_dir
-        self.loss_scaling = loss_scaling
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:

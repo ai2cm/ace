@@ -44,9 +44,9 @@ def run_validation_loop(
         validate_using_ema: Whether to use EMA parameters during validation.
         compute_derived_variables: Whether to compute derived variables.
         log_progress: Whether to log per-batch progress messages.
-        evaluate_all_steps: Whether the stepper evaluates every forward step
-            in the data window, or only the steps it would evaluate for the
-            batch during training.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
     """
     timer = GlobalTimer.get_instance()
     stepper.set_eval()
@@ -112,9 +112,9 @@ def run_validation(
         ema: The EMA tracker, or None if EMA is not used.
         validate_using_ema: Whether to use EMA parameters during validation.
         log_progress: Whether to log per-batch progress messages.
-        evaluate_all_steps: Whether the stepper evaluates every forward step
-            in the data window, or only the steps it would evaluate for the
-            batch during training.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
 
     Returns:
         Summary containing validation metrics and the loss scalar.

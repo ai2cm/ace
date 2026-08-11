@@ -9,6 +9,7 @@ from create_coupled_datasets import CreateCoupledDatasetsConfig
 from create_coupled_ic import CreateCoupledICConfig
 from get_stats import Config as GetStatsConfig
 from upload_stats import Config as UploadStatsConfig
+from upload_stats import _upload_specs
 
 DIRNAME = os.path.abspath(os.path.dirname(__file__))
 # list files in DIRNAME/config
@@ -87,3 +88,105 @@ def test_valid_create_coupled_ic_config(filename):
         data=config_data,
         config=dacite.Config(cast=[tuple], strict=True),
     )
+
+
+NATIVE_DATA_DIRECTORY = "gs://bucket/native-6hourly"
+NATIVE_STATS_DIRECTORY = "gs://bucket/native-stats"
+COARSENED_STATS_DIRECTORY = "gs://bucket/native-daily-stats"
+COARSENED_DATA_DIRECTORY = "gs://bucket/native-daily"
+COARSEN_CLAUSE = "Time coarsened by a factor of"
+
+
+def _upload_stats_config(
+    stats_beaker_dataset: str | None = "native-stats",
+    time_coarsen_beaker_dataset: str | None = None,
+    include_time_coarsen: bool = False,
+    exclude_runs: list[str] | None = None,
+) -> UploadStatsConfig:
+    stats: dict = {
+        "output_directory": NATIVE_STATS_DIRECTORY,
+        "data_type": "CM4",
+        "start_date": "0151-01-01T06:00:00",
+        "end_date": "0351-01-01T00:00:00",
+    }
+    if stats_beaker_dataset is not None:
+        stats["beaker_dataset"] = stats_beaker_dataset
+    if exclude_runs is not None:
+        stats["exclude_runs"] = exclude_runs
+    config_data: dict = {
+        "runs": {"run-a": "", "run-b": ""},
+        "data_output_directory": NATIVE_DATA_DIRECTORY,
+        "stats": stats,
+    }
+    if include_time_coarsen:
+        time_coarsen = {
+            "data_output_directory": COARSENED_DATA_DIRECTORY,
+            "stats_output_directory": COARSENED_STATS_DIRECTORY,
+            "factor": 4,
+        }
+        if time_coarsen_beaker_dataset is not None:
+            time_coarsen["beaker_dataset"] = time_coarsen_beaker_dataset
+        config_data["time_coarsen"] = time_coarsen
+    return dacite.from_dict(data_class=UploadStatsConfig, data=config_data)
+
+
+def test_upload_specs_native_only():
+    specs = _upload_specs(_upload_stats_config())
+    assert len(specs) == 1
+    assert specs[0].beaker_dataset == "native-stats"
+    assert specs[0].combined_directory == NATIVE_STATS_DIRECTORY + "/combined/"
+    assert NATIVE_DATA_DIRECTORY in specs[0].description
+    assert "run-a, run-b" in specs[0].description
+    assert "0151-01-01T06:00:00" in specs[0].description
+    assert COARSEN_CLAUSE not in specs[0].description
+
+
+def test_upload_specs_description_omits_excluded_runs():
+    specs = _upload_specs(_upload_stats_config(exclude_runs=["run-b"]))
+    assert "run-a" in specs[0].description
+    assert "run-b" not in specs[0].description
+
+
+def test_upload_specs_skips_time_coarsened_without_beaker_dataset():
+    specs = _upload_specs(_upload_stats_config(include_time_coarsen=True))
+    assert [spec.beaker_dataset for spec in specs] == ["native-stats"]
+
+
+def test_upload_specs_includes_time_coarsened_dataset():
+    specs = _upload_specs(
+        _upload_stats_config(
+            include_time_coarsen=True,
+            time_coarsen_beaker_dataset="native-daily-stats",
+        )
+    )
+    assert [spec.beaker_dataset for spec in specs] == [
+        "native-stats",
+        "native-daily-stats",
+    ]
+    coarsened = specs[1]
+    assert coarsened.combined_directory == COARSENED_STATS_DIRECTORY + "/combined/"
+    assert COARSENED_DATA_DIRECTORY in coarsened.description
+    assert NATIVE_DATA_DIRECTORY not in coarsened.description
+    assert f"{COARSEN_CLAUSE} 4" in coarsened.description
+
+
+def test_upload_specs_time_coarsened_only():
+    specs = _upload_specs(
+        _upload_stats_config(
+            stats_beaker_dataset=None,
+            include_time_coarsen=True,
+            time_coarsen_beaker_dataset="native-daily-stats",
+        )
+    )
+    assert [spec.beaker_dataset for spec in specs] == ["native-daily-stats"]
+    assert specs[0].combined_directory == COARSENED_STATS_DIRECTORY + "/combined/"
+
+
+def test_upload_config_rejects_no_datasets_requested():
+    with pytest.raises(ValueError, match="No Beaker dataset to upload"):
+        _upload_stats_config(stats_beaker_dataset=None, include_time_coarsen=True)
+
+
+def test_upload_config_rejects_no_datasets_without_time_coarsen():
+    with pytest.raises(ValueError, match="No Beaker dataset to upload"):
+        _upload_stats_config(stats_beaker_dataset=None)
