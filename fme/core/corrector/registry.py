@@ -10,6 +10,7 @@ from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnosti
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.distributed.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -240,12 +241,18 @@ class CorrectionSequence(CorrectorABC):
         keys are present in its inputs, never on tensor values (the
         ``Correction`` contract).
         """
+        dist = Distributed.get_instance()
 
         def _zeros(names: Collection[str]) -> TensorDict:
-            return {
-                name: torch.zeros((1, *img_shape), device=get_device())
-                for name in names
-            }
+            # corrections operate on this rank's spatial shard, so the fake
+            # data must be sharded like real data (img_shape is global)
+            return dist.scatter_spatial(
+                {
+                    name: torch.zeros((1, *img_shape), device=get_device())
+                    for name in names
+                },
+                img_shape,
+            )
 
         result = self(
             _zeros(input_names), _zeros(gen_names), _zeros(forcing_names), None
