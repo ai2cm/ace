@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
 cm4_1pctCO2-4deg-train_0046to0125-atmos_baseline|rs0|01KZQHXMAB3FA952T5ZRKPDCXW|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-4deg-train_0046to0125-atmos_baseline|rs1|01KZQHXWXKWTRV25VWKEFQD44T|training|best_inference_ckpt|normal|--min-runtime 8h
