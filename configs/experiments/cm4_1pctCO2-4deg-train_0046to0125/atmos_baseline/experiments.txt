@@ -9,3 +9,5 @@ cm4_1pctCO2-4deg-train_0046to0125-atmos_baseline|rs2|01KZQHY52D2SVZ2N4F5TKJ0M2C|
 cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs0|01KZSJJXZ0036KW3VGVRFZNYZG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs1|01KZSJK6QHVVP6DMGTZS7GSQ00|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-4deg-train_0046to0125-atmos_embed_dim_512|rs2|01KZSJKF83FYW3EJCBTBBS7J75|training|best_inference_ckpt|normal|--min-runtime 8h
