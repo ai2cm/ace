@@ -101,7 +101,7 @@ The result is a user-configurable instance we can use to optimize model weights.
     Adam (
     Parameter Group 0
         amsgrad: False
-        betas: [0.9, 0.999]
+        betas: (0.9, 0.999)
         capturable: False
         decoupled_weight_decay: False
         differentiable: False
