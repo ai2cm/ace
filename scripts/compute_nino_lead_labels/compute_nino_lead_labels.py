@@ -106,24 +106,34 @@ def nino_box_weighted_mean(
     return sst_box.weighted(weights).mean(dim=[lat_dim, lon_dim], skipna=True)
 
 
-def subtract_linear_trend(series: xr.DataArray, time_dim: str) -> xr.DataArray:
-    """Subtract a least-squares linear trend (fit over the time index).
+def subtract_polynomial_trend(
+    series: xr.DataArray, time_dim: str, degree: int = 1
+) -> xr.DataArray:
+    """Subtract a least-squares polynomial trend (fit over the time index).
 
     Removes only a slow forced trend (e.g. CM4 1pctCO2) while preserving the
     full amplitude of ENSO events, unlike the tropical-mean subtraction which
-    also removes each event's basin-wide warming component. Matches
-    ``get_time_trendline`` in ``scripts/compute_enso_index/compute_enso_index.py``
-    (fit over the integer time index, not the calendar values). NaNs are ignored
-    in the fit and preserved in the output.
+    also removes each event's basin-wide warming component. ``degree=1``
+    matches ``get_time_trendline`` in
+    ``scripts/compute_enso_index/compute_enso_index.py`` (fit over the integer
+    time index, not the calendar values). Higher degrees absorb curvature in
+    the forced response that a straight line misfits, which otherwise leaks
+    into the anomalies most strongly near the ends of the record. NaNs are
+    ignored in the fit and preserved in the output.
     """
     values = np.asarray(series.values, dtype=np.float64)
     x = np.arange(values.shape[0], dtype=np.float64)
     finite = np.isfinite(values)
-    if int(finite.sum()) < 2:
+    if int(finite.sum()) < degree + 1:
         return series
-    slope, intercept = np.polyfit(x[finite], values[finite], deg=1)
-    trend = slope * x + intercept
+    coeffs = np.polyfit(x[finite], values[finite], deg=degree)
+    trend = np.polyval(coeffs, x)
     return series.copy(data=values - trend)
+
+
+def subtract_linear_trend(series: xr.DataArray, time_dim: str) -> xr.DataArray:
+    """Backward-compatible alias for ``subtract_polynomial_trend(degree=1)``."""
+    return subtract_polynomial_trend(series, time_dim, degree=1)
 
 
 def fme_monthly_index_lookup(
@@ -274,6 +284,7 @@ def compute_nino_lead_labels(
     n_running_months: int = 5,
     relative_to_tropical: bool = False,
     linear_detrend: bool = False,
+    detrend_degree: int | None = None,
 ) -> xr.Dataset:
     """End-to-end: host dataset -> Nino3.4 lead-label dataset.
 
@@ -289,6 +300,10 @@ def compute_nino_lead_labels(
       amplitude (recommended for a forced run when amplitude matters).
 
     Both may be enabled together (matches ``compute_enso_index.py --detrend``).
+
+    ``detrend_degree`` generalizes ``linear_detrend`` to a polynomial of the
+    given degree (e.g. 2 to absorb curvature in the forced response); when set,
+    it takes precedence over ``linear_detrend``.
     """
     box_mean = nino_box_weighted_mean(
         ds[sst_var], lat_dim, lon_dim, lat_bounds, lon_bounds
@@ -298,8 +313,15 @@ def compute_nino_lead_labels(
             ds[sst_var], lat_dim, lon_dim, TROPICAL_LAT_BOUNDS, TROPICAL_LON_BOUNDS
         ).compute()
         box_mean = box_mean - tropical_mean
-    if linear_detrend:
-        box_mean = subtract_linear_trend(box_mean, time_dim)
+    effective_degree = (
+        detrend_degree
+        if detrend_degree is not None
+        else (1 if linear_detrend else None)
+    )
+    if effective_degree is not None:
+        box_mean = subtract_polynomial_trend(
+            box_mean, time_dim, degree=effective_degree
+        )
     index = fme_monthly_index_lookup(
         box_mean,
         time_dim,
@@ -339,7 +361,8 @@ def compute_nino_lead_labels(
             "first_lead": first_lead,
             "running_mean_months": n_running_months,
             "relative_to_tropical": int(relative_to_tropical),
-            "linear_detrend": int(linear_detrend),
+            "linear_detrend": int(effective_degree == 1),
+            "detrend_degree": -1 if effective_degree is None else effective_degree,
         }
     )
     return out
@@ -412,6 +435,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--detrend-degree",
+        type=int,
+        default=None,
+        help=(
+            "Subtract a least-squares polynomial trend of this degree from the "
+            "box-mean series before computing anomalies (generalizes "
+            "--linear-detrend; takes precedence over it when set)."
+        ),
+    )
+    parser.add_argument(
         "--time-chunk",
         type=int,
         default=365,
@@ -446,6 +479,7 @@ def main():
         n_running_months=args.running_mean_months,
         relative_to_tropical=args.relative_to_tropical,
         linear_detrend=args.linear_detrend,
+        detrend_degree=args.detrend_degree,
     )
 
     n_valid = int(
