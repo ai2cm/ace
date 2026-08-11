@@ -42,6 +42,20 @@ and fme's `>=2.4.0`, so the project install leaves it alone), and the install
 step ends by printing `torch.__version__`, `torch.version.cuda`, and
 `torch.cuda.is_available()` so the build log records the outcome.
 
+## cuDNN autotuning
+
+`run_inference.py` sets `torch.backends.cudnn.benchmark = True` on GPU,
+matching what fme's inference entrypoint
+(`fme/coupled/inference/inference.py`) does. earth2studio calls the stepper
+directly and never runs that entrypoint, so the flag would otherwise keep its
+torch default of `False`, and cuDNN would pick convolution algorithms by
+heuristic instead of by timing. Comparing the two 24-cycle runs showed the
+consequence: the SFNO atmosphere matched the reference bit-for-bit through a
+whole coupled window (its convolutions are all 1x1 and dispatch as GEMMs),
+while the dilated convolutions in the Samudra ocean network landed on a
+different algorithm and differed by ~1.5e-3 K rms in sst at the first coupled
+step -- a seed that then amplifies chaotically and saturates by ~day 40.
+
 ## Local paths, not HuggingFace
 
 `run_inference.py` reads every model input from the artifact directory:

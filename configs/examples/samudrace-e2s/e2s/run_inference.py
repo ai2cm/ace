@@ -309,6 +309,12 @@ def main() -> None:
     ic_time = os.environ.get("SAMUDRACE_IC_TIME", "0311-01-01T00:00:00")
     device = _resolve_device()
 
+    # Match the fme inference entrypoint (fme/coupled/inference/inference.py),
+    # which enables cuDNN autotuning on GPU. earth2studio calls the stepper
+    # directly and never runs that entrypoint.
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+
     # Second-precision time handling: CM4 model years overflow the
     # nanosecond-precision timestamps that the stock workflow helpers use
     run.to_time_array = _to_time_array_seconds
