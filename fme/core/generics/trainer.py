@@ -64,6 +64,7 @@ import torch
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
+from fme.core.distributed.shutdown import add_post_abort_callback
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -313,9 +314,40 @@ class Trainer:
 
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
+        self._started_training = False
         self._validation_callback: ValidationCallback = validation_callback
         self._inference_callback: InferenceCallback = inference_callback
         self._validate_stepper_callback: ValidateStepper | None = validate_stepper
+
+        def save_restart_checkpoints_on_terminate():
+            """Preserve mid-epoch progress when the job is preempted.
+
+            Runs on the termination listener's thread after the communicators
+            are aborted, so it must stay free of collectives. `save_checkpoint`
+            is root-only and reads local state, which satisfies that.
+            """
+            if (
+                self._current_epoch_num_batches_seen > 0
+                and self._should_save_checkpoints()
+            ):
+                if self._in_ema_context:
+                    logging.info(
+                        "In EMA context during interrupt, not saving "
+                        "restart checkpoints as it is unsafe to do so"
+                    )
+                elif not self._started_training:
+                    logging.info(
+                        "Not saving restart checkpoints as training has not started"
+                    )
+                else:
+                    self._save_restart_checkpoints()
+
+        dist = Distributed.get_instance()
+        if dist.world_size == dist.total_data_parallel_ranks:
+            # rank 0 holds the full model state, so the save needs no other
+            # rank's cooperation; a domain-parallel stepper's state is sharded,
+            # and assembling it would need the aborted communicators
+            add_post_abort_callback(save_restart_checkpoints_on_terminate)
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -528,6 +560,7 @@ class Trainer:
                 f"Subsetted train loader created, has {len(epoch_data)} batches"
             )
         self._last_saved_num_batches_seen = self.num_batches_seen
+        self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
         for batch in epoch_data:

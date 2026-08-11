@@ -51,6 +51,22 @@ _armed = False  # whether the wakeup fd currently belongs to this module
 _pipe_fds: tuple[int, int] | None = None
 _at_fork_registered = False
 
+_post_abort_callbacks: list[Callable[[], None]] = []
+
+
+def add_post_abort_callback(callback: Callable[[], None]) -> None:
+    """Run ``callback`` on the listener thread after the abort, before exit.
+
+    Best-effort by nature: it runs while the rest of the process is still
+    unwinding from the abort, and the scheduler's SIGKILL caps how long it may
+    take. The communicators are gone by then, so it must not use collectives.
+    """
+    _post_abort_callbacks.append(callback)
+
+
+def clear_post_abort_callbacks() -> None:
+    _post_abort_callbacks.clear()
+
 
 def _disarm_in_child() -> None:
     """Undo the parent's signal setup in a forked child.
@@ -118,6 +134,11 @@ def _listen(
         abort()
     except BaseException:
         _write_stderr(f"Aborting communicators failed:\n{traceback.format_exc()}")
+    for callback in _post_abort_callbacks:
+        try:
+            callback()
+        except BaseException:
+            _write_stderr(f"Post-abort callback failed:\n{traceback.format_exc()}")
     # peers' aborts must finish, so their kernels stop touching our memory,
     # before we exit
     time.sleep(grace_period)

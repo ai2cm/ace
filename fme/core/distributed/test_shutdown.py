@@ -153,6 +153,38 @@ def test_exit_waits_out_the_grace_period():
 
 
 @pytest.mark.medium_duration
+def test_post_abort_callbacks_run_after_the_abort_and_cannot_stop_the_exit():
+    """Callbacks (the Trainer's restart checkpoint) run once the abort has
+    released the rank's own kernels, and a raising one must not block the
+    exit or its successors."""
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            add_post_abort_callback,
+            handle_termination_signals,
+        )
+
+        def broken():
+            raise RuntimeError("no checkpoint for you")
+
+        add_post_abort_callback(lambda: print("first", flush=True))
+        add_post_abort_callback(broken)
+        add_post_abort_callback(lambda: print("second", flush=True))
+        with handle_termination_signals(
+            abort=lambda: print("abort", flush=True), grace_period=0.1
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()
+        """
+    )
+
+    assert result.stdout.split() == ["abort", "first", "second"]
+    assert "no checkpoint for you" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
 def test_a_main_thread_released_by_the_abort_cannot_exit_first():
     """Leaving the context must block until the listener has exited.
 

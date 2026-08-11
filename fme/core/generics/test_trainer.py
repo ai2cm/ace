@@ -1,7 +1,7 @@
 import contextlib
 import os
 import unittest.mock
-from typing import Any, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast
 
 import numpy as np
 import pytest
@@ -640,17 +640,31 @@ def get_batch_indices(batches) -> list[int]:
     return [batch.i for batch in batches]
 
 
-def test_resume_after_interrupted_training_during_epoch(tmp_path: str):
+@pytest.mark.parametrize(
+    "interrupt_method",
+    ["preempt", "fail"],
+)
+def test_resume_after_interrupted_training_during_epoch(
+    tmp_path: str, interrupt_method: Literal["preempt", "fail"], monkeypatch
+):
+    registered_callbacks: list = []
+    monkeypatch.setattr(
+        "fme.core.generics.trainer.add_post_abort_callback",
+        registered_callbacks.append,
+    )
     checkpoint_every_n_batches = 20
     batches_before_interrupt = 25
-    # the interrupt kills the process without checkpointing (a preemption does
-    # too: the SIGTERM path aborts the communicators and exits), so resumption
-    # starts from the last every-n-batches checkpoint
-    n_checkpointed_batches = (
-        batches_before_interrupt
-        // checkpoint_every_n_batches
-        * checkpoint_every_n_batches
-    )
+    if interrupt_method == "preempt":
+        # the post-abort callback preserves mid-epoch progress
+        n_checkpointed_batches = batches_before_interrupt
+    else:
+        # an exception kills the process without checkpointing, so resumption
+        # starts from the last every-n-batches checkpoint
+        n_checkpointed_batches = (
+            batches_before_interrupt
+            // checkpoint_every_n_batches
+            * checkpoint_every_n_batches
+        )
     n_train_batches = batches_before_interrupt * 2  # > batches_before_interrupt
     stepper_state = {"foo": "bar"}
     config, trainer = get_trainer(
@@ -670,6 +684,13 @@ def test_resume_after_interrupted_training_during_epoch(tmp_path: str):
             trainer.stepper, "train_on_batch", batches_before_interrupt + 1
         ):
             trainer.train()
+    if interrupt_method == "preempt":
+        # the real preemption path exits the process from the listener thread
+        # (see fme/core/distributed/test_shutdown.py), so it cannot run
+        # in-process; invoke the trainer's registered callback as the listener
+        # would after the abort
+        (save_on_terminate,) = registered_callbacks
+        save_on_terminate()
     assert isinstance(trainer.stepper, TrainStepper)
     stepper = cast(TrainStepper, trainer.stepper)
     pre_interrupt_batches = stepper.train_batches_seen
