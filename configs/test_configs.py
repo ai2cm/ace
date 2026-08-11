@@ -7,6 +7,7 @@ import fme
 from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig as CoupledInferenceEvaluatorConfig,
 )
+from fme.coupled.inference.inference import InferenceConfig as CoupledInferenceConfig
 from fme.coupled.train.train_config import TrainConfig as CoupledTrainConfig
 from fme.downscaling.evaluator import EvaluatorConfig
 from fme.downscaling.train import TrainerConfig as DownscalingTrainConfig
@@ -95,7 +96,17 @@ def test_downscaling_evaluator_configs_are_valid():
 
 
 def test_inference_configs_are_valid():
-    inference_files = get_yaml_files("*inference*.yaml")
+    inference_files = get_yaml_files(
+        "*inference*.yaml",
+        exclude=["samudrace-e2s/fme/inference-config"],
+    )
     assert len(inference_files) > 0, "No inference files found"
     for file in inference_files:
         validate_config(file, fme.ace.InferenceConfig)
+
+
+def test_coupled_inference_configs_are_valid():
+    inference_files = get_yaml_files("**/samudrace-e2s/fme/inference-config.yaml")
+    assert len(inference_files) > 0, "No coupled inference files found"
+    for file in inference_files:
+        validate_config(file, CoupledInferenceConfig)

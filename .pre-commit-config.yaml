@@ -32,5 +32,6 @@ repos:
         (?x)^(
         .+/conf.py |
         .+/conftest.py |
+        configs/examples/samudrace-e2s/e2s/run_inference.py |
         fme/ace/models/makani_fcn3/.*
         )$

@@ -1,0 +1,41 @@
+# Vanilla fme coupled inference (ace v2026.4.0) with the SamudrACE CM4
+# piControl checkpoint: scenario 0311, IC 0311-01-01T00, 24 coupled cycles
+# (= 120 days; 480 six-hourly atmosphere steps at n_inner_steps=20).
+#
+# Paths reference the Beaker artifact dataset mounted at /samudrace-artifacts
+# (mirrors the allenai/SamudrACE-CM4-piControl HF repo layout). Outputs are
+# written to /results, the job's Beaker result dataset (gantry default).
+experiment_dir: /results
+n_coupled_steps: 24
+# Small in-memory window for single-GPU memory headroom; must divide
+# n_coupled_steps.
+coupled_steps_in_memory: 4
+checkpoint_path: /samudrace-artifacts/samudrACE_CM4_piControl_ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: true
+    save_monthly_files: true
+  atmosphere:
+    save_prediction_files: true
+    save_monthly_files: true
+forcing_loader:
+  atmosphere:
+    dataset:
+      data_path: /samudrace-artifacts/forcing_data
+      file_pattern: forcing_0311.nc
+      # forcing_0311.nc covers one full year at 6h (1460 steps); the run needs
+      # 480 steps + 1 initial step, so no tiling is required.
+      n_repeats: 1
+  num_data_workers: 1
+initial_condition:
+  ocean:
+    path: /samudrace-artifacts/initial_conditions/0311-01-01T00:00:00/ocean/initial_condition.nc
+  atmosphere:
+    path: /samudrace-artifacts/initial_conditions/0311-01-01T00:00:00/atmosphere/initial_condition.nc
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
