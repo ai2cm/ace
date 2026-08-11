@@ -690,9 +690,7 @@ def test_a_refused_multi_cluster_demotion_defers_a_single_cluster_grant():
         node_clusters=NODES,
         fail_on={"theirs"},
     )
-    run_pass(
-        client, "ai2/ace", {"ai2/jupiter": 8, "ai2/titan": 8}, dry_run=False
-    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8, "ai2/titan": 8}, dry_run=False)
     assert client.priority_calls == []
 
 
@@ -712,9 +710,7 @@ def test_a_refused_single_cluster_demotion_defers_a_multi_cluster_grant():
         node_clusters=NODES,
         fail_on={"theirs"},
     )
-    run_pass(
-        client, "ai2/ace", {"ai2/jupiter": 8, "ai2/titan": 8}, dry_run=False
-    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8, "ai2/titan": 8}, dry_run=False)
     assert client.priority_calls == []
 
 
