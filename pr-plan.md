@@ -1,233 +1,142 @@
-# Config-selected pre-corrector optimization and corrector regularization
+# Post-corrector residual tracking, presentation, and optimization for prescribed prognostics
 
-Adds a training-only `corrector_loss` config that consumes the correction
-deltas already carried on `StepOutput`: (1) *pre-corrector optimization* — for
-selected corrector-modified variables the main loss sees the pre-corrector
-prediction `output − delta`; (2) *corrector regularization* — a penalty pushing
-`delta` toward zero in loss-normalized space. Field selection is pure opt-in
-via `NameAndPrefixMatcher` entries. Both features extend the existing
-`StepLoss`/`LossOutput` — no new loss classes. All name validation happens
-when the run starts: at construction the corrector discovers the delta keys it
-will produce by running once on fake data. Implements the design of #1273,
-with the divergences listed at the end.
+For each variable in `prescribed_prognostic_names`, `step_with_adjustments`
+overwrites the corrected output `x'` with the target `y` and discards `x'`.
+This PR (stacked on `feature/corrector-loss-config`) records the
+post-corrector residual `r' = y − x'` at that overwrite and uses it three
+ways: (1) *tracking* — `r'` is carried per step on `StepOutput` and stacked
+on `StepDiagnostics`, exported by the step-diagnostics writer; (2)
+*presentation* — aggregators and writers see the model's own `x' = y − r'`
+for prescribed names, while the value fed into the next step remains exactly
+`y`; (3) *optimization* — an opt-in config selects prescribed names whose
+training-loss prediction becomes `x'` (targets untouched), so the model
+trains through the corrector on the fields it is prevented from drifting on.
+The new config is grouped with `corrector_loss` under one `loss_features`
+surface on `TrainStepperConfig`.
 
-Throughout, "active" means the step's corrector produced a non-empty delta
-dict on the current step; an `EpochScheduledCorrector` on a disabled epoch
-returns empty diagnostics and is inactive.
+Three invariants define the optimization feature:
+
+- (a) for each selected prescribed name the loss prediction is `x'`
+  (algebraically exact: the prediction dict carries `y` after the overwrite,
+  and `y − r' = x'`);
+- (b) for unselected prescribed names today's behavior is preserved exactly —
+  the loss sees `y` against `y`, a zero contribution (the loss keeps
+  consuming the `y`-valued dict; presentation feeds aggregators from a
+  separate dict);
+- (c) the next-step input is always exactly `y` (the rollout state is never
+  touched).
+
+Where a name is both prescribed and ocean-written, the pre-overwrite value is
+the ocean's blend, not the corrector's output — the residual optimizes a
+target-vs-target comparison over ocean points and the network only elsewhere.
+Selecting such a name is a build-time error.
 
 ---
 
-## `fme/core/name_and_prefix_matcher.py` (modified)
-
-```python
-class NameAndPrefixMatcher:
-    ...  # unchanged
-
-@dataclasses.dataclass(frozen=True)
-class NameAndPrefixSelection:  # NEW — matcher plus its entries, for validation/reporting
-    entries: tuple[str, ...]
-
-    @property
-    def matcher(self) -> NameAndPrefixMatcher: ...
-
-    def matched(self, names: Iterable[str]) -> list[str]:
-        """Names (sorted) that match any entry."""
-
-    def unmatched_entries(self, names: Iterable[str]) -> list[str]:
-        """Entries that match none of ``names`` — the validation primitive."""
-```
-
-`NameAndPrefixMatcher` has no per-entry reporting today; validation needs it,
-so the entry list is kept alongside the matcher rather than adding state to
-the matcher itself.
-
-## `fme/core/corrector/output.py` (modified)
+## `fme/core/step/output.py` (modified)
 
 ```python
 @dataclasses.dataclass
-class CorrectorDiagnostics:
-    def detach(self) -> "CorrectorDiagnostics":  # NEW
-        return CorrectorDiagnostics(
-            delta={k: v.detach() for k, v in self.delta.items()}
-        )
+class StepOutput:
+    # NEW — after the existing fields:
+    prescribed_residual: TensorMapping = dataclasses.field(default_factory=dict)
+    # r'[name] = next_step_input_data[name] − pre-overwrite output[name],
+    # one entry per prescribed prognostic name; empty when none are configured.
+
+    @property
+    def presented_output(self) -> TensorDict:  # NEW
+        # {**output, name: output[name] − prescribed_residual[name]} — since
+        # output[name] is y after the overwrite, this recovers x' for
+        # prescribed names and is the identity elsewhere.
+        ...
+
+    @classmethod
+    def stack_diagnostics(cls, outputs) -> "StepDiagnostics | None":
+        # CHANGED — also stacks prescribed_residual (same union/consistency
+        # validation per field); returns None only when delta AND
+        # prescribed_residual are empty across all steps.
+        ...
 ```
 
-## `fme/core/corrector/registry.py` (modified)
+A plain mapping rather than a wrapper dataclass: the residual is one
+name→tensor dict with no behavior of its own; detach happens at the step seam
+(below) and masking reuses the existing spatial-masking helper.
+
+## `fme/core/step/step_diagnostics.py` (modified)
 
 ```python
-class Correction(Protocol):
-    # Docstring gains a contract: the key set a correction returns may depend
-    # on its config and on which keys are present in its inputs, never on
-    # tensor values. Modified-name discovery below relies on this.
+PRESCRIBED_RESIDUALS = "prescribed_residuals"  # NEW — dataset key, alongside CORRECTION_DELTAS
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:  # NEW — names corrected via
-        ...                                           # straight-through clamps
+@dataclasses.dataclass
+class StepDiagnostics:
+    prescribed_residual: TensorMapping = dataclasses.field(default_factory=dict)  # NEW
+    # stacked (sample, time, ...) like delta
 
+    # to_device / to_cpu / pin_memory / broadcast_ensemble — CHANGED, carry
+    # prescribed_residual with the same treatment as delta.
 
-class CorrectorABC(abc.ABC):
-    @property
-    def modified_names(self) -> frozenset[str] | None:  # NEW — the delta keys this
-        return None                                     # corrector produces when
-                                                        # active; None before discovery
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:  # NEW
-        return frozenset()
-
-    def discover_modified_names(
-        self,
-        input_names: Collection[str],
-        gen_names: Collection[str],
-        forcing_names: Collection[str],
-        img_shape: tuple[int, int],
-    ) -> None:  # NEW — default no-op; modified_names stays None
+    def to_datasets(self, time):  # CHANGED — adds PRESCRIBED_RESIDUALS when non-empty
         ...
-
-
-class CorrectionSequence(CorrectorABC):
-    def discover_modified_names(self, ...) -> None:
-        # One __call__ on zero tensors of shape (1, *img_shape) keyed by the
-        # given names; records frozenset(result.diagnostics.delta.keys()).
-        ...
-
-    @property
-    def modified_names(self) -> frozenset[str] | None: ...
-
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:  # union over corrections
-        ...
-
-
-class EpochScheduledCorrector(CorrectorABC):
-    # discover_modified_names / modified_names / keep_gradient_names forwarded
-    # to the wrapped corrector, independent of the epoch's disabled state. NEW
 ```
-
-### Critical detail — the discovery pass
-
-Fake-data values can go NaN/inf inside the budget corrections (they divide by
-global means); that is harmless, because the *key set* every current
-correction returns depends only on its config and on which keys exist in its
-inputs — verified across `utils.py`, `atmosphere.py`, `ocean.py`, `ice.py` —
-and the `Correction` docstring contract above pins that for future
-corrections. The pass runs no network and costs one correction sweep over
-`(1, H, W)` zeros at build.
-
-Each `Correction` gains `keep_gradient_names` (default empty). `ForcePositive`
-(`fme/core/corrector/utils.py`) returns its names when `keep_gradient` is set;
-`SeaIceFractionCorrection` (`fme/core/corrector/ocean.py`) returns the fields
-it clamps when `keep_gradient` is set. Today those names are unreachable from
-a corrector instance (`CorrectionSequence._corrections` is private). No
-corrector's numerical behavior changes.
 
 ## `fme/core/step/step.py` (modified)
 
 ```python
 class StepABC(abc.ABC):
-    @property
-    @abc.abstractmethod
-    def corrector(self) -> CorrectorABC | None:  # NEW — introspection surface for
-        ...                                      # build-time corrector_loss validation
+    # __init__ CHANGED — self._detach_prescribed_residuals = True, beside
+    # _detach_corrector_deltas
 
-    def set_detach_corrector_deltas(self, detach: bool) -> None:  # NEW — concrete;
-        self._detach_corrector_deltas = detach  # default True, set in __init__
+    def set_detach_prescribed_residuals(self, detach: bool) -> None:  # NEW
+        # mirrors set_detach_corrector_deltas; wrapping steps must forward
+        ...
 ```
 
-One read property instead of per-fact forwards (`corrector_enabled`,
-`corrector_keep_gradient_names`, `corrector_modified_names`): validation reads
-`corrector.modified_names` / `keep_gradient_names` directly, and future
-corrector surfaces don't touch `StepABC`.
-
-### Critical detail — detach threading
-
-The detach flag is step-level *state*, not a `step()` parameter: `StepABC`
-stores `_detach_corrector_deltas = True` in its existing `__init__`, and each
-concrete step passes it into `step_with_adjustments` — the minimal threading;
-the `StepABC.step` / `StepArgs` signatures do not change. Detach stays at the
-step seam rather than inside `CorrectionSequence.__call__` because the seam
-already post-processes the diagnostics (the ocean-overlap guard and the
-prescribed-prognostic filter) and covers every corrector type uniformly.
-Wrapper steps (`MultiCallStep`) forward the setter and the `corrector`
-property to the wrapped step, mirroring the existing `train()` / `set_epoch()`
-forwarding pattern. Default is detached everywhere; only the train stepper
-flips it, once at build, exactly when `StepLoss.needs_corrector_deltas`.
-Inference paths run under `no_grad`, so an attached-mode stepper builds no
-graphs there.
+A parallel flag, not a reuse of `set_detach_corrector_deltas`: when only one
+of `corrector_loss` / prescribed optimization needs gradients, the other's
+tensors stay off the autograd graph. Both default detached; only
+`Stepper.build_loss` flips them, independently.
 
 ## `fme/core/step/single_module.py` (modified)
 
 ```python
 def step_with_adjustments(
     ...,
-    stepper_state: StepperState | None = None,
-    detach_corrector_deltas: bool = True,  # NEW
+    detach_corrector_deltas: bool = True,
+    detach_prescribed_residuals: bool = True,  # NEW
 ) -> StepOutput:
-    # CHANGED — the unconditional per-tensor detach becomes:
-    #   diagnostics = result.diagnostics.detach() if detach_corrector_deltas
-    #   else CorrectorDiagnostics(delta=dict(result.diagnostics.delta))
-
-
-class SingleModuleStepConfig(StepConfigABC):
-    def get_step(self, ...) -> "SingleModuleStep":
-        # CHANGED — after corrector = self.corrector.get_corrector(dataset_info):
-        #   corrector.discover_modified_names(
-        #       input_names=self.input_names, gen_names=self.output_names,
-        #       forcing_names=self.next_step_input_names,
-        #       img_shape=dataset_info.img_shape,
-        #   )
+    # CHANGED — the prescribed-prognostic overwrite loop also records
+    #   residual[name] = next_step_input_data[name] − output[name]
+    # before the overwrite (output[name] is x' at that point: post-corrector,
+    # and post-ocean for an ocean-written name — hence the build-time
+    # exclusion of ocean-written names from optimization selection).
+    # Residuals are detached per the flag, and returned as
+    # StepOutput(..., prescribed_residual=residuals).
 
 
 class SingleModuleStep(StepABC):
-    @property
-    def corrector(self) -> CorrectorABC | None:  # NEW — self._corrector
-        ...
-
     def step(self, args, wrapper=...) -> StepOutput:
-        # CHANGED — passes detach_corrector_deltas=self._detach_corrector_deltas
+        # CHANGED — also passes
+        # detach_prescribed_residuals=self._detach_prescribed_residuals
         ...
 ```
 
-The loss-visible delta set is `modified_names` minus
-`prescribed_prognostic_names` — `step_with_adjustments` filters prescribed
-prognostics out of the delta after the corrector call — and the validation
-below checks entries against that filtered set.
-
 ## `fme/core/step/secondary_module.py`, `fme/core/step/radiation.py`, `fme/ace/step/fcn3.py`, `fme/core/step/multi_call.py` (modified)
 
-The remaining `step_with_adjustments` callers — `secondary_module.py`,
-`radiation.py`, `fcn3.py` — get the same three-line change as
-`SingleModuleStep`: run discovery in `get_step`, expose `corrector`, and pass
-`detach_corrector_deltas=self._detach_corrector_deltas`. `MultiCallStep` does
-not call `step_with_adjustments` (no corrector of its own; it already passes
-the wrapped step's `corrector_diagnostics` through) — it forwards the
-`corrector` property and `set_detach_corrector_deltas` to the wrapped step.
+The remaining `step_with_adjustments` callers pass
+`detach_prescribed_residuals=self._detach_prescribed_residuals`, the same
+one-line change as `SingleModuleStep`. `MultiCallStep` forwards
+`set_detach_prescribed_residuals` to the wrapped step (the
+`set_detach_corrector_deltas` pattern) and its `step` carries the wrapped
+step's `prescribed_residual` through, like `corrector_diagnostics`
+(multi-call output names are disjoint from prescribed names, so
+`presented_output` on the merged `StepOutput` is unaffected).
 
 ## `fme/core/loss.py` (modified)
 
 ```python
-class LossOutput:
-    def __init__(
-        self,
-        losses: list[LossComponent],
-        channel_names: list[str],
-        mask: torch.Tensor | None = None,
-        corrector_regularization: torch.Tensor | None = None,  # NEW — unweighted
-        corrector_regularization_weight: float = 1.0,          # NEW
-    ): ...
-
-    def total(self) -> torch.Tensor:
-        # CHANGED — adds weight * corrector_regularization when present.
-
-    def scale(self, weight: float) -> "LossOutput":
-        # CHANGED — carries the two new fields through unchanged: the per-step
-        # sqrt decay applies to the main loss only, never the penalty.
-
-
 @dataclasses.dataclass
-class StepLossCorrectorArgs:  # NEW — lives here so corrector/loss.py imports
-    precorrector_names: list[str] | None  # loss.py, never the reverse
-    regularizer: WeightedMappingLoss | None
-    regularization_weight: float
+class StepLossPrescribedArgs:  # NEW — sibling of StepLossCorrectorArgs
+    optimized_names: list[str]  # concrete names, resolved at build
 
 
 class StepLoss(torch.nn.Module):
@@ -235,12 +144,13 @@ class StepLoss(torch.nn.Module):
         self,
         loss: WeightedMappingLoss,
         sqrt_loss_decay_constant: float = 0.0,
-        corrector_args: StepLossCorrectorArgs | None = None,  # NEW
+        corrector_args: StepLossCorrectorArgs | None = None,
+        prescribed_args: StepLossPrescribedArgs | None = None,  # NEW
     ): ...
 
     @property
-    def needs_corrector_deltas(self) -> bool:  # NEW — either feature configured;
-        ...  # both differentiate through delta
+    def needs_prescribed_residuals(self) -> bool:  # NEW
+        ...
 
     def forward(
         self,
@@ -248,113 +158,90 @@ class StepLoss(torch.nn.Module):
         target_dict: TensorMapping,
         step: int,
         data_mask: TensorMapping | None = None,
-        deltas: TensorMapping | None = None,  # NEW — after data_mask: the coupled
-    ) -> LossOutput: ...                      # stepper calls positionally with three
-                                              # args and stays untouched
+        deltas: TensorMapping | None = None,
+        residuals: TensorMapping | None = None,  # NEW — appended, existing
+    ) -> LossOutput: ...                         # positional callers untouched
 ```
 
-### Critical detail — `forward` algorithm
+### Critical detail — `forward` with residuals
 
-- `deltas` `None` or empty, or no `corrector_args` configured: exactly
-  today's behavior. Epoch-scheduled-off steps land here — no swap, no
-  penalty, no per-step metric.
-- Non-empty `deltas`: every name in `precorrector_names` and in the
-  regularizer's packed name list must be present, else raise — an active
-  corrector must produce deltas for every selected name. Cost, accepted: a
-  corrector whose modified set varies step-to-step once active is unsupported
-  with `corrector_loss`; no current correction does that (key sets are
-  config- and key-presence-dependent only, per the `Correction` contract).
-  Build-time validation (below) makes this raise unreachable for current
-  correctors; it remains as the drift guard.
-- Swap: the prediction fed to the main loss is
-  `predict_dict[k] − deltas[k]` for `k in precorrector_names`, plain
-  `predict_dict[k]` otherwise; targets untouched;
-  `main = self.loss(swapped, target_dict, data_mask).scale(step_weight)`.
-- Penalty: `regularizer(selected_deltas, targets)` with
-  `targets[k] = torch.where(deltas[k].isnan(), nan, 0.0)` — copying the
-  delta's NaN pattern onto the zeros target makes masked (NaN-filled) points
-  drop through `WeightedMappingLoss`'s existing NaN-target zeroing. With an
-  affine normalizer the means cancel, so this penalizes `delta/std`, mean
-  over the selected channels. No per-step decay on the penalty — only the
-  weight scales it, unlike the main loss's `sqrt_loss_step_decay` (config
-  docstring notes this).
-- Returns `main` with the unweighted penalty and its weight attached.
+- `residuals` `None`/empty or no `prescribed_args`: exactly today's behavior.
+- Otherwise every name in `optimized_names` must be in `residuals`, else
+  raise — prescribed names are known at build and the step produces a
+  residual for each on every step, so this is a drift guard, mirroring the
+  delta rule.
+- Swap: prediction fed to the main loss is `predict_dict[k] − residuals[k]`
+  for `k in optimized_names` (this *is* `x'`), plain `predict_dict[k]`
+  otherwise; targets untouched. Composes with the pre-corrector swap: the two
+  features' name sets are disjoint by construction (`loss_visible_names`
+  subtracts `prescribed_prognostic_names` on the base branch), so at most one
+  swap applies per name.
+- Off-mask points: a masked residual is NaN-filled, so the swapped prediction
+  is NaN off-mask — dropped by `WeightedMappingLoss`'s target-driven NaN
+  zeroing, since the target is NaN at the same points in masked-output
+  configs. Covered by the masked-output test below.
+- No new metric: once presentation lands, the existing per-variable
+  aggregator metrics report `x'` for prescribed names, which is the quantity
+  a residual metric would monitor.
 
-`StepLossConfig` is unchanged; its `build` gains a default-`None`
-`corrector_args: StepLossCorrectorArgs | None` parameter passed into
-`StepLoss`. `fme/core/loss.py` imports nothing from `fme/core/corrector/`.
+`StepLossConfig.build` gains a default-`None` `prescribed_args` parameter
+passed into `StepLoss`, like `corrector_args`. `fme/core/loss.py` still
+imports nothing from `fme/core/corrector/`.
 
-## `fme/core/corrector/loss.py` (new)
+## `fme/core/loss_features.py` (new)
 
 ```python
 @dataclasses.dataclass
-class PreCorrectorOptimizationConfig:
+class PrescribedPrognosticOptimizationConfig:
     names_and_prefixes: list[str] | None = None
 
     def __post_init__(self):
         # None ⇒ error: configuring the feature while selecting nothing is a
-        # contradiction, not a no-op.
-
-
-@dataclasses.dataclass
-class CorrectorRegularizationConfig:
-    loss: LossConfig = dataclasses.field(default_factory=LossConfig)
-    weight: float = 1.0
-    names_and_prefixes: list[str] | None = None
-
-    def __post_init__(self):
-        # names_and_prefixes None ⇒ error (as above);
-        # reject EnsembleLoss / NaN loss types and any global_mean_type
-        # (per #1273); reject weight <= 0.
-        # Config docstrings document: no per-step decay on the penalty, and
-        # that the two features may be enabled together (a supported, tested
-        # configuration, per #1273's acceptance criteria).
-
-
-@dataclasses.dataclass
-class CorrectorLossConfig:
-    precorrector_optimization: PreCorrectorOptimizationConfig | None = None
-    regularization: CorrectorRegularizationConfig | None = None
-
-    def __post_init__(self):
-        # error when both are None: configuring corrector_loss while selecting
-        # no feature is a contradiction, not a no-op.
+        # contradiction, not a no-op (corrector_loss convention).
+        # Docstring documents: the swap also applies to validation batches
+        # (under no_grad), so selected names report nonzero validation loss
+        # where today they report zero — intended, validation should measure
+        # what training optimizes; and with no corrector configured the
+        # feature optimizes the raw network output for selected names
+        # (x' = x), which is supported.
 
     def build(
         self,
-        corrector: CorrectorABC | None,
         prescribed_prognostic_names: Collection[str],
-        normalizer: StandardNormalizer,
-        gridded_operations: GriddedOperations | None,
-        channel_dim: int = -3,
-    ) -> StepLossCorrectorArgs:
-        # Validates (below), then builds the regularizer as
-        # WeightedMappingLoss(loss=self.regularization.loss.build(...),
-        # weights={}, out_names=selection.matched(loss_visible_names),
-        # normalizer=normalizer, channel_dim=channel_dim) — fully constructed
-        # at build, no factory.
+        ocean_written_names: Collection[str],
+    ) -> StepLossPrescribedArgs:
+        # Raises when prescribed_prognostic_names is empty (configured with
+        # nothing to consume); when any entry matches no prescribed name
+        # (NameAndPrefixSelection.unmatched_entries — all prescribed names
+        # are known at build, no discovery pass); and when a selected name is
+        # in ocean_written_names — there the pre-overwrite value is the
+        # ocean's blend (a Prescriber keeps the generated field off the ocean
+        # mask), so the residual loss compares target against target over
+        # ocean points and reaches the network only elsewhere: muddled
+        # semantics rejected up front, per the keep_gradient_names
+        # philosophy. No corrector is required.
+
+
+@dataclasses.dataclass
+class LossFeaturesConfig:
+    corrector: CorrectorLossConfig | None = None
+    prescribed_prognostic_optimization: PrescribedPrognosticOptimizationConfig | None = None
+
+    def __post_init__(self):
+        # error when both are None: configuring loss_features while selecting
+        # no feature is a contradiction, not a no-op.
 ```
 
-### Critical detail — build-time validation
+### Critical detail — the config regrouping
 
-All name validation runs here, when the run starts; no runtime name check
-remains. With `loss_visible_names = corrector.modified_names −
-prescribed_prognostic_names`, `build` raises when:
-
-- `corrector` is `None` or `modified_names` is empty — `corrector_loss` is
-  configured with nothing to consume (subsumes #1273's corrector-enabled
-  build guard and its empty-modified-set warn-once);
-- `modified_names` is `None` — the step type never ran discovery (a
-  programming error, not a user-config error);
-- any entry of either feature is unmatched against `loss_visible_names`
-  (`NameAndPrefixSelection.unmatched_entries`) — this subsumes a separate
-  check against network output names, since every delta key is a network
-  output name;
-- any `precorrector_optimization` entry matches a name in
-  `corrector.keep_gradient_names` (divergence 6). Proposed extension, review
-  settles it: the same error for `regularization` entries — a
-  straight-through clamp's delta is detached, so its penalty carries no
-  gradient and the feature is silently inert.
+`TrainStepperConfig.corrector_loss` (added on the base branch, unmerged) is
+*replaced* by `loss_features`; in yaml, `corrector_loss: {...}` becomes
+`loss_features: {corrector: {...}}`. No deprecation shim: the base branch has
+not merged, so no released config carries `corrector_loss`, and training
+configs have no checkpoint-compatibility constraint. The module lives in
+`fme/core/` (importing `fme/core/corrector/loss.py` and `fme/core/loss.py`)
+because the grouped surface is not corrector-owned — the prescribed feature
+works with no corrector configured.
 
 ## `fme/ace/stepper/single_module.py` (modified)
 
@@ -363,274 +250,244 @@ class Stepper:
     def build_loss(
         self,
         loss_config: StepLossConfig,
-        corrector_loss: CorrectorLossConfig | None = None,  # NEW — folded in;
-    ) -> StepLoss:                                          # no second method
-        # CHANGED — when corrector_loss is given:
-        #   corrector_args = corrector_loss.build(
-        #       self._step_obj.corrector,
-        #       prescribed_prognostic_names=...,
-        #       normalizer=loss_normalizer,
-        #       gridded_operations=self._dataset_info.gridded_operations,
-        #       channel_dim=self.CHANNEL_DIM)
-        # then loss_config.build(..., corrector_args=corrector_args), and
-        #   self._step_obj.set_detach_corrector_deltas(False)
-        # when the built loss needs_corrector_deltas — detaching would
-        # silently zero part of the correction gradient.
+        loss_features: LossFeaturesConfig | None = None,  # CHANGED — replaces
+    ) -> StepLoss:                                        # corrector_loss
+        # CHANGED — corrector_args from loss_features.corrector.build(...) as
+        # on the base branch; prescribed_args from
+        # loss_features.prescribed_prognostic_optimization.build(
+        #     prescribed_prognostic_names=self.get_prescribed_prognostic_names(),
+        #     ocean_written_names={self._step_obj.surface_temperature_name}
+        #         when an ocean is configured (prescribed or slab — the
+        #         property is non-None exactly then), else frozenset())
+        # then set_detach_corrector_deltas(False) iff needs_corrector_deltas
+        # and set_detach_prescribed_residuals(False) iff
+        # needs_prescribed_residuals — independent flips.
+
+    def step(self, ...):
+        # CHANGED — applies self._output_masking to prescribed_residual as it
+        # does to corrector_diagnostics (NaN off-mask).
+
+    def predict(self, ...):
+        # CHANGED — presentation: in the final BatchData.new_on_device
+        # rebuild (where stack_diagnostics already attaches), each prescribed
+        # name in data.data is replaced by y − stacked residual (= x');
+        # data.data holds exactly the forward steps at that point, matching
+        # the residual's time dim. Ordering inside the existing function
+        # body: prognostic_state = data.get_end(...) and
+        # compute_derived_variables both run before the rebuild, so the next
+        # window's initial condition and the derived variables stay on y.
+        # predict_generator's state = result.output is untouched — the
+        # rollout consumes exactly y (invariant (c)).
 
 
 @dataclasses.dataclass
 class TrainStepperConfig:
-    corrector_loss: CorrectorLossConfig | None = None  # NEW — default preserves
-                                                       # current behavior
+    loss_features: LossFeaturesConfig | None = None  # CHANGED — replaces
+                                                     # corrector_loss
 
 
 class TrainStepper(TrainStepperABC[...]):
-    def __init__(self, stepper: Stepper, config: TrainStepperConfig):
-        # CHANGED — one line:
-        #   self._loss_obj = stepper.build_loss(config.loss, config.corrector_loss)
-        ...
-
     def _accumulate_loss(self, ...):
-        # CHANGED — keeps the yielded StepOutput; when
-        # self._loss_obj.needs_corrector_deltas, unfolds the delta dict the
-        # same way as .output (unfold_ensemble_dim) and passes it down.
-        ...
+        # CHANGED — splits the one gen_step variable:
+        #   loss consumes unfold_ensemble_dim(step_output.output, ...) — the
+        #     y-valued dict, unchanged for unselected names (invariant (b));
+        #   output_list (→ gen_data → training/validation aggregators)
+        #     collects unfold_ensemble_dim(step_output.presented_output, ...).
+        # When self._loss_obj.needs_prescribed_residuals, residuals =
+        # unfold_ensemble_dim(dict(step_output.prescribed_residual), ...) is
+        # passed down, beside deltas. The hard boundary extends to r':
+        # training consumes residuals at the StepOutput level here, never via
+        # the StepDiagnostics carriage.
 
-    def _accumulate_step_loss(
-        self,
-        gen_step: EnsembleTensorDict,
-        target_step: TensorMapping,
-        step: int,
-        ...,
-        deltas: TensorMapping | None = None,  # NEW
-    ) -> torch.Tensor:
-        # CHANGED — self._loss_obj(gen_step, target_step, step=step,
-        # data_mask=data_mask, deltas=deltas); returns result.total() so the
-        # penalty is folded into the one per-step accumulate_loss call;
-        # records metrics["corrector_regularization_step_{step}"] and a
-        # per-batch metrics["corrector_regularization"] from the result's
-        # unweighted penalty (mean over steps; the trainer's existing metric
-        # averaging yields the epoch aggregate).
+    def _accumulate_step_loss(self, ..., deltas=None, residuals=None):  # CHANGED
+        # forwards residuals into self._loss_obj(...)
         ...
 ```
 
-### Critical detail — accumulation seam and the hard boundary
+### Critical detail — presentation scope and grounding
 
-- The penalty is folded into each optimized step's `result.total()` and
-  bypasses the `get_regularizer_loss` accumulation in `train_on_batch`
-  (which stays, unchanged, for the module regularizers): accumulating the
-  penalty as a second `optimization.accumulate_loss` call double-backwards
-  under gradient accumulation, per #1273.
-- Hard boundary: training consumes deltas at the `StepOutput` level inside
-  `_accumulate_loss`, never via the `StepDiagnostics` carriage
-  (`fme/core/step/step_diagnostics.py`) — that carriage is detached,
-  output-masked, and inference-only by design. Stated here and seam-commented
-  in code.
-- `Stepper.step` applies `apply_output_masking` to the diagnostics; with
-  attached deltas the NaN fill now sits on a live graph. The regularizer
-  drops NaN points via the target trick above; the masked-output test below
-  covers the whole path.
-- The coupled stepper's `_build_loss` calls `build_loss` per component with
-  no `corrector_loss` and stays unchanged (`fme.coupled` support is out of
-  scope).
+Presentation is unconditional: whenever `prescribed_prognostic_names` is
+configured, aggregators and writers see `x'` — no opt-in switch. Rationale:
+`y` is already in the target/reference data every aggregator compares
+against; presenting `y` as the prediction makes those metrics vacuous for
+prescribed names, and the step-diagnostics writer plus presented outputs
+carry strictly more information than today.
 
----
+The four consumer surfaces are covered by the two seams above, verified on
+the base branch:
 
-## Divergences from #1273
+- training `gen_data` and validation metrics — the `_accumulate_loss` split
+  (validation runs the same `train_on_batch` under `torch.no_grad()` via
+  `run_validation_loop`, so the same presented dict reaches
+  `record_batch`);
+- inline-inference aggregators and inference writers — the `Stepper.predict`
+  rebuild (writers read `batch.prediction` downstream of it; the restart
+  write consumes `prognostic_state`, which stays on `y`).
 
-1. **Inclusion, not exclusion**: field selection is opt-in
-   `names_and_prefixes` per feature (default selects nothing); #1273 used
-   `exclude_names_and_prefixes` defaulting to all corrector-modified
-   variables. A present config with `names_and_prefixes=None` is an error.
-2. **Extends `StepLoss`/`LossOutput`** instead of adding
-   `StepOutputLoss`/`StepOutputLossResult`: `StepLoss.forward` grows an
-   optional `deltas` argument and `LossOutput` carries the unweighted penalty
-   with the weight applied in `total()`.
-3. **All name validation at build, none at runtime**: the corrector discovers
-   its delta keys at construction by a dummy pass on fake data; #1273
-   warn-onced unmatched entries at runtime. Consequence: an active corrector
-   must produce deltas for every selected name (a partial set raises), so a
-   corrector whose modified set varies step-to-step once active is
-   unsupported with `corrector_loss` — and the `corrector_regularization`
-   metric is comparable across epochs whenever the corrector is active.
-4. **`CorrectorDiagnostics.detach()`**: #1273 threads a bare flag; this plan
-   adds the helper and keeps the detach decision at the step seam.
-5. **No `StepOutput.uncorrected`**: #1273 assumed #1271 had delivered it; it
-   does not exist on `main`, and with the swap happening inside
-   `StepLoss.forward` on plain dicts the convenience would be dead code.
-6. **keep-gradient guard made enforceable**: a 2026-07-10 maintainer decision
-   held that selecting a `replace_value_keep_gradient` variable (e.g.
-   `SeaIceFractionCorrection` under `keep_gradient_through_clamps`) for
-   pre-corrector optimization is an error — two gradient mechanisms layered
-   on one signal. Its premise has changed: under exclusion-default such a
-   selection was always a deliberate per-name entry, whereas under opt-in a
-   prefix entry can sweep one in unintentionally — which argues *for* keeping
-   the error, since the layering can now happen silently. This plan upholds
-   the error and adds the missing discovery surface (`keep_gradient_names`
-   through `Correction` → `CorrectorABC`); without it the variables are
-   unreachable from a corrector instance and the decision is unenforceable.
+No aggregator or writer implementation changes; none takes a new or
+differently-shaped argument. `fme.coupled` is out of scope (its
+`ComponentStepPrediction.data` serves prediction, next-step input, and
+ocean-forcing roles at once and needs its own design); the coupled stepper's
+loss path passes no `loss_features` and is unchanged.
+
+Loss targets and the prescribed `y` are the same values for
+`n_ic_timesteps == 1` (the single-module case) and names untouched by
+`Stepper.forcing_deriver`; the swap itself is exact regardless, since it
+cancels the same tensor the overwrite wrote.
 
 ---
 
 ## Tests
 
-## `fme/core/test_loss.py` (modified)
-
-```python
-# Deterministic helper: fixed prediction/target/delta dicts, a normalizer
-# with known means/stds, MSE step loss — penalties computable by hand.
-
-def test_step_loss_without_corrector_args_unchanged():
-    # GOAL: with no corrector_args, forward matches today's behavior exactly,
-    # deltas is ignored, and needs_corrector_deltas is False.
-    ...
-
-def test_precorrector_swap_selected_only():
-    # GOAL: main loss sees prediction − delta for the configured names only;
-    # other keys use the plain prediction; targets untouched.
-    ...
-
-def test_regularization_analytic_penalty():
-    # GOAL: penalty equals the hand-computed mean of (delta/std)^2 — normalizer
-    # means cancel against the zeros target.
-    ...
-
-def test_regularization_masked_points_drop():
-    # GOAL: NaN-filled delta points contribute nothing; penalty and gradients
-    # stay finite.
-    ...
-
-def test_total_decomposition():
-    # GOAL: total() == main total + weight * penalty; the result carries the
-    # unweighted penalty; scale() scales the main loss only.
-    ...
-
-def test_missing_selected_delta_raises():
-    # GOAL: a non-empty delta dict lacking a selected name raises (the
-    # complete-delta-set rule).
-    ...
-
-def test_empty_deltas_inert():
-    # GOAL: empty deltas ⇒ no swap, no penalty, LossOutput matches the
-    # unconfigured result.
-    ...
-
-def test_needs_corrector_deltas_per_config():
-    # GOAL: property truth table over {precorrector, regularization} presence.
-    ...
-```
-
-## `fme/core/corrector/test_loss.py` (new)
-
-```python
-def test_config_post_init_errors():
-    # GOAL: both features None; a present feature with names_and_prefixes=None;
-    # weight <= 0; EnsembleLoss / NaN / global_mean_type — each raises in
-    # __post_init__.
-    ...
-
-def test_build_errors_on_entry_matching_no_modified_name():
-    # GOAL: an entry matching no corrector-modified name raises at build.
-    # PARAMETERIZE: entry ∈ {exact name, trailing-underscore prefix}.
-    ...
-
-def test_build_errors_without_corrector_or_discovery():
-    # GOAL: corrector None, modified_names empty, and modified_names None
-    # (discovery never ran) each raise with distinct messages.
-    ...
-
-def test_build_excludes_prescribed_prognostics():
-    # GOAL: an entry matching only a prescribed prognostic name raises —
-    # validation runs against the loss-visible set.
-    ...
-
-def test_keep_gradient_selection_raises_at_build():
-    # GOAL: a precorrector entry matching a keep_gradient name errors at
-    # build. PARAMETERIZE: entry ∈ {exact name, prefix that sweeps it in}.
-    ...
-
-def test_build_regularizer_packs_matched_names():
-    # GOAL: the built WeightedMappingLoss packs exactly
-    # selection.matched(loss_visible_names); a prefix entry matches all its
-    # level names.
-    ...
-```
-
-## `fme/core/corrector/test_registry.py` (modified)
-
-```python
-def test_discovery_records_modified_names():
-    # GOAL: discover_modified_names on a CorrectionSequence records exactly
-    # the delta keys a real call produces; modified_names is None before.
-    ...
-
-def test_discovery_forwards_through_epoch_schedule():
-    # GOAL: EpochScheduledCorrector discovery and modified_names are
-    # independent of the disabled-epoch state.
-    ...
-
-def test_keep_gradient_names_union():
-    # GOAL: CorrectionSequence unions per-correction keep_gradient_names;
-    # empty when no correction keeps gradients.
-    ...
-```
-
 ## `fme/core/step/test_step.py` (modified)
 
 ```python
-def test_step_with_adjustments_detach_flag():
-    # GOAL: default detaches deltas (grad_fn is None, matching today);
-    # detach_corrector_deltas=False leaves deltas on the graph while the
-    # corrected output is unaffected either way.
+# Deterministic corrector (fixed-offset correction) + one prescribed name.
+
+def test_step_with_adjustments_prescribed_residual():
+    # GOAL: residual equals next_step_input_data − pre-overwrite output for
+    # each prescribed name; output carries y; delta drop unchanged; empty
+    # residual dict when no names are prescribed.
     ...
 
-def test_get_step_runs_discovery():
-    # GOAL: a built step's corrector.modified_names is populated.
+def test_prescribed_residual_detach_flag():
+    # GOAL: default detaches residuals; detach_prescribed_residuals=False
+    # keeps them on the graph; the two detach flags act independently.
+    # PARAMETERIZE: (detach_deltas, detach_residuals) truth table.
+    ...
+
+```
+
+## `fme/core/step/test_output.py` (modified)
+
+```python
+def test_presented_output():
+    # GOAL: presented_output is x' for prescribed names and identical to
+    # output elsewhere; identity when no residuals.
+    ...
+
+def test_stack_diagnostics_prescribed_residual():
+    # GOAL: residual series stacked alongside delta; None only when both are
+    # empty; inconsistent residual key sets across steps raise.
+    ...
+```
+
+## `fme/core/step/test_multi_call.py` (modified)
+
+```python
+def test_multi_call_forwards_prescribed_residual_surface():
+    # GOAL: set_detach_prescribed_residuals reaches the wrapped step;
+    # MultiCallStep.step carries the wrapped prescribed_residual and
+    # presented_output reflects it.
+    ...
+```
+
+## `fme/core/step/test_step_diagnostics.py` (modified)
+
+```python
+def test_step_diagnostics_ops_carry_prescribed_residual():
+    # GOAL: to_device/to_cpu/pin_memory/broadcast_ensemble treat
+    # prescribed_residual like delta.
+    ...
+
+def test_to_datasets_exports_prescribed_residuals():
+    # GOAL: PRESCRIBED_RESIDUALS dataset present iff residuals non-empty;
+    # CORRECTION_DELTAS unaffected.
+    ...
+```
+
+## `fme/core/test_loss.py` (modified)
+
+```python
+def test_prescribed_swap_selected_only():
+    # GOAL: loss prediction is predict − residual for optimized_names only;
+    # unselected prescribed names keep the plain prediction (zero
+    # contribution when prediction == target); targets untouched.
+    ...
+
+def test_prescribed_missing_residual_raises():
+    # GOAL: a non-empty residual dict lacking an optimized name raises.
+    ...
+
+def test_prescribed_empty_residuals_inert():
+    # GOAL: residuals None/empty, or no prescribed_args ⇒ today's behavior;
+    # needs_prescribed_residuals truth table over config presence.
+    ...
+
+def test_prescribed_and_corrector_swaps_compose():
+    # GOAL: both args configured with disjoint names in one forward — each
+    # swap applies to its own names, penalty unaffected.
+    ...
+```
+
+## `fme/core/test_loss_features.py` (new)
+
+```python
+def test_config_post_init_errors():
+    # GOAL: LossFeaturesConfig with both None; optimization config with
+    # names_and_prefixes=None — each raises in __post_init__.
+    ...
+
+def test_build_errors():
+    # GOAL: empty prescribed_prognostic_names; an entry matching no
+    # prescribed name; a selected name in ocean_written_names — each raises
+    # at build with distinct messages.
+    # PARAMETERIZE: entry ∈ {exact name, trailing-underscore prefix}.
+    ...
+
+def test_build_without_corrector():
+    # GOAL: build succeeds with no corrector configured (x' = x case) and
+    # packs exactly the matched prescribed names.
     ...
 ```
 
 ## `fme/ace/stepper/test_single_module.py` (modified)
 
 ```python
-# Deterministic corrector: a correction adding a fixed offset to one variable.
+# Deterministic corrector + prescribed name via the existing stepper helpers.
 
-def test_train_on_batch_precorrector_equivalence():
-    # GOAL: with pre-corrector optimization selecting the corrected variable,
-    # metrics["loss"] equals the same stepper's loss with no corrector at all;
-    # returned predictions stay fully corrected.
+def test_prescribed_optimization_invariants():
+    # GOAL: (a) the selected name's loss equals the analytic loss of x'
+    # against the target; (b) an unselected prescribed name contributes zero;
+    # (c) the rollout's next-step input is exactly y (step-2 inputs match the
+    # forcing series, with and without the feature).
     ...
 
-def test_gradient_flows_through_correction_when_configured():
-    # GOAL: with corrector_loss configured, parameter grads differ from the
-    # detached baseline (delta attached); without corrector_loss the plain
-    # prediction path still detaches deltas.
+def test_gradient_flows_through_residual_when_configured():
+    # GOAL: with the feature on, parameter grads differ from the detached
+    # baseline; with only corrector_loss on, residuals stay detached (and
+    # vice versa — flag independence end to end).
     ...
 
-def test_corrector_regularization_gradient_accumulation():
-    # GOAL: penalty folded into per-step totals backpropagates under gradient
-    # accumulation (no double-backward); one accumulate_loss per optimized step.
+def test_presentation_train_gen_data():
+    # GOAL: TrainOutput.gen_data carries x' for prescribed names (feature
+    # configured or not); the loss value is unchanged for unselected names.
     ...
 
-def test_masked_output_with_corrector_loss_finite():
-    # GOAL: masked-output config + corrector_loss yields finite losses and
-    # parameter gradients through the NaN-filling apply_output_masking path.
+def test_presentation_predict():
+    # GOAL: predict's returned data carries x' for prescribed names; the
+    # returned prognostic state (next window's initial condition) carries y;
+    # derived variables computed from y.
     ...
 
-def test_epoch_scheduled_corrector():
-    # GOAL: build-time validation passes via discovery even when epoch 0 is
-    # disabled; disabled epochs are inert (no swap, no penalty, no metric, no
-    # error); the penalty and metrics appear from the first enabled epoch.
+# test_predict_with_prescribed_prognostic — CHANGED: it asserts predict
+# returns exactly the forcing values for prescribed names; under
+# presentation it asserts x' (and that the prognostic state stays on y).
+
+def test_validation_batch_reports_prescribed_loss():
+    # GOAL: under no_grad with NullOptimization the selected name's loss is
+    # nonzero and finite — the documented validation-visible change.
     ...
 
-def test_corrector_regularization_metrics():
-    # GOAL: corrector_regularization_step_{i} per optimized step plus the
-    # per-batch corrector_regularization mean.
+def test_masked_output_prescribed_optimization_finite():
+    # GOAL: masked-output config + prescribed optimization yields finite loss
+    # and gradients through the NaN-filled residual path.
     ...
 
-def test_both_features_together():
-    # GOAL: both features configured in one train_on_batch: the main loss sees
-    # the swapped predictions, the penalty is added, and both metric families
-    # appear (per #1273's acceptance criteria).
+def test_loss_features_grouping():
+    # GOAL: both features configured under one loss_features config in one
+    # train_on_batch: pre-corrector swap and residual swap each apply to
+    # their (disjoint) names; regularization metrics still appear.
     ...
 ```
 
@@ -638,11 +495,11 @@ def test_both_features_together():
 
 ## Open Questions
 
-- The `CorrectorRegularizationConfig` restrictions — rejecting
-  `EnsembleLoss` / `NaN` loss types, any `global_mean_type`, and
-  `weight <= 0` — await @mcgibbon's review (thread on this PR).
-- `StepABC.corrector` as a single introspection property, or the per-fact
-  forwards (`corrector_enabled`, `corrector_keep_gradient_names`,
-  `corrector_modified_names`) of the previous revision?
-- Extend the keep-gradient build error to `regularization` entries (proposed
-  above), or keep it precorrector-only as originally decided?
+- Naming: `loss_features` (field and `LossFeaturesConfig`) vs
+  `training_loss_features`; `prescribed_prognostic_optimization` vs the
+  shorter `prescribed_optimization`; `presented_output` vs
+  `output_without_prescription`.
+- Presentation is proposed unconditional-when-prescribing; is an opt-out
+  wanted for inference users who prefer writers to record the on-rails `y`?
+- Is a dedicated residual-magnitude training metric wanted, or do the
+  presentation-informed aggregator metrics suffice (proposed)?
