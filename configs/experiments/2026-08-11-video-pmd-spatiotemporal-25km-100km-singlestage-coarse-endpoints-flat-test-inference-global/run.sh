@@ -19,7 +19,7 @@ set -e
 JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat-test-inference-global"
 CONFIG_FILENAME="video_inference.yaml"
 WORKSPACE="ai2/climate-titan"
-CLUSTER="ai2/titan"
+CLUSTER="ai2/jupiter"  # h100
 N_GPUS=4
 CHECKPOINT_DATASET="01KZEN3KJVNMCQMPAEB8KXWRA3"
 WANDB_SECRET="CHLOE_WANDB_API_KEY"
@@ -33,7 +33,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run --allow-dirty \
     --name "$JOB_NAME" \
-    --description 'Video PMD spatiotemporal SINGLE-STAGE (true LR-endpoints-in/HR-full-out) test-set inference, GLOBAL DOMAIN in one job via patch-tiled divide_generation, 4-member ensemble, flat/independent noise, 5 channels, 25km/100km. Checkpoint is preliminary/undertrained -- see yaml header. 4x GPU DDP on titan.' \
+    --description 'Video PMD spatiotemporal SINGLE-STAGE (true LR-endpoints-in/HR-full-out) test-set inference, GLOBAL DOMAIN in one job via patch-tiled divide_generation, 4-member ensemble, flat/independent noise, 5 channels, 25km/100km. Checkpoint is preliminary/undertrained -- see yaml header. 4x GPU DDP on jupiter (h100).' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
