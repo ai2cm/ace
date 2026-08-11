@@ -489,6 +489,29 @@ def test_unreclaimable_slots_are_broken_out_per_cluster(caplog):
     assert client.priority_calls == []
 
 
+def test_placed_job_on_unbudgeted_cluster_with_no_constraint_does_not_crash(caplog):
+    # A placed job with no cluster constraints that landed on a cluster outside
+    # the allocation has clusters=() and assigned_cluster set. The report must
+    # not crash on clusters[0].
+    client = FakeClient(
+        [
+            make_job(
+                job_id="stray",
+                env={"CM_PRIORITY": "high"},
+                clusters=(),
+                node_id="node-ceres",
+                started=100,
+            )
+        ],
+        node_clusters={"node-ceres": ("ceres", "ai2")},
+    )
+    with caplog.at_level(logging.WARNING):
+        run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert client.priority_calls == []
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("ai2/ceres" in m and "no allocation" in m for m in warnings)
+
+
 def test_a_replica_group_left_alone_is_reported(caplog):
     # Each rank is individually fine, so this is invisible in the per-job
     # counts: without its own line the group would be skipped silently.

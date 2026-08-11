@@ -660,7 +660,8 @@ def report_unmanageable(jobs: Sequence[JobView], limits: dict[str, int]) -> None
         if why is None or why is UNLABELLED or why is OBSERVED:
             continue
         if why is NO_ALLOCATION:
-            reason = f"targets {job.clusters[0]}, which has no allocation"
+            target = job.assigned_cluster or (job.clusters[0] if job.clusters else None)
+            reason = f"targets {target}, which has no allocation" if target else why
         else:
             reason = why
         reasons[reason] += 1
