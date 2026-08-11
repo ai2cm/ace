@@ -29,11 +29,8 @@ class PerStepLossAggregator:
 
     def get_logs(self, label: str) -> dict[str, float]:
         dist = Distributed.get_instance()
-        # Every rank must issue an identical sequence of collective calls, so
-        # first agree on the global key universe, then reduce dense sum and
-        # count vectors over it. Means are count-weighted: ranks contribute in
-        # proportion to how many batches they recorded for each key, and keys
-        # with a global count of zero are skipped.
+        # Ranks may record different keys, so agree on the global key set
+        # before reducing; that way every rank issues the same collectives.
         gathered = dist.gather_object(sorted(self._sums.keys()))
         universe: list[str] | None = None
         if gathered is not None:

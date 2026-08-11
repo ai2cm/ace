@@ -786,9 +786,9 @@ class ValidationTask(Generic[BD, TO]):
             preserving the existing per-epoch construction semantics.
         weight: Contribution weight for the combined validation loss. Zero means
             the task runs but does not contribute to the metric.
-        evaluate_all_steps: Whether the stepper evaluates every forward step
-            in the data window, or only the steps it would evaluate for the
-            batch during training.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
     """
 
     name: str

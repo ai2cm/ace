@@ -190,6 +190,26 @@ def test_stepper_step_schedule():
     assert schedule.has_sampler
 
 
+def test_stepper_step_probabilities_requires_epoch():
+    stepper = _init_train_stepper(
+        n_forward_steps=TimeLengthProbabilities(
+            outcomes=[
+                TimeLengthProbability(steps=1, probability=0.5),
+                TimeLengthProbability(steps=2, probability=0.5),
+            ]
+        ),
+        loss=StepLossConfig(type="MSE"),
+    )
+    with pytest.raises(EpochNotProvidedError):
+        stepper._loss_schedule.init_for_epoch(None)
+
+
+def test_stepper_step_int_does_not_require_epoch():
+    stepper = _init_train_stepper(n_forward_steps=2, loss=StepLossConfig(type="MSE"))
+    stepper._loss_schedule.init_for_epoch(None)
+    assert not stepper._loss_schedule.has_sampler
+
+
 def test_seed_eval_does_not_corrupt_training_sampler():
     stepper = _init_train_stepper(
         n_forward_steps=TimeLengthProbabilities(
@@ -1201,6 +1221,24 @@ def _get_stepper(
     config = _get_stepper_config(in_names, out_names, **kwargs)
     dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
+
+
+def test_stepper_config_input_only_and_all_names_are_sets():
+    """Regression test for #579: input_only_names/all_names are unordered
+    and should be typed and returned as set[str], not list[str]."""
+    in_names = ["a", "b", "c"]
+    out_names = ["b", "d"]
+    config = _get_stepper_config(in_names, out_names)
+
+    assert isinstance(config.input_only_names, set)
+    assert config.input_only_names == {"a", "c"}
+
+    assert isinstance(config.all_names, set)
+    assert config.all_names == {"a", "b", "c", "d"}
+
+    # base config values represent ML channel order and must stay list[str]
+    assert isinstance(config.input_names, list)
+    assert isinstance(config.output_names, list)
 
 
 def _init_train_stepper(

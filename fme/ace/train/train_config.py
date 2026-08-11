@@ -73,19 +73,12 @@ class InlineValidationConfig:
             "val_0", changing its wandb keys and output directory.
         weight: weight for this validation's loss in the combined checkpoint
             selection metric. Must be non-negative.
-        evaluate_all_steps: if True (default), evaluate every forward step in
-            the validation data window, logging a dense set of per-step losses.
-            If False, evaluate only the steps the train stepper would evaluate
-            for the batch: the stochastically-sampled step count under
-            n_forward_steps_schedule, or the fixed step count otherwise. Under
-            a schedule this makes validation cost commensurate with training
-            cost, but each loss_step_N metric then averages only the batches
-            whose sampled step count exceeded N: with B total validation
-            batches and p the probability of sampling N or fewer steps,
-            loss_step_N averages ~B*(1-p) batches — an unbiased but noisier
-            estimate at long leads, to be interpreted in light of the schedule
-            probabilities. Step draws are seeded identically each epoch, so a
-            lead expected in fewer than ~1 batch may never be logged.
+        evaluate_all_steps: whether to evaluate every forward step in the
+            validation data window. If False, evaluate only the steps the train
+            stepper would evaluate for the batch, which under a stochastic
+            n_forward_steps_schedule keeps validation cost near training cost,
+            at the price of averaging each loss_step_N over only the batches
+            that sampled more than N steps.
     """
 
     loader: DataLoaderConfig
