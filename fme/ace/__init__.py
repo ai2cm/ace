@@ -104,6 +104,11 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrectorConfig
+from fme.core.corrector.loss import (
+    CorrectorLossConfig,
+    CorrectorRegularizationConfig,
+    PreCorrectorOptimizationConfig,
+)
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
@@ -112,7 +117,7 @@ from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import OverwriteConfig, XarrayDataConfig
 from fme.core.generics.lr_tuning import LRTuningConfig
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.loss import StepLossConfig
+from fme.core.loss import LossConfig, StepLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import CheckpointConfig
