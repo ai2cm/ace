@@ -1,18 +1,16 @@
 import argparse
-import dataclasses
 import json
 import logging
 import os
 import sys
 import time
-from typing import Mapping
 
 import dacite
 import xarray as xr
 import yaml
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from get_stats import StatsConfig, store_path
+from get_stats import Config, TimeCoarsenConfig
 
 try:
     import dask  # noqa: F401
@@ -23,84 +21,10 @@ except ImportError:
     _HAS_XPARTITION = False
 
 
-@dataclasses.dataclass
-class TimeSlice:
-    """
-    Optional time slice to apply before coarsening.
-
-    Attributes:
-        start: Start time (ISO 8601 string, e.g. "2000-01-01T00:00:00"). Inclusive.
-        stop: Stop time (ISO 8601 string). Inclusive.
-    """
-
-    start: str | None = None
-    stop: str | None = None
-
-
-@dataclasses.dataclass
-class TimeCoarsenConfig:
-    """
-    Configuration for time coarsening of a dataset.
-
-    Attributes:
-        factor: Factor by which to coarsen the time dimension.
-        data_output_directory: Directory to save the coarsened datasets as zarr stores.
-        stats_output_directory: Directory to save the stats of the coarsened datasets.
-        snapshot_names: List of snapshot variable names to coarsen. These will be
-            coarsened by skipping each factor times.
-        window_names: List of window variable names to coarsen. These will be
-            coarsened by averaging over each factor times.
-        constant_prefixes: List of prefixes for constant data variables to copy without
-            modification. Raises an exception if any of these have a "time" dimension.
-        n_split: Number of partitions to split the write into when using xpartition.
-            Only used when dask and xpartition are available.
-        chunking: Mapping of dimension names to inner chunk sizes for the output
-            zarr store. Defaults to {"time": 1}. Spatial dimensions keep their
-            existing chunking.
-        sharding: Mapping of dimension names to shard sizes. If None, an unsharded
-            zarr store is written with chunks as specified in ``chunking``.
-    """
-
-    factor: int
-    data_output_directory: str
-    stats_output_directory: str
-    snapshot_names: list[str]
-    window_names: list[str]
-    constant_prefixes: list[str]
-    n_split: int = 1
-    chunking: dict[str, int] = dataclasses.field(default_factory=lambda: {"time": 1})
-    sharding: dict[str, int] | None = dataclasses.field(
-        default_factory=lambda: {"time": 360}
-    )
-    input_time_slice: TimeSlice = dataclasses.field(default_factory=TimeSlice)
-
-    def store(self, run_name: str) -> str:
-        """Zarr store holding a run's coarsened data."""
-        return store_path(self.data_output_directory, run_name)
-
-
-@dataclasses.dataclass
-class Config:
-    runs: Mapping[str, str]
-    data_output_directory: str
-    stats: StatsConfig
-    time_coarsen: TimeCoarsenConfig
-
-    def run_names(self) -> list[str]:
-        """Names of the configured runs, in the order they are declared."""
-        return list(self.runs)
-
-    def raw_store(self, run_name: str) -> str:
-        """Zarr store holding the native-resolution data for a run."""
-        return store_path(self.data_output_directory, run_name)
-
-    def coarsened_store(self, run_name: str) -> str:
-        """Zarr store holding the time-coarsened data for a run."""
-        return self.time_coarsen.store(run_name)
-
-
 def main(config: Config, run: int, dry_run: bool = False):
     logging.basicConfig(level=logging.INFO)
+    if config.time_coarsen is None:
+        raise ValueError("The config has no time_coarsen section to coarsen with.")
     run_name = config.run_names()[run]
     process_path_pair(
         input_path=config.raw_store(run_name),

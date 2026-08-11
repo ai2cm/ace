@@ -2,7 +2,8 @@ import json
 
 import numpy as np
 import xarray as xr
-from time_coarsen import TimeCoarsenConfig, TimeSlice, coarsen, process_path_pair
+from get_stats import TimeCoarsenConfig, TimeSliceConfig
+from time_coarsen import coarsen, process_path_pair
 from zarr.codecs import BloscCodec
 
 from fme.ace.testing import DimSize, DimSizes, get_nd_dataset
@@ -149,7 +150,7 @@ def test_coarsen_input_time_slice() -> None:
         snapshot_names=["temp"],
         window_names=["temp_tendency"],
         constant_prefixes=[],
-        input_time_slice=TimeSlice(start="2000-01-02"),
+        input_time_slice=TimeSliceConfig(start="2000-01-02"),
     )
     ds_coarsened = coarsen(ds, config)
     # Slicing to start at Jan 2 gives [Jan 2..6] (5 times).

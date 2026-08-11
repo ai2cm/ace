@@ -36,6 +36,9 @@ def _config_data(
             "data_output_directory": COARSENED_DIRECTORY,
             "stats_output_directory": "gs://bucket/daily-stats",
             "factor": 4,
+            "snapshot_names": [],
+            "window_names": [],
+            "constant_prefixes": [],
         }
     return config_data
 

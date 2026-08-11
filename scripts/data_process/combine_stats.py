@@ -1,14 +1,17 @@
-import dataclasses
 import logging
+import os
 import shutil
+import sys
 import tempfile
-from typing import Dict, List
 
 import click
 import dacite
 import fsspec
 import xarray as xr
 import yaml
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from get_stats import Config
 
 
 def copy(source: str, destination: str):
@@ -23,33 +26,6 @@ def copy(source: str, destination: str):
             shutil.copyfileobj(f_source, f_destination)
 
 
-@dataclasses.dataclass
-class StatsConfig:
-    output_directory: str
-    exclude_runs: List[str] = dataclasses.field(default_factory=list)
-
-
-@dataclasses.dataclass
-class TimeCoarsenConfig:
-    """
-    Configuration for time coarsening of a dataset.
-
-    Attributes:
-        data_output_directory: Directory to save the coarsened datasets as zarr stores.
-        stats_output_directory: Directory to save the stats of the coarsened datasets.
-    """
-
-    data_output_directory: str
-    stats_output_directory: str
-
-
-@dataclasses.dataclass
-class Config:
-    runs: Dict[str, str]
-    stats: StatsConfig
-    time_coarsen: TimeCoarsenConfig | None = None
-
-
 def _make_history_string(config_filename: str, stats_output_dir: str):
     return (
         "Created by full-model/data_process/combine_stats.py from "
@@ -57,7 +33,7 @@ def _make_history_string(config_filename: str, stats_output_dir: str):
     )
 
 
-def open_datasets(roots: List[str], filename: str) -> List[xr.Dataset]:
+def open_datasets(roots: list[str], filename: str) -> list[xr.Dataset]:
     datasets = []
     for root in roots:
         with fsspec.open(root + filename) as file:
@@ -172,9 +148,7 @@ def main(config_yaml: str):
     config = dacite.from_dict(data_class=Config, data=config_data)
 
     stats_roots = [
-        config.stats.output_directory + "/" + run + "/"
-        for run in config.runs.keys()
-        if run not in config.stats.exclude_runs
+        config.raw_stats_directory(run) + "/" for run in config.included_run_names()
     ]
     combine_stats(
         stats_roots=stats_roots,
@@ -184,9 +158,8 @@ def main(config_yaml: str):
 
     if config.time_coarsen is not None:
         stats_roots = [
-            config.time_coarsen.stats_output_directory + "/" + run + "/"
-            for run in config.runs.keys()
-            if run not in config.stats.exclude_runs
+            config.coarsened_stats_directory(run) + "/"
+            for run in config.included_run_names()
         ]
         combine_stats(
             stats_roots=stats_roots,

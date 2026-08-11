@@ -18,6 +18,9 @@ def _config(trailing_slash: bool = False, include_time_coarsen: bool = True) -> 
             "data_output_directory": "gs://bucket/daily" + slash,
             "stats_output_directory": "gs://bucket/daily-stats" + slash,
             "factor": 4,
+            "snapshot_names": [],
+            "window_names": [],
+            "constant_prefixes": [],
         }
     return dacite.from_dict(data_class=Config, data=config_data)
 
