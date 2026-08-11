@@ -71,9 +71,12 @@ def main():
     out = f"{here}/sidecar-out/{parent_name}-snow-masked.zarr"
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
-    ds = xr.open_zarr(
-        parent_url, consolidated=False, storage_options={"token": _gcs_token()}
-    )
+    def open_parent():
+        return xr.open_zarr(
+            parent_url, consolidated=False, storage_options={"token": _gcs_token()}
+        )
+
+    ds = open_parent()
     n = ds.sizes["time"] if not args.dev else 2 * SHARD_STEPS
     dims = ds[SWE].dims
     spatial_coords = {d: ds[d].values for d in dims[1:]}
@@ -94,8 +97,15 @@ def main():
         for v in (SWE, SCF)
     }
 
-    first = True
-    for start in range(0, n, SHARD_STEPS):
+    done = 0
+    if os.path.exists(out):
+        done = xr.open_zarr(out).sizes["time"]
+        print(f"  resuming: {done}/{n} steps already written", flush=True)
+    first = done == 0
+    refresh_every = 20 * SHARD_STEPS
+    for start in range(done, n, SHARD_STEPS):
+        if start > done and start % refresh_every == 0:
+            ds = open_parent()
         stop = min(start + SHARD_STEPS, n)
         block = ds[[SWE, SCF]].isel(time=slice(start, stop)).load()
         masked = xr.Dataset(

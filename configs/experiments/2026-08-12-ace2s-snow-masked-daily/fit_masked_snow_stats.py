@@ -40,6 +40,19 @@ from fit_snow_transform_stats import (  # noqa: E402
 )
 
 
+def _stream_with_refresh(spec, name, starts, dev, block_pairs=1500):
+    """Stream in slices of ``block_pairs``, reopening the store (fresh GCS
+    token) between slices so long streams outlive the ~1 h token lifetime.
+    """
+    values, diffs = [], []
+    for i in range(0, len(starts), block_pairs):
+        ds, _ = _load_pairs(spec, dev)
+        v, d = _stream(ds, name, starts[i : i + block_pairs])
+        values.append(v)
+        diffs.append(d)
+    return np.concatenate(values), np.concatenate(diffs)
+
+
 def _nan_entry(values: "np.ndarray", diffs: "np.ndarray") -> dict:
     return {
         "mean": float(np.nanmean(values)),
@@ -73,9 +86,9 @@ def main():
     mask = xr.load_dataset(f"{HERE}/snow_mask.nc")["mask"].values
     valid = mask > 0.5
 
-    ds, starts = _load_pairs(spec, args.dev)
-    swe, swe_diff = _stream(ds, SWE, starts)
-    scf, scf_diff = _stream(ds, SCF, starts)
+    _, starts = _load_pairs(spec, args.dev)
+    swe, swe_diff = _stream_with_refresh(spec, SWE, starts, args.dev)
+    scf, scf_diff = _stream_with_refresh(spec, SCF, starts, args.dev)
     for arr in (swe, swe_diff, scf, scf_diff):
         arr[:, ~valid] = np.nan
     swe_next, scf_next = swe + swe_diff, scf + scf_diff
