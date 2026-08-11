@@ -19,6 +19,14 @@ class CorrectorDiagnostics:
 
     delta: TensorMapping = dataclasses.field(default_factory=dict)
 
+    def detach(self) -> "CorrectorDiagnostics":
+        """Return a new ``CorrectorDiagnostics`` with every ``delta`` tensor
+        detached from the autograd graph; ``self`` is not mutated.
+        """
+        return CorrectorDiagnostics(
+            delta={name: value.detach() for name, value in self.delta.items()}
+        )
+
     def apply_output_masking(self, masking: SpatialMasking) -> "CorrectorDiagnostics":
         """Return a new ``CorrectorDiagnostics`` with the output spatial masking
         applied to ``delta``; ``self`` is not mutated.

@@ -771,6 +771,59 @@ def test_step_returns_step_output_with_populated_detached_delta():
         assert not tensor.requires_grad  # detached at the step boundary
 
 
+def test_step_with_adjustments_detach_flag():
+    # Default detaches deltas (matching prior behavior); after
+    # set_detach_corrector_deltas(False) the deltas stay on the autograd
+    # graph while the corrected output is unaffected either way.
+    selector = get_single_module_with_atmosphere_corrector_selector()
+    img_shape = DEFAULT_IMG_SHAPE
+    step = get_step(selector, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
+    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    args = StepArgs(
+        input=input_data,
+        next_step_input_data=next_step_input_data,
+        labels=None,
+    )
+    detached_result = step.step(args=args)
+    assert detached_result.corrector_diagnostics.delta
+    for tensor in detached_result.corrector_diagnostics.delta.values():
+        assert tensor.grad_fn is None
+
+    step.set_detach_corrector_deltas(False)
+    attached_result = step.step(args=args)
+    assert attached_result.corrector_diagnostics.delta
+    for tensor in attached_result.corrector_diagnostics.delta.values():
+        assert tensor.grad_fn is not None
+    for name in detached_result.output:
+        torch.testing.assert_close(
+            attached_result.output[name], detached_result.output[name]
+        )
+
+
+def test_get_step_runs_discovery():
+    # get_step runs modified-name discovery: the built step's corrector
+    # exposes the delta keys it produces when active.
+    selector = get_single_module_with_atmosphere_corrector_selector()
+    step = get_step(selector, DEFAULT_IMG_SHAPE)
+    assert step.corrector is not None
+    modified_names = step.corrector.modified_names
+    assert modified_names is not None
+    assert len(modified_names) > 0
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, 2
+    )
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
+    )
+    assert set(result.corrector_diagnostics.delta) == set(modified_names)
+
+
 def test_step_empty_delta_when_no_corrector():
     selector = get_single_module_selector()
     img_shape = DEFAULT_IMG_SHAPE

@@ -6,7 +6,11 @@ import torch
 from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrectorConfig
-from fme.core.corrector.ocean import OceanCorrectorConfig
+from fme.core.corrector.ocean import (
+    OceanCorrectorConfig,
+    SeaIceFractionConfig,
+    SeaIceFractionCorrection,
+)
 from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     CorrectionSequence,
@@ -14,6 +18,7 @@ from fme.core.corrector.registry import (
     EpochScheduledCorrector,
 )
 from fme.core.corrector.state import CorrectorState
+from fme.core.corrector.utils import ForcePositive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -140,6 +145,10 @@ class ConstantOffsetCorrection:
         self._name = name
         self._offset = offset
 
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        return frozenset()
+
     def __call__(
         self,
         input_data: TensorMapping,
@@ -203,3 +212,73 @@ def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics():
     enabled = corrector({}, gen_data, {}, None)
     assert set(enabled.modified_names) == {"a"}
     torch.testing.assert_close(enabled.diagnostics.delta["a"], torch.full((2, 2), 1.0))
+
+
+def test_discovery_records_modified_names():
+    sequence = CorrectionSequence(
+        [
+            ConstantOffsetCorrection("a", 1.0),
+            ConstantOffsetCorrection("b", 2.0),
+        ]
+    )
+    assert sequence.modified_names is None
+    sequence.discover_modified_names(
+        input_names=["a"],
+        gen_names=["a", "b", "c"],
+        forcing_names=[],
+        img_shape=(2, 2),
+    )
+    gen_data = {
+        "a": torch.zeros(2, 2),
+        "b": torch.zeros(2, 2),
+        "c": torch.zeros(2, 2),
+    }
+    result = sequence({"a": torch.zeros(2, 2)}, gen_data, {}, None)
+    # discovery records exactly the delta keys a real call produces
+    assert sequence.modified_names == frozenset(result.diagnostics.delta)
+    assert sequence.modified_names == frozenset({"a", "b"})
+
+
+def test_discovery_forwards_through_epoch_schedule():
+    wrapped = CorrectionSequence([ConstantOffsetCorrection("a", 1.0)])
+    corrector = EpochScheduledCorrector(wrapped=wrapped, disabled_epochs=1)
+    corrector.train(True)  # disabled for train-mode steps in the first epoch
+    assert corrector.modified_names is None
+    corrector.discover_modified_names(
+        input_names=[], gen_names=["a", "b"], forcing_names=[], img_shape=(2, 2)
+    )
+    # discovery reaches the wrapped corrector and modified_names reflects it,
+    # even while the corrector is epoch-disabled
+    assert wrapped.modified_names == frozenset({"a"})
+    assert corrector.modified_names == frozenset({"a"})
+    corrector.set_epoch(2)  # enabled
+    assert corrector.modified_names == frozenset({"a"})
+
+
+def test_keep_gradient_names_union():
+    no_keep_gradient = CorrectionSequence(
+        [
+            ConstantOffsetCorrection("a", 1.0),
+            ForcePositive(["b"], keep_gradient=False),
+        ]
+    )
+    assert no_keep_gradient.keep_gradient_names == frozenset()
+
+    sif_config = SeaIceFractionConfig(
+        sea_ice_fraction_name="sea_ice_fraction",
+        land_fraction_name="land_fraction",
+        zero_where_ice_free_names=["siconc"],
+    )
+    sequence = CorrectionSequence(
+        [
+            ConstantOffsetCorrection("a", 1.0),
+            ForcePositive(["b", "c"], keep_gradient=True),
+            SeaIceFractionCorrection(sif_config, keep_gradient=True),
+        ]
+    )
+    # union over corrections; the zero-where-ice-free field is multiplied, not
+    # clamped, so it is not a keep-gradient name
+    assert sequence.keep_gradient_names == frozenset({"b", "c", "sea_ice_fraction"})
+
+    scheduled = EpochScheduledCorrector(wrapped=sequence, disabled_epochs=1)
+    assert scheduled.keep_gradient_names == frozenset({"b", "c", "sea_ice_fraction"})

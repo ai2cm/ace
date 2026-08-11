@@ -150,6 +150,15 @@ class SeaIceFractionCorrection:
     config: SeaIceFractionConfig
     keep_gradient: bool = False
 
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        # Only the sea ice fraction is clamped/rebalanced with the
+        # straight-through estimator; the zero-where-ice-free fields are
+        # multiplied, not clamped.
+        if self.keep_gradient:
+            return frozenset({self.config.sea_ice_fraction_name})
+        return frozenset()
+
     def __call__(
         self,
         input_data: TensorMapping,
@@ -174,6 +183,10 @@ class SurfaceEnergyFluxCorrection:
     """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
 
     method: Literal["residual_prediction", "prescribed"]
+
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        return frozenset()
 
     def __call__(
         self,
@@ -205,6 +218,10 @@ class OceanHeatContentCorrection:
     timestep_seconds: float
     method: Literal["scaled_temperature"]
     unaccounted_heating: float
+
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        return frozenset()
 
     def __call__(
         self,

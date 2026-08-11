@@ -1,13 +1,15 @@
 import abc
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any, Protocol, Self, final
 
 import dacite
+import torch
 
 from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnostics
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
+from fme.core.device import get_device
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -84,7 +86,19 @@ class Correction(Protocol):
     variables the correction is responsible for writing. Because the returned
     dict is exactly what gets applied, the returned keys are the single source of
     truth for what changed and cannot drift from the write.
+
+    The key set a correction returns may depend on its config and on which keys
+    are present in its inputs, never on tensor values; modified-name discovery
+    (``CorrectorABC.discover_modified_names``) relies on this.
     """
+
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        """Names this correction corrects via straight-through clamps
+        (:func:`fme.core.corrector.utils.replace_value_keep_gradient`); empty
+        for corrections that do not keep gradients through hard corrections.
+        """
+        ...
 
     def __call__(
         self,
@@ -132,6 +146,36 @@ class CorrectorABC(abc.ABC):
     def load_state(self, state: dict[str, Any]) -> None:
         """Load corrector checkpoint state. Default implementation is a no-op."""
 
+    @property
+    def modified_names(self) -> frozenset[str] | None:
+        """The delta keys this corrector produces when active, or None if
+        discovery (``discover_modified_names``) never ran.
+
+        Default implementation returns None: discovery is not supported.
+        """
+        return None
+
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        """Names this corrector corrects via straight-through clamps.
+
+        Default implementation returns an empty frozenset.
+        """
+        return frozenset()
+
+    def discover_modified_names(
+        self,
+        input_names: Collection[str],
+        gen_names: Collection[str],
+        forcing_names: Collection[str],
+        img_shape: tuple[int, int],
+    ) -> None:
+        """Discover the delta keys this corrector produces when active, making
+        them available as ``modified_names``.
+
+        Default implementation is a no-op; ``modified_names`` stays None.
+        """
+
     @abc.abstractmethod
     def __call__(
         self,
@@ -168,6 +212,45 @@ class CorrectionSequence(CorrectorABC):
 
     def __init__(self, corrections: list[Correction]):
         self._corrections = corrections
+        self._modified_names: frozenset[str] | None = None
+
+    @property
+    def modified_names(self) -> frozenset[str] | None:
+        return self._modified_names
+
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        return frozenset().union(
+            *(correction.keep_gradient_names for correction in self._corrections)
+        )
+
+    def discover_modified_names(
+        self,
+        input_names: Collection[str],
+        gen_names: Collection[str],
+        forcing_names: Collection[str],
+        img_shape: tuple[int, int],
+    ) -> None:
+        """Run one ``__call__`` on zero tensors keyed by the given names and
+        record the resulting delta keys as ``modified_names``.
+
+        The fake-data values may go NaN/inf inside budget corrections (they
+        divide by global means); that is harmless for key discovery because the
+        key set a correction returns depends only on its config and on which
+        keys are present in its inputs, never on tensor values (the
+        ``Correction`` contract).
+        """
+
+        def _zeros(names: Collection[str]) -> TensorDict:
+            return {
+                name: torch.zeros((1, *img_shape), device=get_device())
+                for name in names
+            }
+
+        result = self(
+            _zeros(input_names), _zeros(gen_names), _zeros(forcing_names), None
+        )
+        self._modified_names = frozenset(result.diagnostics.delta.keys())
 
     def __call__(
         self,
@@ -224,6 +307,27 @@ class EpochScheduledCorrector(CorrectorABC):
     def set_epoch(self, epoch: int) -> None:
         self._corrector_disabled = epoch <= self._disabled_epochs
         self._wrapped.set_epoch(epoch)
+
+    @property
+    def modified_names(self) -> frozenset[str] | None:
+        # Forwarded to the wrapped corrector independent of the epoch-disabled
+        # state: these describe what the corrector produces when active.
+        return self._wrapped.modified_names
+
+    @property
+    def keep_gradient_names(self) -> frozenset[str]:
+        return self._wrapped.keep_gradient_names
+
+    def discover_modified_names(
+        self,
+        input_names: Collection[str],
+        gen_names: Collection[str],
+        forcing_names: Collection[str],
+        img_shape: tuple[int, int],
+    ) -> None:
+        self._wrapped.discover_modified_names(
+            input_names, gen_names, forcing_names, img_shape
+        )
 
     def get_state(self) -> dict[str, Any]:
         state: dict[str, Any] = {}

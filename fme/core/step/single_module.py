@@ -245,6 +245,12 @@ class SingleModuleStepConfig(StepConfigABC):
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
+        corrector.discover_modified_names(
+            input_names=self.input_names,
+            gen_names=self.output_names,
+            forcing_names=self.next_step_input_names,
+            img_shape=dataset_info.img_shape,
+        )
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SingleModuleStep(
             config=self,
@@ -355,6 +361,10 @@ class SingleModuleStep(StepABC):
         return self._config
 
     @property
+    def corrector(self) -> CorrectorABC | None:
+        return self._corrector
+
+    @property
     def normalizer(self) -> StandardNormalizer:
         return self._normalizer
 
@@ -446,6 +456,7 @@ class SingleModuleStep(StepABC):
             global_mean_removal=self._global_mean_removal,
             data_mask=args.data_mask,
             stepper_state=args.stepper_state,
+            detach_corrector_deltas=self._detach_corrector_deltas,
         )
 
     def _draw_input_dropout_mask(self) -> TensorMapping | None:
@@ -605,6 +616,7 @@ def step_with_adjustments(
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
+    detach_corrector_deltas: bool = True,
 ) -> StepOutput:
     """
     Step the model forward one timestep given input data.
@@ -639,6 +651,10 @@ def step_with_adjustments(
             the corrector and any updates are written back into the returned
             ``StepperState``; the other fields (e.g. ``random_state``) pass
             through unchanged. Pass-through unchanged when no corrector is set.
+        detach_corrector_deltas: Whether to detach the corrector delta
+            diagnostics from the autograd graph (default True). When False the
+            deltas stay attached so a training loss can differentiate through
+            the correction; the corrected output is unaffected either way.
 
     Returns:
         A ``StepOutput`` carrying the denormalized data at the next time step,
@@ -673,10 +689,13 @@ def step_with_adjustments(
         )
         result = corrector(input, output, next_step_input_data, corrector_state)
         output = result.corrected
-        # Detach the corrector diagnostic tensors.
-        diagnostics = CorrectorDiagnostics(
-            delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
-        )
+        if detach_corrector_deltas:
+            # Detach the corrector diagnostic tensors.
+            diagnostics = result.diagnostics.detach()
+        else:
+            # Shallow copy: the deltas stay attached to the autograd graph so
+            # a training loss can differentiate through the correction.
+            diagnostics = CorrectorDiagnostics(delta=dict(result.diagnostics.delta))
         if result.corrector_state is not None:
             # Preserve the incoming state's other fields (e.g. random_state)
             # rather than rebuilding from scratch, so StepperState stays
