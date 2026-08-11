@@ -1,8 +1,9 @@
 import dataclasses
 from collections.abc import Sequence
+from typing import final
 
 import torch
-from torch.utils.data import DataLoader, Dataset, RandomSampler
+from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
@@ -31,6 +32,12 @@ from fme.downscaling.data.utils import (
     find_roll_anchor_from_interval,
     get_latlon_coords_from_properties,
     roll_lon_coords,
+)
+from fme.downscaling.data.video_datasets import (
+    PairedVideoBatchData,
+    PairedVideoGriddedData,
+    VideoBatchItemDatasetAdapter,
+    VideoFineCoarsePairedDataset,
 )
 from fme.downscaling.requirements import DataRequirements
 
@@ -458,6 +465,7 @@ class PairedDataLoaderConfig:
                 "within the model when it is first built and trained."
             )
 
+    @final
     def _first_data_config(
         self,
         config: XarrayDataConfig | MergeNoConcatDatasetConfig,
@@ -467,9 +475,11 @@ class PairedDataLoaderConfig:
             return config
         return config.merge[0]
 
+    @final
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
+    @final
     def _mp_context(self):
         mp_context = None
         if self.num_data_workers == 0:
@@ -485,11 +495,13 @@ class PairedDataLoaderConfig:
         return mp_context
 
     @property
+    @final
     def coarse_full_config(
         self,
     ) -> Sequence[XarrayDataConfig | MergeNoConcatDatasetConfig]:
         return _full_configs(self.coarse)
 
+    @final
     def build(
         self,
         train: bool,
@@ -604,6 +616,7 @@ class PairedDataLoaderConfig:
             coarse_extent_latlon_coords=example.coarse.latlon_coordinates,
         )
 
+    @final
     def _get_sampler(
         self, dataset: Dataset, dist: Distributed, train: bool, drop_last: bool = False
     ) -> RandomSampler | DistributedSampler | None:
@@ -629,3 +642,156 @@ class PairedDataLoaderConfig:
             sampler = None
 
         return sampler
+
+
+@dataclasses.dataclass
+class PairedVideoLoaderConfig(PairedDataLoaderConfig):
+    """
+    Configuration for loading video (temporal) downscaling data: fixed-length
+    clips of ``n_timesteps`` consecutive frames with an explicit leading time
+    axis, built from the same fine/coarse loading machinery as
+    ``PairedDataLoaderConfig`` (see its docstring for the args inherited
+    below).
+
+    Args:
+        n_timesteps: Number of consecutive frames in each clip.
+        time_stride: Frames between consecutive clip starts. Defaults to
+            ``n_timesteps - 1`` (clips overlapping by exactly one shared
+            boundary frame). Set to 1 for a full sliding window over every
+            possible clip start; set higher to skip clip starts and reduce
+            the number of samples.
+    """
+
+    n_timesteps: int = 1
+    time_stride: int | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        if self.n_timesteps < 1:
+            raise ValueError(f"n_timesteps must be >= 1, got {self.n_timesteps}.")
+        if self.time_stride is not None and self.time_stride < 1:
+            raise ValueError(f"time_stride must be >= 1, got {self.time_stride}.")
+
+    @property
+    def clip_start_stride(self) -> int:
+        """Frames between consecutive video-clip starts; defaults to
+        ``n_timesteps - 1`` (clips sharing only their boundary frame).
+        """
+        if self.time_stride is not None:
+            return self.time_stride
+        return max(1, self.n_timesteps - 1)
+
+    @final
+    def build_video(
+        self,
+        train: bool,
+        requirements: DataRequirements,
+        dist: Distributed | None = None,
+    ) -> PairedVideoGriddedData:
+        """Build a paired fine/coarse loader of video clips.
+
+        Each sample is a clip of ``self.n_timesteps`` consecutive frames with an
+        explicit leading time axis, spaced ``self.clip_start_stride`` apart.
+        """
+        if dist is None:
+            dist = Distributed.get_instance()
+
+        n_timesteps = IntSchedule.from_constant(self.n_timesteps)
+        dataset_fine, properties_fine = build_from_config_sequence(
+            configs=self.fine,
+            names=requirements.fine_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
+        )
+        dataset_coarse, properties_coarse = build_from_config_sequence(
+            configs=self.coarse,
+            names=requirements.coarse_names,
+            n_timesteps=n_timesteps,
+            strict_ensemble=self.strict_ensemble,
+        )
+
+        if not isinstance(
+            properties_coarse.horizontal_coordinates, LatLonCoordinates
+        ) or not isinstance(properties_fine.horizontal_coordinates, LatLonCoordinates):
+            raise ValueError(
+                "Downscaling data loader only supports datasets with latlon coords."
+            )
+        if not dataset_fine.sample_start_times.equals(
+            dataset_coarse.sample_start_times
+        ):
+            raise ValueError(
+                "Fine and coarse datasets must have the same sample start times."
+            )
+        if dataset_fine.sample_n_times != self.n_timesteps:
+            raise ValueError(
+                f"Expected clips of {self.n_timesteps} timesteps, got "
+                f"{dataset_fine.sample_n_times}."
+            )
+        all_times = dataset_fine.sample_start_times
+
+        dataset_fine = self._repeat_if_requested(dataset_fine)
+        dataset_coarse = self._repeat_if_requested(dataset_coarse)
+
+        dataset_fine_subset, dataset_coarse_subset = _build_aligned_subset_pair(
+            dataset_fine=dataset_fine,
+            properties_fine=properties_fine,
+            dataset_coarse=dataset_coarse,
+            properties_coarse=properties_coarse,
+            lat_extent=self.lat_extent,
+            lon_extent=self.lon_extent,
+        )
+
+        fine_adapter = VideoBatchItemDatasetAdapter(
+            dataset_fine_subset,
+            dataset_fine_subset.subset_latlon_coordinates,
+            properties=properties_fine,
+        )
+        coarse_adapter = VideoBatchItemDatasetAdapter(
+            dataset_coarse_subset,
+            dataset_coarse_subset.subset_latlon_coordinates,
+            properties=properties_coarse,
+        )
+
+        paired_dataset = VideoFineCoarsePairedDataset(fine_adapter, coarse_adapter)
+
+        # Subsample the (stride-one) clip starts to the requested clip spacing.
+        stride = self.clip_start_stride
+        dataset: Dataset
+        if stride > 1:
+            keep = list(range(0, len(paired_dataset), stride))
+            dataset = Subset(paired_dataset, keep)
+            all_times = all_times[::stride]
+        else:
+            dataset = paired_dataset
+
+        sampler = self._get_sampler(
+            dataset=dataset, dist=dist, train=train, drop_last=self.drop_last
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=dist.local_batch_size(int(self.batch_size)),
+            num_workers=self.num_data_workers,
+            shuffle=(sampler is None) and train,
+            sampler=sampler,
+            drop_last=True,
+            pin_memory=using_gpu(),
+            collate_fn=PairedVideoBatchData.from_sequence,
+            multiprocessing_context=self._mp_context(),
+            persistent_workers=True if self.num_data_workers > 0 else False,
+        )
+
+        example = dataset[0]
+        variable_metadata = {
+            **fine_adapter.variable_metadata,
+            **coarse_adapter.variable_metadata,
+        }
+        return PairedVideoGriddedData(
+            _loader=dataloader,
+            coarse_shape=example.coarse.horizontal_shape,
+            downscale_factor=example.downscale_factor,
+            n_timesteps=self.n_timesteps,
+            dims=example.fine.latlon_coordinates.dims,
+            variable_metadata=variable_metadata,
+            all_times=all_times,
+            fine_coords=get_latlon_coords_from_properties(properties_fine),
+        )

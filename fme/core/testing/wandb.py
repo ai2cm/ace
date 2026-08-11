@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import os
 import random
 import string
 from collections.abc import Mapping
@@ -18,6 +19,11 @@ class MockWandB:
         self._last_step = 0
         self._id: str | None = None
         self._disk_logger: DiskMetricLogger | None = None
+        self._runs: list[dict[str, Any]] = []
+        # wandb reads WANDB_NAME only on the first init; model that one-time
+        # snapshot so an explicit `name` is needed to rename subsequent runs.
+        self._env_name_snapshot: str | None = None
+        self._env_name_snapshot_taken = False
 
     def configure(self, log_to_wandb: bool, metrics_log_dir: str | None = None):
         dist = Distributed.get_instance()
@@ -54,13 +60,21 @@ class MockWandB:
                 self._wandb_init(resume="never", **kwargs)
 
     def _wandb_init(
-        self, resume: Literal["must", "never"], id: str | None = None, **kwargs
+        self,
+        resume: Literal["must", "never"],
+        id: str | None = None,
+        name: str | None = None,
+        **kwargs,
     ):
         """
         Mocks the `wandb.init` behavior, specifically around initializing
         a run with `resume` and `id`.
         See https://docs.wandb.ai/guides/runs/resuming/.
         """
+        # Snapshot WANDB_NAME on the first init only; an explicit `name` wins.
+        if not self._env_name_snapshot_taken:
+            self._env_name_snapshot = os.environ.get("WANDB_NAME")
+            self._env_name_snapshot_taken = True
         if resume == "must":
             if id is None:
                 raise ValueError("resume='must' and id is None")
@@ -76,6 +90,8 @@ class MockWandB:
                         "resume='never' and id is None but previous id exists"
                     )
             self._id = _mock_wandb_id()
+            run_name = name if name is not None else self._env_name_snapshot
+            self._runs.append({"id": self._id, "name": run_name})
 
     def get_id(self) -> str:
         if self._id is None:
@@ -84,6 +100,17 @@ class MockWandB:
 
     def set_id(self, id: str):
         self._id = id
+
+    def finish(self):
+        # Reset per-run state so the next init starts fresh; the env-name
+        # snapshot persists, mirroring wandb's setup singleton across finish().
+        self._id = None
+        self._last_step = 0
+
+    @property
+    def runs(self) -> list[dict[str, Any]]:
+        """The runs started so far, each as ``{"id": ..., "name": ...}``."""
+        return self._runs
 
     def watch(self, modules):
         if self._enabled:

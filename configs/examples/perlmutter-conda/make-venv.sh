@@ -24,7 +24,7 @@ else
 
     echo "Creating environment at $ENVIRONMENT_PATH"
     module load python
-    conda create -p $ENVIRONMENT_PATH python=3.11 pip -y
+    conda create -p $ENVIRONMENT_PATH python=3.12 pip -y
     conda run --no-capture-output -p $ENVIRONMENT_PATH python -m pip install uv
     conda run --no-capture-output -p $ENVIRONMENT_PATH uv pip install -c constraints.txt .[dev,docs]
     rm -rf $SCRATCH/ace-slurm-env/temp/ace
