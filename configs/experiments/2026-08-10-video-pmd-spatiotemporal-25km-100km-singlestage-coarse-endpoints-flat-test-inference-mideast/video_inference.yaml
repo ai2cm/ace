@@ -23,6 +23,13 @@ output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-
 n_ensemble: 4
 ensemble_chunk_size: 1
 use_ema: true
+# Preemptively true: a prior batch of v2 two-stage test-inference jobs hit
+# a node health-check failure mid-run, and the auto-retry then failed with
+# FileExistsError against the partial output store (default overwrite is
+# False -- see this field's docstring in video_inference.py). Set true here
+# up front so a retry after any similar interruption just cleanly replaces
+# the partial zarr instead of failing.
+overwrite: true
 logging:
   log_to_screen: true
   log_to_wandb: false
