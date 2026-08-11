@@ -37,6 +37,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.writer import ZarrWriter
 from fme.downscaling.data import PairedDataLoaderConfig
 from fme.downscaling.inference.zarr_utils import determine_zarr_chunks
+from fme.downscaling.predictors.video_composite import VideoPatchPredictor
 from fme.downscaling.video_models import VideoDiffusionModel, VideoDiffusionModelConfig
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,37 @@ class VideoInferenceConfig:
     # a run is expected to succeed, so a completed store can't be clobbered
     # by accident.
     overwrite: bool = False
+    # If True, generate the requested domain (data.lat_extent/lon_extent) by
+    # tiling it into coarse_patch_extent-sized patches (see
+    # VideoPatchPredictor), generating each independently, and compositing
+    # the fine-resolution results back together -- lets one job cover a
+    # domain the model's full-attention forward pass can't fit in memory in
+    # one shot (e.g. the global domain: previously required manually
+    # splitting into 4 disjoint regional jobs, see
+    # configs/experiments/2026-08-10-*-flat-v2-test-inference-*/). Requires
+    # coarse_patch_extent.
+    divide_generation: bool = False
+    # [lat, lon] coarse patch size to tile with when divide_generation=True --
+    # should match the size the model was actually trained on (its
+    # coarse_patch_extent_lat/lon in the training config), since that's the
+    # spatial extent its attention layers have a meaningful receptive field
+    # over; a much larger untrained-on extent is exactly what divide_generation
+    # avoids needing to feed the model.
+    coarse_patch_extent: list[int] | None = None
+    # Overlap (in coarse pixels) between adjacent patches when
+    # divide_generation=True; the overlap region is averaged away at
+    # composite time, softening patch-boundary seams. See
+    # VideoPatchPredictor/get_patches.
+    coarse_horizontal_overlap: int = 1
+
+    def __post_init__(self):
+        if self.divide_generation and self.coarse_patch_extent is None:
+            raise ValueError("divide_generation=True requires coarse_patch_extent.")
+        if self.coarse_patch_extent is not None and len(self.coarse_patch_extent) != 2:
+            raise ValueError(
+                "coarse_patch_extent must be [lat, lon], got "
+                f"{self.coarse_patch_extent}."
+            )
 
     def configure_logging(self, log_filename: str) -> None:
         config = dataclasses.asdict(self)
@@ -161,6 +193,22 @@ def run_inference(config: VideoInferenceConfig) -> None:
     )
     logger.info(f"Number of parameters: {count_parameters(model.modules)}")
 
+    predictor: VideoDiffusionModel | VideoPatchPredictor
+    if config.divide_generation:
+        assert config.coarse_patch_extent is not None  # validated in __post_init__
+        lat_extent, lon_extent = config.coarse_patch_extent
+        predictor = VideoPatchPredictor(
+            model,
+            coarse_yx_patch_extent=(lat_extent, lon_extent),
+            coarse_horizontal_overlap=config.coarse_horizontal_overlap,
+        )
+        logger.info(
+            f"Generating via patch tiling, coarse patch extent "
+            f"{config.coarse_patch_extent}, overlap {config.coarse_horizontal_overlap}."
+        )
+    else:
+        predictor = model
+
     griddata = config.data.build_video(
         train=False, requirements=config.model.data_requirements
     )
@@ -171,12 +219,20 @@ def run_inference(config: VideoInferenceConfig) -> None:
     clip_stride = n_timesteps - 1  # tumbling clips share only their boundary frame
 
     # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),
-    # generated everywhere else. If the dataloader's drop_last truncates the
-    # final partial batch, the tail of this array is simply never written and
-    # will show up as a gap (fill value) in the output -- see run.sh / README
-    # verification notes.
+    # generated everywhere else -- only when the model actually pins the
+    # boundary to a real/generated-but-fixed value (config.model.endpoints_observed).
+    # With endpoints_observed=False (e.g. the single-stage coarse_endpoints_only
+    # models), NO frame is pinned -- clip boundaries are just as much the
+    # model's own diffused output as any interior frame, so splicing in the
+    # true value there would silently misrepresent exactly the capability
+    # that mode exists to test (generating the full series, endpoints
+    # included, from coarse alone). If the dataloader's drop_last truncates
+    # the final partial batch, the tail of this array is simply never
+    # written and will show up as a gap (fill value) in the output -- see
+    # run.sh / README verification notes.
     frame_source = np.ones(n_time, dtype=np.int8)
-    frame_source[0::clip_stride] = 0
+    if config.model.endpoints_observed:
+        frame_source[0::clip_stride] = 0
 
     # griddata.fine_coords reflects the *pre*-lat_extent/lon_extent-crop
     # domain (it's built from build_from_config_sequence's properties, before
@@ -238,16 +294,24 @@ def run_inference(config: VideoInferenceConfig) -> None:
         }
         while remaining > 0:
             n = min(config.ensemble_chunk_size, remaining)
-            generated = model.generate(batch, n_samples=n)
+            generated = predictor.generate(batch, n_samples=n)
             for name in model.out_names:
                 ensemble_chunks[name].append(generated[name])
             remaining -= n
-        # (B, n_ensemble, T, H, W); splice in exact observed endpoints.
-        full = {name: torch.cat(chunks_, dim=1) for name, chunks_ in ensemble_chunks.items()}
-        for name in model.out_names:
-            gt = batch.fine.data[name]  # (B, T, H, W)
-            full[name][:, :, 0] = gt[:, None, 0].expand(-1, config.n_ensemble, -1, -1)
-            full[name][:, :, -1] = gt[:, None, -1].expand(-1, config.n_ensemble, -1, -1)
+        # (B, n_ensemble, T, H, W); splice in exact observed endpoints --
+        # only when the model actually pins them (see frame_source above).
+        full = {
+            name: torch.cat(chunks_, dim=1) for name, chunks_ in ensemble_chunks.items()
+        }
+        if config.model.endpoints_observed:
+            for name in model.out_names:
+                gt = batch.fine.data[name]  # (B, T, H, W)
+                full[name][:, :, 0] = gt[:, None, 0].expand(
+                    -1, config.n_ensemble, -1, -1
+                )
+                full[name][:, :, -1] = gt[:, None, -1].expand(
+                    -1, config.n_ensemble, -1, -1
+                )
 
         clip_times = batch.fine.time.values  # (B, T) cftime
         batch_size = clip_times.shape[0]

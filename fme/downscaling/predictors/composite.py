@@ -184,13 +184,17 @@ def _composite_patch_tensors(
         raise ValueError("The number of predictions must match the number of patches.")
 
     y_size, x_size = _get_full_extent_from_patches(patches)
-    # list elements have shape (n_batch, n_generated_sample, patch_lat, patch_lon)
-    n_batch, n_gen_sample = predictions[0].shape[:2]
+    # list elements have shape (..., patch_lat, patch_lon) -- (n_batch,
+    # n_generated_sample, patch_lat, patch_lon) for the plain spatial model,
+    # (n_batch, n_generated_sample, n_times, patch_lat, patch_lon) for the
+    # video model. Dimension-agnostic on the leading dims so both share this
+    # function.
+    leading_shape = predictions[0].shape[:-2]
     output_sum = torch.zeros(
-        n_batch, n_gen_sample, y_size, x_size, device=predictions[0].device
+        *leading_shape, y_size, x_size, device=predictions[0].device
     )
     output_count = torch.zeros(
-        n_batch, n_gen_sample, y_size, x_size, device=predictions[0].device
+        *leading_shape, y_size, x_size, device=predictions[0].device
     )
 
     for i, pred in enumerate(predictions):

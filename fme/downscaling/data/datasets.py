@@ -699,7 +699,8 @@ class VideoBatchItem:
 
 class VideoBatchItemDatasetAdapter(torch.utils.data.Dataset):
     """Adapts a multi-timestep dataset to return a ``VideoBatchItem``,
-    preserving the time axis and attaching per-frame physical-time features."""
+    preserving the time axis and attaching per-frame physical-time features.
+    """
 
     def __init__(
         self,
@@ -781,6 +782,13 @@ class VideoBatchData:
     def lon_interval(self) -> ClosedInterval:
         lon = self.latlon_coordinates.lon[0]  # all batch members identical; use first
         return ClosedInterval(lon.min().item(), lon.max().item())
+
+    @property
+    def horizontal_shape(self) -> tuple[int, int]:
+        # data is (batch, T, H, W); last two dims are the (lat, lon) grid
+        # regardless of the extra time dim -- video analog of BatchData's
+        # same-named property.
+        return next(iter(self.data.values())).shape[-2:]
 
     def latlon_slice(self, lat_slice: slice, lon_slice: slice) -> "VideoBatchData":
         # data is (batch, T, H, W); day_of_year/second_of_day/lon-independent
