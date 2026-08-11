@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import logging
+from collections.abc import Iterator
 
 import dacite
 import torch
@@ -258,13 +259,10 @@ class EvaluatorConfig:
             save_generated_samples=event_config.save_generated_samples,
         )
 
-    def build(self) -> list[Evaluator | EventEvaluator]:
-        default_evaluator = self._build_default_evaluator()
-        event_evaluators = []
+    def build(self) -> Iterator[Evaluator | EventEvaluator]:
+        yield self._build_default_evaluator()
         for event_config in self.events or []:
-            event_evaluator = self._build_event_evaluator(event_config)
-            event_evaluators.append(event_evaluator)
-        return [default_evaluator] + event_evaluators
+            yield self._build_event_evaluator(event_config)
 
 
 def main(config_path: str):
@@ -282,11 +280,17 @@ def main(config_path: str):
 
     logging.info("Starting downscaling model evaluation")
     evaluators = evaluator_config.build()
+    default_evaluator = next(evaluators)
     logging.info(
-        f"Number of parameters: {count_parameters(evaluators[0].model.modules)}"
+        f"Number of parameters: {count_parameters(default_evaluator.model.modules)}"
     )
+    default_evaluator.run()
+    del default_evaluator
+    torch.cuda.empty_cache()
     for evaluator in evaluators:
         evaluator.run()
+        del evaluator
+        torch.cuda.empty_cache()
 
 
 def parse_args():
