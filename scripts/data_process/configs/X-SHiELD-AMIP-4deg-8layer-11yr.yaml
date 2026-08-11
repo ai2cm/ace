@@ -111,7 +111,8 @@ dataset_computation:
     total_frozen_precip_rate: None
 time_coarsen:
   factor: 4
-  data_output_directory: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset
+  data_output_directory: gs://vcm-ml-intermediate
+  output_name: 2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset
   stats_output_directory: gs://vcm-ml-intermediate/2025-09-11-X-SHiELD-AMIP-4deg-daily-8layer-11yr-fme-dataset-stats
   snapshot_names:
     - PRESsfc

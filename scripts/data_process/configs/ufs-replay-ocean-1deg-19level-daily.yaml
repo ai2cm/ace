@@ -21,7 +21,8 @@ stats:
   end_date: "2021-12-31"
 time_coarsen:
   factor: 4 # 6-hourly -> daily
-  data_output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-daily
+  data_output_directory: gs://vcm-ml-intermediate
+  output_name: ufs-replay-ocean-1deg-19level-daily
   stats_output_directory: gs://vcm-ml-intermediate/ufs-replay-ocean-1deg-19level-daily-stats
   snapshot_names:
     - thetao_0
