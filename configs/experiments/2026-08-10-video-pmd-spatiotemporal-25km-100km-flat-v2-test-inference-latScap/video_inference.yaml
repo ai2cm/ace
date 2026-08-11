@@ -36,6 +36,12 @@ output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-
 n_ensemble: 4
 ensemble_chunk_size: 1
 use_ema: true
+# Set true 2026-08-11: the first attempt at this job was killed by a node
+# health-check failure on ai2/titan mid-run, and its auto-retry then failed
+# with FileExistsError against the partial output store (default overwrite
+# is False -- see this field's docstring in video_inference.py). Relaunching
+# with overwrite so it cleanly replaces the killed attempt's partial zarr.
+overwrite: true
 logging:
   log_to_screen: true
   log_to_wandb: false
