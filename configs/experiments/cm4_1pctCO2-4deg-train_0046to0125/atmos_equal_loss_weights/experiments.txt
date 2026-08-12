@@ -8,3 +8,5 @@ cm4_1pctCO2-4deg-train_0046to0125-atmos_equal_loss_weights|rs2|01KZSFNRFM68PXN73
 cm4_1pctCO2-4deg-train_0046to0125-atmos_equal_512|rs0|01KZVVJ75CQVN2XD5X4T8KBXHT|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-4deg-train_0046to0125-atmos_equal_512|rs1|01KZVVJG2A5SNWD0XMMHPQ4AT1|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-4deg-train_0046to0125-atmos_equal_512|rs2|01KZVVJRAAGJ1Y5AS8KA6YQBM8|training|best_inference_ckpt|normal|--min-runtime 8h
