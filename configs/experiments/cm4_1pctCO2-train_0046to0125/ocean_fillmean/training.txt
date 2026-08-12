@@ -5,7 +5,8 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 # out-of-sample at both ends of the CO2 ramp). Identical to ocean_baseline in
 # every respect except stepper.input_masking.fill_value, which is set to `mean`
 # in this directory's train-config.yaml rather than in the override column.
-# Seeds 0 and 1 match two of the baseline's three, as at 4deg; add an rs2 row if
-# a third seed is wanted.
+# 3 seeds, matching ocean_baseline's, so the two arms have the same seed spread
+# to read a difference against (the 4deg arm ran 2).
 cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
 cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs1|train|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs2|train|high|h100|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
