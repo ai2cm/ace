@@ -139,14 +139,13 @@ checkpoint, initial condition, and forcing straight from
 `allenai/SamudrACE-CM4-piControl` on HuggingFace (no artifact dataset, no
 local paths), runs 24 coupled cycles, and writes one figure: t2m, SST, and
 SST change from the initial condition at four lead times, plus global-mean
-2 m temperature, global-mean SST, and sea-ice area. Submit it with
+2 m temperature and global-mean SST. Submit it with
 `submit_upstream_sanity.sh`.
 
-Two things the figure design works around. The sea-ice fraction is NaN
-outside the ocean's ice-capable domain (0% finite through the tropics), so
-it is shown as a global area series rather than a map. And the raw SST
-field barely changes by eye over 120 days, so the anomaly row is what shows
-the ocean evolving.
+The anomaly row is there because the raw SST field barely changes by eye
+over 120 days; it is what shows the ocean evolving. Sea ice is deliberately
+not plotted: `siconc` is NaN outside the ocean's ice-capable domain (0%
+finite through the tropics), so it makes no readable global map.
 
 ## Prerequisites
 

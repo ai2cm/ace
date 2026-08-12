@@ -59,10 +59,8 @@ STEPS_PER_CYCLE = 20
 N_CYCLES = 24
 NSTEPS = N_CYCLES * STEPS_PER_CYCLE
 
-# Fields to run and plot. The sea-ice fraction is carried for the global
-# sea-ice-area series only: it is defined solely on the ocean's ice-capable
-# domain (NaN through the tropics), so it does not make a readable global map.
-RUN_VARIABLES = ("t2m", "sst", "siconc")
+# Fields to run and plot: one atmosphere field and one ocean field.
+RUN_VARIABLES = ("t2m", "sst")
 
 # Contour rows. The SST anomaly row is what shows the ocean actually
 # evolving: the raw SST field barely changes by eye over 120 days.
@@ -79,9 +77,6 @@ CONTOUR_ROWS = (
     ),
 )
 N_COLUMNS = 4
-
-# Earth radius for the sea-ice area integral (km).
-EARTH_RADIUS_KM = 6371.0
 
 OUTPUT_PATH = Path("samudrace_sanity_contours.png")
 STORE_PATH = Path("samudrace_sanity.zarr")
@@ -141,29 +136,6 @@ def global_mean(field: xr.DataArray) -> xr.DataArray:
     return field.weighted(weights.fillna(0.0)).mean(dim=("lat", "lon"))
 
 
-def sea_ice_area(field: xr.DataArray) -> xr.DataArray:
-    """Total sea-ice area from a sea-ice fraction field.
-
-    Parameters
-    ----------
-    field : xr.DataArray
-        Sea-ice fraction with lat and lon dimensions.
-
-    Returns
-    -------
-    xr.DataArray
-        Sea-ice area in millions of square kilometres.
-    """
-    dlat = float(np.abs(np.diff(field["lat"].values)).mean())
-    dlon = float(np.abs(np.diff(field["lon"].values)).mean())
-    cell_km2 = (
-        (EARTH_RADIUS_KM * np.deg2rad(dlat))
-        * (EARTH_RADIUS_KM * np.deg2rad(dlon))
-        * np.cos(np.deg2rad(field["lat"]))
-    )
-    return (field * cell_km2).sum(dim=("lat", "lon")) / 1.0e6
-
-
 def plot_forecast(forecast: xr.Dataset) -> None:
     """Plot forecast contours at several lead times and the global series.
 
@@ -217,10 +189,9 @@ def plot_forecast(forecast: xr.Dataset) -> None:
     series = (
         ("Global mean 2 m temperature (K)", global_mean(forecast["t2m"])),
         ("Global mean SST (K)", global_mean(forecast["sst"])),
-        ("Sea-ice area (million km2)", sea_ice_area(forecast["siconc"])),
     )
     for index, (label, values) in enumerate(series):
-        ax = fig.add_subplot(grid[3, 4 * index : 4 * index + 4])
+        ax = fig.add_subplot(grid[3, 6 * index : 6 * index + 6])
         ax.plot(lead_days, values, linewidth=1.2)
         ax.set_xlabel("Lead time (days)")
         ax.set_ylabel(label, fontsize=9)
