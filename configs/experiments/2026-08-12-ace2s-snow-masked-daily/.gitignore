@@ -1,2 +1,4 @@
 sidecar-out/
 stats-out/
+pipeline.log
+nohup.out
