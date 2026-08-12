@@ -5,3 +5,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs0|01KZW4EPM58RNSB12TJW6N08EA|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs1|01KZW4EZ610HJB4RV3TE2F2XR8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs2|01KZW4F7PHTZR1A8V8TAKNC8FS|training|best_inference_ckpt|normal|--min-runtime 8h
