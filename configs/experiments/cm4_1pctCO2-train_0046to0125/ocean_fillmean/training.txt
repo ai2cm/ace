@@ -1,0 +1,11 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+# 1deg port of the 4deg fill_value=mean arm
+# (cm4_1pctCO2-4deg-train_0046to0125-ocean_fill_value_mean, 2 seeds, won
+# out-of-sample at both ends of the CO2 ramp). Identical to ocean_baseline in
+# every respect except stepper.input_masking.fill_value, which is set to `mean`
+# in this directory's train-config.yaml rather than in the override column.
+# Seeds 0 and 1 match two of the baseline's three, as at 4deg; add an rs2 row if
+# a third seed is wanted.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean|rs1|train|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
