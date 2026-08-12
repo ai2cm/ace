@@ -163,6 +163,7 @@ while read TRAIN_EXPER; do
     FME_MODULE="$FME_MODULE_EVALUATOR"
 
     build_cluster_args "$CLUSTER" "$WORKSPACE"
+    build_cm_priority_args "$PRIORITY"
 
     # Print job info based on dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -181,6 +182,7 @@ while read TRAIN_EXPER; do
         echo " - Training results dataset ID: ${EXISTING_RESULTS_DATASET}"
         echo " - Cluster: ${CLUSTER}"
         echo " - Priority: ${PRIORITY}"
+        echo " - CM_PRIORITY: ${JOB_CM_PRIORITY}"
         echo " - ${MIN_RUNTIME}"
         echo " - --override args: ${OVERRIDE_ARGS}"
 
@@ -212,6 +214,7 @@ while read TRAIN_EXPER; do
             --env WANDB_JOB_TYPE=inference \
             --env WANDB_RUN_GROUP="$JOB_GROUP" \
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+            "${CM_PRIORITY_ARGS[@]}" \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
