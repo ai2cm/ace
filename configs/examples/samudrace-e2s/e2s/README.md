@@ -131,6 +131,23 @@ base64-encodes it into `RUN_INFERENCE_B64` and the entrypoint decodes it to
 lexicon, and data sources, and lets the payload be edited without another
 push.
 
+## Upstream PR sanity check
+
+`upstream_sanity_check.py` is the review artifact for the upstream
+earth2studio PR, not part of this paired-comparison job. It pulls the
+checkpoint, initial condition, and forcing straight from
+`allenai/SamudrACE-CM4-piControl` on HuggingFace (no artifact dataset, no
+local paths), runs 24 coupled cycles, and writes one figure: t2m, SST, and
+SST change from the initial condition at four lead times, plus global-mean
+2 m temperature, global-mean SST, and sea-ice area. Submit it with
+`submit_upstream_sanity.sh`.
+
+Two things the figure design works around. The sea-ice fraction is NaN
+outside the ocean's ice-capable domain (0% finite through the tropics), so
+it is shown as a global area series rather than a map. And the raw SST
+field barely changes by eye over 120 days, so the anomaly row is what shows
+the ocean evolving.
+
 ## Prerequisites
 
 - The branch `feature/samudrace-predict-paired` must be pushed to
