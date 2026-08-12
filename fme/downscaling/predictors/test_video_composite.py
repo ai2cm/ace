@@ -92,7 +92,10 @@ def test_video_patch_predictor_generate_matches_full_extent():
         downscale_factor=downscale_factor,
     )
     predictor = VideoPatchPredictor(
-        model, coarse_yx_patch_extent=(2, 2), coarse_horizontal_overlap=0
+        model,
+        coarse_yx_patch_extent=(2, 2),
+        downscale_factor=downscale_factor,
+        coarse_horizontal_overlap=0,
     )
 
     generated = predictor.generate(batch, n_samples=2)
@@ -116,7 +119,10 @@ def test_video_patch_predictor_matches_unpatched_single_patch():
         downscale_factor=downscale_factor,
     )
     predictor = VideoPatchPredictor(
-        model, coarse_yx_patch_extent=(2, 2), coarse_horizontal_overlap=0
+        model,
+        coarse_yx_patch_extent=(2, 2),
+        downscale_factor=downscale_factor,
+        coarse_horizontal_overlap=0,
     )
 
     torch.manual_seed(0)
@@ -171,7 +177,10 @@ def test_video_patch_predictor_generate_on_batch_no_target():
         [_coarse_item(n_times), _coarse_item(n_times)]
     )
     predictor = VideoPatchPredictor(
-        model, coarse_yx_patch_extent=(2, 2), coarse_horizontal_overlap=0
+        model,
+        coarse_yx_patch_extent=(2, 2),
+        downscale_factor=downscale_factor,
+        coarse_horizontal_overlap=0,
     )
 
     generated = predictor.generate_on_batch_no_target(coarse, n_samples=2)

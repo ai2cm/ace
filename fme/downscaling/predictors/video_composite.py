@@ -19,7 +19,14 @@ class VideoPatchPredictor:
     ``coarse_shape`` of its own (it's a property of the video UNet's
     *training* patch config, not stored on the built model), so
     ``coarse_yx_patch_extent`` must be given explicitly here rather than
-    inferred.
+    inferred. ``downscale_factor`` is likewise taken explicitly rather than
+    read off ``model.downscale_factor``: that attribute is only set when the
+    model is built with ``full_fine_coords``/``downscale_factor`` (needed
+    for ``get_fine_coords_for_batch``/``generate_on_batch_no_target``), which
+    ordinary paired-batch inference (``generate()``, what this predictor
+    wraps for ``video_inference.py``) has no other reason to require --
+    ``downscale_factor`` here is trivially available from the data loader
+    instead (e.g. ``PairedVideoGriddedData.downscale_factor``).
 
     Each patch is generated as its own independent video-diffusion sample
     (independent ensemble noise per patch, no shared spatial context across
@@ -32,18 +39,14 @@ class VideoPatchPredictor:
         self,
         model: VideoDiffusionModel,
         coarse_yx_patch_extent: tuple[int, int],
+        downscale_factor: int,
         coarse_horizontal_overlap: int = 1,
     ):
         self.model = model
         self.modules = model.modules
         self.out_names = model.out_names
         self.coarse_yx_patch_extent = coarse_yx_patch_extent
-        if model.downscale_factor is None:
-            raise ValueError(
-                "VideoPatchPredictor requires the model to have been built "
-                "with downscale_factor set -- see VideoDiffusionModelConfig.build."
-            )
-        self.downscale_factor = model.downscale_factor
+        self.downscale_factor = downscale_factor
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
 
     def _get_patches(

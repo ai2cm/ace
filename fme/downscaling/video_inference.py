@@ -193,6 +193,10 @@ def run_inference(config: VideoInferenceConfig) -> None:
     )
     logger.info(f"Number of parameters: {count_parameters(model.modules)}")
 
+    griddata = config.data.build_video(
+        train=False, requirements=config.model.data_requirements
+    )
+
     predictor: VideoDiffusionModel | VideoPatchPredictor
     if config.divide_generation:
         assert config.coarse_patch_extent is not None  # validated in __post_init__
@@ -200,6 +204,7 @@ def run_inference(config: VideoInferenceConfig) -> None:
         predictor = VideoPatchPredictor(
             model,
             coarse_yx_patch_extent=(lat_extent, lon_extent),
+            downscale_factor=griddata.downscale_factor,
             coarse_horizontal_overlap=config.coarse_horizontal_overlap,
         )
         logger.info(
@@ -208,10 +213,6 @@ def run_inference(config: VideoInferenceConfig) -> None:
         )
     else:
         predictor = model
-
-    griddata = config.data.build_video(
-        train=False, requirements=config.model.data_requirements
-    )
 
     time, var_attrs = _reference_time_and_attrs(config.data, model.out_names)
     n_time = len(time)
