@@ -147,3 +147,6 @@ joblogs/
 # reports
 crps_eval_results/
 crps_eval_results_*/
+
+# local scratch notes/analysis -- lives at ../toy/ outside the repo, never in git
+/toy/
