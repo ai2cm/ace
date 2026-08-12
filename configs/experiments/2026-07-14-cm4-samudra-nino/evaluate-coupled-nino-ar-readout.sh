@@ -23,6 +23,13 @@ JOB_GROUP="${JOB_GROUP:-cm4-1pct-samudra-nino}"
 COUPLED_RESULTS_DATASET="${COUPLED_RESULTS_DATASET:-01KY3DATM3CAEA479JQZQDPT9W}"
 COUPLED_CKPT="${COUPLED_CKPT:-best_inference_ckpt}"
 OOS_WINDOW="${OOS_WINDOW:-val}"
+# WITH_FLUXES=1 -> monthly-mean surface energy fluxes instead of native stress.
+WITH_FLUXES="${WITH_FLUXES:-0}"
+if [[ "$WITH_FLUXES" == "1" ]]; then
+  MAKE_ARGS="--with-fluxes"; NAME_SUFFIX="-fluxes"
+else
+  MAKE_ARGS=""; NAME_SUFFIX=""
+fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -49,9 +56,9 @@ esac
 cd "$REPO_ROOT"
 
 if [[ "$OOS_WINDOW" == "custom" ]]; then
-  python "$MAKE_SCRIPT" --year-start "$YEAR_START" --year-end "$YEAR_END"
+  python "$MAKE_SCRIPT" --year-start "$YEAR_START" --year-end "$YEAR_END" $MAKE_ARGS
 else
-  python "$MAKE_SCRIPT" --oos-window "$OOS_WINDOW"
+  python "$MAKE_SCRIPT" --oos-window "$OOS_WINDOW" $MAKE_ARGS
 fi
 
 echo "AR SST eval: years $(printf '%04d' "$YEAR_START")–$(printf '%04d' "$YEAR_END") (OOS_WINDOW=$OOS_WINDOW, $((YEAR_END - YEAR_START + 1)) jobs × 12 ICs)"
@@ -61,7 +68,7 @@ run_eval() {
   local year_str
   year_str=$(printf "%04d" "$year")
   local config_path="${CONFIG_DIR}/evaluator-config-1pct-ar-readout-yr${year_str}.yaml"
-  local job_name="cm4-coupled-ft-nino-ar-readout-yr${year_str}"
+  local job_name="cm4-coupled-ft-nino-ar-readout-yr${year_str}${NAME_SUFFIX}"
 
   python -m fme.coupled.validate_config --config_type evaluator "$config_path"
 
@@ -90,7 +97,7 @@ run_eval() {
     --system-python \
     --install "pip install --no-deps ." \
     -- bash -c \
-        "python '$MAKE_SCRIPT' --year-start $year --year-end $year && \
+        "python '$MAKE_SCRIPT' --year-start $year --year-end $year $MAKE_ARGS && \
          python -I -m fme.coupled.evaluator '$config_path'"
 }
 

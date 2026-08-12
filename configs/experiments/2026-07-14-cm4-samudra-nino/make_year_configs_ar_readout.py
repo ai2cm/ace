@@ -30,9 +30,22 @@ from make_year_configs_ar_sst import (
 
 OCEAN_NAMES = ["sst"] + [f"nino34_lead_{k:02d}" for k in range(1, 13)]
 ATMOS_NAMES = ["eastward_surface_wind_stress", "northward_surface_wind_stress"]
+# Surface energy-flux components exchanged across the coupled interface. Saved
+# as monthly means only: the flux *response* to SST (damping / Bjerknes) is a
+# monthly-scale regression, while the interface-noise question is answered by
+# the natively-saved wind stress. Native 6-hr fluxes would be ~8.5 GB per
+# variable per year.
+ATMOS_FLUX_NAMES = [
+    "LHTFLsfc",
+    "SHTFLsfc",
+    "DSWRFsfc",
+    "USWRFsfc",
+    "DLWRFsfc",
+    "ULWRFsfc",
+]
 
 
-def make_readout_config(times: list[str]) -> dict:
+def make_readout_config(times: list[str], with_fluxes: bool = False) -> dict:
     config = make_config(times)
     config["data_writer"] = {
         "ocean": {
@@ -41,9 +54,9 @@ def make_readout_config(times: list[str]) -> dict:
             "names": OCEAN_NAMES,
         },
         "atmosphere": {
-            "save_prediction_files": True,
-            "save_monthly_files": False,
-            "names": ATMOS_NAMES,
+            "save_prediction_files": not with_fluxes,
+            "save_monthly_files": with_fluxes,
+            "names": ATMOS_NAMES + (ATMOS_FLUX_NAMES if with_fluxes else []),
         },
     }
     return config
@@ -64,6 +77,14 @@ def main() -> None:
     )
     parser.add_argument("--year-start", type=int, default=None)
     parser.add_argument("--year-end", type=int, default=None)
+    parser.add_argument(
+        "--with-fluxes",
+        action="store_true",
+        help=(
+            "Save monthly-mean surface energy fluxes (plus stress) instead of "
+            "native-cadence stress, for the coupled flux-response audit."
+        ),
+    )
     args = parser.parse_args()
 
     year_start, year_end, window_note = _resolve_year_range(
@@ -79,7 +100,7 @@ def main() -> None:
 
     for year in range(year_start, year_end + 1):
         times = monthly_ic_times(year)
-        config = make_readout_config(times)
+        config = make_readout_config(times, with_fluxes=args.with_fluxes)
         out = args.output_dir / f"evaluator-config-1pct-ar-readout-yr{year:04d}.yaml"
         header = (
             f"# Coupled AR readout eval for year {year:04d}.\n"
