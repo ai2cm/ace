@@ -141,6 +141,7 @@ This is useful for:
 
 **Cluster and Job Configuration:**
 - `build_cluster_args()`: Construct `CLUSTER_ARGS` array for gantry
+- `build_cm_priority_args()`: Construct `CM_PRIORITY_ARGS` array that opts the job in to the Beaker priority balancer
 - `get_beaker_username()`: Get Beaker username from account info
 - `build_job_name()`: Build job name from group, tag, and suffix
 
@@ -193,6 +194,32 @@ is protected from preemption before it can be interrupted.
   `--no-auto-resume` is never emitted on the training path.
 - **Example values**: `0` for short test runs, `1h` to protect a checkpoint cycle,
   `8h` for a fully protected run.
+
+### `CM_PRIORITY` and the Beaker priority balancer
+
+Every job launched by these scripts is submitted with a `CM_PRIORITY` env var,
+which opts it in to the Beaker priority balancer (`scripts/beaker_balancer`).
+The balancer keeps the team inside its urgent-GPU allocation by moving the
+Beaker priority of opted-in jobs up and down; jobs without the env var are never
+touched, but their urgent slots still count against the allocation.
+
+- **Default**: the `priority` field from the input file (`training.txt`,
+  `pretraining.txt`, `finetuning.txt`, `resuming.txt`, `experiments.txt`). A job
+  asking for `urgent` is therefore first in line for a scarce urgent slot and
+  falls back to `high` when it doesn't get one; a job asking for `normal` ranks
+  below it and rests at `normal`.
+- **Accepted values**: `low`, `normal`, `high`, `urgent`. Anything else —
+  including `immediate` and an empty `priority` field — submits no `CM_PRIORITY`
+  and leaves the job unmanaged. `immediate` is a deliberate, human-justified
+  decision the balancer must not undo.
+- **Override**: set `CM_PRIORITY` in the environment to apply one value to every
+  job in an invocation, e.g. `CM_PRIORITY=low job_runner/uncoupled_train.sh ...`.
+  Use `CM_PRIORITY=none` to opt out of the balancer entirely.
+
+Note that `CM_PRIORITY` is a ranking, not a ceiling: a job labelled `low` can
+still be promoted to `urgent` when the cluster is quiet — it is simply the first
+to be dropped when the allocation gets tight. See
+`scripts/beaker_balancer/README.md` for the full model.
 
 ### TAG Field (Optional)
 

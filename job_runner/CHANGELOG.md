@@ -3,6 +3,15 @@
 
 https://github.com/ai2cm/full-model/compare/job_runner
 
+## [Unreleased]
+
+### Added
+
+- Submit all jobs with a `CM_PRIORITY` env var to opt them in to the Beaker
+  priority balancer ([#1419](https://github.com/ai2cm/ace/pull/1419)). It
+  defaults to the `priority` field from the input file and can be overridden for
+  a whole invocation with the `CM_PRIORITY` environment variable.
+
 ## [0.0.1] - 2025-11-06
 
 ### Added
