@@ -39,7 +39,7 @@ cd "$REPO_ROOT"
 
 DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
-gantry run \
+gantry run --allow-dirty \
     --name "$JOB_NAME" \
     --description 'Resume of hiro-downscaling-25km-100km-global-5ch-v6-validation-fix for another 200 epochs (200->400 total), to test whether more training narrows the gap vs. the video-PMD models.' \
     --workspace "$WORKSPACE" \
