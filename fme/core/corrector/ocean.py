@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 from collections.abc import Mapping
-from typing import Any, Literal, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 import torch
 
@@ -266,6 +266,13 @@ class OceanCorrectorConfig(CorrectorConfigABC):
     ocean_heat_content_correction: OceanHeatContentBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
 
+    # keep_gradient_through_clamps only changes how gradient flows through the
+    # clamps, not whether they are applied, so it is not a correction that
+    # disable_corrections can switch off (it is also a no-op under no_grad).
+    NON_CORRECTION_OPTIONS: ClassVar[frozenset[str]] = (
+        CorrectorConfigABC.NON_CORRECTION_OPTIONS | {"keep_gradient_through_clamps"}
+    )
+
     @classmethod
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         state_copy = dict(state)
@@ -281,7 +288,10 @@ class OceanCorrectorConfig(CorrectorConfigABC):
             else:
                 state_copy["ocean_heat_content_correction"] = None
         elif (
-            "ocean_heat_content_correction" in state_copy
+            # an explicit null is a valid serialized state (e.g. what
+            # disable_corrections writes), so the membership test below must not
+            # be reached for it
+            isinstance(state_copy.get("ocean_heat_content_correction"), dict)
             and "method" in state_copy["ocean_heat_content_correction"]
             and state_copy["ocean_heat_content_correction"]["method"]
             == "constant_temperature"

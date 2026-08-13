@@ -571,6 +571,54 @@ def test_disable_corrections_through_a_corrector_selector():
     assert selector.config["ocean_heat_content_correction"] is not None
     assert selector.config["force_positive_names"] == ["so_0"]
 
+    # and the refreshed `config` survives a serialize -> reload cycle, the path
+    # a re-dumped inference config takes
+    reloaded = CorrectorSelector.from_state(dataclasses.asdict(selector))
+    reloaded_wrapped = reloaded._corrector_config_instance
+    assert isinstance(reloaded_wrapped, OceanCorrectorConfig)
+    assert reloaded_wrapped.surface_energy_flux_correction is None
+    assert reloaded_wrapped.ocean_heat_content_correction is not None
+    assert reloaded_wrapped.force_positive_names == ["so_0"]
+
+
+def test_reload_of_a_disabled_ocean_heat_content_correction():
+    """disable_corrections writes ``ocean_heat_content_correction: null`` into
+    the serialized config, so remove_deprecated_keys must accept an explicit
+    null rather than treating it as a dict to inspect."""
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config=dataclasses.asdict(
+            OceanCorrectorConfig(
+                ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+                    method="scaled_temperature"
+                ),
+            )
+        ),
+    )
+    selector.disable_corrections(["ocean_heat_content_correction"])
+    assert selector.config["ocean_heat_content_correction"] is None
+    reloaded = CorrectorSelector.from_state(dataclasses.asdict(selector))
+    reloaded_wrapped = reloaded._corrector_config_instance
+    assert isinstance(reloaded_wrapped, OceanCorrectorConfig)
+    assert reloaded_wrapped.ocean_heat_content_correction is None
+
+
+def test_disable_corrections_through_a_selector_rejects_a_non_correction():
+    """The selector resolves names against the wrapped config, so the wrapped
+    config's non-correction options are rejected there too."""
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config=dataclasses.asdict(
+            OceanCorrectorConfig(
+                force_positive_names=["so_0"],
+                keep_gradient_through_clamps=True,
+            )
+        ),
+    )
+    with pytest.raises(ValueError, match="not a correction"):
+        selector.disable_corrections(["keep_gradient_through_clamps"])
+    assert selector.config["keep_gradient_through_clamps"] is True
+
 
 def test_disabled_surface_energy_flux_correction_leaves_hfds_untouched():
     """With the correction off, the generated hfds is the raw prediction."""
