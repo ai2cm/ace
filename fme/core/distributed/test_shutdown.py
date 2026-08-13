@@ -11,6 +11,7 @@ import torch.utils.data
 from fme.core.distributed.shutdown import (
     TERMINATION_SIGNALS,
     abort_and_exit_on_termination,
+    park_if_terminating,
 )
 
 
@@ -37,7 +38,9 @@ def test_aborts_then_exits_with_conventional_code_for_signal(sig):
         from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         with abort_and_exit_on_termination(
-            abort=lambda: print("abort", flush=True), grace_period=0.1
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
         ):
             signal.raise_signal(signal.Signals({int(sig)}))
             threading.Event().wait()  # the listener must end the process
@@ -71,7 +74,9 @@ def test_acts_while_the_main_thread_is_wedged_holding_the_logging_lock():
         threading.Thread(target=signal_later, daemon=True).start()
         lock = threading.Lock()
         with abort_and_exit_on_termination(
-            abort=lambda: print("abort", flush=True), grace_period=0.1
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
         ):
             # stands in for being interrupted mid-emit, inside `Handler.handle`
             with logging.getLogger().handlers[0].lock:
@@ -99,7 +104,9 @@ def test_exits_even_if_abort_raises():
         def abort():
             raise RuntimeError("no process group")
 
-        with abort_and_exit_on_termination(abort=abort, grace_period=0.1):
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=0.1, park_deadline=0.1
+        ):
             signal.raise_signal(signal.SIGTERM)
             threading.Event().wait()
         """
@@ -124,7 +131,7 @@ def test_exit_waits_out_the_grace_period():
         from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         with abort_and_exit_on_termination(
-            abort=lambda: None, grace_period={grace_period}
+            abort=lambda: None, grace_period={grace_period}, park_deadline=0.1
         ):
             print("ready", flush=True)
             threading.Event().wait()
@@ -177,7 +184,9 @@ def test_post_abort_callbacks_run_after_the_abort_and_cannot_stop_the_exit():
         add_post_abort_callback(lambda: print("first", flush=True))
         add_post_abort_callback(broken)
         add_post_abort_callback(lambda: print("second", flush=True))
-        with abort_and_exit_on_termination(abort=abort, grace_period=0.1):
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=0.1, park_deadline=0.1
+        ):
             signal.raise_signal(signal.SIGTERM)
             released.wait()  # blocked "in the collective" until the abort
             raise RuntimeError("rank unwinding after its collective died")
@@ -212,7 +221,9 @@ def test_callbacks_wait_for_the_main_thread_to_stop_running():
             released.set()
 
         add_post_abort_callback(lambda: print("callback", flush=True))
-        with abort_and_exit_on_termination(abort=abort, grace_period=0.1):
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=0.1, park_deadline=0.1
+        ):
             signal.raise_signal(signal.SIGTERM)
             released.wait()
             time.sleep(1.0)  # compute continuing between collectives
@@ -244,6 +255,7 @@ def test_callbacks_are_skipped_when_the_main_thread_never_stops():
             abort=lambda: print("abort", flush=True),
             grace_period=0.1,
             state_freeze_timeout=0.2,
+            park_deadline=0.1,
         ):
             signal.raise_signal(signal.SIGTERM)
             threading.Event().wait()  # never unwinds
@@ -270,7 +282,9 @@ def test_a_dead_stderr_cannot_stop_the_abort_or_the_exit():
         os.close(r)
         os.dup2(w, 2)  # every stderr write now raises BrokenPipeError
         with abort_and_exit_on_termination(
-            abort=lambda: print("abort", flush=True), grace_period=0.1
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
         ):
             signal.raise_signal(signal.SIGTERM)
             threading.Event().wait()
@@ -302,7 +316,9 @@ def test_a_main_thread_released_by_the_abort_cannot_exit_first():
             print("abort", flush=True)
             released.set()
 
-        with abort_and_exit_on_termination(abort=abort, grace_period=1.0):
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=1.0, park_deadline=0.1
+        ):
             signal.raise_signal(signal.SIGTERM)
             released.wait()  # blocked "in the collective" until the abort
             raise RuntimeError("rank unwinding after its collective died")
@@ -337,7 +353,7 @@ def test_a_repeated_signal_cannot_cut_the_grace_period_short(sig):
 
         try:
             with abort_and_exit_on_termination(
-                abort=abort, grace_period={grace_period}
+                abort=abort, grace_period={grace_period}, park_deadline=0.1
             ):
                 print("ready", flush=True)
                 released.wait()  # blocked "in the collective" until the abort
@@ -391,7 +407,9 @@ def test_forked_child_does_not_trigger_the_parent_abort():
         from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         with abort_and_exit_on_termination(
-            abort=lambda: print("abort", flush=True), grace_period=0.1
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
         ):
             pid = os.fork()
             if pid == 0:
@@ -468,7 +486,9 @@ def test_other_handled_signals_do_not_trigger_the_abort():
 
         signal.signal(signal.SIGCHLD, lambda signum, frame: None)
         with abort_and_exit_on_termination(
-            abort=lambda: print("abort", flush=True), grace_period=0.1
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
         ):
             pid = os.fork()
             if pid == 0:
@@ -525,3 +545,147 @@ def test_no_listener_installed_in_a_dataloader_worker(monkeypatch):
 
     with abort_and_exit_on_termination(abort=lambda: None):
         assert signal.getsignal(signal.SIGTERM) is original
+
+
+@pytest.mark.medium_duration
+def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
+    """Parking at a loop boundary tells the listener the rank's collectives
+    are idle: the abort proceeds after the settle period rather than waiting
+    out the park deadline, and the post-abort callbacks run against the
+    boundary-frozen state rather than being skipped.
+    """
+    result = _run_listener_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+            park_if_terminating,
+        )
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=2.0,
+            settle_period=0.05,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:  # the training loop: a boundary between batches
+                park_if_terminating()
+        """
+    )
+
+    assert "parked at a loop boundary" in result.stderr
+    assert "has not reached a loop boundary" not in result.stderr
+    assert result.stdout.split() == ["abort", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_settle_period_holds_the_abort_after_the_park():
+    """A parked rank's own collectives are complete, but a peer's kernel for
+    the last of them may still be retiring -- actively reading this rank's
+    memory. The settle period between the park and the abort is what lets it
+    drain, so the abort must not come earlier.
+    """
+    settle_period = 0.5
+    result = _run_listener_program(
+        f"""
+        import signal, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        boundary = {{"at": 0.0}}
+
+        def abort():
+            print(f"settle {{time.monotonic() - boundary['at']:.3f}}", flush=True)
+
+        with abort_and_exit_on_termination(
+            abort=abort,
+            grace_period=0.1,
+            park_deadline=5.0,
+            settle_period={settle_period},
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                boundary["at"] = time.monotonic()
+                park_if_terminating()
+        """
+    )
+
+    label, observed = result.stdout.split()
+    assert label == "settle"
+    assert float(observed) >= settle_period * 0.9
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_deadline_bounds_the_wait_for_a_main_thread_that_never_parks():
+    """A main thread wedged in a collective a peer will never complete cannot
+    park; its kernels are waiting rather than transferring, so after the
+    deadline the abort proceeds without it.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.2,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()  # wedged "in a collective"
+        """
+    )
+
+    assert "has not reached a loop boundary" in result.stderr
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_only_the_main_thread_parks():
+    """Any thread may call the park check, but only the main thread's arrival
+    at a loop boundary says anything about the rank's collectives -- a side
+    thread (a DataLoader pin-memory thread, a metrics thread) must return
+    immediately rather than freeze training state the main thread is still
+    mutating.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        def side_thread():
+            park_if_terminating()
+            print("side thread returned", flush=True)
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.5,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            time.sleep(0.1)  # let the listener take ownership of the exit
+            threading.Thread(target=side_thread).start()
+            threading.Event().wait()  # the main thread itself never parks
+        """
+    )
+
+    assert "side thread returned" in result.stdout
+    assert "has not reached a loop boundary" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+def test_park_is_a_noop_without_a_pending_termination():
+    park_if_terminating()  # no listener context armed at all
+    with abort_and_exit_on_termination(abort=lambda: None):
+        park_if_terminating()  # armed, but no signal has arrived

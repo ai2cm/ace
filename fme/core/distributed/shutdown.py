@@ -13,6 +13,19 @@ termination signal it aborts its own communicators -- ``ncclCommAbort`` kills
 the local kernels and unblocks whatever host thread was waiting on them --
 then waits out a grace period so its peers' aborts finish before it exits.
 
+The abort itself is deferred until this rank's collectives are idle or merely
+waiting. Aborting communicators whose kernels are actively exchanging data
+faulted the fabric in a real preemption (8xH100, mid-training-step: contained
+NVLink peer-access errors, an unrecoverable NVSwitch SXid, node cordoned),
+while aborting idle or *waiting* kernels was validated safe on H100 and B200.
+So the training, validation, and inference loops offer every batch boundary
+as a stopping point (`park_if_terminating`), and the listener aborts only
+once the main thread has parked at one -- or has unwound into the context's
+exit -- plus a settle period for peers' kernel tails. A main thread that
+misses the deadline is wedged in a collective a peer will never complete,
+where the kernels are waiting rather than transferring and the abort is safe
+anyway.
+
 The signal is received on a *listener* -- a dedicated thread whose only job is
 to wait for the signal -- because the main thread cannot be trusted to receive
 it: a preempted rank's main thread is typically blocked inside a collective,
@@ -53,6 +66,22 @@ DEFAULT_GRACE_PERIOD = 5.0
 # case; together with the callbacks and grace period this must fit torchrun's
 # 30s SIGTERM-to-SIGKILL budget.
 DEFAULT_STATE_FREEZE_TIMEOUT = 5.0
+
+# How long the listener waits for the main thread to park at a loop boundary
+# before aborting anyway. Long enough for the tail of a training batch or an
+# inference window (sub-second to a few seconds); a main thread that misses it
+# is taken to be wedged in a collective a peer will never complete, whose
+# kernels are waiting rather than transferring, so the abort is safe without
+# the park. With the settle period, abort, post-abort callbacks, and grace
+# period behind it, the sum must fit the same 30s budget.
+DEFAULT_PARK_DEADLINE = 10.0
+
+# How long a parked rank waits before aborting. Parking means every collective
+# this rank joined has completed *for this rank*; a peer's kernel for that
+# same collective may still be retiring -- actively reading this rank's
+# memory for a little longer. Kernel tails are sub-millisecond and signal
+# skew across ranks is tens of milliseconds, so this is a generous cover.
+DEFAULT_SETTLE_PERIOD = 1.0
 
 _post_abort_callbacks: list[Callable[[], None]] = []
 
@@ -112,14 +141,75 @@ class _ExitCoordination:
         return self._listener_owns_exit.is_set()
 
     def mark_training_state_frozen(self) -> None:
-        """The main thread will never touch training state again, so the
-        post-abort callbacks may read it without racing a mutation.
+        """The main thread is parked at a loop boundary or blocked in the
+        context's exit: it will launch no further collectives and never touch
+        training state again, so the abort cannot meet an actively
+        transferring kernel and the post-abort callbacks may read state
+        without racing a mutation.
         """
         self._training_state_frozen.set()
 
     def wait_until_training_state_frozen(self, timeout: float) -> bool:
         """Block up to ``timeout`` seconds for the freeze; False on timeout."""
         return self._training_state_frozen.wait(timeout)
+
+
+# The coordination of the one active listener context, so that
+# `park_if_terminating` -- called from the training loops, far from the
+# context -- can see whether a termination is pending. At most one context is
+# active at a time (`Distributed.context()` is non-nestable).
+_active_coordination: _ExitCoordination | None = None
+
+
+def park_if_terminating() -> None:
+    """Give a pending termination a safe place to happen: a loop boundary.
+
+    The loops call this once per batch or window, at a point where this rank
+    has no collective in flight. With no termination signal pending -- the
+    overwhelmingly common case -- it returns immediately, at the cost of one
+    flag read. Once one is pending, the calling thread blocks here
+    permanently: that freezes training state at the boundary, which tells the
+    listener it may abort (`_wait_for_main_thread_to_park`) and lets the
+    post-abort callbacks snapshot a boundary-consistent state. The listener's
+    exit ends the process out from under the parked thread; the scheduler's
+    SIGKILL is the backstop.
+
+    Only the main thread of a listener-armed process parks; any other caller
+    returns immediately. Reaching a loop boundary in a DataLoader worker means
+    nothing about the parent's collectives, so workers never park.
+    """
+    coordination = _active_coordination
+    if coordination is None or not coordination.listener_owns_exit():
+        return
+    if threading.current_thread() is not threading.main_thread():
+        return
+    if in_dataloader_worker():
+        return
+    write_stderr("Main thread parked at a loop boundary for termination.\n")
+    coordination.mark_training_state_frozen()
+    threading.Event().wait()
+
+
+def _wait_for_main_thread_to_park(
+    coordination: _ExitCoordination, park_deadline: float, settle_period: float
+) -> None:
+    """Hold the abort until this rank's collectives are idle or merely waiting.
+
+    A parked (or context-exiting) main thread launches no further collectives,
+    and every collective it joined has completed for this rank -- so after a
+    settle period for peers' kernel tails (see ``DEFAULT_SETTLE_PERIOD``),
+    nothing is actively moving data and the abort is safe. A main thread that
+    never parks is wedged in a collective a peer will never complete; its
+    kernels are waiting, not transferring, which is also safe to abort -- so
+    after the deadline the abort proceeds without the park.
+    """
+    if coordination.wait_until_training_state_frozen(park_deadline):
+        time.sleep(settle_period)
+    else:
+        write_stderr(
+            f"Main thread has not reached a loop boundary {park_deadline}s "
+            "after the signal; aborting without it.\n"
+        )
 
 
 def _abort_local_communicators(abort: Callable[[], None]) -> None:
@@ -171,6 +261,8 @@ def _abort_and_exit(
     coordination: _ExitCoordination,
     grace_period: float,
     state_freeze_timeout: float,
+    park_deadline: float,
+    settle_period: float,
 ) -> None:
     """The termination policy. Runs on the listener thread."""
     coordination.mark_listener_owns_exit()
@@ -178,6 +270,7 @@ def _abort_and_exit(
         f"Received {signal.Signals(signum).name}, aborting distributed "
         "communicators before exiting.\n"
     )
+    _wait_for_main_thread_to_park(coordination, park_deadline, settle_period)
     _abort_local_communicators(abort)
     _run_post_abort_callbacks(coordination, state_freeze_timeout)
     _wait_for_peer_aborts(grace_period)
@@ -190,6 +283,8 @@ def abort_and_exit_on_termination(
     abort: Callable[[], None],
     grace_period: float = DEFAULT_GRACE_PERIOD,
     state_freeze_timeout: float = DEFAULT_STATE_FREEZE_TIMEOUT,
+    park_deadline: float = DEFAULT_PARK_DEADLINE,
+    settle_period: float = DEFAULT_SETTLE_PERIOD,
 ) -> Generator[None, None, None]:
     """Exit on SIGTERM or SIGINT, aborting the distributed backend first.
 
@@ -206,13 +301,20 @@ def abort_and_exit_on_termination(
     Args:
         abort: Locally aborts the backend's communicators. Called on the
             listener thread, typically while the main thread is blocked in a
-            collective, so it must not require the main thread's cooperation.
+            collective or parked at a loop boundary, so it must not require
+            the main thread's cooperation.
         grace_period: Seconds to wait between aborting and exiting, so that
             peers' aborts finish while this process's memory is still mapped.
         state_freeze_timeout: Seconds the listener waits for the main thread
             to block in this context's exit before skipping the post-abort
             callbacks (see ``add_post_abort_callback``).
+        park_deadline: Seconds the listener waits for the main thread to park
+            at a loop boundary before aborting anyway (see
+            ``park_if_terminating`` and ``_wait_for_main_thread_to_park``).
+        settle_period: Seconds a parked rank waits before aborting, covering
+            peers' kernel tails.
     """
+    global _active_coordination
     if threading.current_thread() is not threading.main_thread():
         # only the main thread may install handlers; a thread shares the
         # process disposition its main thread installed
@@ -229,9 +331,16 @@ def abort_and_exit_on_termination(
     listener = SignalListener(
         signals=TERMINATION_SIGNALS,
         on_signal=lambda signum: _abort_and_exit(
-            signum, abort, coordination, grace_period, state_freeze_timeout
+            signum,
+            abort,
+            coordination,
+            grace_period,
+            state_freeze_timeout,
+            park_deadline,
+            settle_period,
         ),
     )
+    _active_coordination = coordination
     listener.start()
     try:
         yield
@@ -252,6 +361,7 @@ def abort_and_exit_on_termination(
             listener.block_until_process_exit()
         else:
             listener.dismantle()
+            _active_coordination = None
             # the callbacks belonged to this context's session; a later
             # context must not fire them against torn-down state
             clear_post_abort_callbacks()

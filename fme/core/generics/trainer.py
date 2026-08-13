@@ -323,11 +323,11 @@ class Trainer:
             """Preserve mid-epoch progress when the job is preempted.
 
             Runs on the termination listener's thread, after the communicators
-            are aborted and once the main thread has blocked in the shutdown
-            context's exit, so it must stay free of collectives and of the
-            logging module (see `add_post_abort_callback` and `write_stderr`).
-            `save_checkpoint` is root-only and reads local state, which
-            satisfies that.
+            are aborted and once the main thread has parked at a loop boundary
+            or blocked in the shutdown context's exit, so it must stay free of
+            collectives and of the logging module (see
+            `add_post_abort_callback` and `write_stderr`). `save_checkpoint`
+            is root-only and reads local state, which satisfies that.
             """
             if (
                 self._current_epoch_num_batches_seen > 0
@@ -575,7 +575,9 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
+        dist = Distributed.get_instance()
         for batch in epoch_data:
+            dist.park_if_terminating()
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
             self._end_of_batch_callback()
@@ -620,6 +622,7 @@ class Trainer:
             for batch in self.train_data.subset_loader(
                 stop_batch=self.params.train_evaluation_batches
             ):
+                dist.park_if_terminating()
                 with GlobalTimer():
                     stepped = self.stepper.train_on_batch(
                         batch, self._no_optimization, evaluate_all_steps=True

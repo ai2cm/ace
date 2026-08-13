@@ -11,7 +11,7 @@ from fme.core import metrics
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
-from .shutdown import abort_and_exit_on_termination
+from .shutdown import abort_and_exit_on_termination, park_if_terminating
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -534,6 +534,17 @@ class Distributed:
         to call from a non-main thread.
         """
         return self._distributed.abort()
+
+    def park_if_terminating(self):
+        """Offer this point -- a loop boundary, with no collective in flight --
+        to a pending termination.
+
+        The batch loops call this once per batch or window. It returns
+        immediately unless a termination signal has arrived; if one has, it
+        blocks, and the process exits from the termination listener's thread.
+        See `fme.core.distributed.shutdown.park_if_terminating`.
+        """
+        park_if_terminating()
 
 
 singleton: Distributed | None = None
