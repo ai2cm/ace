@@ -843,12 +843,29 @@ def test_disable_corrections_resets_a_flag_and_a_name_list():
         pytest.param(
             "corrector_disabled_epochs", "not a correction", id="training_schedule"
         ),
+        pytest.param(
+            "keep_gradient_through_clamps", "not a correction", id="gradient_shaping"
+        ),
     ],
 )
 def test_disable_corrections_rejects_a_name_that_is_not_a_correction(name, match):
     config = AtmosphereCorrectorConfig(conserve_dry_air=True)
     with pytest.raises(ValueError, match=match):
         config.disable_corrections([name])
+
+
+def test_disable_corrections_rejects_gradient_shaping_without_touching_the_clamp():
+    """keep_gradient_through_clamps changes only how gradient flows through the
+    clamps, not whether they run, so "disabling" it would ablate nothing --
+    exactly the silent no-op the raise-on-already-off rule exists to prevent."""
+    config = AtmosphereCorrectorConfig(
+        force_positive_names=["PRATEsfc"],
+        keep_gradient_through_clamps=True,
+    )
+    with pytest.raises(ValueError, match="not a correction"):
+        config.disable_corrections(["keep_gradient_through_clamps"])
+    assert config.keep_gradient_through_clamps is True
+    assert config.force_positive_names == ["PRATEsfc"]
 
 
 def test_disable_corrections_rejects_an_already_disabled_correction():
