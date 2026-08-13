@@ -119,6 +119,15 @@ FULL_37_MODEL_LEVEL_SURFACE_VARS = [
     "10m_v_component_of_wind",
 ]
 
+FULL_37_SURFACE_MEAN_VARS = [
+    "skin_temperature",
+    "2m_temperature",
+    "2m_dewpoint_temperature",
+    "surface_pressure",
+    "10m_u_component_of_wind",
+    "10m_v_component_of_wind",
+]
+
 # Soil type definitions from the ECMWF documentation: https://codes.ecmwf.int/grib/param-db/43
 # undefined is not part of the defintions, but it appears to be the fill value.
 # Some cells with land_fraction > 0 have this value, so it still seems relevant
@@ -217,6 +226,41 @@ DESIRED_ATTRS = {
     "surface_snow_amount": {
         "long_name": "Surface snow amount",
         "units": "kg/m**2",
+    },
+    "surface_temperature_mean": {
+        "long_name": "6-hourly mean skin temperature",
+        "units": "K",
+        "averaging_window": "[T-5h, T]",
+    },
+    "TMP2m_mean": {
+        "long_name": "6-hourly mean 2m air temperature",
+        "units": "K",
+        "averaging_window": "[T-5h, T]",
+    },
+    "DPT2m_mean": {
+        "long_name": "6-hourly mean 2m dewpoint temperature",
+        "units": "K",
+        "averaging_window": "[T-5h, T]",
+    },
+    "Q2m_mean": {
+        "long_name": "6-hourly mean 2m specific humidity",
+        "units": "kg/kg",
+        "averaging_window": "[T-5h, T]",
+    },
+    "UGRD10m_mean": {
+        "long_name": "6-hourly mean 10m U component of wind",
+        "units": "m/s",
+        "averaging_window": "[T-5h, T]",
+    },
+    "VGRD10m_mean": {
+        "long_name": "6-hourly mean 10m V component of wind",
+        "units": "m/s",
+        "averaging_window": "[T-5h, T]",
+    },
+    "WIND10m_mean": {
+        "long_name": "6-hourly mean 10m wind speed",
+        "units": "m/s",
+        "averaging_window": "[T-5h, T]",
     },
     **{
         f"{soil_type}_soil_type_fraction": {
@@ -635,6 +679,63 @@ def process_mean_flux(
 
 
 # ---------------------------------------------------------------------------
+# Stream 5: Surface mean (6h mean of hourly-regridded surface fields)
+# ---------------------------------------------------------------------------
+
+
+def _process_surface_mean(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
+    """Regrid surface fields hourly, derive Q2m and wind speed, then average.
+
+    Processing order: regrid each hourly stamp → derive nonlinear channels
+    (Q2m from dewpoint+pressure, wind speed from u+v) at the target grid →
+    average the 6 stamps → drop intermediates → rename to *_mean output names.
+    """
+    xr.set_options(keep_attrs=True)
+    regridded = _regrid(ds, output_grid)
+    regridded = regridded.drop_vars(["latitude", "longitude"])
+
+    q2m = _specific_humidity_from_dewpoint(
+        regridded["2m_dewpoint_temperature"], regridded["surface_pressure"]
+    )
+    wind_speed = np.sqrt(
+        regridded["10m_u_component_of_wind"] ** 2
+        + regridded["10m_v_component_of_wind"] ** 2
+    )
+    wind_speed.attrs = {"long_name": "10m wind speed", "units": "m/s"}
+
+    output = xr.Dataset()
+    output["surface_temperature_mean"] = regridded["skin_temperature"]
+    output["TMP2m_mean"] = regridded["2m_temperature"]
+    output["DPT2m_mean"] = regridded["2m_dewpoint_temperature"]
+    output["Q2m_mean"] = q2m
+    output["UGRD10m_mean"] = regridded["10m_u_component_of_wind"]
+    output["VGRD10m_mean"] = regridded["10m_v_component_of_wind"]
+    output["WIND10m_mean"] = wind_speed
+
+    averaged = _average_hourly_to_6hourly(output)
+
+    for name, attrs in DESIRED_ATTRS.items():
+        if name in averaged:
+            averaged[name] = averaged[name].assign_attrs(**attrs)
+
+    return averaged
+
+
+def process_surface_mean(
+    key, ds, output_grid=DEFAULT_OUTPUT_GRID, check_data_validity=False
+):
+    if check_data_validity:
+        _check_data_validity(ds)
+    output = _process_surface_mean(ds, output_grid)
+    output_time_offset = key.offsets["time"] // TIME_STEP
+    new_key = key.replace(
+        offsets={"time": output_time_offset, "latitude": 0, "longitude": 0},
+        vars=frozenset(output.keys()),
+    )
+    return new_key, output
+
+
+# ---------------------------------------------------------------------------
 # Stream 2: Surface analysis / invariant
 # ---------------------------------------------------------------------------
 
@@ -1000,6 +1101,7 @@ def _make_template(
     ds_model_level,
     ds_model_level_surface,
     ds_flux,
+    ds_surface_mean,
     ds_surface_analysis,
     ds_pressure_level,
     ds_co2,
@@ -1017,6 +1119,10 @@ def _make_template(
     # Process one timestep from each stream
     flux_one = _average_hourly_to_6hourly(ds_flux.isel(time=slice(0, 6)).load())
     ds_flux_regridded = _process_mean_flux(flux_one, output_grid)
+
+    ds_surface_mean_regridded = _process_surface_mean(
+        ds_surface_mean.isel(time=slice(0, 6)).load(), output_grid
+    )
 
     # Use a time from the output range for invariant data (values are constant
     # in time, but early times in the store may contain NaN fill values)
@@ -1046,6 +1152,7 @@ def _make_template(
     ds_regridded = xr.merge(
         [
             ds_flux_regridded,
+            ds_surface_mean_regridded,
             ds_sfc_an_regridded,
             ds_ml_regridded,
             ds_inv_regridded,
@@ -1174,6 +1281,9 @@ def main():
     # Stream 1: Mean flux (hourly data)
     ds_flux = open_full_37(FULL_37_MEAN_FLUX_VARS, flux_time_slice)
 
+    # Stream 5: Surface mean (hourly data, same time range as flux)
+    ds_surface_mean = open_full_37(FULL_37_SURFACE_MEAN_VARS, flux_time_slice)
+
     # Stream 2: Surface analysis (6-hourly)
     ds_surface_analysis = open_full_37(FULL_37_SURFACE_ANALYSIS_VARS, output_time_slice)
 
@@ -1202,6 +1312,7 @@ def main():
         ds_model_level,
         ds_model_level_surface,
         ds_flux,
+        ds_surface_mean,
         ds_surface_analysis,
         ds_pressure_level,
         ds_co2,
@@ -1230,6 +1341,28 @@ def main():
             )
             | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "mean_flux_to_zarr"
+            >> xbeam.ChunksToZarr(
+                output_store,
+                template,
+                zarr_chunks=output_chunks,
+                zarr_shards=output_shards,
+                zarr_format=3,
+            )
+        )
+
+        # Stream 5: Surface mean (hourly -> regrid -> derive -> average)
+        (
+            p
+            | "surface_mean_DatasetToChunks"
+            >> xbeam.DatasetToChunks(ds_surface_mean, chunks={"time": 6})
+            | beam.MapTuple(
+                process_surface_mean,
+                output_grid=args.output_grid,
+                check_data_validity=args.check_data_validity,
+            )
+            | "surface_mean_ConsolidateChunks"
+            >> xbeam.ConsolidateChunks(output_shards)
+            | "surface_mean_to_zarr"
             >> xbeam.ChunksToZarr(
                 output_store,
                 template,
