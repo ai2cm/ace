@@ -64,7 +64,7 @@ import torch
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
-from fme.core.distributed.shutdown import add_post_abort_callback
+from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -322,25 +322,37 @@ class Trainer:
         def save_restart_checkpoints_on_terminate():
             """Preserve mid-epoch progress when the job is preempted.
 
-            Runs on the termination listener's thread after the communicators
-            are aborted, so it must stay free of collectives. `save_checkpoint`
-            is root-only and reads local state, which satisfies that.
+            Runs on the termination listener's thread, after the communicators
+            are aborted and once the main thread has blocked in the shutdown
+            context's exit, so it must stay free of collectives and of the
+            logging module (see `add_post_abort_callback` and `write_stderr`).
+            `save_checkpoint` is root-only and reads local state, which
+            satisfies that.
             """
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
             ):
                 if self._in_ema_context:
-                    logging.info(
+                    write_stderr(
                         "In EMA context during interrupt, not saving "
-                        "restart checkpoints as it is unsafe to do so"
+                        "restart checkpoints as it is unsafe to do so\n"
                     )
                 elif not self._started_training:
-                    logging.info(
-                        "Not saving restart checkpoints as training has not started"
+                    write_stderr(
+                        "Not saving restart checkpoints as training has "
+                        "not started\n"
                     )
                 else:
-                    self._save_restart_checkpoints()
+                    write_stderr(
+                        "Saving restart checkpoint to "
+                        f"{self.paths.latest_checkpoint_path} after "
+                        f"{self.num_batches_seen} batches\n"
+                    )
+                    self.save_checkpoint(
+                        self.paths.latest_checkpoint_path,
+                        include_optimization=True,
+                    )
 
         dist = Distributed.get_instance()
         if dist.world_size == dist.total_data_parallel_ranks:

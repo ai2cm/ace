@@ -165,12 +165,110 @@ def test_post_abort_callbacks_run_after_the_abort_and_cannot_stop_the_exit():
             handle_termination_signals,
         )
 
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
         def broken():
             raise RuntimeError("no checkpoint for you")
 
         add_post_abort_callback(lambda: print("first", flush=True))
         add_post_abort_callback(broken)
         add_post_abort_callback(lambda: print("second", flush=True))
+        with handle_termination_signals(abort=abort, grace_period=0.1):
+            signal.raise_signal(signal.SIGTERM)
+            released.wait()  # blocked "in the collective" until the abort
+            raise RuntimeError("rank unwinding after its collective died")
+        """
+    )
+
+    assert result.stdout.split() == ["abort", "first", "second"]
+    assert "no checkpoint for you" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_callbacks_wait_for_the_main_thread_to_stop_running():
+    """The abort releases only a main thread blocked in a collective; one
+    between collectives keeps computing until the next collective raises. A
+    callback that reads training state (the restart checkpoint) must not run
+    until the main thread has blocked in the context's exit, or it would
+    snapshot state mid-mutation.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading, time
+        from fme.core.distributed.shutdown import (
+            add_post_abort_callback,
+            handle_termination_signals,
+        )
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with handle_termination_signals(abort=abort, grace_period=0.1):
+            signal.raise_signal(signal.SIGTERM)
+            released.wait()
+            time.sleep(1.0)  # compute continuing between collectives
+            print("still training", flush=True)
+            raise RuntimeError("the next collective died")
+        """
+    )
+
+    assert result.stdout.splitlines() == ["abort", "still training", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_callbacks_are_skipped_when_the_main_thread_never_stops():
+    """A main thread that never unwinds (stuck outside any collective) keeps
+    mutating whatever it is stuck in; a snapshot taken alongside it could be
+    torn, so no snapshot is taken -- but the grace period and exit still
+    happen."""
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            add_post_abort_callback,
+            handle_termination_signals,
+        )
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with handle_termination_signals(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_timeout=0.2,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()  # never unwinds
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert "skipping post-abort callbacks" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_dead_stderr_cannot_stop_the_abort_or_the_exit():
+    """``os.write`` to a pipe whose reader is gone raises EPIPE (Python
+    ignores SIGPIPE), and mid-preemption the log collector may die before the
+    ranks do. Losing the listener's messages must not lose the abort, the
+    grace period, or the exit code."""
+    result = _run_listener_program(
+        """
+        import os, signal, threading
+        from fme.core.distributed.shutdown import handle_termination_signals
+
+        r, w = os.pipe()
+        os.close(r)
+        os.dup2(w, 2)  # every stderr write now raises BrokenPipeError
         with handle_termination_signals(
             abort=lambda: print("abort", flush=True), grace_period=0.1
         ):
@@ -179,8 +277,7 @@ def test_post_abort_callbacks_run_after_the_abort_and_cannot_stop_the_exit():
         """
     )
 
-    assert result.stdout.split() == ["abort", "first", "second"]
-    assert "no checkpoint for you" in result.stderr
+    assert result.stdout.split() == ["abort"]
     assert result.returncode == 128 + signal.SIGTERM
 
 
@@ -314,6 +411,43 @@ def test_forked_child_does_not_trigger_the_parent_abort():
         "child killed by signal: True",
         "parent alive",
     ]
+    assert result.returncode == 0
+
+
+@pytest.mark.medium_duration
+def test_second_generation_fork_does_not_close_recycled_fds():
+    """A fork-started worker's own fork (dataset code using multiprocessing)
+    runs the at-fork disarm a second time. The first disarm closed the
+    inherited pipe fds, so it must also clear the module state -- or the
+    second run closes fd numbers the worker has since reused for something
+    else.
+    """
+    result = _run_listener_program(
+        """
+        import os
+        from fme.core.distributed.shutdown import handle_termination_signals
+
+        with handle_termination_signals(abort=lambda: None, grace_period=0.1):
+            pid = os.fork()
+            if pid == 0:  # worker: its at-fork disarm closed the pipe fds
+                a, b = os.pipe()  # recycle those fd numbers
+                gpid = os.fork()  # grandchild: the at-fork hook runs again
+                if gpid == 0:
+                    try:
+                        os.fstat(a)
+                        os.fstat(b)
+                    except OSError:
+                        os._exit(1)
+                    os._exit(0)
+                _, status = os.waitpid(gpid, 0)
+                os._exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 2)
+            _, status = os.waitpid(pid, 0)
+            intact = os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+            print(f"recycled fds intact: {intact}", flush=True)
+        """
+    )
+
+    assert result.stdout.splitlines() == ["recycled fds intact: True"]
     assert result.returncode == 0
 
 
