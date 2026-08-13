@@ -1,7 +1,7 @@
 import abc
 import dataclasses
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol, Self, final
+from typing import Any, ClassVar, Protocol, Self, final
 
 import dacite
 
@@ -27,6 +27,14 @@ class CorrectorConfigABC(abc.ABC):
     """
 
     corrector_disabled_epochs: int = dataclasses.field(default=0, kw_only=True)
+
+    # Options that are not corrections: they schedule the corrector or shape how
+    # a correction is applied, rather than being a correction that can be
+    # switched off. ``disable_corrections`` rejects these names, since resetting
+    # them to their default disables no correction. Subclasses extend the set.
+    NON_CORRECTION_OPTIONS: ClassVar[frozenset[str]] = frozenset(
+        {"corrector_disabled_epochs"}
+    )
 
     def __post_init__(self):
         if self.corrector_disabled_epochs < 0:
@@ -69,9 +77,10 @@ class CorrectorConfigABC(abc.ABC):
         for a flag, empty for a name list). Using the default rather than a
         per-option rule keeps this uniform across corrector types.
 
-        Only the corrections themselves can be disabled;
-        ``corrector_disabled_epochs`` schedules the corrector during training
-        rather than being a correction, so naming it is an error.
+        Only the corrections themselves can be disabled; the options in
+        ``NON_CORRECTION_OPTIONS`` schedule the corrector or shape how a
+        correction is applied rather than being corrections, so naming one is an
+        error -- resetting it to its default would disable no correction.
 
         Raises:
             ValueError: if a name is not an option on this corrector config, if
@@ -81,9 +90,10 @@ class CorrectorConfigABC(abc.ABC):
                 loudly instead.
         """
         fields = {field.name: field for field in dataclasses.fields(self)}
+        non_corrections = type(self).NON_CORRECTION_OPTIONS
         for name in names:
-            if name == "corrector_disabled_epochs" or name not in fields:
-                options = sorted(set(fields) - {"corrector_disabled_epochs"})
+            if name in non_corrections or name not in fields:
+                options = sorted(set(fields) - non_corrections)
                 raise ValueError(
                     f"cannot disable {name!r}: not a correction of "
                     f"{type(self).__name__}, whose corrections are {options}"
