@@ -18,7 +18,7 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # Flip a row's status to `run_ICx1-smoke` to send it through the ~1.1 yr smoke
 # config instead. Set status to `skip` to leave a row out of a launch.
 
-cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|base|01KY8H7JPZ2BXJJZEYV8GZESQG|skip|best_inference_ckpt|high|--min-runtime 4h||01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
-cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|q0|01KY8H7JPZ2BXJJZEYV8GZESQG|skip|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.prescribed_prognostic_names=[specific_total_water_0]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
-cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|noTEBC|01KY8H7JPZ2BXJJZEYV8GZESQG|skip|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.disable_corrections=[total_energy_budget_correction]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
-cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|q0-noTEBC|01KY8H7JPZ2BXJJZEYV8GZESQG|run_ICx1-smoke|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.prescribed_prognostic_names=[specific_total_water_0]' 'stepper_override.disable_corrections=[total_energy_budget_correction]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|base|01KY8H7JPZ2BXJJZEYV8GZESQG|run_ICx1-80yr|best_inference_ckpt|high|--min-runtime 4h||01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|q0|01KY8H7JPZ2BXJJZEYV8GZESQG|run_ICx1-80yr|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.prescribed_prognostic_names=[specific_total_water_0]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|noTEBC|01KY8H7JPZ2BXJJZEYV8GZESQG|run_ICx1-80yr|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.disable_corrections=[total_energy_budget_correction]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|q0-noTEBC|01KY8H7JPZ2BXJJZEYV8GZESQG|run_ICx1-80yr|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.prescribed_prognostic_names=[specific_total_water_0]' 'stepper_override.disable_corrections=[total_energy_budget_correction]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
