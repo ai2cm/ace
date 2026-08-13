@@ -1,16 +1,17 @@
-"""Quiesce the GPU fabric before a preempted job exits.
+"""Tear the distributed backend down safely when a job is preempted.
 
 Schedulers preempt jobs by sending SIGTERM and escalating to SIGKILL once a
-grace period expires. A rank that dies while a peer's NCCL kernels still have
-in-flight NVLink accesses into its memory faults the fabric (SXid errors), so
-the GPUs need a reset and the cluster cordons the node. The invariant is
-therefore that no rank exits until every rank has stopped its own NCCL
-kernels.
+grace period expires. A rank that is killed while a peer's NCCL kernels still
+have in-flight NVLink accesses into its memory faults the surviving ranks with
+``CUDA error: Invalid access of peer GPU memory over nvlink or a hardware
+error``. That raises SXid errors, so the GPUs need a reboot and the cluster
+cordons the node. To avoid that outcome, no rank may exit until every rank has
+stopped its own NCCL kernels.
 
-Each rank quiesces itself, with no cross-rank coordination: on a termination
-signal it aborts its own communicators -- ``ncclCommAbort`` kills the local
-kernels and unblocks whatever host thread was waiting on them -- then waits
-out a grace period so its peers' aborts finish before it exits.
+Each rank handles this on its own, with no cross-rank coordination: on a
+termination signal it aborts its own communicators -- ``ncclCommAbort`` kills
+the local kernels and unblocks whatever host thread was waiting on them --
+then waits out a grace period so its peers' aborts finish before it exits.
 
 A Python signal handler runs only when the main thread returns to the
 interpreter, and a preempted rank's main thread is typically blocked inside a
@@ -130,7 +131,7 @@ def _listen(
     )
     try:
         # not bounded: if the abort hangs, exiting anyway would guarantee the
-        # fabric fault, so the rank rides to the scheduler's SIGKILL instead
+        # peer-GPU fault, so the rank rides to the scheduler's SIGKILL instead
         abort()
     except BaseException:
         _write_stderr(f"Aborting communicators failed:\n{traceback.format_exc()}")
@@ -158,9 +159,10 @@ def handle_termination_signals(
     that was blocked in a collective, which then typically raises out of the
     training loop: leaving this context blocks until the listener's exit, so
     the unwinding main thread cannot exit first -- ahead of the grace period,
-    and with the wrong exit code. The guarantee only holds for a main thread
-    that unwinds through this context; nothing on the way out may
-    ``os._exit`` or ``SIG_DFL`` its way around it.
+    and with the wrong exit code. Repeated signals are ignored for the same
+    reason: nothing short of SIGKILL may cut the grace period short. The
+    guarantee only holds for a main thread that unwinds through this context;
+    nothing on the way out may ``os._exit`` or ``SIG_DFL`` its way around it.
 
     Args:
         abort: Locally aborts the backend's communicators. Called on the
@@ -207,18 +209,22 @@ def handle_termination_signals(
     finally:
         _armed = False
         _pipe_fds = None
-        for sig, handler in previous_handlers.items():
-            signal.signal(sig, handler)
-        signal.set_wakeup_fd(previous_fd)
         os.write(write_fd, bytes([_STOP_LISTENING]))
-        if terminating.is_set():
-            # the listener owns the exit: hold the unwinding main thread for
-            # the abort and grace period. If the abort hangs, the scheduler's
-            # SIGKILL is the backstop.
-            listener.join()
-        else:
+        if not terminating.is_set():
             # covers the race where a signal was delivered but not yet read:
             # long enough for the listener to abort and exit
             listener.join(timeout=grace_period + 10.0)
-        os.close(write_fd)
-        os.close(read_fd)
+        if terminating.is_set():
+            # the listener owns the exit: hold the unwinding main thread for
+            # the abort and grace period, with the ignore-handlers still
+            # installed -- restoring the previous dispositions (typically
+            # SIG_DFL) here would let a repeated signal kill the rank before
+            # the grace period ends. If the abort hangs, the scheduler's
+            # SIGKILL is the backstop.
+            listener.join()
+        else:
+            for sig, handler in previous_handlers.items():
+                signal.signal(sig, handler)
+            signal.set_wakeup_fd(previous_fd)
+            os.close(write_fd)
+            os.close(read_fd)

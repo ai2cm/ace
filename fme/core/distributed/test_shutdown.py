@@ -217,6 +217,66 @@ def test_a_main_thread_released_by_the_abort_cannot_exit_first():
 
 
 @pytest.mark.medium_duration
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_a_repeated_signal_cannot_cut_the_grace_period_short(sig):
+    """A second signal is routine whenever a human is involved: Ctrl-C hits
+    every rank via the tty and again via torchrun's forwarding, and an
+    impatient operator repeats it. If the context's exit restored the previous
+    dispositions (typically ``SIG_DFL``) while the listener was still waiting
+    out the grace period, that second signal would kill the rank instantly --
+    before its peers' aborts had finished.
+    """
+    grace_period = 2.0
+    program = textwrap.dedent(
+        f"""
+        import threading
+        from fme.core.distributed.shutdown import handle_termination_signals
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        try:
+            with handle_termination_signals(abort=abort, grace_period={grace_period}):
+                print("ready", flush=True)
+                released.wait()  # blocked "in the collective" until the abort
+                raise RuntimeError("rank unwinding after its collective died")
+        except BaseException as exc:  # noqa: B036
+            print(f"escaped the context: {{type(exc).__name__}}", flush=True)
+        """
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "ready"
+        start = time.monotonic()
+        proc.send_signal(sig)
+        # once the abort has run, the released main thread is unwinding into
+        # the context's exit; give it time to get there before the repeat
+        assert proc.stdout.readline().strip() == "abort"
+        time.sleep(0.5)
+        proc.send_signal(sig)
+        proc.wait(timeout=30)
+        elapsed = time.monotonic() - start
+        remaining_stdout = proc.stdout.read()
+    finally:
+        proc.kill()
+        proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+    assert "escaped the context" not in remaining_stdout
+    assert proc.returncode == 128 + sig
+    assert elapsed >= grace_period * 0.9
+
+
+@pytest.mark.medium_duration
 def test_forked_child_does_not_trigger_the_parent_abort():
     """A signal delivered to a fork-started worker must stay the worker's.
 

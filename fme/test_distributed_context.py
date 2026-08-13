@@ -3,9 +3,6 @@ import pathlib
 EXCLUDED_FILES = {
     "downscaling/modules/swinir.py",
     "core/cuhpx/data/convert_fits_to_npy.py",
-    # torch-only by design: it probes the NCCL abort mechanism beneath
-    # Distributed and must not depend on fme
-    "core/distributed/nccl_abort_probe.py",
 }
 
 
