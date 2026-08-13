@@ -20,6 +20,7 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -1307,6 +1308,7 @@ def get_stepper_config(
     ocean_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
+    atmosphere_corrector: AtmosphereCorrectorConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -1330,6 +1332,8 @@ def get_stepper_config(
 
     ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
     atmosphere_prescribed = list(atmosphere_prescribed_prognostic_names or [])
+    if atmosphere_corrector is None:
+        atmosphere_corrector = AtmosphereCorrectorConfig()
 
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
@@ -1351,6 +1355,7 @@ def get_stepper_config(
                                 ocean_fraction_name=ocean_fraction_name,
                             ),
                             input_dropout=atmosphere_input_dropout,
+                            corrector=atmosphere_corrector,
                         ),
                     ),
                 ),

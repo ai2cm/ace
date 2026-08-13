@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import copy
 from typing import Any, TypeVar
 
@@ -206,6 +206,9 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.wrapped_step.get_prescribed_prognostic_names()
+
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        self.wrapped_step.disable_corrections(names)
 
     def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call
