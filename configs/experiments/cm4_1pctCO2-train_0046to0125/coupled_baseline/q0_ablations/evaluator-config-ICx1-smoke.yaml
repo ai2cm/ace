@@ -12,13 +12,15 @@ checkpoint_path: /ckpt.tar
 # All arms share one noise realization, so an arm-vs-arm difference is the
 # ablation and not a different draw from the stochastic atmosphere.
 seed: 0
+# No save_step_diagnostics in either realm: the coupled path does not carry the
+# corrector's per-step deltas through to its writers or aggregator (they are
+# dropped when the paired data is built), so requesting them writes nothing. The
+# uncoupled arms carry that measurement instead, via the aggregator's
+# correction-magnitude metrics; plumbing the coupled side is its own task.
 data_writer:
   ocean:
     save_prediction_files: false
     save_monthly_files: true
-    save_step_diagnostics: true
-    time_coarsen:
-      coarsen_factor: 10
     names:
       - sst
       - thetao_9
@@ -28,9 +30,6 @@ data_writer:
   atmosphere:
     save_prediction_files: false
     save_monthly_files: true
-    save_step_diagnostics: true
-    time_coarsen:
-      coarsen_factor: 200
     names:
       - surface_temperature
       - specific_total_water_0

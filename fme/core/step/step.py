@@ -119,18 +119,15 @@ class StepConfigABC(abc.ABC):
         step configs (e.g. multi-call) delegate to the wrapped config.
         """
 
+    @abc.abstractmethod
     def disable_corrections(self, names: Sequence[str]) -> None:
         """Disable the named corrections on this step's corrector, in place.
 
-        Used for inference-time ablation of a trained checkpoint, whose
-        corrector options are otherwise fixed at training time. Step configs
-        that hold a corrector override this; the default raises, so a step type
-        without one fails loudly rather than silently leaving the corrections on.
+        Used for inference-time ablation of a trained checkpoint, whose corrector
+        options are otherwise fixed at training time. A step type with no
+        corrector must raise, so that naming a correction fails loudly rather
+        than silently leaving the corrections on.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} has no corrector, so corrections "
-            f"{sorted(names)} cannot be disabled"
-        )
 
     @property
     @abc.abstractmethod
