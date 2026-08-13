@@ -1,0 +1,18 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+# Isolation arm B for the poor 1deg ocean_fillmean runs (xrfjr4cq, 5eovzgxd,
+# mj3koiqj), motivated by a colleague's healthy 1deg Samudra training that
+# carries no sea ice variables. Identical to ocean_fillmean except that no sea
+# ice variable is predicted: ocean_sea_ice_fraction, sea_ice_volume, sfdsi, UI
+# and VI all leave out_names (87 -> 82 channels), and sea_ice_volume leaves
+# force_positive_names with sea_ice_fraction_correction dropped entirely.
+# ocean_sea_ice_fraction stays in in_names (97 -> 93) as prescribed forcing:
+# surface_energy_flux_correction forms ocean_fraction = 1 - land_fraction -
+# sea_ice_fraction from it and raises KeyError without it, so removing it too
+# would force dropping the flux correction and confound the arm.
+# Parameter count is unchanged at 131.9 M, so this arm and ocean_fillmean
+# differ only in what the model must predict.
+# 3 seeds, matching ocean_fillmean's, so the arms have the same seed spread.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_noice|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_noice|rs1|train|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_noice|rs2|train|high|h100|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
