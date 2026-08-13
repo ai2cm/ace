@@ -116,6 +116,7 @@ class EventEvaluator:
         # since there is no batch parallelism in event evaluation.
         total_samples = self.dist.local_batch_size(self.n_samples)
         for start_idx in range(0, total_samples, self._max_sample_group):
+            self.dist.park_if_terminating()
             end_idx = min(start_idx + self._max_sample_group, total_samples)
             logging.info(
                 f"Generating samples {start_idx} to {end_idx} "
