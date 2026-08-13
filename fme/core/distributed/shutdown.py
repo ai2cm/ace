@@ -46,6 +46,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable, Generator
+from typing import NamedTuple
 
 from fme.core.device import in_dataloader_worker
 
@@ -76,11 +77,12 @@ DEFAULT_STATE_FREEZE_TIMEOUT = 5.0
 # period behind it, the sum must fit the same 30s budget.
 DEFAULT_PARK_DEADLINE = 10.0
 
-# How long a parked rank waits before aborting. Parking means every collective
-# this rank joined has completed *for this rank*; a peer's kernel for that
-# same collective may still be retiring -- actively reading this rank's
-# memory for a little longer. Kernel tails are sub-millisecond and signal
-# skew across ranks is tens of milliseconds, so this is a generous cover.
+# How long a parked rank waits before aborting. Parking means this rank's own
+# kernels have drained (`park_if_terminating` synchronizes the device before
+# freezing), but a peer's kernel for a collective this rank has finished may
+# still be retiring -- actively reading this rank's memory for a little
+# longer. Kernel tails are sub-millisecond and signal skew across ranks is
+# tens of milliseconds, so this is a generous cover.
 DEFAULT_SETTLE_PERIOD = 1.0
 
 _post_abort_callbacks: list[Callable[[], None]] = []
@@ -121,7 +123,7 @@ def write_stderr(message: str) -> None:
 
 
 class _ExitCoordination:
-    """The two facts the main thread and the listener thread tell each other.
+    """The facts the main thread and the listener thread tell each other.
 
     Each starts false and flips true exactly once; the methods wrap the
     thread-safe flag primitive (``threading.Event``) in the fact it records.
@@ -130,6 +132,7 @@ class _ExitCoordination:
     def __init__(self) -> None:
         self._listener_owns_exit = threading.Event()
         self._training_state_frozen = threading.Event()
+        self._abort_started = threading.Event()
 
     def mark_listener_owns_exit(self) -> None:
         """A termination signal arrived: from now on the listener thread ends
@@ -149,44 +152,87 @@ class _ExitCoordination:
         """
         self._training_state_frozen.set()
 
+    def mark_abort_started(self) -> None:
+        """The listener has begun aborting the communicators; a main thread
+        released by that abort no longer needs to drain device work on its
+        way into the context's exit.
+        """
+        self._abort_started.set()
+
+    def abort_started(self) -> bool:
+        return self._abort_started.is_set()
+
     def wait_until_training_state_frozen(self, timeout: float) -> bool:
         """Block up to ``timeout`` seconds for the freeze; False on timeout."""
         return self._training_state_frozen.wait(timeout)
 
 
-# The coordination of the one active listener context, so that
+class _ArmedContext(NamedTuple):
+    """What `park_if_terminating` needs from the one active listener context."""
+
+    coordination: _ExitCoordination
+    drain: Callable[[], None]
+
+
+# The active listener context's coordination and drain, so that
 # `park_if_terminating` -- called from the training loops, far from the
 # context -- can see whether a termination is pending. At most one context is
-# active at a time (`Distributed.context()` is non-nestable).
-_active_coordination: _ExitCoordination | None = None
+# active at a time (`Distributed.context()` is non-nestable), and a forked
+# child clears it (`_clear_armed_context_in_child`): the inherited copy of the
+# parent's pending termination must not park the child's threads.
+_armed_context: _ArmedContext | None = None
+_at_fork_registered = False
+
+
+def _clear_armed_context_in_child() -> None:
+    global _armed_context
+    _armed_context = None
 
 
 def park_if_terminating() -> None:
     """Give a pending termination a safe place to happen: a loop boundary.
 
     The loops call this once per batch or window, at a point where this rank
-    has no collective in flight. With no termination signal pending -- the
-    overwhelmingly common case -- it returns immediately, at the cost of one
-    flag read. Once one is pending, the calling thread blocks here
-    permanently: that freezes training state at the boundary, which tells the
-    listener it may abort (`_wait_for_main_thread_to_park`) and lets the
-    post-abort callbacks snapshot a boundary-consistent state. The listener's
-    exit ends the process out from under the parked thread; the scheduler's
-    SIGKILL is the backstop.
+    has launched every collective it is going to. With no termination signal
+    pending -- the overwhelmingly common case -- it returns immediately, at
+    the cost of one flag read. Once one is pending, the calling thread first
+    *drains* its device work -- the loop reaching a boundary is a host-side
+    fact, while the last batch's collectives may still be running on the GPU
+    (DDP enqueues its gradient all-reduce asynchronously and nothing in a
+    default-config batch blocks the host on it) -- and then blocks here
+    permanently. That freezes training state at the boundary with the
+    device idle, which tells the listener it may abort
+    (`_wait_for_main_thread_to_park`) and lets the post-abort callbacks
+    snapshot a boundary-consistent state. The listener's exit ends the
+    process out from under the parked thread; the scheduler's SIGKILL is the
+    backstop.
+
+    A drain that hangs (a collective a peer will never complete) or raises (a
+    sticky device error) leaves the freeze unset, so the listener takes the
+    deadline path, which assumes nothing about this rank's kernels.
 
     Only the main thread of a listener-armed process parks; any other caller
-    returns immediately. Reaching a loop boundary in a DataLoader worker means
+    returns immediately. Reaching a loop boundary in a DataLoader worker says
     nothing about the parent's collectives, so workers never park.
     """
-    coordination = _active_coordination
-    if coordination is None or not coordination.listener_owns_exit():
+    armed = _armed_context
+    if armed is None or not armed.coordination.listener_owns_exit():
         return
     if threading.current_thread() is not threading.main_thread():
         return
     if in_dataloader_worker():
         return
-    write_stderr("Main thread parked at a loop boundary for termination.\n")
-    coordination.mark_training_state_frozen()
+    write_stderr(
+        "Main thread reached a loop boundary for termination; draining "
+        "local device work.\n"
+    )
+    try:
+        armed.drain()
+    except BaseException:
+        write_stderr(f"Draining local device work failed:\n{traceback.format_exc()}")
+    else:
+        write_stderr("Main thread parked at a loop boundary for termination.\n")
+        armed.coordination.mark_training_state_frozen()
     threading.Event().wait()
 
 
@@ -195,11 +241,13 @@ def _wait_for_main_thread_to_park(
 ) -> None:
     """Hold the abort until this rank's collectives are idle or merely waiting.
 
-    A parked (or context-exiting) main thread launches no further collectives,
-    and every collective it joined has completed for this rank -- so after a
-    settle period for peers' kernel tails (see ``DEFAULT_SETTLE_PERIOD``),
-    nothing is actively moving data and the abort is safe. A main thread that
-    never parks is wedged in a collective a peer will never complete; its
+    A parked main thread has drained its device work (`park_if_terminating`
+    synchronizes before freezing) and launches no further collectives -- so
+    after a settle period for peers' kernel tails (see
+    ``DEFAULT_SETTLE_PERIOD``), nothing is actively moving data and the abort
+    is safe. A main thread that unwound into the context's exit before the
+    abort drains there likewise. A main thread that never freezes is wedged
+    in a collective a peer will never complete (or in a drain of one); its
     kernels are waiting, not transferring, which is also safe to abort -- so
     after the deadline the abort proceeds without the park.
     """
@@ -207,8 +255,8 @@ def _wait_for_main_thread_to_park(
         time.sleep(settle_period)
     else:
         write_stderr(
-            f"Main thread has not reached a loop boundary {park_deadline}s "
-            "after the signal; aborting without it.\n"
+            f"Main thread has not parked {park_deadline}s after the signal; "
+            "aborting without it.\n"
         )
 
 
@@ -271,6 +319,7 @@ def _abort_and_exit(
         "communicators before exiting.\n"
     )
     _wait_for_main_thread_to_park(coordination, park_deadline, settle_period)
+    coordination.mark_abort_started()
     _abort_local_communicators(abort)
     _run_post_abort_callbacks(coordination, state_freeze_timeout)
     _wait_for_peer_aborts(grace_period)
@@ -285,6 +334,7 @@ def abort_and_exit_on_termination(
     state_freeze_timeout: float = DEFAULT_STATE_FREEZE_TIMEOUT,
     park_deadline: float = DEFAULT_PARK_DEADLINE,
     settle_period: float = DEFAULT_SETTLE_PERIOD,
+    drain: Callable[[], None] | None = None,
 ) -> Generator[None, None, None]:
     """Exit on SIGTERM or SIGINT, aborting the distributed backend first.
 
@@ -313,8 +363,18 @@ def abort_and_exit_on_termination(
             ``park_if_terminating`` and ``_wait_for_main_thread_to_park``).
         settle_period: Seconds a parked rank waits before aborting, covering
             peers' kernel tails.
+        drain: Blocks until every kernel this rank has enqueued has completed
+            (``torch.cuda.synchronize`` or equivalent). Called on the main
+            thread before it freezes training state, so a settle-path abort
+            cannot meet this rank's own kernels still running. None means
+            there is nothing asynchronous to drain.
     """
-    global _active_coordination
+    global _armed_context, _at_fork_registered
+    if drain is None:
+
+        def drain() -> None:
+            pass
+
     if threading.current_thread() is not threading.main_thread():
         # only the main thread may install handlers; a thread shares the
         # process disposition its main thread installed
@@ -340,14 +400,32 @@ def abort_and_exit_on_termination(
             settle_period,
         ),
     )
-    _active_coordination = coordination
+    if not _at_fork_registered:
+        os.register_at_fork(after_in_child=_clear_armed_context_in_child)
+        _at_fork_registered = True
+    _armed_context = _ArmedContext(coordination, drain)
     listener.start()
     try:
         yield
     finally:
         # the main thread only winds the listener down from here; it will not
         # touch training state again, so the post-abort callbacks may read it
-        coordination.mark_training_state_frozen()
+        if coordination.listener_owns_exit() and not coordination.abort_started():
+            # unwound here with a termination pending but the abort not yet
+            # fired (an exception racing the signal): drain as a park would,
+            # so the settle-path abort cannot meet active kernels. A drain
+            # that hangs or raises leaves the freeze unset and the listener
+            # takes the deadline path.
+            try:
+                drain()
+            except BaseException:
+                write_stderr(
+                    f"Draining local device work failed:\n{traceback.format_exc()}"
+                )
+            else:
+                coordination.mark_training_state_frozen()
+        else:
+            coordination.mark_training_state_frozen()
         listener.request_stop()
         if not coordination.listener_owns_exit():
             # covers the race where a signal was delivered but not yet read:
@@ -361,7 +439,7 @@ def abort_and_exit_on_termination(
             listener.block_until_process_exit()
         else:
             listener.dismantle()
-            _active_coordination = None
+            _armed_context = None
             # the callbacks belonged to this context's session; a later
             # context must not fire them against torn-down state
             clear_post_abort_callbacks()

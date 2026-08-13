@@ -7,6 +7,7 @@ from typing import TypeVar
 import torch
 
 from fme.core import metrics
+from fme.core.device import using_gpu
 
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
@@ -94,7 +95,11 @@ class Distributed:
         try:
             with contextlib.ExitStack() as stack:
                 if handle_signals and instance.is_distributed():
-                    stack.enter_context(abort_and_exit_on_termination(instance.abort))
+                    stack.enter_context(
+                        abort_and_exit_on_termination(
+                            instance.abort, drain=instance.drain_local_work
+                        )
+                    )
                 try:
                     yield
                 except BaseException:
@@ -536,15 +541,24 @@ class Distributed:
         return self._distributed.abort()
 
     def park_if_terminating(self):
-        """Offer this point -- a loop boundary, with no collective in flight --
-        to a pending termination.
+        """Offer this point -- a loop boundary, past the batch's last
+        collective launch -- to a pending termination.
 
         The batch loops call this once per batch or window. It returns
         immediately unless a termination signal has arrived; if one has, it
-        blocks, and the process exits from the termination listener's thread.
-        See `fme.core.distributed.shutdown.park_if_terminating`.
+        drains this rank's device work, blocks, and the process exits from
+        the termination listener's thread. See
+        `fme.core.distributed.shutdown.park_if_terminating`.
         """
         park_if_terminating()
+
+    def drain_local_work(self):
+        """Block until every kernel this rank has enqueued -- collectives
+        included -- has completed. On CPU there is nothing asynchronous to
+        drain.
+        """
+        if using_gpu():
+            torch.cuda.synchronize()
 
 
 singleton: Distributed | None = None

@@ -8,6 +8,7 @@ import time
 import pytest
 import torch.utils.data
 
+from fme.core.distributed import shutdown
 from fme.core.distributed.shutdown import (
     TERMINATION_SIGNALS,
     abort_and_exit_on_termination,
@@ -551,9 +552,12 @@ def test_no_listener_installed_in_a_dataloader_worker(monkeypatch):
 def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
     """Parking at a loop boundary tells the listener the rank's collectives
     are idle: the abort proceeds after the settle period rather than waiting
-    out the park deadline, and the post-abort callbacks run against the
-    boundary-frozen state rather than being skipped.
+    out the park deadline -- the deadline here dwarfs the observed runtime,
+    so waiting it out would fail the timing bound -- and the post-abort
+    callbacks run against the boundary-frozen state rather than being
+    skipped.
     """
+    start = time.monotonic()
     result = _run_listener_program(
         """
         import signal
@@ -567,7 +571,7 @@ def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
         with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True),
             grace_period=0.1,
-            park_deadline=2.0,
+            park_deadline=30.0,
             settle_period=0.05,
         ):
             signal.raise_signal(signal.SIGTERM)
@@ -575,11 +579,13 @@ def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
                 park_if_terminating()
         """
     )
+    elapsed = time.monotonic() - start
 
     assert "parked at a loop boundary" in result.stderr
-    assert "has not reached a loop boundary" not in result.stderr
+    assert "has not parked" not in result.stderr
     assert result.stdout.split() == ["abort", "callback"]
     assert result.returncode == 128 + signal.SIGTERM
+    assert elapsed < 25.0  # interpreter startup dominates; the deadline would add 30
 
 
 @pytest.mark.medium_duration
@@ -643,7 +649,7 @@ def test_the_deadline_bounds_the_wait_for_a_main_thread_that_never_parks():
         """
     )
 
-    assert "has not reached a loop boundary" in result.stderr
+    assert "has not parked" in result.stderr
     assert result.stdout.split() == ["abort"]
     assert result.returncode == 128 + signal.SIGTERM
 
@@ -671,7 +677,7 @@ def test_only_the_main_thread_parks():
         with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True),
             grace_period=0.1,
-            park_deadline=0.5,
+            park_deadline=2.0,
         ):
             signal.raise_signal(signal.SIGTERM)
             time.sleep(0.1)  # let the listener take ownership of the exit
@@ -681,7 +687,7 @@ def test_only_the_main_thread_parks():
     )
 
     assert "side thread returned" in result.stdout
-    assert "has not reached a loop boundary" in result.stderr
+    assert "has not parked" in result.stderr
     assert result.returncode == 128 + signal.SIGTERM
 
 
@@ -689,3 +695,163 @@ def test_park_is_a_noop_without_a_pending_termination():
     park_if_terminating()  # no listener context armed at all
     with abort_and_exit_on_termination(abort=lambda: None):
         park_if_terminating()  # armed, but no signal has arrived
+
+
+@pytest.mark.medium_duration
+def test_the_drain_runs_before_the_park_and_the_abort():
+    """The loop reaching a boundary is a host-side fact; the batch's last
+    collectives may still be running on the device. The park must drain them
+    before freezing state, and the abort must come after the drain.
+    """
+    result = _run_listener_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=5.0,
+            settle_period=0.05,
+            drain=lambda: print("drain", flush=True),
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                park_if_terminating()
+        """
+    )
+
+    assert result.stdout.split() == ["drain", "abort"]
+    assert "parked at a loop boundary" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_drain_that_hangs_leaves_the_deadline_path_in_charge():
+    """A drain wedged on a collective a peer will never complete must not
+    freeze training state -- the listener's deadline abort assumes nothing
+    about this rank's kernels, and is what releases the situation.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.3,
+            drain=lambda: threading.Event().wait(),
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                park_if_terminating()
+        """
+    )
+
+    assert "draining local device work" in result.stderr
+    assert "parked at a loop boundary" not in result.stderr
+    assert "has not parked" in result.stderr
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_drain_that_raises_forfeits_the_callbacks_but_not_the_exit():
+    """A drain that raises (a sticky device error) means the kernel state is
+    unknown: training state must not be frozen -- so the callbacks are
+    skipped rather than snapshot beside it -- and the deadline abort and exit
+    must still happen.
+    """
+    result = _run_listener_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+            park_if_terminating,
+        )
+
+        def drain():
+            raise RuntimeError("device poisoned")
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.3,
+            state_freeze_timeout=0.2,
+            drain=drain,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                park_if_terminating()
+        """
+    )
+
+    assert "Draining local device work failed" in result.stderr
+    assert "device poisoned" in result.stderr
+    assert "skipping post-abort callbacks" in result.stderr
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_child_forked_after_the_signal_does_not_park():
+    """``os.fork`` copies a set ``listener_owns_exit`` into the child, whose
+    surviving thread is re-designated the main thread: without the at-fork
+    clear of the armed context, the child's next park check would block it
+    forever on the parent's pending termination.
+    """
+    result = _run_listener_program(
+        """
+        import os, signal, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=5.0,
+            settle_period=0.05,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            time.sleep(0.2)  # let the listener take ownership of the exit
+            pid = os.fork()
+            if pid == 0:
+                park_if_terminating()  # must return, not park
+                os._exit(7)
+            _, status = os.waitpid(pid, 0)
+            print(f"child exit: {os.WEXITSTATUS(status)}", flush=True)
+            park_if_terminating()  # the parent itself parks here
+        """
+    )
+
+    assert "child exit: 7" in result.stdout
+    assert "parked at a loop boundary" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+def test_park_returns_immediately_in_a_dataloader_worker(monkeypatch):
+    """A worker's loop position says nothing about the parent's collectives,
+    and a parked worker would hang the DataLoader that owns it, so the guard
+    must return even with a termination pending.
+    """
+    coordination = shutdown._ExitCoordination()
+    coordination.mark_listener_owns_exit()
+    monkeypatch.setattr(
+        shutdown,
+        "_armed_context",
+        shutdown._ArmedContext(coordination, lambda: None),
+    )
+    monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
+
+    park_if_terminating()  # returning at all is the assertion
