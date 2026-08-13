@@ -54,6 +54,7 @@ class Evaluator:
         )
 
         for i, batch in enumerate(self.data.get_generator()):
+            self.dist.park_if_terminating()
             with torch.no_grad():
                 logging.info(f"Generating predictions on batch {i + 1}")
                 outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)

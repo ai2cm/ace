@@ -557,35 +557,40 @@ def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
     callbacks run against the boundary-frozen state rather than being
     skipped.
     """
-    start = time.monotonic()
     result = _run_listener_program(
         """
-        import signal
+        import signal, time
         from fme.core.distributed.shutdown import (
             abort_and_exit_on_termination,
             add_post_abort_callback,
             park_if_terminating,
         )
 
+        signaled = {"at": 0.0}
+
+        def abort():
+            print(f"elapsed {time.monotonic() - signaled['at']:.3f}", flush=True)
+
         add_post_abort_callback(lambda: print("callback", flush=True))
         with abort_and_exit_on_termination(
-            abort=lambda: print("abort", flush=True),
+            abort=abort,
             grace_period=0.1,
             park_deadline=30.0,
             settle_period=0.05,
         ):
+            signaled["at"] = time.monotonic()
             signal.raise_signal(signal.SIGTERM)
             while True:  # the training loop: a boundary between batches
                 park_if_terminating()
         """
     )
-    elapsed = time.monotonic() - start
 
     assert "parked at a loop boundary" in result.stderr
     assert "has not parked" not in result.stderr
-    assert result.stdout.split() == ["abort", "callback"]
+    label, elapsed, callback = result.stdout.split()
+    assert (label, callback) == ("elapsed", "callback")
+    assert float(elapsed) < 5.0  # the deadline would add 30, on its own clock
     assert result.returncode == 128 + signal.SIGTERM
-    assert elapsed < 25.0  # interpreter startup dominates; the deadline would add 30
 
 
 @pytest.mark.medium_duration
@@ -855,3 +860,82 @@ def test_park_returns_immediately_in_a_dataloader_worker(monkeypatch):
     monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
 
     park_if_terminating()  # returning at all is the assertion
+
+
+@pytest.mark.medium_duration
+def test_the_context_exit_drains_when_the_abort_has_not_started():
+    """An exception racing the signal unwinds into the context's exit while
+    the listener may not have read the signal yet: the exit must drain
+    whenever the abort has not fired, or the settle-path abort meets an
+    undrained rank."""
+    result = _run_listener_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+        )
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        try:
+            with abort_and_exit_on_termination(
+                abort=lambda: print("abort", flush=True),
+                grace_period=0.1,
+                park_deadline=10.0,
+                settle_period=0.05,
+                drain=lambda: print("drain", flush=True),
+            ):
+                signal.raise_signal(signal.SIGTERM)
+                raise RuntimeError("rank raising alongside the signal")
+        except RuntimeError:
+            pass
+        """
+    )
+
+    assert result.stdout.split() == ["drain", "abort", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_wedged_path_keeps_its_callbacks_despite_a_failing_drain():
+    """A main thread released by the deadline abort unwinds into the context's
+    exit with its device already torn down: draining there would raise and
+    forfeit the restart checkpoint, so the exit must skip the drain once the
+    abort has started."""
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+        )
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        def drain():
+            raise RuntimeError("device torn down by the abort")
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        try:
+            with abort_and_exit_on_termination(
+                abort=abort,
+                grace_period=0.1,
+                park_deadline=0.2,
+                state_freeze_timeout=1.0,
+                drain=drain,
+            ):
+                signal.raise_signal(signal.SIGTERM)
+                released.wait()  # wedged "in a collective" until the abort
+                raise RuntimeError("rank unwinding after its collective died")
+        except RuntimeError:
+            pass
+        """
+    )
+
+    assert "Draining local device work failed" not in result.stderr
+    assert result.stdout.split() == ["abort", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
