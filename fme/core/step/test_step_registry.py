@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -134,6 +134,9 @@ class MockStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
+
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        raise NotImplementedError("MockStepConfig has no corrector")
 
     @property
     def allow_missing_variables(self) -> bool:
