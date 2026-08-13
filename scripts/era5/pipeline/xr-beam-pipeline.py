@@ -228,39 +228,32 @@ DESIRED_ATTRS = {
         "units": "kg/m**2",
     },
     "surface_temperature_mean": {
-        "long_name": "6-hourly mean skin temperature",
+        "long_name": "Mean skin temperature",
         "units": "K",
-        "averaging_window": "[T-5h, T]",
     },
     "TMP2m_mean": {
-        "long_name": "6-hourly mean 2m air temperature",
+        "long_name": "Mean 2m air temperature",
         "units": "K",
-        "averaging_window": "[T-5h, T]",
     },
     "DPT2m_mean": {
-        "long_name": "6-hourly mean 2m dewpoint temperature",
+        "long_name": "Mean 2m dewpoint temperature",
         "units": "K",
-        "averaging_window": "[T-5h, T]",
     },
     "Q2m_mean": {
-        "long_name": "6-hourly mean 2m specific humidity",
+        "long_name": "Mean 2m specific humidity",
         "units": "kg/kg",
-        "averaging_window": "[T-5h, T]",
     },
     "UGRD10m_mean": {
-        "long_name": "6-hourly mean 10m U component of wind",
+        "long_name": "Mean 10m U component of wind",
         "units": "m/s",
-        "averaging_window": "[T-5h, T]",
     },
     "VGRD10m_mean": {
-        "long_name": "6-hourly mean 10m V component of wind",
+        "long_name": "Mean 10m V component of wind",
         "units": "m/s",
-        "averaging_window": "[T-5h, T]",
     },
     "WIND10m_mean": {
-        "long_name": "6-hourly mean 10m wind speed",
+        "long_name": "Mean 10m wind speed",
         "units": "m/s",
-        "averaging_window": "[T-5h, T]",
     },
     **{
         f"{soil_type}_soil_type_fraction": {
@@ -684,12 +677,7 @@ def process_mean_flux(
 
 
 def _process_surface_mean(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
-    """Regrid surface fields hourly, derive Q2m and wind speed, then average.
-
-    Processing order: regrid each hourly stamp → derive nonlinear channels
-    (Q2m from dewpoint+pressure, wind speed from u+v) at the target grid →
-    average the 6 stamps → drop intermediates → rename to *_mean output names.
-    """
+    """Regrid surface fields hourly, derive Q2m and wind speed, then average."""
     xr.set_options(keep_attrs=True)
     regridded = _regrid(ds, output_grid)
     regridded = regridded.drop_vars(["latitude", "longitude"])
@@ -1360,8 +1348,7 @@ def main():
                 output_grid=args.output_grid,
                 check_data_validity=args.check_data_validity,
             )
-            | "surface_mean_ConsolidateChunks"
-            >> xbeam.ConsolidateChunks(output_shards)
+            | "surface_mean_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_shards)
             | "surface_mean_to_zarr"
             >> xbeam.ChunksToZarr(
                 output_store,
