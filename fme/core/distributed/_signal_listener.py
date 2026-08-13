@@ -70,18 +70,23 @@ class SignalListener:
 
     ``on_signal`` runs on the listener's own thread, so it must not assume the
     main thread's cooperation -- and if it never returns (it may end the
-    process), the thread never finishes. While the listener is armed the
-    process's own disposition for ``signals`` is a no-op handler: nothing
-    happens on delivery except the callback.
+    process), the thread never finishes. Only the first matching signal runs
+    it: the thread reads nothing further, and the process's own disposition
+    for ``signals`` stays a no-op handler, so later deliveries do nothing.
 
-    The lifecycle is ``start()``, then exactly one of two teardowns, the
-    caller choosing by whether a signal arrived:
+    The lifecycle is ``start()``, then ``request_stop()`` -- issued before the
+    caller can know whether a signal arrived, so it only asks, and a signal
+    already delivered still wins -- then one of two teardowns:
 
-    - no signal: ``request_stop()``, ``wait_until_finished()``, ``dismantle()``
-      to restore the previous signal setup;
+    - no signal: ``wait_until_finished()``, then ``dismantle()`` to restore
+      the previous signal setup;
     - signal arrived: the listener stays armed -- so further signals stay
       no-ops -- and ``block_until_process_exit()`` parks the calling thread
       until ``on_signal`` ends the process.
+
+    A forked child takes a third teardown, automatically: an at-fork hook
+    restores the default dispositions and closes the child's copy of the pipe
+    (see ``_disarm_in_child``).
     """
 
     def __init__(
@@ -137,12 +142,16 @@ class SignalListener:
                 return
 
     def request_stop(self) -> None:
-        """Ask the listener thread to finish, assuming no signal arrived.
+        """Begin teardown: ask the listener thread to finish, and stand down
+        the at-fork disarm.
 
         A signal already delivered but not yet read still wins over the stop
         request. One delivered between the thread consuming the sentinel and
         ``dismantle()`` restoring the dispositions is dropped; the window is
-        microseconds wide and the process is exiting anyway.
+        microseconds wide and the process is exiting anyway. Clearing the
+        active listener here also stops ``_disarm_in_child`` from acting in
+        children forked after the teardown has begun, when the fds it would
+        close may already be gone.
         """
         global _active_listener
         _active_listener = None

@@ -213,7 +213,7 @@ class Distributed:
 
     @property
     def has_spatial_parallelism(self) -> bool:
-        """Whether spatial co-ranks exist (world_size >
+        """Whether spatial co-ranks exist (world_size !=
         total_data_parallel_ranks), meaning each rank holds only a shard of
         the model's spatial state rather than a full copy.
         """

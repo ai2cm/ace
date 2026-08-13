@@ -48,7 +48,7 @@ TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT
 DEFAULT_GRACE_PERIOD = 5.0
 
 # How long the listener waits for the main thread to stop touching training
-# state (see _ExitCoordination.training_state_frozen) before giving up on the
+# state (see _ExitCoordination.mark_training_state_frozen) before giving up on the
 # post-abort callbacks. One batch of compute bounds the wait in the common
 # case; together with the callbacks and grace period this must fit torchrun's
 # 30s SIGTERM-to-SIGKILL budget.
