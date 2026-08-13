@@ -2,9 +2,8 @@
 #
 # Run one arm of each kind through this before launching the 80-year campaign,
 # to confirm the override reached the checkpoint (the dumped config.yaml shows
-# the corrector option as null), that every requested monthly name is actually
-# present in the prediction data (an absent name only warns), and that the
-# step-diagnostics files appear.
+# the corrector option as null), and that every requested monthly name is
+# actually present in the prediction data (an absent name only warns).
 experiment_dir: /results
 n_coupled_steps: 80
 coupled_steps_in_memory: 10
