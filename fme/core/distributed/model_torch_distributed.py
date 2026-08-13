@@ -108,6 +108,10 @@ class ModelTorchDistributed(DistributedBackend):
             self._data_rank = self._rank // spatial_size
             return
 
+        # Keep the NCCL watchdog from std::terminate-ing the rank on a CUDA
+        # error observed off the main thread; see the same setting in
+        # TorchDistributed.__init__ for the full rationale.
+        os.environ.setdefault("TORCH_NCCL_RETHROW_CUDA_ERRORS", "0")
         # Initialize PhysicsNeMo DistributedManager.
         DistributedManager.initialize()
         self._dm = DistributedManager()
