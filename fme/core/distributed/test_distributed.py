@@ -4,6 +4,7 @@ import subprocess
 import sys
 import textwrap
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import torch
@@ -14,6 +15,8 @@ from fme import get_device
 from fme.core.distributed import Distributed, model_torch_distributed, torch_distributed
 from fme.core.distributed.external.pnd_manager import DistributedManager
 from fme.core.distributed.model_torch_distributed import ModelTorchDistributed
+from fme.core.distributed.non_distributed import NonDistributed
+from fme.core.distributed.stop_agreement import SoloStopAgreement
 from fme.core.distributed.torch_distributed import (
     TorchDistributed,
     _gather_irregular,
@@ -367,6 +370,19 @@ def test_dataloader_worker_guard_does_not_affect_main_process(
     monkeypatch.setattr(torch.distributed, "get_world_size", lambda: 8)
     monkeypatch.setattr(torch.distributed, "get_rank", lambda: 3)
     monkeypatch.setattr(torch.distributed, "init_process_group", lambda **kwargs: None)
+    # The constructor joins a world-wide gloo agreement group immediately after
+    # `init_process_group`, which this test skips by answering `is_initialized()`
+    # `True`. `new_group` is a real collective and there is no default group here
+    # for it to run on, so it is stubbed alongside `init_process_group` for the
+    # same reason. This test asserts nothing about the agreement group.
+    monkeypatch.setattr(
+        torch_distributed,
+        "new_stop_agreement",
+        lambda world_size, world: SoloStopAgreement(),
+    )
+    monkeypatch.setattr(
+        torch.distributed.distributed_c10d, "_get_default_group", lambda: None
+    )
     set_devices: list[int] = []
     monkeypatch.setattr(torch.cuda, "set_device", set_devices.append)
 
@@ -375,6 +391,55 @@ def test_dataloader_worker_guard_does_not_affect_main_process(
     assert dist.rank == 3
     assert dist.total_ranks == 8
     assert set_devices == [expected_device_id]
+
+
+def test_the_agreement_object_is_created_with_the_backend_on_every_backend():
+    """The contract is one object per backend, and it holds without a launcher too.
+
+    `DistributedBackend.stop_agreement` documents the object as created with the
+    backend and not destroyed with it, and multi-rank tests assert exactly that for
+    the real backends. Returning a fresh one here is harmless today -- nothing
+    reads per-object state on `SoloStopAgreement` -- but a contract stated one way
+    and implemented two ways is how the harmless case stops being harmless.
+    """
+    backend = NonDistributed()
+    assert backend.stop_agreement() is backend.stop_agreement()
+
+
+def test_an_unavailable_abort_is_reported_rather_than_swallowed(capfd):
+    """An unavailable abort and a failed abort must not read the same in a log.
+
+    `ProcessGroup.abort()` is not in every supported release -- `pyproject.toml`
+    declares ``torch>=2.4.0`` while `constraints.txt` pins ``torch==2.8.0`` -- and
+    the only caller is the watchdog, whose ``except BaseException`` would swallow an
+    `AttributeError` exactly as it swallows an abort that was attempted and failed.
+    A reader of a rank that hard-exited would then have no way to tell which
+    happened.
+    """
+
+    class _WithAbort:
+        def __init__(self) -> None:
+            self.aborted = 0
+
+        def abort(self) -> None:
+            self.aborted += 1
+
+    class _WithoutAbort:
+        pass
+
+    available = _WithAbort()
+    torch_distributed._abort_group(cast(Any, available))
+    assert available.aborted == 1
+    assert "fme-stop:watchdog-abort-unavailable" not in capfd.readouterr().err
+
+    torch_distributed._abort_group(cast(Any, _WithoutAbort()))
+    marker = capfd.readouterr().err
+    assert "fme-stop:watchdog-abort-unavailable" in marker, marker
+    assert f"torch={torch.__version__}" in marker, marker
+
+    # and no group at all is neither an abort nor a missing one
+    torch_distributed._abort_group(None)
+    assert "fme-stop:watchdog-abort-unavailable" not in capfd.readouterr().err
 
 
 def test_dataloader_worker_without_launcher_env_raises(monkeypatch):

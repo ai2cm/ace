@@ -63,7 +63,7 @@ import torch
 
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, cooperative_stop
 from fme.core.distributed.shutdown import add_post_shutdown_callback
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
@@ -315,6 +315,12 @@ class Trainer:
         self._do_gc_collect = do_gc_collect
         self._in_ema_context = False
         self._started_training = False
+        # `train_one_epoch` resets this at the top of every epoch, but the
+        # terminate-time callback below reads it, and a signal can arrive before
+        # any epoch has started -- during startup, or during the validation pass
+        # of a mid-epoch resume, where `_current_epoch_num_batches_seen` is
+        # already non-zero and so does not short-circuit the read
+        self._last_saved_num_batches_seen = self.num_batches_seen
         self._validation_callback: ValidationCallback = validation_callback
         self._inference_callback: InferenceCallback = inference_callback
         self._validate_stepper_callback: ValidateStepper | None = validate_stepper
@@ -325,10 +331,19 @@ class Trainer:
             Runs after the process group has been destroyed, so it must stay
             free of collectives. `save_checkpoint` is root-only and reads local
             state, which satisfies that.
+
+            The third guard is what keeps a stop inside the scheduler's grace
+            period. A signal landing during root's periodic checkpoint write
+            leaves every rank agreeing on the very index that write recorded --
+            the periodic block and the boundary check are adjacent in the loop
+            body -- so without it root would spend another 20s or so reproducing
+            a file that already exists and be SIGKILLed for it. The same
+            predicate guards the epoch-boundary write for the same reason.
             """
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
+                and self.num_batches_seen > self._last_saved_num_batches_seen
             ):
                 if self._in_ema_context:
                     logging.info(
@@ -558,42 +573,84 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
-        for batch in epoch_data:
-            with GlobalTimer():
-                stepped = self.stepper.train_on_batch(batch, self.optimization)
-            self._end_of_batch_callback()
-            self._ema(model=self.stepper.modules)
-            # Step scheduler per-iteration if configured to do so
-            self.optimization.step_scheduler(is_iteration=True)
-            self.num_batches_seen += 1
-            self._current_epoch_num_batches_seen += 1
-            n_samples_seen_since_logging += self.train_data.batch_size
-            metrics_aggregator.record(stepped.get_metrics())
-            if (
-                self.params.log_train_every_n_batches > 0
-                and self.num_batches_seen % self.params.log_train_every_n_batches == 0
-            ):
-                metrics = {
-                    f"batch_{name}": value
-                    for name, value in metrics_aggregator.get_metrics().items()
-                }
-                metrics_aggregator.clear()
-                duration = time.time() - current_time
-                current_time = time.time()
-                samples_per_second = n_samples_seen_since_logging / duration
-                metrics["training_samples_per_second_on_rank_0"] = samples_per_second
-                metrics["lr"] = self.optimization.learning_rate
-                wandb.log(metrics, step=self.num_batches_seen)
-                metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
-                logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
-                n_samples_seen_since_logging = 0
-            if (
-                self._should_save_checkpoints()
-                and self.params.checkpoint_every_n_batches > 0
-                and self.num_batches_seen % self.params.checkpoint_every_n_batches == 0
-            ):
-                self._save_restart_checkpoints()
-                self._last_saved_num_batches_seen = self.num_batches_seen
+        # Whether the loop below was left at an agreed stop rather than at the end
+        # of the epoch's data. With a handler installed the two are told apart by
+        # the process no longer being here -- but `handle_signals=False` (the whole
+        # test session) and `PendingStop.request` without a handler both leave the
+        # loop with nothing registered to tear down, and on those paths the epoch
+        # counters below decide the resume point. Recording a truncated epoch as
+        # complete would skip the rest of its data on resume, which is worse than
+        # the stop failing.
+        stopped = False
+        with cooperative_stop(
+            # the index the *first* iteration below will pass to `agreed`, so
+            # that a rank raising inside it contributes what its peers will
+            first_index=self.num_batches_seen + 1,
+            loop_length=len(epoch_data),
+        ) as stop:
+            for batch in epoch_data:
+                with GlobalTimer():
+                    stepped = self.stepper.train_on_batch(batch, self.optimization)
+                self._end_of_batch_callback()
+                self._ema(model=self.stepper.modules)
+                # Step scheduler per-iteration if configured to do so
+                self.optimization.step_scheduler(is_iteration=True)
+                self.num_batches_seen += 1
+                self._current_epoch_num_batches_seen += 1
+                n_samples_seen_since_logging += self.train_data.batch_size
+                metrics_aggregator.record(stepped.get_metrics())
+                if (
+                    self.params.log_train_every_n_batches > 0
+                    and self.num_batches_seen % self.params.log_train_every_n_batches
+                    == 0
+                ):
+                    metrics = {
+                        f"batch_{name}": value
+                        for name, value in metrics_aggregator.get_metrics().items()
+                    }
+                    metrics_aggregator.clear()
+                    duration = time.time() - current_time
+                    current_time = time.time()
+                    samples_per_second = n_samples_seen_since_logging / duration
+                    metrics["training_samples_per_second_on_rank_0"] = (
+                        samples_per_second
+                    )
+                    metrics["lr"] = self.optimization.learning_rate
+                    wandb.log(metrics, step=self.num_batches_seen)
+                    metrics_to_log = {
+                        k: metrics[k] for k in names_to_log if k in metrics
+                    }
+                    logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
+                    n_samples_seen_since_logging = 0
+                if (
+                    self._should_save_checkpoints()
+                    and self.params.checkpoint_every_n_batches > 0
+                    and self.num_batches_seen % self.params.checkpoint_every_n_batches
+                    == 0
+                    # A multi-GB `torch.save` between the signal and the boundary
+                    # delays the agreed stop by the whole write, and the write is
+                    # redundant: the boundary the ranks are about to agree on is
+                    # this very index, and the terminate-time restart checkpoint
+                    # records it after the teardown -- which is where slow work
+                    # belongs. Skipping leaves `_last_saved_num_batches_seen`
+                    # behind, which is what makes that callback write.
+                    and not stop.pending.requested
+                ):
+                    self._save_restart_checkpoints()
+                    self._last_saved_num_batches_seen = self.num_batches_seen
+                # last in the body, after the counters and after the periodic
+                # checkpoint: the boundary every rank then agrees on is one where
+                # their counters and parameters match, no scheduled checkpoint is
+                # skipped, and reaching the decision costs no further loader fetch
+                if stop.agreed(self.num_batches_seen):
+                    # Where a handler is installed -- which is every entrypoint --
+                    # leaving this context tears the backend down and exits, so the
+                    # shuffle, the train-evaluation pass and everything below are
+                    # skipped: they are collectives, and their peers have left. The
+                    # flag is for the configurations where that exit does not
+                    # happen; see where it is declared.
+                    stopped = True
+                    break
         # evaluate after training on an independent shuffle of the data
         self.train_data.alternate_shuffle()
         aggregator = self._aggregator_builder.get_train_aggregator()
@@ -615,9 +672,23 @@ class Trainer:
             self._save_restart_checkpoints()  # before incrementing epoch so we will validate after resuming  # noqa: E501
         # we will save restart checkpoints again after validation/inference
         # are recorded to wandb
-        self._epochs_trained += 1
-        self._current_epoch_num_batches_seen = 0
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._epochs_trained:04d}")
+        if not stopped:
+            # An epoch left at an agreed stop is not a complete epoch, so it is not
+            # counted as one and its batch counter is not cleared: the pair of them
+            # is the resume point, and `_current_epoch_num_batches_seen` is what
+            # `subset_loader` skips by on the way back in. Guarded rather than left
+            # to the exit, because the exit only happens where a handler is
+            # installed.
+            self._epochs_trained += 1
+            self._current_epoch_num_batches_seen = 0
+        # `_epochs_trained` is a count of *complete* epochs, so on a stop it still
+        # names the previous one and writing there would overwrite a completed
+        # epoch's diagnostics with a truncated epoch's. The subdirectory has to name
+        # the epoch the data belongs to, which on a stop is the one that was
+        # truncated -- the next. A resume re-runs that epoch and replaces these with
+        # the complete version, which is the outcome to want.
+        completed_or_truncated_epoch = self._epochs_trained + (1 if stopped else 0)
+        aggregator.flush_diagnostics(subdir=f"epoch_{completed_or_truncated_epoch:04d}")
         return aggregator.get_summary(label="train")
 
     def _save_restart_checkpoints(self):

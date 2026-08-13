@@ -18,6 +18,8 @@ from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend
 from .non_distributed import DummyWrapper
+from .shutdown import write_marker
+from .stop_agreement import SoloStopAgreement, StopAgreement, new_stop_agreement
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +35,51 @@ def _rank_metadata_from_env() -> tuple[int, int]:
     return int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
 
 
+def _abort_group(group: torch.distributed.ProcessGroup | None) -> None:
+    """Abort ``group``'s communicators, or record that this torch release cannot.
+
+    Shared by both torch-backed backends, because the availability question is the
+    installed release's rather than either backend's.
+
+    ``ProcessGroup.abort()`` is not present in every supported release:
+    `pyproject.toml` declares ``torch>=2.4.0``, while `constraints.txt` pins
+    ``torch==2.8.0`` for the Docker image -- so the pinned release has it and a
+    supported one may not. Checking rather than calling and letting the
+    ``AttributeError`` fly matters because the only caller is the watchdog's
+    ``give_up``, whose ``except BaseException`` would swallow it identically to an
+    abort that was attempted and failed. A reader of a rank that hard-exited would
+    then have no way to tell "this torch has no abort" from "the abort did not
+    work", so the two get different markers.
+    """
+    if group is None:
+        return
+    abort = getattr(group, "abort", None)
+    if abort is None:
+        write_marker("watchdog-abort-unavailable", torch=torch.__version__)
+        return
+    abort()
+
+
 class TorchDistributed(DistributedBackend):
     """A non-distributed backend implementation."""
 
     def __init__(self):
+        # Annotated here rather than on whichever branch happens to assign first,
+        # so that a later edit to the branching below cannot move the declaration
+        # out from under the paths that do not carry it.
+        self._stop_agreement: StopAgreement
+        self._default_group: torch.distributed.ProcessGroup | None = None
         if in_dataloader_worker():
             # a worker only needs the sharding metadata that tells it which
             # samples are its rank's. Joining the process group and setting the
             # device would buy it nothing and leave an idle ~520 MiB CUDA context
             # behind, GiB of it across several persistent worker pools per rank.
             self._rank, self.world_size = _rank_metadata_from_env()
+            # A worker joins no group, so it can agree with nobody -- and must
+            # not, since `new_group` is a collective its rank's real process is
+            # not making. It inherits the parent's group file descriptors
+            # harmlessly, issuing no collectives on them.
+            self._stop_agreement = SoloStopAgreement()
             return
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if not torch.distributed.is_initialized():
@@ -64,6 +101,11 @@ class TorchDistributed(DistributedBackend):
             if using_gpu():
                 self._device_id = local_rank
                 torch.cuda.set_device(self._device_id)
+            # after the device binding, which the `Distributed` class documents as
+            # coming first. A gloo `new_group` does not touch the device today, so
+            # this is ordering rather than a fix -- and a collective on the wrong
+            # side of a documented ordering is not worth leaving there.
+            self._stop_agreement, self._default_group = self._join_stop_agreement()
         elif using_srun():  # executing with srun
             shared_dist_file = os.environ["SRUN_DIST_FILE_PATH"]
             self._rank = int(os.environ["SLURM_PROCID"])
@@ -81,10 +123,49 @@ class TorchDistributed(DistributedBackend):
                 # --gpus-per-task=1 --gpu-bind=closest
                 self._device_id = 0
                 torch.cuda.set_device(self._device_id)
+            # after the device binding, for the reason given in the torchrun branch
+            self._stop_agreement, self._default_group = self._join_stop_agreement()
         else:
             raise ValueError(
                 "Distributed backend initialized without torchrun or srun."
             )
+
+    def _join_stop_agreement(
+        self,
+    ) -> tuple[StopAgreement, torch.distributed.ProcessGroup]:
+        """Join the world-wide agreement group, eagerly and once per process.
+
+        Returns both the agreement and the default group it was built alongside,
+        rather than assigning the latter as a side effect: the watchdog's `abort`
+        needs that group and a returned pair is the version a reader of the
+        constructor can see.
+
+        Eagerly because ``new_group`` for gloo is a blocking full-mesh rendezvous,
+        so its creation point has to be one every rank provably reaches; the
+        constructor immediately after ``init_process_group`` is, while a lazy
+        first use inside a training loop is not, a rank there possibly already
+        tearing down. The cost is real and is stated rather than hidden: this
+        becomes the process's first world-wide barrier, so it absorbs the launch
+        jitter ``init_process_group`` does not, inside the window before the
+        termination handler is installed. It is bounded by the same 30 minutes
+        ``init_process_group`` itself carries.
+
+        Once per process because the constructor is reached ad hoc, and a second
+        unmatched ``new_group`` would hang whichever ranks did not make it.
+        """
+        default_group = torch.distributed.distributed_c10d._get_default_group()
+        return new_stop_agreement(self.world_size, default_group), default_group
+
+    def stop_agreement(self) -> StopAgreement:
+        return self._stop_agreement
+
+    def abort(self) -> None:
+        # `ProcessGroup.abort()` on the group captured at construction, not
+        # `_abort_process_group`: the module-level helper mutates torch's `_world`
+        # and would race the main thread inside `destroy_process_group`, and
+        # looking the default group up again would fail once that call has
+        # cleared the bookkeeping.
+        _abort_group(self._default_group)
 
     @classmethod
     def is_available(cls) -> bool:

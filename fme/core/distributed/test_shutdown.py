@@ -12,8 +12,15 @@ import torch.utils.data
 
 from fme.core.distributed.shutdown import (
     add_post_shutdown_callback,
+    defer_termination,
     handle_termination_signals,
+    write_marker,
 )
+
+
+def _marker_lines(event: str, captured: str) -> list[str]:
+    prefix = f"fme-stop:{event} "
+    return [line for line in captured.splitlines() if line.startswith(prefix)]
 
 
 def _run_handler_program(program: str) -> "subprocess.CompletedProcess[str]":
@@ -87,6 +94,181 @@ def test_later_callbacks_run_even_if_an_earlier_one_fails():
             signal.raise_signal(signal.SIGTERM)
 
     assert events == ["callback"]
+
+
+def test_a_hard_exit_is_taken_after_the_callbacks_and_not_before(monkeypatch, capfd):
+    """The hard exit an abandoned group forces must skip nothing.
+
+    A caller that has left a gloo group behind asks for `os._exit`, because
+    interpreter finalization joins the worker thread still holding the abandoned
+    operation and so waits for the wedged peer to die; `PendingStop.require_hard_exit`
+    carries the measurement. What makes that safe, where the watchdog's hard exit is
+    the fault this module exists to avoid, is *where* it happens: after `shutdown`
+    destroyed the communicators and after the callbacks ran, so nothing is dropped
+    and nothing is skipped. That ordering is the whole claim, so it is what this
+    asserts.
+    """
+    events: list[str] = []
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        # the stubbed `os._exit` falls through to the ordinary `sys.exit`, which is
+        # what lets this run in-session at all
+        with pytest.raises(SystemExit) as excinfo:
+            with defer_termination(budget=1.0) as pending:
+                pending.require_hard_exit()
+                signal.raise_signal(signal.SIGTERM)
+
+    assert events == ["shutdown", "callback"]
+    assert exited == [128 + signal.SIGTERM]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+    # and it says so, since a rank that ends this way writes no exit status anyone
+    # inside the process can read
+    hard = _marker_lines("hard-exit", capfd.readouterr().err)
+    assert len(hard) == 1
+    assert f"code={128 + signal.SIGTERM}" in hard[0]
+
+
+def test_a_deferral_left_without_a_pending_stop_does_not_hard_exit(monkeypatch):
+    """`require_hard_exit` is about how to exit, not a reason to exit.
+
+    A scope that asked for it and then reached its end with nothing recorded --
+    a loop that ran to completion after an earlier epoch abandoned an exchange, say
+    -- must exit no more eagerly than one that never asked.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with defer_termination(budget=1.0) as pending:
+            pending.require_hard_exit()
+
+    assert exited == []
+    assert events == []
+
+
+def test_a_system_exit_from_a_pending_deferral_takes_the_exit_path(monkeypatch, capfd):
+    """A caller leaving by `sys.exit` gets the teardown, and the hard exit with it.
+
+    This is how `cooperative_stop` leaves when the loop-entry exchange is given up
+    on: the loop body must not run, and a context manager cannot skip its own body.
+    A `SystemExit` carries no traceback to protect, so unlike a real exception it
+    takes the exit path -- which is the only one that can honour a hard exit.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=1.0) as pending:
+                pending.note_peer_stop()
+                pending.require_hard_exit()
+                raise SystemExit(128 + signal.SIGTERM)
+
+    assert events == ["shutdown"]
+    assert exited == [128 + signal.SIGTERM]
+    marker = _marker_lines("hard-exit", capfd.readouterr().err)
+    assert len(marker) == 1
+    assert f"code={128 + signal.SIGTERM}" in marker[0]
+
+
+def test_a_raising_deferral_that_asked_for_a_hard_exit_takes_one(monkeypatch, capfd):
+    """The exception path owes the hard exit too, and owes the traceback with it.
+
+    `exit_process=False` exists to leave a propagating exception's traceback intact,
+    but on a scope that abandoned a gloo group it also left the rank blocking in
+    finalization until its wedged peer died -- so torchrun SIGKILLed it and the
+    launcher read a signal death rather than a failure. The branch now prints the
+    traceback itself and exits hard with the exception's code, which is the code the
+    propagating exception would have produced anyway.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        # the stubbed `os._exit` falls through to `sys.exit`, which from a `finally`
+        # replaces the original exception -- so the `SystemExit` here is the evidence
+        # that the hard path was taken rather than the returning one
+        with pytest.raises(SystemExit) as excinfo:
+            with defer_termination(budget=1.0) as pending:
+                pending.require_hard_exit()
+                raise ValueError("a NaN in the loss")
+
+    assert exited == [1], "the rank was left to die in interpreter finalization"
+    assert excinfo.value.code == 1
+    assert events == ["shutdown", "callback"], "the hard exit skipped work"
+    stderr = capfd.readouterr().err
+    # the only thing `exit_process=False` was protecting
+    assert "ValueError: a NaN in the loss" in stderr, stderr
+    assert "code=1" in _marker_lines("hard-exit", stderr)[0]
+
+
+def test_a_system_exit_after_an_abandonment_hard_exits_with_the_callers_code(
+    monkeypatch, capfd
+):
+    """A caller's own `sys.exit` after an abandonment gets the hard exit and its code.
+
+    `defer_termination` is documented, exported behaviour, so this branch is reachable
+    by an adopter even though the trainer never takes it: a scope that abandoned an
+    exchange and then left by `sys.exit`, with no signal and no peer stop recorded,
+    previously got neither the hard exit nor an exit code of its own.
+    """
+    exited: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=1.0) as pending:
+                pending.require_hard_exit()
+                raise SystemExit(17)  # nothing recorded: not a signal, not a peer
+
+    assert events == ["shutdown"]
+    assert exited == [17], "the caller's own exit code was replaced or not honoured"
+    assert "code=17" in _marker_lines("hard-exit", capfd.readouterr().err)[0]
+
+
+def test_a_marker_field_cannot_break_the_key_value_contract(capfd):
+    """A torch error message contains spaces, and a marker line may not.
+
+    The lines are fixed space-separated ``key=value`` pairs, and the readers that
+    matter -- including the tests' own field parsers -- split on whitespace. So the
+    encoding is the writer's job rather than each caller's.
+    """
+    write_marker("agreement-timeout", err="Operation timed out!\nsecond line")
+
+    line = _marker_lines("agreement-timeout", capfd.readouterr().err)[0]
+    fields = dict(part.partition("=")[::2] for part in line.split())
+    assert fields["err"] == "Operation_timed_out!_second_line"
+    assert len(line.splitlines()) == 1
+
+
+def test_an_inner_handler_scope_does_not_discard_an_outer_scopes_callbacks():
+    """Nesting is legal, and leaving an inner scope must not disarm an outer one.
+
+    The restore-on-exit of `_terminate` says nesting is supported; clearing the
+    callback registry unconditionally said the opposite, since an inner scope
+    exiting took the outer job's restart-checkpoint callback with it.
+    """
+    ran: list[str] = []
+
+    with handle_termination_signals(shutdown=lambda: None):
+        add_post_shutdown_callback(lambda: ran.append("outer"))
+        with handle_termination_signals(shutdown=lambda: None):
+            add_post_shutdown_callback(lambda: ran.append("inner"))
+        assert ran == []
+        with pytest.raises(SystemExit):
+            signal.raise_signal(signal.SIGTERM)
+
+    # the outer scope's callback survived the inner scope's exit, and the inner
+    # scope's own did not outlive it
+    assert ran == ["outer"]
 
 
 def test_previous_handlers_and_callbacks_are_restored_on_exit():
@@ -400,3 +582,481 @@ def test_no_handler_installed_in_a_dataloader_worker(monkeypatch):
 
     with handle_termination_signals(shutdown=lambda: None):
         assert signal.getsignal(signal.SIGTERM) is original
+
+
+def test_signal_inside_a_deferral_does_not_shut_down(capfd):
+    """A signal must not tear the backend down while a rendezvous is open.
+
+    Tearing down from the handler is what strands peers: it happens wherever the
+    signal landed, which on one rank is a batch boundary and on another the
+    middle of a collective. Inside a deferral the signal is recorded instead, and
+    the caller decides where to act on it.
+    """
+    events = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=1.0) as pending:
+                signal.raise_signal(signal.SIGTERM)
+                assert pending.requested
+                assert pending.exit_code == 128 + signal.SIGTERM
+                assert events == []
+
+    assert events == ["shutdown"]
+    deferred = _marker_lines("signal-deferred", capfd.readouterr().err)
+    assert len(deferred) == 1
+    assert "signal=SIGTERM" in deferred[0]
+
+
+def test_deferred_stop_shuts_down_when_the_deferral_exits(capfd):
+    """Leaving the deferral must run the teardown the handler would have run."""
+    events = []
+    add_post_shutdown_callback(lambda: events.append("first callback"))
+    add_post_shutdown_callback(lambda: events.append("second callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit) as excinfo:
+            with defer_termination(budget=1.0):
+                signal.raise_signal(signal.SIGTERM)
+
+    assert events == ["shutdown", "first callback", "second callback"]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+    # claim (b) of the evidence channel: this rank's teardown returned
+    assert len(_marker_lines("shutdown-returned", capfd.readouterr().err)) == 1
+
+
+def test_signal_outside_a_deferral_still_shuts_down_immediately():
+    """Outside a loop there is no rendezvous to wait for, so nothing changes.
+
+    Both sides of the deferral are checked: a signal before one has ever been
+    entered, and a signal after one has been left, must each tear down from the
+    handler as they do without this mechanism.
+    """
+    before = []
+    with handle_termination_signals(shutdown=lambda: before.append("shutdown")):
+        with pytest.raises(SystemExit) as excinfo:
+            signal.raise_signal(signal.SIGTERM)
+        assert before == ["shutdown"]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+
+    after = []
+    with handle_termination_signals(shutdown=lambda: after.append("shutdown")):
+        with defer_termination(budget=1.0):
+            pass  # left with nothing pending, so nothing was torn down
+        assert after == []
+        with pytest.raises(SystemExit) as excinfo:
+            signal.raise_signal(signal.SIGTERM)
+        assert after == ["shutdown"]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+
+
+def test_second_signal_while_a_stop_is_pending_is_ignored(monkeypatch, capfd):
+    """A repeated SIGTERM must not defeat the deferral.
+
+    In production a second SIGTERM is the norm rather than an escalation: the
+    scheduler signals the container's process group and torchrun's agent then
+    signals every rank again. Honouring it by tearing down immediately would
+    strand peers on essentially every real preemption.
+    """
+    exited = []
+    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
+    events = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=1.0) as pending:
+                signal.raise_signal(signal.SIGTERM)
+                signal.raise_signal(signal.SIGTERM)
+                signal.raise_signal(signal.SIGINT)
+                assert events == []
+                assert pending.exit_code == 128 + signal.SIGTERM
+
+    assert exited == []  # no escalation to a hard exit
+    assert events == ["shutdown"]
+    stderr = capfd.readouterr().err
+    assert len(_marker_lines("signal-deferred", stderr)) == 1
+    assert len(_marker_lines("signal-ignored", stderr)) == 2
+
+
+def test_the_budget_is_absolute_from_the_signal_not_per_boundary():
+    """A rank cannot accumulate a fresh budget at each rendezvous.
+
+    The budget bounds how long a rank that is leaving waits for peers that may
+    never arrive, measured from the local event, so time spent walking to a
+    rendezvous is spent out of it.
+    """
+    with handle_termination_signals(shutdown=lambda: None):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=0.3) as pending:
+                # nothing recorded yet, so no clock is running: a healthy rank
+                # must never be the one holding a short deadline
+                assert pending.seconds_remaining() is None
+                signal.raise_signal(signal.SIGTERM)
+                observed = []
+                for _ in range(3):
+                    time.sleep(0.01)
+                    remaining = pending.seconds_remaining()
+                    assert remaining is not None
+                    observed.append(remaining)
+                assert observed == sorted(observed, reverse=True)
+                assert len(set(observed)) == 3
+                assert max(observed) < 0.3
+
+
+def test_a_peer_stop_tears_down_even_though_no_signal_arrived():
+    """A rank that only ever read a peer's stop must still tear down.
+
+    Without this it would leave the loop and walk into the next collective, whose
+    peers have already left -- so it would hang there and be SIGKILLed with its
+    communicators open.
+    """
+    events = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(SystemExit) as excinfo:
+            with defer_termination(budget=1.0) as pending:
+                pending.note_peer_stop()
+
+    assert events == ["shutdown"]
+    # a peer's stop carries no signal number, so SIGTERM's code by convention
+    assert excinfo.value.code == 128 + signal.SIGTERM
+
+
+def test_an_exception_inside_a_deferral_tears_down_without_masking_it():
+    """The exception path must tear down and still lose nothing of the raise.
+
+    Today an exception skips `shutdown()` entirely and the rank exits with its
+    communicators open. Tearing down here fixes that, but a `sys.exit` on the way
+    out would replace the traceback with an exit code, so this path returns.
+    """
+    events = []
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(ValueError, match="a NaN in the loss"):
+            with defer_termination(budget=1.0):
+                raise ValueError("a NaN in the loss")
+
+    assert events == ["shutdown", "callback"]
+
+
+def test_a_signalled_rank_that_also_raises_keeps_the_exception():
+    """A propagating exception survives the dispatch, even beside a recorded signal.
+
+    This is the common case rather than a corner: the scheduler signals the whole
+    process group, so a rank whose peer *crashed* has usually recorded a signal
+    too -- and the exception it is carrying is the ``Connection closed by peer``
+    that the boundary exchange went out of its way to re-raise instead of masking
+    as a graceful stop. Exiting `128 + signum` from the dispatch would throw that
+    away and report a clean preemption.
+    """
+    events = []
+    add_post_shutdown_callback(lambda: events.append("callback"))
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        with pytest.raises(RuntimeError, match="Connection closed by peer"):
+            with defer_termination(budget=1.0) as pending:
+                signal.raise_signal(signal.SIGTERM)
+                assert pending.requested
+                raise RuntimeError("Connection closed by peer")
+
+    # the teardown still happened; only the `sys.exit` was withheld
+    assert events == ["shutdown", "callback"]
+
+
+def test_a_deferral_that_never_stops_writes_one_diagnostic_line(capfd):
+    """A rank that never reaches a stopping point must not go unrecorded.
+
+    The timer only writes: the sole lever a timer thread has over a wedged main
+    thread is `os._exit`, which is the fabric fault this module exists to avoid.
+    """
+    with handle_termination_signals(shutdown=lambda: None):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=0.05) as pending:
+                signal.raise_signal(signal.SIGTERM)
+                assert pending.requested
+                time.sleep(0.3)  # past 2 x budget, without reaching a stop
+
+    overrun = _marker_lines("deferral-overrun", capfd.readouterr().err)
+    assert len(overrun) == 1
+    assert "since=0s" in overrun[0]
+
+
+def test_a_deferral_that_stops_promptly_writes_no_diagnostic_line(capfd):
+    with handle_termination_signals(shutdown=lambda: None):
+        with pytest.raises(SystemExit):
+            with defer_termination(budget=0.05) as pending:
+                signal.raise_signal(signal.SIGTERM)
+                assert pending.requested
+
+    time.sleep(0.3)  # long enough that an uncancelled timer would have fired
+    assert _marker_lines("deferral-overrun", capfd.readouterr().err) == []
+
+
+def test_deferral_is_inert_in_a_dataloader_worker(monkeypatch):
+    """A worker must not swallow the signal that would have killed it.
+
+    A fork-started worker inherits both the handler and the deferral registry, so
+    a deferral that registered here would leave the worker alive and deaf: it
+    would neither die as it would have without the inheritance nor gain anyone to
+    poll what it recorded.
+    """
+    events = []
+    pendings = []
+
+    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
+        monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
+        with pytest.raises(SystemExit) as excinfo:
+            with defer_termination(budget=1.0) as pending:
+                pendings.append(pending)
+                signal.raise_signal(signal.SIGTERM)
+
+    assert pendings[0].requested is False
+    assert events == ["shutdown"]
+    assert excinfo.value.code == 128 + signal.SIGTERM
+
+
+def test_a_deferral_off_the_main_thread_does_not_claim_the_registry():
+    """A thread cannot own the disposition, so it must not own the registry.
+
+    Nothing would ever record a signal into it, and claiming it would lock the
+    main thread out of the one registration there is.
+    """
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            with defer_termination(budget=1.0):
+                with defer_termination(budget=1.0):
+                    pass
+        except BaseException as err:
+            errors.append(err)  # a thread's exception would otherwise be lost
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join()
+
+    assert errors == []
+
+
+def test_nested_defer_termination_is_rejected():
+    """The registry is process-global, so only one scope can own the teardown."""
+    with defer_termination(budget=1.0):
+        with pytest.raises(RuntimeError, match="Nested"):
+            with defer_termination(budget=1.0):
+                pass
+
+
+def test_a_forked_child_in_a_deferral_does_not_record_intent():
+    """The pid guard must run before the deferral branch.
+
+    A forked worker inherits the registry along with the handler, so if the
+    deferral branch ran first the worker would record intent and return -- left
+    alive, deaf, and with nobody to poll it -- instead of dying as it would have
+    without the inheritance.
+    """
+    read_fd, write_fd = os.pipe()
+
+    def report(event: bytes) -> None:
+        # the child cannot report back through the parent's objects
+        os.write(write_fd, event)
+
+    add_post_shutdown_callback(lambda: report(b"callback"))
+
+    with handle_termination_signals(shutdown=lambda: report(b"shutdown")):
+        with defer_termination(budget=1.0):
+            pid = os.fork()
+            if pid == 0:
+                # never let a forked copy of the test session escape back into
+                # pytest, whatever the handler does
+                try:
+                    os.close(read_fd)
+                    signal.raise_signal(signal.SIGTERM)
+                    report(b"deferred")
+                except BaseException:
+                    pass
+                finally:
+                    os._exit(0)
+
+            os.close(write_fd)
+            ready: list[int] = []
+            try:
+                ready, _, _ = select.select([read_fd], [], [], 30.0)
+                observed = os.read(read_fd, 4096) if ready else b"child hung"
+            finally:
+                os.close(read_fd)
+                if not ready:
+                    os.kill(pid, signal.SIGKILL)
+                _, status = os.waitpid(pid, 0)
+
+    assert observed == b""
+    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGTERM
+
+
+def test_marker_lines_carry_the_documented_fields(capfd, monkeypatch):
+    """One line, one write, fields in a fixed order.
+
+    The reader's whole recipe is `grep` over these lines, and a rank that failed
+    is identified by the absence of its own, so every line has to carry the rank
+    label and `installed_pid` -- which is what tells a real rank from a
+    fork-started DataLoader worker sharing its parent's RANK.
+    """
+    monkeypatch.setenv("RANK", "3")
+    monkeypatch.setenv("LOCAL_RANK", "1")
+
+    with handle_termination_signals(shutdown=lambda: None):
+        write_marker("stop-agreed", batch="41200", world="8")
+    write_marker("stop-agreed", batch="41201", world="8")
+
+    installed, uninstalled = _marker_lines("stop-agreed", capfd.readouterr().err)
+    fields = installed.split(" ")
+    assert [field.split("=")[0] for field in fields[1:]] == [
+        "rank",
+        "local_rank",
+        "pid",
+        "installed_pid",
+        "wall",
+        "mono",
+        "batch",
+        "world",
+    ]
+    assert fields[0] == "fme-stop:stop-agreed"
+    assert f"rank=3 local_rank=1 pid={os.getpid()} installed_pid={os.getpid()}" in (
+        installed
+    )
+    assert "batch=41200 world=8" in installed
+    # with no handler installed there is no pid to compare against
+    assert "installed_pid=?" in uninstalled
+
+
+def test_marker_lines_survive_an_unwritable_stderr(monkeypatch):
+    """A marker is evidence about a failure and may not become one."""
+
+    def refuse(fd, data):
+        raise OSError("stderr is gone")
+
+    monkeypatch.setattr(os, "write", refuse)
+    write_marker("stop-agreed", batch="41200")
+
+
+@pytest.mark.medium_duration
+def test_the_watchdog_aborts_before_its_backstop_exit():
+    """A rank that gives up must abort its communicators, not just vanish.
+
+    An `os._exit` taken with communicators open is what drops this rank's NVLink
+    peers abruptly. Aborting first at least makes the release ordered, and may
+    release this rank's own main thread from the collective; the hard exit stays
+    as a named backstop for when it does not.
+    """
+    result = _run_handler_program(
+        """
+        import signal, threading
+        from fme.core.distributed import shutdown as shutdown_module
+        from fme.core.distributed.shutdown import handle_termination_signals
+
+        shutdown_module._ABORT_BACKSTOP = 0.3
+
+        def hang():
+            threading.Event().wait()
+
+        def abort():
+            print("abort ran", flush=True)
+
+        with handle_termination_signals(
+            shutdown=hang, teardown_timeout=1.0, abort=abort
+        ):
+            signal.raise_signal(signal.SIGTERM)
+        """
+    )
+
+    assert result.returncode == 128 + signal.SIGTERM
+    assert result.stdout.splitlines() == ["abort ran"]
+    assert "fme-stop:watchdog-abort" in result.stderr
+    assert "timeout=1" in result.stderr
+    assert (
+        "Distributed shutdown did not complete within 1s, aborting the local "
+        "communicator." in result.stderr
+    )
+
+
+@pytest.mark.medium_duration
+def test_a_released_main_thread_is_not_exited_mid_callback():
+    """The backstop must stand down if the abort released the main thread.
+
+    An abort that works releases the main thread at once, so it can cancel the
+    watchdog while the watchdog thread is still between its abort and its
+    backstop. `Timer.cancel()` on an unstarted timer does nothing, so without the
+    cancelled flag the backstop would start unopposed and exit the process out
+    from under the checkpoint write the released main thread had just begun.
+    """
+    result = _run_handler_program(
+        """
+        import signal, threading, time
+        from fme.core.distributed import shutdown as shutdown_module
+        from fme.core.distributed.shutdown import (
+            add_post_shutdown_callback,
+            handle_termination_signals,
+        )
+
+        shutdown_module._ABORT_BACKSTOP = 0.2
+
+        released = threading.Event()
+
+        def hang():
+            released.wait()      # the abort below is what lets this return
+
+        def abort():
+            released.set()
+
+        def slow_write():
+            time.sleep(1.0)      # stands in for the multi-GB torch.save
+            print("callback complete", flush=True)
+
+        add_post_shutdown_callback(slow_write)
+        try:
+            with handle_termination_signals(
+                shutdown=hang, teardown_timeout=0.5, abort=abort
+            ):
+                signal.raise_signal(signal.SIGTERM)
+        except SystemExit as err:
+            # the graceful exit and the backstop's os._exit share an exit code,
+            # so the code cannot be the evidence
+            print(f"sys.exit {err.code}", flush=True)
+            raise
+        """
+    )
+
+    assert result.stdout.splitlines() == [
+        "callback complete",
+        f"sys.exit {128 + signal.SIGTERM}",
+    ]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_signal_outside_a_deferral_exits_128_plus_signum():
+    """The immediate path is unchanged at process level, not only in process.
+
+    pytest catches the graceful `SystemExit`, so the exit code a real rank hands
+    the launcher can only be observed from outside.
+    """
+    result = _run_handler_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            defer_termination,
+            handle_termination_signals,
+        )
+
+        with handle_termination_signals(
+            shutdown=lambda: print("shutdown", flush=True)
+        ):
+            with defer_termination(budget=1.0):
+                pass
+            signal.raise_signal(signal.SIGTERM)
+        """
+    )
+
+    assert result.returncode == 128 + signal.SIGTERM
+    assert result.stdout.splitlines() == ["shutdown"]
+    assert "fme-stop:shutdown-returned" in result.stderr
