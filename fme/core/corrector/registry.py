@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, Self, final
 
 import dacite
@@ -59,6 +59,51 @@ class CorrectorConfigABC(abc.ABC):
             wrapped=corrector,
             disabled_epochs=self.corrector_disabled_epochs,
         )
+
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        """Switch the named corrections off in place, for inference-time ablation.
+
+        A correction is disabled by resetting its option to that field's
+        declared default, which is the "not applied" value for every option on
+        every corrector config (``None`` for an optional sub-config, ``False``
+        for a flag, empty for a name list). Using the default rather than a
+        per-option rule keeps this uniform across corrector types.
+
+        Only the corrections themselves can be disabled;
+        ``corrector_disabled_epochs`` schedules the corrector during training
+        rather than being a correction, so naming it is an error.
+
+        Raises:
+            ValueError: if a name is not an option on this corrector config, if
+                it has no default (so no disabled state), or if it is already
+                disabled. An unknown or already-off name would make the
+                ablation silently reproduce the un-ablated run, so it fails
+                loudly instead.
+        """
+        fields = {field.name: field for field in dataclasses.fields(self)}
+        for name in names:
+            if name == "corrector_disabled_epochs" or name not in fields:
+                options = sorted(set(fields) - {"corrector_disabled_epochs"})
+                raise ValueError(
+                    f"cannot disable {name!r}: not a correction of "
+                    f"{type(self).__name__}, whose corrections are {options}"
+                )
+            field = fields[name]
+            if field.default is not dataclasses.MISSING:
+                disabled = field.default
+            elif field.default_factory is not dataclasses.MISSING:
+                disabled = field.default_factory()
+            else:
+                raise ValueError(
+                    f"cannot disable {name!r}: it has no default, so it has no "
+                    "disabled state"
+                )
+            if getattr(self, name) == disabled:
+                raise ValueError(
+                    f"cannot disable {name!r}: it is already disabled "
+                    f"({disabled!r}) on this {type(self).__name__}"
+                )
+            setattr(self, name, disabled)
 
     @abc.abstractmethod
     def _get_corrector(

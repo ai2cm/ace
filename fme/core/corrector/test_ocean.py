@@ -15,6 +15,7 @@ from fme.core.corrector.ocean import (
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
+from fme.core.registry import CorrectorSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
@@ -539,3 +540,67 @@ def test_ocean_corrector_empty_delta_when_nothing_modified():
     assert dict(result.diagnostics.delta) == {}
     assert set(result.modified_names) == set()
     torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+def test_disable_corrections_through_a_corrector_selector():
+    """The ocean corrector is configured as ``type: ocean_corrector``, i.e.
+    wrapped in a CorrectorSelector, so disabling has to reach the wrapped
+    config and keep the serialized ``config`` mapping in step with it."""
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config=dataclasses.asdict(
+            OceanCorrectorConfig(
+                force_positive_names=["so_0"],
+                surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                    method="prescribed"
+                ),
+                ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+                    method="scaled_temperature"
+                ),
+            )
+        ),
+    )
+    selector.disable_corrections(["surface_energy_flux_correction"])
+
+    wrapped = selector._corrector_config_instance
+    assert isinstance(wrapped, OceanCorrectorConfig)
+    assert wrapped.surface_energy_flux_correction is None
+    assert wrapped.ocean_heat_content_correction is not None
+    # `config` is what gets serialized, so it must reflect the mutation
+    assert selector.config["surface_energy_flux_correction"] is None
+    assert selector.config["ocean_heat_content_correction"] is not None
+    assert selector.config["force_positive_names"] == ["so_0"]
+
+
+def test_disabled_surface_energy_flux_correction_leaves_hfds_untouched():
+    """With the correction off, the generated hfds is the raw prediction."""
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    gen_data = {
+        "sst": torch.full(IMG_SHAPE, 300.0, device=DEVICE),
+        "hfds": gen_hfds,
+        "sea_ice_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+    }
+    forcing_data = {
+        "land_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+
+    corrected_on = config._build(ops, None, timestep)(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    assert not torch.allclose(corrected_on["hfds"], gen_hfds)
+
+    config.disable_corrections(["surface_energy_flux_correction"])
+    corrected_off = config._build(ops, None, timestep)(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    torch.testing.assert_close(corrected_off["hfds"], gen_hfds)

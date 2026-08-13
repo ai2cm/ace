@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Mapping, Sequence
 from typing import Any, Literal, cast
 
 import dacite
@@ -745,6 +745,15 @@ class StepperConfig:
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self.step.get_prescribed_prognostic_names()
 
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        """Disable the named corrections of this stepper's step, in place.
+
+        Used for inference / evaluation ablations: the corrector options are
+        serialized in the trained checkpoint, so switching one off is only
+        possible after loading.
+        """
+        self.step.disable_corrections(names)
+
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1035,6 +1044,25 @@ class Stepper:
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._config.get_prescribed_prognostic_names()
+
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        """
+        Disable the named corrections of the step's corrector.
+
+        The corrector is built when the step is built, so the step is rebuilt
+        from the mutated config and the trained state reloaded into it. Only
+        meant to be used at inference time: a disabled conservation correction
+        makes the model's budgets open.
+
+        Args:
+            names: The corrector option names to switch off.
+        """
+        self._config.disable_corrections(names)
+        new_stepper: Stepper = self._config.get_stepper(
+            dataset_info=self._dataset_info,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
@@ -1903,12 +1931,19 @@ class StepperOverrideConfig:
             producing a serialized stepper.
         prescribed_prognostic_names: List of prognostic variable names to overwrite
             from forcing at each step during inference.
+        disable_corrections: Names of corrector options to switch off, e.g.
+            ``[total_energy_budget_correction]``. Corrector options are
+            serialized into the checkpoint, so this is the only way to ablate a
+            correction at inference time. A name that is not an option of the
+            checkpoint's corrector, or that is already off, is an error rather
+            than a silent no-op.
     """
 
     ocean: Literal["keep"] | OceanConfig | None = "keep"
     multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
     derived_forcings: Literal["keep"] | DerivedForcingsConfig = "keep"
     prescribed_prognostic_names: Literal["keep"] | list[str] = "keep"
+    disable_corrections: Literal["keep"] | list[str] = "keep"
 
 
 def load_stepper_config(
@@ -2001,6 +2036,9 @@ def apply_stepper_override(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.disable_corrections != "keep":
+        logging.info("Disabling corrections %s.", override_config.disable_corrections)
+        stepper.disable_corrections(override_config.disable_corrections)
 
 
 def apply_stepper_override_to_stepper_config(
@@ -2040,3 +2078,6 @@ def apply_stepper_override_to_stepper_config(
         stepper_config.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
+    if override_config.disable_corrections != "keep":
+        logging.info("Disabling corrections %s.", override_config.disable_corrections)
+        stepper_config.disable_corrections(override_config.disable_corrections)
