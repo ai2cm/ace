@@ -1,0 +1,24 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# Uncoupled (SST-forced) arms of the stratospheric-humidity /
+# energy-corrector ablations, on the pre-trained atmosphere the coupled run
+# mounted as /atmos_ckpt.tar (atmos_baseline-ft rs2, wandb xa468b28). Its
+# corrector carries total_energy_budget_correction: constant_temperature --
+# that came from the fine-tune config, not atmos_baseline/train-config.yaml.
+#
+# The 4 arms share evaluator-config-ICx1-80yr.yaml and differ only by the
+# `override` column (field 8):
+#
+#   tag              prescribe q0   atmos TEBC
+#   base                  -            on
+#   q0                    y            on
+#   noTEBC                -            off
+#   q0-noTEBC             y            off
+#
+# Flip a row's status to `run_ICx1-smoke` to send it through the ~1.1 yr smoke
+# config instead. Set status to `skip` to leave a row out of a launch.
+
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|base|01KY8H7JPZ2BXJJZEYV8GZESQG|skip|best_inference_ckpt|high|--min-runtime 4h||01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|q0|01KY8H7JPZ2BXJJZEYV8GZESQG|skip|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.prescribed_prognostic_names=[specific_total_water_0]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|noTEBC|01KY8H7JPZ2BXJJZEYV8GZESQG|skip|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.disable_corrections=[total_energy_budget_correction]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
+cm4_1pctCO2-train_0046to0125-atmos_baseline-ft|q0-noTEBC|01KY8H7JPZ2BXJJZEYV8GZESQG|skip|best_inference_ckpt|high|--min-runtime 4h|'stepper_override.prescribed_prognostic_names=[specific_total_water_0]' 'stepper_override.disable_corrections=[total_energy_budget_correction]'|01KYJ7EFE3TSRGKSM351YVB918|ai2/ace|h100
