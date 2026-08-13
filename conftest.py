@@ -147,7 +147,7 @@ def distributed_context():
     # no signal handler: this context spans the whole session, so installing one
     # would make Ctrl-C tear the backend down and register as a test failure,
     # leaving the rest of the run without a process group. The tests that want
-    # the handler open their own `handle_termination_signals`.
+    # the listener open their own `abort_and_exit_on_termination`.
     with Distributed.context(handle_signals=False):
         yield
 

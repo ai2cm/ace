@@ -11,7 +11,7 @@ from fme.core import metrics
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
-from .shutdown import handle_termination_signals
+from .shutdown import abort_and_exit_on_termination
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -94,7 +94,7 @@ class Distributed:
         try:
             with contextlib.ExitStack() as stack:
                 if handle_signals and instance.is_distributed():
-                    stack.enter_context(handle_termination_signals(instance.abort))
+                    stack.enter_context(abort_and_exit_on_termination(instance.abort))
                 try:
                     yield
                 except BaseException:
@@ -211,13 +211,21 @@ class Distributed:
         """
         return self._distributed.total_ranks
 
+    @property
+    def has_spatial_parallelism(self) -> bool:
+        """Whether spatial co-ranks exist (world_size >
+        total_data_parallel_ranks), meaning each rank holds only a shard of
+        the model's spatial state rather than a full copy.
+        """
+        return self.world_size != self.total_data_parallel_ranks
+
     def require_no_spatial_parallelism(self, msg: str) -> None:
         """Raise if spatial parallelism is active.
 
         Use this to guard code paths that are known to be incorrect
-        when spatial co-ranks exist (world_size > total_data_parallel_ranks).
+        when spatial co-ranks exist.
         """
-        if self.world_size != self.total_data_parallel_ranks:
+        if self.has_spatial_parallelism:
             raise SpatialParallelismNotImplemented(msg)
 
     def get_sampler(

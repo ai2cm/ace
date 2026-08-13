@@ -1,4 +1,4 @@
-"""Tear the distributed backend down safely when a job is preempted.
+"""Exit safely when a job is preempted, by aborting NCCL before anything else.
 
 Schedulers preempt jobs by sending SIGTERM and escalating to SIGKILL once a
 grace period expires. A rank that is killed while a peer's NCCL kernels still
@@ -13,12 +13,13 @@ termination signal it aborts its own communicators -- ``ncclCommAbort`` kills
 the local kernels and unblocks whatever host thread was waiting on them --
 then waits out a grace period so its peers' aborts finish before it exits.
 
-A Python signal handler runs only when the main thread returns to the
-interpreter, and a preempted rank's main thread is typically blocked inside a
-collective's stream sync, so a handler could never run in time. Instead the
-signal is observed on a dedicated listener thread through
-``signal.set_wakeup_fd``, which CPython's C-level handler writes regardless of
-what the main thread is doing.
+The signal is received on a *listener* -- a dedicated thread whose only job is
+to wait for the signal -- because the main thread cannot be trusted to receive
+it: a preempted rank's main thread is typically blocked inside a collective,
+where an ordinary Python signal handler would never run. How the listener
+observes the signal anyway is `SignalListener`'s concern
+(`fme.core.distributed._signal_listener`); everything that *happens* on
+termination is decided here, in `_abort_and_exit` and the steps it calls.
 
 The instants before the listener is armed remain unprotected --
 ``init_process_group`` itself, inside ``Distributed.context()`` entry, most
@@ -31,10 +32,11 @@ import signal
 import threading
 import time
 import traceback
-import types
 from collections.abc import Callable, Generator
 
 from fme.core.device import in_dataloader_worker
+
+from ._signal_listener import SignalListener
 
 TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
 
@@ -45,18 +47,12 @@ TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT
 # default timeout, torch/distributed/elastic/agent/server/local_elastic_agent.py).
 DEFAULT_GRACE_PERIOD = 5.0
 
-# How long the listener waits for the main thread to unwind into the
-# context's exit before giving up on the post-abort callbacks. One batch of
-# compute bounds the unwind in the common case; together with the callbacks
-# and grace period this must fit torchrun's 30s SIGTERM-to-SIGKILL budget.
-DEFAULT_PARK_TIMEOUT = 5.0
-
-# tells the sentinel apart from signal numbers, which are all positive
-_STOP_LISTENING = 0
-
-_armed = False  # whether the wakeup fd currently belongs to this module
-_pipe_fds: tuple[int, int] | None = None
-_at_fork_registered = False
+# How long the listener waits for the main thread to stop touching training
+# state (see _ExitCoordination.training_state_frozen) before giving up on the
+# post-abort callbacks. One batch of compute bounds the wait in the common
+# case; together with the callbacks and grace period this must fit torchrun's
+# 30s SIGTERM-to-SIGKILL budget.
+DEFAULT_STATE_FREEZE_TIMEOUT = 5.0
 
 _post_abort_callbacks: list[Callable[[], None]] = []
 
@@ -67,8 +63,8 @@ def add_post_abort_callback(callback: Callable[[], None]) -> None:
     Callbacks run only once the main thread has unwound into the context's
     exit, where it blocks until the process ends -- so their reads of training
     state cannot race it. A main thread that has not unwound within
-    ``park_timeout`` (still computing, or stuck somewhere that is not a
-    collective) forfeits the callbacks rather than risk a torn snapshot.
+    ``state_freeze_timeout`` (still computing, or stuck somewhere that is not
+    a collective) forfeits the callbacks rather than risk a torn snapshot.
     Best-effort in duration too: the scheduler's SIGKILL caps how long a
     callback may take. The communicators are gone by then, so callbacks must
     not use collectives, nor the logging module (see ``write_stderr``).
@@ -78,38 +74,6 @@ def add_post_abort_callback(callback: Callable[[], None]) -> None:
 
 def clear_post_abort_callbacks() -> None:
     _post_abort_callbacks.clear()
-
-
-def _disarm_in_child() -> None:
-    """Undo the parent's signal setup in a forked child.
-
-    A fork-started DataLoader worker inherits the ignore-handler and the wakeup
-    fd, which still feeds the parent's pipe: a signal delivered to the worker
-    would masquerade as the parent's own preemption. Restore the defaults so
-    the child dies as it would have without the inheritance. This runs in the
-    child's main thread -- fork's surviving thread is re-designated as such
-    before the at-fork hooks run -- so the signal module cooperates.
-    """
-    global _armed, _pipe_fds
-    if not _armed:
-        return
-    for sig in TERMINATION_SIGNALS:
-        signal.signal(sig, signal.SIG_DFL)
-    signal.set_wakeup_fd(-1)
-    if _pipe_fds is not None:
-        for fd in _pipe_fds:
-            os.close(fd)
-    # clear the state, or a second-generation fork (dataset code forking a
-    # worker's own subprocess) re-runs this on fd numbers the worker has
-    # since reused
-    _armed = False
-    _pipe_fds = None
-
-
-def _ignore_signal(signum: int, frame: types.FrameType | None) -> None:
-    # exists so CPython delivers the signal (writing it to the wakeup fd)
-    # instead of taking the default action; the listener thread does the work
-    pass
 
 
 def write_stderr(message: str) -> None:
@@ -127,73 +91,105 @@ def write_stderr(message: str) -> None:
         pass
 
 
-def _wait_for_termination_signal(read_fd: int) -> signal.Signals | None:
-    while True:
-        data = os.read(read_fd, 64)
-        # the wakeup fd sees every signal CPython delivers (torch's DataLoader
-        # installs a SIGCHLD handler, for one); act only on termination.
-        # Checked before the sentinel: a signal racing the context's exit must
-        # win, or the process walks on with its protection already removed.
-        for sig in TERMINATION_SIGNALS:
-            if sig in data:
-                return sig
-        if not data or _STOP_LISTENING in data:
-            return None
+class _ExitCoordination:
+    """The two facts the main thread and the listener thread tell each other.
+
+    Each starts false and flips true exactly once; the methods wrap the
+    thread-safe flag primitive (``threading.Event``) in the fact it records.
+    """
+
+    def __init__(self) -> None:
+        self._listener_owns_exit = threading.Event()
+        self._training_state_frozen = threading.Event()
+
+    def mark_listener_owns_exit(self) -> None:
+        """A termination signal arrived: from now on the listener thread ends
+        the process, and the main thread must not exit on its own.
+        """
+        self._listener_owns_exit.set()
+
+    def listener_owns_exit(self) -> bool:
+        return self._listener_owns_exit.is_set()
+
+    def mark_training_state_frozen(self) -> None:
+        """The main thread will never touch training state again, so the
+        post-abort callbacks may read it without racing a mutation.
+        """
+        self._training_state_frozen.set()
+
+    def wait_until_training_state_frozen(self, timeout: float) -> bool:
+        """Block up to ``timeout`` seconds for the freeze; False on timeout."""
+        return self._training_state_frozen.wait(timeout)
 
 
-def _listen(
-    read_fd: int,
-    abort: Callable[[], None],
-    grace_period: float,
-    park_timeout: float,
-    terminating: threading.Event,
-    main_parked: threading.Event,
-) -> None:
-    signum = _wait_for_termination_signal(read_fd)
-    if signum is None:  # the context exited normally
-        return
-    terminating.set()  # from here on this thread owns the process's exit
-    write_stderr(
-        f"Received {signal.Signals(signum).name}, aborting distributed "
-        "communicators before exiting.\n"
-    )
+def _abort_local_communicators(abort: Callable[[], None]) -> None:
+    """Stop this rank's own NCCL kernels and release its wedged host threads."""
     try:
         # not bounded: if the abort hangs, exiting anyway would guarantee the
         # peer-GPU fault, so the rank rides to the scheduler's SIGKILL instead
         abort()
     except BaseException:
         write_stderr(f"Aborting communicators failed:\n{traceback.format_exc()}")
-    if _post_abort_callbacks:
-        # the abort releases only a main thread blocked in a collective; one
-        # between collectives keeps computing until the next collective
-        # raises, and the callbacks' reads of training state would race it.
-        # Wait for it to block in the context's exit, and forfeit the
-        # callbacks rather than record a torn snapshot if it never does.
-        if main_parked.wait(park_timeout):
-            for callback in _post_abort_callbacks:
-                try:
-                    callback()
-                except BaseException:
-                    write_stderr(
-                        f"Post-abort callback failed:\n{traceback.format_exc()}"
-                    )
-        else:
-            write_stderr(
-                f"Main thread still running {park_timeout}s after the abort; "
-                "skipping post-abort callbacks.\n"
-            )
-    # peers' aborts must finish, so their kernels stop touching our memory,
-    # before we exit
+
+
+def _run_post_abort_callbacks(
+    coordination: _ExitCoordination, state_freeze_timeout: float
+) -> None:
+    """Run the registered callbacks once training state is safe to read.
+
+    The abort releases only a main thread blocked in a collective; one between
+    collectives keeps computing until the next collective raises, and the
+    callbacks' reads of training state would race it. Wait for it to block in
+    the context's exit, and forfeit the callbacks rather than record a torn
+    snapshot if it never does.
+    """
+    if not _post_abort_callbacks:
+        return
+    if not coordination.wait_until_training_state_frozen(state_freeze_timeout):
+        write_stderr(
+            f"Main thread still running {state_freeze_timeout}s after the "
+            "abort; skipping post-abort callbacks.\n"
+        )
+        return
+    for callback in _post_abort_callbacks:
+        try:
+            callback()
+        except BaseException:
+            write_stderr(f"Post-abort callback failed:\n{traceback.format_exc()}")
+
+
+def _wait_for_peer_aborts(grace_period: float) -> None:
+    """Peers' aborts must finish, so their kernels stop touching this rank's
+    memory, before this rank exits.
+    """
     time.sleep(grace_period)
+
+
+def _abort_and_exit(
+    signum: signal.Signals,
+    abort: Callable[[], None],
+    coordination: _ExitCoordination,
+    grace_period: float,
+    state_freeze_timeout: float,
+) -> None:
+    """The termination policy. Runs on the listener thread."""
+    coordination.mark_listener_owns_exit()
+    write_stderr(
+        f"Received {signal.Signals(signum).name}, aborting distributed "
+        "communicators before exiting.\n"
+    )
+    _abort_local_communicators(abort)
+    _run_post_abort_callbacks(coordination, state_freeze_timeout)
+    _wait_for_peer_aborts(grace_period)
     write_stderr(f"Exiting with code {128 + signum}.\n")
     os._exit(128 + signum)
 
 
 @contextlib.contextmanager
-def handle_termination_signals(
+def abort_and_exit_on_termination(
     abort: Callable[[], None],
     grace_period: float = DEFAULT_GRACE_PERIOD,
-    park_timeout: float = DEFAULT_PARK_TIMEOUT,
+    state_freeze_timeout: float = DEFAULT_STATE_FREEZE_TIMEOUT,
 ) -> Generator[None, None, None]:
     """Exit on SIGTERM or SIGINT, aborting the distributed backend first.
 
@@ -213,11 +209,10 @@ def handle_termination_signals(
             collective, so it must not require the main thread's cooperation.
         grace_period: Seconds to wait between aborting and exiting, so that
             peers' aborts finish while this process's memory is still mapped.
-        park_timeout: Seconds the listener waits for the main thread to block
-            in this context's exit before skipping the post-abort callbacks
-            (see ``add_post_abort_callback``).
+        state_freeze_timeout: Seconds the listener waits for the main thread
+            to block in this context's exit before skipping the post-abort
+            callbacks (see ``add_post_abort_callback``).
     """
-    global _armed, _pipe_fds, _at_fork_registered
     if threading.current_thread() is not threading.main_thread():
         # only the main thread may install handlers; a thread shares the
         # process disposition its main thread installed
@@ -230,58 +225,33 @@ def handle_termination_signals(
         yield
         return
 
-    if not _at_fork_registered:
-        os.register_at_fork(after_in_child=_disarm_in_child)
-        _at_fork_registered = True
-
-    read_fd, write_fd = os.pipe()
-    os.set_blocking(write_fd, False)
-    terminating = threading.Event()
-    main_parked = threading.Event()
-    listener = threading.Thread(
-        target=_listen,
-        args=(read_fd, abort, grace_period, park_timeout, terminating, main_parked),
-        name="termination-listener",
-        daemon=True,
+    coordination = _ExitCoordination()
+    listener = SignalListener(
+        signals=TERMINATION_SIGNALS,
+        on_signal=lambda signum: _abort_and_exit(
+            signum, abort, coordination, grace_period, state_freeze_timeout
+        ),
     )
     listener.start()
-    previous_handlers = {sig: signal.getsignal(sig) for sig in TERMINATION_SIGNALS}
-    previous_fd = signal.set_wakeup_fd(write_fd, warn_on_full_buffer=False)
-    for sig in TERMINATION_SIGNALS:
-        signal.signal(sig, _ignore_signal)
-    _pipe_fds = (read_fd, write_fd)
-    _armed = True
     try:
         yield
     finally:
-        _armed = False
-        _pipe_fds = None
-        # the main thread only joins the listener and restores dispositions
-        # from here; it will not touch training state again, so the
-        # post-abort callbacks may read it
-        main_parked.set()
-        # a signal delivered between the listener consuming this sentinel and
-        # the dispositions being restored below is dropped; the window is
-        # microseconds wide and the process is exiting anyway
-        os.write(write_fd, bytes([_STOP_LISTENING]))
-        if not terminating.is_set():
+        # the main thread only winds the listener down from here; it will not
+        # touch training state again, so the post-abort callbacks may read it
+        coordination.mark_training_state_frozen()
+        listener.request_stop()
+        if not coordination.listener_owns_exit():
             # covers the race where a signal was delivered but not yet read:
             # long enough for the listener to abort and exit
-            listener.join(timeout=grace_period + 10.0)
-        if terminating.is_set():
-            # the listener owns the exit: hold the unwinding main thread for
-            # the abort and grace period, with the ignore-handlers still
-            # installed -- restoring the previous dispositions (typically
-            # SIG_DFL) here would let a repeated signal kill the rank before
-            # the grace period ends. If the abort hangs, the scheduler's
-            # SIGKILL is the backstop.
-            listener.join()
+            listener.wait_until_finished(timeout=grace_period + 10.0)
+        if coordination.listener_owns_exit():
+            # hold the unwinding main thread for the abort and grace period,
+            # with the listener still armed -- dismantling it here would
+            # restore the previous dispositions (typically SIG_DFL) and let a
+            # repeated signal kill the rank before the grace period ends
+            listener.block_until_process_exit()
         else:
-            for sig, handler in previous_handlers.items():
-                signal.signal(sig, handler)
-            signal.set_wakeup_fd(previous_fd)
-            os.close(write_fd)
-            os.close(read_fd)
+            listener.dismantle()
             # the callbacks belonged to this context's session; a later
             # context must not fire them against torn-down state
             clear_post_abort_callbacks()
