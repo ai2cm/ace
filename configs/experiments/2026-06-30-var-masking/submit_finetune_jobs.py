@@ -2,8 +2,8 @@
 
 Each ``*-mstepft.yaml`` config in run_configs/ (from
 generate_finetune_configs.py) is submitted via run-ace-train.sh, which validates
-it and calls gantry. All fine-tunes are v5 (1-degree), so they take the 8-GPU /
-400GiB footprint like the v5 seed replicates.
+it and calls gantry. All fine-tunes are v5 (1-degree) and take the 400GiB
+footprint; GPU count is per-cluster (titan/B200 = 4, jupiter/H100 = 8).
 
 Usage:
     python submit_finetune_jobs.py [--dry-run]
@@ -24,10 +24,40 @@ RUN_SCRIPT = HERE / "run-ace-train.sh"
 WANDB_PROJECT = "VarMasking8"
 WANDB_GROUP = "ace2-var-masking-mstepft-2026-06-30"
 
-# All fine-tunes are v5 (1-degree); match the v5 seed-run footprint (the
-# run-ace-train.sh defaults of N_GPUS=2 / 100GiB are for the 4-degree runs).
-V5_N_GPUS = "8"
+# All fine-tunes are v5 (1-degree); the run-ace-train.sh defaults (N_GPUS=2 /
+# 100GiB) are for the 4-degree runs, so we override the footprint here.
+#
+# GPU count is per-cluster to avoid wasting the more powerful accelerators:
+# jupiter (H100) uses the standard 8, but titan (B200) does the same work with 4.
+# batch_size (8) is the *global* batch (local = batch_size // world_size), so 4
+# vs 8 GPUs gives identical training and 8 stays divisible by both.
+GPUS_PER_CLUSTER = {
+    "ai2/titan": "4",  # B200
+    "ai2/jupiter": "8",  # H100
+}
+DEFAULT_N_GPUS = "8"
 V5_SHARED_MEMORY = "400GiB"
+
+
+def n_gpus_for_clusters(clusters: list[str]) -> str:
+    """GPU count for the requested clusters.
+
+    A single beaker job requests a fixed GPU count and can then land on any of
+    its allowed clusters, so mixing clusters whose standard counts differ (e.g.
+    titan=4 and jupiter=8) is ambiguous -- reject it and ask for one at a time.
+    """
+    counts = {
+        cluster: GPUS_PER_CLUSTER.get(cluster, DEFAULT_N_GPUS) for cluster in clusters
+    }
+    distinct = set(counts.values())
+    if len(distinct) > 1:
+        raise ValueError(
+            "Requested clusters have different standard GPU counts "
+            f"({counts}); a job requests a fixed GPU count and could land on "
+            "either, so submit one cluster at a time "
+            "(e.g. --beaker-cluster ai2/titan, then --beaker-cluster ai2/jupiter)."
+        )
+    return distinct.pop()
 
 
 def config_to_job_name(config_filename: str) -> str:
@@ -72,15 +102,17 @@ def main() -> None:
             "generate_finetune_configs.py first"
         )
 
+    n_gpus = n_gpus_for_clusters(args.beaker_cluster)
     base_env = {
         **os.environ,
         "WANDB_PROJECT": WANDB_PROJECT,
         "BEAKER_WORKSPACE": args.beaker_workspace,
         "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
         "BEAKER_PRIORITY": args.beaker_priority,
-        "N_GPUS": V5_N_GPUS,
+        "N_GPUS": n_gpus,
         "BEAKER_SHARED_MEMORY": V5_SHARED_MEMORY,
     }
+    print(f"Using N_GPUS={n_gpus} for cluster(s): {' '.join(args.beaker_cluster)}")
     for config_filename in configs:
         config_text = (RUN_CONFIGS_DIR / config_filename).read_text()
         if "REPLACE_WITH_BEAKER_DATASET_ID" in config_text:

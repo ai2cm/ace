@@ -41,18 +41,28 @@ the per-cell `/weights` checkpoint mount.
 
 ## Run
 
+GPU count is per-cluster to avoid wasting the more powerful accelerators:
+**titan (B200) uses 4 GPUs, jupiter (H100) uses 8**. `batch_size: 8` is the
+global batch (local = batch_size // world_size), so 4 vs 8 GPUs trains
+identically and 8 stays divisible by both. Because one beaker job requests a
+fixed GPU count and could land on any allowed cluster, `submit_finetune_jobs.py`
+rejects mixing clusters with different counts -- **submit one cluster at a time**.
+
 ```bash
 # regenerate the four run_configs/*-mstepft.yaml (needs current dataset IDs)
 python generate_finetune_configs.py
 
-# dry run first
+# dry run first (one cluster at a time)
 python submit_finetune_jobs.py --dry-run \
-  --beaker-cluster ai2/titan ai2/jupiter --beaker-priority high
+  --beaker-cluster ai2/titan --beaker-priority high
 
-# submit (8 GPUs / 400GiB each, via run-ace-train.sh)
+# submit to titan (4 B200 GPUs / 400GiB each, via run-ace-train.sh)
 python submit_finetune_jobs.py \
-  --beaker-cluster ai2/titan ai2/jupiter --beaker-priority high \
-  --beaker-workspace ai2/ace
+  --beaker-cluster ai2/titan --beaker-priority high --beaker-workspace ai2/ace
+
+# ...or submit to jupiter (8 H100 GPUs)
+python submit_finetune_jobs.py \
+  --beaker-cluster ai2/jupiter --beaker-priority high --beaker-workspace ai2/ace
 ```
 
 Fine-tune run names are the source run name + `-mstepft`, wandb group
