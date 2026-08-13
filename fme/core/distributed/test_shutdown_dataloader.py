@@ -1,9 +1,9 @@
-"""The termination handler must act only in the process that installed it.
+"""The termination listener must act only in the process that installed it.
 
-Kept apart from `test_shutdown.py`, which exercises the handler in-process:
-everything here needs a real DataLoader, real worker processes and a real
-process group to signal, so it carries a driver script and process plumbing
-that the unit tests there do not.
+Kept apart from `test_shutdown.py`, which exercises the listener with plain
+forks: everything here needs a real DataLoader, real worker processes and a
+real signal to the process group, so it carries a driver script and process
+plumbing that the unit tests there do not.
 """
 
 import multiprocessing
@@ -28,7 +28,6 @@ _DRIVER = textwrap.dedent(
     only channel a forked DataLoader worker has back to the test.
     """
 
-    import multiprocessing
     import os
     import signal
     import sys
@@ -38,7 +37,6 @@ _DRIVER = textwrap.dedent(
     import torch.utils.data
 
     from fme.core.distributed import Distributed
-    from fme.core.distributed.shutdown import add_post_shutdown_callback
 
     MARKER_DIR = sys.argv[1]
     MAIN_PID = os.getpid()
@@ -73,43 +71,35 @@ _DRIVER = textwrap.dedent(
             return 1 << 20
 
         def __getitem__(self, index):
-            dispositions = " ".join(
-                f"{name}={getattr(signal.getsignal(sig), '__qualname__', None)!r}"
-                for name, sig in (
-                    ("sigint", signal.SIGINT),
-                    ("sigterm", signal.SIGTERM),
-                )
-            )
             record(
                 "started",
-                f"{dispositions}"
-                f" start_method={multiprocessing.get_start_method()}"
+                f"sigint={signal.getsignal(signal.SIGINT)!r}"
+                f" start_method={torch.multiprocessing.get_start_method()}"
                 f" ppid={os.getppid()}",
             )
             return torch.zeros(1)
 
 
     dist = Distributed.get_instance()
-    # Production passes `instance.shutdown` to `handle_termination_signals`;
-    # wrapping it here observes the backend teardown itself, not just the
-    # callbacks that follow it, and without touching production code.
-    backend_shutdown = dist.shutdown
-    dist.shutdown = lambda: (record("shutdown"), backend_shutdown())
+    # Production passes `instance.abort` to `handle_termination_signals`;
+    # wrapping it here observes which process ran it, without touching
+    # production code.
+    backend_abort = dist.abort
+    dist.abort = lambda: (record("abort"), backend_abort())
+    # the context only installs the listener for real multi-rank jobs, and this
+    # driver is a single process standing in for one rank of one
+    dist.is_distributed = lambda: True
 
-    # the real entrypoint context, so the handler is installed by production
+    # the real entrypoint context, so the listener is installed by production
     # code rather than by the test
     with Distributed.context():
-        # stands in for the Trainer's restart-checkpoint write
-        add_post_shutdown_callback(lambda: record("callback"))
-
         loader = torch.utils.data.DataLoader(
             _Dataset(),
             batch_size=1,
             num_workers=2,
-            # Mirrors the arguments fme/ace/data_loading/getters.py:116-117
-            # gives the loader on the non-zarr path: the default start method
-            # (fork, on Linux), no worker initializer to reset the inherited
-            # signal dispositions, and non-persistent workers.
+            # Mirrors the arguments fme/ace/data_loading/getters.py gives the
+            # loader on the non-zarr path: the default start method (fork, on
+            # Linux), no worker initializer, non-persistent workers.
             multiprocessing_context=None,
             worker_init_fn=None,
             persistent_workers=False,
@@ -148,14 +138,6 @@ _RANK_ENV = (
 # own message without making either arrive sooner. Observed runtime is ~10s.
 _READY_TIMEOUT = 120.0
 _EXIT_TIMEOUT = 120.0
-# A worker that decides to tear down writes its marker in microseconds, so this
-# is long enough to catch one. It is not a guarantee: the driver's exit joins
-# each worker for only MP_STATUS_CHECK_INTERVAL (5s) before terminating it, so
-# the driver being gone does not mean a worker finished arbitrary work -- the
-# negative assertion below rests on this sleep, not on that join.
-_SETTLE = 2.0
-
-_HANDLER_QUALNAME = "handle_termination_signals.<locals>.handle"
 
 # The driver is a separate interpreter of the same build, so its default matches.
 _DEFAULT_START_METHOD = multiprocessing.get_start_method()
@@ -205,32 +187,25 @@ def _kill_group(pgid: int) -> None:
     _DEFAULT_START_METHOD != "fork",
     reason=(
         f"DataLoader workers default to {_DEFAULT_START_METHOD} here, so no "
-        "worker inherits the handler this test checks is declined"
+        "worker inherits the listener setup this test checks is disarmed"
     ),
 )
-def test_dataloader_workers_do_not_tear_down_when_the_group_is_signalled(tmp_path):
-    """Only the process that installed the handler may run the teardown.
+def test_dataloader_workers_do_not_abort_when_the_group_is_signalled(tmp_path):
+    """Only the process that installed the listener may abort and exit.
 
     The default DataLoader start method is fork, so every worker inherits the
-    handler, and torchrun signals the whole process group, which delivers the
-    signal to the workers directly. A worker that runs the teardown destroys a
-    fork-inherited process group and re-runs the parent's callbacks, including
-    the Trainer's multi-GB restart-checkpoint write, which then races the
-    parent's own write of the same path.
+    ignore-handler and the wakeup fd, and torchrun signals the whole process
+    group, delivering the signal to the workers directly. Without the at-fork
+    disarm a worker's copy of the wakeup fd feeds the parent's pipe, and the
+    parent cannot tell a signal sent to a worker from its own preemption.
 
-    The `get_worker_info` guard in `handle_termination_signals` cannot prevent
-    this: it is consulted when the context is entered, not when the signal
-    arrives, and a forked worker inherited an already-installed handler.
-
-    SIGINT is the signal to test with, because it is the one that reaches the
-    workers' Python handler. torch replaces the SIGTERM disposition in every
-    worker with a C-level handler of its own
+    SIGINT is the signal to test with: torch replaces the SIGTERM disposition
+    in every worker with a C-level handler of its own
     (`signal_handling._set_worker_signal_handlers`, called at the top of
-    `_worker_loop`), which pre-empts the Python-level handler and lets the
-    worker die instead; it installs nothing for SIGINT. A SIGTERM case would
-    therefore pass whether or not the handler guards itself, so it is left
-    out. Ctrl-C delivers SIGINT to the whole foreground group, and torchrun's
-    agent forwards whichever death signal it received.
+    `_worker_loop`, after the at-fork hooks), so a SIGTERM case could pass
+    whether or not the disarm ran. It installs nothing for SIGINT. Ctrl-C
+    delivers SIGINT to the whole foreground group, and torchrun's agent
+    forwards whichever death signal it received.
     """
     sig = signal.SIGINT
     marker_dir = tmp_path / "markers"
@@ -254,12 +229,7 @@ def test_dataloader_workers_do_not_tear_down_when_the_group_is_signalled(tmp_pat
 
         os.killpg(pgid, sig)  # as torchrun kills a rank
 
-        _wait_for(str(marker_dir), "callback", child, _EXIT_TIMEOUT)
-        try:
-            child.wait(timeout=_EXIT_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            pass
-        time.sleep(_SETTLE)
+        child.wait(timeout=_EXIT_TIMEOUT)
     finally:
         _kill_group(pgid)
         child.wait(timeout=_EXIT_TIMEOUT)
@@ -267,31 +237,25 @@ def test_dataloader_workers_do_not_tear_down_when_the_group_is_signalled(tmp_pat
             child.stderr.close()
 
     # Preconditions, so that the assertions below cannot pass vacuously: two
-    # workers really were running, in their own processes, and really did
-    # inherit the handler by forking.
+    # workers really were running, in their own processes, fork-started inside
+    # the armed context.
     worker_pids = set(started) - {driver_pid}
     assert len(worker_pids) >= 2, f"expected forked workers, got {started}"
-    inherited = f"{sig.name.lower()}='{_HANDLER_QUALNAME}'"
     for pid in worker_pids:
-        assert (
-            inherited in started[pid]
-        ), f"worker {pid} did not inherit the {sig.name} handler: {started[pid]}"
         assert (
             "start_method=fork" in started[pid]
         ), f"worker {pid} was not fork-started: {started[pid]}"
+        # the at-fork disarm restored the default disposition; the parent's
+        # ignore-handler would read as `_ignore_signal` here
+        assert (
+            "sigint=<Handlers.SIG_DFL" in started[pid]
+        ), f"worker {pid} was not disarmed at fork: {started[pid]}"
 
-    shutdowns = _markers(str(marker_dir), "shutdown")
-    callbacks = _markers(str(marker_dir), "callback")
-    # and the signal really did reach the group, so an absent worker teardown
-    # means the worker declined to act, not that nothing was ever signalled
+    aborts = _markers(str(marker_dir), "abort")
     assert (
-        driver_pid in shutdowns and driver_pid in callbacks
-    ), f"the driver itself did not tear down: {shutdowns=} {callbacks=}"
-
-    assert set(shutdowns) == {
+        driver_pid in aborts
+    ), f"the driver itself did not abort on the signal: {aborts=}"
+    assert set(aborts) == {
         driver_pid
-    }, f"a process other than the driver shut the backend down: {shutdowns}"
-    assert set(callbacks) == {driver_pid}, (
-        f"a process other than the driver ran the post-shutdown callbacks: "
-        f"{callbacks}"
-    )
+    }, f"a process other than the driver ran the abort: {aborts}"
+    assert child.returncode == 128 + sig
