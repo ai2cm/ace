@@ -31,6 +31,10 @@ data_writer:
     save_monthly_files: true
     names:
       - surface_temperature
+      # the field total_energy_budget_correction acts on, on the same top layer
+      # as the prescribed humidity: with the correction off the atmosphere's
+      # energy budget is open, and temperature drift is the signature
+      - air_temperature_0
       - specific_total_water_0
       - LHTFLsfc
       - SHTFLsfc
