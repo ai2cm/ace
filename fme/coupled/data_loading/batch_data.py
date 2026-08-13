@@ -29,6 +29,19 @@ class CoupledPrognosticState:
             self.ocean_data.to_device(), self.atmosphere_data.to_device()
         )
 
+    def apply_config_seed(self, seed: int | None) -> "CoupledPrognosticState":
+        """Return a state whose components are seeded from ``config.seed``.
+
+        Each component gets its own generator seeded from the same value; they
+        are separate models, so their noise sequences do not interact. See
+        ``PrognosticState.apply_config_seed`` for the precedence rule when a
+        random state is already present.
+        """
+        return CoupledPrognosticState(
+            self.ocean_data.apply_config_seed(seed),
+            self.atmosphere_data.apply_config_seed(seed),
+        )
+
     def as_batch_data(self) -> "CoupledBatchData":
         return CoupledBatchData(
             self.ocean_data.as_batch_data(), self.atmosphere_data.as_batch_data()

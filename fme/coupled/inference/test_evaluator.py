@@ -166,6 +166,7 @@ def inference_helper(
     use_prediction_data: bool = False,
     expected_derived_names: list[str] | None = None,
     mock_data: MockCoupledData | None = None,
+    seed: int | None = None,
 ):
     """
     Reusable helper for running coupled inference tests.
@@ -243,6 +244,7 @@ def inference_helper(
             ),
         ),
         coupled_steps_in_memory=coupled_steps_in_memory,
+        seed=seed,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -457,12 +459,13 @@ def test_evaluator_rejects_top_level_override_with_standalone_checkpoint():
 
 @pytest.mark.parametrize(
     "n_coupled_steps,coupled_steps_in_memory,n_initial_conditions,"
-    "save_standalone_component_checkpoints,use_prediction_data",
+    "save_standalone_component_checkpoints,use_prediction_data,seed",
     [
-        (2, 1, 2, True, False),
-        (4, 2, 1, False, False),
-        (2, 2, 1, False, False),
-        (2, 1, 2, False, True),
+        (2, 1, 2, True, False, None),
+        (4, 2, 1, False, False, None),
+        (2, 2, 1, False, False, None),
+        (2, 1, 2, False, True, None),
+        (2, 1, 1, False, False, 0),
     ],
 )
 @pytest.mark.medium_duration
@@ -473,6 +476,7 @@ def test_evaluator_inference(
     n_initial_conditions: int,
     save_standalone_component_checkpoints: bool,
     use_prediction_data: bool,
+    seed: int | None,
 ):
     ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag", "thetao_0"]
     ocean_out_names = ["o_prog", "sst", "o_diag", "thetao_0"]
@@ -518,6 +522,7 @@ def test_evaluator_inference(
         use_prediction_data=use_prediction_data,
         expected_derived_names=expected_derived_names,
         mock_data=mock_data,
+        seed=seed,
     )
 
 
