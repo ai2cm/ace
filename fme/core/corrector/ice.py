@@ -210,10 +210,6 @@ class IceBudgetCorrection:
     config: IceBudgetCorrectionConfig
     timestep_seconds: float
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset()
-
     def __call__(
         self,
         input_data: TensorMapping,

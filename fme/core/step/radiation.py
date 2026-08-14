@@ -106,12 +106,11 @@ class SeparateRadiationStepConfig(StepConfigABC):
         init_weights: Callable[[list[nn.Module]], None],
     ) -> "SeparateRadiationStep":
         logging.info("Initializing stepper from provided config")
-        corrector = self.corrector.get_corrector(dataset_info)
-        corrector.discover_modified_names(
+        corrector = self.corrector.get_corrector(
+            dataset_info,
             input_names=self.input_names,
             gen_names=self.output_names,
             forcing_names=self.next_step_input_names,
-            img_shape=dataset_info.img_shape,
         )
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SeparateRadiationStep(
@@ -319,8 +318,8 @@ class SeparateRadiationStep(StepABC):
         return self._config
 
     @property
-    def corrector(self) -> CorrectorABC | None:
-        return self._corrector
+    def corrector_modified_names(self) -> frozenset[str]:
+        return self._corrector.modified_names
 
     @property
     def surface_temperature_name(self) -> str | None:
@@ -407,7 +406,6 @@ class SeparateRadiationStep(StepABC):
             residual_prediction=self._config.residual_prediction,
             prognostic_names=self.prognostic_names,
             stepper_state=args.stepper_state,
-            detach_corrector_deltas=self._detach_corrector_deltas,
         )
 
     def get_regularizer_loss(self) -> torch.Tensor:

@@ -7,7 +7,6 @@ import dacite
 import torch
 from torch import nn
 
-from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
@@ -274,12 +273,8 @@ class MultiCallStep(StepABC):
         return self._config
 
     @property
-    def corrector(self) -> CorrectorABC | None:
-        return self._wrapped_step.corrector
-
-    def set_detach_corrector_deltas(self, detach: bool) -> None:
-        super().set_detach_corrector_deltas(detach)
-        self._wrapped_step.set_detach_corrector_deltas(detach)
+    def corrector_modified_names(self) -> frozenset[str]:
+        return self._wrapped_step.corrector_modified_names
 
     @property
     def modules(self) -> torch.nn.ModuleList:

@@ -27,7 +27,7 @@ from fme.ace.stepper.parameter_init import (
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.loss import CorrectorLossConfig
+from fme.core.corrector.loss import CorrectorLoss, CorrectorLossConfig, StepOutputLoss
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
@@ -870,47 +870,48 @@ class Stepper:
         self._dataset_info = dataset_info
         self.forcing_deriver = config.derived_forcings.build(dataset_info)
 
-    def build_loss(
-        self,
-        loss_config: StepLossConfig,
-        corrector_loss: CorrectorLossConfig | None = None,
-    ) -> StepLoss:
+    def build_loss(self, loss_config: StepLossConfig) -> StepLoss:
         """Build a StepLoss from the given config using this stepper's normalizer
         and dataset info.
 
         Args:
             loss_config: The loss configuration to build from.
-            corrector_loss: Optional training-only configuration for
-                consuming the corrector's correction deltas in the loss.
-                When given, its selections are validated here at build time
-                and the step is flipped to carry attached (non-detached)
-                deltas so gradients flow through the correction.
 
         Returns:
             A StepLoss built using this stepper's loss normalizer, gridded
             operations, loss variable names, and channel dimension.
         """
         loss_normalizer = self._step_obj.get_loss_normalizer()
-        corrector_args = None
-        if corrector_loss is not None:
-            corrector_args = corrector_loss.build(
-                self._step_obj.corrector,
-                prescribed_prognostic_names=self.get_prescribed_prognostic_names(),
-                normalizer=loss_normalizer,
-                gridded_operations=self._dataset_info.gridded_operations,
-                channel_dim=self.CHANNEL_DIM,
-            )
-        loss = loss_config.build(
+        return loss_config.build(
             self._dataset_info.gridded_operations,
             out_names=self.loss_names,
             channel_dim=self.CHANNEL_DIM,
             normalizer=loss_normalizer,
-            corrector_args=corrector_args,
         )
-        if loss.needs_corrector_deltas:
-            # detaching would silently zero part of the correction gradient
-            self._step_obj.set_detach_corrector_deltas(False)
-        return loss
+
+    def build_corrector_loss(
+        self, corrector_loss: CorrectorLossConfig | None
+    ) -> CorrectorLoss | None:
+        """Build the corrector-delta half of the training loss, if configured.
+
+        Args:
+            corrector_loss: Optional training-only configuration for consuming
+                the corrector's correction deltas in the loss. Its selections
+                are validated here, at build time, against the delta keys the
+                step's corrector produces.
+
+        Returns:
+            A CorrectorLoss, or None when no corrector loss is configured.
+        """
+        if corrector_loss is None:
+            return None
+        return corrector_loss.build(
+            self._step_obj.corrector_modified_names,
+            prescribed_prognostic_names=self.get_prescribed_prognostic_names(),
+            normalizer=self._step_obj.get_loss_normalizer(),
+            gridded_operations=self._dataset_info.gridded_operations,
+            channel_dim=self.CHANNEL_DIM,
+        )
 
     @property
     def config(self) -> StepperConfig:
@@ -1570,6 +1571,25 @@ class TrainStepperConfig:
         )
 
 
+@dataclasses.dataclass
+class _AccumulatedLoss:
+    """The results of accumulating the loss over a batch's forward steps.
+
+    Parameters:
+        output_list: The per-step ensemble predictions.
+        per_channel_losses: The per-channel loss values accumulated over the
+            optimized steps, or None when no step was optimized. Corrector
+            regularization channels appear under a ``corrector_regularization/``
+            key prefix and are unweighted.
+        corrector_regularization: The mean corrector regularization penalty
+            over the steps that produced one, or None when there was none.
+    """
+
+    output_list: list[EnsembleTensorDict]
+    per_channel_losses: dict[str, ChannelLossInfo] | None
+    corrector_regularization: torch.Tensor | None
+
+
 def _finalize_per_channel_losses(
     weighted_sums: dict[str, torch.Tensor],
     total_counts: dict[str, int],
@@ -1622,7 +1642,10 @@ class TrainStepper(
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
-        self._loss_obj = self._stepper.build_loss(config.loss, config.corrector_loss)
+        self._loss_obj = StepOutputLoss(
+            self._stepper.build_loss(config.loss),
+            self._stepper.build_corrector_loss(config.corrector_loss),
+        )
 
     def train_on_batch(
         self,
@@ -1664,7 +1687,7 @@ class TrainStepper(
         data = self._stepper.forcing_deriver(data)
 
         optimization.set_mode(self._stepper.modules)
-        output_list, per_channel_losses = self._accumulate_loss(
+        accumulated = self._accumulate_loss(
             data,
             target_data,
             optimization,
@@ -1677,9 +1700,11 @@ class TrainStepper(
         if torch.any(regularizer_loss > 0):
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
+        if accumulated.corrector_regularization is not None:
+            metrics["corrector_regularization"] = accumulated.corrector_regularization
         optimization.step_weights()
 
-        gen_data = process_ensemble_prediction_generator_list(output_list)
+        gen_data = process_ensemble_prediction_generator_list(accumulated.output_list)
 
         stepped = TrainOutput(
             metrics=metrics,
@@ -1688,7 +1713,7 @@ class TrainStepper(
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self._derive_func,
-            per_channel_losses=per_channel_losses,
+            per_channel_losses=accumulated.per_channel_losses,
         )
         ic = data.get_start(
             set(data.data.keys()), self.n_ic_timesteps
@@ -1707,7 +1732,7 @@ class TrainStepper(
         metrics: dict[str, float],
         n_forward_steps: int,
         n_loss_steps: int,
-    ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
+    ) -> _AccumulatedLoss:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
@@ -1746,18 +1771,17 @@ class TrainStepper(
                     step_output.output, n_ensemble=n_ensemble
                 )
                 output_list.append(gen_step)
-                deltas: TensorMapping | None = None
-                if self._loss_obj.needs_corrector_deltas:
-                    # Hard boundary: training consumes correction deltas at
-                    # the StepOutput level here, never via the
-                    # StepDiagnostics carriage
-                    # (fme/core/step/step_diagnostics.py) -- that carriage
-                    # is detached, output-masked, and inference-only by
-                    # design.
-                    deltas = unfold_ensemble_dim(
-                        dict(step_output.corrector_diagnostics.delta),
-                        n_ensemble=n_ensemble,
-                    )
+                # Hard boundary: training consumes correction deltas at the
+                # StepOutput level here, never via the StepDiagnostics
+                # carriage (fme/core/step/step_diagnostics.py) -- that
+                # carriage is detached, output-masked, and inference-only by
+                # design. The unfold is metadata-only (a view sharing
+                # storage) and an empty delta dict passes through unchanged,
+                # so this runs unconditionally.
+                deltas = unfold_ensemble_dim(
+                    dict(step_output.corrector_diagnostics.delta),
+                    n_ensemble=n_ensemble,
+                )
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1778,11 +1802,16 @@ class TrainStepper(
                 )
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
-        if corrector_penalties:
-            metrics["corrector_regularization"] = torch.stack(
-                corrector_penalties
-            ).mean()
-        return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
+        corrector_regularization = (
+            torch.stack(corrector_penalties).mean() if corrector_penalties else None
+        )
+        return _AccumulatedLoss(
+            output_list=output_list,
+            per_channel_losses=_finalize_per_channel_losses(
+                weighted_sums, total_counts
+            ),
+            corrector_regularization=corrector_regularization,
+        )
 
     def _accumulate_step_loss(
         self,
@@ -1794,8 +1823,8 @@ class TrainStepper(
         metrics: dict[str, float],
         weighted_sums: dict[str, torch.Tensor],
         total_counts: dict[str, int],
+        deltas: TensorMapping,
         corrector_penalties: list[torch.Tensor] | None = None,
-        deltas: TensorMapping | None = None,
     ) -> torch.Tensor:
         step_loss = self._loss_obj(
             gen_step,
@@ -1810,12 +1839,16 @@ class TrainStepper(
         step_total_loss = step_loss.total()
         metrics[f"loss_step_{step}"] = step_total_loss.detach()
         if step_loss.corrector_regularization is not None:
-            penalty = step_loss.corrector_regularization.detach()
+            penalty = step_loss.corrector_regularization.total().detach()
             metrics[f"corrector_regularization_step_{step}"] = penalty
             if corrector_penalties is not None:
                 corrector_penalties.append(penalty)
         if optimize:
-            per_ch = step_loss.get_channel_losses()
+            per_ch = dict(step_loss.get_channel_losses())
+            # Unweighted per-channel penalties, reported alongside the
+            # main-loss channels rather than summing into them.
+            for name, info in step_loss.get_corrector_channel_losses().items():
+                per_ch[f"corrector_regularization/{name}"] = info
             for k, v in per_ch.items():
                 if k in weighted_sums:
                     weighted_sums[k] = weighted_sums[k] + v.loss.detach() * v.count

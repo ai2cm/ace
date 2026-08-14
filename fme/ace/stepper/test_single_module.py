@@ -3215,10 +3215,6 @@ class _ScaleCorrection:
         self._name = name
         self._factor = factor
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset()
-
     def __call__(
         self,
         input_data: TensorMapping,
@@ -3287,7 +3283,7 @@ def _corrector_loss_stepper(
             corrector = EpochScheduledCorrector(
                 wrapped=corrector, disabled_epochs=disabled_epochs
             )
-        corrector.discover_modified_names(
+        corrector._discover_modified_names(
             input_names=step.input_names,
             gen_names=step.output_names,
             forcing_names=[],
@@ -3338,7 +3334,7 @@ def test_gradient_flows_through_correction_when_configured():
         regularization=CorrectorRegularizationConfig(names_and_prefixes=["a"])
     )
     grads = {}
-    for label, config in (("detached", None), ("attached", corrector_loss)):
+    for label, config in (("baseline", None), ("regularized", corrector_loss)):
         module = _ScaleModule()
         stepper = _corrector_loss_stepper(module, _ScaleCorrection("a", 2.0))
         train_stepper = _init_train_stepper(
@@ -3346,18 +3342,15 @@ def test_gradient_flows_through_correction_when_configured():
             loss=StepLossConfig(type="MSE"),
             corrector_loss=config,
         )
-        # without corrector_loss the plain path still detaches deltas at the
-        # step seam; with it, build_loss flips the step to attached deltas
-        assert stepper._step_obj._detach_corrector_deltas is (config is None)
         # the prebuilt module is deep-copied into the stepper, so read the
         # stepper's own parameters
         optimization = _GradRecordingOptimization(stepper.modules.parameters())
         train_stepper.train_on_batch(data, optimization=optimization)
         assert optimization.grads is not None
         grads[label] = optimization.grads[0]
-    assert torch.isfinite(grads["detached"]).all()
-    assert torch.isfinite(grads["attached"]).all()
-    assert not torch.allclose(grads["detached"], grads["attached"])
+    assert torch.isfinite(grads["baseline"]).all()
+    assert torch.isfinite(grads["regularized"]).all()
+    assert not torch.allclose(grads["baseline"], grads["regularized"])
 
 
 def test_corrector_regularization_gradient_accumulation():
@@ -3513,6 +3506,23 @@ def test_corrector_regularization_metrics():
         )
     batch_penalty = reg_out.metrics["corrector_regularization"]
     torch.testing.assert_close(batch_penalty, torch.full_like(batch_penalty, offset**2))
+    # per-channel penalties, unweighted, for exactly the selected names
+    assert reg_out.per_channel_losses is not None
+    penalty_channels = {
+        name: info
+        for name, info in reg_out.per_channel_losses.items()
+        if name.startswith("corrector_regularization/")
+    }
+    assert set(penalty_channels) == {"corrector_regularization/a"}
+    channel_penalty = penalty_channels["corrector_regularization/a"].loss
+    torch.testing.assert_close(
+        channel_penalty, torch.full_like(channel_penalty, offset**2)
+    )
+    assert base_out.per_channel_losses is not None
+    assert not any(
+        name.startswith("corrector_regularization/")
+        for name in base_out.per_channel_losses
+    )
 
 
 def test_both_features_together():
@@ -3542,8 +3552,8 @@ def test_both_features_together():
     )
     both_out = both.train_on_batch(data, optimization=NullOptimization())
     base_out = no_corrector.train_on_batch(data, optimization=NullOptimization())
-    # the main loss sees the swapped (pre-corrector) predictions, and the
-    # weighted penalty is added on top
+    # the main loss sees the pre-corrector outputs, and the weighted penalty
+    # is added on top
     torch.testing.assert_close(
         both_out.metrics["loss"], base_out.metrics["loss"] + weight * offset**2
     )

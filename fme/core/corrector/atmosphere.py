@@ -62,10 +62,6 @@ class ConserveDryAir:
     vertical_coordinate: HasAtmosphereVerticalIntegral | None
     precision: torch.dtype
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset()
-
     def __call__(
         self,
         input_data: TensorMapping,
@@ -107,10 +103,6 @@ class ZeroGlobalMeanMoistureAdvection:
 
     area_weighted_mean: AreaWeightedMean
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset()
-
     def __call__(
         self,
         input_data: TensorMapping,
@@ -151,10 +143,6 @@ class MoistureBudgetCorrection:
         "advection_and_evaporation",
     ]
     clip_frozen_precipitation: bool = False
-
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset()
 
     def __call__(
         self,
@@ -199,10 +187,6 @@ class TotalEnergyBudgetCorrection:
     timestep_seconds: float
     method: Literal["constant_temperature"]
     unaccounted_heating: float
-
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset()
 
     def __call__(
         self,

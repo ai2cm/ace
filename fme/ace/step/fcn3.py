@@ -318,12 +318,11 @@ class FCN3StepConfig(StepConfigABC):
         init_weights: Callable[[list[nn.Module]], None],
     ) -> "FCN3Step":
         logging.info("Initializing stepper from provided config")
-        corrector = self.corrector.get_corrector(dataset_info)
-        corrector.discover_modified_names(
+        corrector = self.corrector.get_corrector(
+            dataset_info,
             input_names=self.input_names,
             gen_names=self.output_names,
             forcing_names=self.next_step_input_names,
-            img_shape=dataset_info.img_shape,
         )
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return FCN3Step(
@@ -413,8 +412,8 @@ class FCN3Step(StepABC):
         return self._config
 
     @property
-    def corrector(self) -> CorrectorABC | None:
-        return self._corrector
+    def corrector_modified_names(self) -> frozenset[str]:
+        return self._corrector.modified_names
 
     @property
     def normalizer(self) -> StandardNormalizer:
@@ -494,7 +493,6 @@ class FCN3Step(StepABC):
             prognostic_names=self.prognostic_names,
             prescribed_prognostic_names=self._config.prescribed_prognostic_names,
             stepper_state=args.stepper_state,
-            detach_corrector_deltas=self._detach_corrector_deltas,
         )
 
     def get_regularizer_loss(self):

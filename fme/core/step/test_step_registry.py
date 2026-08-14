@@ -33,10 +33,6 @@ class MockStep(StepABC):
         return self._config
 
     @property
-    def corrector(self):
-        return None
-
-    @property
     def modules(self):
         raise NotImplementedError()
 

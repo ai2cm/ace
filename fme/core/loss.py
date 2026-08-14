@@ -78,18 +78,12 @@ class LossOutput:
         losses: list[LossComponent],
         channel_names: list[str],
         mask: torch.Tensor | None = None,
-        corrector_regularization: torch.Tensor | None = None,
-        corrector_regularization_weight: float = 1.0,
     ):
         self._losses = losses
         self._channel_names = channel_names
         self._mask = mask
         self._per_channel: torch.Tensor | None = None
         self._counts: list[int] | None = None
-        #: unweighted corrector-regularization penalty, or None when the
-        #: corrector-regularization feature is not active on this loss
-        self.corrector_regularization = corrector_regularization
-        self.corrector_regularization_weight = corrector_regularization_weight
 
     def _reduce(self) -> tuple[torch.Tensor, list[int]]:
         """Return ``(per_channel, counts)`` tensors, computed once.
@@ -120,21 +114,14 @@ class LossOutput:
         This is the mean of the per-channel losses across channels (over
         active channels only when a mask is present), not a sum. Adding
         or removing channels therefore does not change the scale of the
-        returned value. When a corrector-regularization penalty is
-        attached, ``weight * penalty`` is added to the result.
+        returned value.
         """
         pc, _ = self._reduce()
         if self._mask is not None:
             active = self._mask.sum(dim=0) > 0
-            main = pc[active].mean() if active.any() else pc.mean()
-        else:
-            main = pc.mean()
-        if self.corrector_regularization is not None:
-            return (
-                main
-                + self.corrector_regularization_weight * self.corrector_regularization
-            )
-        return main
+            if active.any():
+                return pc[active].mean()
+        return pc.mean()
 
     def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
         """Per-channel mean losses with active-sample counts.
@@ -158,30 +145,11 @@ class LossOutput:
         }
 
     def scale(self, weight: float) -> "LossOutput":
-        """Return a new ``LossOutput`` with every component scaled.
-
-        A corrector-regularization penalty is carried through unchanged:
-        the per-step sqrt decay applies to the main loss only, never the
-        penalty.
-        """
+        """Return a new ``LossOutput`` with every component scaled."""
         return LossOutput(
             [type(c)(c.loss * weight) for c in self._losses],
             self._channel_names,
             mask=self._mask,
-            corrector_regularization=self.corrector_regularization,
-            corrector_regularization_weight=self.corrector_regularization_weight,
-        )
-
-    def with_corrector_regularization(
-        self, penalty: torch.Tensor, weight: float
-    ) -> "LossOutput":
-        """Return a copy carrying the unweighted penalty and its weight."""
-        return LossOutput(
-            self._losses,
-            self._channel_names,
-            mask=self._mask,
-            corrector_regularization=penalty,
-            corrector_regularization_weight=weight,
         )
 
 
@@ -904,57 +872,18 @@ class LossConfig:
         return final_loss.to(device=get_device())
 
 
-@dataclasses.dataclass
-class StepLossCorrectorArgs:
-    """Corrector-loss arguments consumed by :class:`StepLoss`.
-
-    Built by ``fme.core.corrector.loss.CorrectorLossConfig.build``; defined
-    here so that module imports this one, never the reverse.
-
-    Parameters:
-        precorrector_names: Names whose main-loss prediction is the
-            pre-corrector value ``prediction - delta``, or None when
-            pre-corrector optimization is not configured.
-        regularizer: A mapping loss penalizing the selected deltas toward
-            zero in loss-normalized space, or None when corrector
-            regularization is not configured.
-        regularization_weight: The weight applied to the penalty in
-            :meth:`LossOutput.total`.
-    """
-
-    precorrector_names: list[str] | None
-    regularizer: WeightedMappingLoss | None
-    regularization_weight: float
-
-
 class StepLoss(torch.nn.Module):
     def __init__(
-        self,
-        loss: WeightedMappingLoss,
-        sqrt_loss_decay_constant: float = 0.0,
-        corrector_args: StepLossCorrectorArgs | None = None,
+        self, loss: WeightedMappingLoss, sqrt_loss_decay_constant: float = 0.0
     ):
         super().__init__()
         self.loss = loss
         self.sqrt_loss_decay_constant = sqrt_loss_decay_constant
-        self._corrector_args = corrector_args
 
     @property
     def _normalizer(self) -> StandardNormalizer:
         # private because this is only used in unit tests
         return self.loss.normalizer
-
-    @property
-    def needs_corrector_deltas(self) -> bool:
-        """Whether either corrector-loss feature is configured; both
-        differentiate through the correction deltas.
-        """
-        if self._corrector_args is None:
-            return False
-        return (
-            self._corrector_args.precorrector_names is not None
-            or self._corrector_args.regularizer is not None
-        )
 
     def forward(
         self,
@@ -962,7 +891,6 @@ class StepLoss(torch.nn.Module):
         target_dict: TensorMapping,
         step: int,
         data_mask: TensorMapping | None = None,
-        deltas: TensorMapping | None = None,
     ) -> LossOutput:
         """
         Args:
@@ -971,57 +899,14 @@ class StepLoss(torch.nn.Module):
             step: The step number, indexed from 0 for the first step.
             data_mask: Optional per-variable boolean masks forwarded to
                 the underlying :class:`WeightedMappingLoss`.
-            deltas: Optional correction deltas produced by the step's
-                corrector. Only consumed when corrector-loss features are
-                configured; None or empty (e.g. an epoch-disabled
-                corrector) leaves the loss unchanged.
 
         Returns:
-            A ``LossOutput`` wrapping the step-weighted loss tensor,
-            carrying the unweighted corrector-regularization penalty when
-            that feature is active.
+            A ``LossOutput`` wrapping the step-weighted loss tensor.
         """
         step_weight = (1.0 + self.sqrt_loss_decay_constant * step) ** (-0.5)
-        if self._corrector_args is None or deltas is None or len(deltas) == 0:
-            return self.loss(predict_dict, target_dict, data_mask=data_mask).scale(
-                step_weight
-            )
-        precorrector_names = set(self._corrector_args.precorrector_names or [])
-        regularizer = self._corrector_args.regularizer
-        regularizer_names = (
-            list(regularizer.packer.names) if regularizer is not None else []
+        return self.loss(predict_dict, target_dict, data_mask=data_mask).scale(
+            step_weight
         )
-        missing = sorted(precorrector_names.union(regularizer_names) - set(deltas))
-        if missing:
-            raise ValueError(
-                "Names selected for corrector_loss are missing from the "
-                f"corrector's deltas: {missing}. An active corrector must "
-                "produce a delta for every selected name."
-            )
-        if precorrector_names:
-            predict_dict = {
-                k: v - deltas[k] if k in precorrector_names else v
-                for k, v in predict_dict.items()
-            }
-        main = self.loss(predict_dict, target_dict, data_mask=data_mask)
-        if regularizer is not None:
-            selected_deltas = {k: deltas[k] for k in regularizer_names}
-            # Copy each delta's NaN pattern onto the zeros target so masked
-            # (NaN-filled) points drop through WeightedMappingLoss's
-            # NaN-target zeroing.
-            zero_targets = {
-                k: torch.where(
-                    d.isnan(), torch.full_like(d, torch.nan), torch.zeros_like(d)
-                )
-                for k, d in selected_deltas.items()
-            }
-            penalty = regularizer(selected_deltas, zero_targets).total()
-            # No per-step decay on the penalty: scale() carries it through
-            # unchanged, only regularization_weight scales it in total().
-            main = main.with_corrector_regularization(
-                penalty, self._corrector_args.regularization_weight
-            )
-        return main.scale(step_weight)
 
 
 @dataclasses.dataclass
@@ -1076,7 +961,6 @@ class StepLossConfig:
         out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
-        corrector_args: StepLossCorrectorArgs | None = None,
     ) -> StepLoss:
         loss = self.loss_config.build(
             gridded_operations=gridded_ops,
@@ -1090,5 +974,4 @@ class StepLossConfig:
                 normalizer=normalizer,
             ),
             sqrt_loss_decay_constant=self.sqrt_loss_step_decay_constant,
-            corrector_args=corrector_args,
         )

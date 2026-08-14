@@ -59,12 +59,6 @@ class ForcePositive:
     names: list[str]
     keep_gradient: bool = False
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        if self.keep_gradient:
-            return frozenset(self.names)
-        return frozenset()
-
     def __call__(
         self,
         input_data: TensorMapping,

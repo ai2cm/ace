@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Collection
 
 import pytest
 import torch
@@ -6,19 +7,15 @@ import torch
 from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrectorConfig
-from fme.core.corrector.ocean import (
-    OceanCorrectorConfig,
-    SeaIceFractionConfig,
-    SeaIceFractionCorrection,
-)
+from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     CorrectionSequence,
     CorrectorABC,
+    CorrectorConfigABC,
     EpochScheduledCorrector,
 )
 from fme.core.corrector.state import CorrectorState
-from fme.core.corrector.utils import ForcePositive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -29,7 +26,22 @@ def _get_dataset_info() -> DatasetInfo:
     return DatasetInfo(
         vertical_coordinate=NullVerticalCoordinate(),
         gridded_operations=LatLonOperations(area_weights=torch.ones(2, 2)),
+        img_shape=(2, 2),
         timestep=datetime.timedelta(hours=6),
+    )
+
+
+def _get_corrector(
+    config: CorrectorConfigABC,
+    input_names: Collection[str] = (),
+    gen_names: Collection[str] = (),
+    forcing_names: Collection[str] = (),
+) -> CorrectorABC:
+    return config.get_corrector(
+        _get_dataset_info(),
+        input_names=input_names,
+        gen_names=gen_names,
+        forcing_names=forcing_names,
     )
 
 
@@ -47,12 +59,12 @@ def test_corrector_disabled_epochs_must_be_non_negative():
     ],
 )
 def test_corrector_configs_wrap_when_disabled_epochs_set(config):
-    corrector = config.get_corrector(_get_dataset_info())
+    corrector = _get_corrector(config)
     assert isinstance(corrector, EpochScheduledCorrector)
 
 
 def test_corrector_not_wrapped_when_disabled_epochs_zero():
-    corrector = AtmosphereCorrectorConfig().get_corrector(_get_dataset_info())
+    corrector = _get_corrector(AtmosphereCorrectorConfig())
     assert not isinstance(corrector, EpochScheduledCorrector)
     # the bare corrector inherits the base no-op lifecycle methods
     assert corrector.train(False) is corrector
@@ -77,14 +89,12 @@ def test_corrector_selector_disabled_epochs_set_on_wrapped_config():
         type="atmosphere_corrector",
         config={"corrector_disabled_epochs": 1},
     )
-    corrector = selector.get_corrector(_get_dataset_info())
+    corrector = _get_corrector(selector)
     assert isinstance(corrector, EpochScheduledCorrector)
 
 
 def test_scheduled_corrector_requires_state_when_disabled_epochs_configured():
-    corrector = AtmosphereCorrectorConfig(corrector_disabled_epochs=1).get_corrector(
-        _get_dataset_info()
-    )
+    corrector = _get_corrector(AtmosphereCorrectorConfig(corrector_disabled_epochs=1))
     with pytest.raises(ValueError, match="corrector_disabled"):
         corrector.load_state({})
 
@@ -144,10 +154,6 @@ class ConstantOffsetCorrection:
     def __init__(self, name: str, offset: float):
         self._name = name
         self._offset = offset
-
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset()
 
     def __call__(
         self,
@@ -214,71 +220,34 @@ def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics():
     torch.testing.assert_close(enabled.diagnostics.delta["a"], torch.full((2, 2), 1.0))
 
 
-def test_discovery_records_modified_names():
-    sequence = CorrectionSequence(
-        [
-            ConstantOffsetCorrection("a", 1.0),
-            ConstantOffsetCorrection("b", 2.0),
-        ]
-    )
-    assert sequence.modified_names is None
-    sequence.discover_modified_names(
-        input_names=["a"],
-        gen_names=["a", "b", "c"],
-        forcing_names=[],
-        img_shape=(2, 2),
-    )
+def test_construction_records_modified_names():
+    config = OceanCorrectorConfig(force_positive_names=["a", "b"])
+    corrector = _get_corrector(config, gen_names=["a", "b", "c"])
     gen_data = {
         "a": torch.zeros(2, 2),
         "b": torch.zeros(2, 2),
         "c": torch.zeros(2, 2),
     }
-    result = sequence({"a": torch.zeros(2, 2)}, gen_data, {}, None)
-    # discovery records exactly the delta keys a real call produces
-    assert sequence.modified_names == frozenset(result.diagnostics.delta)
-    assert sequence.modified_names == frozenset({"a", "b"})
+    result = corrector({}, gen_data, {}, None)
+    # construction records exactly the delta keys a real call produces
+    assert corrector.modified_names == frozenset(result.diagnostics.delta)
+    assert corrector.modified_names == frozenset({"a", "b"})
 
 
-def test_discovery_forwards_through_epoch_schedule():
-    wrapped = CorrectionSequence([ConstantOffsetCorrection("a", 1.0)])
-    corrector = EpochScheduledCorrector(wrapped=wrapped, disabled_epochs=1)
-    corrector.train(True)  # disabled for train-mode steps in the first epoch
-    assert corrector.modified_names is None
-    corrector.discover_modified_names(
-        input_names=[], gen_names=["a", "b"], forcing_names=[], img_shape=(2, 2)
+def test_discovery_through_epoch_schedule():
+    config = OceanCorrectorConfig(
+        force_positive_names=["a"], corrector_disabled_epochs=1
     )
-    # discovery reaches the wrapped corrector and modified_names reflects it,
-    # even while the corrector is epoch-disabled
-    assert wrapped.modified_names == frozenset({"a"})
+    corrector = _get_corrector(config, gen_names=["a", "b"])
+    assert isinstance(corrector, EpochScheduledCorrector)
+    corrector.train(True)  # disabled for train-mode steps in the first epoch
+    # modified_names describes what the corrector produces when active, so it is
+    # independent of the epoch-disabled state
     assert corrector.modified_names == frozenset({"a"})
     corrector.set_epoch(2)  # enabled
     assert corrector.modified_names == frozenset({"a"})
 
 
-def test_keep_gradient_names_union():
-    no_keep_gradient = CorrectionSequence(
-        [
-            ConstantOffsetCorrection("a", 1.0),
-            ForcePositive(["b"], keep_gradient=False),
-        ]
-    )
-    assert no_keep_gradient.keep_gradient_names == frozenset()
-
-    sif_config = SeaIceFractionConfig(
-        sea_ice_fraction_name="sea_ice_fraction",
-        land_fraction_name="land_fraction",
-        zero_where_ice_free_names=["siconc"],
-    )
-    sequence = CorrectionSequence(
-        [
-            ConstantOffsetCorrection("a", 1.0),
-            ForcePositive(["b", "c"], keep_gradient=True),
-            SeaIceFractionCorrection(sif_config, keep_gradient=True),
-        ]
-    )
-    # union over corrections; the zero-where-ice-free field is multiplied, not
-    # clamped, so it is not a keep-gradient name
-    assert sequence.keep_gradient_names == frozenset({"b", "c", "sea_ice_fraction"})
-
-    scheduled = EpochScheduledCorrector(wrapped=sequence, disabled_epochs=1)
-    assert scheduled.keep_gradient_names == frozenset({"b", "c", "sea_ice_fraction"})
+def test_modified_names_empty_without_corrections():
+    corrector = _get_corrector(AtmosphereCorrectorConfig(), gen_names=["a"])
+    assert corrector.modified_names == frozenset()

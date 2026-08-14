@@ -7,7 +7,6 @@ import dacite
 import torch
 from torch import nn
 
-from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
@@ -251,10 +250,6 @@ class StepABC(abc.ABC):
         # Mirrors ``torch.nn.Module.training`` so that step-level eval/train
         # state is observable without reaching into the underlying modules.
         self._training: bool = True
-        # Whether corrector delta diagnostics are detached from the autograd
-        # graph at the step boundary. Default is detached; only a train
-        # stepper whose loss consumes the deltas flips this, once at build.
-        self._detach_corrector_deltas: bool = True
 
     @property
     @abc.abstractmethod
@@ -262,23 +257,15 @@ class StepABC(abc.ABC):
         pass
 
     @property
-    @abc.abstractmethod
-    def corrector(self) -> CorrectorABC | None:
-        """The step's corrector instance, or None if it has none.
+    def corrector_modified_names(self) -> frozenset[str]:
+        """The delta keys the step's corrector produces when active.
 
         The single introspection surface for build-time corrector-loss
-        validation; read ``corrector.modified_names`` /
-        ``keep_gradient_names`` directly. Steps which wrap another step
-        forward this to the wrapped step.
+        validation. Default implementation returns an empty frozenset: a step
+        with no corrector, or a corrector which modifies nothing. Steps which
+        wrap another step forward this to the wrapped step.
         """
-        pass
-
-    def set_detach_corrector_deltas(self, detach: bool) -> None:
-        """Set whether corrector delta diagnostics are detached from the
-        autograd graph at the step boundary (default True). Steps which wrap
-        another step must forward the call to the wrapped step.
-        """
-        self._detach_corrector_deltas = detach
+        return frozenset()
 
     def train(self, mode: bool = True) -> "StepABC":
         """Set the step (and all submodules) to training mode.

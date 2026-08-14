@@ -20,7 +20,8 @@ class CorrectorConfigABC(abc.ABC):
 
     Subclasses implement ``_get_corrector``. The ``corrector_disabled_epochs``
     option is handled here: ``get_corrector`` wraps the built corrector in an
-    ``EpochScheduledCorrector`` when it is greater than zero.
+    ``EpochScheduledCorrector`` when it is greater than zero, and runs
+    modified-name discovery on the result.
 
     Parameters:
         corrector_disabled_epochs: Number of initial training epochs during
@@ -54,7 +55,43 @@ class CorrectorConfigABC(abc.ABC):
         return dict(state)
 
     @final
-    def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
+    def get_corrector(
+        self,
+        dataset_info: DatasetInfo,
+        input_names: Collection[str],
+        gen_names: Collection[str],
+        forcing_names: Collection[str],
+    ) -> "CorrectorABC":
+        """Build the corrector and discover the delta keys it produces.
+
+        Discovery runs here, as part of construction, so ``modified_names`` is
+        populated for every corrector type and no caller has to update it
+        statefully. ``img_shape`` comes from ``dataset_info``.
+
+        Args:
+            dataset_info: Information about the dataset the corrector runs on.
+            input_names: Names present in the corrector's ``input_data``.
+            gen_names: Names present in the corrector's ``gen_data``.
+            forcing_names: Names present in the corrector's ``forcing_data``.
+        """
+        corrector = self._build_corrector(dataset_info)
+        corrector._discover_modified_names(
+            input_names=input_names,
+            gen_names=gen_names,
+            forcing_names=forcing_names,
+            img_shape=dataset_info.img_shape,
+        )
+        return corrector
+
+    @final
+    def _build_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
+        """Build the corrector, applying ``corrector_disabled_epochs``, without
+        running discovery.
+
+        Exists so that a config which delegates to another config (see
+        ``CorrectorSelector``) can compose the build without triggering a
+        second discovery pass.
+        """
         corrector = self._get_corrector(dataset_info)
         if self.corrector_disabled_epochs == 0:
             return corrector
@@ -90,16 +127,8 @@ class Correction(Protocol):
 
     The key set a correction returns may depend on its config and on which keys
     are present in its inputs, never on tensor values; modified-name discovery
-    (``CorrectorABC.discover_modified_names``) relies on this.
+    at corrector construction relies on this.
     """
-
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        """Names this correction corrects via straight-through clamps
-        (:func:`fme.core.corrector.utils.replace_value_keep_gradient`); empty
-        for corrections that do not keep gradients through hard corrections.
-        """
-        ...
 
     def __call__(
         self,
@@ -148,23 +177,15 @@ class CorrectorABC(abc.ABC):
         """Load corrector checkpoint state. Default implementation is a no-op."""
 
     @property
-    def modified_names(self) -> frozenset[str] | None:
-        """The delta keys this corrector produces when active, or None if
-        discovery (``discover_modified_names``) never ran.
+    def modified_names(self) -> frozenset[str]:
+        """The delta keys this corrector produces when active.
 
-        Default implementation returns None: discovery is not supported.
-        """
-        return None
-
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        """Names this corrector corrects via straight-through clamps.
-
-        Default implementation returns an empty frozenset.
+        Default implementation returns an empty frozenset: a corrector which
+        modifies nothing.
         """
         return frozenset()
 
-    def discover_modified_names(
+    def _discover_modified_names(
         self,
         input_names: Collection[str],
         gen_names: Collection[str],
@@ -174,7 +195,9 @@ class CorrectorABC(abc.ABC):
         """Discover the delta keys this corrector produces when active, making
         them available as ``modified_names``.
 
-        Default implementation is a no-op; ``modified_names`` stays None.
+        Called by ``CorrectorConfigABC.get_corrector`` during construction, not
+        by corrector users. Default implementation is a no-op, leaving
+        ``modified_names`` empty.
         """
 
     @abc.abstractmethod
@@ -213,19 +236,13 @@ class CorrectionSequence(CorrectorABC):
 
     def __init__(self, corrections: list[Correction]):
         self._corrections = corrections
-        self._modified_names: frozenset[str] | None = None
+        self._modified_names: frozenset[str] = frozenset()
 
     @property
-    def modified_names(self) -> frozenset[str] | None:
+    def modified_names(self) -> frozenset[str]:
         return self._modified_names
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return frozenset().union(
-            *(correction.keep_gradient_names for correction in self._corrections)
-        )
-
-    def discover_modified_names(
+    def _discover_modified_names(
         self,
         input_names: Collection[str],
         gen_names: Collection[str],
@@ -316,23 +333,19 @@ class EpochScheduledCorrector(CorrectorABC):
         self._wrapped.set_epoch(epoch)
 
     @property
-    def modified_names(self) -> frozenset[str] | None:
+    def modified_names(self) -> frozenset[str]:
         # Forwarded to the wrapped corrector independent of the epoch-disabled
         # state: these describe what the corrector produces when active.
         return self._wrapped.modified_names
 
-    @property
-    def keep_gradient_names(self) -> frozenset[str]:
-        return self._wrapped.keep_gradient_names
-
-    def discover_modified_names(
+    def _discover_modified_names(
         self,
         input_names: Collection[str],
         gen_names: Collection[str],
         forcing_names: Collection[str],
         img_shape: tuple[int, int],
     ) -> None:
-        self._wrapped.discover_modified_names(
+        self._wrapped._discover_modified_names(
             input_names, gen_names, forcing_names, img_shape
         )
 
