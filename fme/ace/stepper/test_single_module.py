@@ -3382,7 +3382,8 @@ def test_corrector_penalty_gradient_accumulation():
     output = train_stepper.train_on_batch(data, optimization=optimization)
     assert len(accumulate_calls) == n_forward_steps  # one per optimized step
     assert torch.isfinite(output.metrics["loss"])
-    assert torch.isfinite(output.metrics["loss/corrector_penalty"])
+    for step in range(n_forward_steps):
+        assert torch.isfinite(output.metrics[f"loss_step_{step}"])
 
 
 def test_masked_output_with_corrector_loss_finite():
@@ -3420,7 +3421,7 @@ def test_masked_output_with_corrector_loss_finite():
     # losses and gradients stay finite through the NaN-filling
     # apply_output_masking path
     assert torch.isfinite(output.metrics["loss"])
-    assert torch.isfinite(output.metrics["loss/corrector_penalty"])
+    assert torch.isfinite(output.metrics["loss_step_0"])
     assert optimization.grads is not None
     for grad in optimization.grads:
         assert torch.isfinite(grad).all()
@@ -3430,41 +3431,54 @@ def test_epoch_scheduled_corrector():
     torch.manual_seed(0)
     offset = 2.0
     weight = 0.5
+
+    def make(corrector_loss: CorrectorLossConfig | None) -> TrainStepper:
+        return _init_train_stepper(
+            stepper=_corrector_loss_stepper(
+                _AddOne(), ConstantOffsetCorrection("a", offset), disabled_epochs=1
+            ),
+            loss=StepLossConfig(type="MSE"),
+            corrector_loss=corrector_loss,
+        )
+
     # build-time validation passes via discovery even though the corrector is
     # epoch-disabled at build
-    train_stepper = _init_train_stepper(
-        stepper=_corrector_loss_stepper(
-            _AddOne(), ConstantOffsetCorrection("a", offset), disabled_epochs=1
-        ),
-        loss=StepLossConfig(type="MSE"),
-        corrector_loss=CorrectorLossConfig(
+    train_stepper = make(
+        CorrectorLossConfig(
             regularization=CorrectorRegularizationConfig(
                 names_and_prefixes=["a"], weight=weight
             )
-        ),
+        )
     )
+    baseline = make(None)
     data = BatchData.new_for_testing(
         names=["a"], n_samples=2, n_timesteps=2, epoch=0
     ).to_device()
     ic = data.data["a"][:, 0]
 
-    train_stepper.set_train()
-    train_stepper.set_epoch(1)  # disabled during the first epoch
+    for stepper in (train_stepper, baseline):
+        stepper.set_train()
+        stepper.set_epoch(1)  # disabled during the first epoch
     disabled = train_stepper.train_on_batch(data, optimization=NullOptimization())
-    # inert: no correction applied, no penalty, no metrics, no error
-    assert "loss/corrector_penalty" not in disabled.metrics
-    assert "loss/corrector_penalty_step_0" not in disabled.metrics
+    disabled_base = baseline.train_on_batch(data, optimization=NullOptimization())
+    # inert: no correction applied, nothing added to the total, no error
     torch.testing.assert_close(disabled.gen_data["a"][:, 0, 1], ic + 1.0)
+    torch.testing.assert_close(
+        disabled.metrics["loss_step_0"], disabled_base.metrics["loss_step_0"]
+    )
 
-    train_stepper.set_epoch(2)  # first enabled epoch
+    for stepper in (train_stepper, baseline):
+        stepper.set_epoch(2)  # first enabled epoch
     enabled = train_stepper.train_on_batch(data, optimization=NullOptimization())
+    enabled_base = baseline.train_on_batch(data, optimization=NullOptimization())
     torch.testing.assert_close(enabled.gen_data["a"][:, 0, 1], ic + 1.0 + offset)
-    penalty = enabled.metrics["loss/corrector_penalty"]
-    torch.testing.assert_close(penalty, torch.full_like(penalty, offset**2))
-    assert "loss/corrector_penalty_step_0" in enabled.metrics
+    torch.testing.assert_close(
+        enabled.metrics["loss_step_0"],
+        enabled_base.metrics["loss_step_0"] + weight * offset**2,
+    )
 
 
-def test_corrector_penalty_metrics():
+def test_penalty_rides_the_existing_metrics():
     torch.manual_seed(0)
     offset = 2.0
     weight = 0.5
@@ -3495,33 +3509,24 @@ def test_corrector_penalty_metrics():
     # a constant-offset delta in trivial (std 1) loss normalization gives an
     # exact MSE penalty of offset**2 at every step
     for step in range(n_forward_steps):
-        penalty_step = reg_out.metrics[f"loss/corrector_penalty_step_{step}"]
-        torch.testing.assert_close(
-            penalty_step, torch.full_like(penalty_step, offset**2)
-        )
         # the weighted penalty is folded into the per-step loss
         torch.testing.assert_close(
             reg_out.metrics[f"loss_step_{step}"],
             base_out.metrics[f"loss_step_{step}"] + weight * offset**2,
         )
-    batch_penalty = reg_out.metrics["loss/corrector_penalty"]
-    torch.testing.assert_close(batch_penalty, torch.full_like(batch_penalty, offset**2))
-    # per-channel penalties, unweighted, for exactly the selected names
-    assert reg_out.per_channel_losses is not None
-    penalty_channels = {
-        name: info
-        for name, info in reg_out.per_channel_losses.items()
-        if name.startswith("corrector_penalty/")
-    }
-    assert set(penalty_channels) == {"corrector_penalty/a"}
-    channel_penalty = penalty_channels["corrector_penalty/a"].loss
+    # the batch total is the sum over the optimized steps
     torch.testing.assert_close(
-        channel_penalty, torch.full_like(channel_penalty, offset**2)
+        reg_out.metrics["loss"],
+        base_out.metrics["loss"] + n_forward_steps * weight * offset**2,
     )
+    # the per-channel entries stay the main loss for that channel
+    assert reg_out.per_channel_losses is not None
     assert base_out.per_channel_losses is not None
-    assert not any(
-        name.startswith("corrector_penalty/") for name in base_out.per_channel_losses
-    )
+    assert set(reg_out.per_channel_losses) == set(base_out.per_channel_losses)
+    for name, info in reg_out.per_channel_losses.items():
+        torch.testing.assert_close(info.loss, base_out.per_channel_losses[name].loss)
+    # no metric key of the penalty's own
+    assert not any("penalty" in name for name in reg_out.metrics)
 
 
 def test_both_features_together():
@@ -3556,11 +3561,10 @@ def test_both_features_together():
     torch.testing.assert_close(
         both_out.metrics["loss"], base_out.metrics["loss"] + weight * offset**2
     )
-    # both metric families appear
-    assert "loss_step_0" in both_out.metrics
-    penalty = both_out.metrics["loss/corrector_penalty_step_0"]
-    torch.testing.assert_close(penalty, torch.full_like(penalty, offset**2))
-    assert "loss/corrector_penalty" in both_out.metrics
+    torch.testing.assert_close(
+        both_out.metrics["loss_step_0"],
+        base_out.metrics["loss_step_0"] + weight * offset**2,
+    )
     # the returned predictions stay fully corrected
     ic = data.data["a"][:, 0]
     torch.testing.assert_close(both_out.gen_data["a"][:, 0, 1], ic + 1.0 + offset)

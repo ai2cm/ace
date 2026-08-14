@@ -1021,12 +1021,16 @@ class CorrectorLoss(torch.nn.Module):
             net_output[name] = predict_dict[name] - deltas[name]
         return net_output
 
-    def penalty(self, deltas: TensorMapping) -> LossOutput | None:
+    def penalty(
+        self, deltas: TensorMapping, data_mask: TensorMapping | None = None
+    ) -> LossOutput | None:
         """Penalty over the selected deltas, per channel, or None when the
         feature is off or the deltas are empty.
 
         The deltas are compared against zeros in loss-normalized space, so with
         an affine normalizer the means cancel and this penalizes ``delta/std``.
+        The mask is the main loss's, so both halves of the step total average
+        over the same samples per channel.
         """
         if self._regularizer is None or len(deltas) == 0:
             return None
@@ -1042,7 +1046,7 @@ class CorrectorLoss(torch.nn.Module):
                 torch.full_like(delta, torch.nan),
                 torch.zeros_like(delta),
             )
-        return self._regularizer(selected, targets)
+        return self._regularizer(selected, targets, data_mask)
 
 
 def _require_delta(deltas: TensorMapping, name: str, feature: str) -> None:
@@ -1063,7 +1067,7 @@ class StepOutputLossOutput:
         corrector_penalty: The penalty's own per-channel ``LossOutput``, or
             None when there is no penalty.
         corrector_penalty_weight: The weight applied to the penalty in
-            ``total()``. Per-channel penalties are reported unweighted.
+            ``total()``.
     """
 
     main: LossOutput
@@ -1080,14 +1084,8 @@ class StepOutputLossOutput:
         return total
 
     def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
-        """Per-channel main-loss values; the penalty is reported separately."""
+        """Per-channel main-loss values; the penalty is in ``total()`` only."""
         return self.main.get_channel_losses()
-
-    def get_corrector_penalty_losses(self) -> dict[str, ChannelLossInfo]:
-        """Unweighted per-channel penalties, empty when there is no penalty."""
-        if self.corrector_penalty is None:
-            return {}
-        return self.corrector_penalty.get_channel_losses()
 
 
 class StepOutputLoss(torch.nn.Module):
@@ -1134,6 +1132,6 @@ class StepOutputLoss(torch.nn.Module):
         # outputs the main loss saw.
         return StepOutputLossOutput(
             main=main,
-            corrector_penalty=self.corrector_loss.penalty(deltas),
+            corrector_penalty=self.corrector_loss.penalty(deltas, data_mask),
             corrector_penalty_weight=self.corrector_loss.penalty_weight,
         )

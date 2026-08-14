@@ -1099,7 +1099,6 @@ def test_step_output_loss_without_corrector_loss_unchanged():
     )
     assert result.corrector_penalty is None
     torch.testing.assert_close(result.total(), bare.total())
-    assert result.get_corrector_penalty_losses() == {}
     expected = bare.get_channel_losses()
     actual = result.get_channel_losses()
     assert set(actual) == set(expected)
@@ -1158,9 +1157,9 @@ def test_penalty_masked_points_drop():
 
 
 def test_total_and_channel_decomposition():
-    # GOAL: total() == main.total() + weight * penalty.total();
-    # get_channel_losses() is main-only; get_corrector_penalty_losses() covers
-    # exactly the selected names.
+    # GOAL: total() == main.total() + weight * penalty.total(), and
+    # get_channel_losses() equals the bare StepLoss channels — no penalty
+    # anywhere per channel.
     predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
     corrector_loss = _corrector_loss(
         precorrector_names=["a"],
@@ -1175,13 +1174,37 @@ def test_total_and_channel_decomposition():
         result.total(),
         result.main.total() + 3.0 * result.corrector_penalty.total(),
     )
-    assert list(result.get_channel_losses()) == _CORRECTOR_NAMES
-    penalty_channels = result.get_corrector_penalty_losses()
-    assert list(penalty_channels) == ["b_0", "b_1"]
-    # per-channel penalties are unweighted
+    net_output = corrector_loss.pre_corrector_outputs(predict, deltas)
+    expected = _corrector_step_loss()(net_output, target, 0).get_channel_losses()
+    actual = result.get_channel_losses()
+    assert list(actual) == _CORRECTOR_NAMES
+    for name in expected:
+        torch.testing.assert_close(actual[name].loss, expected[name].loss)
+
+
+def test_penalty_uses_the_data_mask():
+    # GOAL: with a data_mask hiding one sample of a selected variable, that
+    # sample contributes to neither half of total().
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    keep = torch.ones(_CORRECTOR_SHAPE[0], dtype=torch.bool, device=get_device())
+    keep[0] = False
+    corrector_loss = _corrector_loss(regularizer_names=["a"])
+    result = StepOutputLoss(_corrector_step_loss(), corrector_loss)(
+        predict, target, 0, data_mask={"a": keep}, deltas=deltas
+    )
+    assert result.corrector_penalty is not None
     torch.testing.assert_close(
-        torch.stack([info.loss for info in penalty_channels.values()]).mean(),
-        _expected_penalty(deltas, ["b_0", "b_1"]),
+        result.corrector_penalty.get_channel_losses()["a"].loss,
+        _expected_penalty({name: v[keep] for name, v in deltas.items()}, ["a"]),
+    )
+    subset_main = _corrector_step_loss()(
+        {name: v[keep] for name, v in predict.items()},
+        {name: v[keep] for name, v in target.items()},
+        0,
+    )
+    torch.testing.assert_close(
+        result.main.get_channel_losses()["a"].loss,
+        subset_main.get_channel_losses()["a"].loss,
     )
 
 
@@ -1212,5 +1235,4 @@ def test_empty_deltas_inert(deltas):
     )
     unconfigured = StepOutputLoss(_corrector_step_loss(), None)(predict, target, 0)
     assert result.corrector_penalty is None
-    assert result.get_corrector_penalty_losses() == {}
     torch.testing.assert_close(result.total(), unconfigured.total())

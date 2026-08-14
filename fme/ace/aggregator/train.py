@@ -124,9 +124,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         self._loss += batch.metrics["loss"]
         self._n_loss_batches += 1
         step_metrics = {
-            k: v
-            for k, v in batch.metrics.items()
-            if k.startswith("loss_step_") or k.startswith("loss/")
+            k: v for k, v in batch.metrics.items() if k.startswith("loss_step_")
         }
         self._per_step_losses.record(step_metrics)
         if (

@@ -1578,27 +1578,12 @@ class TrainStepperConfig:
 class _StepLossOutput:  # what one step's loss produced
     total: torch.Tensor  # on the graph
     channel_losses: dict[str, ChannelLossInfo]  # detached; empty unless optimized
-    corrector_penalty: torch.Tensor | None  # detached
-
-
-@dataclasses.dataclass
-class _AccumulateLossMetrics:  # reporting only; every tensor detached
-    # penalty channels are unweighted, under a "corrector_penalty/" key prefix
-    per_channel_losses: dict[str, ChannelLossInfo] | None
-    corrector_penalties: list[torch.Tensor]
-
-    @property
-    def corrector_penalty(self) -> torch.Tensor | None:
-        # mean over the steps that produced one, else None
-        if not self.corrector_penalties:
-            return None
-        return torch.stack(self.corrector_penalties).mean()
 
 
 @dataclasses.dataclass
 class _AccumulateLossOutput:
     output_list: list[EnsembleTensorDict]  # data: the per-step predictions
-    metrics: _AccumulateLossMetrics
+    per_channel_losses: dict[str, ChannelLossInfo] | None  # detached reporting
 
 
 def _finalize_per_channel_losses(
@@ -1711,9 +1696,6 @@ class TrainStepper(
         if torch.any(regularizer_loss > 0):
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
-        corrector_penalty = accumulated.metrics.corrector_penalty
-        if corrector_penalty is not None:
-            metrics["loss/corrector_penalty"] = corrector_penalty
         optimization.step_weights()
 
         gen_data = process_ensemble_prediction_generator_list(accumulated.output_list)
@@ -1725,7 +1707,7 @@ class TrainStepper(
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self._derive_func,
-            per_channel_losses=accumulated.metrics.per_channel_losses,
+            per_channel_losses=accumulated.per_channel_losses,
         )
         ic = data.get_start(
             set(data.data.keys()), self.n_ic_timesteps
@@ -1768,7 +1750,6 @@ class TrainStepper(
         output_iterator = iter(output_generator)
         weighted_sums: dict[str, torch.Tensor] = {}
         total_counts: dict[str, int] = {}
-        corrector_penalties: list[torch.Tensor] = []
         for step in range(n_forward_steps):
             if self._config.optimize_last_step_only:
                 optimize_step = step == n_loss_steps - 1
@@ -1803,11 +1784,6 @@ class TrainStepper(
                     deltas=deltas,
                 )
             metrics[f"loss_step_{step}"] = step_loss.total.detach()
-            if step_loss.corrector_penalty is not None:
-                metrics[f"loss/corrector_penalty_step_{step}"] = (
-                    step_loss.corrector_penalty
-                )
-                corrector_penalties.append(step_loss.corrector_penalty)
             for k, v in step_loss.channel_losses.items():
                 if k in weighted_sums:
                     weighted_sums[k] = weighted_sums[k] + v.loss * v.count
@@ -1819,11 +1795,8 @@ class TrainStepper(
                 optimization.accumulate_loss(step_loss.total)
         return _AccumulateLossOutput(
             output_list=output_list,
-            metrics=_AccumulateLossMetrics(
-                per_channel_losses=_finalize_per_channel_losses(
-                    weighted_sums, total_counts
-                ),
-                corrector_penalties=corrector_penalties,
+            per_channel_losses=_finalize_per_channel_losses(
+                weighted_sums, total_counts
             ),
         )
 
@@ -1851,18 +1824,9 @@ class TrainStepper(
                 k: ChannelLossInfo(loss=v.loss.detach(), count=v.count)
                 for k, v in step_loss.get_channel_losses().items()
             }
-            for name, info in step_loss.get_corrector_penalty_losses().items():
-                # Unweighted per-channel penalties
-                channel_losses[f"corrector_penalty/{name}"] = ChannelLossInfo(
-                    loss=info.loss.detach(), count=info.count
-                )
-        corrector_penalty = None
-        if step_loss.corrector_penalty is not None:
-            corrector_penalty = step_loss.corrector_penalty.total().detach()
         return _StepLossOutput(
             total=step_loss.total(),
             channel_losses=channel_losses,
-            corrector_penalty=corrector_penalty,
         )
 
     def update_training_history(self, training_job: TrainingJob) -> None:
