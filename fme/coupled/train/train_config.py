@@ -152,8 +152,7 @@ class InlineInferenceConfig:
             re-reading data from disk
         epochs: positional slice over the training epochs 1 to max_epochs, so
             index 0 selects epoch 1. By default runs inference every training
-            epoch. Epoch 0 is additionally included when
-            evaluate_before_training is true.
+            epoch.
         aggregator: configuration of inline coupled inference aggregator.
         name: name used as wandb log prefix and output subdirectory. If None,
             defaults to "inference" when there is a single inference config
