@@ -13,12 +13,17 @@ config.yaml the checkpoint was trained with, cached under
      from the pre-trained checkpoint (mounted at ``/weights``).
   3. ``max_epochs`` is capped at FT_MAX_EPOCHS (fine-tuning is short; pre-training
      ran 150).
+  4. ``stepper.step.config.input_dropout_optimized_steps_only`` is set True so
+     input masking applies only on the optimized (last) rollout step, not the
+     intermediate no_grad steps (a no-op for the mask0 cells). Without it,
+     masking would perturb the rollout trajectory feeding the optimized step
+     while inference runs unmasked.
 
 Everything else -- inference suite, training/validation windows, optimizer
 (FusedAdam), EnsembleLoss (crps 0.9 / energy 0.1, no extra weights), EMA,
-masking, global-mean-removal, model architecture -- is copied verbatim from
-pre-training, so the fine-tune differs from pre-training only in that it rolls
-out multiple steps over a short schedule.
+masking level, global-mean-removal, model architecture -- is copied verbatim
+from pre-training, so the fine-tune differs from pre-training only in that it
+rolls out multiple steps over a short schedule.
 
 Checkpoint dataset IDs (for the ``/weights`` mount) are resolved from
 ``wandb_to_beaker_map.json`` (refresh with ``update_beaker_map.py``).
@@ -92,6 +97,11 @@ def _to_finetune(pretrain_cfg: dict) -> dict:
     st["n_forward_steps"] = copy.deepcopy(MULTISTEP_SCHEDULE)
     st["parameter_init"] = {"weights_path": f"/weights/{CHECKPOINT_NAME}"}
     cfg["max_epochs"] = FT_MAX_EPOCHS
+    # Mask only the optimized (last) step of each rollout, not the intermediate
+    # no_grad steps -- otherwise masking perturbs the trajectory feeding the
+    # optimized step while inference runs unmasked (train/inference mismatch).
+    # No-op for the mask0 cells (max_masked_vars 0); meaningful for mask20.
+    cfg["stepper"]["step"]["config"]["input_dropout_optimized_steps_only"] = True
     return cfg
 
 
@@ -119,9 +129,10 @@ def generate_finetune_config(
         f"# arg: --dataset {beaker_dataset_id}:/weights\n"
         f"# source pre-training run: {source_run_name}\n"
         "# = that run's 1-step pre-training config, with only: n_forward_steps"
-        " swapped for the\n#   multi-step schedule, parameter_init added, and"
-        f" max_epochs capped at {FT_MAX_EPOCHS}\n#   (see"
-        " generate_finetune_configs.py).\n"
+        " swapped for the\n#   multi-step schedule, parameter_init added,"
+        f" max_epochs capped at {FT_MAX_EPOCHS}, and\n#"
+        "   input_dropout_optimized_steps_only set"
+        " (see generate_finetune_configs.py).\n"
     )
     with out_path.open("w") as f:
         f.write(header)

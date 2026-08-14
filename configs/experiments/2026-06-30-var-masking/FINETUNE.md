@@ -39,6 +39,11 @@ verbatim from pre-training.
 - `stepper_training.parameter_init.weights_path`: added, loads
   `/weights/training_checkpoints/best_ckpt.tar`
 - `max_epochs`: `150` -> `20` (fine-tuning is short; set by `FT_MAX_EPOCHS`)
+- `stepper.step.config.input_dropout_optimized_steps_only`: `true` — input
+  masking applies only on the optimized (last) rollout step, not the
+  intermediate `no_grad` steps (no-op for the mask0 cells; matters for mask20).
+  Without it, masking perturbs the trajectory feeding the optimized step while
+  inference runs unmasked.
 
 Everything else is pre-training verbatim, including FusedAdam lr 1e-4,
 EnsembleLoss (crps 0.9 / energy 0.1, no extra weights),

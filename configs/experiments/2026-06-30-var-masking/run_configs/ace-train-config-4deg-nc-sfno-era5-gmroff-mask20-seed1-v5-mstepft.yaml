@@ -1,8 +1,8 @@
 # arg: --dataset 01KZEFBKGFJ2V38N8V9HNAVZ27:/weights
 # source pre-training run: ace2-var-mask-nc-sfno-era5-gmroff-mask20-seed1-v5
 # = that run's 1-step pre-training config, with only: n_forward_steps swapped for the
-#   multi-step schedule, parameter_init added, and max_epochs capped at 20
-#   (see generate_finetune_configs.py).
+#   multi-step schedule, parameter_init added, max_epochs capped at 20, and
+#   input_dropout_optimized_steps_only set (see generate_finetune_configs.py).
 seed: 1
 experiment_dir: /results
 save_checkpoint: true
@@ -622,3 +622,4 @@ stepper:
         default:
           max_masked_vars: 20
       include_channel_mask_inputs: true
+      input_dropout_optimized_steps_only: true
