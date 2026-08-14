@@ -79,3 +79,13 @@ python submit_finetune_jobs.py \
 Fine-tune run names are the source run name + `-mstepft`, wandb group
 `ace2-var-masking-mstepft-2026-06-30`. Evaluate them with the existing eval
 tooling (`generate_eval_configs.py` / `submit_eval_jobs.py`) once trained.
+
+## Memory
+
+The multi-step rollout of the embed_dim-512 var-masking model (with channel-mask
+inputs + GMR) is heavier than the ERA5 baseline this schedule came from and can
+fragment GPU memory near the 80 GiB H100 limit. `run-ace-train.sh` sets
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (overridable) to reclaim
+reserved-but-unallocated memory. If a run still OOMs, escalate with gradient
+checkpointing in the builder (`stepper.step.config.builder.config.checkpointing`,
+1 = encoder/decoder … 3 = per-block; reproducibility-safe, ~20-30% slower).

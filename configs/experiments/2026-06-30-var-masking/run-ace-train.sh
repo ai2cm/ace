@@ -50,6 +50,7 @@ run_training() {
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP="$job_group" \
     --env WANDB_PROJECT="$WANDB_PROJECT" \
+    --env PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
