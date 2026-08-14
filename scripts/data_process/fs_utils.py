@@ -9,7 +9,17 @@ from fsspec.implementations.local import LocalFileSystem
 
 
 def _fs_and_path(path: str) -> tuple[fsspec.AbstractFileSystem, str]:
-    return fsspec.core.url_to_fs(path)
+    """Resolve a path to its filesystem, dropping any cached listing for it.
+
+    ``url_to_fs`` returns a cached, long-lived instance whose directory
+    listing cache is not invalidated by writes made through other instances
+    (e.g. zarr writes via a separate asynchronous instance). Callers use these
+    helpers to decide whether to overwrite an existing store, so a stale
+    negative would silently clobber data rather than raise.
+    """
+    fs, fs_path = fsspec.core.url_to_fs(path)
+    fs.invalidate_cache(fs_path)
+    return fs, fs_path
 
 
 def path_exists(path: str) -> bool:
