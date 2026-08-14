@@ -13,7 +13,7 @@ DATASET_ID=01KWD8DZVJFKYC5A9PNW8259GH
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-for seed in {0..0}; do
+for seed in {1..5}; do
     override="\
         n_forward_steps=182621 \
         seed=$seed \
