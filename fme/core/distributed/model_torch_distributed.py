@@ -471,3 +471,11 @@ class ModelTorchDistributed(DistributedBackend):
         if torch.distributed.is_initialized():
             logger.info("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()
+
+    def abort(self):
+        if not torch.distributed.is_initialized():
+            return
+        # covers the manager's mesh subgroups too: passing no group aborts
+        # every registered process group. The manager's own state is left
+        # behind, but the process is about to exit.
+        torch.distributed.distributed_c10d._abort_process_group()
