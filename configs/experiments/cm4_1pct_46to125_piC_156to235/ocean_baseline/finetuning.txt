@@ -1,0 +1,16 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+# wandb_id is blank: it exists only once the pretraining job of the same tag in
+# training.txt has run. Fill it with the pretraining run's W&B run id, beside
+# the wandb_project already set, then flip that row's status to "train".
+# uncoupled_finetune.sh resolves the rest itself: get_experiment_from_wandb
+# turns project+id into a Beaker experiment (scripts/wandb/wandb_to_beaker_experiment.py),
+# and get_beaker_dataset_from_experiment turns that into the results dataset
+# whose checkpoint the finetune starts from. That lookup is skipped only when
+# the trailing results_dataset field is already set, so naming a Beaker id by
+# hand is possible but not the preferred route -- prefer project + run id.
+# status "pretraining" = pretraining not yet run or not yet selected;
+# uncoupled_finetune.sh acts only on rows whose status is exactly "train".
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|ace-samudra-cm4||best_ckpt|pretraining|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=0
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|ace-samudra-cm4||best_ckpt|pretraining|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=1
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs2|ace-samudra-cm4||best_ckpt|pretraining|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=2
