@@ -366,71 +366,48 @@ class TrainStepperConfig:
                                                        # current behavior
 
 
-@dataclasses.dataclass
-class _StepLossOutput:  # NEW — what one step's loss produced
-    total: torch.Tensor  # on the graph
-    channel_losses: dict[str, ChannelLossInfo]  # detached; empty unless optimized
-
-
-@dataclasses.dataclass
-class _AccumulateLossOutput:  # NEW — replaces the tuple returned by _accumulate_loss
-    output_list: list[EnsembleTensorDict]
-    per_channel_losses: dict[str, ChannelLossInfo] | None  # detached
-
-
 class TrainStepper(TrainStepperABC[...]):
     def __init__(self, stepper: Stepper, config: TrainStepperConfig):
         # CHANGED — self._loss_obj = StepOutputLoss(
         #     stepper.build_loss(config.loss),
         #     stepper.build_corrector_loss(config.corrector_loss))
 
-    def _accumulate_loss(self, ...) -> _AccumulateLossOutput:
+    def _accumulate_loss(self, ...):
         # CHANGED — keeps the yielded StepOutput and unconditionally unfolds
-        # its delta dict alongside .output (unfold_ensemble_dim); now also owns
-        # every accumulation and every metric key write, from the per-step
-        # results below.
+        # its delta dict alongside .output (unfold_ensemble_dim), handing it to
+        # the per-step seam. Signature and return type otherwise unchanged.
 
-    def _accumulate_step_loss(  # CHANGED — signature and return
+    def _accumulate_step_loss(
         self,
-        gen_step: EnsembleTensorDict,
-        target_step: TensorMapping,
-        step: int,
-        data_mask: TensorMapping | None,
-        optimize: bool,
-        deltas: TensorMapping,
-    ) -> _StepLossOutput:
-        # Computes one step's loss via self._loss_obj(..., deltas=deltas) and
-        # reports it. Accumulates nothing and mutates no argument.
+        ...,  # unchanged: gen_step, target_step, step, data_mask, optimize,
+              # metrics, weighted_sums, total_counts — still out-params
+        deltas: TensorMapping,  # NEW — the only change to this signature
+    ) -> torch.Tensor:
+        # CHANGED — self._loss_obj(..., deltas=deltas). The metric writes and
+        # the per-channel accumulation stay exactly where `main` has them.
 ```
 
-### Critical detail — the per-step seam returns instead of mutating
+### Critical detail — the per-step seam keeps `main`'s shape
 
-On `main`, `_accumulate_step_loss` takes `metrics`, `weighted_sums`, and
-`total_counts` and mutates them in place. Threading the corrector deltas
-through it would add two more such parameters — a `deltas` input and a
-`corrector_penalties` list to append to — taking it to eleven parameters, four
-of them out-params, one of them a defaulted `None` the single caller always
-passes. Instead it returns `_StepLossOutput` and `_accumulate_loss` does the
-accumulating, which it is already shaped to do: it owns the step loop and the
-containers. Net effect on the pre-existing signature is four parameters fewer
-than on `main`, not two more.
+`_accumulate_step_loss` gains one parameter and nothing else. The out-params it
+mutates on `main` — `metrics`, `weighted_sums`, `total_counts` — stay
+out-params, `_finalize_per_channel_losses` stays where it is, and
+`_accumulate_loss` keeps returning its tuple. Retiring that mutation-based
+shape is a real cleanup but an independent one, and it belongs in a follow-up
+PR that also covers `CoupledTrainStepper._accumulate_step_loss`
+(`fme/coupled/stepper.py`), which has the same shape and which this PR does not
+touch.
 
-`_accumulate_loss` therefore holds every metric key write in the step loop.
-This PR adds no key: `loss_step_{i}` and the per-channel entries keep their
-existing meanings, with the penalty riding `loss_step_{i}` through
-`_StepLossOutput.total`.
-
-`weighted_sums` / `total_counts` stay the pair of parallel dicts they are on
-`main`, finalized by the existing `_finalize_per_channel_losses`; this PR stops
-threading them one level deeper and otherwise leaves them alone.
+This PR adds no metric key: `loss_step_{i}` and the per-channel entries keep
+their existing meanings, with the penalty riding `loss_step_{i}` through the
+per-step total.
 
 ### Critical detail — comments on the private surface
 
 Private classes and methods carry no docstrings; a short inline comment on a
 field or at a seam is the documentation, and a comment that restates the name
-above it is deleted. So `_StepLossOutput`, `_AccumulateLossOutput`, and the
-`_accumulate_*` methods are commented as shown above and nothing more, while the reasoning a
-reader needs — the `StepDiagnostics` hard boundary, the no-decay penalty, the
+above it is deleted. So the `_accumulate_*` methods are commented as shown
+above and nothing more, while the reasoning a reader needs — the `StepDiagnostics` hard boundary, the no-decay penalty, the
 two features combining — lives in the public `StepOutputLoss` docstring and in
 this plan. Inline comments stay at ~1 line, docstring components at ≤2.
 
