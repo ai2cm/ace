@@ -15,6 +15,7 @@ from fme.core.corrector.ocean import (
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean_data import OceanData
+from fme.core.registry import CorrectorSelector
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.typing_ import TensorMapping
 
@@ -539,3 +540,115 @@ def test_ocean_corrector_empty_delta_when_nothing_modified():
     assert dict(result.diagnostics.delta) == {}
     assert set(result.modified_names) == set()
     torch.testing.assert_close(result.corrected["so_0"], gen_data["so_0"])
+
+
+def test_disable_corrections_through_a_corrector_selector():
+    """The ocean corrector is configured as ``type: ocean_corrector``, i.e.
+    wrapped in a CorrectorSelector, so disabling has to reach the wrapped
+    config and keep the serialized ``config`` mapping in step with it."""
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config=dataclasses.asdict(
+            OceanCorrectorConfig(
+                force_positive_names=["so_0"],
+                surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                    method="prescribed"
+                ),
+                ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+                    method="scaled_temperature"
+                ),
+            )
+        ),
+    )
+    selector.disable_corrections(["surface_energy_flux_correction"])
+
+    wrapped = selector._corrector_config_instance
+    assert isinstance(wrapped, OceanCorrectorConfig)
+    assert wrapped.surface_energy_flux_correction is None
+    assert wrapped.ocean_heat_content_correction is not None
+    # `config` is what gets serialized, so it must reflect the mutation
+    assert selector.config["surface_energy_flux_correction"] is None
+    assert selector.config["ocean_heat_content_correction"] is not None
+    assert selector.config["force_positive_names"] == ["so_0"]
+
+    # and the refreshed `config` survives a serialize -> reload cycle, the path
+    # a re-dumped inference config takes
+    reloaded = CorrectorSelector.from_state(dataclasses.asdict(selector))
+    reloaded_wrapped = reloaded._corrector_config_instance
+    assert isinstance(reloaded_wrapped, OceanCorrectorConfig)
+    assert reloaded_wrapped.surface_energy_flux_correction is None
+    assert reloaded_wrapped.ocean_heat_content_correction is not None
+    assert reloaded_wrapped.force_positive_names == ["so_0"]
+
+
+def test_reload_of_a_disabled_ocean_heat_content_correction():
+    """disable_corrections writes ``ocean_heat_content_correction: null`` into
+    the serialized config, so remove_deprecated_keys must accept an explicit
+    null rather than treating it as a dict to inspect."""
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config=dataclasses.asdict(
+            OceanCorrectorConfig(
+                ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+                    method="scaled_temperature"
+                ),
+            )
+        ),
+    )
+    selector.disable_corrections(["ocean_heat_content_correction"])
+    assert selector.config["ocean_heat_content_correction"] is None
+    reloaded = CorrectorSelector.from_state(dataclasses.asdict(selector))
+    reloaded_wrapped = reloaded._corrector_config_instance
+    assert isinstance(reloaded_wrapped, OceanCorrectorConfig)
+    assert reloaded_wrapped.ocean_heat_content_correction is None
+
+
+def test_disable_corrections_through_a_selector_rejects_a_non_correction():
+    """The selector resolves names against the wrapped config, so the wrapped
+    config's non-correction options are rejected there too."""
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config=dataclasses.asdict(
+            OceanCorrectorConfig(
+                force_positive_names=["so_0"],
+                keep_gradient_through_clamps=True,
+            )
+        ),
+    )
+    with pytest.raises(ValueError, match="not a correction"):
+        selector.disable_corrections(["keep_gradient_through_clamps"])
+    assert selector.config["keep_gradient_through_clamps"] is True
+
+
+def test_disabled_surface_energy_flux_correction_leaves_hfds_untouched():
+    """With the correction off, the generated hfds is the raw prediction."""
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    gen_data = {
+        "sst": torch.full(IMG_SHAPE, 300.0, device=DEVICE),
+        "hfds": gen_hfds,
+        "sea_ice_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+    }
+    forcing_data = {
+        "land_fraction": torch.zeros(IMG_SHAPE, device=DEVICE),
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    input_data = {**forcing_data, **gen_data}
+
+    corrected_on = config._build(ops, None, timestep)(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    assert not torch.allclose(corrected_on["hfds"], gen_hfds)
+
+    config.disable_corrections(["surface_energy_flux_correction"])
+    corrected_off = config._build(ops, None, timestep)(
+        input_data, gen_data, forcing_data, None
+    ).corrected
+    torch.testing.assert_close(corrected_off["hfds"], gen_hfds)
