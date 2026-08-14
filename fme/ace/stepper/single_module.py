@@ -1574,18 +1574,6 @@ class TrainStepperConfig:
         )
 
 
-@dataclasses.dataclass
-class _StepLossOutput:  # what one step's loss produced
-    total: torch.Tensor  # on the graph
-    channel_losses: dict[str, ChannelLossInfo]  # detached; empty unless optimized
-
-
-@dataclasses.dataclass
-class _AccumulateLossOutput:
-    output_list: list[EnsembleTensorDict]  # data: the per-step predictions
-    per_channel_losses: dict[str, ChannelLossInfo] | None  # detached reporting
-
-
 def _finalize_per_channel_losses(
     weighted_sums: dict[str, torch.Tensor],
     total_counts: dict[str, int],
@@ -1683,7 +1671,7 @@ class TrainStepper(
         data = self._stepper.forcing_deriver(data)
 
         optimization.set_mode(self._stepper.modules)
-        accumulated = self._accumulate_loss(
+        output_list, per_channel_losses = self._accumulate_loss(
             data,
             target_data,
             optimization,
@@ -1698,7 +1686,7 @@ class TrainStepper(
         metrics["loss"] = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
 
-        gen_data = process_ensemble_prediction_generator_list(accumulated.output_list)
+        gen_data = process_ensemble_prediction_generator_list(output_list)
 
         stepped = TrainOutput(
             metrics=metrics,
@@ -1707,7 +1695,7 @@ class TrainStepper(
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self._derive_func,
-            per_channel_losses=accumulated.per_channel_losses,
+            per_channel_losses=per_channel_losses,
         )
         ic = data.get_start(
             set(data.data.keys()), self.n_ic_timesteps
@@ -1726,7 +1714,7 @@ class TrainStepper(
         metrics: dict[str, float],
         n_forward_steps: int,
         n_loss_steps: int,
-    ) -> _AccumulateLossOutput:
+    ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
@@ -1775,30 +1763,22 @@ class TrainStepper(
                         for k, v in target_data.data.items()
                     }
                 )
-                step_loss = self._accumulate_step_loss(
+                step_total_loss = self._accumulate_step_loss(
                     gen_step=gen_step,
                     target_step=target_step,
                     step=step,
                     data_mask=data.data_mask,
                     optimize=optimize_step,
+                    metrics=metrics,
+                    weighted_sums=weighted_sums,
+                    total_counts=total_counts,
                     deltas=deltas,
                 )
-            metrics[f"loss_step_{step}"] = step_loss.total.detach()
-            for k, v in step_loss.channel_losses.items():
-                if k in weighted_sums:
-                    weighted_sums[k] = weighted_sums[k] + v.loss * v.count
-                    total_counts[k] = total_counts[k] + v.count
-                else:
-                    weighted_sums[k] = v.loss * v.count
-                    total_counts[k] = v.count
+            # The penalty rides the per-step total, so one accumulate_loss call
+            # carries it; a second would double-backward under accumulation.
             if optimize_step:
-                optimization.accumulate_loss(step_loss.total)
-        return _AccumulateLossOutput(
-            output_list=output_list,
-            per_channel_losses=_finalize_per_channel_losses(
-                weighted_sums, total_counts
-            ),
-        )
+                optimization.accumulate_loss(step_total_loss)
+        return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
 
     def _accumulate_step_loss(
         self,
@@ -1807,8 +1787,11 @@ class TrainStepper(
         step: int,
         data_mask: TensorMapping | None,
         optimize: bool,
+        metrics: dict[str, float],
+        weighted_sums: dict[str, torch.Tensor],
+        total_counts: dict[str, int],
         deltas: TensorMapping,
-    ) -> _StepLossOutput:
+    ) -> torch.Tensor:
         step_loss = self._loss_obj(
             gen_step,
             target_step,
@@ -1816,18 +1799,18 @@ class TrainStepper(
             data_mask=data_mask,
             deltas=deltas,
         )
-        # The penalty rides the per-step total, so one accumulate_loss call carries
-        # it; a second call would double-backward under gradient accumulation.
-        channel_losses: dict[str, ChannelLossInfo] = {}
+        step_total_loss = step_loss.total()
+        metrics[f"loss_step_{step}"] = step_total_loss.detach()
         if optimize:
-            channel_losses = {
-                k: ChannelLossInfo(loss=v.loss.detach(), count=v.count)
-                for k, v in step_loss.get_channel_losses().items()
-            }
-        return _StepLossOutput(
-            total=step_loss.total(),
-            channel_losses=channel_losses,
-        )
+            per_ch = step_loss.get_channel_losses()
+            for k, v in per_ch.items():
+                if k in weighted_sums:
+                    weighted_sums[k] = weighted_sums[k] + v.loss.detach() * v.count
+                    total_counts[k] = total_counts[k] + v.count
+                else:
+                    weighted_sums[k] = v.loss.detach() * v.count
+                    total_counts[k] = v.count
+        return step_total_loss
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
