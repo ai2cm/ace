@@ -1,0 +1,32 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+# Isolation arm D for the poor 1deg ocean_fillmean runs (xrfjr4cq, 5eovzgxd,
+# mj3koiqj). Identical to ocean_fillmean in every respect except
+# optimization.max_grad_norm, which is 1.0 rather than unset in this
+# directory's train-config.yaml. fill_value=mean is held fixed, so a
+# difference against ocean_fillmean is attributable to gradient clipping
+# alone.
+#
+# What this arm tests. Every ocean_fillmean seed except rs2, and all three of
+# the wide/noice/noice_nofluxcorr arms, show a discrete single-epoch training
+# loss explosion (0.21-0.28 -> 0.5-2.3) somewhere in epochs 6-14, from which
+# the training loss recovers in ~10 epochs but the 1460-step rollout metric
+# does not: it jumps 5-20x and takes 30-80 epochs to return, or never does.
+# No ocean_baseline seed shows it. Capacity, sea ice and the flux correction
+# are already ruled out (all three arms spiked anyway), and AdamW here runs
+# unclipped with no scheduler and no warmup, so a single outlier batch can
+# take a step many times lr while the beta2=0.999 second moment lags.
+#
+# The arm doubles as the diagnostic. clip_grad_norm_ returns the *pre-clip*
+# norm, which this branch logs as batch_grad_norm_max/mean every
+# log_train_every_n_batches, so the run reports the true magnitude of any
+# spike whether or not the clip binds. A flat norm trace across the event
+# refutes the gradient-outlier hypothesis; a spike confirms it.
+#
+# Only rs0 is set to train, matching how the other isolation arms were read:
+# the pathology is present in nearly every seed, so one seed is enough for a
+# first read. Flip rs1/rs2 to `train` to fill in the spread once rs0 shows
+# whether clipping removes the event.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs1|skip|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs2|skip|high|h100|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'

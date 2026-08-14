@@ -1,0 +1,15 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+
+# The finetune leg is not staged yet: its wandb_id column must be the pretraining
+# runs' ids, which do not exist until the rows in training.txt have run. Add rows
+# here (mirroring ocean_baseline/finetuning.txt) after pretraining completes.
+# fill_value=mean needs no override here -- the finetune stepper is inherited
+# from the pretraining checkpoint, so input_masking carries over. max_grad_norm
+# does not carry over: it is optimizer config, not stepper config, so a
+# finetune leg that should also clip must set it in its own override column.
+#
+# Before staging a finetune from this arm, check which checkpoint it loads.
+# experiments.txt selects best_inference_ckpt, and in every ocean_fillmean run
+# best_inference_error froze at its pre-spike value (rs0 at 0.3067 from epoch
+# 10 on), so best_inference_ckpt for those runs is a ~10-epoch model, not a
+# converged one.
