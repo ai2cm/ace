@@ -264,7 +264,7 @@ class StepOutputLossOutput:  # NEW
         """Delegates to ``main``."""
 
     def get_corrector_channel_losses(self) -> dict[str, ChannelLossInfo]:
-        """Per-channel penalties, empty when no penalty."""
+        """Unweighted per-channel penalties, empty when no penalty."""
 ```
 
 `StepOutputLoss` lives here rather than in `fme/core/loss.py` so that
@@ -355,7 +355,9 @@ class TrainStepper(TrainStepperABC[...]):
         # CHANGED — calls self._loss_obj(..., deltas=deltas) and returns
         # result.total(), so the penalty rides the one per-step
         # accumulate_loss call; records
-        # metrics["corrector_regularization_step_{step}"].
+        # metrics["corrector_regularization_step_{step}"]; folds
+        # get_corrector_channel_losses() into the per-channel accumulation
+        # under a "corrector_regularization/" key prefix.
 ```
 
 ### Critical detail — accumulation seam and the hard boundary
@@ -372,6 +374,12 @@ class TrainStepper(TrainStepperABC[...]):
 - `train_on_batch` writes `metrics["corrector_regularization"]` from
   `_AccumulatedLoss`, next to its existing `metrics["loss"]` write, so the
   batch aggregate is set where the other aggregate is set.
+- Per-channel penalties are reported unweighted, under keys
+  `corrector_regularization/<var>`, which `PerChannelLossAggregator` logs
+  unchanged as `<label>/mean/loss/corrector_regularization/<var>`. Per-channel
+  losses therefore do not sum to `total()`: the main-loss channels and the
+  penalty channels are different quantities, and the weighted contribution is
+  recoverable from the logged penalty and the configured `weight`.
 - Hard boundary: training consumes deltas at the `StepOutput` level inside
   `_accumulate_loss`, never via the `StepDiagnostics` carriage — that carriage
   is detached, output-masked, and inference-only by design. Stated here and
@@ -521,38 +529,13 @@ def test_epoch_scheduled_corrector():
     # disabled; disabled epochs are inert (no penalty, no metric, no error).
 
 def test_corrector_regularization_metrics():
-    # GOAL: corrector_regularization_step_{i} per optimized step plus the
-    # per-batch corrector_regularization mean written in train_on_batch.
+    # GOAL: corrector_regularization_step_{i} per optimized step, the per-batch
+    # corrector_regularization mean written in train_on_batch, and unweighted
+    # per-channel penalties under corrector_regularization/<var> for exactly
+    # the selected names.
 
 def test_both_features_together():
     # GOAL: both features configured in one train_on_batch: the main loss sees
     # the pre-corrector outputs, the penalty is added, and both metric families
     # appear (per #1273's acceptance criteria).
 ```
-
----
-
-## Open Questions
-
-- **Per-channel reporting of the penalty.** `get_channel_losses()` is main-loss
-  only, so per-channel losses do not sum to `total()` under regularization.
-  Keeping the penalty as a `LossOutput` makes the fix available:
-  `_accumulate_loss` can fold `get_corrector_channel_losses()` into
-  `per_channel_losses` under a `corrector_regularization/` key prefix, which
-  `PerChannelLossAggregator` logs unchanged as
-  `<label>/mean/loss/corrector_regularization/<var>`. That reports every
-  selected channel's penalty without mixing two quantities under one variable
-  name — at the cost that no single reported number decomposes `total()`. The
-  alternative, adding `weight * penalty` into the matching main channels, makes
-  the sum work but hides which term moved; it stays available because every
-  delta key is a network output and `loss_names` is `output_names` for every
-  step type, and it belongs at this reporting seam rather than inside
-  `LossOutput`, whose `scale()` would subject the penalty to the step decay.
-  Proposed: the prefixed keys.
-- **Where discovery runs.** Moving it into `get_corrector` requires the step
-  configs to pass their name sets through; the alternative is keeping the
-  post-construction `discover_modified_names(...)` call in `get_step`. Proposed:
-  construction, since it removes both the mutation and the
-  `modified_names is None` state.
-- **Splitting field selection into a follow-on PR.** Proposed: keep it here —
-  see the PR thread on `fme/core/name_and_prefix_matcher.py`.
