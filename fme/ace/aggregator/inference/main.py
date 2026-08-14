@@ -49,13 +49,15 @@ from .zonal_mean import ZonalMeanMetricConfig
 wandb = WandB.get_instance()
 
 
-def _summary_logs(name: str, aggregator) -> InferenceLog:
+def _summary_logs(
+    name: str, aggregator: SubAggregator | SelectStepEnsembleAggregator
+) -> InferenceLog:
     """Collect one sub-aggregator's summary logs, tolerating its failure.
 
     get_summary runs after the whole rollout, so raising here throws away every
     other aggregator's metrics along with the GPU time that produced them --
     figure construction in particular is easy to break on an input the rollout
-    itself handled fine. Degrade to a warning instead.
+    itself handled fine. Degrade to a logged error instead.
     """
     logging.info(f"Getting summary logs for {name} aggregator")
     try:
