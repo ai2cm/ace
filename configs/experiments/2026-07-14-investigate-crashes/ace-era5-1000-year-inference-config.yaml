@@ -1,0 +1,26 @@
+checkpoint_path: /ckpt.tar
+data_writer:
+  save_monthly_files: false
+  save_prediction_files: false
+logging:
+  project: ace2s-era5-1000-year
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+forward_steps_in_memory: 40
+n_forward_steps: 1460968  # 1000 years
+experiment_dir: /results
+forcing_loader:
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2024-09-04-era5-1deg-8layer-forcing-clim-1991-2020.zarr
+    engine: zarr
+    n_repeats: 300
+  num_data_workers: 8
+initial_condition:
+  path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - "2001-01-01T00:00:00"
+seed: 0
