@@ -62,7 +62,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     VerticalCoordinate,
 )
-from fme.core.corrector.loss import (
+from fme.core.corrector.loss_config import (
     CorrectorLossConfig,
     CorrectorRegularizationConfig,
     PreCorrectorOptimizationConfig,
@@ -3293,7 +3293,7 @@ def _corrector_loss_stepper(
     return stepper
 
 
-def test_train_on_batch_precorrector_equivalence():
+def test_train_on_batch_pre_corrector_equivalence():
     torch.manual_seed(0)
     data = BatchData.new_for_testing(
         names=["a"], n_samples=2, n_timesteps=2, epoch=0
@@ -3353,7 +3353,7 @@ def test_gradient_flows_through_correction_when_configured():
     assert not torch.allclose(grads["baseline"], grads["regularized"])
 
 
-def test_corrector_regularization_gradient_accumulation():
+def test_corrector_penalty_gradient_accumulation():
     torch.manual_seed(0)
     n_forward_steps = 2
     data = BatchData.new_for_testing(
@@ -3382,7 +3382,7 @@ def test_corrector_regularization_gradient_accumulation():
     output = train_stepper.train_on_batch(data, optimization=optimization)
     assert len(accumulate_calls) == n_forward_steps  # one per optimized step
     assert torch.isfinite(output.metrics["loss"])
-    assert torch.isfinite(output.metrics["corrector_regularization"])
+    assert torch.isfinite(output.metrics["loss/corrector_penalty"])
 
 
 def test_masked_output_with_corrector_loss_finite():
@@ -3420,7 +3420,7 @@ def test_masked_output_with_corrector_loss_finite():
     # losses and gradients stay finite through the NaN-filling
     # apply_output_masking path
     assert torch.isfinite(output.metrics["loss"])
-    assert torch.isfinite(output.metrics["corrector_regularization"])
+    assert torch.isfinite(output.metrics["loss/corrector_penalty"])
     assert optimization.grads is not None
     for grad in optimization.grads:
         assert torch.isfinite(grad).all()
@@ -3452,19 +3452,19 @@ def test_epoch_scheduled_corrector():
     train_stepper.set_epoch(1)  # disabled during the first epoch
     disabled = train_stepper.train_on_batch(data, optimization=NullOptimization())
     # inert: no correction applied, no penalty, no metrics, no error
-    assert "corrector_regularization" not in disabled.metrics
-    assert "corrector_regularization_step_0" not in disabled.metrics
+    assert "loss/corrector_penalty" not in disabled.metrics
+    assert "loss/corrector_penalty_step_0" not in disabled.metrics
     torch.testing.assert_close(disabled.gen_data["a"][:, 0, 1], ic + 1.0)
 
     train_stepper.set_epoch(2)  # first enabled epoch
     enabled = train_stepper.train_on_batch(data, optimization=NullOptimization())
     torch.testing.assert_close(enabled.gen_data["a"][:, 0, 1], ic + 1.0 + offset)
-    penalty = enabled.metrics["corrector_regularization"]
+    penalty = enabled.metrics["loss/corrector_penalty"]
     torch.testing.assert_close(penalty, torch.full_like(penalty, offset**2))
-    assert "corrector_regularization_step_0" in enabled.metrics
+    assert "loss/corrector_penalty_step_0" in enabled.metrics
 
 
-def test_corrector_regularization_metrics():
+def test_corrector_penalty_metrics():
     torch.manual_seed(0)
     offset = 2.0
     weight = 0.5
@@ -3495,7 +3495,7 @@ def test_corrector_regularization_metrics():
     # a constant-offset delta in trivial (std 1) loss normalization gives an
     # exact MSE penalty of offset**2 at every step
     for step in range(n_forward_steps):
-        penalty_step = reg_out.metrics[f"corrector_regularization_step_{step}"]
+        penalty_step = reg_out.metrics[f"loss/corrector_penalty_step_{step}"]
         torch.testing.assert_close(
             penalty_step, torch.full_like(penalty_step, offset**2)
         )
@@ -3504,24 +3504,23 @@ def test_corrector_regularization_metrics():
             reg_out.metrics[f"loss_step_{step}"],
             base_out.metrics[f"loss_step_{step}"] + weight * offset**2,
         )
-    batch_penalty = reg_out.metrics["corrector_regularization"]
+    batch_penalty = reg_out.metrics["loss/corrector_penalty"]
     torch.testing.assert_close(batch_penalty, torch.full_like(batch_penalty, offset**2))
     # per-channel penalties, unweighted, for exactly the selected names
     assert reg_out.per_channel_losses is not None
     penalty_channels = {
         name: info
         for name, info in reg_out.per_channel_losses.items()
-        if name.startswith("corrector_regularization/")
+        if name.startswith("corrector_penalty/")
     }
-    assert set(penalty_channels) == {"corrector_regularization/a"}
-    channel_penalty = penalty_channels["corrector_regularization/a"].loss
+    assert set(penalty_channels) == {"corrector_penalty/a"}
+    channel_penalty = penalty_channels["corrector_penalty/a"].loss
     torch.testing.assert_close(
         channel_penalty, torch.full_like(channel_penalty, offset**2)
     )
     assert base_out.per_channel_losses is not None
     assert not any(
-        name.startswith("corrector_regularization/")
-        for name in base_out.per_channel_losses
+        name.startswith("corrector_penalty/") for name in base_out.per_channel_losses
     )
 
 
@@ -3559,9 +3558,9 @@ def test_both_features_together():
     )
     # both metric families appear
     assert "loss_step_0" in both_out.metrics
-    penalty = both_out.metrics["corrector_regularization_step_0"]
+    penalty = both_out.metrics["loss/corrector_penalty_step_0"]
     torch.testing.assert_close(penalty, torch.full_like(penalty, offset**2))
-    assert "corrector_regularization" in both_out.metrics
+    assert "loss/corrector_penalty" in both_out.metrics
     # the returned predictions stay fully corrected
     ic = data.data["a"][:, 0]
     torch.testing.assert_close(both_out.gen_data["a"][:, 0, 1], ic + 1.0 + offset)

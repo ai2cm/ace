@@ -104,7 +104,7 @@ from fme.ace.stepper.time_length_probabilities import (
 from fme.core.cli import ResumeResultsConfig
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ice import IceCorrectorConfig
-from fme.core.corrector.loss import (
+from fme.core.corrector.loss_config import (
     CorrectorLossConfig,
     CorrectorRegularizationConfig,
     PreCorrectorOptimizationConfig,
