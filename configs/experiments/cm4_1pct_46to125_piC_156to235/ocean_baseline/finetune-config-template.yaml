@@ -10,9 +10,6 @@ inference:
     weight: 1.0
     n_forward_steps: 1460 # exactly 20 noleap years
     forward_steps_in_memory: 40
-    epochs:
-      start: -1
-      step: -2
     loader:
       start_indices:
         times:
@@ -41,9 +38,6 @@ inference:
     weight: 1.0
     n_forward_steps: 1460 # exactly 20 noleap years
     forward_steps_in_memory: 40
-    epochs:
-      start: -1
-      step: -2
     loader:
       start_indices:
         times:
