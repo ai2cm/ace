@@ -11,6 +11,7 @@ from fme.core import metrics
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
+from .shutdown import handle_termination_signals
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -65,26 +66,45 @@ class Distributed:
 
     @classmethod
     @contextlib.contextmanager
-    def context(cls) -> Generator[None, None, None]:
+    def context(cls, handle_signals: bool = True) -> Generator[None, None, None]:
         """
         Context manager for initializing and shutting down the distributed backend.
 
         This should generally be used at the top level of the training script to
         wrap the entire training process, to ensure proper initialization and
         shutdown of the distributed backend.
+
+        Termination signals are handled for the lifetime of the context, so that
+        a preempted job aborts its communicators before exiting instead of
+        dropping its NVLink peers. See `fme.core.distributed.shutdown`. A
+        single-process job has no peers to protect and keeps the default signal
+        behavior (Ctrl-C raises KeyboardInterrupt and unwinds normally).
+
+        Args:
+            handle_signals: Install the termination listener. Pass `False` only
+                when something else owns the process's response to SIGTERM and
+                SIGINT -- the test suite, which wraps the whole session in this
+                context and needs Ctrl-C to keep interrupting pytest rather than
+                becoming an abort-and-exit. Every entrypoint wants the default.
         """
         if cls._entered:
             raise RuntimeError("Nested Distributed.context() is not supported.")
         cls._entered = True
         instance = cls.get_instance()
         try:
-            yield
-        except BaseException:
-            # exit immediately to avoid hanging other ranks
-            # the OS should clean up resources based on the non-zero exit
-            raise  # re-raise the exception to avoid masking it
-        else:  # if no exception is raised, let root finish cleanup
-            instance.shutdown()
+            with contextlib.ExitStack() as stack:
+                if handle_signals and instance.is_distributed():
+                    stack.enter_context(handle_termination_signals(instance.abort))
+                try:
+                    yield
+                except BaseException:
+                    # exit immediately to avoid hanging other ranks
+                    # the OS should clean up resources based on the non-zero exit
+                    raise  # re-raise the exception to avoid masking it
+                else:  # if no exception is raised, let root finish cleanup
+                    # inside the stack: the teardown is itself a collective, so
+                    # it must run while the listener still protects the process
+                    instance.shutdown()
         finally:
             cls._entered = False
 
@@ -499,6 +519,13 @@ class Distributed:
 
     def shutdown(self):
         return self._distributed.shutdown()
+
+    def abort(self):
+        """Locally release the backend's communicators so this process can exit
+        without faulting its peers. Not collective, unlike `shutdown`, and safe
+        to call from a non-main thread.
+        """
+        return self._distributed.abort()
 
 
 singleton: Distributed | None = None
