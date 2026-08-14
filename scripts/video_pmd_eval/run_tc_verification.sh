@@ -13,10 +13,13 @@
 #
 # Known-tracks dataset: 01KZT2P2PS0QZC5J69PQGE6XK8
 #
-# Run:  bash scripts/video_pmd_eval/run_tc_verification.sh
+# Run:  bash scripts/video_pmd_eval/run_tc_verification.sh [model]
+#   model: any label in combine_regions_to_zarr.py's PATCHED_MODELS
+#     (default: st-singlestage-flat).
 set -e
 
-JOB_NAME="tc-verification-st-singlestage-flat-$(date +%s)"
+MODEL="${1:-st-singlestage-flat}"
+JOB_NAME="tc-verification-${MODEL}-$(date +%s)"
 WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/saturn"
 KNOWN_TRACKS_DATASET="01KZT2P2PS0QZC5J69PQGE6XK8"
@@ -37,7 +40,7 @@ SUMMARY_B64=$(base64 < scripts/video_pmd_eval/tc_summary.py | tr -d '\n')
 DETECT_B64=$(base64 < scripts/tropical_cyclones/detect_tc_tracks.py | tr -d '\n')
 RECTIFY_B64=$(base64 < scripts/tropical_cyclones/rectify_tc_tracks.py | tr -d '\n')
 
-COMBINED_ZARR="/climate-default/2026-06-25-temporal-diffusion/inference/global-25km-100km-spatiotemporal-singlestage-5ch-flat-v1/test-2023-2024-ens0-global-combined.zarr"
+COMBINED_ZARR="/climate-default/2026-06-25-temporal-diffusion/inference/tc_combined/${MODEL}-ens0-global-combined.zarr"
 
 set +e
 CREATE_OUTPUT=$(beaker session create \
@@ -75,7 +78,7 @@ echo '=== installing dask (needed for chunked/streamed zarr write) ==='
 python3 -m pip install --quiet dask
 
 echo '=== combining 4 regions into one global zarr ==='
-python3 /tmp/combine.py --model st-singlestage-flat --ensemble-member 0 \
+python3 /tmp/combine.py --model $MODEL --ensemble-member 0 \
     --out-zarr '$COMBINED_ZARR'
 
 echo '=== running TC detection (SLP-only, 3hr) ==='
@@ -92,7 +95,7 @@ python3 /tmp/rectify_tc_tracks.py /known_tracks/known_tracks_2023_filtered.csv \
 cp /results/tc_rectified/rectified_tracks.csv /results/rectified_tracks.csv
 
 echo '=== computing summary ==='
-python3 /tmp/tc_summary.py --label st-singlestage-flat \
+python3 /tmp/tc_summary.py --label $MODEL \
     --known-csv /known_tracks/known_tracks_2023_filtered.csv \
     --raw-csv /results/detect_raw_tracks.csv \
     --rectified-csv /results/rectified_tracks.csv \

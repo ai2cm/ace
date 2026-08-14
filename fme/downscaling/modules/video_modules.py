@@ -70,7 +70,7 @@ class CalendarEmbedding(nn.Module):
         height: int,
     ) -> torch.Tensor:
         lon = lon.to(second_of_day.device, second_of_day.dtype)
-        local = (second_of_day[:, :, None] + lon[None, None, :] * 86400.0 / 360.0)
+        local = second_of_day[:, :, None] + lon[None, None, :] * 86400.0 / 360.0
         local = local % 86400.0
         diurnal = self.embed(local / 86400.0)
         diurnal = diurnal.permute(0, 3, 1, 2)
@@ -120,9 +120,7 @@ class ResBlock(nn.Module):
         self.emb = nn.Linear(emb_dim, 2 * out_ch)
         self.norm2 = nn.GroupNorm(_groups(out_ch), out_ch)
         self.conv2 = PeriodicConv3d(out_ch, out_ch)
-        self.skip = (
-            nn.Conv3d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
-        )
+        self.skip = nn.Conv3d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
         self.skip_scale = skip_scale
 
     def forward(self, x: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
@@ -287,7 +285,9 @@ class FIRBlur(nn.Module):
         return F.conv3d(x, w, groups=c)
 
 
-def _resize_spatial(x: torch.Tensor, size, blur: nn.Module | None = None) -> torch.Tensor:
+def _resize_spatial(
+    x: torch.Tensor, size, blur: nn.Module | None = None
+) -> torch.Tensor:
     """Resize the (H, W) of a (B, C, T, H, W) tensor to ``size`` (keeps T), with
     an optional FIR low-pass applied only when the size actually changes.
     """
@@ -345,8 +345,11 @@ class VideoUNet(nn.Module):
                 ch = chs[level]
                 self.enc_attn.append(
                     _BlockAttn(
-                        ch, n_heads, seq_length,
-                        level in attn_spatial, level in attn_temporal,
+                        ch,
+                        n_heads,
+                        seq_length,
+                        level in attn_spatial,
+                        level in attn_temporal,
                     )
                 )
                 skip_ch.append(ch)
@@ -357,7 +360,16 @@ class VideoUNet(nn.Module):
                 skip_ch.append(ch)
 
         self.mid_block1 = ResBlock(ch, ch, emb_dim)
-        self.mid_attn = _BlockAttn(ch, n_heads, seq_length, True, True)
+        # Mid-block operates at the same resolution as the deepest encoder
+        # level (self.levels - 1, since that level skips the downsample), so
+        # its temporal-attention gating reuses that level's membership in
+        # attn_temporal rather than being hardcoded on -- otherwise an
+        # explicit temporal_attention_levels=() (fully per-frame-independent
+        # model) would still leak cross-frame information through this one
+        # always-on layer.
+        self.mid_attn = _BlockAttn(
+            ch, n_heads, seq_length, True, (self.levels - 1) in attn_temporal
+        )
         self.mid_block2 = ResBlock(ch, ch, emb_dim)
 
         self.dec_blocks = nn.ModuleList()
@@ -369,8 +381,11 @@ class VideoUNet(nn.Module):
                 ch = chs[level]
                 self.dec_attn.append(
                     _BlockAttn(
-                        ch, n_heads, seq_length,
-                        level in attn_spatial, level in attn_temporal,
+                        ch,
+                        n_heads,
+                        seq_length,
+                        level in attn_spatial,
+                        level in attn_temporal,
                     )
                 )
 
