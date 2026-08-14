@@ -47,7 +47,8 @@ https://github.com/ai2cm/full-model/compare/job_runner
 
 - [ISSUE] `init_exper.sh` populates wrong dataset for `<COUPLED_ATMOS_ZARR>` in uncoupled atmosphere config.
 - [ISSUE] `init_exper.sh` populates top-level `n_forward_steps` with inference value
-- Use `ocean` as sub-directory of `--coupled_stats`.
+- [ISSUE] Use `ocean` as sub-directory of `--coupled_stats`.
+- [ISSUE] Use `*=n` rather than `*=` in `create_coupled_finetune_config.sh`.
 - [ISSUE] `create_coupled_train_config.sh` used the BSD-only `sed -i ''` form for
   the ocean stats rewrite, so every coupled submission from a Linux host aborted
   with `sed: can't read s/statsdata/ocean_stats/g: No such file or directory`.
