@@ -1,8 +1,4 @@
-# arg: --dataset 01KYT8YZZZGKGJFFK6TNJ64SFN:/weights
-# source pre-training run: ace2-var-mask-nc-sfno-era5-gmron-mask20-seed0-v5
-# = that run's 1-step pre-training config, with only n_forward_steps swapped for the
-#   multi-step schedule and parameter_init added (see generate_finetune_configs.py).
-seed: 0
+seed: 2
 experiment_dir: /results
 save_checkpoint: true
 checkpoint_every_n_batches: 5000
@@ -452,26 +448,13 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
-  n_forward_steps:
-    outcomes:
-    - steps: 1
-      probability: 0.6
-    - steps: 2
-      probability: 0.2
-    - steps: 4
-      probability: 0.1
-    - steps: 12
-      probability: 0.05
-    - steps: 20
-      probability: 0.05
+  n_forward_steps: 1
   optimize_last_step_only: true
   loss:
     type: EnsembleLoss
     kwargs:
       crps_weight: 0.9
       energy_score_weight: 0.1
-  parameter_init:
-    weights_path: /weights/training_checkpoints/best_ckpt.tar
 stepper:
   step:
     type: single_module
@@ -622,5 +605,5 @@ stepper:
         append_as_input: true
       input_dropout:
         default:
-          max_masked_vars: 20
+          max_masked_vars: 0
       include_channel_mask_inputs: true

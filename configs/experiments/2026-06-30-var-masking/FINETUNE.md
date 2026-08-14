@@ -1,9 +1,14 @@
 # Multi-step fine-tuning of the paper-final var-masking runs
 
 Continues the four paper-final v5 pre-trained checkpoints (one per
-global-mean-removal x masking cell) with the **exact multi-step fine-tuning
-recipe of the ERA5 baseline**
-(`configs/baselines/era5/ace-train-config-multi-step-finetuning.yaml`).
+global-mean-removal x masking cell). Each fine-tune config **is that run's exact
+1-step pre-training config** with only one change: `stepper_training.n_forward_steps`
+is swapped from `1` to a multi-step probability schedule (plus loading the
+pre-trained weights). The schedule is the only thing borrowed from the ERA5
+baseline multi-step fine-tune
+(`configs/baselines/era5/ace-train-config-multi-step-finetuning.yaml`); inference
+suite, training/validation windows, optimizer, loss, EMA, `max_epochs`, masking,
+global-mean-removal, and architecture are all identical to pre-training.
 
 ## Source checkpoints (one per cell)
 
@@ -17,27 +22,27 @@ recipe of the ERA5 baseline**
 `gmron-mask0` uses **seed2** as an interim stand-in: the paper's intended
 `gmron-mask0-seed1` had no succeeded checkpoint at generation time (still running
 in urgent). Swap it once seed1 finishes — edit `SELECTED_SOURCES` in
-`generate_finetune_configs.py`, `update_beaker_map.py`, re-generate, re-submit.
+`generate_finetune_configs.py`, cache its `config.yaml` into
+`pretrain_source_configs/`, re-generate, re-submit.
 
-The model architecture is reconstructed per cell from each checkpoint
-(`stepper.checkpoint_path`), so masking / global-mean-removal / SFNO settings are
-inherited exactly from pre-training; `stepper_training.parameter_init` loads the
-same weights as the fine-tuning start.
+Each run's exact 1-step pre-training config (the `config.yaml` the checkpoint was
+trained with) is cached under `pretrain_source_configs/`; the generator reads it,
+applies the two changes below, and writes the fine-tune config. So masking,
+global-mean-removal, SFNO settings, and all training/eval details are inherited
+verbatim from pre-training.
 
-## Fine-tuning recipe (copied from the ERA5 baseline)
+## The only changes from pre-training
 
-- `stepper_training.n_forward_steps`: probability schedule over
-  {1: 0.6, 2: 0.2, 4: 0.1, 12: 0.05, 20: 0.05}
-- `optimize_last_step_only: true`, `n_ensemble: 2`
-- `loss`: EnsembleLoss (crps 0.9 / energy 0.1), `h500` weight 5.0
-- `optimization`: AdamW, lr 1e-4, weight_decay 0.01, fused, grad accumulation, amp off
-- `max_epochs: 40`, EMA decay 0.999, validate using EMA
-- inference / train / val windows: verbatim from the baseline FT config
-- checkpoint file loaded: `training_checkpoints/best_ckpt.tar`
+- `stepper_training.n_forward_steps`: `1` -> probability schedule over
+  {1: 0.6, 2: 0.2, 4: 0.1, 12: 0.05, 20: 0.05} (the ERA5-baseline multi-step
+  schedule — the only borrowed piece)
+- `stepper_training.parameter_init.weights_path`: added, loads
+  `/weights/training_checkpoints/best_ckpt.tar`
 
-**Only deviations from the baseline FT config:** `logging.project: VarMasking8`
-(so fine-tunes group with the experiment and the eval tooling finds them), and
-the per-cell `/weights` checkpoint mount.
+Everything else is pre-training verbatim, including `max_epochs: 150`, FusedAdam
+lr 1e-4, EnsembleLoss (crps 0.9 / energy 0.1, no extra weights),
+`optimize_last_step_only: true`, `n_ensemble: 2`, the full v5 inference suite,
+the 1979–2008 training windows, and `logging.project: VarMasking8`.
 
 ## Run
 

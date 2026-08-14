@@ -1,32 +1,25 @@
 """Generate multi-step fine-tuning configs for the paper-final var-masking runs.
 
-Takes the four paper-final v5 pre-trained checkpoints (one per
-global-mean-removal x masking cell) and, for each, writes a training config that
-loads that checkpoint and continues training with the *exact* multi-step
-fine-tuning recipe used by the ERA5 baseline
-(``configs/baselines/era5/ace-train-config-multi-step-finetuning.yaml``): a
-``n_forward_steps`` probability schedule over {1, 2, 4, 12, 20},
-``optimize_last_step_only``, EnsembleLoss (crps 0.9 / energy 0.1, h500 weight
-5.0), AdamW lr 1e-4, and ``max_epochs: 40``.
+Each fine-tune config is the run's **exact 1-step pre-training config** (the
+config.yaml the checkpoint was trained with, cached under
+``pretrain_source_configs/``) with only two changes:
 
-The model architecture (NoiseConditionedSFNO-512, global-mean-removal, input
-masking, channel-mask inputs, ...) is not re-specified here: ``stepper`` is a
-``checkpoint_path`` reference, so the full stepper config is reconstructed from
-the pre-trained checkpoint and every var-masking cell keeps its own
-architecture. ``stepper_training.parameter_init.weights_path`` then loads those
-same weights as the fine-tuning starting point.
+  1. ``stepper_training.n_forward_steps`` is swapped from ``1`` to the multi-step
+     probability schedule used by the ERA5 baseline multi-step fine-tune
+     (``configs/baselines/era5/ace-train-config-multi-step-finetuning.yaml``):
+     {1: 0.6, 2: 0.2, 4: 0.1, 12: 0.05, 20: 0.05}. This schedule is the *only*
+     thing taken from the ERA5 baseline recipe.
+  2. ``stepper_training.parameter_init.weights_path`` is added so training starts
+     from the pre-trained checkpoint (mounted at ``/weights``).
 
-The only deliberate deviations from the ERA5 baseline recipe are:
-  - ``logging.project`` is ``VarMasking8`` (not ``ace``) so the fine-tunes group
-    with the pre-training runs and the existing eval tooling can find them;
-  - the pre-trained checkpoint dataset mounted at ``/weights`` differs per cell.
+Everything else -- inference suite, training/validation windows, optimizer
+(FusedAdam), EnsembleLoss (crps 0.9 / energy 0.1, no extra weights), EMA,
+``max_epochs``, masking, global-mean-removal, model architecture -- is copied
+verbatim from pre-training, so the fine-tune differs from pre-training only in
+that it rolls out multiple steps.
 
-Everything else -- data windows, inference protocol, optimizer, EMA, loss, and
-the ``n_forward_steps`` schedule -- is copied verbatim from the ERA5 baseline
-fine-tuning config.
-
-Checkpoint dataset IDs are resolved from ``wandb_to_beaker_map.json`` (refresh
-it with ``update_beaker_map.py`` if a source run's succeeded job changed).
+Checkpoint dataset IDs (for the ``/weights`` mount) are resolved from
+``wandb_to_beaker_map.json`` (refresh with ``update_beaker_map.py``).
 
 Usage:
     python generate_finetune_configs.py [--source-map PATH] [--existing-only]
@@ -42,6 +35,7 @@ from generate_masking_configs import CONFIG_PREFIX, RUN_CONFIGS_DIR, WANDB_PREFI
 
 HERE = pathlib.Path(__file__).parent
 DEFAULT_SOURCE_MAP = HERE / "wandb_to_beaker_map.json"
+PRETRAIN_CONFIGS_DIR = HERE / "pretrain_source_configs"
 
 # Checkpoint file loaded for fine-tuning, matching the ERA5 baseline recipe.
 CHECKPOINT_NAME = "training_checkpoints/best_ckpt.tar"
@@ -49,135 +43,29 @@ CHECKPOINT_NAME = "training_checkpoints/best_ckpt.tar"
 # Suffix distinguishing a fine-tune config/run from its pre-training source.
 FT_SUFFIX = "-mstepft"
 
+# The one thing taken from the ERA5 baseline multi-step fine-tuning config: the
+# n_forward_steps probability schedule. Everything else comes from pre-training.
+MULTISTEP_SCHEDULE = {
+    "outcomes": [
+        {"steps": 1, "probability": 0.6},
+        {"steps": 2, "probability": 0.2},
+        {"steps": 4, "probability": 0.1},
+        {"steps": 12, "probability": 0.05},
+        {"steps": 20, "probability": 0.05},
+    ]
+}
+
 # Paper-final source run per (global-mean-removal, masking) cell. gmron-mask0
 # uses seed2 as an interim stand-in because the intended gmron-mask0-seed1 run
 # had not produced a succeeded checkpoint when these configs were generated;
-# swap it once seed1 finishes (update SELECTED_SOURCES and re-run).
+# swap it once seed1 finishes (update SELECTED_SOURCES, drop its cached config
+# into pretrain_source_configs/, and re-run).
 SELECTED_SOURCES = {
     "gmroff-mask0": "ace2-var-mask-nc-sfno-era5-gmroff-mask0-seed1-v5",
     "gmroff-mask20": "ace2-var-mask-nc-sfno-era5-gmroff-mask20-seed1-v5",
     "gmron-mask0": "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed2-v5",
     "gmron-mask20": "ace2-var-mask-nc-sfno-era5-gmron-mask20-seed0-v5",
 }
-
-
-def _era5_baseline_finetune_recipe() -> dict:
-    """The ERA5 baseline multi-step fine-tuning recipe, minus the per-cell
-    checkpoint mount points (filled in by ``generate_finetune_config``).
-
-    Copied verbatim from
-    ``configs/baselines/era5/ace-train-config-multi-step-finetuning.yaml`` except
-    ``logging.project`` (``VarMasking8`` so the fine-tunes group with the
-    experiment) and the ``stepper``/``parameter_init`` weights paths.
-    """
-    dataset = {
-        "data_path": "/climate-default/",
-        "file_pattern": "2026-03-19-era5-1deg-8layer-1940-2025.zarr",
-        "engine": "zarr",
-    }
-    return {
-        "seed": 0,
-        "experiment_dir": "/results",
-        "save_checkpoint": True,
-        "validate_using_ema": True,
-        "max_epochs": 40,
-        "ema": {"decay": 0.999},
-        "inference": [
-            {
-                "n_forward_steps": 7300,
-                "forward_steps_in_memory": 40,
-                "loader": {
-                    "start_indices": {
-                        "times": [
-                            "1996-01-01T00:00:00",
-                            "1996-02-15T00:00:00",
-                            "1996-04-01T00:00:00",
-                            "1996-05-15T00:00:00",
-                            "1996-07-01T00:00:00",
-                            "1996-08-15T00:00:00",
-                            "1996-10-01T00:00:00",
-                            "1996-11-15T00:00:00",
-                        ]
-                    },
-                    "dataset": copy.deepcopy(dataset),
-                    "num_data_workers": 8,
-                },
-                "aggregator": {
-                    "histogram": {"enabled": True},
-                    "time_mean_reference_data": "/statsdata/time-mean.nc",
-                },
-            }
-        ],
-        "logging": {
-            "log_to_screen": True,
-            "log_to_wandb": True,
-            "log_to_file": True,
-            "project": "VarMasking8",
-            "entity": "ai2cm",
-        },
-        "train_loader": {
-            "batch_size": 8,
-            "num_data_workers": 8,
-            "prefetch_factor": 2,
-            "dataset": {
-                "concat": [
-                    {**copy.deepcopy(dataset), "subset": {"stop_time": "1995-12-31"}},
-                    {
-                        **copy.deepcopy(dataset),
-                        "subset": {
-                            "start_time": "2011-01-01",
-                            "stop_time": "2019-12-31",
-                        },
-                    },
-                    {
-                        **copy.deepcopy(dataset),
-                        "subset": {"start_time": "2021-01-01"},
-                    },
-                ]
-            },
-        },
-        "validation": {
-            "loader": {
-                "batch_size": 32,
-                "num_data_workers": 8,
-                "prefetch_factor": 2,
-                "dataset": {
-                    **copy.deepcopy(dataset),
-                    "subset": {
-                        "start_time": "1996-01-01",
-                        "stop_time": "1997-12-31",
-                    },
-                },
-            }
-        },
-        "optimization": {
-            "use_gradient_accumulation": True,
-            "enable_automatic_mixed_precision": False,
-            "lr": 0.0001,
-            "optimizer_type": "AdamW",
-            "kwargs": {"fused": True, "weight_decay": 0.01},
-        },
-        "stepper_training": {
-            "n_ensemble": 2,
-            "parameter_init": {"weights_path": f"/weights/{CHECKPOINT_NAME}"},
-            "n_forward_steps": {
-                "outcomes": [
-                    {"steps": 1, "probability": 0.6},
-                    {"steps": 2, "probability": 0.2},
-                    {"steps": 4, "probability": 0.1},
-                    {"steps": 12, "probability": 0.05},
-                    {"steps": 20, "probability": 0.05},
-                ]
-            },
-            "optimize_last_step_only": True,
-            "loss": {
-                "type": "EnsembleLoss",
-                "weights": {"h500": 5.0},
-                "kwargs": {"crps_weight": 0.9, "energy_score_weight": 0.1},
-            },
-        },
-        "stepper": {"checkpoint_path": f"/weights/{CHECKPOINT_NAME}"},
-    }
 
 
 def source_run_to_config_stem(source_run_name: str) -> str:
@@ -190,6 +78,17 @@ def source_run_to_config_stem(source_run_name: str) -> str:
     return f"{CONFIG_PREFIX}{suffix}{FT_SUFFIX}"
 
 
+def _to_finetune(pretrain_cfg: dict) -> dict:
+    """Return a fine-tune config: pre-training config with only the multi-step
+    schedule and checkpoint weight-loading changed.
+    """
+    cfg = copy.deepcopy(pretrain_cfg)
+    st = cfg.setdefault("stepper_training", {})
+    st["n_forward_steps"] = copy.deepcopy(MULTISTEP_SCHEDULE)
+    st["parameter_init"] = {"weights_path": f"/weights/{CHECKPOINT_NAME}"}
+    return cfg
+
+
 def generate_finetune_config(
     source_run_name: str,
     beaker_dataset_id: str,
@@ -200,12 +99,22 @@ def generate_finetune_config(
         print(f"Skipped {out_path.name}")
         return
 
-    cfg = _era5_baseline_finetune_recipe()
-    stats_dataset = "andrep/2026-03-19-era5-1deg-8layer-stats-1990-2019"
+    pretrain_path = PRETRAIN_CONFIGS_DIR / f"{source_run_name}.yaml"
+    if not pretrain_path.exists():
+        raise FileNotFoundError(
+            f"missing cached pre-training config {pretrain_path.name} in "
+            f"{PRETRAIN_CONFIGS_DIR} — fetch it with "
+            f"`beaker dataset stream-file {beaker_dataset_id} config.yaml`."
+        )
+    pretrain_cfg = yaml.safe_load(pretrain_path.read_text())
+    cfg = _to_finetune(pretrain_cfg)
+
     header = (
-        f"# arg: --dataset {stats_dataset}:/statsdata\n"
         f"# arg: --dataset {beaker_dataset_id}:/weights\n"
         f"# source pre-training run: {source_run_name}\n"
+        "# = that run's 1-step pre-training config, with only n_forward_steps"
+        " swapped for the\n#   multi-step schedule and parameter_init added"
+        " (see generate_finetune_configs.py).\n"
     )
     with out_path.open("w") as f:
         f.write(header)
