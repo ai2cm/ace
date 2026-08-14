@@ -408,18 +408,17 @@ def abort_and_exit_on_termination(
     try:
         yield
     finally:
-        # the main thread only winds the listener down from here; it will not
-        # touch training state again, so the post-abort callbacks may read it.
-        # Every freeze is preceded by a drain unless the abort already fired:
-        # gating the drain on a pending termination instead would race the
-        # listener thread, which may not have read the signal yet when an
-        # exception unwinds here alongside it -- and a freeze set without a
-        # drain lets the settle-path abort meet active kernels. On a normal
-        # exit the device is idle and the drain is instant; a drain wedged on
-        # a dead peer's collective is released by the deadline abort once the
-        # scheduler's (or torchrun's teardown) SIGTERM arrives. After the
-        # abort, draining would only raise against torn-down communicators
-        # and forfeit the wedged path's restart checkpoint.
+        # Past this point the main thread no longer touches training state, so
+        # this block may mark it frozen -- but a freeze tells the listener it
+        # is safe to abort, so device work must drain first. The drain runs
+        # unconditionally rather than only when a termination is pending,
+        # because the listener may not have read a just-delivered signal yet
+        # when an exception unwinds here alongside it. On a normal exit the
+        # device is idle, so the drain is instant; a drain wedged on a dead
+        # peer's collective is released by the deadline abort once the
+        # scheduler's (or torchrun's teardown) SIGTERM arrives. Once the abort
+        # has started, draining would only raise against the torn-down
+        # communicators and forfeit the restart checkpoint, so it is skipped.
         if not coordination.abort_started():
             try:
                 drain()

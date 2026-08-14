@@ -97,7 +97,7 @@ class Distributed:
                 if handle_signals and instance.is_distributed():
                     stack.enter_context(
                         abort_and_exit_on_termination(
-                            instance.abort, drain=instance.drain_local_work
+                            instance.abort, drain=instance._drain_local_work
                         )
                     )
                 try:
@@ -541,10 +541,10 @@ class Distributed:
         return self._distributed.abort()
 
     def park_if_terminating(self):
-        """Offer this point -- a loop boundary, past the batch's last
-        collective launch -- to a pending termination.
+        """
+        If we've received a termination signal, stop work and wait for termination.
 
-        The batch loops call this once per batch or window. It returns
+        The batch loops should call this once per batch or window. It returns
         immediately unless a termination signal has arrived; if one has, it
         drains this rank's device work, blocks, and the process exits from
         the termination listener's thread. See
@@ -552,7 +552,7 @@ class Distributed:
         """
         park_if_terminating()
 
-    def drain_local_work(self):
+    def _drain_local_work(self):
         """Block until every kernel this rank has enqueued -- collectives
         included -- has completed. On CPU there is nothing asynchronous to
         drain.
