@@ -1760,6 +1760,7 @@ def test_step_shared_global_mean_removal_raises_on_masked_reference():
 def _make_single_module_step(
     input_dropout: VariableMaskingConfig | None,
     include_channel_mask_inputs: bool = False,
+    input_dropout_optimized_steps_only: bool = False,
 ) -> SingleModuleStep:
     in_names = ["forcing_shared", "forcing_rad"]
     out_names = ["diagnostic_main", "diagnostic_rad"]
@@ -1779,12 +1780,35 @@ def _make_single_module_step(
                 normalization=normalization,
                 include_channel_mask_inputs=include_channel_mask_inputs,
                 input_dropout=input_dropout,
+                input_dropout_optimized_steps_only=input_dropout_optimized_steps_only,
             )
         ),
     )
     step = get_step(config, DEFAULT_IMG_SHAPE)
     assert isinstance(step, SingleModuleStep)
     return step
+
+
+def test_input_dropout_optimized_steps_only_skips_no_grad():
+    """With input_dropout_optimized_steps_only, no_grad steps draw no mask.
+
+    A non-optimized rollout step runs under torch.no_grad(); the flag must
+    suppress the dropout draw there while leaving grad-enabled (optimized)
+    steps masked. With the flag off (default) both draw a mask.
+    """
+    dropout = VariableMaskingConfig(default=UniformMaskingConfig(1))
+
+    gated = _make_single_module_step(dropout, input_dropout_optimized_steps_only=True)
+    gated.module.torch_module.train()
+    with torch.enable_grad():
+        assert gated._draw_input_dropout_mask() is not None
+    with torch.no_grad():
+        assert gated._draw_input_dropout_mask() is None
+
+    ungated = _make_single_module_step(dropout)
+    ungated.module.torch_module.train()
+    with torch.no_grad():
+        assert ungated._draw_input_dropout_mask() is not None
 
 
 def _make_gmr_input_dropout_step(

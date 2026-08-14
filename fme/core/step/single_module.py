@@ -78,6 +78,16 @@ class SingleModuleStepConfig(StepConfigABC):
             a random subset of input channels is zeroed during training, with
             the same mask broadcast across the whole batch. Disabled during
             inference (eval mode).
+        input_dropout_optimized_steps_only: When True, ``input_dropout`` is
+            applied only on forward steps that are being optimized, leaving
+            non-optimized rollout steps unmasked. Implemented by skipping the
+            dropout draw whenever gradients are disabled (``torch.no_grad``);
+            during a multi-step training rollout the loss loop runs
+            non-optimized steps under ``no_grad`` (e.g. the intermediate steps
+            when ``optimize_last_step_only`` is set), so those steps see full
+            inputs while the optimized step is still masked. No effect without
+            ``input_dropout``, and none on single-step training (the one step
+            is always optimized). Defaults to False (all training steps masked).
     """
 
     builder: ModuleSelector
@@ -95,6 +105,7 @@ class SingleModuleStepConfig(StepConfigABC):
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
+    input_dropout_optimized_steps_only: bool = False
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -454,11 +465,19 @@ class SingleModuleStep(StepABC):
         Each ``step`` samples independently; the mask has no lifetime beyond
         the call. Returns ``None`` (no dropout) when input dropout is
         unconfigured or the module is in eval mode, so inference and
-        validation batches stay inert.
+        validation batches stay inert. Also returns ``None`` when
+        ``input_dropout_optimized_steps_only`` is set and gradients are
+        disabled, so non-optimized rollout steps stay unmasked.
         """
         if self._input_masking is None:
             return None
         if not self.module.torch_module.training:
+            return None
+        if (
+            self._config.input_dropout_optimized_steps_only
+            and not torch.is_grad_enabled()
+        ):
+            # Non-optimized rollout steps run under no_grad; leave them unmasked.
             return None
         names = self.in_packer.names
         mask = self._input_masking.sample_mask(get_device())
