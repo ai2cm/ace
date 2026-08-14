@@ -157,7 +157,9 @@ class InlineInferenceConfig:
         n_coupled_steps: number of coupled forward steps to take
         coupled_steps_in_memory: number of coupled forward steps to take before
             re-reading data from disk
-        epochs: epochs on which to run inference. By default runs inference every epoch.
+        epochs: positional slice over the training epochs 1 to max_epochs, so
+            index 0 selects epoch 1. By default runs inference every training
+            epoch.
         aggregator: configuration of inline coupled inference aggregator.
         name: name used as wandb log prefix and output subdirectory. If None,
             defaults to "inference" when there is a single inference config
@@ -384,8 +386,8 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
-        evaluate_before_training: Whether to run validation and inline inference before
-            any training is done.
+        evaluate_before_training: Whether to run all validation and inline
+            inference before any training is done.
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
@@ -520,9 +522,12 @@ class TrainConfig:
         inference = self.inference_list
         if not inference:
             return []
-        start_epoch = 0 if self.evaluate_before_training else 1
-        all_epochs = list(range(start_epoch, self.max_epochs + 1))
-        return [set(all_epochs[entry.epochs.slice]) for entry in inference]
+        training_epochs = list(range(1, self.max_epochs + 1))
+        pre_training_epochs = {0} if self.evaluate_before_training else set()
+        return [
+            set(training_epochs[entry.epochs.slice]) | pre_training_epochs
+            for entry in inference
+        ]
 
     def get_inference_epochs(self) -> list[int]:
         epoch_sets = self.get_inference_epoch_sets()
