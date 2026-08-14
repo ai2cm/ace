@@ -133,6 +133,25 @@ FINE_TRUTH_ZARR = (
 # instead. See configs/experiments/2026-08-03-video-pmd-spatiotemporal-25km-100km-*
 # for the 3 region-2/3/4 configs and their boundary-alignment verification.
 PATCHED_MODELS = {
+    # Single-stage coarse-endpoints (v2 of the single-stage architecture --
+    # true LR-endpoints-in/HR-full-out, no stage-A network, replaces the
+    # non-deployable single-stage-v1 design; see
+    # configs/experiments/2026-08-07-video-pmd-spatiotemporal-25km-100km-singlestage-coarse-endpoints-{flat,ou}/).
+    # Global patch-tiled inference via VideoPatchPredictor
+    # (fme/downscaling/predictors/video_composite.py, divide_generation:
+    # true) -- ONE contiguous global zarr, not the 4-region dict the other
+    # PATCHED_MODELS entries use, so this is a plain str path (same as
+    # KNOWN_MODELS' entries; _load_pred_window handles both).
+    "st-singlestage-coarse-endpoints-flat": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
+    "st-singlestage-coarse-endpoints-ou": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-ou/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
     "st-flat": {
         "mid_west": (
             "/climate-default/2026-06-25-temporal-diffusion/inference/"
@@ -174,6 +193,61 @@ PATCHED_MODELS = {
         "south_cap": (
             "/climate-default/2026-06-25-temporal-diffusion/inference/"
             "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v1/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
+    # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
+    # (fme/downscaling/video_models.py, commit 7ec7d69a8 -- v1's coarse
+    # conditioning leaked LR info into every interior frame instead of just
+    # the two observed endpoints). CAVEAT: both checkpoints are epoch 41/200
+    # (~20% of the planned schedule) -- training crashed on an ai2/titan
+    # infra incident around 2026-08-09 23:00-2026-08-10 00:30 and inference
+    # was run directly against the crashed run's latest.ckpt per explicit
+    # instruction, not a resumed/completed run. See
+    # configs/experiments/2026-08-10-video-pmd-spatiotemporal-25km-100km-{flat,ou}-v2-test-inference-*/
+    # header comments. Treat as preliminary/undertrained, not the final v2
+    # comparison.
+    "st-flat-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
+    "st-ou-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
             "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
         ),
     },
