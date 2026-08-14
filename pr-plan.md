@@ -544,7 +544,11 @@ def test_both_features_together():
   selected channel's penalty without mixing two quantities under one variable
   name — at the cost that no single reported number decomposes `total()`. The
   alternative, adding `weight * penalty` into the matching main channels, makes
-  the sum work but hides which term moved. Proposed: the prefixed keys.
+  the sum work but hides which term moved; it stays available because every
+  delta key is a network output and `loss_names` is `output_names` for every
+  step type, and it belongs at this reporting seam rather than inside
+  `LossOutput`, whose `scale()` would subject the penalty to the step decay.
+  Proposed: the prefixed keys.
 - **Where discovery runs.** Moving it into `get_corrector` requires the step
   configs to pass their name sets through; the alternative is keeping the
   post-construction `discover_modified_names(...)` call in `get_step`. Proposed:
