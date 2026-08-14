@@ -68,15 +68,7 @@ Before starting, plan out how the changes will be made in one or more atomic com
 Commits should leave the codebase in a consistent state, and should not add unused features that can't be reviewed in isolation.
 They should also include tests for any new functionality, and should not break existing tests.
 
-When making new branches, use the naming convention:
-`<type>/<short-description>`, where `<type>` is one of:
-- feature: Any new functionality (most common branch type).
-- refactor: No changes to features or configs, just code restructuring.
-- fix: Bug fixes.
-- exp: Branch used for running experiments, likely will not be merged to main.
-- config: Changes to configurations under config/.
-- scripts: Changes isolated to a single directory under scripts/.
-- docs: Documentation changes only.
+For branch naming conventions, see the "Internal Development" section of CONTRIBUTING.md.
 
 ### Naming
 

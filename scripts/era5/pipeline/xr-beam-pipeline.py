@@ -852,6 +852,7 @@ def _vertical_coarsen(
 ) -> dict:
     """Pressure-weighted vertical coarsening from 137 levels to coarse layers."""
     n_output_layers = len(output_layer_indices) - 1
+    long_name = var.attrs["long_name"]
     results = {}
     for i in range(n_output_layers):
         fine_slice = slice(output_layer_indices[i], output_layer_indices[i + 1])
@@ -859,7 +860,8 @@ def _vertical_coarsen(
         dp_fine = dp.isel(hybrid=fine_slice)
         weighted = (var_fine * dp_fine).sum("hybrid")
         total_dp = dp_fine.sum("hybrid")
-        results[i] = (weighted / total_dp).astype(np.float32)
+        coarsened = (weighted / total_dp).astype(np.float32)
+        results[i] = coarsened.assign_attrs(long_name=f"{long_name} level-{i}")
     return results
 
 
@@ -901,7 +903,7 @@ def _process_model_level_data(
         + ds_model["specific_cloud_ice_water_content"]
         + ds_model["specific_rain_water_content"]
         + ds_model["specific_snow_water_content"]
-    )
+    ).assign_attrs(long_name="Specific total water")
 
     logging.info("Computing layer thicknesses")
     surface_pressure = ds_surface["surface_pressure"]

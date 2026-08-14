@@ -1,6 +1,5 @@
 import contextlib
 import os
-import signal
 import unittest.mock
 from typing import Any, Literal, TypeVar, cast
 
@@ -165,6 +164,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         self.loaded_state: dict[str, Any] | None = None
         self.train_batches_seen: list[int] = []
         self.validation_batches_seen: list[int] = []
+        self.validation_evaluate_all_steps_seen: list[bool] = []
 
     def get_state(self) -> dict[str, Any]:
         return {**self._state, "modules": self._modules.state_dict()}
@@ -210,6 +210,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         optimization.step_weights()
         if isinstance(optimization, NullOptimization):
             self.validation_batches_seen.append(batch.i)
+            self.validation_evaluate_all_steps_seen.append(evaluate_all_steps)
         else:
             self.train_batches_seen.append(batch.i)
         return TrainOutput()
@@ -588,26 +589,6 @@ def fail_after_calls_patch(object, method: str, call_count: int):
             pass
 
 
-@contextlib.contextmanager
-def preempt_after_calls_patch(object, method: str, call_count: int):
-    total_calls = 0
-    original_method = getattr(object, method)
-
-    def wrapper(*args, **kwargs):
-        nonlocal total_calls
-        total_calls += 1
-        if total_calls >= call_count:
-            signal.raise_signal(signal.SIGTERM)
-        return original_method(*args, **kwargs)
-
-    with unittest.mock.patch.object(object, method) as mock:
-        mock.side_effect = wrapper
-        try:
-            yield mock
-        except SystemExit:
-            pass
-
-
 @pytest.mark.parametrize(
     "interrupt_method",
     ["train_one_epoch", "_validation_callback", "_inference_callback"],
@@ -664,19 +645,21 @@ def get_batch_indices(batches) -> list[int]:
     ["preempt", "fail"],
 )
 def test_resume_after_interrupted_training_during_epoch(
-    tmp_path: str, interrupt_method: Literal["preempt", "fail"]
+    tmp_path: str, interrupt_method: Literal["preempt", "fail"], monkeypatch
 ):
-    if interrupt_method == "preempt":
-        patch_func = preempt_after_calls_patch
-    else:
-        patch_func = fail_after_calls_patch
+    registered_callbacks: list = []
+    monkeypatch.setattr(
+        "fme.core.generics.trainer.add_post_abort_callback",
+        registered_callbacks.append,
+    )
     checkpoint_every_n_batches = 20
     batches_before_interrupt = 25
     if interrupt_method == "preempt":
-        # saves checkpoint gracefully during interrupt
+        # the post-abort callback preserves mid-epoch progress
         n_checkpointed_batches = batches_before_interrupt
     else:
-        # exception leads to immediate termination without checkpointing
+        # an exception kills the process without checkpointing, so resumption
+        # starts from the last every-n-batches checkpoint
         n_checkpointed_batches = (
             batches_before_interrupt
             // checkpoint_every_n_batches
@@ -697,10 +680,17 @@ def test_resume_after_interrupted_training_during_epoch(
             trainer, "_log_first_batch_metrics", return_value=None
         ),
     ):  # would throw off count for actual training batches seen
-        with patch_func(
+        with fail_after_calls_patch(
             trainer.stepper, "train_on_batch", batches_before_interrupt + 1
         ):
             trainer.train()
+    if interrupt_method == "preempt":
+        # the real preemption path exits the process from the listener thread
+        # (see fme/core/distributed/test_shutdown.py), so it cannot run
+        # in-process; invoke the trainer's registered callback as the listener
+        # would after the abort
+        (save_on_terminate,) = registered_callbacks
+        save_on_terminate()
     assert isinstance(trainer.stepper, TrainStepper)
     stepper = cast(TrainStepper, trainer.stepper)
     pre_interrupt_batches = stepper.train_batches_seen
@@ -742,74 +732,6 @@ def test_resume_after_interrupted_training_during_epoch(
     assert set(stepper.train_batches_seen).intersection(repeated_batches) == set(
         repeated_batches
     )
-
-
-@pytest.mark.parametrize("evaluate_before_training", [True, False])
-def test_resume_after_preemption_during_validation(
-    tmp_path: str, evaluate_before_training: bool
-):
-    checkpoint_every_n_batches = 20
-    n_train_batches = checkpoint_every_n_batches * 2
-    stepper_state = {"foo": "bar"}
-    n_validation_batches = 4
-    config, trainer = get_trainer(
-        tmp_path,
-        stepper_state=stepper_state,
-        checkpoint_save_epochs=Slice(start=0, stop=0),
-        max_epochs=1,
-        n_train_batches=n_train_batches,
-        checkpoint_every_n_batches=checkpoint_every_n_batches,
-        evaluate_before_training=evaluate_before_training,
-        n_validation_batches=n_validation_batches,
-    )
-    with (
-        unittest.mock.patch.object(
-            trainer, "_log_first_batch_metrics", return_value=None
-        ),
-    ):  # would throw off count for actual training batches seen
-        with preempt_after_calls_patch(
-            trainer,
-            "_validation_callback",
-            1 + int(evaluate_before_training),
-        ):
-            trainer.train()
-    assert isinstance(trainer.stepper, TrainStepper)
-    stepper = cast(TrainStepper, trainer.stepper)
-    assert len(stepper.train_batches_seen) == n_train_batches
-    assert (
-        len(stepper.validation_batches_seen)
-        == int(evaluate_before_training) * n_validation_batches
-        + config.train_evaluation_batches
-    )
-    paths = CheckpointPaths(config.checkpoint_dir)
-    assert os.path.exists(paths.latest_checkpoint_path)
-    assert not os.path.exists(
-        paths.best_checkpoint_path
-    )  # requires end-of-epoch validation loss
-    _, trainer = get_trainer(
-        tmp_path,
-        checkpoint_save_epochs=Slice(start=0, stop=0),
-        max_epochs=1,
-        n_train_batches=n_train_batches,
-        stepper_state=stepper_state,
-    )
-    with (
-        unittest.mock.patch.object(
-            trainer,
-            "_validation_callback",
-            return_value=({"val/mean/loss": 0.0}, 0.0),
-        ) as validate_mock,
-    ):
-        assert trainer._epochs_trained == 0
-        trainer.train()
-        assert validate_mock.call_count == 1
-        assert trainer._epochs_trained == 1
-    stepper = cast(TrainStepper, trainer.stepper)
-    assert len(stepper.train_batches_seen) == 0  # empty epoch after preemption
-    assert (
-        len(stepper.validation_batches_seen) == config.train_evaluation_batches
-    )  # already did evaluate_before_training before pre-emption
-    assert os.path.exists(paths.best_checkpoint_path)
 
 
 @pytest.mark.parametrize("ema_decay", [0.05, 0.99])
@@ -1601,7 +1523,7 @@ class TestBuildValidationCallback:
     """
 
     @staticmethod
-    def _make_task(name, weight=1.0, aggregator=None):
+    def _make_task(name, weight=1.0, aggregator=None, evaluate_all_steps=True):
         data = unittest.mock.MagicMock()
         if aggregator is None:
             aggregator = unittest.mock.MagicMock()
@@ -1610,6 +1532,7 @@ class TestBuildValidationCallback:
             data=data,
             aggregator_factory=lambda: aggregator,
             weight=weight,
+            evaluate_all_steps=evaluate_all_steps,
         )
 
     @staticmethod
@@ -1712,6 +1635,27 @@ class TestBuildValidationCallback:
         )
         for task in tasks:
             task.data.set_epoch.assert_called_once_with(7)
+
+    def test_per_task_evaluate_all_steps_passed_to_run_validation(self):
+        tasks = [
+            self._make_task("a"),
+            self._make_task("b", evaluate_all_steps=False),
+        ]
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.2),
+            ],
+        ) as mock_run_validation:
+            callback = build_validation_callback(tasks=tasks, stepper=stepper)
+            callback(epoch=1)
+        flags = [
+            call.kwargs["evaluate_all_steps"]
+            for call in mock_run_validation.call_args_list
+        ]
+        assert flags == [True, False]
 
     def test_aggregator_factory_called_per_invocation(self):
         factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())

@@ -303,14 +303,6 @@ class WeightedMappingLoss:
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
 
-    @property
-    def effective_loss_scaling(self) -> dict[str, float]:
-        custom_weights = dict(zip(self.packer.names, self._weight_tensor.flatten()))
-        loss_normalizer_stds = self.normalizer.stds
-        return {
-            k: loss_normalizer_stds[k] / custom_weights[k] for k in self.packer.names
-        }
-
 
 def _construct_weight_tensor(
     weights: dict[str, float],
@@ -892,10 +884,6 @@ class StepLoss(torch.nn.Module):
     def _normalizer(self) -> StandardNormalizer:
         # private because this is only used in unit tests
         return self.loss.normalizer
-
-    @property
-    def effective_loss_scaling(self) -> dict[str, float]:
-        return self.loss.effective_loss_scaling
 
     def forward(
         self,

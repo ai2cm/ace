@@ -53,6 +53,11 @@ from .evaluator import resolve_variable_metadata
 
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
+# Truncated to hour precision: segment start times in existing runs have always
+# been at least 6h apart, so finer precision would just add visual noise. We can
+# reconsider if this changes.
+SEGMENT_LABEL_FORMAT = "segment_%Y%m%dT%H"
+
 
 @dataclasses.dataclass
 class InitialConditionConfig:
@@ -463,6 +468,49 @@ def run_inference_from_config(config: InferenceConfig):
     logger.log_to_current_step(timer.get_durations(), label="")
 
 
+def _get_initialization_time_and_timestep(
+    config: InferenceConfig,
+) -> tuple[cftime.datetime, datetime.timedelta]:
+    # Loading the stepper is expensive, but it is necessary to get the timestep
+    # and prognostic names. We only call this function once before the
+    # segmented loop starts to minimize the overhead.
+    stepper = config.load_stepper()
+    initial_condition = get_initial_condition(
+        config.initial_condition.get_dataset(),
+        InitialConditionRequirements(
+            prognostic_names=stepper.prognostic_names,
+            labels=config.labels,
+        ),
+    )
+    initialization_time = initial_condition.as_batch_data().time.isel(sample=0).item()
+    return initialization_time, stepper.training_dataset_info.timestep
+
+
+def _get_segment_label(
+    initialization_time: cftime.datetime,
+    timestep: datetime.timedelta,
+    segment: int,
+    n_forward_steps: int,
+) -> str:
+    segment_length = n_forward_steps * timestep
+    current_start_time = initialization_time + segment * segment_length
+    current_label = current_start_time.strftime(SEGMENT_LABEL_FORMAT)
+
+    if segment > 0:
+        previous_start_time = initialization_time + (segment - 1) * segment_length
+        previous_label = previous_start_time.strftime(SEGMENT_LABEL_FORMAT)
+        if previous_label == current_label:
+            raise ValueError(
+                f"Consecutive segments have the same label ({previous_label!r} "
+                f"and {current_label!r}), meaning the current segment would "
+                f"overwrite the previous segment. Please open an issue on "
+                f"GitHub if having greater temporal precision in segmented run "
+                f"directory labels is an important use-case for you."
+            )
+
+    return current_label
+
+
 def run_segmented_inference(config: InferenceConfig, segments: int):
     """Run inference in multiple segments.
 
@@ -476,7 +524,7 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
         This is useful when running very long simulations or when saving a large
         amount of output data to disk. The simulation outputs will be split across
         multiple folders, each corresponding to one of the segments and labeled by
-        the segment number.
+        the start time of its first (or only) ensemble member.
     """
     if config.n_ensemble_per_ic > 1:
         raise ValueError(
@@ -500,8 +548,17 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
     )
     config_copy = copy.deepcopy(config)
     original_wandb_name = os.environ.get("WANDB_NAME")
+
+    initialization_time, timestep = _get_initialization_time_and_timestep(config)
+    n_forward_steps = config.n_forward_steps
+
     for segment in range(segments):
-        segment_label = f"segment_{segment:04d}"
+        segment_label = _get_segment_label(
+            initialization_time,
+            timestep,
+            segment,
+            n_forward_steps,
+        )
         segment_dir = os.path.join(config.experiment_dir, segment_label)
         restart_path = os.path.join(segment_dir, "restart.nc")
         if exists(restart_path):
