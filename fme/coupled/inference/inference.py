@@ -289,6 +289,8 @@ def run_inference_from_config(config: InferenceConfig):
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
         output_dir=config.experiment_dir,
+        ocean_normalize=stepper.ocean.normalizer.normalize,
+        atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
     )
 
     writer = config.get_data_writer(data=data)

@@ -19,6 +19,7 @@ from fme.ace.aggregator.inference.main import (
     MeanMetricConfig,
     PowerSpectrumMetricConfig,
     SeasonalMetricConfig,
+    StepDiagnosticsMetricConfig,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
     VideoMetricConfig,
@@ -243,6 +244,12 @@ class InferenceEvaluatorAggregatorConfig:
             This should include both ocean and atmosphere variables.
         time_mean_reference_data: Path to reference time means to compare against.
             This should include both ocean and atmosphere variables.
+        step_diagnostics: Granularity of metrics computed from the step
+            diagnostics carried on prediction data (the corrector's
+            correction deltas), applied to both the ocean and atmosphere
+            aggregators; such metrics are logged only for a realm whose
+            component has a corrector, normalized with that realm's
+            normalizer.
     """
 
     log_histograms: bool = False
@@ -254,6 +261,9 @@ class InferenceEvaluatorAggregatorConfig:
     log_global_mean_norm_time_series: bool = True
     monthly_reference_data: str | None = None
     time_mean_reference_data: str | None = None
+    step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
+        default_factory=StepDiagnosticsMetricConfig
+    )
 
     def _build_metrics(
         self,
@@ -312,6 +322,7 @@ class InferenceEvaluatorAggregatorConfig:
         output_dir: str | None = None,
         ocean_channel_mean_names: Sequence[str] | None = None,
         atmosphere_channel_mean_names: Sequence[str] | None = None,
+        enable_time_series: bool = True,
     ) -> "InferenceEvaluatorAggregator":
         if n_timesteps_atmosphere > 2**15 and self.log_zonal_mean_images:
             # matplotlib raises an error if image size is too large, and we plot
@@ -352,6 +363,8 @@ class InferenceEvaluatorAggregatorConfig:
             ),
             channel_mean_names=ocean_channel_mean_names,
             save_diagnostics=save_diagnostics,
+            enable_time_series=enable_time_series,
+            step_diagnostics=self.step_diagnostics,
         )
         atmosphere_agg = build_inference_evaluator_aggregator(
             metrics=atmosphere_metrics,
@@ -369,6 +382,8 @@ class InferenceEvaluatorAggregatorConfig:
             ),
             channel_mean_names=atmosphere_channel_mean_names,
             save_diagnostics=save_diagnostics,
+            enable_time_series=enable_time_series,
+            step_diagnostics=self.step_diagnostics,
         )
 
         return InferenceEvaluatorAggregator(
@@ -552,11 +567,21 @@ class InferenceAggregatorConfig:
         log_global_mean_time_series: Whether to log global mean time series metrics.
         atmosphere_time_mean_reference_data: Path to atmosphere reference time means.
         ocean_time_mean_reference_data: Path to ocean reference time means.
+        step_diagnostics: Granularity of metrics computed from the step
+            diagnostics carried on prediction data (the corrector's
+            correction deltas), applied to both the ocean and atmosphere
+            aggregators. Such metrics require that realm's normalizer to be
+            supplied at build time: building with a non-default configuration
+            but no normalizer raises an error, while with the default
+            configuration the metrics are silently skipped.
     """
 
     log_global_mean_time_series: bool = True
     atmosphere_time_mean_reference_data: str | None = None
     ocean_time_mean_reference_data: str | None = None
+    step_diagnostics: StepDiagnosticsMetricConfig = dataclasses.field(
+        default_factory=StepDiagnosticsMetricConfig
+    )
 
     def build(
         self,
@@ -564,26 +589,32 @@ class InferenceAggregatorConfig:
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
         output_dir: str,
+        ocean_normalize: NormalizeFn | None = None,
+        atmosphere_normalize: NormalizeFn | None = None,
     ) -> "InferenceAggregator":
         ocean_ace_config = AceInferenceAggregatorConfig(
             time_mean_reference_data=self.ocean_time_mean_reference_data,
             log_global_mean_time_series=self.log_global_mean_time_series,
+            step_diagnostics=self.step_diagnostics,
         )
         atmosphere_ace_config = AceInferenceAggregatorConfig(
             time_mean_reference_data=self.atmosphere_time_mean_reference_data,
             log_global_mean_time_series=self.log_global_mean_time_series,
+            step_diagnostics=self.step_diagnostics,
         )
         ocean_agg = ocean_ace_config.build(
             dataset_info=dataset_info.ocean,
             n_timesteps=n_timesteps_ocean,
             output_dir=os.path.join(output_dir, "ocean"),
             save_diagnostics=True,
+            normalize=ocean_normalize,
         )
         atmosphere_agg = atmosphere_ace_config.build(
             dataset_info=dataset_info.atmosphere,
             n_timesteps=n_timesteps_atmosphere,
             output_dir=os.path.join(output_dir, "atmosphere"),
             save_diagnostics=True,
+            normalize=atmosphere_normalize,
         )
         return InferenceAggregator(
             ocean=ocean_agg,
