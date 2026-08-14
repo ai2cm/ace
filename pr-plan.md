@@ -193,8 +193,9 @@ class CorrectorLoss(torch.nn.Module):  # NEW
 class StepOutputLoss(torch.nn.Module):  # NEW
     """`StepLoss` plus the corrector-delta terms of `StepOutput`.
 
-    The penalty takes no per-step decay, and the two corrector features may
-    be enabled together.
+    Deltas come from the `StepOutput`, never the inference-only
+    `StepDiagnostics` carriage. The penalty takes no per-step decay, and the
+    two corrector features may be enabled together.
     """
 
     def __init__(self, step_loss: StepLoss, corrector_loss: CorrectorLoss | None): ...
@@ -333,7 +334,7 @@ class Stepper:
     ) -> CorrectorLoss | None:
         # corrector_loss.build(self._step_obj.corrector_modified_names,
         #   prescribed_prognostic_names=self.get_prescribed_prognostic_names(),
-        #   normalizer=self.get_loss_normalizer(),
+        #   normalizer=self._step_obj.get_loss_normalizer(),
         #   gridded_operations=self._dataset_info.gridded_operations,
         #   channel_dim=self.CHANNEL_DIM)
 
@@ -345,13 +346,20 @@ class TrainStepperConfig:
 
 
 @dataclasses.dataclass
+class _StepLossOutput:  # NEW — what one step's loss produced
+    total: torch.Tensor  # on the graph
+    channel_losses: dict[str, ChannelLossInfo]  # detached; empty unless optimized
+    corrector_penalty: torch.Tensor | None  # detached
+
+
+@dataclasses.dataclass
 class _AccumulateLossMetrics:  # NEW — reporting only; every tensor detached
     per_channel_losses: dict[str, ChannelLossInfo] | None
     corrector_penalties: list[torch.Tensor]
 
     @property
     def corrector_penalty(self) -> torch.Tensor | None:
-        """Mean over the steps that produced a penalty, or None if none did."""
+        ...  # mean over the steps that produced one, else None
 
 
 @dataclasses.dataclass
@@ -368,17 +376,53 @@ class TrainStepper(TrainStepperABC[...]):
 
     def _accumulate_loss(self, ...) -> _AccumulateLossOutput:
         # CHANGED — keeps the yielded StepOutput and unconditionally unfolds
-        # its delta dict alongside .output (unfold_ensemble_dim), carrying the
-        # hard-boundary comment below.
+        # its delta dict alongside .output (unfold_ensemble_dim); now also owns
+        # every accumulation and every metric key write, from the per-step
+        # results below.
 
-    def _accumulate_step_loss(self, ..., deltas: TensorMapping) -> torch.Tensor:
-        # CHANGED — calls self._loss_obj(..., deltas=deltas) and returns
-        # result.total(), so the penalty rides the one per-step
-        # accumulate_loss call; records
-        # metrics["loss/corrector_penalty_step_{step}"]; folds
-        # get_corrector_penalty_losses() into the per-channel accumulation
-        # under a "corrector_penalty/" key prefix.
+    def _accumulate_step_loss(  # CHANGED — signature and return
+        self,
+        gen_step: EnsembleTensorDict,
+        target_step: TensorMapping,
+        step: int,
+        data_mask: TensorMapping | None,
+        optimize: bool,
+        deltas: TensorMapping,
+    ) -> _StepLossOutput:
+        # Computes one step's loss via self._loss_obj(..., deltas=deltas) and
+        # reports it. Accumulates nothing and mutates no argument.
 ```
+
+### Critical detail — the per-step seam returns instead of mutating
+
+On `main`, `_accumulate_step_loss` takes `metrics`, `weighted_sums`, and
+`total_counts` and mutates them in place. Threading the corrector deltas
+through it would add two more such parameters — a `deltas` input and a
+`corrector_penalties` list to append to — taking it to eleven parameters, four
+of them out-params, one of them a defaulted `None` the single caller always
+passes. Instead it returns `_StepLossOutput` and `_accumulate_loss` does the
+accumulating, which it is already shaped to do: it owns the step loop and the
+containers. Net effect on the pre-existing signature is four parameters fewer
+than on `main`, not two more.
+
+`_accumulate_loss` therefore holds every metric key this PR touches — the
+existing `loss_step_{i}` alongside `loss/corrector_penalty_step_{i}` and the
+`corrector_penalty/<var>` per-channel prefix — so the key set has one site
+rather than two.
+
+`weighted_sums` / `total_counts` stay the pair of parallel dicts they are on
+`main`, finalized by the existing `_finalize_per_channel_losses`; this PR stops
+threading them one level deeper and otherwise leaves them alone.
+
+### Critical detail — comments on the private surface
+
+Private classes and methods carry no docstrings; a short inline comment on a
+field or at a seam is the documentation. So `_StepLossOutput`,
+`_AccumulateLossMetrics`, `_AccumulateLossOutput`, and the `_accumulate_*`
+methods are commented as shown above and nothing more, while the reasoning a
+reader needs — the `StepDiagnostics` hard boundary, the no-decay penalty, the
+two features combining — lives in the public `StepOutputLoss` docstring and in
+this plan. Inline comments stay at ~1 line, docstring components at ≤2.
 
 ### Critical detail — what the accumulator carries
 
@@ -417,8 +461,8 @@ is therefore the main loss for that channel alone, with no penalty folded in.
   recoverable from the logged penalty and the configured `weight`.
 - Hard boundary: training consumes deltas at the `StepOutput` level inside
   `_accumulate_loss`, never via the `StepDiagnostics` carriage — that carriage
-  is detached, output-masked, and inference-only by design. Stated here and
-  seam-commented in code.
+  is detached, output-masked, and inference-only by design. The reasoning lives
+  in the `StepOutputLoss` docstring; the seam itself gets one line.
 - `Stepper.step` applies `apply_output_masking` to the diagnostics, so the NaN
   fill sits on a live graph. The regularizer drops NaN points via the target
   trick above; the masked-output test below covers the whole path.
