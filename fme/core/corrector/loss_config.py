@@ -134,10 +134,6 @@ class CorrectorLossConfig:
         ) -> list[str]:
             unmatched = selection.unmatched_entries(loss_visible_names)
             if unmatched:
-                # Name the reason for each unmatched entry rather than
-                # restating the set arithmetic: an entry that only reaches a
-                # prescribed prognostic is a different mistake from an entry
-                # that reaches nothing the corrector touches.
                 reasons = []
                 for entry in unmatched:
                     entry_selection = NameAndPrefixSelection((entry,))
