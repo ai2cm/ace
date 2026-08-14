@@ -871,6 +871,31 @@ def test_gradient_clipping_with_amp():
     assert optimization._last_grad_norm is not None
 
 
+@pytest.mark.parametrize("max_grad_norm", [0.01, None])
+def test_last_grad_norm_property(max_grad_norm):
+    """last_grad_norm exposes the pre-clip norm, and is None without clipping."""
+    torch.manual_seed(0)
+    model = nn.Linear(10, 1).to(fme.get_device())
+    optimization = _build_optimization(
+        nn.ModuleList([model]), max_grad_norm=max_grad_norm
+    )
+
+    x = torch.ones(1, 10).to(fme.get_device()) * 1e4
+    optimization.accumulate_loss(model(x).sum())
+    optimization.step_weights()
+
+    assert optimization.last_grad_norm == optimization._last_grad_norm
+    if max_grad_norm is None:
+        assert optimization.last_grad_norm is None
+    else:
+        assert optimization.last_grad_norm > max_grad_norm
+
+
+def test_null_optimization_last_grad_norm_is_none():
+    """NullOptimization inherits the ABC default so the trainer can read it."""
+    assert NullOptimization().last_grad_norm is None
+
+
 def test_optimization_config_passes_max_grad_norm():
     """OptimizationConfig.max_grad_norm is wired through to Optimization."""
     model = nn.Linear(1, 1).to(fme.get_device())

@@ -535,7 +535,12 @@ class Trainer:
         if self._current_epoch_num_batches_seen == 0:
             self.stepper.set_epoch(self._epochs_trained + 1)
         wandb = WandB.get_instance()
-        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0", "lr")
+        names_to_log = (
+            "batch_loss",
+            "batch_grad_norm_max",
+            "training_samples_per_second_on_rank_0",
+            "lr",
+        )
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
         if self.num_batches_seen == 0:
@@ -558,9 +563,16 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
+        # Per-step pre-clip gradient norms since the last log, so a single
+        # outlier batch is visible as a max rather than diluted into a mean.
+        # Only populated when gradient clipping is enabled.
+        grad_norms_since_logging: list[float] = []
         for batch in epoch_data:
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
+            grad_norm = self.optimization.last_grad_norm
+            if grad_norm is not None:
+                grad_norms_since_logging.append(grad_norm)
             self._end_of_batch_callback()
             self._ema(model=self.stepper.modules)
             # Step scheduler per-iteration if configured to do so
@@ -583,6 +595,12 @@ class Trainer:
                 samples_per_second = n_samples_seen_since_logging / duration
                 metrics["training_samples_per_second_on_rank_0"] = samples_per_second
                 metrics["lr"] = self.optimization.learning_rate
+                if grad_norms_since_logging:
+                    metrics["batch_grad_norm_max"] = max(grad_norms_since_logging)
+                    metrics["batch_grad_norm_mean"] = sum(
+                        grad_norms_since_logging
+                    ) / len(grad_norms_since_logging)
+                    grad_norms_since_logging.clear()
                 wandb.log(metrics, step=self.num_batches_seen)
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")

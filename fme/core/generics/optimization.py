@@ -16,6 +16,16 @@ class OptimizationABC(abc.ABC):
     @abc.abstractmethod
     def learning_rate(self) -> float: ...
 
+    @property
+    def last_grad_norm(self) -> float | None:
+        """
+        Global gradient L2 norm of the most recent weight step, before clipping.
+
+        None when the implementation does not compute it, which for
+        Optimization means gradient clipping is disabled.
+        """
+        return None
+
     @abc.abstractmethod
     def set_learning_rate(self, lr: float):
         """

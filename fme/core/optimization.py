@@ -126,6 +126,10 @@ class Optimization(OptimizationABC):
     def learning_rate(self) -> float:
         return self.optimizer.param_groups[0]["lr"]
 
+    @property
+    def last_grad_norm(self) -> float | None:
+        return self._last_grad_norm
+
     def set_mode(self, modules: nn.ModuleList):
         """
         Sets the mode of the module to train.
