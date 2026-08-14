@@ -235,7 +235,7 @@ def test_fetch_only_reads_cluster_placement_constraints():
     )
     (view,) = fetch_jobs(client, "ai2/ace")
     assert view.clusters == ("ai2/jupiter",)
-    assert view.managed_cluster(LIMITS) == "ai2/jupiter"
+    assert view.managed_clusters(LIMITS) == ("ai2/jupiter",)
 
 
 def test_fetch_reads_a_job_with_no_cluster_constraint():
@@ -262,7 +262,7 @@ def test_fetch_reads_the_replica_group_so_ranks_group_together():
     assert {view.replica_group_size for view in views} == {4}
     assert {view.group_key for view in views} == {"rg-1"}
     # A rank is individually manageable; the group decides whether it moves.
-    assert all(view.managed_cluster(LIMITS) == "ai2/jupiter" for view in views)
+    assert all(view.managed_clusters(LIMITS) == ("ai2/jupiter",) for view in views)
 
 
 def test_a_lone_job_is_its_own_group():
@@ -290,7 +290,7 @@ def test_fetch_leaves_cm_priority_unset_when_absent():
     client = FakeClient([make_job(env={"WANDB_NAME": "x"})])
     (view,) = fetch_jobs(client, "ai2/ace")
     assert view.cm_priority is None
-    assert view.managed_cluster(LIMITS) is None
+    assert view.managed_clusters(LIMITS) is None
 
 
 def test_fetch_reads_multi_cluster_constraints_in_order():
@@ -364,7 +364,7 @@ def test_a_job_with_an_unusable_cm_priority_is_not_managed():
     client = FakeClient([make_job(env={"CM_PRIORITY": "highest"})])
     (view,) = fetch_jobs(client, "ai2/ace")
     assert view.cm_priority is None
-    assert view.managed_cluster(LIMITS) is None
+    assert view.managed_clusters(LIMITS) is None
 
 
 # --- mutation ---------------------------------------------------------------
@@ -440,21 +440,20 @@ def test_run_pass_is_idempotent():
     assert client.priority_calls == []
 
 
-def test_multi_cluster_labelled_jobs_are_reported_once_in_aggregate(caplog):
+def test_queued_multi_cluster_labelled_jobs_are_managed(caplog):
+    # Five 8-slot urgent-labelled jobs targeting both clusters. All start at
+    # HIGH. Four fit on titan (32/32) and are promoted; the fifth stays at
+    # its resting priority (HIGH), which is already where it is.
     client = FakeClient(
         [
             _labelled(f"both-{i}", "urgent", clusters=("ai2/titan", "ai2/jupiter"))
             for i in range(5)
         ]
     )
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         applied = run_pass(client, "ai2/ace", LIMITS, dry_run=False)
-    assert applied == 0
-    assert client.priority_calls == []
-    # One aggregate line, not one per job: most ace jobs are multi-cluster.
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
-    assert "5 job(s)" in warnings[0].getMessage()
+    assert applied == 4
+    assert all(p == URGENT for _, p in client.priority_calls)
 
 
 def test_unreclaimable_slots_are_broken_out_per_cluster(caplog):
@@ -488,6 +487,29 @@ def test_unreclaimable_slots_are_broken_out_per_cluster(caplog):
         for m in messages
     )
     assert client.priority_calls == []
+
+
+def test_placed_job_on_unbudgeted_cluster_with_no_constraint_does_not_crash(caplog):
+    # A placed job with no cluster constraints that landed on a cluster outside
+    # the allocation has clusters=() and assigned_cluster set. The report must
+    # not crash on clusters[0].
+    client = FakeClient(
+        [
+            make_job(
+                job_id="stray",
+                env={"CM_PRIORITY": "high"},
+                clusters=(),
+                node_id="node-ceres",
+                started=100,
+            )
+        ],
+        node_clusters={"node-ceres": ("ceres", "ai2")},
+    )
+    with caplog.at_level(logging.WARNING):
+        run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert client.priority_calls == []
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("ai2/ceres" in m and "no allocation" in m for m in warnings)
 
 
 def test_a_replica_group_left_alone_is_reported(caplog):
@@ -671,6 +693,48 @@ def test_a_deferred_group_repays_the_deficit_with_all_of_its_slots():
     # Abandoning the group frees 32 against a 16-slot deficit, so the lone job
     # still fits and must not be deferred with it.
     assert client.priority_calls == [("lone", URGENT)]
+
+
+def test_a_refused_multi_cluster_demotion_defers_a_single_cluster_grant():
+    # A queued multi-cluster job holds urgent on both clusters. Its demotion is
+    # refused, so the deficit must appear on BOTH clusters — otherwise a grant
+    # on the second cluster goes through and the pass ends over allocation.
+    client = FakeClient(
+        [
+            _labelled(
+                "theirs",
+                "normal",
+                priority=pb2.JOB_PRIORITY_URGENT,
+                clusters=("ai2/titan", "ai2/jupiter"),
+                author="yyexela",
+            ),
+            _labelled("mine", "high", clusters=("ai2/jupiter",)),
+        ],
+        node_clusters=NODES,
+        fail_on={"theirs"},
+    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8, "ai2/titan": 8}, dry_run=False)
+    assert client.priority_calls == []
+
+
+def test_a_refused_single_cluster_demotion_defers_a_multi_cluster_grant():
+    # A placed single-cluster job's demotion on jupiter is refused. A queued
+    # multi-cluster grant targeting (titan, jupiter) must be deferred because
+    # jupiter still has a deficit, even though titan does not.
+    client = FakeClient(
+        [
+            _holder("theirs", "normal", cluster="ai2/jupiter", author="yyexela"),
+            _labelled(
+                "mine",
+                "high",
+                clusters=("ai2/titan", "ai2/jupiter"),
+            ),
+        ],
+        node_clusters=NODES,
+        fail_on={"theirs"},
+    )
+    run_pass(client, "ai2/ace", {"ai2/jupiter": 8, "ai2/titan": 8}, dry_run=False)
+    assert client.priority_calls == []
 
 
 def test_negative_node_cache_is_dropped_between_passes():

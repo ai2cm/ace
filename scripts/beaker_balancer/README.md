@@ -30,13 +30,6 @@ the point.
 Things that stop a job being managed, each reported in the log as an aggregate
 count per pass:
 
-- **It is still queued and targets more than one cluster.** Beaker offers no
-  way to pin a queued job, so a job eligible for both jupiter and titan could
-  consume either allocation and there is no way to know which in advance. This
-  stops applying the moment it lands: a running job occupies one cluster, is
-  charged to that one alone, and is balanced against it whatever it was
-  submitted eligible for. Most `ai2/ace` jobs target `titan+jupiter`, so during
-  adoption expect them to be unmanaged while queued and managed once running.
 - **It targets a cluster with no allocation** (`ai2/saturn`, `ai2/ceres`).
 - **It is an interactive session.** There is a person attached to it, and
   taking their priority away mid-session is not the script's call.
@@ -118,8 +111,8 @@ difference:
    it with its ranks.
 2. Subtract the slots held at urgent or `immediate` by jobs it cannot modify.
    Those are a fixed charge; only what is left is available.
-3. Walk the managed groups in `CM_PRIORITY` order, granting urgent while the
-   group's cluster has room for all of it.
+3. Walk the managed groups in `CM_PRIORITY` order, granting urgent while every
+   cluster the group could land on has room for all of it.
 4. Set every managed group to urgent if granted, or to its resting priority if
    not.
 
@@ -176,13 +169,21 @@ urgent job counts at full weight against every cluster it could land on.
 Nothing outranks urgent and nothing can preempt it, so a queued urgent job is a
 committed future occupant, not a maybe.
 
-Being charged to one cluster and being balanced against it are the same
-question, so they are answered the same way: a placed job is managed against
-the cluster it landed on. It could in principle be preempted and come back
-somewhere else, but then it is queued again and the next pass treats it as
-ambiguous once more. The alternative — leaving a running job unmanaged because
-of a constraint that no longer decides anything — means its slots can be seen
-but never reclaimed.
+Being charged to a cluster and being balanced against it are the same question,
+so they are answered the same way. A placed job is managed against the single
+cluster it landed on. A queued job targeting multiple clusters is managed
+**pessimistically** against all of them: granting it urgent requires room on
+every cluster, and the grant charges all of them. Demoting it frees all of
+them. This means a multi-cluster grant costs more than a single-cluster one
+when headroom is tight, which is the right tradeoff — the alternative is to
+grant urgent against a budget the job might consume elsewhere.
+
+A placed multi-cluster job is different: it is on one cluster and only that
+cluster's budget is affected, whether the job is granted or demoted. It could
+in principle be preempted and come back somewhere else, but then it is queued
+again and the next pass treats it pessimistically once more. The alternative —
+leaving a running job unmanaged because of a constraint that no longer decides
+anything — means its slots can be seen but never reclaimed.
 
 `immediate` counts the same as urgent: it outranks urgent, so the slot is just
 as occupied. Interactive sessions count too.
