@@ -386,8 +386,8 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
-        evaluate_before_training: Whether to run validation and inline inference before
-            any training is done.
+        evaluate_before_training: Whether to run all validation and inline
+            inference before any training is done.
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
