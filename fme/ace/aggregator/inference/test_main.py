@@ -1,4 +1,5 @@
 import datetime
+import logging
 from collections.abc import Sequence
 
 import numpy as np
@@ -10,6 +11,7 @@ from fme.ace.aggregator.inference.main import (
     EnsembleMetricConfig,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
+    _summary_logs,
     build_inference_evaluator_aggregator,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
@@ -169,3 +171,24 @@ def test_inference_evaluator_aggregator_ensemble():
                 summary_logs[f"ensemble_step_20/{metric}/{varname}"]
                 != summary_logs[f"ensemble_step_20_norm/{metric}/{varname}"]
             )
+
+
+def test_summary_logs_survives_a_failing_sub_aggregator(caplog):
+    """One aggregator raising must not discard the others' metrics.
+
+    get_summary runs after the whole rollout, so an exception there throws away
+    every finished metric along with the GPU time that produced them.
+    """
+
+    class _Failing:
+        def get_logs(self, label: str):
+            raise ValueError("boom")
+
+    class _Working:
+        def get_logs(self, label: str):
+            return {f"{label}/metric": 1.0}
+
+    assert _summary_logs("working", _Working()) == {"working/metric": 1.0}
+    with caplog.at_level(logging.ERROR):
+        assert _summary_logs("failing", _Failing()) == {}
+    assert "failing" in caplog.text
