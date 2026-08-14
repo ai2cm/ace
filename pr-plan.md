@@ -16,9 +16,8 @@ empty diagnostics and is inactive.
 
 Straight-through corrections (`keep_gradient`) are out of scope here: a
 straight-through delta is detached, so it carries no gradient and cannot be
-regularized. That feature is removed in a follow-up PR (thread on
-`fme/core/corrector/loss.py`), and this PR adds nothing to discover or guard
-against it.
+regularized. That feature is removed in a follow-up PR, and this PR adds
+nothing to discover or guard against it.
 
 ---
 
@@ -159,15 +158,86 @@ The other `step_with_adjustments` callers pass the name sets into
 `get_corrector` and expose `corrector_modified_names`. `MultiCallStep` has no
 corrector of its own and forwards the property to the wrapped step.
 
-## `fme/core/loss.py` (unchanged)
+## `fme/core/loss.py` (modified)
 
 `StepLoss`, `StepLossConfig`, `LossOutput`, and `WeightedMappingLoss` are as on
 `main`: `LossOutput` stays a per-channel reduction container, and
 `StepLoss.forward(predict_dict, target_dict, step, data_mask)` knows only
-predictions, targets, and the step decay. Everything corrector-aware lives in
-the new module below, which already imports from here.
+predictions, targets, and the step decay. The loss objects that consume
+corrector deltas join them here.
 
-## `fme/core/corrector/loss.py` (new)
+```python
+class CorrectorLoss(torch.nn.Module):  # NEW
+    """The corrector-delta half of the training loss."""
+
+    def __init__(
+        self,
+        precorrector_names: list[str] | None,
+        regularizer: WeightedMappingLoss | None,
+        penalty_weight: float,
+    ): ...
+
+    def pre_corrector_outputs(
+        self, predict_dict: TensorMapping, deltas: TensorMapping
+    ) -> TensorDict:
+        """``predict_dict[k] − deltas[k]`` for the selected names, else
+        ``predict_dict[k]``; raises when a selected name is missing."""
+
+    def penalty(self, deltas: TensorMapping) -> LossOutput | None:
+        """Penalty over the selected deltas, per channel."""
+
+    @property
+    def penalty_weight(self) -> float: ...
+
+
+class StepOutputLoss(torch.nn.Module):  # NEW
+    """`StepLoss` plus the corrector-delta terms of `StepOutput`.
+
+    The penalty takes no per-step decay, and the two corrector features may
+    be enabled together.
+    """
+
+    def __init__(self, step_loss: StepLoss, corrector_loss: CorrectorLoss | None): ...
+
+    def forward(
+        self,
+        predict_dict: TensorMapping,
+        target_dict: TensorMapping,
+        step: int,
+        data_mask: TensorMapping | None = None,
+        deltas: TensorMapping | None = None,
+    ) -> "StepOutputLossOutput": ...
+
+
+@dataclasses.dataclass
+class StepOutputLossOutput:  # NEW
+    main: LossOutput
+    corrector_penalty: LossOutput | None = None
+    corrector_penalty_weight: float = 1.0
+
+    def total(self) -> torch.Tensor:
+        """``main.total() + weight * corrector_penalty.total()``."""
+
+    def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
+        """Delegates to ``main``."""
+
+    def get_corrector_penalty_losses(self) -> dict[str, ChannelLossInfo]:
+        """Unweighted per-channel penalties, empty when no penalty."""
+```
+
+These live here, not under `fme/core/corrector/`, so the loss objects sit with
+the loss objects they compose; `fme/core/loss.py` still imports nothing from
+`fme/core/corrector/`, and the dependency runs the other way — the config
+module below imports `CorrectorLoss` from here.
+
+### Critical detail — terminology
+
+"Corrector regularization" names the *feature*; the tensors it produces are
+*penalties*. So `CorrectorRegularizationConfig` configures the feature, while
+`penalty`, `corrector_penalty`, `corrector_penalties`, and `penalty_weight`
+name the terms, in code and in metric keys alike.
+
+## `fme/core/corrector/loss_config.py` (new)
 
 ```python
 @dataclasses.dataclass
@@ -189,8 +259,6 @@ class CorrectorRegularizationConfig:
         # names_and_prefixes None or empty ⇒ error (as above);
         # reject EnsembleLoss / NaN loss types and any global_mean_type
         # (per #1273); reject weight <= 0.
-        # Docstrings document: no per-step decay on the penalty, and that the
-        # two features may be enabled together (supported and tested).
 
 
 @dataclasses.dataclass
@@ -209,66 +277,9 @@ class CorrectorLossConfig:
         normalizer: StandardNormalizer,
         gridded_operations: GriddedOperations | None,
         channel_dim: int = -3,
-    ) -> "CorrectorLoss":  # CHANGED from a field bag to a behavior-bearing object
+    ) -> CorrectorLoss:  # CHANGED from a field bag to a behavior-bearing object
         ...
-
-
-class CorrectorLoss(torch.nn.Module):  # NEW
-    """The corrector-delta half of the training loss."""
-
-    def __init__(
-        self,
-        precorrector_names: list[str] | None,
-        regularizer: WeightedMappingLoss | None,
-        regularization_weight: float,
-    ): ...
-
-    def pre_corrector_outputs(
-        self, predict_dict: TensorMapping, deltas: TensorMapping
-    ) -> TensorDict:
-        """``predict_dict[k] − deltas[k]`` for the selected names, else
-        ``predict_dict[k]``; raises when a selected name is missing."""
-
-    def regularization(self, deltas: TensorMapping) -> LossOutput | None:
-        """Penalty over the selected deltas, per channel."""
-
-    @property
-    def regularization_weight(self) -> float: ...
-
-
-class StepOutputLoss(torch.nn.Module):  # NEW
-    """`StepLoss` plus the corrector-delta terms of `StepOutput`."""
-
-    def __init__(self, step_loss: StepLoss, corrector_loss: CorrectorLoss | None): ...
-
-    def forward(
-        self,
-        predict_dict: TensorMapping,
-        target_dict: TensorMapping,
-        step: int,
-        data_mask: TensorMapping | None = None,
-        deltas: TensorMapping | None = None,
-    ) -> "StepOutputLossOutput": ...
-
-
-@dataclasses.dataclass
-class StepOutputLossOutput:  # NEW
-    main: LossOutput
-    corrector_regularization: LossOutput | None = None
-    corrector_regularization_weight: float = 1.0
-
-    def total(self) -> torch.Tensor:
-        """``main.total() + weight * corrector_regularization.total()``."""
-
-    def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
-        """Delegates to ``main``."""
-
-    def get_corrector_channel_losses(self) -> dict[str, ChannelLossInfo]:
-        """Unweighted per-channel penalties, empty when no penalty."""
 ```
-
-`StepOutputLoss` lives here rather than in `fme/core/loss.py` so that
-`fme/core/loss.py` keeps importing nothing from `fme/core/corrector/`.
 
 ### Critical detail — `forward` order and inert paths
 
@@ -334,10 +345,19 @@ class TrainStepperConfig:
 
 
 @dataclasses.dataclass
+class _AccumulatedLossMetrics:  # NEW — reporting only; every tensor detached
+    per_channel_losses: dict[str, ChannelLossInfo] | None
+    corrector_penalties: list[torch.Tensor]
+
+    @property
+    def corrector_penalty(self) -> torch.Tensor | None:
+        """Mean over the steps that produced a penalty, or None if none did."""
+
+
+@dataclasses.dataclass
 class _AccumulatedLoss:  # NEW — replaces the tuple returned by _accumulate_loss
     output_list: list[EnsembleTensorDict]
-    per_channel_losses: dict[str, ChannelLossInfo] | None
-    corrector_regularization: torch.Tensor | None  # mean penalty over steps
+    metrics: _AccumulatedLossMetrics
 
 
 class TrainStepper(TrainStepperABC[...]):
@@ -355,10 +375,25 @@ class TrainStepper(TrainStepperABC[...]):
         # CHANGED — calls self._loss_obj(..., deltas=deltas) and returns
         # result.total(), so the penalty rides the one per-step
         # accumulate_loss call; records
-        # metrics["corrector_regularization_step_{step}"]; folds
-        # get_corrector_channel_losses() into the per-channel accumulation
-        # under a "corrector_regularization/" key prefix.
+        # metrics["loss/corrector_penalty_step_{step}"]; folds
+        # get_corrector_penalty_losses() into the per-channel accumulation
+        # under a "corrector_penalty/" key prefix.
 ```
+
+### Critical detail — what the accumulator carries
+
+`output_list` is data: the per-step predictions that become `TrainOutput.gen_data`.
+Everything under `.metrics` is detached reporting, which is why the split names
+it — the loss numbers there never feed a backward pass, and none of them is the
+quantity being optimized (that is `optimization`'s accumulated loss). Keeping
+the raw `corrector_penalties` list rather than a pre-reduced scalar leaves the
+per-step values available and puts the mean behind one property.
+
+Per-channel penalties reach `TrainOutput` through the same
+`per_channel_losses` dict as the main-loss channels, distinguished by the
+`corrector_penalty/` key prefix — one dict, because `PerChannelLossAggregator`
+consumes exactly one and logs whatever keys it is handed. Each main-loss entry
+is therefore the main loss for that channel alone, with no penalty folded in.
 
 ### Critical detail — accumulation seam and the hard boundary
 
@@ -371,12 +406,12 @@ class TrainStepper(TrainStepperABC[...]):
   stays, unchanged, for the module regularizers): the penalty's graph is not
   disjoint from the main loss's, so a second `optimization.accumulate_loss`
   call would backward through it twice under gradient accumulation.
-- `train_on_batch` writes `metrics["corrector_regularization"]` from
-  `_AccumulatedLoss`, next to its existing `metrics["loss"]` write, so the
-  batch aggregate is set where the other aggregate is set.
+- `train_on_batch` writes `metrics["loss/corrector_penalty"]` from
+  `_AccumulatedLoss.metrics`, next to its existing `metrics["loss"]` write, so
+  the batch aggregate is set where the other aggregate is set.
 - Per-channel penalties are reported unweighted, under keys
-  `corrector_regularization/<var>`, which `PerChannelLossAggregator` logs
-  unchanged as `<label>/mean/loss/corrector_regularization/<var>`. Per-channel
+  `corrector_penalty/<var>`, which `PerChannelLossAggregator` logs
+  unchanged as `<label>/mean/loss/corrector_penalty/<var>`. Per-channel
   losses therefore do not sum to `total()`: the main-loss channels and the
   penalty channels are different quantities, and the weighted contribution is
   recoverable from the logged penalty and the configured `weight`.
@@ -390,6 +425,39 @@ class TrainStepper(TrainStepperABC[...]):
 - `fme.coupled` is out of scope: `CoupledStepperTrainLoss` keeps calling
   `build_loss` and using `StepLoss` directly.
 
+## `fme/ace/aggregator/train.py` (modified)
+
+```python
+class TrainAggregator:
+    def record_batch(self, batch: TrainOutput):
+        # CHANGED — the step_metrics filter admits "loss/" keys alongside
+        # "loss_step_", matching one_step/main.py's filter.
+```
+
+### Critical detail — the metric keys have to survive the filter
+
+Both aggregators select which of `TrainOutput.metrics` reach
+`PerStepLossAggregator`, and a bare `corrector_regularization` key passes
+neither: `fme/ace/aggregator/train.py` admits only `loss_step_*`, and
+`fme/ace/aggregator/one_step/main.py` admits `loss_step_*` and `loss/*`. A
+metric outside those prefixes is dropped silently — `TrainOutput.metrics` holds
+it, nothing logs it, and a test asserting on `TrainOutput.metrics` still
+passes. This is why #1273's claim that "the trainer's standard `batch_` prefix
+yields `batch_corrector_regularization` with no extra work" does not hold.
+
+So the penalty metrics are keyed under `loss/`, and the train aggregator's
+filter widens to admit that prefix. `PerStepLossAggregator.get_logs` emits
+`<label>/mean/<key>`, giving:
+
+| `TrainOutput.metrics` key | wandb key |
+| --- | --- |
+| `loss/corrector_penalty` | `train/mean/loss/corrector_penalty` |
+| `loss/corrector_penalty_step_{i}` | `train/mean/loss/corrector_penalty_step_{i}` |
+| `corrector_penalty/<var>` (per-channel) | `train/mean/loss/corrector_penalty/<var>` |
+
+with `val/` in place of `train/` for the validation aggregator. Every
+corrector-penalty number therefore lands under `<label>/mean/loss/`.
+
 ---
 
 ## Divergences from #1273
@@ -402,8 +470,7 @@ class TrainStepper(TrainStepperABC[...]):
    its delta keys at construction by a dummy pass on fake data; #1273
    warn-onced unmatched entries at runtime. Consequence: an active corrector
    must produce deltas for every selected name (a partial set raises), so the
-   `corrector_regularization` metric is comparable across epochs whenever the
-   corrector is active.
+   penalty metric is comparable across epochs whenever the corrector is active.
 3. **No detach control**: #1273 threads a detach flag from the stepper to the
    step seam; deltas are simply always attached, since detaching frees nothing.
 4. **No `StepOutput.uncorrected`**: #1273 assumed #1271 had delivered it; it
@@ -416,17 +483,24 @@ class TrainStepper(TrainStepperABC[...]):
    `StepOutputLoss`/`StepOutputLossResult` is adopted, but as a thin wrapper
    over an unchanged `StepLoss` plus a `CorrectorLoss`, and the result keeps the
    penalty's own `LossOutput` instead of a scalar.
+7. **Penalty metrics keyed under `loss/`**: #1273 named them
+   `corrector_regularization` and `corrector_regularization_step_{i}` and
+   expected the trainer to log them with no extra work. Both aggregators filter
+   `TrainOutput.metrics` by key prefix, so those keys log nothing; the names
+   become `loss/corrector_penalty` and `loss/corrector_penalty_step_{i}`, and
+   the train aggregator's filter widens to admit `loss/`. The rename also
+   reserves "corrector regularization" for the feature rather than the term.
 
 ---
 
 ## Tests
 
-## `fme/core/corrector/test_loss.py` (new)
+Each test file follows the module it covers: config and build validation with
+the configs, loss behavior with the loss objects.
+
+## `fme/core/corrector/test_loss_config.py` (new)
 
 ```python
-# Deterministic helper: fixed prediction/target/delta dicts, a normalizer with
-# known means/stds, MSE step loss — penalties computable by hand.
-
 def test_config_post_init_errors():
     # GOAL: both features None; a present feature with names_and_prefixes None
     # or empty; weight <= 0; EnsembleLoss / NaN / global_mean_type — each
@@ -447,6 +521,13 @@ def test_build_regularizer_packs_matched_names():
     # GOAL: the built WeightedMappingLoss packs exactly
     # selection.matched(loss_visible_names); a prefix entry matches all its
     # level names.
+```
+
+## `fme/core/test_loss.py` (modified)
+
+```python
+# Deterministic helper: fixed prediction/target/delta dicts, a normalizer with
+# known means/stds, MSE step loss — penalties computable by hand.
 
 def test_step_output_loss_without_corrector_loss_unchanged():
     # GOAL: with corrector_loss None, total() and get_channel_losses() match a
@@ -456,17 +537,17 @@ def test_pre_corrector_outputs_selected_only():
     # GOAL: the main loss sees output − delta for the configured names only;
     # other keys use the network output as-is; targets untouched.
 
-def test_regularization_analytic_penalty():
+def test_penalty_analytic_value():
     # GOAL: penalty equals the hand-computed mean of (delta/std)^2 — normalizer
     # means cancel against the zeros target.
 
-def test_regularization_masked_points_drop():
+def test_penalty_masked_points_drop():
     # GOAL: NaN-filled delta points contribute nothing; penalty and gradients
     # stay finite.
 
 def test_total_and_channel_decomposition():
     # GOAL: total() == main.total() + weight * penalty.total();
-    # get_channel_losses() is main-only; get_corrector_channel_losses() covers
+    # get_channel_losses() is main-only; get_corrector_penalty_losses() covers
     # exactly the selected names.
 
 def test_missing_selected_delta_raises():
@@ -515,7 +596,7 @@ def test_gradient_flows_through_correction_when_configured():
     # GOAL: with corrector_loss configured, parameter grads differ from the
     # no-corrector-loss baseline.
 
-def test_corrector_regularization_gradient_accumulation():
+def test_corrector_penalty_gradient_accumulation():
     # GOAL: the penalty folded into per-step totals backpropagates under
     # gradient accumulation (no double-backward); one accumulate_loss per
     # optimized step.
@@ -528,14 +609,25 @@ def test_epoch_scheduled_corrector():
     # GOAL: build-time validation passes via discovery even when epoch 0 is
     # disabled; disabled epochs are inert (no penalty, no metric, no error).
 
-def test_corrector_regularization_metrics():
-    # GOAL: corrector_regularization_step_{i} per optimized step, the per-batch
-    # corrector_regularization mean written in train_on_batch, and unweighted
-    # per-channel penalties under corrector_regularization/<var> for exactly
-    # the selected names.
+def test_corrector_penalty_metrics():
+    # GOAL: loss/corrector_penalty_step_{i} per optimized step, the per-batch
+    # loss/corrector_penalty mean written in train_on_batch, and unweighted
+    # per-channel penalties under corrector_penalty/<var> for exactly the
+    # selected names.
 
 def test_both_features_together():
     # GOAL: both features configured in one train_on_batch: the main loss sees
     # the pre-corrector outputs, the penalty is added, and both metric families
     # appear (per #1273's acceptance criteria).
+```
+
+## `fme/ace/aggregator/test_train.py` (modified)
+
+```python
+def test_corrector_penalty_metrics_reach_the_logs():
+    # GOAL: a TrainOutput carrying loss/corrector_penalty,
+    # loss/corrector_penalty_step_0, and a corrector_penalty/<var> per-channel
+    # entry logs all three under train/mean/loss/. Asserting on
+    # TrainOutput.metrics alone cannot catch the dropped-by-filter case, so this
+    # asserts on get_logs output.
 ```
