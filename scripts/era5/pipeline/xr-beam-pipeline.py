@@ -239,6 +239,10 @@ DESIRED_ATTRS = {
         "long_name": "Mean 2m dewpoint temperature",
         "units": "K",
     },
+    "PRESsfc_mean": {
+        "long_name": "Mean surface pressure",
+        "units": "Pa",
+    },
     "Q2m_mean": {
         "long_name": "Mean 2m specific humidity",
         "units": "kg/kg",
@@ -693,6 +697,7 @@ def _process_surface_mean(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
 
     output = xr.Dataset()
     output["surface_temperature_mean"] = regridded["skin_temperature"]
+    output["PRESsfc_mean"] = regridded["surface_pressure"]
     output["TMP2m_mean"] = regridded["2m_temperature"]
     output["DPT2m_mean"] = regridded["2m_dewpoint_temperature"]
     output["Q2m_mean"] = q2m

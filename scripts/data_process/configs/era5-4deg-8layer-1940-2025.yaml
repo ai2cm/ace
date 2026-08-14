@@ -88,6 +88,7 @@ time_coarsen:
     - DSWRFtoa
     - LHTFLsfc
     - PRATEsfc
+    - PRESsfc_mean
     - Q2m_mean
     - SHTFLsfc
     - TMP2m_mean
