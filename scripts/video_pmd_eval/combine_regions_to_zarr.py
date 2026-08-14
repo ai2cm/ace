@@ -9,6 +9,67 @@ import argparse
 import xarray as xr
 
 PATCHED_MODELS = {
+    # Single-stage coarse-endpoints (v2 of the single-stage architecture),
+    # global patch-tiled inference -- ONE contiguous global zarr, so a
+    # plain str path (see crps_eval.py's PATCHED_MODELS comment for the
+    # full architecture/provenance note).
+    "st-singlestage-coarse-endpoints-flat": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
+    "st-singlestage-coarse-endpoints-ou": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-ou/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
+    # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
+    # (see crps_eval.py's PATCHED_MODELS comment for the full caveat --
+    # epoch 41/200, preliminary/undertrained).
+    "st-flat-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
+    "st-ou-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
     "st-singlestage-flat": {
         "mid_west": (
             "/climate-default/2026-06-25-temporal-diffusion/inference/"
@@ -48,12 +109,18 @@ def parse_args():
 def main():
     args = parse_args()
     spec = PATCHED_MODELS[args.model]
-    parts = {
-        region: xr.open_zarr(path).isel(ensemble=args.ensemble_member, drop=True)
-        for region, path in spec.items()
-    }
-    mid_band = xr.concat([parts["mid_west"], parts["mid_east"]], dim="longitude")
-    combined = xr.concat([parts["south_cap"], mid_band, parts["north_cap"]], dim="latitude")
+    if not isinstance(spec, dict):
+        # Already a single global zarr (e.g. divide_generation patch-tiled
+        # inference output) -- just apply the ensemble-member selection,
+        # no region merge needed.
+        combined = xr.open_zarr(spec).isel(ensemble=args.ensemble_member, drop=True)
+    else:
+        parts = {
+            region: xr.open_zarr(path).isel(ensemble=args.ensemble_member, drop=True)
+            for region, path in spec.items()
+        }
+        mid_band = xr.concat([parts["mid_west"], parts["mid_east"]], dim="longitude")
+        combined = xr.concat([parts["south_cap"], mid_band, parts["north_cap"]], dim="latitude")
     combined = combined.chunk({"time": args.chunk_time, "latitude": -1, "longitude": -1})
     # Each source region zarr's own chunk encoding (e.g. frame_source's
     # single-chunk-covering-the-original-multi-year-axis metadata) survives

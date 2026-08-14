@@ -49,6 +49,67 @@ COARSE_TRUTH_ZARR = (
 # Same 4-region tiling as crps_eval.py's PATCHED_MODELS -- copied rather than
 # imported since crps_eval.py executes argparse at import time.
 PATCHED_MODELS = {
+    # Single-stage coarse-endpoints (v2 of the single-stage architecture),
+    # global patch-tiled inference -- ONE contiguous global zarr, so a
+    # plain str path (see crps_eval.py's PATCHED_MODELS comment for the
+    # full architecture/provenance note).
+    "st-singlestage-coarse-endpoints-flat": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
+    "st-singlestage-coarse-endpoints-ou": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-ou/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
+    # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
+    # (see crps_eval.py's PATCHED_MODELS comment for the full caveat --
+    # epoch 41/200, preliminary/undertrained).
+    "st-flat-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
+    "st-ou-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
     "st-singlestage-flat": {
         "mid_west": (
             "/climate-default/2026-06-25-temporal-diffusion/inference/"
@@ -113,13 +174,23 @@ ARGS = parse_args()
 OUTDIR = ARGS.outdir
 
 
-def _load_region_tiled(pred_spec: dict, t0, t1, variables: list[str] | None = None) -> xr.Dataset:
+def _load_region_tiled(pred_spec, t0, t1, variables: list[str] | None = None) -> xr.Dataset:
     """Same manual per-region-then-concat loading as crps_eval.py's
     _load_pred_window -- see that function's docstring for why a lazy
     4-way concat over the full multi-year time axis reliably OOMs and this
     doesn't. ``variables``, if given, subsets BEFORE .load() -- loading all
     5 channels when only 2 are needed for a whole JJA season is what OOM'd a
-    96GiB job on the first attempt at this script."""
+    96GiB job on the first attempt at this script.
+
+    ``pred_spec`` is either a 4-region dict (see PATCHED_MODELS) or a single
+    str zarr path (already-global output, e.g. from a divide_generation
+    patch-tiled inference run) -- matches crps_eval.py's _load_pred_window
+    dual-mode handling."""
+    if not isinstance(pred_spec, dict):
+        ds = xr.open_zarr(pred_spec).sel(time=slice(t0, t1))
+        if variables is not None:
+            ds = ds[variables]
+        return ds.load()
     parts = {}
     for region, path in pred_spec.items():
         ds = xr.open_zarr(path).sel(time=slice(t0, t1))

@@ -35,6 +35,67 @@ COARSE_TRUTH_ZARR = (
     "2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr"
 )
 PATCHED_MODELS = {
+    # Single-stage coarse-endpoints (v2 of the single-stage architecture),
+    # global patch-tiled inference -- ONE contiguous global zarr, so a
+    # plain str path (see crps_eval.py's PATCHED_MODELS comment for the
+    # full architecture/provenance note).
+    "st-singlestage-coarse-endpoints-flat": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
+    "st-singlestage-coarse-endpoints-ou": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-ou/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
+    # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
+    # (see crps_eval.py's PATCHED_MODELS comment for the full caveat --
+    # epoch 41/200, preliminary/undertrained).
+    "st-flat-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-flat-v2/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
+    "st-ou-v2": {
+        "mid_west": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon0to180.zarr"
+        ),
+        "mid_east": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-44to44-lon180to360.zarr"
+        ),
+        "north_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat44to88-lon0to360.zarr"
+        ),
+        "south_cap": (
+            "/climate-default/2026-06-25-temporal-diffusion/inference/"
+            "video-pmd-spatiotemporal-25km-100km-global-5ch-ou-v2/"
+            "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
+        ),
+    },
     "st-singlestage-flat": {
         "mid_west": (
             "/climate-default/2026-06-25-temporal-diffusion/inference/"
@@ -95,7 +156,12 @@ ARGS = parse_args()
 OUTDIR = ARGS.outdir
 
 
-def _load_region_tiled(pred_spec: dict, t0, t1) -> xr.Dataset:
+def _load_region_tiled(pred_spec, t0, t1) -> xr.Dataset:
+    # pred_spec is either a 4-region dict (see PATCHED_MODELS) or a single
+    # str zarr path (already-global output) -- matches crps_eval.py's
+    # _load_pred_window dual-mode handling.
+    if not isinstance(pred_spec, dict):
+        return xr.open_zarr(pred_spec).sel(time=slice(t0, t1)).load()
     parts = {}
     for region, path in pred_spec.items():
         parts[region] = xr.open_zarr(path).sel(time=slice(t0, t1)).load()
