@@ -25,7 +25,13 @@ def is_dir(path: str) -> bool:
 
 
 def makedirs(path: str) -> None:
-    """Create a directory if it doesn't exist; a no-op on object stores."""
+    """Create a directory if it doesn't exist.
+
+    Object stores have implicit directories, so this does nothing for a
+    prefix within an existing bucket. It is not unconditionally a no-op on
+    them: gcsfs attempts to create a bucket that doesn't exist, which raises
+    if the caller lacks permission. Existing data is never overwritten.
+    """
     fs, fs_path = _fs_and_path(path)
     fs.makedirs(fs_path, exist_ok=True)
 
