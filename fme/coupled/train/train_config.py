@@ -109,6 +109,12 @@ class InlineValidationConfig:
             "val_0", changing its wandb keys and output directory.
         weight: weight for this validation's loss in the combined checkpoint
             selection metric. Must be non-negative.
+        evaluate_all_steps: whether to evaluate every forward step in the
+            validation data window. If False, evaluate only the steps the
+            coupled train stepper would evaluate for the batch, which under a
+            stochastic n_steps loss configuration keeps validation cost near
+            training cost, at the price of averaging each per-step loss over
+            only the batches that reached its step.
     """
 
     loader: CoupledDataLoaderConfig
@@ -117,6 +123,7 @@ class InlineValidationConfig:
     )
     name: str | None = None
     weight: float = 1.0
+    evaluate_all_steps: bool = True
 
     def __post_init__(self):
         if self.weight < 0:
@@ -246,6 +253,7 @@ def _get_validation_callback(
                 output_dir=output_dir,
             ),
             weight=entry_config.weight,
+            evaluate_all_steps=entry_config.evaluate_all_steps,
         )
         for entry_config, data, name in validation_entries
     ]
@@ -278,6 +286,7 @@ def _get_validate_stepper_callback(
                 aggregator=aggregator,
                 ema=ema,
                 validate_using_ema=validate_using_ema,
+                evaluate_all_steps=entry_config.evaluate_all_steps,
             )
             if entry_config.weight > 0:
                 summary = aggregator.get_summary(label=name)
