@@ -75,15 +75,17 @@ class Distributed:
         shutdown of the distributed backend.
 
         Termination signals are handled for the lifetime of the context, so that
-        a preempted job tears the backend down instead of dropping its NVLink
-        peers. See `fme.core.distributed.shutdown`.
+        a preempted job aborts its communicators before exiting instead of
+        dropping its NVLink peers. See `fme.core.distributed.shutdown`. A
+        single-process job has no peers to protect and keeps the default signal
+        behavior (Ctrl-C raises KeyboardInterrupt and unwinds normally).
 
         Args:
-            handle_signals: Install the termination handler. Pass `False` only
+            handle_signals: Install the termination listener. Pass `False` only
                 when something else owns the process's response to SIGTERM and
                 SIGINT -- the test suite, which wraps the whole session in this
                 context and needs Ctrl-C to keep interrupting pytest rather than
-                becoming a caught teardown. Every entrypoint wants the default.
+                becoming an abort-and-exit. Every entrypoint wants the default.
         """
         if cls._entered:
             raise RuntimeError("Nested Distributed.context() is not supported.")
@@ -91,15 +93,18 @@ class Distributed:
         instance = cls.get_instance()
         try:
             with contextlib.ExitStack() as stack:
-                if handle_signals:
-                    stack.enter_context(handle_termination_signals(instance.shutdown))
-                yield
-        except BaseException:
-            # exit immediately to avoid hanging other ranks
-            # the OS should clean up resources based on the non-zero exit
-            raise  # re-raise the exception to avoid masking it
-        else:  # if no exception is raised, let root finish cleanup
-            instance.shutdown()
+                if handle_signals and instance.is_distributed():
+                    stack.enter_context(handle_termination_signals(instance.abort))
+                try:
+                    yield
+                except BaseException:
+                    # exit immediately to avoid hanging other ranks
+                    # the OS should clean up resources based on the non-zero exit
+                    raise  # re-raise the exception to avoid masking it
+                else:  # if no exception is raised, let root finish cleanup
+                    # inside the stack: the teardown is itself a collective, so
+                    # it must run while the listener still protects the process
+                    instance.shutdown()
         finally:
             cls._entered = False
 
@@ -514,6 +519,13 @@ class Distributed:
 
     def shutdown(self):
         return self._distributed.shutdown()
+
+    def abort(self):
+        """Locally release the backend's communicators so this process can exit
+        without faulting its peers. Not collective, unlike `shutdown`, and safe
+        to call from a non-main thread.
+        """
+        return self._distributed.abort()
 
 
 singleton: Distributed | None = None
