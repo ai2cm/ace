@@ -26,8 +26,8 @@ for seed in {0..0}; do
         --description 'Run inference with ACE' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
-        --priority urgent \
-        --cluster ai2/jupiter \
+        --priority high \
+        --cluster ai2/titan \
         --env CM_PRIORITY=high \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
