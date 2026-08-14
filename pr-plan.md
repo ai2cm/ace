@@ -345,7 +345,7 @@ class TrainStepperConfig:
 
 
 @dataclasses.dataclass
-class _AccumulatedLossMetrics:  # NEW — reporting only; every tensor detached
+class _AccumulateLossMetrics:  # NEW — reporting only; every tensor detached
     per_channel_losses: dict[str, ChannelLossInfo] | None
     corrector_penalties: list[torch.Tensor]
 
@@ -355,9 +355,9 @@ class _AccumulatedLossMetrics:  # NEW — reporting only; every tensor detached
 
 
 @dataclasses.dataclass
-class _AccumulatedLoss:  # NEW — replaces the tuple returned by _accumulate_loss
+class _AccumulateLossOutput:  # NEW — replaces the tuple returned by _accumulate_loss
     output_list: list[EnsembleTensorDict]
-    metrics: _AccumulatedLossMetrics
+    metrics: _AccumulateLossMetrics
 
 
 class TrainStepper(TrainStepperABC[...]):
@@ -366,7 +366,7 @@ class TrainStepper(TrainStepperABC[...]):
         #     stepper.build_loss(config.loss),
         #     stepper.build_corrector_loss(config.corrector_loss))
 
-    def _accumulate_loss(self, ...) -> _AccumulatedLoss:
+    def _accumulate_loss(self, ...) -> _AccumulateLossOutput:
         # CHANGED — keeps the yielded StepOutput and unconditionally unfolds
         # its delta dict alongside .output (unfold_ensemble_dim), carrying the
         # hard-boundary comment below.
@@ -407,7 +407,7 @@ is therefore the main loss for that channel alone, with no penalty folded in.
   disjoint from the main loss's, so a second `optimization.accumulate_loss`
   call would backward through it twice under gradient accumulation.
 - `train_on_batch` writes `metrics["loss/corrector_penalty"]` from
-  `_AccumulatedLoss.metrics`, next to its existing `metrics["loss"]` write, so
+  `_AccumulateLossOutput.metrics`, next to its existing `metrics["loss"]` write, so
   the batch aggregate is set where the other aggregate is set.
 - Per-channel penalties are reported unweighted, under keys
   `corrector_penalty/<var>`, which `PerChannelLossAggregator` logs
