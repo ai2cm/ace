@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import torch
@@ -233,6 +233,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return list(self.prescribed_prognostic_names)
+
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        self.corrector.disable_corrections(names)
 
     def get_step(
         self,

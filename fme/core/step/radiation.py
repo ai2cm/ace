@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import torch
@@ -166,6 +166,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return []
+
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        self.corrector.disable_corrections(names)
 
     @property
     def allow_missing_variables(self) -> bool:
