@@ -38,9 +38,10 @@ verbatim from pre-training.
   schedule — the only borrowed piece)
 - `stepper_training.parameter_init.weights_path`: added, loads
   `/weights/training_checkpoints/best_ckpt.tar`
+- `max_epochs`: `150` -> `20` (fine-tuning is short; set by `FT_MAX_EPOCHS`)
 
-Everything else is pre-training verbatim, including `max_epochs: 150`, FusedAdam
-lr 1e-4, EnsembleLoss (crps 0.9 / energy 0.1, no extra weights),
+Everything else is pre-training verbatim, including FusedAdam lr 1e-4,
+EnsembleLoss (crps 0.9 / energy 0.1, no extra weights),
 `optimize_last_step_only: true`, `n_ensemble: 2`, the full v5 inference suite,
 the 1979–2008 training windows, and `logging.project: VarMasking8`.
 

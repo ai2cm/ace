@@ -1,7 +1,8 @@
 # arg: --dataset 01KYWXQH0XT66EHXVRJ5N9HC4S:/weights
 # source pre-training run: ace2-var-mask-nc-sfno-era5-gmron-mask0-seed2-v5
-# = that run's 1-step pre-training config, with only n_forward_steps swapped for the
-#   multi-step schedule and parameter_init added (see generate_finetune_configs.py).
+# = that run's 1-step pre-training config, with only: n_forward_steps swapped for the
+#   multi-step schedule, parameter_init added, and max_epochs capped at 20
+#   (see generate_finetune_configs.py).
 seed: 2
 experiment_dir: /results
 save_checkpoint: true
@@ -10,7 +11,7 @@ validate_using_ema: true
 ema_checkpoint_save_epochs:
   start: 10
   step: 10
-max_epochs: 150
+max_epochs: 20
 ema:
   decay: 0.999
 train_aggregator:
