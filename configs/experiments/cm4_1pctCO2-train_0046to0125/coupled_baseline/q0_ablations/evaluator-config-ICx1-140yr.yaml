@@ -1,0 +1,92 @@
+# Out-of-sample counterpart of evaluator-config-ICx1-80yr.yaml: the same
+# checkpoint and the same two reference arms (base, q0), over the whole
+# 1pctCO2 record instead of the training window.
+#
+# One IC at the store's start, so the rollout crosses every data split:
+#   years 0001-0040  never seen (out of sample, CO2 below the training range)
+#   years 0041-0045  val_1pct_early
+#   years 0046-0125  training window
+#   years 0126-0130  val_1pct_late
+#   years 0131-0140  holdout (out of sample, CO2 above the training range)
+# Nothing here restricts scoring to a segment; the split is done offline from
+# the monthly output and the annual aggregator series.
+#
+# 0001-01-06 is the first valid coupled timestep (the leading all-NaN ffill
+# window in the ocean-sourced fields ends at the first 5-daily ocean snapshot,
+# 5 days past the store start). 10218 5-day ocean steps run from there to
+# 0140-12-27, the record's last snapshot -- 10218 = 2 x 3 x 13 x 131, so
+# coupled_steps_in_memory: 6 divides it. Everything below other than the step
+# count and the start time is identical to the 80yr config.
+experiment_dir: /results
+n_coupled_steps: 10218
+coupled_steps_in_memory: 6
+checkpoint_path: /ckpt.tar
+# All arms share one noise realization, so an arm-vs-arm difference is the
+# ablation and not a different draw from the stochastic atmosphere. Same seed
+# as the 80yr arms.
+seed: 0
+# No save_step_diagnostics in either realm: the coupled path does not carry the
+# corrector's per-step deltas through to its writers or aggregator (they are
+# dropped when the paired data is built), so requesting them writes nothing. The
+# uncoupled arms carry that measurement instead, via the aggregator's
+# correction-magnitude metrics; plumbing the coupled side is its own task.
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - sst
+      - thetao_9
+      - thetao_18
+      - hfds_total_area
+      - ocean_heat_content
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - surface_temperature
+      # the field total_energy_budget_correction acts on, on the same top layer
+      # as the prescribed humidity: with the correction off the atmosphere's
+      # energy budget is open, and temperature drift is the signature
+      - air_temperature_0
+      - specific_total_water_0
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+      - '0001-01-06T00:00:00'
+# The ocean realm's Nino3.4 index (>2 yr) and IPO index (>80 yr) are built
+# unconditionally at this length -- the coupled aggregator config has no
+# log_nino34_index / log_ipo_index switch. Both plot a matplotlib date axis,
+# which on a 140-year series starting in year 0001 used to autoscale past year
+# 0001 and kill the job in get_summary() after the whole rollout. That is fixed
+# on this branch (ace #1439); do not run this config from a commit without it.
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false
