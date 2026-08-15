@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # rows are appended here by the job runner at submission
 
 cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs0|01M015F7GXN1S5JB9XXX58T2C6|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs1|01M01RJ12Z967KEDBVN68RQH86|training|best_inference_ckpt|normal|--min-runtime 8h
