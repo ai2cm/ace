@@ -121,10 +121,12 @@ def test_exits_even_if_abort_raises():
 def test_exit_waits_out_the_grace_period():
     """No rank may exit before its peers' aborts have finished.
 
-    The grace period after the local abort is the only thing standing between
-    a fast rank's exit and a slow peer's still-running kernels, so the exit
-    must not come early.
+    The exit floor -- park deadline + settle period + grace period after the
+    signal -- is the only thing standing between a fast rank's exit and a
+    slow peer's still-running kernels, so the exit must not come early.
     """
+    park_deadline = 0.1
+    settle_period = 0.1
     grace_period = 1.0
     program = textwrap.dedent(
         f"""
@@ -132,7 +134,10 @@ def test_exit_waits_out_the_grace_period():
         from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         with abort_and_exit_on_termination(
-            abort=lambda: None, grace_period={grace_period}, park_deadline=0.1
+            abort=lambda: None,
+            grace_period={grace_period},
+            park_deadline={park_deadline},
+            settle_period={settle_period},
         ):
             print("ready", flush=True)
             threading.Event().wait()
@@ -157,7 +162,7 @@ def test_exit_waits_out_the_grace_period():
             proc.stdout.close()
 
     assert proc.returncode == 128 + signal.SIGTERM
-    assert elapsed >= grace_period * 0.9
+    assert elapsed >= (park_deadline + settle_period + grace_period) * 0.9
 
 
 @pytest.mark.medium_duration
@@ -552,10 +557,11 @@ def test_no_listener_installed_in_a_dataloader_worker(monkeypatch):
 def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
     """Parking at a loop boundary tells the listener the rank's collectives
     are idle: the abort proceeds after the settle period rather than waiting
-    out the park deadline -- the deadline here dwarfs the observed runtime,
-    so waiting it out would fail the timing bound -- and the post-abort
+    out the park deadline -- the bound asserted is well under the deadline,
+    so taking the deadline path would fail it -- and the post-abort
     callbacks run against the boundary-frozen state rather than being
-    skipped.
+    skipped. (The *exit* still waits out the deadline-based floor for its
+    peers' aborts; only the abort comes early.)
     """
     result = _run_listener_program(
         """
@@ -575,7 +581,7 @@ def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
         with abort_and_exit_on_termination(
             abort=abort,
             grace_period=0.1,
-            park_deadline=30.0,
+            park_deadline=5.0,
             settle_period=0.05,
         ):
             signaled["at"] = time.monotonic()
@@ -589,7 +595,7 @@ def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
     assert "has not parked" not in result.stderr
     label, elapsed, callback = result.stdout.split()
     assert (label, callback) == ("elapsed", "callback")
-    assert float(elapsed) < 5.0  # the deadline would add 30, on its own clock
+    assert float(elapsed) < 2.0  # the deadline path would make this >= 5
     assert result.returncode == 128 + signal.SIGTERM
 
 
@@ -617,7 +623,7 @@ def test_the_settle_period_holds_the_abort_after_the_park():
         with abort_and_exit_on_termination(
             abort=abort,
             grace_period=0.1,
-            park_deadline=5.0,
+            park_deadline=1.0,
             settle_period={settle_period},
         ):
             signal.raise_signal(signal.SIGTERM)
@@ -657,6 +663,88 @@ def test_the_deadline_bounds_the_wait_for_a_main_thread_that_never_parks():
     assert "has not parked" in result.stderr
     assert result.stdout.split() == ["abort"]
     assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_no_rank_exits_before_a_wedged_peer_has_aborted():
+    """Parking spreads abort times across ranks: a parked rank aborts a settle
+    period after the signal while a wedged peer waits out the park deadline --
+    an ordinary split, since signal skew around one park check sends two ranks
+    down different paths. A fixed post-abort grace would let the parked rank
+    exit -- unmapping memory the wedged peer's waiting kernels still poll --
+    before that peer aborts, so the exit must hold until no peer can still be
+    aborting.
+    """
+    park_deadline = 1.0
+    settle_period = 0.1
+    grace_period = 0.5
+    child = textwrap.dedent(
+        f"""
+        import sys, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        def abort():
+            print(f"abort {{time.monotonic():.3f}}", flush=True)
+
+        with abort_and_exit_on_termination(
+            abort,
+            grace_period={grace_period},
+            park_deadline={park_deadline},
+            settle_period={settle_period},
+        ):
+            print("READY", flush=True)
+            while True:
+                if sys.argv[1] == "park":
+                    park_if_terminating()  # a batch loop offering a boundary
+                time.sleep(0.01)  # "wedge": in a collective, no park point
+        """
+    )
+    procs = {}
+    for role in ("park", "wedge"):
+        proc = subprocess.Popen(
+            [sys.executable, "-c", child, role],
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "READY"  # startup paid
+        procs[role] = proc
+
+    aborted_at: dict[str, float] = {}
+    exited_at: dict[str, float] = {}
+
+    def observe(role: str) -> None:
+        proc = procs[role]
+        assert proc.stdout is not None
+        label, at = proc.stdout.readline().split()
+        assert label == "abort"
+        aborted_at[role] = float(at)
+        proc.wait(timeout=30)
+        exited_at[role] = time.monotonic()
+
+    observers = [threading.Thread(target=observe, args=(role,)) for role in procs]
+    try:
+        for proc in procs.values():
+            proc.send_signal(signal.SIGTERM)  # one each, as torchrun's agent does
+        for thread in observers:
+            thread.start()
+        for thread in observers:
+            thread.join(timeout=30)
+    finally:
+        for proc in procs.values():
+            proc.kill()
+            proc.wait()
+            if proc.stdout is not None:
+                proc.stdout.close()
+
+    assert set(exited_at) == {"park", "wedge"}
+    # time.monotonic() is CLOCK_MONOTONIC, shared across processes on Linux,
+    # so the children's abort stamps and the parent's exit stamps compare
+    assert aborted_at["park"] < aborted_at["wedge"], "the paths did not split"
+    assert min(exited_at.values()) > max(aborted_at.values())
 
 
 @pytest.mark.medium_duration

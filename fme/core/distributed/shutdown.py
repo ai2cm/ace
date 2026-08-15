@@ -11,7 +11,9 @@ stopped its own NCCL kernels.
 Each rank handles this on its own, with no cross-rank coordination: on a
 termination signal it aborts its own communicators -- ``ncclCommAbort`` kills
 the local kernels and unblocks whatever host thread was waiting on them --
-then waits out a grace period so its peers' aborts finish before it exits.
+then holds its exit until no peer can still be aborting (see
+`_wait_for_peer_aborts`), so its memory stays mapped until every peer's
+kernels have stopped.
 
 The abort itself is deferred until this rank's collectives are idle or merely
 waiting. Aborting communicators whose kernels are actively exchanging data
@@ -54,10 +56,13 @@ from ._signal_listener import SignalListener
 
 TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
 
-# How long an aborting rank waits for its peers' aborts before exiting. Aborts
-# return in under a second on a wedged 8-GPU node (measured on H100 and B200),
-# so this generously covers rank-to-rank signal skew while fitting many times
-# over in torchrun's shared 30s SIGTERM-to-SIGKILL budget (`PContext.close`'s
+# Allowance past the latest possible peer abort *start* (the park deadline
+# plus the settle period after the signal) for the abort itself and for
+# rank-to-rank signal skew: no rank may exit before
+# signal + park_deadline + settle_period + grace_period (see
+# `_wait_for_peer_aborts`). Aborts return in under a second on a wedged 8-GPU
+# node (measured on H100 and B200), so this generously covers both while the
+# sum fits torchrun's shared 30s SIGTERM-to-SIGKILL budget (`PContext.close`'s
 # default timeout, torch/distributed/elastic/agent/server/local_elastic_agent.py).
 DEFAULT_GRACE_PERIOD = 5.0
 
@@ -296,11 +301,27 @@ def _run_post_abort_callbacks(
             write_stderr(f"Post-abort callback failed:\n{traceback.format_exc()}")
 
 
-def _wait_for_peer_aborts(grace_period: float) -> None:
+def _wait_for_peer_aborts(
+    signal_time: float,
+    grace_period: float,
+    park_deadline: float,
+    settle_period: float,
+) -> None:
     """Peers' aborts must finish, so their kernels stop touching this rank's
     memory, before this rank exits.
+
+    Parking makes abort times rank-dependent: a parked peer aborts a settle
+    period after it parks, while one wedged in a collective waits out the
+    whole park deadline. A fixed sleep from this rank's own abort would let a
+    parked rank exit -- unmapping its memory -- while a wedged peer's kernels
+    are still waiting on it. So every rank instead holds its exit until the
+    latest instant a peer can still be aborting: the park deadline plus the
+    settle period after the signal (the latest abort start, reached by a peer
+    that parks just under the deadline), plus the grace period for the abort
+    itself and rank-to-rank signal skew.
     """
-    time.sleep(grace_period)
+    exit_time = signal_time + park_deadline + settle_period + grace_period
+    time.sleep(max(0.0, exit_time - time.monotonic()))
 
 
 def _abort_and_exit(
@@ -313,6 +334,7 @@ def _abort_and_exit(
     settle_period: float,
 ) -> None:
     """The termination policy. Runs on the listener thread."""
+    signal_time = time.monotonic()
     coordination.mark_listener_owns_exit()
     write_stderr(
         f"Received {signal.Signals(signum).name}, aborting distributed "
@@ -322,7 +344,7 @@ def _abort_and_exit(
     coordination.mark_abort_started()
     _abort_local_communicators(abort)
     _run_post_abort_callbacks(coordination, state_freeze_timeout)
-    _wait_for_peer_aborts(grace_period)
+    _wait_for_peer_aborts(signal_time, grace_period, park_deadline, settle_period)
     write_stderr(f"Exiting with code {128 + signum}.\n")
     os._exit(128 + signum)
 
@@ -353,8 +375,11 @@ def abort_and_exit_on_termination(
             listener thread, typically while the main thread is blocked in a
             collective or parked at a loop boundary, so it must not require
             the main thread's cooperation.
-        grace_period: Seconds to wait between aborting and exiting, so that
-            peers' aborts finish while this process's memory is still mapped.
+        grace_period: Allowance for a peer's abort to run and for signal
+            skew: no rank exits before ``park_deadline + settle_period +
+            grace_period`` after the signal, so peers' aborts finish while
+            this process's memory is still mapped (see
+            ``_wait_for_peer_aborts``).
         state_freeze_timeout: Seconds the listener waits for the main thread
             to block in this context's exit before skipping the post-abort
             callbacks (see ``add_post_abort_callback``).
@@ -434,7 +459,9 @@ def abort_and_exit_on_termination(
         if not coordination.listener_owns_exit():
             # covers the race where a signal was delivered but not yet read:
             # long enough for the listener to abort and exit
-            listener.wait_until_finished(timeout=grace_period + 10.0)
+            listener.wait_until_finished(
+                timeout=park_deadline + settle_period + grace_period + 10.0
+            )
         if coordination.listener_owns_exit():
             # hold the unwinding main thread for the abort and grace period,
             # with the listener still armed -- dismantling it here would
