@@ -4,7 +4,7 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 13
+max_epochs: 13 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~9,490 iterations
 inference:
   - name: inference_1pct
     weight: 1.0
