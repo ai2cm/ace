@@ -23,10 +23,18 @@ group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|ove
 # spike whether or not the clip binds. A flat norm trace across the event
 # refutes the gradient-outlier hypothesis; a spike confirms it.
 #
-# Only rs0 is set to train, matching how the other isolation arms were read:
-# the pathology is present in nearly every seed, so one seed is enough for a
-# first read. Flip rs1/rs2 to `train` to fill in the spread once rs0 shows
-# whether clipping removes the event.
-cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs0|train|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
-cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs1|skip|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
-cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs2|skip|high|h100|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+# rs1/rs2 added 2026-08-14 with rs0 at epoch 17: past the epoch 6-14 window
+# every other spike fell in, monotone rollout error, and the best trajectory
+# in the family at matched epoch. One clean seed is not yet evidence -- 1 of
+# the 6 unclipped fill_value=mean runs (ocean_fillmean rs2) never spiked
+# either, so a single clean clipped seed is consistent with clipping doing
+# nothing. Three clean seeds is the read.
+#
+# rs0 is `skip` because it is already launched, not because it is cancelled:
+# uncoupled_train.sh has no duplicate-launch guard and submits every row it
+# finds set to `train`, so a launched row must be flipped to skip before the
+# next invocation or it is relaunched. experiments.txt is the record of what
+# actually ran.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs0|skip|high|h100|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs1|train|high|h100|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs2|train|high|h100|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
