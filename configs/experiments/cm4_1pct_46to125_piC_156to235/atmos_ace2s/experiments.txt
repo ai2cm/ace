@@ -7,3 +7,5 @@ cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01SGEQ8110DHRV7YVN1HH3T|trainin
 cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs2|01M01SGVQK06MW6EMARMHNFCT9|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs0|01M01SRMP4CNJF3G1NA80A4NZF|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01SS0YWZMNG9D1GMKHSFWSX|training|best_inference_ckpt|normal|--min-runtime 8h
