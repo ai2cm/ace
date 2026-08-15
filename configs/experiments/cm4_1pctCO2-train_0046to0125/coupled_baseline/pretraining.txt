@@ -4,39 +4,11 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # components. Tags are o<ocean seed>a<atmos seed>rs<coupled seed>; component
 # seeds are independent, so all 3 ocean x 3 atmos pairings are prepared here
 # and flipped to `train` individually. Checkpoint selection is
-# `best_inference_ckpt` throughout (decided 2026-08-03, James).
+# `best_inference_ckpt` throughout.
 #
-# STATUS COLUMN HAS THREE VALUES, and the distinction is load-bearing:
+# `status` column has only one value that actually launches a job:
 #   train        - submit this row (only exact `train` is submitted)
-#   skip         - ready to submit; both component FT runs have finished
-#   pretraining  - NOT ready; a component FT run has not finished yet.
-#                  Inert to the runner, same as `skip`, but do not flip it to
-#                  `train` without re-checking the component below. Convention
-#                  borrowed from ocean_baseline/finetuning.txt.
 #
-# Component FT runs, as of 2026-08-03:
-#   ocean rs0  xalddsui  DONE  25/25 epochs, exit 0 (Beaker 01KZ2AW7KB3683TT7HGA4PYWY3)
-#   ocean rs1  nu9sqwp6  DONE  25/25 epochs, exit 0 (Beaker 01KZ2AWRDK6Y2VKN7RMM8TDRNV)
-#   ocean rs2  --------  NOT SUBMITTED. Its pretraining (rzehx59b) finished
-#                        150/150 on 2026-08-03; the FT row in
-#                        ocean_baseline/finetuning.txt still needs flipping
-#                        `pretraining`->`train` and submitting. There is no
-#                        ocean rs2 *FT* wandb id yet, hence the placeholder.
-#   atmos rs0  akh7gplh  DONE  25/25 epochs, exit 0 (Beaker 01KY8H72B6ZSA7EVPV8V68XBJE)
-#   atmos rs1  o7o6e32x  RUNNING - resumed 2026-08-03 as Beaker
-#                        01KZ46A8FEJ3BBN8BFKK779YWP, at 16 of 25 epochs.
-#                        The id is already correct and stable (the resume runs
-#                        with resume_wandb true, so it continues o7o6e32x), which
-#                        is precisely the hazard: an a1 row flipped to `train`
-#                        now would resolve, fetch the *current*
-#                        best_inference_ckpt, and silently couple from an
-#                        unfinished fine-tune. Hence `pretraining`, not `skip`.
-#   atmos rs2  xa468b28  DONE  25/25 epochs, exit 0 (Beaker 01KY8H7JPZ2BXJJZEYV8GZESQG)
-#
-# Seed->id mapping is read off each Beaker experiment name, which embeds the
-# seed (`...-ft-rs0-train-738c`), with the wandb id taken from that same job's
-# log - one source carrying both facts, so a mislabelled pairing cannot slip
-# through unnoticed.
 cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|o0a0rs0|ace-samudra-cm4|xalddsui|best_inference_ckpt|ace2-cm4-atmos-noLSM|akh7gplh|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
 cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|o0a1rs0|ace-samudra-cm4|xalddsui|best_inference_ckpt|ace2-cm4-atmos-noLSM|o7o6e32x|best_inference_ckpt|pretraining|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
 cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|o0a2rs0|ace-samudra-cm4|xalddsui|best_inference_ckpt|ace2-cm4-atmos-noLSM|xa468b28|best_inference_ckpt|skip|high|b200|8|800GiB|3|ai2/ace|seed=0|1h
