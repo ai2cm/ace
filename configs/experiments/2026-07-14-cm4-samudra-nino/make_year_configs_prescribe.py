@@ -27,6 +27,14 @@ Arms (each vs the existing free-running baseline, same ICs):
                 in a way the scalar gain missed (pattern, curl, phase)?
   fluxes        atmosphere's surface energy/freshwater fluxes held at truth ->
                 is the thermodynamic coupling the leak?
+  fluxrad       the radiative half of that arm alone
+  fluxturb      the non-radiative half alone (turbulent heat + freshwater);
+                latent heat flux is the classic ENSO damping term
+
+On 36 ICs the flux arm recovered lead-12 skill of 0.95 against the free run's
+-0.57, while wind stress -- the other atmosphere-to-ocean pathway, and equally
+indirect -- recovered only 0.23. fluxrad/fluxturb split that result to say
+which component carries it.
 
 Every arm writes the same small monthly-mean output: SST (for skill, directly
 comparable to the existing curves) plus zos and four thermocline levels, so the
@@ -55,15 +63,15 @@ CURRENTS = (
     [f"uo_{k}" for k in range(19)] + [f"vo_{k}" for k in range(19)] + ["ssu", "ssv"]
 )
 WIND_STRESS = ["eastward_surface_wind_stress", "northward_surface_wind_stress"]
-FLUXES = [
-    "DLWRFsfc",
-    "DSWRFsfc",
-    "ULWRFsfc",
-    "USWRFsfc",
-    "LHTFLsfc",
-    "SHTFLsfc",
-    "PRATEsfc",
-]
+FLUX_RAD = ["DLWRFsfc", "DSWRFsfc", "ULWRFsfc", "USWRFsfc"]
+# Non-radiative: turbulent heat plus the freshwater flux. Latent heat flux is
+# the classic ENSO thermodynamic damping term, so this is the half expected to
+# matter if the flux pathway's skill recovery is a damping effect.
+FLUX_TURB = ["LHTFLsfc", "SHTFLsfc", "PRATEsfc"]
+# FLUX_RAD and FLUX_TURB partition FLUXES exactly, so `fluxrad` + `fluxturb`
+# are directly comparable to the combined `fluxes` arm: any shortfall relative
+# to it is interaction between the two halves, not a field left out.
+FLUXES = FLUX_RAD + FLUX_TURB
 
 # arm -> (ocean prescribed names, atmosphere prescribed names)
 ARMS: dict[str, tuple[list[str], list[str]]] = {
@@ -73,6 +81,8 @@ ARMS: dict[str, tuple[list[str], list[str]]] = {
     "currents": (CURRENTS, []),
     "windstress": ([], WIND_STRESS),
     "fluxes": ([], FLUXES),
+    "fluxrad": ([], FLUX_RAD),
+    "fluxturb": ([], FLUX_TURB),
 }
 
 
