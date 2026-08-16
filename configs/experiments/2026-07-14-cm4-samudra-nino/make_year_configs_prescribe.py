@@ -64,6 +64,17 @@ CURRENTS = (
 )
 WIND_STRESS = ["eastward_surface_wind_stress", "northward_surface_wind_stress"]
 FLUX_RAD = ["DLWRFsfc", "DSWRFsfc", "ULWRFsfc", "USWRFsfc"]
+# ULWRFsfc is not external forcing: the coupled stepper prescribes Samudra's sst
+# into the atmosphere's surface_temperature over ocean, and ACE diagnoses
+# ULWRFsfc = eps*sigma*T^4 from it. So it is the ocean's own state re-encoded
+# and handed back. Prescribing it to truth tells the network "skin temperature
+# is truth" in exactly the encoding it was trained on, which can restore SST
+# skill with no radiative physics involved. Split it out to test that.
+FLUX_ULW = ["ULWRFsfc"]
+# The genuinely external radiative terms: downwelling shortwave and longwave are
+# set by the atmospheric column, and reflected shortwave is ~albedo*DSWRF with
+# near-constant ocean albedo. None is an invertible readout of skin temperature.
+FLUX_RAD_NO_ULW = ["DLWRFsfc", "DSWRFsfc", "USWRFsfc"]
 # Non-radiative: turbulent heat plus the freshwater flux. Latent heat flux is
 # the classic ENSO thermodynamic damping term, so this is the half expected to
 # matter if the flux pathway's skill recovery is a damping effect.
@@ -83,6 +94,8 @@ ARMS: dict[str, tuple[list[str], list[str]]] = {
     "fluxes": ([], FLUXES),
     "fluxrad": ([], FLUX_RAD),
     "fluxturb": ([], FLUX_TURB),
+    "fluxulw": ([], FLUX_ULW),
+    "fluxradnoulw": ([], FLUX_RAD_NO_ULW),
 }
 
 
