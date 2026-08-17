@@ -12,6 +12,6 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # status "pretraining" = pretraining not yet run or not yet selected;
 # uncoupled_finetune.sh acts only on rows whose status is exactly "train".
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|ace-samudra-cm4|yam9t8xl|best_ckpt|train|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=0
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|ace-samudra-cm4||best_ckpt|pretraining|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=1
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs2|ace-samudra-cm4|qwq9wme7|best_ckpt|pretraining|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=2
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|ace-samudra-cm4|yam9t8xl|best_ckpt|training|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=0
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|ace-samudra-cm4|lez7jurw|best_ckpt|train|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=1
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs2|ace-samudra-cm4|qwq9wme7|best_ckpt|train|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=2
