@@ -8,6 +8,7 @@ from combine_stats import Config as CombineStatsConfig
 from create_coupled_datasets import CreateCoupledDatasetsConfig
 from create_coupled_ic import CreateCoupledICConfig
 from get_stats import Config as GetStatsConfig
+from time_coarsen import Config as TimeCoarsenConfig
 from upload_stats import Config as UploadStatsConfig
 from upload_stats import _upload_specs
 
@@ -190,3 +191,27 @@ def test_upload_config_rejects_no_datasets_requested():
 def test_upload_config_rejects_no_datasets_without_time_coarsen():
     with pytest.raises(ValueError, match="No Beaker dataset to upload"):
         _upload_stats_config(stats_beaker_dataset=None)
+
+
+OUTPUT_NAMES_CONFIG_YAMLS = [
+    f for f in CONFIG_YAMLS if "output_names" in open(f).read()
+]
+
+
+@pytest.mark.parametrize("filename", OUTPUT_NAMES_CONFIG_YAMLS)
+def test_output_names_resolve_to_distinct_paths(filename):
+    with open(filename) as f:
+        config_data = yaml.load(f, Loader=yaml.CLoader)
+    config = dacite.from_dict(data_class=TimeCoarsenConfig, data=config_data)
+    data_dir = config.data_output_directory.rstrip("/")
+    tc_dir = config.time_coarsen.data_output_directory.rstrip("/")
+    for run_name in config.runs:
+        output_name = config.time_coarsen.output_names.get(run_name, run_name)
+        input_zarr = data_dir + "/" + run_name + ".zarr"
+        output_zarr = tc_dir + "/" + output_name + ".zarr"
+        assert (
+            input_zarr != output_zarr
+        ), f"Coarsened output path equals input: {input_zarr}"
+        assert (
+            output_name != run_name
+        ), f"output_names should give run {run_name!r} a distinct name"
