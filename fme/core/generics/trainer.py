@@ -765,14 +765,18 @@ class Trainer:
             best_checkpoint_context = self._ema_context
         else:
             best_checkpoint_context = contextlib.nullcontext  # type: ignore
+        prev_best_inference_error = self._best_inference_error
         save_best_checkpoint, save_best_inference_checkpoint = (
             self._update_best_metrics(valid_loss, inference_error)
         )
         with best_checkpoint_context():
             if save_best_inference_checkpoint:
                 logging.info(
-                    f"Epoch inference error ({self._best_inference_error}) is the "
-                    "best so far; saving lowest inference error checkpoint to "
+                    f"Epoch inference error ({inference_error}) is lower than "
+                    f"previous best inference error ({prev_best_inference_error})."
+                )
+                logging.info(
+                    "Saving lowest inference error checkpoint to "
                     f"{self.paths.best_inference_checkpoint_path}"
                 )
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
@@ -790,7 +794,6 @@ class Trainer:
                     )
                     self.save_checkpoint(best_inference_epoch_path)
             if save_best_checkpoint:
-                # saved after the inference error so the checkpoint records it
                 logging.info(
                     "Saving lowest validation loss checkpoint to "
                     f"{self.paths.best_checkpoint_path}"
