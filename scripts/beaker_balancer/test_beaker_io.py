@@ -512,6 +512,49 @@ def test_placed_job_on_unbudgeted_cluster_with_no_constraint_does_not_crash(capl
     assert any("ai2/ceres" in m and "no allocation" in m for m in warnings)
 
 
+def test_queued_job_targeting_budgeted_and_non_budgeted_clusters_is_promoted(caplog):
+    # A job eligible for jupiter and ceres is managed against jupiter alone.
+    # Ceres has no allocation, so the job is treated as a jupiter-only job.
+    NODES = {"node-jup": ("jupiter", "ai2")}
+    client = FakeClient(
+        [_labelled("mixed", "high", clusters=("ai2/jupiter", "ai2/ceres"))],
+        node_clusters=NODES,
+    )
+    applied = run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    assert applied == 1
+    assert client.priority_calls == [("mixed", URGENT)]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert not any("no allocation" in m for m in warnings)
+
+
+def test_placed_job_on_non_budgeted_cluster_that_targeted_a_budgeted_one(caplog):
+    # The job targeted jupiter+ceres but landed on ceres. It should not be
+    # counted against jupiter, and should not produce a warning — this is a
+    # normal outcome, not an error.
+    client = FakeClient(
+        [
+            make_job(
+                job_id="on-ceres",
+                env={"CM_PRIORITY": "high"},
+                priority=pb2.JOB_PRIORITY_URGENT,
+                clusters=("ai2/jupiter", "ai2/ceres"),
+                node_id="node-ceres",
+                started=100,
+            ),
+            _labelled("contender", "high", gpu_count=72),
+        ],
+        node_clusters={"node-ceres": ("ceres", "ai2")},
+    )
+    with caplog.at_level(logging.WARNING):
+        applied = run_pass(client, "ai2/ace", LIMITS, dry_run=False)
+    # The job on ceres is not counted against jupiter, so the contender fits.
+    assert applied == 1
+    assert client.priority_calls == [("contender", URGENT)]
+    # No warning about the job on ceres — it targeted a budgeted cluster.
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert not any("no allocation" in m for m in warnings)
+
+
 def test_a_replica_group_left_alone_is_reported(caplog):
     # Each rank is individually fine, so this is invisible in the per-job
     # counts: without its own line the group would be skipped silently.

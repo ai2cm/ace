@@ -171,12 +171,19 @@ committed future occupant, not a maybe.
 
 Being charged to a cluster and being balanced against it are the same question,
 so they are answered the same way. A placed job is managed against the single
-cluster it landed on. A queued job targeting multiple clusters is managed
-**pessimistically** against all of them: granting it urgent requires room on
-every cluster, and the grant charges all of them. Demoting it frees all of
-them. This means a multi-cluster grant costs more than a single-cluster one
-when headroom is tight, which is the right tradeoff — the alternative is to
-grant urgent against a budget the job might consume elsewhere.
+cluster it landed on. A queued job targeting multiple budgeted clusters is
+managed **pessimistically** against all of them: granting it urgent requires
+room on every cluster, and the grant charges all of them. Demoting it frees
+all of them. This means a multi-cluster grant costs more than a single-cluster
+one when headroom is tight, which is the right tradeoff — the alternative is
+to grant urgent against a budget the job might consume elsewhere.
+
+A job targeting a mix of budgeted and non-budgeted clusters — e.g. both
+`ai2/jupiter` (budgeted) and `ai2/ceres` (no allocation) — is managed against
+the budgeted ones only. While queued, only the budgeted clusters are checked
+and charged. If it lands on a non-budgeted cluster, its slots stop counting
+against the allocation entirely, since it is not consuming a budgeted cluster's
+slots.
 
 A placed multi-cluster job is different: it is on one cluster and only that
 cluster's budget is affected, whether the job is granted or demoted. It could

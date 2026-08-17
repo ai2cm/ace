@@ -660,6 +660,11 @@ def report_unmanageable(jobs: Sequence[JobView], limits: dict[str, int]) -> None
         if why is None or why is UNLABELLED or why is OBSERVED:
             continue
         if why is NO_ALLOCATION:
+            # A placed job on a non-budgeted cluster that was submitted to at
+            # least one budgeted cluster is a normal outcome: it was managed
+            # while queued and simply landed elsewhere.
+            if job.is_placed and any(c in limits for c in job.clusters):
+                continue
             target = job.assigned_cluster or (job.clusters[0] if job.clusters else None)
             reason = f"targets {target}, which has no allocation" if target else why
         else:

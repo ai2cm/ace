@@ -412,6 +412,40 @@ def test_jobs_on_unbudgeted_clusters_are_left_alone():
     assert decide([saturn], LIMITS) == []
 
 
+# --- mixed budgeted and non-budgeted clusters --------------------------------
+
+
+def test_a_queued_job_targeting_budgeted_and_non_budgeted_clusters_is_managed():
+    mixed = job(clusters=("ai2/jupiter", "ai2/ceres"), cm_priority=HIGH)
+    assert mixed.budget_clusters(LIMITS) == ("ai2/jupiter",)
+    assert mixed.managed_clusters(LIMITS) == ("ai2/jupiter",)
+    result = changes(decide([mixed], LIMITS))
+    assert result == {mixed.id: URGENT}
+
+
+def test_promoting_a_queued_mixed_cluster_job_charges_only_the_budgeted_cluster():
+    mixed = job(cm_priority=HIGH, slots=72, clusters=("ai2/jupiter", "ai2/ceres"))
+    on_titan = job(cm_priority=HIGH, slots=32, clusters=("ai2/titan",))
+    result = changes(decide([mixed, on_titan], LIMITS))
+    # mixed takes 72 from jupiter (fills it), but titan is independent.
+    assert result == {mixed.id: URGENT, on_titan.id: URGENT}
+
+
+def test_a_placed_job_on_a_non_budgeted_cluster_is_not_counted():
+    on_ceres = placed(
+        priority=URGENT,
+        cm_priority=HIGH,
+        clusters=("ai2/jupiter", "ai2/ceres"),
+        assigned_cluster="ai2/ceres",
+    )
+    assert on_ceres.budget_clusters(LIMITS) == ()
+    assert on_ceres.managed_clusters(LIMITS) is None
+    # The urgent slots on ceres do not reduce what is available on jupiter.
+    contender = job(cm_priority=HIGH, slots=72, clusters=("ai2/jupiter",))
+    result = changes(decide([on_ceres, contender], LIMITS))
+    assert result == {contender.id: URGENT}
+
+
 # --- replica groups ---------------------------------------------------------
 
 
@@ -658,6 +692,7 @@ def random_population(rng: random.Random) -> list[JobView]:
                 ("ai2/jupiter",),
                 ("ai2/titan",),
                 ("ai2/titan", "ai2/jupiter"),
+                ("ai2/jupiter", "ai2/ceres"),
                 ("ai2/saturn",),
                 (),  # unconstrained: could land anywhere
             ]
@@ -876,6 +911,7 @@ def test_random_population_reaches_the_states_that_matter():
         "replica": 0,
         "replica_managed": 0,
         "multi_cluster_managed": 0,
+        "mixed_budget_non_budget": 0,
         "session": 0,
         "immediate": 0,
         "demotion": 0,
@@ -895,6 +931,12 @@ def test_random_population_reaches_the_states_that_matter():
         )
         seen["multi_cluster_managed"] += sum(
             1 for j in jobs if len(j.clusters) > 1 and j.id in allowed
+        )
+        seen["mixed_budget_non_budget"] += sum(
+            1
+            for j in jobs
+            if any(c in LIMITS for c in j.clusters)
+            and any(c not in LIMITS for c in j.clusters)
         )
         seen["session"] += sum(1 for j in jobs if j.is_session)
         seen["immediate"] += sum(1 for j in jobs if j.priority == IMMEDIATE)
