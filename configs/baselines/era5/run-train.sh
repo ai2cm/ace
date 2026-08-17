@@ -165,3 +165,12 @@ run_training "ace-train-config-ft3-bptt-daily.yaml" \
 #   ./run-train.sh ft3-bptt-daily-fg16
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-ft3-bptt-multi-step-fine-tuning-rs0" 8
+
+# Deterministic analog of the paper recipe (added 2026-08-17): same pipeline
+# with noise and the ensemble loss removed (MSE + ACE2-paper variable weights).
+# Its 3-step BPTT fine-tune config (…-ft3-bptt-daily-fg16-sr0p125-det.yaml) is
+# NOT wired here yet — it waits on this pretrain's checkpoint dataset.
+# The arms above are done or live -- launch this alone:
+#   ./run-train.sh det
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-det.yaml" \
+  "ace2-era5-daily-fg16-sr0p125-deterministic-1-step-pre-training-rs0" 4

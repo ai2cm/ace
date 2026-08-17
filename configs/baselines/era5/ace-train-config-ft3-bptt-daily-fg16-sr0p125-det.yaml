@@ -1,0 +1,121 @@
+# arg: --dataset troya/2026-07-24-era5-1deg-8layer-daily-stats-1990-2019:/statsdata
+# arg: --dataset FILL-DET-PRETRAIN-RESULT-DATASET:/weights
+#
+# NOT LAUNCHABLE YET: replace the /weights placeholder above with the
+# deterministic pretrain's final result dataset (and add a run_training call to
+# run-train.sh) once that pretrain finishes.
+#
+# Deterministic analog of ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml for
+# the stochastic ACE2 paper: same 3-step BPTT fine-tune (fixed 3-step rollout,
+# loss on all 3 steps, no gradient accumulation), with the stochastic bits
+# removed — loss is MSE with the ACE2 paper's per-variable weights instead of
+# EnsembleLoss, n_ensemble removed (defaults to 1). Donor is the deterministic
+# daily+bottleneck pretrain (ace-train-config-1-step-pretrain-daily-fg16-
+# sr0p125-det.yaml); architecture (incl. noise_embed_dim 0 and the spectral
+# bottleneck), normalization and recipe come from the donor checkpoint via
+# stepper.checkpoint_path, so they cannot drift from the donor.
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 40
+ema:
+  decay: 0.999
+inference:
+  - n_forward_steps: 1825
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-02-15T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-05-15T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-08-15T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1996-11-15T00:00:00'
+      dataset:
+        data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+      num_data_workers: 8
+    aggregator:
+      histogram:
+        enabled: true
+      time_mean_reference_data: /statsdata/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 8
+  prefetch_factor: 2
+  dataset:
+    concat:
+    - data_path: /climate-default/
+      file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        stop_time: '1995-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2011-01-01'
+        stop_time: '2019-12-31'
+    - data_path: /climate-default/
+      file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '2021-01-01'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 8
+    prefetch_factor: 2
+    dataset:
+      data_path: /climate-default/
+      file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+      subset:
+        start_time: '1996-01-01'
+        stop_time: '1997-12-31'
+optimization:
+  use_gradient_accumulation: false   # BPTT: keep the graph across the 3-step rollout
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_forward_steps: 3
+  optimize_last_step_only: false   # take the loss on all 3 steps
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_ckpt.tar
+  loss:
+    type: MSE
+    weights:
+      air_temperature_0: 0.5
+      air_temperature_1: 0.5
+      eastward_wind_0: 0.5
+      northward_wind_0: 0.5
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      PRATEsfc: 0.5
+      h500: 10
+      TMP850: 5
+      Q2m: 0.5
+      DLWRFsfc: 2
+      ULWRFsfc: 5
+      USWRFsfc: 2
+      DSWRFsfc: 2
+      USWRFtoa: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
+stepper:
+  checkpoint_path: /weights/training_checkpoints/best_ckpt.tar
