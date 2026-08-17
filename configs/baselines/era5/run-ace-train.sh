@@ -7,7 +7,7 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=4
+N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -28,12 +28,12 @@ run_training() {
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
-    --description 'Run ACE2S-ERA5 training' \
+    --description 'Cooperative-stop fault test for PR #1407: preemptible ERA5 training that exercises the agreed batch-boundary stop' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
+    --priority high \
     --preemptible \
-    --cluster ai2/titan \
+    --cluster ai2/jupiter \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -51,9 +51,17 @@ run_training() {
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH
 }
 
-base_name="ace2s"
+# The H100 cluster and `high` priority above are what make this arm a fault test:
+# `urgent` jobs preempt the run often enough to sample the cooperative stop.
+base_name="coop-stop-fault-test-pr1407-8gpu"
 
-run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-era5-1-step-pre-training-rs0"
+# Beaker experiment names are unique per workspace, and --name and --task-name
+# come from the same variable, so a resubmission after an experiment record
+# already exists needs a fresh tag. Set RUN_TAG to name a specific attempt.
+RUN_TAG=${RUN_TAG:-$(date -u +%Y%m%d-%H%M%S)}
+
+# Third argument is the W&B run group, the single handle for this arm's jobs.
+run_training "ace-train-config-1-step-pretrain.yaml" "$base_name-$RUN_TAG" "$base_name"
 
 # For the finetuning stage take beaker dataset id from the above job and add it to
 # ace-train-config-multi-step-finetuning.yaml then uncomment next line
