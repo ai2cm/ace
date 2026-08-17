@@ -22,7 +22,7 @@ N_GPUS=4
 # cwd guard: an empty SCRIPT_PATH means this was run from the repo root, which would make
 # CONFIG_PATH absolute and submit a doomed job.
 if [[ -z "$SCRIPT_PATH" ]]; then
-  echo "ERROR: run this script from configs/baselines/aimip-like-6hourly, not the repo root." >&2
+  echo "ERROR: run this script from configs/experiments/2026-08-12-aimip-1deg-6hourly, not the repo root." >&2
   exit 1
 fi
 
@@ -72,4 +72,23 @@ run_training() {
 # AIMIP. The daily-step original emits daily snapshots, which cannot be evaluated against
 # the monthly-/daily-AVERAGED AIMIP ERA5 data; a 6h step resolves the diurnal cycle so its
 # output averages into comparable means. See README.md for the full change list.
-run_training "train-1deg-6hourly-v2-era5-only-no-residual-no-co2.yaml" "train-1deg-6hourly-v2-era5-only-no-residual-no-co2-rs0"
+#
+# Trained in two stages, following the ACE2S recipe: 1-step pretraining, then a multi-step
+# fine-tune initialized from its checkpoint.
+
+base_name="train-1deg-6hourly-v2-era5-only-no-residual-no-co2"
+
+# --- Stage 1: 1-step pretraining ---
+run_training "$base_name.yaml" "$base_name-rs0"
+
+# --- Stage 2: multi-step fine-tuning ---
+# Take the beaker result dataset id from the stage 1 job above, put it in the `# arg:`
+# header of $base_name-multi-step-ft.yaml (it mounts at /weights, supplying both the
+# stepper config and the initial weights), then uncomment the line below.
+#
+# The stage 1 run this experiment's fine-tune config currently points at:
+#   beaker experiment 01KZYJ4HT4ZMZH296KBNWMPCQF   launched 2026-08-13 at commit b4a688d85
+#   wandb            g94277n6                     40 epochs, 44.5h on 4 GPUs
+#   result dataset   01KZYJ4HTBWED5VG3VFTRYKDRC   <- the donor checkpoint
+#
+# run_training "$base_name-multi-step-ft.yaml" "$base_name-multi-step-ft-rs0"

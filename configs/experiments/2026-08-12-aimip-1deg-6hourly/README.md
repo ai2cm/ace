@@ -1,4 +1,4 @@
-# AIMIP-like 1° baseline, 6-hourly step
+# AIMIP-like 1°, 6-hourly step
 
 `train-1deg-6hourly-v2-era5-only-no-residual-no-co2.yaml` is a 6-hourly-timestep
 counterpart of the 1°/daily v2 ERA5-only no-residual no-CO2 baseline submitted to AIMIP,
@@ -59,6 +59,49 @@ genuine daily/monthly means directly comparable to the evaluation target.
 Initial-condition timestamps stay at `T06:00:00`: 06Z exists in the 6-hourly store
 (00/06/12/18Z), and keeping it makes lead times directly comparable with the daily runs.
 
+## Two-stage training
+
+Trained in the standard ACE2S two stages, mirroring the pair in `configs/baselines/era5/`:
+
+| stage | config | `n_forward_steps` | status |
+|---|---|---|---|
+| 1. pretraining | `train-1deg-6hourly-v2-era5-only-no-residual-no-co2.yaml` | `1` | done — wandb `g94277n6`, beaker `01KZYJ4HT4ZMZH296KBNWMPCQF`, result dataset `01KZYJ4HTBWED5VG3VFTRYKDRC` |
+| 2. fine-tuning | `…-no-co2-multi-step-ft.yaml` | stochastic 1/2/4/12/20 @ 0.6/0.2/0.1/0.05/0.05 | not launched |
+
+Stage 1 ran at commit `b4a688d85` and finished 40 epochs in 44.5 h on 4 GPUs, with
+`best_val_loss` 0.1271 still falling at the final epoch — so the fine-tune's donor is a
+still-improving checkpoint rather than a converged one.
+
+The fine-tune config is the pretrain config with six changes and nothing else:
+
+- **Donor checkpoint.** A `# arg: --dataset <id>:/weights` header mounts the pretrain job's
+  result dataset; `stepper_training.parameter_init.weights_path` and
+  `stepper.checkpoint_path` both point at `/weights/training_checkpoints/best_ckpt.tar`.
+  The two are complementary — `checkpoint_path` supplies the stepper *config*
+  (architecture, normalization, corrector, `global_mean_removal`, in/out names),
+  `parameter_init` supplies the *weights*. `CheckpointStepperConfig` has exactly one field
+  and parsing is strict, so nothing under `stepper:` can be overridden; the recipe is
+  inherited wholesale, which is the intent. Note `parameter_init` does not restore EMA
+  state, so the fine-tune builds a fresh EMA tracker from the loaded weights.
+- **`best_ckpt.tar`, not `ckpt.tar`.** The pretrain ran `validate_using_ema: true`, so the
+  best-validation checkpoint is saved inside the EMA context and holds EMA-averaged
+  weights.
+- **Rollout distribution** as above, with `optimize_last_step_only: true` (already set in
+  the pretrain config): only the sampled last step carries gradients, earlier rollout steps
+  run under `torch.no_grad()`.
+- **`validation.evaluate_all_steps: false`** and validation `batch_size` 32 → 16. The
+  20-step outcome sizes *every* data window at 21 timesteps regardless of the sampled
+  length, so the default (`true`) would roll out 20 steps on every validation batch —
+  roughly 20× the pretrain's 127 s/epoch, about 28 h over 40 epochs. The trade-off is that
+  each `loss_step_N` is averaged over only the batches that sampled more than N steps.
+- **10-year inference cadence** halved, `{start: 1, step: 2}` → `{start: 3, step: 4}`, i.e.
+  epochs 4, 8, …, 40 instead of every second epoch. In the pretrain run the `10year` pair
+  was 73.5% of all inference cost (~53,400 s of 72,628 s) against 25.8% for `long_46year`,
+  so this is the largest single lever. `long_46year` keeps epochs 30/35/40.
+- Everything else — `max_epochs: 40`, `seed`, `lr`, `ema.decay`, the training loader, and
+  all inference horizons and initial conditions — is unchanged, as in every other
+  fine-tune/pretrain pair in the repo.
+
 ## Held fixed deliberately
 
 `seed: 0`, batch sizes (8 train / 32 validation), `optimization` (FusedAdam, lr 1e-4,
@@ -77,9 +120,17 @@ inference costs ~4× its daily counterpart.
 ## Launching
 
 ```bash
-cd configs/baselines/aimip-like-6hourly
+cd configs/experiments/2026-08-12-aimip-1deg-6hourly
 ./run-train.sh
 ```
+
+Both stages are `run_training` calls in `run-train.sh`, in reproduction order: stage 1 is
+live, stage 2 is commented out. To reproduce from scratch, run stage 1, take its beaker
+result dataset id, put it in the fine-tune config's `# arg:` header, then uncomment stage
+2. There is no automation for that lookup anywhere in the repo, so the id is pasted in by
+hand; the ids from our own stage 1 run are recorded next to the commented-out stage 2 call.
+
+Note that stage 1 has already run, so launching the script as-is relaunches a 44-hour job.
 
 Targets and GPU count live in `run-train.sh`. `N_GPUS` is only correct for the cluster the
 launcher pins, since per-GPU memory is cluster-specific — retarget by changing both
