@@ -19,7 +19,7 @@ set -e
 JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat-no-temporal-attn-test-inference-global"
 CONFIG_FILENAME="video_inference.yaml"
 WORKSPACE="ai2/climate-titan"
-CLUSTER="ai2/jupiter"  # h100
+CLUSTER="ai2/titan"  # b200
 N_GPUS=4
 CHECKPOINT_DATASET="01M00Z9062AYGEBHTFQJJVTWTZ"
 WANDB_SECRET="CHLOE_WANDB_API_KEY"

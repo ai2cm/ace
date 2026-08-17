@@ -24,7 +24,7 @@ set -e
 JOB_NAME="hiro-downscaling-25km-100km-global-5ch-v6-test-inference-ens4"
 CONFIG_FILENAME="inference.yaml"
 WORKSPACE="ai2/climate-titan"
-CLUSTER="ai2/jupiter"  # h100 -- this model is tiny (16x16-coarse-pixel patches),
+CLUSTER="ai2/titan"  # b200 -- this model is tiny (16x16-coarse-pixel patches),
                         # doesn't need b200s; jupiter is the standard ai2 h100 cluster
 N_GPUS=4
 CHECKPOINT_DATASET="01KZ1WGMM2SQR6WSV0R3F3EM47"
