@@ -26,3 +26,5 @@ cm4_1pct_46to125_piC_156to235-ocean_baseline|rs1|01M01AXQP8Q3MKMVEBKH6MFSKX|trai
 cm4_1pct_46to125_piC_156to235-ocean_baseline|rs2|01M01AY4W5WVQ6XX3VZJQBVT9E|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|01M06TXEMBTJNS6085BE9BW89H|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|01M08JR4AQE9MGJM3H55KK67W4|training|best_inference_ckpt|normal|--min-runtime 8h
