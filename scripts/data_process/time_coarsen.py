@@ -67,6 +67,7 @@ class TimeCoarsenConfig:
     snapshot_names: list[str]
     window_names: list[str]
     constant_prefixes: list[str]
+    output_names: dict[str, str] = dataclasses.field(default_factory=dict)
     n_split: int = 1
     chunking: dict[str, int] = dataclasses.field(default_factory=lambda: {"time": 1})
     sharding: dict[str, int] | None = dataclasses.field(
@@ -86,10 +87,24 @@ class Config:
 def main(config: Config, run: int, dry_run: bool = False):
     logging.basicConfig(level=logging.INFO)
     run_name = list(config.runs.keys())[run]
+    unknown_keys = set(config.time_coarsen.output_names) - set(config.runs)
+    if unknown_keys:
+        raise ValueError(
+            f"time_coarsen.output_names keys not found in runs: {unknown_keys}"
+        )
     if config.data_output_directory.endswith("/"):
         config.data_output_directory = config.data_output_directory[:-1]
+    output_name = config.time_coarsen.output_names.get(run_name, run_name)
     input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
-    output_zarr = config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
+    output_zarr = (
+        config.time_coarsen.data_output_directory + "/" + output_name + ".zarr"
+    )
+    if input_zarr == output_zarr:
+        raise ValueError(
+            f"Coarsened output path is identical to input path: {input_zarr}. "
+            "Use time_coarsen.output_names to give the coarsened store a "
+            "distinct name."
+        )
     process_path_pair(
         input_path=input_zarr,
         output_path=output_zarr,

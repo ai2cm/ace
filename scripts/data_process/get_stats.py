@@ -99,6 +99,7 @@ class TimeCoarsenConfig:
     data_output_directory: str
     stats_output_directory: str
     factor: int
+    output_names: dict[str, str] = dataclasses.field(default_factory=dict)
     beaker_dataset: str | None = None
 
 
@@ -274,11 +275,12 @@ def main(config_yaml: str, run: int, debug: bool):
         debug=debug,
     )
     if config.time_coarsen is not None:
+        output_name = config.time_coarsen.output_names.get(run_name, run_name)
         time_coarsened_zarr = (
-            config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
+            config.time_coarsen.data_output_directory + "/" + output_name + ".zarr"
         )
         time_coarsened_out_dir = (
-            config.time_coarsen.stats_output_directory + "/" + run_name
+            config.time_coarsen.stats_output_directory + "/" + output_name
         )
         get_stats(
             config=config.stats,
