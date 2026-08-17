@@ -490,6 +490,11 @@ class Trainer:
             if inference_error is not None:
                 logging.info(f"Inference error: {inference_error}")
 
+            # must happen before logging, so the logged bests are read from the
+            # updated state rather than recomputed (min(nan, x) is nan, which
+            # let a diverged epoch report itself as the best)
+            self._update_best_metrics(valid_loss, inference_error)
+
             with self.validation_context():
                 additional_logs = self._end_of_epoch_callback(self._epochs_trained)
 
@@ -505,10 +510,8 @@ class Trainer:
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
-                    "best_val_loss": min(valid_loss, self._best_validation_loss),
-                    "best_inference_error": min(
-                        inference_error or torch.inf, self._best_inference_error
-                    ),
+                    "best_val_loss": self._best_validation_loss,
+                    "best_inference_error": self._best_inference_error,
                 },
             }
             if inference_end is not None:
@@ -732,32 +735,46 @@ class Trainer:
             epoch, self.params.max_epochs, self.params.ema_checkpoint_save_epochs
         )
 
+    def _update_best_metrics(
+        self, valid_loss: float, inference_error: float | None
+    ) -> tuple[bool, bool]:
+        """Record this epoch's metrics as the best so far if they improve on it.
+
+        Returns whether the validation loss and the inference error were each
+        (re-)attained this epoch, i.e. whether their best checkpoints are due to
+        be written.
+
+        A diverged epoch's NaN never becomes the best, since every comparison
+        with NaN is False. The comparisons are non-strict, so calling this twice
+        with the same values gives the same answer both times and the caller can
+        re-run it without changing what gets saved.
+        """
+        is_best_validation = valid_loss <= self._best_validation_loss
+        if is_best_validation:
+            self._best_validation_loss = valid_loss
+        is_best_inference = False
+        if inference_error is not None and (
+            inference_error <= self._best_inference_error
+        ):
+            self._best_inference_error = inference_error
+            is_best_inference = True
+        return is_best_validation, is_best_inference
+
     def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
         if self.params.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
             best_checkpoint_context = contextlib.nullcontext  # type: ignore
+        save_best_checkpoint, save_best_inference_checkpoint = (
+            self._update_best_metrics(valid_loss, inference_error)
+        )
         with best_checkpoint_context():
-            save_best_checkpoint = False
-            if valid_loss <= self._best_validation_loss:
+            if save_best_inference_checkpoint:
                 logging.info(
-                    "Saving lowest validation loss checkpoint to "
-                    f"{self.paths.best_checkpoint_path}"
-                )
-                self._best_validation_loss = valid_loss
-                save_best_checkpoint = True  # wait until inference error is updated
-            if inference_error is not None and (
-                inference_error <= self._best_inference_error
-            ):
-                logging.info(
-                    f"Epoch inference error ({inference_error}) is lower than "
-                    f"previous best inference error ({self._best_inference_error})."
-                )
-                logging.info(
-                    "Saving lowest inference error checkpoint to "
+                    f"Epoch inference error ({self._best_inference_error}) is the "
+                    "best so far; saving lowest inference error checkpoint to "
                     f"{self.paths.best_inference_checkpoint_path}"
                 )
-                self._best_inference_error = inference_error
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
 
                 # Save epoch-specific best inference checkpoint if configured
@@ -773,6 +790,11 @@ class Trainer:
                     )
                     self.save_checkpoint(best_inference_epoch_path)
             if save_best_checkpoint:
+                # saved after the inference error so the checkpoint records it
+                logging.info(
+                    "Saving lowest validation loss checkpoint to "
+                    f"{self.paths.best_checkpoint_path}"
+                )
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
         self._save_restart_checkpoints()
