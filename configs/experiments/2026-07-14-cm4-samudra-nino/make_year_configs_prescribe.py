@@ -59,6 +59,15 @@ INTERIOR_NAMES = ["zos", "thetao_2", "thetao_4", "thetao_6", "thetao_8"]
 OCEAN_WRITE_NAMES = ["sst"] + INTERIOR_NAMES
 
 SUBSURFACE = [f"thetao_{k}" for k in range(1, 19)] + ["zos"]
+# Matched control for the `subsurface` arm. 19 salinity levels against
+# subsurface's 19 fields (thetao_1..18 + zos): same count, same kind of thing
+# (ocean interior prognostic state), prescribed the same way, so equally
+# constraining in the structural sense. But salinity is not the ENSO memory
+# variable. If `salinity` recovers little while `subsurface` recovers 0.85, the
+# objection that state arms beat forcing arms merely because state constrains the
+# scored index more directly is answered. If it recovers as much, the interior
+# result is an artifact of pinning 19 fields and the conclusion does not hold.
+SALINITY = [f"so_{k}" for k in range(19)]
 CURRENTS = (
     [f"uo_{k}" for k in range(19)] + [f"vo_{k}" for k in range(19)] + ["ssu", "ssv"]
 )
@@ -90,6 +99,7 @@ ARMS: dict[str, tuple[list[str], list[str]]] = {
     "subsurface": (SUBSURFACE, []),
     "sst": (["sst"], []),
     "currents": (CURRENTS, []),
+    "salinity": (SALINITY, []),
     "windstress": ([], WIND_STRESS),
     "fluxes": ([], FLUXES),
     "fluxrad": ([], FLUX_RAD),
