@@ -158,3 +158,10 @@ run_training "ace-train-config-ft3-bptt.yaml" \
 
 run_training "ace-train-config-ft3-bptt-daily.yaml" \
   "ace2s-era5-daily-ft3-bptt-multi-step-fine-tuning-rs0" 8
+
+# 3-step BPTT fine-tune of the daily+bottleneck cell (added 2026-08-17), donor
+# r95iprjt — also the headline run of the paper-recipe investigation.
+# The arms above are done or live -- launch this alone:
+#   ./run-train.sh ft3-bptt-daily-fg16
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-ft3-bptt-multi-step-fine-tuning-rs0" 8
