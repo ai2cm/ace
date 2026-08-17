@@ -73,11 +73,13 @@ CURRENTS = (
 )
 WIND_STRESS = ["eastward_surface_wind_stress", "northward_surface_wind_stress"]
 FLUX_RAD = ["DLWRFsfc", "DSWRFsfc", "ULWRFsfc", "USWRFsfc"]
-# ULWRFsfc is not external forcing: the coupled stepper prescribes Samudra's sst
-# into the atmosphere's surface_temperature over ocean, and ACE diagnoses
-# ULWRFsfc = eps*sigma*T^4 from it. So it is the ocean's own state re-encoded
-# and handed back. Prescribing it to truth tells the network "skin temperature
-# is truth" in exactly the encoding it was trained on, which can restore SST
+# ULWRFsfc is not external forcing: upward longwave is a function of the surface
+# temperature that emits it, and the coupled stepper prescribes Samudra's sst
+# into the atmosphere's surface_temperature over ocean, so the field handed back
+# carries the temperature the ocean supplied. Inverting the archived CM4 field
+# through sigma*T^4 gives emissivity 1.0002, and at Nino3.4 scale it tracks the
+# true index to 0.28 K scatter about a +0.10 K skin-vs-bulk offset: roughly 3:1
+# against the 0.78 K anomaly signal, delivered every step. Enough to restore SST
 # skill with no radiative physics involved. Split it out to test that.
 FLUX_ULW = ["ULWRFsfc"]
 # The genuinely external radiative terms: downwelling shortwave and longwave are
