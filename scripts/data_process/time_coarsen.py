@@ -94,6 +94,10 @@ def main(config: Config, run: int, dry_run: bool = False):
         )
     if config.data_output_directory.endswith("/"):
         config.data_output_directory = config.data_output_directory[:-1]
+    if config.time_coarsen.data_output_directory.endswith("/"):
+        config.time_coarsen.data_output_directory = (
+            config.time_coarsen.data_output_directory[:-1]
+        )
     output_name = config.time_coarsen.output_names.get(run_name, run_name)
     input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
     output_zarr = (
