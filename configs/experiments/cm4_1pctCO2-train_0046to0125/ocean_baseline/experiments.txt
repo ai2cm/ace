@@ -24,3 +24,13 @@ cm4_1pctCO2-train_0046to0125-ocean_baseline|rs2|01KYX3HSXFMBPA6QMXRPKWQ5ZQ|train
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|01KZ2AW7KB3683TT7HGA4PYWY3|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|01KZ2AWRDK6Y2VKN7RMM8TDRNV|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ICx1 140-yr out-of-sample evaluation, 2026-08-17. Rows with status run_ICx1
+# are read by job_runner/evaluate.sh, which mounts
+# training_checkpoints/best_inference_ckpt.tar from each training run's result
+# dataset and runs evaluator-config-ICx1.yaml against it. These point at the
+# three current (2026-07-31) ocean_baseline seeds -- not the `invalid` rows
+# above, which are an earlier generation with a different out_names.
+cm4_1pctCO2-train_0046to0125-ocean_baseline|rs0|01KYX3GZH9D18HS93BF55B73F4|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
+cm4_1pctCO2-train_0046to0125-ocean_baseline|rs1|01KYX3HCB6BPMDXJRNECXTB2MP|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
+cm4_1pctCO2-train_0046to0125-ocean_baseline|rs2|01KYX3HSXFMBPA6QMXRPKWQ5ZQ|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
