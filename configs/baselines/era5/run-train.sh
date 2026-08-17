@@ -174,3 +174,17 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml" \
 #   ./run-train.sh det
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-det.yaml" \
   "ace2-era5-daily-fg16-sr0p125-deterministic-1-step-pre-training-rs0" 4
+
+# CRPS/ES 50/50 split ablation (added 2026-08-17): paper-recipe gating ablation
+# comparing 50/50 vs 90/10 CRPS/energy-score weights. Pretrain launches first;
+# fine-tune waits on the pretrain checkpoint.
+# The arms above are done or live -- launch the pretrain alone:
+#   ./run-train.sh crps50
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-crps50.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-crps50-1-step-pre-training-rs0" 4
+
+# Fine-tune — launch separately after the pretrain is done and the checkpoint
+# dataset ID is filled into the config's "# arg: --dataset" header:
+#   ./run-train.sh ft3-bptt-daily-fg16-sr0p125-crps50
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-crps50.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-crps50-ft3-bptt-multi-step-fine-tuning-rs0" 8
