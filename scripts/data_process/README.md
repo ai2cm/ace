@@ -28,6 +28,29 @@ make fv3gfs_AMIP_monthly_netcdfs RESOLUTION=4deg OUTPUT_DIR_AMIP=/data/shared/20
 The stats dataset creation step (e.g. `make fv3gfs_AMIP_stats_beaker_dataset`) must be run in the fme conda environment (created by `make create_environment` at the top level of this repo), and additionally requires the beaker client is installed ([install instructions](https://beaker-docs.apps.allenai.org/start/install.html)).
 
 
+## Copying zarr stores to WEKA
+
+`copy_to_weka.py` submits a gantry job that copies zarr stores from GCS to the
+`/climate-default` WEKA mount. It takes the stores either from a pipeline config
+or from explicit `--source` paths, and copies each one to
+`<destination>/<store name>`:
+
+```
+python copy_to_weka.py --config configs/era5-1deg-8layer-1940-2025.yaml \
+    --destination /climate-default/2026-03-19-era5-1deg-8layer-1940-2025 --dry-run
+```
+
+Add `--coarsened` to copy the stores under `time_coarsen.data_output_directory`
+rather than the native resolution ones, and `--run NAME` (repeatable) to copy a
+subset of the runs. `--dry-run` prints the resolved source and destination of
+every store, along with the commands the job would run, without submitting it.
+
+A destination store that already exists is never replaced: the job checks all
+destinations before copying anything and fails if any of them are present.
+Pass `--overwrite` to delete and replace them instead. This replaced the earlier
+`copy_zarr_to_weka.sh` and `gcs_to_weka.sh`, which copied over existing stores
+without warning.
+
 For healpix data (both `healpix_ace` and `healpix_dlwp`), you will need to use the annad/dlwp-datapipe image.
 
 You can either run the target with gantry or use the --bare flag, passing your own beaker secrets to the usual session command.

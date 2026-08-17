@@ -73,6 +73,16 @@ def copy(source: str, destination: str):
             shutil.copyfileobj(f_source, f_destination)
 
 
+def store_path(directory: str, run_name: str) -> str:
+    """Path of the zarr store holding a run's data within an output directory."""
+    return directory.rstrip("/") + "/" + run_name + ".zarr"
+
+
+def stats_path(directory: str, run_name: str) -> str:
+    """Path of the directory holding a run's stats within an output directory."""
+    return directory.rstrip("/") + "/" + run_name
+
+
 @dataclasses.dataclass
 class StatsConfig:
     output_directory: str
@@ -81,6 +91,28 @@ class StatsConfig:
     start_date: str | None = None
     end_date: str | None = None
     beaker_dataset: str | None = None
+
+    def stats_directory(self, run_name: str) -> str:
+        """Directory holding a run's stats."""
+        return stats_path(self.output_directory, run_name)
+
+    def includes(self, run_name: str) -> bool:
+        """Whether a run contributes to the stats."""
+        return run_name not in self.exclude_runs
+
+
+@dataclasses.dataclass
+class TimeSliceConfig:
+    """
+    Optional time slice to apply before coarsening.
+
+    Attributes:
+        start: Start time (ISO 8601 string, e.g. "2000-01-01T00:00:00"). Inclusive.
+        stop: Stop time (ISO 8601 string). Inclusive.
+    """
+
+    start: str | None = None
+    stop: str | None = None
 
 
 @dataclasses.dataclass
@@ -92,14 +124,127 @@ class TimeCoarsenConfig:
         data_output_directory: Directory to save the coarsened datasets as zarr stores.
         stats_output_directory: Directory to save the stats of the coarsened datasets.
         factor: Factor by which the time dimension is coarsened.
+        snapshot_names: List of snapshot variable names to coarsen. These will be
+            coarsened by skipping each factor times.
+        window_names: List of window variable names to coarsen. These will be
+            coarsened by averaging over each factor times.
+        constant_prefixes: List of prefixes for constant data variables to copy without
+            modification. Raises an exception if any of these have a "time" dimension.
+        output_name: Dataset name to give the coarsened data, used in place of the run
+            name for both the zarr store and the stats directory. Required when the run
+            names are dataset names in their own right, i.e. when
+            data_output_directory holds datasets rather than the runs of one dataset.
+            If None, each run's coarsened data is named after the run.
         beaker_dataset: Name of the Beaker dataset to create from the coarsened stats.
             If None, the coarsened stats are not uploaded to Beaker.
+        n_split: Number of partitions to split the write into when using xpartition.
+            Only used when dask and xpartition are available.
+        chunking: Mapping of dimension names to inner chunk sizes for the output
+            zarr store. Defaults to {"time": 1}. Spatial dimensions keep their
+            existing chunking.
+        sharding: Mapping of dimension names to shard sizes. If None, an unsharded
+            zarr store is written with chunks as specified in ``chunking``.
+        input_time_slice: Optional time slice to apply before coarsening.
     """
 
     data_output_directory: str
     stats_output_directory: str
     factor: int
+    snapshot_names: list[str]
+    window_names: list[str]
+    constant_prefixes: list[str]
+    output_name: str | None = None
     beaker_dataset: str | None = None
+    n_split: int = 1
+    chunking: dict[str, int] = dataclasses.field(default_factory=lambda: {"time": 1})
+    sharding: dict[str, int] | None = dataclasses.field(
+        default_factory=lambda: {"time": 360}
+    )
+    input_time_slice: TimeSliceConfig = dataclasses.field(
+        default_factory=TimeSliceConfig
+    )
+
+    def __post_init__(self):
+        if self.output_name is not None and (
+            "/" in self.output_name or self.output_name.endswith(".zarr")
+        ):
+            raise ValueError(
+                "time_coarsen.output_name must be a bare dataset name, but got "
+                f"{self.output_name!r}. The output directory and the '.zarr' "
+                "suffix are added to it automatically."
+            )
+
+    def coarsened_name(self, run_name: str) -> str:
+        """Dataset name given to a run's coarsened data."""
+        return run_name if self.output_name is None else self.output_name
+
+    def store(self, run_name: str) -> str:
+        """Zarr store holding a run's coarsened data."""
+        return store_path(self.data_output_directory, self.coarsened_name(run_name))
+
+    def stats_directory(self, run_name: str) -> str:
+        """Directory holding a run's coarsened stats."""
+        return stats_path(self.stats_output_directory, self.coarsened_name(run_name))
+
+    def validate_stats_location(self, stats: StatsConfig, run_names: list[str]) -> None:
+        """Check the coarsened stats would not be written over the input's stats.
+
+        get_stats.py computes the stats of the input before those of the coarsened
+        data, and skips a run whose stats already exist, so a shared directory
+        means the coarsened stats are silently never computed and the input's
+        stats stand in for them.
+
+        Args:
+            stats: Configuration of the stats of the data being coarsened.
+            run_names: Names of the runs being coarsened.
+        """
+        collisions = [
+            run
+            for run in run_names
+            if self.stats_directory(run) == stats.stats_directory(run)
+        ]
+        if collisions:
+            run = collisions[0]
+            raise ValueError(
+                "The time coarsened stats would be written to the same directory as "
+                f"the stats of the data they were coarsened from, for {run!r}: "
+                f"{self.stats_directory(run)}. Because get_stats.py skips a "
+                "run whose stats already exist, the coarsened stats would never be "
+                "computed. Give time_coarsen.stats_output_directory a directory of its "
+                "own, or set time_coarsen.output_name."
+            )
+
+    def validate_output_location(
+        self, data_output_directory: str, run_names: list[str]
+    ) -> None:
+        """Check the coarsened data would not be written over or inside the input.
+
+        Args:
+            data_output_directory: Directory holding the data being coarsened.
+            run_names: Names of the runs being coarsened.
+        """
+        source = data_output_directory.rstrip("/")
+        destination = self.data_output_directory.rstrip("/")
+        if destination == source:
+            overwritten = [run for run in run_names if self.coarsened_name(run) == run]
+            if overwritten:
+                raise ValueError(
+                    "Time coarsening would overwrite the data it reads: the "
+                    f"coarsened store for {overwritten[0]!r} is its own input "
+                    f"store. Set time_coarsen.output_name to a name that is not a "
+                    "run name."
+                )
+        elif destination.startswith(source + "/") and self.output_name is None:
+            example = self.store(run_names[0]) if run_names else destination + "/<run>"
+            raise ValueError(
+                f"time_coarsen.data_output_directory ({self.data_output_directory}) "
+                f"is inside data_output_directory ({data_output_directory}), so the "
+                "coarsened stores would be named after the runs they were coarsened "
+                f"from, e.g. {example}. Set time_coarsen.output_name to the coarsened "
+                "dataset's name and point time_coarsen.data_output_directory at "
+                f"{data_output_directory}. See "
+                "https://github.com/ai2cm/ace/issues/1399."
+            )
 
 
 @dataclasses.dataclass
@@ -108,6 +253,46 @@ class Config:
     data_output_directory: str
     stats: StatsConfig
     time_coarsen: TimeCoarsenConfig | None = None
+
+    def __post_init__(self):
+        if self.time_coarsen is not None:
+            self.time_coarsen.validate_output_location(
+                self.data_output_directory, self.run_names()
+            )
+            self.time_coarsen.validate_stats_location(self.stats, self.run_names())
+
+    @property
+    def has_time_coarsen(self) -> bool:
+        """Whether the pipeline is configured to time coarsen the data."""
+        return self.time_coarsen is not None
+
+    def run_names(self) -> list[str]:
+        """Names of the configured runs, in the order they are declared."""
+        return list(self.runs)
+
+    def included_run_names(self) -> list[str]:
+        """Names of the runs that contribute to the stats."""
+        return [run for run in self.run_names() if self.stats.includes(run)]
+
+    def raw_store(self, run_name: str) -> str:
+        """Zarr store holding the native-resolution data for a run."""
+        return store_path(self.data_output_directory, run_name)
+
+    def raw_stats_directory(self, run_name: str) -> str:
+        """Directory holding the native-resolution stats for a run."""
+        return self.stats.stats_directory(run_name)
+
+    def coarsened_store(self, run_name: str) -> str:
+        """Zarr store holding the time-coarsened data for a run."""
+        if self.time_coarsen is None:
+            raise ValueError("No time_coarsen section is configured.")
+        return self.time_coarsen.store(run_name)
+
+    def coarsened_stats_directory(self, run_name: str) -> str:
+        """Directory holding the time-coarsened stats for a run."""
+        if self.time_coarsen is None:
+            raise ValueError("No time_coarsen section is configured.")
+        return self.time_coarsen.stats_directory(run_name)
 
 
 def _out_dir_exists(out_dir: str) -> bool:
@@ -259,31 +444,21 @@ def main(config_yaml: str, run: int, debug: bool):
     with open(config_yaml, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
     config = dacite.from_dict(data_class=Config, data=config_data)
-    run_name = list(config.runs.keys())[run]
-    if run_name in config.stats.exclude_runs:
+    run_name = config.run_names()[run]
+    if not config.stats.includes(run_name):
         logging.info(f"Skipping run {run_name}")
         return
-    if config.data_output_directory.endswith("/"):
-        config.data_output_directory = config.data_output_directory[:-1]
-    input_zarr = config.data_output_directory + "/" + run_name + ".zarr"
-    out_dir = config.stats.output_directory + "/" + run_name
     get_stats(
         config=config.stats,
-        input_zarr=input_zarr,
-        out_dir=out_dir,
+        input_zarr=config.raw_store(run_name),
+        out_dir=config.raw_stats_directory(run_name),
         debug=debug,
     )
-    if config.time_coarsen is not None:
-        time_coarsened_zarr = (
-            config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
-        )
-        time_coarsened_out_dir = (
-            config.time_coarsen.stats_output_directory + "/" + run_name
-        )
+    if config.has_time_coarsen:
         get_stats(
             config=config.stats,
-            input_zarr=time_coarsened_zarr,
-            out_dir=time_coarsened_out_dir,
+            input_zarr=config.coarsened_store(run_name),
+            out_dir=config.coarsened_stats_directory(run_name),
             debug=debug,
         )
 

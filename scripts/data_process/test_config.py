@@ -4,7 +4,6 @@ import dacite
 import pytest
 import yaml
 from append_dataset import DatasetAppendConfig
-from combine_stats import Config as CombineStatsConfig
 from create_coupled_datasets import CreateCoupledDatasetsConfig
 from create_coupled_ic import CreateCoupledICConfig
 from get_stats import Config as GetStatsConfig
@@ -51,7 +50,7 @@ CONFIG_YAMLS = [
     "filename",
     CONFIG_YAMLS,
 )
-@pytest.mark.parametrize("cls", [GetStatsConfig, UploadStatsConfig, CombineStatsConfig])
+@pytest.mark.parametrize("cls", [GetStatsConfig, UploadStatsConfig])
 def test_get_stats_valid(filename, cls):
     with open(filename, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
@@ -123,6 +122,9 @@ def _upload_stats_config(
             "data_output_directory": COARSENED_DATA_DIRECTORY,
             "stats_output_directory": COARSENED_STATS_DIRECTORY,
             "factor": 4,
+            "snapshot_names": [],
+            "window_names": [],
+            "constant_prefixes": [],
         }
         if time_coarsen_beaker_dataset is not None:
             time_coarsen["beaker_dataset"] = time_coarsen_beaker_dataset

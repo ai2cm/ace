@@ -91,6 +91,8 @@ spec:
             parameters:
             - name: python_script
               value: "{{workflow.parameters.combine_stats_script}}"
+            - name: stats_script
+              value: "{{workflow.parameters.get_stats_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
       - - name: upload-beaker-stats
@@ -184,6 +186,8 @@ spec:
               parameters:
               - name: python_script
                 value: "{{workflow.parameters.combine_stats_script}}"
+              - name: stats_script
+                value: "{{workflow.parameters.get_stats_script}}"
               - name: config
                 value: "{{workflow.parameters.config}}"
     - name: time-coarsen
@@ -281,6 +285,7 @@ spec:
       inputs:
         parameters:
           - name: python_script
+          - name: stats_script
           - name: config
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
@@ -296,6 +301,10 @@ spec:
           - |
             cat << EOF > script.py
             {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > get_stats.py
+            {{inputs.parameters.stats_script}}
             EOF
 
             cat << EOF > config.yaml

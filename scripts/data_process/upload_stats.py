@@ -41,6 +41,11 @@ class Config:
     time_coarsen: TimeCoarsenConfig | None = None
 
     def __post_init__(self):
+        if self.time_coarsen is not None:
+            self.time_coarsen.validate_output_location(
+                self.data_output_directory, list(self.runs)
+            )
+            self.time_coarsen.validate_stats_location(self.stats, list(self.runs))
         if self.stats.beaker_dataset is None and (
             self.time_coarsen is None or self.time_coarsen.beaker_dataset is None
         ):
