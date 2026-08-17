@@ -46,7 +46,10 @@ loader:
   num_data_workers: 4
 data_writer:
   save_prediction_files: false
-  save_monthly_files: true
+  # Off by default: the monthly files are large, and the per-segment split this
+  # evaluation needs comes from the wandb per-step weighted_rmse series instead.
+  # Turn on only for an analysis that genuinely needs gridded monthly output.
+  save_monthly_files: false
 aggregator:
   log_histograms: true
   # Both of these plot a matplotlib *date* axis (they are the only two
