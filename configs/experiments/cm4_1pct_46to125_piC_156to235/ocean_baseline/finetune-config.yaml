@@ -4,15 +4,12 @@ validate_using_ema: true
 evaluate_before_training: true
 ema:
   decay: 0.999
-max_epochs: 13
+max_epochs: 13 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~9,490 iterations
 inference:
   - name: inference_1pct
     weight: 1.0
     n_forward_steps: 1460 # exactly 20 noleap years
     forward_steps_in_memory: 40
-    epochs:
-      start: -1
-      step: -2
     loader:
       start_indices:
         times:
@@ -41,9 +38,6 @@ inference:
     weight: 1.0
     n_forward_steps: 1460 # exactly 20 noleap years
     forward_steps_in_memory: 40
-    epochs:
-      start: -1
-      step: -2
     loader:
       start_indices:
         times:
@@ -80,11 +74,11 @@ train_loader:
   batch_size: 16
   num_data_workers: 8
   dataset:
-    # 1pctCO2 years 46-125 concatenated with piControl years 156-235: 80 years
-    # each, 160 total. Neither window enters its run's validation years
-    # (1pctCO2 41-45 and 126-130, piControl 236-240) or holdout (1pctCO2 131-140,
-    # piControl 241-350). One concat list per store, both in the same simulation
-    # order so the merged members share sample start times.
+    # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235: 80
+    # years each, 160 total. Neither window enters its run's validation years
+    # (1pctCO2 0041-0045 and 0126-0130, piControl 0236-0240) or holdout (1pctCO2
+    # 0131-0140, piControl 0241-0350). One concat list per store, both in the
+    # same simulation order so the merged members share sample start times.
     merge:
       - concat:
           - data_path: /climate-default
