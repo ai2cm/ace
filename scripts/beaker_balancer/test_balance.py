@@ -446,6 +446,59 @@ def test_a_placed_job_on_a_non_budgeted_cluster_is_not_counted():
     assert result == {contender.id: URGENT}
 
 
+def test_zero_allocation_cluster_is_transparent_for_grants():
+    # A cluster at limit 0 is tracked (jobs targeting it are managed) but
+    # transparent for grants: the grant check and charge skip it, so a job
+    # targeting both jupiter and ceres is granted against jupiter alone.
+    limits = {"ai2/jupiter": 72, "ai2/titan": 32, "ai2/ceres": 0}
+    mixed = job(clusters=("ai2/jupiter", "ai2/ceres"), cm_priority=HIGH)
+    assert mixed.budget_clusters(limits) == ("ai2/jupiter", "ai2/ceres")
+    assert mixed.managed_clusters(limits) == ("ai2/jupiter", "ai2/ceres")
+    result = changes(decide([mixed], limits))
+    assert result == {mixed.id: URGENT}
+
+
+def test_zero_allocation_cluster_does_not_block_pessimistic_grant():
+    limits = {"ai2/jupiter": 72, "ai2/titan": 32, "ai2/ceres": 0}
+    mixed = job(clusters=("ai2/jupiter", "ai2/ceres"), cm_priority=HIGH, slots=72)
+    result = changes(decide([mixed], limits))
+    assert result == {mixed.id: URGENT}
+
+
+def test_job_targeting_only_zero_allocation_cluster_is_managed_but_never_granted():
+    # The job is managed (ceres is in limits), so it can be demoted. But the
+    # grant check has no positive-allocation cluster to check, so it is never
+    # granted urgent.
+    limits = {"ai2/jupiter": 72, "ai2/titan": 32, "ai2/ceres": 0}
+    only_ceres = job(clusters=("ai2/ceres",), cm_priority=HIGH)
+    assert only_ceres.budget_clusters(limits) == ("ai2/ceres",)
+    assert only_ceres.managed_clusters(limits) == ("ai2/ceres",)
+    assert decide([only_ceres], limits) == []
+
+
+def test_urgent_job_on_zero_allocation_cluster_is_demoted():
+    limits = {"ai2/jupiter": 72, "ai2/titan": 32, "ai2/ceres": 0}
+    on_ceres = job(priority=URGENT, cm_priority=HIGH, clusters=("ai2/ceres",))
+    result = changes(decide([on_ceres], limits))
+    assert result == {on_ceres.id: HIGH}
+
+
+def test_placed_on_zero_allocation_cluster_does_not_block_jupiter():
+    limits = {"ai2/jupiter": 72, "ai2/titan": 32, "ai2/ceres": 0}
+    on_ceres = placed(
+        priority=URGENT,
+        cm_priority=HIGH,
+        clusters=("ai2/jupiter", "ai2/ceres"),
+        assigned_cluster="ai2/ceres",
+    )
+    # Placed on ceres, charged to ceres only (limit 0). Does not consume
+    # jupiter's budget, so the contender fits.
+    assert on_ceres.budget_clusters(limits) == ("ai2/ceres",)
+    contender = job(cm_priority=HIGH, slots=72, clusters=("ai2/jupiter",))
+    result = changes(decide([on_ceres, contender], limits))
+    assert contender.id in result and result[contender.id] == URGENT
+
+
 # --- replica groups ---------------------------------------------------------
 
 

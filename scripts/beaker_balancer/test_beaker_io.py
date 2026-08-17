@@ -555,6 +555,20 @@ def test_placed_job_on_non_budgeted_cluster_that_targeted_a_budgeted_one(caplog)
     assert not any("no allocation" in m for m in warnings)
 
 
+def test_zero_allocation_cluster_is_transparent_for_grants(caplog):
+    # Ceres is in limits at 0: the balancer knows the cluster name, but its
+    # zero allocation does not block grants on jupiter.
+    limits_with_zero = {"ai2/jupiter": 72, "ai2/titan": 32, "ai2/ceres": 0}
+    client = FakeClient(
+        [_labelled("mixed", "high", clusters=("ai2/jupiter", "ai2/ceres"))],
+    )
+    applied = run_pass(client, "ai2/ace", limits_with_zero, dry_run=False)
+    assert applied == 1
+    assert client.priority_calls == [("mixed", URGENT)]
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert not any("no allocation" in m for m in warnings)
+
+
 def test_a_replica_group_left_alone_is_reported(caplog):
     # Each rank is individually fine, so this is invisible in the per-job
     # counts: without its own line the group would be skipped silently.
@@ -780,6 +794,29 @@ def test_a_refused_single_cluster_demotion_defers_a_multi_cluster_grant():
     assert client.priority_calls == []
 
 
+def test_a_refused_zero_allocation_demotion_does_not_block_a_positive_grant():
+    # A managed job on ceres (limit 0) at urgent is demoted. If that demotion
+    # fails, the ceres deficit must not block a grant that only needs jupiter.
+    # The grant action's clusters must be the positive-allocation ones only,
+    # so the deficit check does not see ceres.
+    limits = {"ai2/jupiter": 8, "ai2/ceres": 0}
+    client = FakeClient(
+        [
+            _labelled(
+                "on-ceres",
+                "normal",
+                priority=pb2.JOB_PRIORITY_URGENT,
+                clusters=("ai2/ceres",),
+                author="yyexela",
+            ),
+            _labelled("mine", "high", clusters=("ai2/jupiter", "ai2/ceres")),
+        ],
+        fail_on={"on-ceres"},
+    )
+    run_pass(client, "ai2/ace", limits, dry_run=False)
+    assert ("mine", URGENT) in client.priority_calls
+
+
 def test_negative_node_cache_is_dropped_between_passes():
     # A transient error must not charge a job to every budget indefinitely.
     jobs = [make_job(node_id="flaky", started=5000)]
@@ -851,12 +888,22 @@ def test_a_pass_never_ends_over_allocation_however_calls_fail(seed):
 
 
 def test_limits_default_to_the_team_allocation():
-    assert parse_limits(None) == {"ai2/jupiter": 72, "ai2/titan": 32}
+    assert parse_limits(None) == {
+        "ai2/jupiter": 72,
+        "ai2/titan": 32,
+        "ai2/ceres": 0,
+        "ai2/saturn": 0,
+    }
 
 
 def test_an_override_merges_rather_than_replacing():
     # Replacing would silently unmanage jupiter entirely.
-    assert parse_limits(["ai2/titan=0"]) == {"ai2/jupiter": 72, "ai2/titan": 0}
+    assert parse_limits(["ai2/titan=0"]) == {
+        "ai2/jupiter": 72,
+        "ai2/titan": 0,
+        "ai2/ceres": 0,
+        "ai2/saturn": 0,
+    }
 
 
 def test_limits_can_add_a_new_cluster():

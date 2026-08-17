@@ -4,8 +4,11 @@ Beaker does not enforce our urgent-priority allocation, so queueing urgent jobs
 can quietly put the team over it. This script keeps us within the allocation
 without anyone having to hand-manage priorities.
 
-Our allocation is **72 GPU slots on `ai2/jupiter` and 32 on `ai2/titan`**. A
-Beaker slot is one GPU; a CPU-only job counts as one slot.
+Our allocation is **72 GPU slots on `ai2/jupiter` and 32 on `ai2/titan`**.
+`ai2/ceres` and `ai2/saturn` are tracked at **0** — the balancer knows they
+exist so jobs targeting them alongside a budgeted cluster are managed, but they
+carry no allocation of their own. A Beaker slot is one GPU; a CPU-only job
+counts as one slot.
 
 The allocation is the team's, not one workspace's. The balancer manages
 `ai2/ace` and also counts the urgent slots held in `ai2/climate-titan`, without
@@ -30,7 +33,9 @@ the point.
 Things that stop a job being managed, each reported in the log as an aggregate
 count per pass:
 
-- **It targets a cluster with no allocation** (`ai2/saturn`, `ai2/ceres`).
+- **Every cluster it targets has zero allocation.** A job targeting only
+  `ai2/ceres` (0 slots) has nothing to budget against. A job targeting both
+  `ai2/jupiter` and `ai2/ceres` *is* managed — against jupiter alone.
 - **It is an interactive session.** There is a person attached to it, and
   taking their priority away mid-session is not the script's call.
 - **It is at `immediate` priority.** Beaker requires a human-supplied reason for
@@ -178,12 +183,11 @@ all of them. This means a multi-cluster grant costs more than a single-cluster
 one when headroom is tight, which is the right tradeoff — the alternative is
 to grant urgent against a budget the job might consume elsewhere.
 
-A job targeting a mix of budgeted and non-budgeted clusters — e.g. both
-`ai2/jupiter` (budgeted) and `ai2/ceres` (no allocation) — is managed against
-the budgeted ones only. While queued, only the budgeted clusters are checked
-and charged. If it lands on a non-budgeted cluster, its slots stop counting
-against the allocation entirely, since it is not consuming a budgeted cluster's
-slots.
+A job targeting a mix of budgeted and zero-allocation clusters — e.g. both
+`ai2/jupiter` (72 slots) and `ai2/ceres` (0 slots) — is managed against the
+budgeted ones only. A zero-allocation cluster has no budget to protect, so it
+is transparent: the grant check skips it, the charge skips it, and if the job
+lands there its slots stop counting against the allocation entirely.
 
 A placed multi-cluster job is different: it is on one cluster and only that
 cluster's budget is affected, whether the job is granted or demoted. It could

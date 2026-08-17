@@ -39,7 +39,12 @@ CM_PRIORITY_ENV = "CM_PRIORITY"
 
 #: GPU slots the team may hold at urgent priority, per cluster. Clusters absent
 #: from this mapping have no allocation and are left alone entirely.
-DEFAULT_CLUSTER_LIMITS = {"ai2/jupiter": 72, "ai2/titan": 32}
+DEFAULT_CLUSTER_LIMITS = {
+    "ai2/jupiter": 72,
+    "ai2/titan": 32,
+    "ai2/ceres": 0,
+    "ai2/saturn": 0,
+}
 
 #: Workspaces whose jobs spend the same allocation but are never modified. The
 #: allocation is the team's, not one workspace's, so slots held here have to be
@@ -405,6 +410,7 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
             remaining[charged] -= job.slots
 
     granted: set[str] = set()
+    grant_clusters: dict[str, tuple[str, ...]] = {}
     by_level: dict[int, list[ReplicaGroup]] = {}
     for group in groups:
         by_level.setdefault(group.cm_priority, []).append(group)
@@ -419,14 +425,20 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
             # taken everything it was entitled to. A multi-cluster group must
             # fit on every cluster it could land on: granting it urgent commits
             # the allocation on each, and nothing can preempt an urgent job.
-            if all(group.slots <= remaining[c] for c in group.clusters):
+            # Zero-allocation clusters are transparent: they have no budget to
+            # protect, so including them would block grants that are valid on
+            # the clusters that matter.
+            eligible = tuple(c for c in group.clusters if limits[c] > 0)
+            if eligible and all(group.slots <= remaining[c] for c in eligible):
                 granted.add(group.id)
-                for c in group.clusters:
+                grant_clusters[group.id] = eligible
+                for c in eligible:
                     remaining[c] -= group.slots
 
     actions = []
     for group in groups:
         desired = URGENT if group.id in granted else resting_priority(group.cm_priority)
+        clusters = grant_clusters.get(group.id, group.clusters)
         for job in group.jobs:
             if desired == job.priority:
                 continue
@@ -442,7 +454,7 @@ def decide(jobs: Iterable[JobView], limits: dict[str, int]) -> list[Action]:
                 )
                 continue
             reason = _reason(job, desired)
-            actions.append(Action(job, group.clusters, job.priority, desired, reason))
+            actions.append(Action(job, clusters, job.priority, desired, reason))
 
     # Demotions first, so that any prefix of a partially applied pass is still
     # within allocation. A promotion applied before the demotion paying for it
@@ -660,10 +672,10 @@ def report_unmanageable(jobs: Sequence[JobView], limits: dict[str, int]) -> None
         if why is None or why is UNLABELLED or why is OBSERVED:
             continue
         if why is NO_ALLOCATION:
-            # A placed job on a non-budgeted cluster that was submitted to at
-            # least one budgeted cluster is a normal outcome: it was managed
-            # while queued and simply landed elsewhere.
-            if job.is_placed and any(c in limits for c in job.clusters):
+            # A placed job on a zero-allocation cluster that was submitted to
+            # at least one positively-budgeted cluster is a normal outcome: it
+            # was managed while queued and simply landed elsewhere.
+            if job.is_placed and any(limits.get(c, 0) > 0 for c in job.clusters):
                 continue
             target = job.assigned_cluster or (job.clusters[0] if job.clusters else None)
             reason = f"targets {target}, which has no allocation" if target else why
