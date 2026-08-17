@@ -554,17 +554,18 @@ def test_no_listener_installed_in_a_dataloader_worker(monkeypatch):
 
 
 @pytest.mark.medium_duration
-def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
-    """Parking at a loop boundary tells the listener the rank's collectives
-    are idle: the abort proceeds after the settle period rather than waiting
-    out the park deadline -- the bound asserted is well under the deadline,
-    so taking the deadline path would fail it -- and the post-abort
-    callbacks run against the boundary-frozen state rather than being
-    skipped. (The *exit* still waits out the deadline-based floor for its
-    peers' aborts; only the abort comes early.)
+def test_a_parked_main_thread_is_aborted_at_the_uniform_time_with_callbacks():
+    """Parking at a loop boundary freezes state, but the abort must not come
+    early: an idle rank's abort frees buffers a peer wedged in a later
+    collective is still waiting on, so a parked rank aborts at the uniform
+    time -- a settle period past the park deadline, after every wedged peer's
+    deadline abort -- and the post-abort callbacks run against the
+    boundary-frozen state rather than being skipped.
     """
+    park_deadline = 0.5
+    settle_period = 0.2
     result = _run_listener_program(
-        """
+        f"""
         import signal, time
         from fme.core.distributed.shutdown import (
             abort_and_exit_on_termination,
@@ -572,17 +573,17 @@ def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
             park_if_terminating,
         )
 
-        signaled = {"at": 0.0}
+        signaled = {{"at": 0.0}}
 
         def abort():
-            print(f"elapsed {time.monotonic() - signaled['at']:.3f}", flush=True)
+            print(f"elapsed {{time.monotonic() - signaled['at']:.3f}}", flush=True)
 
         add_post_abort_callback(lambda: print("callback", flush=True))
         with abort_and_exit_on_termination(
             abort=abort,
             grace_period=0.1,
-            park_deadline=5.0,
-            settle_period=0.05,
+            park_deadline={park_deadline},
+            settle_period={settle_period},
         ):
             signaled["at"] = time.monotonic()
             signal.raise_signal(signal.SIGTERM)
@@ -595,18 +596,20 @@ def test_a_parked_main_thread_is_aborted_without_waiting_for_the_deadline():
     assert "has not parked" not in result.stderr
     label, elapsed, callback = result.stdout.split()
     assert (label, callback) == ("elapsed", "callback")
-    assert float(elapsed) < 2.0  # the deadline path would make this >= 5
+    assert float(elapsed) >= (park_deadline + settle_period) * 0.9
+    assert float(elapsed) < 5.0  # parked, not hung: the abort still comes
     assert result.returncode == 128 + signal.SIGTERM
 
 
 @pytest.mark.medium_duration
-def test_the_settle_period_holds_the_abort_after_the_park():
-    """A parked rank's own collectives are complete, but a peer's kernel for
-    the last of them may still be retiring -- actively reading this rank's
-    memory. The settle period between the park and the abort is what lets it
-    drain, so the abort must not come earlier.
+def test_the_settle_period_holds_a_parked_abort_past_the_deadline():
+    """A wedged peer aborts at the park deadline on its own clock, which may
+    lag this rank's by the signal skew. The settle period is what puts a
+    parked rank's abort strictly after every such peer's, so it must land on
+    top of the deadline, not replace it.
     """
-    settle_period = 0.5
+    park_deadline = 0.3
+    settle_period = 0.6
     result = _run_listener_program(
         f"""
         import signal, time
@@ -615,27 +618,28 @@ def test_the_settle_period_holds_the_abort_after_the_park():
             park_if_terminating,
         )
 
-        boundary = {{"at": 0.0}}
+        signaled = {{"at": 0.0}}
 
         def abort():
-            print(f"settle {{time.monotonic() - boundary['at']:.3f}}", flush=True)
+            print(f"settle {{time.monotonic() - signaled['at']:.3f}}", flush=True)
 
         with abort_and_exit_on_termination(
             abort=abort,
             grace_period=0.1,
-            park_deadline=1.0,
+            park_deadline={park_deadline},
             settle_period={settle_period},
         ):
+            signaled["at"] = time.monotonic()
             signal.raise_signal(signal.SIGTERM)
             while True:
-                boundary["at"] = time.monotonic()
                 park_if_terminating()
         """
     )
 
+    assert "parked at a loop boundary" in result.stderr
     label, observed = result.stdout.split()
     assert label == "settle"
-    assert float(observed) >= settle_period * 0.9
+    assert float(observed) >= (park_deadline + settle_period) * 0.9
     assert result.returncode == 128 + signal.SIGTERM
 
 
@@ -666,17 +670,17 @@ def test_the_deadline_bounds_the_wait_for_a_main_thread_that_never_parks():
 
 
 @pytest.mark.medium_duration
-def test_no_rank_exits_before_a_wedged_peer_has_aborted():
-    """Parking spreads abort times across ranks: a parked rank aborts a settle
-    period after the signal while a wedged peer waits out the park deadline --
-    an ordinary split, since signal skew around one park check sends two ranks
-    down different paths. A fixed post-abort grace would let the parked rank
-    exit -- unmapping memory the wedged peer's waiting kernels still poll --
-    before that peer aborts, so the exit must hold until no peer can still be
-    aborting.
+def test_a_park_wedge_split_keeps_aborts_ordered_and_exits_last():
+    """Signal skew around one park check sends two ranks down different
+    paths: one parks, one wedges in a collective the parked rank never joins.
+    Two invariants protect the wedged rank: the parked rank must not abort
+    first (freeing buffers the wedged rank's waiting kernels still poll --
+    its abort comes a settle period after the wedged rank's deadline abort),
+    and no rank may exit -- unmapping its memory -- before every rank has
+    aborted.
     """
     park_deadline = 1.0
-    settle_period = 0.1
+    settle_period = 0.2
     grace_period = 0.5
     child = textwrap.dedent(
         f"""
@@ -707,6 +711,7 @@ def test_no_rank_exits_before_a_wedged_peer_has_aborted():
         proc = subprocess.Popen(
             [sys.executable, "-c", child, role],
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
         )
         assert proc.stdout is not None
@@ -715,6 +720,7 @@ def test_no_rank_exits_before_a_wedged_peer_has_aborted():
 
     aborted_at: dict[str, float] = {}
     exited_at: dict[str, float] = {}
+    stderr_of: dict[str, str] = {}
 
     def observe(role: str) -> None:
         proc = procs[role]
@@ -722,6 +728,8 @@ def test_no_rank_exits_before_a_wedged_peer_has_aborted():
         label, at = proc.stdout.readline().split()
         assert label == "abort"
         aborted_at[role] = float(at)
+        assert proc.stderr is not None
+        stderr_of[role] = proc.stderr.read()  # EOF at exit
         proc.wait(timeout=30)
         exited_at[role] = time.monotonic()
 
@@ -737,13 +745,16 @@ def test_no_rank_exits_before_a_wedged_peer_has_aborted():
         for proc in procs.values():
             proc.kill()
             proc.wait()
-            if proc.stdout is not None:
-                proc.stdout.close()
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
 
     assert set(exited_at) == {"park", "wedge"}
+    assert "parked at a loop boundary" in stderr_of["park"]
+    assert "has not parked" in stderr_of["wedge"]
     # time.monotonic() is CLOCK_MONOTONIC, shared across processes on Linux,
     # so the children's abort stamps and the parent's exit stamps compare
-    assert aborted_at["park"] < aborted_at["wedge"], "the paths did not split"
+    assert aborted_at["wedge"] < aborted_at["park"]
     assert min(exited_at.values()) > max(aborted_at.values())
 
 
@@ -807,7 +818,7 @@ def test_the_drain_runs_before_the_park_and_the_abort():
         with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True),
             grace_period=0.1,
-            park_deadline=5.0,
+            park_deadline=0.5,
             settle_period=0.05,
             drain=lambda: print("drain", flush=True),
         ):
@@ -913,7 +924,7 @@ def test_a_child_forked_after_the_signal_does_not_park():
         with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True),
             grace_period=0.1,
-            park_deadline=5.0,
+            park_deadline=1.0,
             settle_period=0.05,
         ):
             signal.raise_signal(signal.SIGTERM)
@@ -969,7 +980,7 @@ def test_the_context_exit_drains_when_the_abort_has_not_started():
             with abort_and_exit_on_termination(
                 abort=lambda: print("abort", flush=True),
                 grace_period=0.1,
-                park_deadline=10.0,
+                park_deadline=0.5,
                 settle_period=0.05,
                 drain=lambda: print("drain", flush=True),
             ):

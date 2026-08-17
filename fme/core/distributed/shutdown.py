@@ -21,12 +21,17 @@ faulted the fabric in a real preemption (8xH100, mid-training-step: contained
 NVLink peer-access errors, an unrecoverable NVSwitch SXid, node cordoned),
 while aborting idle or *waiting* kernels was validated safe on H100 and B200.
 So the training, validation, and inference loops offer every batch boundary
-as a stopping point (`park_if_terminating`), and the listener aborts only
-once the main thread has parked at one -- or has unwound into the context's
-exit -- plus a settle period for peers' kernel tails. A main thread that
-misses the deadline is wedged in a collective a peer will never complete,
-where the kernels are waiting rather than transferring and the abort is safe
-anyway.
+as a stopping point (`park_if_terminating`), and the listener aborts at one
+uniform instant across ranks -- the park deadline after the signal -- once
+the main thread has parked at a boundary or unwound into the context's exit.
+A main thread that misses the deadline is wedged in a collective a peer will
+never complete, where the kernels are waiting rather than transferring and
+the abort is safe anyway. The abort must not come *early* on a parked rank
+even though that rank is idle: freeing its communicator buffers faults the
+waiting kernels of peers still wedged in a collective it never joined
+(observed contained on H100, the same error class as the fabric fault), so
+parked ranks abort a settle period *after* the deadline, once every wedged
+peer's own abort has already killed its kernels.
 
 The signal is received on a *listener* -- a dedicated thread whose only job is
 to wait for the signal -- because the main thread cannot be trusted to receive
@@ -73,21 +78,24 @@ DEFAULT_GRACE_PERIOD = 5.0
 # 30s SIGTERM-to-SIGKILL budget.
 DEFAULT_STATE_FREEZE_TIMEOUT = 5.0
 
-# How long the listener waits for the main thread to park at a loop boundary
-# before aborting anyway. Long enough for the tail of a training batch or an
-# inference window (sub-second to a few seconds); a main thread that misses it
-# is taken to be wedged in a collective a peer will never complete, whose
-# kernels are waiting rather than transferring, so the abort is safe without
-# the park. With the settle period, abort, post-abort callbacks, and grace
-# period behind it, the sum must fit the same 30s budget.
+# The uniform abort time: how long after the signal every rank aborts,
+# parked or not. For a wedged main thread it is the wait before aborting
+# anyway -- long enough for the tail of a training batch or an inference
+# window (sub-second to a few seconds); missing it means the thread is wedged
+# in a collective a peer will never complete, whose kernels are waiting
+# rather than transferring, so the abort is safe without the park. A parked
+# rank holds its abort to the same instant (plus the settle period): aborting
+# early would free buffers that a wedged peer's waiting kernels still poll
+# (see _wait_for_main_thread_to_park). With the settle period, abort,
+# post-abort callbacks, and grace period behind it, the sum must fit the same
+# 30s budget.
 DEFAULT_PARK_DEADLINE = 10.0
 
-# How long a parked rank waits before aborting. Parking means this rank's own
-# kernels have drained (`park_if_terminating` synchronizes the device before
-# freezing), but a peer's kernel for a collective this rank has finished may
-# still be retiring -- actively reading this rank's memory for a little
-# longer. Kernel tails are sub-millisecond and signal skew across ranks is
-# tens of milliseconds, so this is a generous cover.
+# How long past the park deadline a parked rank holds its abort, so that
+# every wedged peer's deadline abort has already killed its kernels -- despite
+# rank-to-rank signal skew (tens of milliseconds) -- before this rank frees
+# the buffers those kernels were waiting on. Aborts return in under a second
+# on a wedged 8-GPU node, so this is a generous cover.
 DEFAULT_SETTLE_PERIOD = 1.0
 
 _post_abort_callbacks: list[Callable[[], None]] = []
@@ -242,22 +250,29 @@ def park_if_terminating() -> None:
 
 
 def _wait_for_main_thread_to_park(
-    coordination: _ExitCoordination, park_deadline: float, settle_period: float
+    coordination: _ExitCoordination,
+    signal_time: float,
+    park_deadline: float,
+    settle_period: float,
 ) -> None:
-    """Hold the abort until this rank's collectives are idle or merely waiting.
+    """Hold the abort until the uniform abort time, park or no park.
 
     A parked main thread has drained its device work (`park_if_terminating`
-    synchronizes before freezing) and launches no further collectives -- so
-    after a settle period for peers' kernel tails (see
-    ``DEFAULT_SETTLE_PERIOD``), nothing is actively moving data and the abort
-    is safe. A main thread that unwound into the context's exit before the
-    abort drains there likewise. A main thread that never freezes is wedged
-    in a collective a peer will never complete (or in a drain of one); its
-    kernels are waiting, not transferring, which is also safe to abort -- so
-    after the deadline the abort proceeds without the park.
+    synchronizes before freezing) and launches no further collectives; a main
+    thread that unwound into the context's exit drains there likewise. But an
+    idle rank's abort is still destructive to its *peers*: freeing this
+    rank's communicator buffers faults the waiting kernels of a peer wedged
+    in a collective this rank never joined. So a frozen rank holds its abort
+    until a settle period past the park deadline, when every wedged peer's
+    own deadline abort has already killed its kernels. A main thread that
+    never freezes is wedged in such a collective itself (or in a drain of
+    one); its kernels are waiting, not transferring, which is safe to abort
+    with its peers at the deadline -- simultaneous aborts of waiting kernels
+    are the probe-validated shape.
     """
     if coordination.wait_until_training_state_frozen(park_deadline):
-        time.sleep(settle_period)
+        abort_time = signal_time + park_deadline + settle_period
+        time.sleep(max(0.0, abort_time - time.monotonic()))
     else:
         write_stderr(
             f"Main thread has not parked {park_deadline}s after the signal; "
@@ -310,15 +325,12 @@ def _wait_for_peer_aborts(
     """Peers' aborts must finish, so their kernels stop touching this rank's
     memory, before this rank exits.
 
-    Parking makes abort times rank-dependent: a parked peer aborts a settle
-    period after it parks, while one wedged in a collective waits out the
-    whole park deadline. A fixed sleep from this rank's own abort would let a
-    parked rank exit -- unmapping its memory -- while a wedged peer's kernels
-    are still waiting on it. So every rank instead holds its exit until the
-    latest instant a peer can still be aborting: the park deadline plus the
-    settle period after the signal (the latest abort start, reached by a peer
-    that parks just under the deadline), plus the grace period for the abort
-    itself and rank-to-rank signal skew.
+    A fixed sleep from this rank's own abort would let a rank whose abort
+    fired early exit -- unmapping its memory -- while a peer's kernels are
+    still waiting on it. So every rank instead holds its exit until the
+    latest instant a peer can still be aborting: the latest abort start (a
+    settle period past the park deadline, a frozen peer's abort time), plus
+    the grace period for the abort itself and rank-to-rank signal skew.
     """
     exit_time = signal_time + park_deadline + settle_period + grace_period
     time.sleep(max(0.0, exit_time - time.monotonic()))
@@ -340,7 +352,9 @@ def _abort_and_exit(
         f"Received {signal.Signals(signum).name}, aborting distributed "
         "communicators before exiting.\n"
     )
-    _wait_for_main_thread_to_park(coordination, park_deadline, settle_period)
+    _wait_for_main_thread_to_park(
+        coordination, signal_time, park_deadline, settle_period
+    )
     coordination.mark_abort_started()
     _abort_local_communicators(abort)
     _run_post_abort_callbacks(coordination, state_freeze_timeout)
@@ -383,16 +397,17 @@ def abort_and_exit_on_termination(
         state_freeze_timeout: Seconds the listener waits for the main thread
             to block in this context's exit before skipping the post-abort
             callbacks (see ``add_post_abort_callback``).
-        park_deadline: Seconds the listener waits for the main thread to park
-            at a loop boundary before aborting anyway (see
-            ``park_if_terminating`` and ``_wait_for_main_thread_to_park``).
-        settle_period: Seconds a parked rank waits before aborting, covering
-            peers' kernel tails.
+        park_deadline: The uniform abort time, in seconds after the signal:
+            how long the listener waits for the main thread to park at a
+            loop boundary before aborting anyway (see ``park_if_terminating``
+            and ``_wait_for_main_thread_to_park``).
+        settle_period: Seconds past the park deadline a frozen rank holds
+            its abort, so every wedged peer's deadline abort lands first.
         drain: Blocks until every kernel this rank has enqueued has completed
             (``torch.cuda.synchronize`` or equivalent). Called on the main
-            thread before it freezes training state, so a settle-path abort
-            cannot meet this rank's own kernels still running. None means
-            there is nothing asynchronous to drain.
+            thread before it freezes training state, so a frozen rank's abort
+            cannot meet its own kernels still running. None means there is
+            nothing asynchronous to drain.
     """
     global _armed_context, _at_fork_registered
     if drain is None:
