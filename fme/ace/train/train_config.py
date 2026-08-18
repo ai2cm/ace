@@ -683,6 +683,7 @@ class TrainConfig:
         return self.stepper_training.get_train_stepper(
             stepper_config=self.stepper_config,
             dataset_info=dataset_info,
+            default_optimization=self.optimization,
         )
 
     def _get_ema(self, modules) -> EMATracker:

@@ -84,6 +84,7 @@ from fme.core.optimization import (
 from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.core.scheduler import SchedulerConfig
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import StaticSpatialMaskingConfig
 from fme.core.step import SingleModuleStepConfig, StepOutput, StepSelector
@@ -1247,6 +1248,7 @@ def _init_train_stepper(
 ) -> TrainStepper:
     if stepper is None:
         stepper = unittest.mock.Mock()
+        stepper.discriminator = None
     config = TrainStepperConfig(**train_config_kwargs)
     return TrainStepper(stepper=stepper, config=config)
 
@@ -3181,3 +3183,318 @@ def test_step_masks_corrector_diagnostics():
     assert torch.isnan(delta[..., 0, 0]).all()
     on_mask = delta[~torch.isnan(delta)]
     torch.testing.assert_close(on_mask, torch.full_like(on_mask, offset))
+
+
+class _ParamAddOne(torch.nn.Module):
+    """AddOne with a parameter, so optimizers can build and gradients flow."""
+
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        return x + 1 + self.weight
+
+
+def _make_channel_mean_discriminator(
+    weight: float = 0.3,
+) -> tuple[torch.nn.Module, list[torch.Tensor]]:
+    """Per-pixel logit head recording the packed pairs it judges.
+
+    Records through a closure: config round-trips deep-copy prebuilt module
+    instances, so instance attributes would record into the copy.
+    """
+    records: list[torch.Tensor] = []
+
+    class ChannelMeanLogits(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.full((1,), weight))
+
+        def forward(self, x):
+            records.append(x)
+            return x.mean(dim=-3, keepdim=True) * self.weight
+
+    return ChannelMeanLogits(), records
+
+
+def _get_gan_stepper_config(discriminator_module: torch.nn.Module) -> StepperConfig:
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _ParamAddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
+                    discriminator=ModuleSelector(
+                        type="prebuilt", config={"module": discriminator_module}
+                    ),
+                )
+            ),
+        ),
+    )
+
+
+def _get_gan_train_stepper(
+    discriminator_module: torch.nn.Module,
+    discriminator_loss_weight: float = 0.5,
+    **train_config_kwargs,
+) -> TrainStepper:
+    return _get_train_stepper(
+        _get_gan_stepper_config(discriminator_module),
+        discriminator_loss_weight=discriminator_loss_weight,
+        discriminator_optimization=OptimizationConfig(optimizer_type="Adam", lr=0.01),
+        n_ensemble=1,
+        **train_config_kwargs,
+    )
+
+
+def test_train_stepper_positive_weight_requires_discriminator():
+    config = _get_stepper_config(["a"], ["a"])
+    with pytest.raises(ValueError, match="no discriminator"):
+        _get_train_stepper(config, discriminator_loss_weight=0.1)
+
+
+def test_train_stepper_discriminator_requires_positive_weight():
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    config = _get_stepper_config(
+        ["a"],
+        ["a"],
+        discriminator=ModuleSelector(
+            type="prebuilt", config={"module": discriminator_module}
+        ),
+    )
+    with pytest.raises(ValueError, match="discriminator_loss_weight"):
+        _get_train_stepper(config)
+
+
+def test_train_stepper_config_rejects_negative_discriminator_weight():
+    with pytest.raises(ValueError, match="non-negative"):
+        TrainStepperConfig(discriminator_loss_weight=-0.1)
+
+
+def test_discriminator_optimization_rejects_scheduler():
+    with pytest.raises(ValueError, match="scheduler"):
+        TrainStepperConfig(
+            discriminator_optimization=OptimizationConfig(
+                scheduler=SchedulerConfig(type="CosineAnnealingLR")
+            )
+        )
+
+
+def test_discriminator_optimization_rejects_gradient_accumulation():
+    with pytest.raises(ValueError, match="use_gradient_accumulation"):
+        TrainStepperConfig(
+            discriminator_optimization=OptimizationConfig(
+                use_gradient_accumulation=True
+            )
+        )
+
+
+def test_discriminator_optimization_mirrors_default_without_scheduler():
+    config = TrainStepperConfig()
+    default = OptimizationConfig(
+        optimizer_type="AdamW",
+        lr=3e-4,
+        kwargs={"weight_decay": 0.01},
+        scheduler=SchedulerConfig(type="CosineAnnealingLR"),
+        max_grad_norm=1.0,
+    )
+    mirrored = config.get_discriminator_optimization_config(default)
+    assert mirrored.optimizer_type == "AdamW"
+    assert mirrored.lr == 3e-4
+    assert mirrored.kwargs == {"weight_decay": 0.01}
+    assert mirrored.max_grad_norm == 1.0
+    assert not mirrored.has_lr_schedule
+
+
+def test_discriminator_optimization_requires_default_or_explicit_config():
+    config = TrainStepperConfig()
+    with pytest.raises(ValueError, match="discriminator_optimization"):
+        config.get_discriminator_optimization_config(None)
+
+
+def test_train_on_batch_gan_training_updates_and_metrics():
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    data = get_data(["a", "b"], n_samples=3, n_time=3).data
+    optimization = OptimizationConfig(optimizer_type="Adam", lr=1e-3).build(
+        train_stepper.modules, max_epochs=1
+    )
+    generator_params_before = [
+        p.detach().clone() for p in train_stepper.modules.parameters()
+    ]
+    assert train_stepper._discriminator is not None
+    discriminator_params_before = [
+        p.detach().clone() for p in train_stepper._discriminator.modules.parameters()
+    ]
+    output = train_stepper.train_on_batch(data, optimization)
+    metrics = output.metrics
+    for key in [
+        "adversarial_loss_step_0",
+        "adversarial_loss_step_1",
+        "discriminator_loss_real",
+        "discriminator_loss_fake",
+        "discriminator_score_real",
+        "discriminator_score_fake",
+    ]:
+        assert key in metrics, key
+    expected_loss = (
+        metrics["loss_step_0"]
+        + metrics["loss_step_1"]
+        + 0.5
+        * (metrics["adversarial_loss_step_0"] + metrics["adversarial_loss_step_1"])
+    )
+    torch.testing.assert_close(metrics["loss"], expected_loss)
+    for before, after in zip(
+        generator_params_before, train_stepper.modules.parameters()
+    ):
+        assert not torch.equal(before, after)
+    for before, after in zip(
+        discriminator_params_before,
+        train_stepper._discriminator.modules.parameters(),
+    ):
+        assert not torch.equal(before, after)
+
+
+def test_train_on_batch_gan_validation_excludes_adversarial_term():
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    data = get_data(["a", "b"], n_samples=3, n_time=3).data
+    assert train_stepper._discriminator is not None
+    discriminator_params_before = [
+        p.detach().clone() for p in train_stepper._discriminator.modules.parameters()
+    ]
+    output = train_stepper.train_on_batch(data, NullOptimization())
+    metrics = output.metrics
+    assert "adversarial_loss_step_0" in metrics
+    assert "discriminator_score_fake" in metrics
+    expected_loss = metrics["loss_step_0"] + metrics["loss_step_1"]
+    torch.testing.assert_close(metrics["loss"], expected_loss)
+    for before, after in zip(
+        discriminator_params_before,
+        train_stepper._discriminator.modules.parameters(),
+    ):
+        assert torch.equal(before, after)
+
+
+def test_gan_discriminator_judges_dataset_transitions_against_generated_pairs():
+    torch.manual_seed(0)
+    discriminator_module, records = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    data = get_data(["a", "b"], n_samples=2, n_time=3).data
+    train_stepper.train_on_batch(data, NullOptimization())
+    # per optimized step, three judgments in order: generated pair with
+    # generator gradients, generated pair detached, dataset transition
+    assert len(records) == 6
+    input_channels = slice(0, 2)
+    output_channels = slice(2, 4)
+
+    def packed(time_index: int) -> torch.Tensor:
+        return torch.stack(
+            [data.data["a"][:, time_index], data.data["b"][:, time_index]], dim=-3
+        )
+
+    # normalization is trivial (mean 0, std 1) and the generator adds one,
+    # so generated values are directly comparable to the data
+    step1_real = records[5]
+    torch.testing.assert_close(step1_real[:, input_channels], packed(1))
+    torch.testing.assert_close(step1_real[:, output_channels], packed(2))
+    step1_generated = records[3]
+    torch.testing.assert_close(step1_generated[:, input_channels], packed(0) + 1)
+    torch.testing.assert_close(step1_generated[:, output_channels], packed(0) + 2)
+    step0_real = records[2]
+    torch.testing.assert_close(step0_real[:, input_channels], packed(0))
+    torch.testing.assert_close(step0_real[:, output_channels], packed(1))
+    step0_generated = records[0]
+    torch.testing.assert_close(step0_generated[:, input_channels], packed(0))
+    torch.testing.assert_close(step0_generated[:, output_channels], packed(0) + 1)
+
+
+@pytest.mark.parametrize("use_gradient_accumulation", [False, True])
+def test_predict_generator_input_follows_detach_pattern(use_gradient_accumulation):
+    torch.manual_seed(0)
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": _ParamAddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(["a", "b"]),
+                )
+            ),
+        ),
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    optimization = OptimizationConfig(
+        optimizer_type="Adam",
+        lr=1e-3,
+        use_gradient_accumulation=use_gradient_accumulation,
+    ).build(stepper.modules, max_epochs=1)
+    data = get_data(["a", "b"], n_samples=2, n_time=3).data
+    ic_dict = {name: data.data[name][:, :1] for name in ["a", "b"]}
+    outputs = list(
+        stepper.predict_generator(
+            ic_dict, data.data, n_forward_steps=2, optimizer=optimization, labels=None
+        )
+    )
+    assert outputs[0].input is not None
+    torch.testing.assert_close(outputs[0].input["a"], data.data["a"][:, 0])
+    assert outputs[0].input["a"].grad_fn is None
+    assert outputs[1].input is not None
+    if use_gradient_accumulation:
+        assert outputs[1].input["a"].grad_fn is None
+    else:
+        assert outputs[1].input["a"].grad_fn is not None
+
+
+def test_gan_train_stepper_state_round_trip():
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator(weight=0.3)
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    data = get_data(["a", "b"], n_samples=2, n_time=2).data
+    # a training batch gives the discriminator optimizer non-trivial state
+    optimization = OptimizationConfig(optimizer_type="Adam", lr=1e-3).build(
+        train_stepper.modules, max_epochs=1
+    )
+    train_stepper.train_on_batch(data, optimization)
+    state = train_stepper.get_state()
+    assert "discriminator_optimization" in state
+    assert "discriminator" in state["step"]
+
+    other_module, _ = _make_channel_mean_discriminator(weight=0.9)
+    other = _get_gan_train_stepper(other_module)
+    other.load_state(state)
+    assert train_stepper._discriminator is not None
+    assert other._discriminator is not None
+    for expected, loaded in zip(
+        train_stepper._discriminator.modules.parameters(),
+        other._discriminator.modules.parameters(),
+    ):
+        torch.testing.assert_close(loaded, expected)
+    assert other._discriminator_optimization is not None
+    assert len(other._discriminator_optimization.optimizer.state_dict()["state"]) > 0
+
+
+def test_gan_train_stepper_warm_starts_from_checkpoint_without_discriminator():
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator(weight=0.3)
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    state = train_stepper.get_state()
+    # simulate a donor checkpoint from a run without a discriminator
+    del state["step"]["discriminator"]
+    del state["discriminator_optimization"]
+    train_stepper.load_state(state)
+    assert train_stepper._discriminator is not None
+    (weight,) = train_stepper._discriminator.modules.parameters()
+    torch.testing.assert_close(weight, torch.full_like(weight, 0.3))

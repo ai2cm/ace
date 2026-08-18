@@ -12,6 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
+from fme.core.step.discriminator import StepDiscriminator
 from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -312,6 +313,16 @@ class StepABC(abc.ABC):
     @abc.abstractmethod
     def modules(self) -> nn.ModuleList:
         pass
+
+    @property
+    def discriminator(self) -> StepDiscriminator | None:
+        """Optional discriminator judging (input, output) timestep pairs.
+
+        Excluded from ``modules`` so it never joins the modules being trained
+        by the main optimizer; trainers that use it optimize it separately.
+        None when the step defines no discriminator.
+        """
+        return None
 
     @property
     @abc.abstractmethod
