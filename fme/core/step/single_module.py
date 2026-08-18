@@ -23,6 +23,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.discriminator import StepDiscriminator
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
@@ -78,6 +79,12 @@ class SingleModuleStepConfig(StepConfigABC):
             a random subset of input channels is zeroed during training, with
             the same mask broadcast across the whole batch. Disabled during
             inference (eval mode).
+        discriminator: Optional builder for a discriminator module judging
+            (input, output) timestep pairs for adversarial training. The
+            module receives the normalized input and output variables as
+            channels and emits one per-pixel logit channel. Trained by the
+            training stepper's separate discriminator optimizer, never by the
+            main optimizer.
     """
 
     builder: ModuleSelector
@@ -95,6 +102,7 @@ class SingleModuleStepConfig(StepConfigABC):
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
+    discriminator: ModuleSelector | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -337,6 +345,20 @@ class SingleModuleStep(StepABC):
         else:
             self.secondary_decoder = NoSecondaryDecoder()
 
+        if config.discriminator is not None:
+            # Wraps DistributedDataParallel internally, so ranks start from
+            # rank 0's weights without joining init_weights (parameter_init
+            # loads donor generators, which carry no discriminator).
+            self._discriminator: StepDiscriminator | None = StepDiscriminator(
+                builder=config.discriminator,
+                in_names=config.in_names,
+                out_names=config.out_names,
+                normalizer=normalizer,
+                dataset_info=dataset_info,
+            )
+        else:
+            self._discriminator = None
+
         init_weights(self.modules)
         self._img_shape = dataset_info.img_shape
         self._config = config
@@ -392,6 +414,10 @@ class SingleModuleStep(StepABC):
         modules = [self.module.torch_module]
         modules.extend(self.secondary_decoder.torch_modules)
         return nn.ModuleList(modules)
+
+    @property
+    def discriminator(self) -> StepDiscriminator | None:
+        return self._discriminator
 
     def step(
         self,
@@ -474,6 +500,8 @@ class SingleModuleStep(StepABC):
     def train(self, mode: bool = True) -> StepABC:
         super().train(mode)
         self._corrector.train(mode)
+        if self._discriminator is not None:
+            self._discriminator.train(mode)
         return self
 
     def set_epoch(self, epoch: int) -> None:
@@ -491,6 +519,8 @@ class SingleModuleStep(StepABC):
         corrector_state = self._corrector.get_state()
         if len(corrector_state) > 0:
             state["corrector"] = corrector_state
+        if self._discriminator is not None:
+            state["discriminator"] = self._discriminator.get_state()
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -508,6 +538,11 @@ class SingleModuleStep(StepABC):
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
         self._corrector.load_state(state.get("corrector", {}))
+        # Absent key is allowed: a checkpoint from a run without a
+        # discriminator can warm-start one, which then keeps its fresh
+        # initialization.
+        if self._discriminator is not None and "discriminator" in state:
+            self._discriminator.load_state(state["discriminator"])
 
 
 def _raise_input_nan_error(input_norm: TensorMapping) -> None:

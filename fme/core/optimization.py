@@ -207,6 +207,16 @@ class Optimization(OptimizationABC):
             self.gscaler.update()
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
 
+    def zero_gradients(self):
+        """Zero all parameter gradients without stepping.
+
+        Used to discard gradients another loss's backward deposited on these
+        parameters (e.g. a generator's adversarial term backpropagating
+        through a discriminator) before accumulating this optimizer's own
+        loss.
+        """
+        self.optimizer.zero_grad()
+
     def set_learning_rate(self, lr: float):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr

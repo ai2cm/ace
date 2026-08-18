@@ -42,7 +42,7 @@ from fme.core.normalizer import (
     StandardNormalizer,
 )
 from fme.core.ocean import OceanConfig
-from fme.core.optimization import NullOptimization
+from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.rand import use_generator
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.spatial_masking import (
@@ -51,6 +51,11 @@ from fme.core.spatial_masking import (
     StaticSpatialMaskingConfig,
 )
 from fme.core.step.args import StepArgs
+from fme.core.step.discriminator import (
+    GanStepLosses,
+    StepDiscriminator,
+    compute_gan_step_losses,
+)
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
     MultiCallConfig,
@@ -1039,6 +1044,10 @@ class Stepper:
         return self._step_obj.modules
 
     @property
+    def discriminator(self) -> StepDiscriminator | None:
+        return self._step_obj.discriminator
+
+    @property
     def normalizer(self) -> StandardNormalizer:
         return self._step_obj.normalizer
 
@@ -1163,6 +1172,7 @@ class Stepper:
                 )
             state = result.output
             stepper_state = result.stepper_state
+            result.input = input_data
             yield result
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
@@ -1462,6 +1472,17 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        discriminator_loss_weight: Weight of the adversarial (generator-side)
+            loss term, added to the base loss on every optimized forward step.
+            Requires the step to define a discriminator; must be positive when
+            one is defined.
+        discriminator_optimization: Optimization configuration for the
+            discriminator. When None, mirrors the run's main optimization
+            config (optimizer type, lr, kwargs, mixed precision, and gradient
+            clipping — never its scheduler). The discriminator's learning rate
+            stays constant: schedulers are not supported, since the training
+            stepper never sees the epoch and validation-loss signals that
+            drive them.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1471,6 +1492,8 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    discriminator_loss_weight: float = 0.0
+    discriminator_optimization: OptimizationConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1478,6 +1501,25 @@ class TrainStepperConfig:
                 self.n_ensemble = 2
             else:
                 self.n_ensemble = 1
+        if self.discriminator_loss_weight < 0:
+            raise ValueError(
+                "discriminator_loss_weight must be non-negative, got "
+                f"{self.discriminator_loss_weight}"
+            )
+        if self.discriminator_optimization is not None:
+            if self.discriminator_optimization.has_lr_schedule:
+                raise ValueError(
+                    "discriminator_optimization does not support learning rate "
+                    "schedulers: the training stepper never sees the epoch and "
+                    "validation-loss signals that drive them."
+                )
+            if self.discriminator_optimization.use_gradient_accumulation:
+                raise ValueError(
+                    "discriminator_optimization does not support "
+                    "use_gradient_accumulation: the discriminator loss is "
+                    "accumulated across forward steps and backpropagated once "
+                    "per batch."
+                )
 
     @property
     def n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
@@ -1503,11 +1545,43 @@ class TrainStepperConfig:
             load_weights_and_history=load_weights_and_history_fn
         )
 
+    def get_discriminator_optimization_config(
+        self, default_optimization: OptimizationConfig | None
+    ) -> OptimizationConfig:
+        """Resolve the discriminator's optimization config.
+
+        Args:
+            default_optimization: The run's main optimization config, mirrored
+                (optimizer type, lr, kwargs, mixed precision, gradient
+                clipping — never its scheduler) when no explicit
+                discriminator_optimization is configured.
+
+        Returns:
+            The optimization config to build the discriminator optimizer from.
+        """
+        if self.discriminator_optimization is not None:
+            return self.discriminator_optimization
+        if default_optimization is None:
+            raise ValueError(
+                "discriminator_optimization must be provided when no default "
+                "optimization config is available to mirror."
+            )
+        return OptimizationConfig(
+            optimizer_type=default_optimization.optimizer_type,
+            lr=default_optimization.lr,
+            kwargs=default_optimization.kwargs,
+            enable_automatic_mixed_precision=(
+                default_optimization.enable_automatic_mixed_precision
+            ),
+            max_grad_norm=default_optimization.max_grad_norm,
+        )
+
     def get_train_stepper(
         self,
         stepper_config: StepperConfig,
         dataset_info: DatasetInfo,
         load_weights_and_history_fn: WeightsAndHistoryLoader = load_weights_and_history,
+        default_optimization: OptimizationConfig | None = None,
     ) -> "TrainStepper":
         """
         Build a TrainStepper from this configuration and a StepperConfig.
@@ -1523,6 +1597,9 @@ class TrainStepperConfig:
             load_weights_and_history_fn: Function for loading weights and
                 history. Default implementation loads a Trainer checkpoint
                 containing a Stepper.
+            default_optimization: The run's main optimization config, used as
+                the template for the discriminator optimizer when
+                discriminator_optimization is not set.
 
         Returns:
             A TrainStepper wrapping the built stepper with training
@@ -1538,6 +1615,7 @@ class TrainStepperConfig:
         return TrainStepper(
             stepper=stepper,
             config=self,
+            default_optimization=default_optimization,
         )
 
 
@@ -1579,11 +1657,15 @@ class TrainStepper(
         self,
         stepper: Stepper,
         config: TrainStepperConfig,
+        default_optimization: OptimizationConfig | None = None,
     ):
         """
         Args:
             stepper: The underlying stepper for inference operations.
             config: Training-specific configuration.
+            default_optimization: The run's main optimization config, used as
+                the template for the discriminator optimizer when
+                config.discriminator_optimization is not set.
         """
         self._stepper = stepper
         self._config = config
@@ -1594,6 +1676,35 @@ class TrainStepper(
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
         self._loss_obj = self._stepper.build_loss(config.loss)
+
+        discriminator = stepper.discriminator
+        if config.discriminator_loss_weight > 0 and discriminator is None:
+            raise ValueError(
+                "discriminator_loss_weight is positive but the step defines "
+                "no discriminator."
+            )
+        if discriminator is not None and config.discriminator_loss_weight == 0:
+            raise ValueError(
+                "The step defines a discriminator but discriminator_loss_weight "
+                "is 0. With no adversarial term the generator never sees the "
+                "discriminator's signal, so the discriminator would train to "
+                "trivially identify the generator's outputs. Remove the "
+                "discriminator or set a positive weight."
+            )
+        self._discriminator = discriminator
+        if discriminator is not None:
+            discriminator_optimization_config = (
+                config.get_discriminator_optimization_config(default_optimization)
+            )
+            # max_epochs only parameterizes LR schedulers, which are rejected
+            # for the discriminator, so any value serves.
+            self._discriminator_optimization: Optimization | None = (
+                discriminator_optimization_config.build(
+                    discriminator.modules, max_epochs=1
+                )
+            )
+        else:
+            self._discriminator_optimization = None
 
     def train_on_batch(
         self,
@@ -1635,7 +1746,16 @@ class TrainStepper(
         data = self._stepper.forcing_deriver(data)
 
         optimization.set_mode(self._stepper.modules)
-        output_list, per_channel_losses = self._accumulate_loss(
+        if self._discriminator is not None:
+            if data.data_mask is not None:
+                raise NotImplementedError(
+                    "Adversarial training does not support data_mask."
+                )
+            # The optimization argument is the in-batch train/eval authority
+            # (NullOptimization sets eval), so the discriminator's mode — which
+            # gates its update below — must come from the same call.
+            optimization.set_mode(self._discriminator.modules)
+        output_list, per_channel_losses, discriminator_losses = self._accumulate_loss(
             data,
             target_data,
             optimization,
@@ -1649,6 +1769,15 @@ class TrainStepper(
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
+
+        if self._discriminator_optimization is not None and discriminator_losses:
+            # The generator's backward deposited adversarial-term gradients on
+            # the discriminator; discard them so only its own loss steps it.
+            self._discriminator_optimization.zero_gradients()
+            self._discriminator_optimization.accumulate_loss(
+                torch.stack(discriminator_losses).sum()
+            )
+            self._discriminator_optimization.step_weights()
 
         gen_data = process_ensemble_prediction_generator_list(output_list)
 
@@ -1678,7 +1807,11 @@ class TrainStepper(
         metrics: dict[str, float],
         n_forward_steps: int,
         n_loss_steps: int,
-    ) -> tuple[list[EnsembleTensorDict], dict[str, ChannelLossInfo] | None]:
+    ) -> tuple[
+        list[EnsembleTensorDict],
+        dict[str, ChannelLossInfo] | None,
+        list[torch.Tensor],
+    ]:
         input_data = data.get_start(self._prognostic_names, self.n_ic_timesteps)
         n_ensemble = self._config.n_ensemble
         input_batch_data = input_data.as_batch_data()
@@ -1702,6 +1835,8 @@ class TrainStepper(
         output_iterator = iter(output_generator)
         weighted_sums: dict[str, torch.Tensor] = {}
         total_counts: dict[str, int] = {}
+        discriminator_losses: list[torch.Tensor] = []
+        gan_step_losses: list[GanStepLosses] = []
         for step in range(n_forward_steps):
             if self._config.optimize_last_step_only:
                 optimize_step = step == n_loss_steps - 1
@@ -1711,8 +1846,10 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step = next(output_iterator).output
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                step_output = next(output_iterator)
+                gen_step = unfold_ensemble_dim(
+                    step_output.output, n_ensemble=n_ensemble
+                )
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
                     {
@@ -1730,9 +1867,92 @@ class TrainStepper(
                     weighted_sums=weighted_sums,
                     total_counts=total_counts,
                 )
+                if self._discriminator is not None and optimize_step:
+                    gan_losses = self._compute_gan_losses(
+                        discriminator=self._discriminator,
+                        data=data,
+                        target_data=target_data,
+                        step=step,
+                        step_output=step_output,
+                        fake_labels=forcing_ensemble_data.labels,
+                    )
+                    metrics[f"adversarial_loss_step_{step}"] = (
+                        gan_losses.generator_loss.detach()
+                    )
+                    gan_step_losses.append(gan_losses)
+                    if self._discriminator.training:
+                        step_total_loss = (
+                            step_total_loss
+                            + self._config.discriminator_loss_weight
+                            * gan_losses.generator_loss
+                        )
+                        discriminator_losses.append(gan_losses.discriminator_loss)
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
-        return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)
+        if gan_step_losses:
+            metrics["discriminator_loss_real"] = torch.stack(
+                [losses.discriminator_loss_real for losses in gan_step_losses]
+            ).mean()
+            metrics["discriminator_loss_fake"] = torch.stack(
+                [losses.discriminator_loss_fake for losses in gan_step_losses]
+            ).mean()
+            metrics["discriminator_score_real"] = torch.stack(
+                [losses.score_real for losses in gan_step_losses]
+            ).mean()
+            metrics["discriminator_score_fake"] = torch.stack(
+                [losses.score_fake for losses in gan_step_losses]
+            ).mean()
+        return (
+            output_list,
+            _finalize_per_channel_losses(weighted_sums, total_counts),
+            discriminator_losses,
+        )
+
+    def _compute_gan_losses(
+        self,
+        discriminator: StepDiscriminator,
+        data: BatchData,
+        target_data: BatchData,
+        step: int,
+        step_output: StepOutput,
+        fake_labels: BatchLabels | None,
+    ) -> GanStepLosses:
+        """Compute this step's adversarial losses.
+
+        The generated ("fake") pair is the input the generator consumed —
+        following its between-step detach behavior, with ensemble members
+        folded into the batch dimension — and its output. The real pair is
+        the corresponding dataset transition, assembled with the same
+        next-step-forcing convention the generator's inputs use.
+        """
+        if step_output.input is None:
+            raise RuntimeError(
+                "predict_generator did not populate StepOutput.input, which "
+                "adversarial training requires."
+            )
+        next_step_forcing_names = set(self._stepper.config.next_step_forcing_names)
+        real_input = {
+            name: (
+                data.data[name][:, step + 1]
+                if name in next_step_forcing_names
+                else data.data[name][:, step]
+            )
+            for name in discriminator.in_names
+        }
+        real_output = {
+            name: target_data.data[name].select(self.TIME_DIM, step)
+            for name in discriminator.out_names
+        }
+        return compute_gan_step_losses(
+            discriminator=discriminator,
+            gridded_operations=(self._stepper.training_dataset_info.gridded_operations),
+            real_input=real_input,
+            real_output=real_output,
+            fake_input=step_output.input,
+            fake_output=step_output.output,
+            real_labels=data.labels,
+            fake_labels=fake_labels,
+        )
 
     def _accumulate_step_loss(
         self,
@@ -1774,9 +1994,26 @@ class TrainStepper(
         self._stepper.update_training_history(training_job)
 
     def get_state(self) -> dict[str, Any]:
-        return self._stepper.get_state()
+        state = self._stepper.get_state()
+        if self._discriminator_optimization is not None:
+            # Training-only state riding in the stepper payload so it survives
+            # preemption restarts; inference loads read only the keys they
+            # know, and load_state below pops it before delegating.
+            state["discriminator_optimization"] = (
+                self._discriminator_optimization.get_state()
+            )
+        return state
 
     def load_state(self, state: dict[str, Any]) -> None:
+        state = dict(state)
+        discriminator_optimization_state = state.pop("discriminator_optimization", None)
+        if (
+            discriminator_optimization_state is not None
+            and self._discriminator_optimization is not None
+        ):
+            self._discriminator_optimization.load_state(
+                discriminator_optimization_state
+            )
         self._stepper.load_state(state)
 
     def get_base_weights(self):
