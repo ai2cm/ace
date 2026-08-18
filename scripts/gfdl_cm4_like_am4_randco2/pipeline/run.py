@@ -33,6 +33,7 @@ Masking conventions of the output store:
 
 import argparse
 import logging
+import math
 
 import apache_beam as beam
 import fsspec
@@ -120,6 +121,28 @@ def open_stream(stream: StreamConfig, config: PipelineConfig) -> xr.Dataset:
                 f"({TIME_DIM}, yh, xh) — check dim_renaming"
             )
     return ds
+
+
+def source_time_chunk_size(ds: xr.Dataset) -> int:
+    """The stream's own time chunk width, used as the beam read width.
+
+    Reading a narrower slice than the source is chunked re-fetches and
+    re-decompresses the whole chunk once per slice, so a one-timestep read
+    against a ten-timestep chunk costs ten times the bytes it uses. Matching
+    the source width makes every chunk pay for itself once. Widening beyond
+    it would buy nothing and cost worker memory.
+    """
+    widths = {
+        int(da.encoding["preferred_chunks"][TIME_DIM])
+        for da in ds.data_vars.values()
+        if TIME_DIM in da.encoding.get("preferred_chunks", {})
+    }
+    if len(widths) != 1:
+        raise AssertionError(
+            f"expected one source time chunk width across the stream's "
+            f"variables; found {sorted(widths)}"
+        )
+    return widths.pop()
 
 
 def load_wetmask(config: PipelineConfig) -> xr.DataArray:
@@ -414,12 +437,14 @@ def main():
     output_shards = {TIME_DIM: config.output.time_shard_size}
     output_store = _make_zarr_store(config.output.path, read_only=False)
 
-    chunks = {TIME_DIM: 1}
+    chunks = {TIME_DIM: source_time_chunk_size(stream_dataset)}
     logger.info(
-        "[stream:%s] %d variables in %d chunks",
+        "[stream:%s] %d variables, %d timesteps in %d chunks of %d",
         config.stream.name,
         len(stream_dataset.data_vars),
         stream_dataset.sizes[TIME_DIM],
+        math.ceil(stream_dataset.sizes[TIME_DIM] / chunks[TIME_DIM]),
+        chunks[TIME_DIM],
     )
     logger.info("[pipeline] starting; writing to %s", config.output.path)
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
