@@ -60,4 +60,4 @@ class CorrectorSelector(CorrectorConfigABC):
         # double-wrapping is possible. Building rather than calling the wrapped
         # config's get_corrector keeps modified-name discovery to the single
         # pass run by the selector's own get_corrector.
-        return self._corrector_config_instance._build_corrector(dataset_info)
+        return self._corrector_config_instance.build_without_discovery(dataset_info)

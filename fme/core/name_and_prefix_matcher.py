@@ -66,8 +66,9 @@ class NameAndPrefixSelection:
     def unmatched_entries(self, names: Iterable[str]) -> list[str]:
         """Entries that match none of ``names``."""
         names = list(names)
+        matchers = [(entry, NameAndPrefixMatcher([entry])) for entry in self.entries]
         return [
             entry
-            for entry in self.entries
-            if not any(NameAndPrefixMatcher([entry]).match(name) for name in names)
+            for entry, matcher in matchers
+            if not any(matcher.match(name) for name in names)
         ]

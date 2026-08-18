@@ -51,12 +51,14 @@ def _build(
         corrector_modified_names,
         normalizer=_normalizer(sorted(corrector_modified_names | frozenset(_NAMES))),
         gridded_operations=None,
+        channel_dim=-3,
     )
 
 
 def test_config_post_init_errors():
     # both features None; a present feature selecting nothing; weight <= 0;
-    # EnsembleLoss / NaN / global_mean_type — each raises in __post_init__.
+    # EnsembleLoss / NaN / global_mean_type / LpLoss — each raises in
+    # __post_init__.
     with pytest.raises(ValueError, match="at least one"):
         CorrectorLossConfig()
     with pytest.raises(ValueError, match="names_and_prefixes"):
@@ -74,6 +76,13 @@ def test_config_post_init_errors():
     with pytest.raises(ValueError, match="global_mean_type"):
         CorrectorRegularizationConfig(
             names_and_prefixes=["a"], loss=LossConfig(global_mean_type="LpLoss")
+        )
+    # LpLoss divides by the norm of the target. The penalty's target is the
+    # constant field -mean/std, so the value would be rescaled by 1/|mean|
+    # per channel, and 0/0 where the loss normalizer's mean is zero.
+    with pytest.raises(ValueError, match="relative"):
+        CorrectorRegularizationConfig(
+            names_and_prefixes=["a"], loss=LossConfig(type="LpLoss")
         )
 
 

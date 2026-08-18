@@ -87,7 +87,8 @@ class CorrectorRegularizationConfig:
             corrector-modified variables whose deltas are penalized.
         loss: The loss applied to the normalized deltas against zeros. The
             ``EnsembleLoss`` and ``NaN`` types and ``global_mean_type`` are not
-            supported.
+            supported, and neither is the relative ``LpLoss``: the target here
+            is a constant field, whose norm ``LpLoss`` divides by.
         weight: The positive weight applied to the penalty in the total loss.
     """
 
@@ -102,7 +103,7 @@ class CorrectorRegularizationConfig:
                 "the feature while selecting nothing is a contradiction, "
                 "not a no-op."
             )
-        self.loss.validate(pointwise_against_target=True)
+        self.loss.validate(pointwise_against_target=True, absolute_scale=True)
         if self.weight <= 0:
             raise ValueError(
                 f"regularization weight must be positive, got {self.weight}"
@@ -168,7 +169,7 @@ class CorrectorLossConfig:
         corrector_modified_names: frozenset[str],
         normalizer: StandardNormalizer,
         gridded_operations: GriddedOperations | None,
-        channel_dim: int = -3,
+        channel_dim: int,
     ) -> CorrectorLoss:
         """Validate the configured selections and build the corrector loss.
 

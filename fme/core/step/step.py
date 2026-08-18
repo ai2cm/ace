@@ -257,13 +257,18 @@ class StepABC(abc.ABC):
         pass
 
     @property
+    @abc.abstractmethod
     def corrector_modified_names(self) -> frozenset[str]:
         """The delta keys the step's corrector produces when active.
 
         The single introspection surface for build-time corrector-loss
-        validation.
+        validation. Abstract rather than defaulting to ``frozenset()``: a step
+        that owns a corrector and forgets to implement this would report
+        "modifies nothing", which surfaces to the user as a corrector-loss
+        selection error rather than as the missing implementation it is. A
+        step without a corrector returns ``frozenset()`` explicitly.
         """
-        return frozenset()
+        ...
 
     def train(self, mode: bool = True) -> "StepABC":
         """Set the step (and all submodules) to training mode.

@@ -1141,9 +1141,59 @@ def test_penalty_analytic_value():
     )
 
 
-def test_penalty_masked_points_drop():
-    # NaN-filled delta points contribute nothing; penalty and gradients
-    # stay finite.
+def test_penalty_ignores_main_loss_weights():
+    # the penalty is built with weights={}, so a per-variable weight
+    # configured for the main loss does not reach it.
+    deltas = _delta_dict()
+    weighted_step_loss = StepLossConfig(
+        type="MSE", weights={name: 10.0 for name in _CORRECTOR_NAMES}
+    ).build(
+        gridded_ops=None,
+        out_names=list(_CORRECTOR_NAMES),
+        normalizer=_corrector_normalizer(),
+    )
+    corrector_loss = _corrector_loss(regularizer_names=list(_CORRECTOR_NAMES))
+    result = StepOutputLoss(weighted_step_loss, corrector_loss)(
+        _predict_dict(), _target_dict(), 0, deltas=deltas
+    )
+    assert result.corrector_penalty is not None
+    torch.testing.assert_close(
+        result.corrector_penalty.total(),
+        _expected_penalty(deltas, _CORRECTOR_NAMES),
+    )
+
+
+def test_penalty_escapes_the_step_decay():
+    # the decay lives inside StepLoss.forward; the penalty is added outside
+    # it, so it is constant across steps while the main loss shrinks.
+    deltas = _delta_dict()
+    predict, target = _predict_dict(), _target_dict()
+    corrector_loss = _corrector_loss(regularizer_names=list(_CORRECTOR_NAMES))
+
+    def _at_step(step: int):
+        decaying_step_loss = StepLossConfig(
+            type="MSE", sqrt_loss_step_decay_constant=3.0
+        ).build(
+            gridded_ops=None,
+            out_names=list(_CORRECTOR_NAMES),
+            normalizer=_corrector_normalizer(),
+        )
+        return StepOutputLoss(decaying_step_loss, corrector_loss)(
+            predict, target, step, deltas=deltas
+        )
+
+    first, second = _at_step(0), _at_step(1)
+    assert first.corrector_penalty is not None and second.corrector_penalty is not None
+    torch.testing.assert_close(
+        first.corrector_penalty.total(), second.corrector_penalty.total()
+    )
+    assert second.main.total() < first.main.total()
+
+
+def test_penalty_masked_points_dilute():
+    # NaN-filled delta points are zeroed on both sides, so they enter the
+    # channel mean contributing zero rather than being dropped from it;
+    # penalty and gradients stay finite.
     deltas = _delta_dict()
     masked = deltas["a"].clone()
     masked[0] = torch.nan

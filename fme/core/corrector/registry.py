@@ -74,7 +74,7 @@ class CorrectorConfigABC(abc.ABC):
             gen_names: Names present in the corrector's ``gen_data``.
             forcing_names: Names present in the corrector's ``forcing_data``.
         """
-        corrector = self._build_corrector(dataset_info)
+        corrector = self.build_without_discovery(dataset_info)
         corrector.discover_modified_names(
             input_names=input_names,
             gen_names=gen_names,
@@ -84,13 +84,16 @@ class CorrectorConfigABC(abc.ABC):
         return corrector
 
     @final
-    def _build_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
+    def build_without_discovery(self, dataset_info: DatasetInfo) -> "CorrectorABC":
         """Build the corrector, applying ``corrector_disabled_epochs``, without
         running discovery.
 
-        Exists so that a config which delegates to another config (see
-        ``CorrectorSelector``) can compose the build without triggering a
-        second discovery pass.
+        The first phase of the two-phase build, public so that a config which
+        delegates to another config (see ``CorrectorSelector``) can compose the
+        build without triggering a second discovery pass. Callers other than
+        such a delegating config want ``get_corrector``, which runs both
+        phases; a corrector returned from here reports no ``modified_names``
+        until discovery has run on it.
         """
         corrector = self._get_corrector(dataset_info)
         if self.corrector_disabled_epochs == 0:

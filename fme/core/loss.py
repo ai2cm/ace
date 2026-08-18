@@ -812,7 +812,12 @@ class LossConfig:
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
             raise NotImplementedError(self.global_mean_type)
 
-    def validate(self, *, pointwise_against_target: bool = False) -> None:
+    def validate(
+        self,
+        *,
+        pointwise_against_target: bool = False,
+        absolute_scale: bool = False,
+    ) -> None:
         """Raise if this configuration does not satisfy the named invariants.
 
         Args:
@@ -821,6 +826,10 @@ class LossConfig:
                 ``EnsembleLoss`` compares distributions, ``NaN`` ignores the
                 prediction, and a global-mean term is not pointwise, so all
                 three are rejected.
+            absolute_scale: Require a loss whose value does not depend on the
+                magnitude of the target. ``LpLoss`` divides by the target norm,
+                so a caller whose target is a constant field gets a value
+                rescaled by that constant, and ``0/0`` where it is zero.
         """
         if pointwise_against_target:
             if self.type in ("EnsembleLoss", "NaN"):
@@ -832,6 +841,20 @@ class LossConfig:
                 raise ValueError(
                     "global_mean_type is not a pointwise comparison against "
                     "target values."
+                )
+        if absolute_scale:
+            if self.type == "LpLoss":
+                raise ValueError(
+                    "loss type 'LpLoss' is relative: it divides by the norm of "
+                    "the target, so its value depends on the target magnitude. "
+                    "Use an absolute loss such as 'MSE', 'L1', or "
+                    "'AreaWeightedMSE' here."
+                )
+            if self.global_mean_type == "LpLoss":
+                raise ValueError(
+                    "global_mean_type 'LpLoss' is relative: it divides by the "
+                    "norm of the target global mean, so its value depends on "
+                    "the target magnitude."
                 )
 
     def build(
@@ -1036,6 +1059,14 @@ class CorrectorRegularizer(torch.nn.Module):
         an affine normalizer the means cancel and this penalizes ``delta/std``.
         The mask is the main loss's, so both halves of the step total average
         over the same samples per channel.
+
+        NaN-filled delta points are zeroed on both sides by
+        ``WeightedMappingLoss``, matching how the main loss treats a NaN
+        target: they enter the channel mean contributing zero, so the penalty
+        is diluted by the masked fraction rather than renormalized over the
+        kept points. With ``fill_nans_on_normalize`` set on the loss
+        normalizer the NaN is filled before that mask is taken, and no point
+        is zeroed at all.
         """
         selected: TensorDict = {}
         targets: TensorDict = {}
@@ -1043,7 +1074,8 @@ class CorrectorRegularizer(torch.nn.Module):
             _require_delta(deltas, name, "regularization")
             delta = deltas[name]
             selected[name] = delta
-            # NaN target where the delta is NaN-filled, so masked points drop out.
+            # NaN target where the delta is NaN-filled; see the docstring for
+            # what the downstream loss does with it.
             targets[name] = torch.where(
                 delta.isnan(),
                 torch.full_like(delta, torch.nan),
