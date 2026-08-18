@@ -83,14 +83,19 @@ class StepDiscriminator:
 
     @contextlib.contextmanager
     def gradient_sync_disabled(self):
-        """Context under which forward passes do not sync gradients across
-        ranks on backward.
+        """Context under which forward passes do not arm gradient syncing.
 
         Used for forward passes whose gradients with respect to discriminator
-        parameters will be discarded (the generator's adversarial term), so
-        the single synchronized backward per batch is the discriminator's own
-        loss. ``no_sync`` only exists on DistributedDataParallel, hence the
-        isinstance check; other wrappers have nothing to disable.
+        parameters will be discarded (the generator's adversarial term).
+        ``no_sync`` marks the forwards it wraps, not a graph: a forward under
+        it does not call the DDP reducer's ``prepare_for_backward``, so a
+        later backward through that graph fires no reduction (grads still
+        accumulate locally and must be discarded by the caller). The
+        discriminator's own loss must therefore run its forwards *outside*
+        this context and immediately precede its backward, so that backward
+        is the one the armed reducer services. ``no_sync`` only exists on
+        DistributedDataParallel, hence the isinstance check; other wrappers
+        have nothing to disable.
         """
         torch_module = self._module.torch_module
         if isinstance(torch_module, DistributedDataParallel):
@@ -137,31 +142,6 @@ class StepDiscriminator:
         self._module.load_state(state["module"])
 
 
-@dataclasses.dataclass
-class GanStepLosses:
-    """Adversarial losses and diagnostics for one forward step.
-
-    Parameters:
-        generator_loss: Non-saturating generator term (how strongly the
-            discriminator rejects the generated pair), with gradients flowing
-            into the generator. Unweighted.
-        discriminator_loss: The discriminator's training loss (real + fake
-            sides), with gradients flowing only into the discriminator.
-        discriminator_loss_real: Detached real-side component.
-        discriminator_loss_fake: Detached fake-side component.
-        score_real: Detached mean sigmoid score on real pairs (1 = confidently
-            real; 0.5 at equilibrium).
-        score_fake: Detached mean sigmoid score on generated pairs.
-    """
-
-    generator_loss: torch.Tensor
-    discriminator_loss: torch.Tensor
-    discriminator_loss_real: torch.Tensor
-    discriminator_loss_fake: torch.Tensor
-    score_real: torch.Tensor
-    score_fake: torch.Tensor
-
-
 def _area_weighted_bce(
     logits: torch.Tensor,
     target_value: float,
@@ -183,58 +163,152 @@ def _detached(data: TensorMapping) -> TensorDict:
     return {k: v.detach() for k, v in data.items()}
 
 
-def compute_gan_step_losses(
+def compute_generator_adversarial_loss(
     discriminator: StepDiscriminator,
     gridded_operations: GriddedOperations,
-    real_input: TensorMapping,
-    real_output: TensorMapping,
     fake_input: TensorMapping,
     fake_output: TensorMapping,
-    real_labels: BatchLabels | None = None,
     fake_labels: BatchLabels | None = None,
-) -> GanStepLosses:
+) -> torch.Tensor:
     """
-    Compute non-saturating GAN losses for one forward step.
+    Compute the non-saturating generator adversarial term for one step.
 
-    The generated pair is judged twice: once with gradients flowing into the
-    generator (the generator's adversarial term, computed with gradient sync
-    disabled since its discriminator-parameter gradients are discarded), and
-    once fully detached for the discriminator's own loss. Real and fake sides
-    of the discriminator loss are averaged separately, so differing batch
-    sizes (e.g. ensemble members on the fake side only) stay balanced.
+    Gradients flow through the discriminator into the generator; the
+    discriminator's own parameter gradients from this term are discarded by
+    the caller, so the forward runs under ``gradient_sync_disabled`` (no DDP
+    reduction is armed for the generator's backward).
 
     Args:
-        discriminator: The discriminator to evaluate and train.
+        discriminator: The discriminator judging the pair.
         gridded_operations: Provides the area-weighted spherical mean reducing
             per-pixel binary cross-entropy to a scalar.
-        real_input: Denormalized input-timestep data from the dataset.
-        real_output: Denormalized output-timestep data from the dataset.
         fake_input: Denormalized input the model consumed this step (already
             detached from previous steps when the host detaches between
             steps).
         fake_output: Denormalized model output for this step.
-        real_labels: Labels for the real pairs' batch members.
         fake_labels: Labels for the generated pairs' batch members.
 
     Returns:
-        The step's adversarial losses and detached diagnostics.
+        Unweighted generator adversarial loss (how strongly the discriminator
+        rejects the generated pair).
     """
     with discriminator.gradient_sync_disabled():
         generator_logits = discriminator.forward(
             fake_input, fake_output, labels=fake_labels
         )
-    generator_loss = _area_weighted_bce(generator_logits, 1.0, gridded_operations)
-    fake_logits = discriminator.forward(
-        _detached(fake_input), _detached(fake_output), labels=fake_labels
-    )
-    real_logits = discriminator.forward(real_input, real_output, labels=real_labels)
-    loss_real = _area_weighted_bce(real_logits, 1.0, gridded_operations)
-    loss_fake = _area_weighted_bce(fake_logits, 0.0, gridded_operations)
-    return GanStepLosses(
-        generator_loss=generator_loss,
-        discriminator_loss=loss_real + loss_fake,
-        discriminator_loss_real=loss_real.detach(),
-        discriminator_loss_fake=loss_fake.detach(),
-        score_real=_area_weighted_score(real_logits, gridded_operations),
-        score_fake=_area_weighted_score(fake_logits, gridded_operations),
+    return _area_weighted_bce(generator_logits, 1.0, gridded_operations)
+
+
+@dataclasses.dataclass
+class GanStepPair:
+    """Real and generated (input, output) pairs for one optimized step,
+    cached so the discriminator's own loss can run after the generator's
+    optimizer step (its forwards must immediately precede its backward for
+    DDP gradient reduction to service it; see
+    ``StepDiscriminator.gradient_sync_disabled``).
+
+    The fake side is detached so the discriminator loss cannot backpropagate
+    into the generator.
+    """
+
+    real_input: TensorDict
+    real_output: TensorDict
+    fake_input: TensorDict
+    fake_output: TensorDict
+    real_labels: BatchLabels | None
+    fake_labels: BatchLabels | None
+
+    @classmethod
+    def from_step_data(
+        cls,
+        real_input: TensorMapping,
+        real_output: TensorMapping,
+        fake_input: TensorMapping,
+        fake_output: TensorMapping,
+        real_labels: BatchLabels | None,
+        fake_labels: BatchLabels | None,
+    ) -> "GanStepPair":
+        return cls(
+            real_input=dict(real_input),
+            real_output=dict(real_output),
+            fake_input=_detached(fake_input),
+            fake_output=_detached(fake_output),
+            real_labels=real_labels,
+            fake_labels=fake_labels,
+        )
+
+
+@dataclasses.dataclass
+class DiscriminatorLosses:
+    """The discriminator's training loss and detached diagnostics, aggregated
+    over the batch's optimized steps.
+
+    Parameters:
+        loss: The discriminator's training loss (real + fake sides, summed
+            over steps), with gradients flowing only into the discriminator.
+        loss_real: Detached real-side component, averaged over steps.
+        loss_fake: Detached fake-side component, averaged over steps.
+        score_real: Detached mean sigmoid score on real pairs, averaged over
+            steps (1 = confidently real; 0.5 at equilibrium).
+        score_fake: Detached mean sigmoid score on generated pairs, averaged
+            over steps.
+    """
+
+    loss: torch.Tensor
+    loss_real: torch.Tensor
+    loss_fake: torch.Tensor
+    score_real: torch.Tensor
+    score_fake: torch.Tensor
+
+
+def compute_discriminator_losses(
+    discriminator: StepDiscriminator,
+    gridded_operations: GriddedOperations,
+    pairs: list[GanStepPair],
+) -> DiscriminatorLosses:
+    """
+    Compute the discriminator's training loss over a batch's optimized steps.
+
+    Real and fake sides are averaged separately per step, so differing batch
+    sizes (e.g. ensemble members on the fake side only) stay balanced; steps
+    are summed. All forwards run before the caller's single backward — under
+    DDP they arm the reducer that backward services, so this must be the
+    discriminator's final forward-backward of the batch (see
+    ``StepDiscriminator.gradient_sync_disabled``).
+
+    Args:
+        discriminator: The discriminator to train.
+        gridded_operations: Provides the area-weighted spherical mean reducing
+            per-pixel binary cross-entropy to a scalar.
+        pairs: One real/fake pair per optimized step.
+
+    Returns:
+        The discriminator's loss and detached diagnostics.
+    """
+    if not pairs:
+        raise ValueError("pairs must be non-empty")
+    losses_real = []
+    losses_fake = []
+    scores_real = []
+    scores_fake = []
+    for pair in pairs:
+        fake_logits = discriminator.forward(
+            pair.fake_input, pair.fake_output, labels=pair.fake_labels
+        )
+        real_logits = discriminator.forward(
+            pair.real_input, pair.real_output, labels=pair.real_labels
+        )
+        losses_real.append(_area_weighted_bce(real_logits, 1.0, gridded_operations))
+        losses_fake.append(_area_weighted_bce(fake_logits, 0.0, gridded_operations))
+        scores_real.append(_area_weighted_score(real_logits, gridded_operations))
+        scores_fake.append(_area_weighted_score(fake_logits, gridded_operations))
+    loss_real = torch.stack(losses_real).sum()
+    loss_fake = torch.stack(losses_fake).sum()
+    n_steps = len(pairs)
+    return DiscriminatorLosses(
+        loss=loss_real + loss_fake,
+        loss_real=loss_real.detach() / n_steps,
+        loss_fake=loss_fake.detach() / n_steps,
+        score_real=torch.stack(scores_real).mean(),
+        score_fake=torch.stack(scores_fake).mean(),
     )

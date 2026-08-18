@@ -68,6 +68,7 @@ from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.test_registry import ConstantOffsetCorrection
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import AggregatorABC, AggregatorSummary
 from fme.core.generics.data import GriddedDataABC
 from fme.core.generics.optimization import OptimizationABC
@@ -3242,13 +3243,14 @@ def _get_gan_stepper_config(discriminator_module: torch.nn.Module) -> StepperCon
 def _get_gan_train_stepper(
     discriminator_module: torch.nn.Module,
     discriminator_loss_weight: float = 0.5,
+    n_ensemble: int = 1,
     **train_config_kwargs,
 ) -> TrainStepper:
     return _get_train_stepper(
         _get_gan_stepper_config(discriminator_module),
         discriminator_loss_weight=discriminator_loss_weight,
         discriminator_optimization=OptimizationConfig(optimizer_type="Adam", lr=0.01),
-        n_ensemble=1,
+        n_ensemble=n_ensemble,
         **train_config_kwargs,
     )
 
@@ -3390,8 +3392,9 @@ def test_gan_discriminator_judges_dataset_transitions_against_generated_pairs():
     train_stepper = _get_gan_train_stepper(discriminator_module)
     data = get_data(["a", "b"], n_samples=2, n_time=3).data
     train_stepper.train_on_batch(data, NullOptimization())
-    # per optimized step, three judgments in order: generated pair with
-    # generator gradients, generated pair detached, dataset transition
+    # in the step loop, one generator-gradient judgment per optimized step;
+    # then after the generator's optimizer step, per step: generated pair
+    # detached, dataset transition
     assert len(records) == 6
     input_channels = slice(0, 2)
     output_channels = slice(2, 4)
@@ -3403,18 +3406,22 @@ def test_gan_discriminator_judges_dataset_transitions_against_generated_pairs():
 
     # normalization is trivial (mean 0, std 1) and the generator adds one,
     # so generated values are directly comparable to the data
-    step1_real = records[5]
-    torch.testing.assert_close(step1_real[:, input_channels], packed(1))
-    torch.testing.assert_close(step1_real[:, output_channels], packed(2))
-    step1_generated = records[3]
-    torch.testing.assert_close(step1_generated[:, input_channels], packed(0) + 1)
-    torch.testing.assert_close(step1_generated[:, output_channels], packed(0) + 2)
-    step0_real = records[2]
-    torch.testing.assert_close(step0_real[:, input_channels], packed(0))
-    torch.testing.assert_close(step0_real[:, output_channels], packed(1))
     step0_generated = records[0]
     torch.testing.assert_close(step0_generated[:, input_channels], packed(0))
     torch.testing.assert_close(step0_generated[:, output_channels], packed(0) + 1)
+    step1_generated = records[1]
+    torch.testing.assert_close(step1_generated[:, input_channels], packed(0) + 1)
+    torch.testing.assert_close(step1_generated[:, output_channels], packed(0) + 2)
+    step0_fake_detached = records[2]
+    torch.testing.assert_close(step0_fake_detached, step0_generated)
+    step0_real = records[3]
+    torch.testing.assert_close(step0_real[:, input_channels], packed(0))
+    torch.testing.assert_close(step0_real[:, output_channels], packed(1))
+    step1_fake_detached = records[4]
+    torch.testing.assert_close(step1_fake_detached, step1_generated)
+    step1_real = records[5]
+    torch.testing.assert_close(step1_real[:, input_channels], packed(1))
+    torch.testing.assert_close(step1_real[:, output_channels], packed(2))
 
 
 @pytest.mark.parametrize("use_gradient_accumulation", [False, True])
@@ -3498,3 +3505,240 @@ def test_gan_train_stepper_warm_starts_from_checkpoint_without_discriminator():
     assert train_stepper._discriminator is not None
     (weight,) = train_stepper._discriminator.modules.parameters()
     torch.testing.assert_close(weight, torch.full_like(weight, 0.3))
+
+
+def test_gan_real_pair_uses_next_step_forcing_from_next_timestep():
+    """A next-step forcing variable enters the real pair's input at step + 1,
+    matching the convention of the generator's own inputs."""
+    torch.manual_seed(0)
+    records: list[torch.Tensor] = []
+
+    class ChannelMeanLogits(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.full((1,), 0.3))
+
+        def forward(self, x):
+            records.append(x)
+            return x.mean(dim=-3, keepdim=True) * self.weight
+
+    class DropForcingAddOne(torch.nn.Module):
+        """Maps (a, b, f) input channels to (a, b) outputs."""
+
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.zeros(1))
+
+        def forward(self, x):
+            return x[:, :2] + 1 + self.weight
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": DropForcingAddOne()}
+                    ),
+                    in_names=["a", "b", "f"],
+                    out_names=["a", "b"],
+                    normalization=trivial_network_and_loss_normalization(
+                        ["a", "b", "f"]
+                    ),
+                    next_step_forcing_names=["f"],
+                    discriminator=ModuleSelector(
+                        type="prebuilt", config={"module": ChannelMeanLogits()}
+                    ),
+                )
+            ),
+        ),
+    )
+    train_stepper = _get_train_stepper(
+        config,
+        discriminator_loss_weight=0.5,
+        discriminator_optimization=OptimizationConfig(optimizer_type="Adam", lr=0.01),
+        n_ensemble=1,
+    )
+    data = get_data(["a", "b", "f"], n_samples=2, n_time=2).data
+    train_stepper.train_on_batch(data, NullOptimization())
+    # one optimized step: generator judgment, then detached fake, then real
+    assert len(records) == 3
+    forcing_channel = 2  # packed in the discriminator's in_names order
+    real = records[2]
+    torch.testing.assert_close(real[:, forcing_channel], data.data["f"][:, 1])
+    torch.testing.assert_close(real[:, 0], data.data["a"][:, 0])
+    fake = records[1]
+    torch.testing.assert_close(fake[:, forcing_channel], data.data["f"][:, 1])
+
+
+def test_gan_fake_side_folds_ensemble_members():
+    """With n_ensemble > 1 the generated pairs fold the ensemble into the
+    batch dimension while the real side keeps the data batch size."""
+    torch.manual_seed(0)
+    discriminator_module, records = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(
+        discriminator_module,
+        n_ensemble=2,
+        loss=StepLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 0.9, "energy_score_weight": 0.1},
+        ),
+    )
+    data = get_data(["a", "b"], n_samples=3, n_time=2).data
+    optimization = OptimizationConfig(optimizer_type="Adam", lr=1e-3).build(
+        train_stepper.modules, max_epochs=1
+    )
+    output = train_stepper.train_on_batch(data, optimization)
+    assert len(records) == 3
+    generated, fake_detached, real = records
+    assert generated.shape[0] == 6
+    assert fake_detached.shape[0] == 6
+    assert real.shape[0] == 3
+    assert "discriminator_loss_real" in output.metrics
+    assert "discriminator_loss_fake" in output.metrics
+
+
+def test_gan_training_with_gradient_accumulation():
+    """The adversarial term is part of the same accumulated per-step loss, so
+    gradient-accumulation mode (backward inside the step loop) must train both
+    networks."""
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    data = get_data(["a", "b"], n_samples=3, n_time=3).data
+    optimization = OptimizationConfig(
+        optimizer_type="Adam", lr=1e-3, use_gradient_accumulation=True
+    ).build(train_stepper.modules, max_epochs=1)
+    assert train_stepper._discriminator is not None
+    generator_params_before = [
+        p.detach().clone() for p in train_stepper.modules.parameters()
+    ]
+    discriminator_params_before = [
+        p.detach().clone() for p in train_stepper._discriminator.modules.parameters()
+    ]
+    output = train_stepper.train_on_batch(data, optimization)
+    assert torch.isfinite(output.metrics["loss"])
+    assert any(
+        not torch.equal(before, after)
+        for before, after in zip(
+            generator_params_before, train_stepper.modules.parameters()
+        )
+    )
+    assert any(
+        not torch.equal(before, after)
+        for before, after in zip(
+            discriminator_params_before,
+            train_stepper._discriminator.modules.parameters(),
+        )
+    )
+
+
+def test_get_train_stepper_builds_mirrored_discriminator_optimizer():
+    """The end-to-end construction path mirrors the run's main optimization
+    config for the discriminator, minus scheduler and gradient accumulation."""
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    config = TrainStepperConfig(discriminator_loss_weight=0.5, n_ensemble=1)
+    default_optimization = OptimizationConfig(
+        optimizer_type="AdamW",
+        lr=3e-4,
+        kwargs={"weight_decay": 0.01},
+        scheduler=SchedulerConfig(type="CosineAnnealingLR"),
+        use_gradient_accumulation=True,
+    )
+    train_stepper = config.get_train_stepper(
+        _get_gan_stepper_config(discriminator_module),
+        get_dataset_info(),
+        default_optimization=default_optimization,
+    )
+    discriminator_optimization = train_stepper._discriminator_optimization
+    assert discriminator_optimization is not None
+    assert isinstance(discriminator_optimization.optimizer, torch.optim.AdamW)
+    assert discriminator_optimization.learning_rate == 3e-4
+    assert not discriminator_optimization._use_gradient_accumulation
+
+
+def test_gan_data_mask_raises_not_implemented():
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    data = get_data(["a", "b"], n_samples=2, n_time=2).data
+    data.data_mask = {"a": torch.ones(2, dtype=torch.bool, device=DEVICE)}
+    with pytest.raises(NotImplementedError, match="data_mask"):
+        train_stepper.train_on_batch(data, NullOptimization())
+
+
+def test_train_stepper_eval_construction_for_gan_checkpoint():
+    """The inference evaluator constructs a TrainStepper (training=False) with
+    a validation config unrelated to how the checkpoint was trained; this must
+    work for a GAN checkpoint, must not update the discriminator, and must
+    still log its monitor metrics."""
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    stepper = _get_gan_stepper_config(discriminator_module).get_stepper(
+        get_dataset_info()
+    )
+    train_stepper = TrainStepper(
+        stepper=stepper, config=TrainStepperConfig(n_ensemble=1), training=False
+    )
+    assert train_stepper._discriminator_optimization is None
+    # a positive weight with no optimization config to mirror also constructs
+    TrainStepper(
+        stepper=stepper,
+        config=TrainStepperConfig(discriminator_loss_weight=0.1, n_ensemble=1),
+        training=False,
+    )
+    data = get_data(["a", "b"], n_samples=2, n_time=3).data
+    assert train_stepper._discriminator is not None
+    discriminator_params_before = [
+        p.detach().clone() for p in train_stepper._discriminator.modules.parameters()
+    ]
+    metrics = train_stepper.train_on_batch(data, NullOptimization()).metrics
+    assert "discriminator_score_real" in metrics
+    torch.testing.assert_close(
+        metrics["loss"], metrics["loss_step_0"] + metrics["loss_step_1"]
+    )
+    for before, after in zip(
+        discriminator_params_before,
+        train_stepper._discriminator.modules.parameters(),
+    ):
+        assert torch.equal(before, after)
+
+
+@pytest.mark.parallel
+def test_gan_training_synchronizes_parameters_across_ranks():
+    """Each rank trains on different data; after one batch both the generator
+    and the discriminator must hold identical parameters on every rank — the
+    discriminator's own backward is the one DDP reduces (its real/fake
+    forwards run last, after the generator's optimizer step)."""
+    dist = Distributed.get_instance()
+    if dist.has_spatial_parallelism:
+        pytest.skip("GAN training is exercised data-parallel only")
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(discriminator_module)
+    optimization = OptimizationConfig(optimizer_type="Adam", lr=1e-3).build(
+        train_stepper.modules, max_epochs=1
+    )
+    assert train_stepper._discriminator is not None
+    discriminator_params_before = [
+        p.detach().clone() for p in train_stepper._discriminator.modules.parameters()
+    ]
+    # Multiple batches: Adam's first update is lr * sign(grad), which hides
+    # unsynchronized gradients of equal sign; divergence of the second-moment
+    # estimates across ranks exposes them from the second update on.
+    for batch in range(3):
+        torch.manual_seed(1 + batch * dist.world_size + dist.rank)
+        data = get_data(["a", "b"], n_samples=2, n_time=3).data
+        train_stepper.train_on_batch(data, optimization)
+    # the discriminator actually updated (otherwise the cross-rank check
+    # below would pass vacuously)
+    assert any(
+        not torch.equal(before, after)
+        for before, after in zip(
+            discriminator_params_before,
+            train_stepper._discriminator.modules.parameters(),
+        )
+    )
+    for module in (train_stepper.modules, train_stepper._discriminator.modules):
+        for param in module.parameters():
+            local = param.detach().clone()
+            torch.testing.assert_close(dist.reduce_max(param.detach().clone()), local)
+            torch.testing.assert_close(dist.reduce_min(param.detach().clone()), local)

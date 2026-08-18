@@ -254,12 +254,26 @@ class SingleModuleStepConfig(StepConfigABC):
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        if self.discriminator is not None:
+            # Wraps DistributedDataParallel internally, so ranks start from
+            # rank 0's weights without joining init_weights (parameter_init
+            # loads donor generators, which carry no discriminator).
+            discriminator: StepDiscriminator | None = StepDiscriminator(
+                builder=self.discriminator,
+                in_names=self.in_names,
+                out_names=self.out_names,
+                normalizer=normalizer,
+                dataset_info=dataset_info,
+            )
+        else:
+            discriminator = None
         return SingleModuleStep(
             config=self,
             dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
             init_weights=init_weights,
+            discriminator=discriminator,
         )
 
     def load(self):
@@ -281,6 +295,7 @@ class SingleModuleStep(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         init_weights: Callable[[list[nn.Module]], None],
+        discriminator: StepDiscriminator | None = None,
     ):
         """
         Args:
@@ -290,6 +305,10 @@ class SingleModuleStep(StepABC):
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the module.
+            discriminator: Optional discriminator judging (input, output)
+                timestep pairs. Excluded from ``modules`` (and so from
+                ``init_weights``); optimized separately by the training
+                stepper.
         """
         super().__init__()
         if config.global_mean_removal is not None:
@@ -345,19 +364,7 @@ class SingleModuleStep(StepABC):
         else:
             self.secondary_decoder = NoSecondaryDecoder()
 
-        if config.discriminator is not None:
-            # Wraps DistributedDataParallel internally, so ranks start from
-            # rank 0's weights without joining init_weights (parameter_init
-            # loads donor generators, which carry no discriminator).
-            self._discriminator: StepDiscriminator | None = StepDiscriminator(
-                builder=config.discriminator,
-                in_names=config.in_names,
-                out_names=config.out_names,
-                normalizer=normalizer,
-                dataset_info=dataset_info,
-            )
-        else:
-            self._discriminator = None
+        self._discriminator = discriminator
 
         init_weights(self.modules)
         self._img_shape = dataset_info.img_shape

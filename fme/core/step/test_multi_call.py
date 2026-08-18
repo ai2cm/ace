@@ -286,3 +286,30 @@ def test_loss_normalizer_uses_extra_stats_names(include_multi_call_in_loss: bool
             "b_doubled_co2",
             "b_halved_co2",
         }
+
+
+def test_multi_call_step_forwards_discriminator():
+    """A discriminator defined by the wrapped step must stay visible through
+    the wrapper, or the training stepper would silently ignore it (and its
+    weight-0 configuration guard would be bypassed)."""
+    config = MultiCallStepConfig(
+        wrapped_step=StepSelector(
+            type="mock",
+            config={"in_names": ["CO2", "a", "b"], "out_names": ["b", "c"]},
+        ),
+        config=MultiCallConfig(
+            forcing_name="CO2",
+            forcing_multipliers={"_doubled_co2": 2},
+            output_names=["c"],
+        ),
+    )
+    step = config.get_step(DatasetInfo(), lambda x: None)
+    assert step.discriminator is None
+    sentinel = unittest.mock.Mock()
+    with unittest.mock.patch.object(
+        type(step._wrapped_step),
+        "discriminator",
+        new_callable=unittest.mock.PropertyMock,
+        return_value=sentinel,
+    ):
+        assert step.discriminator is sentinel

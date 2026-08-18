@@ -7,7 +7,12 @@ from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import StandardNormalizer
 from fme.core.registry import ModuleSelector
-from fme.core.step.discriminator import StepDiscriminator, compute_gan_step_losses
+from fme.core.step.discriminator import (
+    GanStepPair,
+    StepDiscriminator,
+    compute_discriminator_losses,
+    compute_generator_adversarial_loss,
+)
 from fme.core.testing.dataset_info import get_dataset_info
 
 IN_NAMES = ["a", "b"]
@@ -100,25 +105,41 @@ def _get_gridded_operations() -> LatLonOperations:
     return LatLonOperations(torch.ones(*IMG_SHAPE))
 
 
-def test_gan_step_losses_at_chance_logits():
+def _get_gan_pair(
+    real_input: dict, real_output: dict, fake_input: dict, fake_output: dict
+) -> GanStepPair:
+    return GanStepPair.from_step_data(
+        real_input=real_input,
+        real_output=real_output,
+        fake_input=fake_input,
+        fake_output=fake_output,
+        real_labels=None,
+        fake_labels=None,
+    )
+
+
+def test_gan_losses_at_chance_logits():
     """A zero-logit discriminator is at equilibrium: both sides score 0.5 and
     every BCE term is ln(2)."""
     discriminator = _get_discriminator(module=_ChannelMeanLogits(weight=0.0))
     real_input, real_output = _get_pair()
     fake_input, fake_output = _get_pair()
-    losses = compute_gan_step_losses(
+    generator_loss = compute_generator_adversarial_loss(
         discriminator=discriminator,
         gridded_operations=_get_gridded_operations(),
-        real_input=real_input,
-        real_output=real_output,
         fake_input=fake_input,
         fake_output=fake_output,
     )
-    ln2 = torch.tensor(math.log(2.0), device=losses.generator_loss.device)
-    torch.testing.assert_close(losses.generator_loss, ln2)
-    torch.testing.assert_close(losses.discriminator_loss_real, ln2)
-    torch.testing.assert_close(losses.discriminator_loss_fake, ln2)
-    torch.testing.assert_close(losses.discriminator_loss, 2 * ln2)
+    losses = compute_discriminator_losses(
+        discriminator=discriminator,
+        gridded_operations=_get_gridded_operations(),
+        pairs=[_get_gan_pair(real_input, real_output, fake_input, fake_output)],
+    )
+    ln2 = torch.tensor(math.log(2.0), device=generator_loss.device)
+    torch.testing.assert_close(generator_loss, ln2)
+    torch.testing.assert_close(losses.loss_real, ln2)
+    torch.testing.assert_close(losses.loss_fake, ln2)
+    torch.testing.assert_close(losses.loss, 2 * ln2)
     torch.testing.assert_close(
         losses.score_real, torch.full_like(losses.score_real, 0.5)
     )
@@ -127,23 +148,54 @@ def test_gan_step_losses_at_chance_logits():
     )
 
 
-def test_generator_loss_flows_into_fake_pair_only():
+def test_discriminator_losses_aggregate_over_steps():
+    """The backward loss sums steps; the diagnostics average them."""
+    discriminator = _get_discriminator(module=_ChannelMeanLogits(weight=0.0))
+    pairs = []
+    for _ in range(3):
+        real_input, real_output = _get_pair()
+        fake_input, fake_output = _get_pair()
+        pairs.append(_get_gan_pair(real_input, real_output, fake_input, fake_output))
+    losses = compute_discriminator_losses(
+        discriminator=discriminator,
+        gridded_operations=_get_gridded_operations(),
+        pairs=pairs,
+    )
+    ln2 = torch.tensor(math.log(2.0), device=losses.loss.device)
+    torch.testing.assert_close(losses.loss, 6 * ln2)
+    torch.testing.assert_close(losses.loss_real, ln2)
+    torch.testing.assert_close(losses.loss_fake, ln2)
+
+
+def test_discriminator_losses_require_pairs():
+    discriminator = _get_discriminator()
+    with pytest.raises(ValueError, match="non-empty"):
+        compute_discriminator_losses(
+            discriminator=discriminator,
+            gridded_operations=_get_gridded_operations(),
+            pairs=[],
+        )
+
+
+def test_generator_loss_flows_into_fake_pair_and_discriminator():
+    """The generator's adversarial term backpropagates into the generated pair
+    and (as a side effect discarded by the trainer via zero_gradients) into the
+    discriminator's parameters — but never into the real pair."""
     discriminator = _get_discriminator(module=_ChannelMeanLogits(weight=0.5))
-    real_input, real_output = _get_pair()
     fake_input, fake_output = _get_pair()
     for tensor in list(fake_input.values()) + list(fake_output.values()):
         tensor.requires_grad_(True)
-    losses = compute_gan_step_losses(
+    generator_loss = compute_generator_adversarial_loss(
         discriminator=discriminator,
         gridded_operations=_get_gridded_operations(),
-        real_input=real_input,
-        real_output=real_output,
         fake_input=fake_input,
         fake_output=fake_output,
     )
-    losses.generator_loss.backward()
+    generator_loss.backward()
     assert fake_output["b"].grad is not None
     assert fake_input["a"].grad is not None
+    (weight,) = discriminator.modules[0].parameters()
+    assert weight.grad is not None
 
 
 def test_discriminator_loss_does_not_flow_into_generator():
@@ -152,15 +204,12 @@ def test_discriminator_loss_does_not_flow_into_generator():
     fake_input, fake_output = _get_pair()
     for tensor in list(fake_input.values()) + list(fake_output.values()):
         tensor.requires_grad_(True)
-    losses = compute_gan_step_losses(
+    losses = compute_discriminator_losses(
         discriminator=discriminator,
         gridded_operations=_get_gridded_operations(),
-        real_input=real_input,
-        real_output=real_output,
-        fake_input=fake_input,
-        fake_output=fake_output,
+        pairs=[_get_gan_pair(real_input, real_output, fake_input, fake_output)],
     )
-    losses.discriminator_loss.backward()
+    losses.loss.backward()
     assert all(tensor.grad is None for tensor in fake_input.values())
     assert all(tensor.grad is None for tensor in fake_output.values())
     (weight,) = discriminator.modules[0].parameters()
@@ -171,17 +220,14 @@ def test_detached_diagnostics_carry_no_graph():
     discriminator = _get_discriminator(module=_ChannelMeanLogits(weight=0.5))
     real_input, real_output = _get_pair()
     fake_input, fake_output = _get_pair()
-    losses = compute_gan_step_losses(
+    losses = compute_discriminator_losses(
         discriminator=discriminator,
         gridded_operations=_get_gridded_operations(),
-        real_input=real_input,
-        real_output=real_output,
-        fake_input=fake_input,
-        fake_output=fake_output,
+        pairs=[_get_gan_pair(real_input, real_output, fake_input, fake_output)],
     )
     for diagnostic in [
-        losses.discriminator_loss_real,
-        losses.discriminator_loss_fake,
+        losses.loss_real,
+        losses.loss_fake,
         losses.score_real,
         losses.score_fake,
     ]:
