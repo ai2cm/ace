@@ -398,6 +398,11 @@ class CoupledDatasetsConfig:
     )
 
     def validate(self, input_datasets: InputDatasetsConfig):
+        self.coupled_sea_ice.validate(
+            sea_ice_dataset_configured=not isinstance(
+                input_datasets.sea_ice, NullCoupledInputDatasetConfig
+            )
+        )
         if self.coupled_sea_surface is None:
             if self.coupled_ts is not None:
                 raise ValueError(

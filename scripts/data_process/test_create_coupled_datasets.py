@@ -106,7 +106,8 @@ def _make_config(tmp_path):
         output_directory=str(output_dir),
         coupled_datasets=CoupledDatasetsConfig(
             coupled_sea_ice=CoupledSeaIceConfig(
-                window_avg=WindowAvgDatasetConfig(
+                use_atmosphere_sea_ice_fraction=True,
+                sea_ice_fraction_resampling=WindowAvgDatasetConfig(
                     window_timedelta="120h", first_timestamp=FIRST_WINDOW_END
                 ),
             ),

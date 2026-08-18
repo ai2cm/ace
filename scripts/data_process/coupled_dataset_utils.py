@@ -409,52 +409,109 @@ class CoupledSeaIceConfig:
     """Configuration for computing the coupled sea ice dataset.
 
     Parameters:
-        window_avg: Optional configuration for windowed time-averaging of the
-            coupled sea ice dataset.
-        include_ts: If true, then the atmosphere surface temperature field is added
-            to the output dataset. If window_avg is also configured, then the window-
-            average is applied to ocean grid cells only based on the forumula
-            (1 - ofrac_window_avg) * ts + ofrac_window_avg * ts_window_avg.
-        use_atmosphere_sea_ice_fraction_fallback: If true, the atmosphere's own
-            sea ice fraction may be used as the sea ice source when no separate
-            sea ice dataset is provided and the ocean-sourced path does not
-            apply. If false (the default), reaching that fallback raises a
-            ValueError, so a misconfiguration (e.g. a missing ocean sea ice
-            variable, or an unintentionally configured window_avg) fails loudly
-            instead of silently training on the atmosphere's own field.
+        use_atmosphere_sea_ice_fraction: If true, the sea ice fractions are
+            computed from the atmosphere's own sea ice fraction, and a
+            configured sea ice input dataset is not consulted for them. If
+            false (the default), the fractions come from a configured sea ice
+            input dataset, and from the ocean dataset when there is none.
+        sea_ice_fraction_resampling: Optional configuration for resampling the
+            sea ice fraction fields in time, reindexed back onto the
+            atmosphere's time coordinate by forward fill. Valid only when the
+            fractions come from a sea ice dataset or from the atmosphere; the
+            ocean-sourced fractions are already at the ocean's cadence.
+        include_ts: If true, the atmosphere surface temperature field is added
+            to the output dataset.
+        ts_resampling: Optional configuration for resampling the ocean-side
+            ingredient sst of the include_ts blend
+            (1 - ofrac) * ts + ofrac * sst, where ofrac is the emitted ocean
+            fraction. When None, the ocean-sourced route samples ts at the
+            ocean instants and the other routes emit the instantaneous ts
+            unblended.
         timedelta: Time resolution of the sea ice data (default: "6h").
 
     """
 
-    window_avg: WindowAvgDatasetConfig | None = None
+    use_atmosphere_sea_ice_fraction: bool = False
+    sea_ice_fraction_resampling: WindowAvgDatasetConfig | None = None
     include_ts: bool = False
-    use_atmosphere_sea_ice_fraction_fallback: bool = False
+    ts_resampling: WindowAvgDatasetConfig | None = None
     timedelta: str = "6h"
 
-    def apply_window_avg_and_reindex(
+    def sea_ice_fraction_source(self, sea_ice_dataset_configured: bool) -> str:
+        """The input the sea ice fractions are computed from: "atmosphere",
+        "sea_ice_dataset", or "ocean"."""
+        if self.use_atmosphere_sea_ice_fraction:
+            return "atmosphere"
+        if sea_ice_dataset_configured:
+            return "sea_ice_dataset"
+        return "ocean"
+
+    def validate(self, sea_ice_dataset_configured: bool):
+        if (
+            self.sea_ice_fraction_resampling is not None
+            and self.sea_ice_fraction_source(sea_ice_dataset_configured) == "ocean"
+        ):
+            raise ValueError(
+                "sea_ice_fraction_resampling is configured but the sea ice "
+                "fractions are sourced from the ocean dataset, where they are "
+                "already at the ocean's cadence. Remove it, configure a sea ice "
+                "input dataset, or set use_atmosphere_sea_ice_fraction to true."
+            )
+        if self.ts_resampling is not None and not self.include_ts:
+            raise ValueError(
+                "ts_resampling is configured but include_ts is false, so no "
+                "surface temperature is emitted to resample."
+            )
+
+    def apply_resampling_and_reindex(
         self,
         ds: xr.Dataset,
         atmos_names: AtmosphereInputFieldsConfig,
         time_dim="time",
     ) -> xr.Dataset:
-        ds_avg = ds
+        """Resample the fraction fields and, when include_ts is set, blend the
+        surface temperature with its resampled counterpart, on the time
+        coordinate of ds."""
         ts_name = atmos_names.surface_temperature_name
-        if ts_name in ds_avg and not self.include_ts:
-            ds_avg = ds_avg.drop(ts_name)
-        if self.window_avg is not None:
-            logging.info("Computing window-averaged coupled sea ice")
-            ds_avg = self.window_avg.get_window_avg(ds)
-            ds_avg = ds_avg.reindex(time=ds["time"], method="ffill")
-            logging.info(
-                f"After reindex window-averaged time coord:\n {str(ds_avg[time_dim])}"
+        ts = ds[ts_name] if ts_name in ds else None
+        fractions = ds.drop_vars(ts_name) if ts is not None else ds
+        if self.sea_ice_fraction_resampling is not None:
+            logging.info("Resampling the coupled sea ice fractions")
+            out = _resample_and_ffill(
+                self.sea_ice_fraction_resampling, fractions, time_dim, ds[time_dim]
             )
-            if ts_name in ds_avg.data_vars:
-                ds_avg[ts_name] = _interpolate_sst(
-                    ts=ds[ts_name],
-                    sst=ds_avg[ts_name],
-                    ofrac=ds_avg[atmos_names.ocean_fraction_name],
+        else:
+            out = fractions
+        if ts is not None and self.include_ts:
+            if self.ts_resampling is not None:
+                logging.info("Resampling the surface temperature blend ingredient")
+                sst = _resample_and_ffill(
+                    self.ts_resampling,
+                    ts.to_dataset(name=ts_name),
+                    time_dim,
+                    ds[time_dim],
+                )[ts_name]
+                out[ts_name] = _interpolate_sst(
+                    ts=ts,
+                    sst=sst,
+                    ofrac=out[atmos_names.ocean_fraction_name],
                 )
-        return ds_avg
+            else:
+                out[ts_name] = ts
+            out[ts_name].attrs = ts.attrs
+        return out
+
+
+def _resample_and_ffill(
+    resampling: WindowAvgDatasetConfig,
+    ds: xr.Dataset,
+    time_dim: str,
+    target_times: xr.DataArray,
+) -> xr.Dataset:
+    ds_resampled = resampling.get_window_avg(ds)
+    ds_resampled = ds_resampled.reindex({time_dim: target_times}, method="ffill")
+    logging.info(f"After reindex resampled time coord:\n {str(ds_resampled[time_dim])}")
+    return ds_resampled
 
 
 def _compute_fractions_from_ocean(
@@ -558,16 +615,14 @@ def compute_coupled_sea_ice(
     Derives consistent sea ice concentration, fractions, and masks by combining
     information from the processed atmosphere and ocean datasets.
 
-    The sea ice source is selected by presence priority:
+    The sea ice fraction source is selected by configuration alone:
 
-        1. the separate sea ice dataset, when provided;
-        2. else the ocean dataset, when no window_avg is configured and the
-           ocean carries sea ice fields. Fractions are computed at the ocean's
-           native temporal resolution and forward-filled onto the atmosphere's
-           time index, with no window-averaging;
-        3. else the atmosphere's own sea ice fraction (including whenever a
-           window_avg is configured), allowed only when
-           config.use_atmosphere_sea_ice_fraction_fallback is true.
+        - config.use_atmosphere_sea_ice_fraction true: the atmosphere's own
+          sea ice fraction, whether or not a sea ice dataset is provided;
+        - else the separate sea ice dataset, when provided;
+        - else the ocean dataset, whose sea ice fields give fractions at the
+          ocean's native temporal resolution, forward-filled onto the
+          atmosphere's time index.
 
     Args:
         atmos: Atmosphere dataset containing land fraction, sea ice fraction, and
@@ -576,12 +631,12 @@ def compute_coupled_sea_ice(
             is taken from here instead of from the ocean or atmosphere datasets.
             Assumed to have the same temporal resolution as the atmos dataset.
         ocean: Optional separate dataset containing sea surface fraction and,
-            optionally, sea ice fields. If sea_ice is None, no window_avg is
-            configured, and the ocean carries sea ice fields, the sea ice
-            fractions are sourced from this dataset; otherwise it is only used
-            for sea surface fraction (and is unused if sea_ice is non-null and
-            contains sea surface fraction).
-        config: Configuration for window averaging and including surface temperature.
+            optionally, sea ice fields. On the ocean-sourced route this dataset
+            provides the sea ice fields; otherwise it is only used for sea
+            surface fraction (and is unused if sea_ice is non-null and contains
+            sea surface fraction).
+        config: Configuration for the sea ice source, resampling, and including
+            surface temperature.
         input_field_names: Names of input fields. If None, uses defaults.
         atmos_extras: Optional configuration for copying extra variables from the
             atmosphere dataset.
@@ -599,6 +654,8 @@ def compute_coupled_sea_ice(
     """
     if sea_ice is None and sea_ice_extras is not None:
         raise ValueError("Got non-None sea_ice_extras but sea_ice is None.")
+
+    config.validate(sea_ice_dataset_configured=sea_ice is not None)
 
     if input_field_names is None:
         input_field_names = CoupledFieldNamesConfig()
@@ -619,44 +676,45 @@ def compute_coupled_sea_ice(
     # new field
     sic_name = input_field_names.derived.ocean_sea_ice_fraction_name
 
+    source = config.sea_ice_fraction_source(
+        sea_ice_dataset_configured=sea_ice is not None
+    )
+    logging.info(f"Sea ice fractions are sourced from the {source}.")
+    ocean_sic_name = input_field_names.ocean.ocean_sea_ice_fraction_name
+    ocean_ifrac_name = input_field_names.ocean.sea_ice_fraction_name
     ocean_has_sea_ice_fields = ocean is not None and (
-        input_field_names.ocean.ocean_sea_ice_fraction_name in ocean.data_vars
-        or input_field_names.ocean.sea_ice_fraction_name in ocean.data_vars
+        ocean_sic_name in ocean.data_vars or ocean_ifrac_name in ocean.data_vars
     )
-    # Gating on window_avg exists solely so the E3SM coupled configs — which
-    # configure a window_avg and an ocean store that carries sea ice fields —
-    # stay on the atmosphere-sourced path byte-for-byte. If those configs are
-    # confirmed to not need that guarantee (or move to the ocean-sourced
-    # path), the gate can be dropped.
-    use_ocean_source = (
-        sea_ice is None and config.window_avg is None and ocean_has_sea_ice_fields
-    )
-    if (
-        sea_ice is None
-        and not use_ocean_source
-        and not config.use_atmosphere_sea_ice_fraction_fallback
-    ):
+    if source == "ocean" and not ocean_has_sea_ice_fields:
         raise ValueError(
-            "No separate sea ice dataset is configured and the ocean-sourced "
-            "sea ice path does not apply (it requires an ocean dataset with "
-            "sea ice fields and no window_avg), so the atmosphere's own sea "
-            "ice fraction would be used. Set "
-            "use_atmosphere_sea_ice_fraction_fallback to true to allow this."
+            "The sea ice fractions are sourced from the ocean dataset, but no "
+            f"ocean dataset carrying {ocean_sic_name} or {ocean_ifrac_name} is "
+            "configured. Configure a sea ice input dataset, or set "
+            "use_atmosphere_sea_ice_fraction to true to use the atmosphere's "
+            "own sea ice fraction."
         )
 
-    if use_ocean_source:
+    if source == "ocean":
         assert ocean is not None
         logging.info("Computing sea ice fractions from the ocean dataset.")
         fractions = _compute_fractions_from_ocean(atmos, ocean, input_field_names)
         ds = fractions.reindex({tdim: atmos[tdim]}, method="ffill")
         if config.include_ts:
             ts = atmos[ts_name]
-            ts_ocean_cadence = ts.sel({tdim: fractions[tdim]}).reindex(
-                {tdim: atmos[tdim]}, method="ffill"
-            )
+            if config.ts_resampling is not None:
+                sst = _resample_and_ffill(
+                    config.ts_resampling,
+                    ts.to_dataset(name=ts_name),
+                    tdim,
+                    atmos[tdim],
+                )[ts_name]
+            else:
+                sst = ts.sel({tdim: fractions[tdim]}).reindex(
+                    {tdim: atmos[tdim]}, method="ffill"
+                )
             ds[ts_name] = _interpolate_sst(
                 ts=ts,
-                sst=ts_ocean_cadence,
+                sst=sst,
                 ofrac=ds[ofrac_name],
             )
             ds[ts_name].attrs = ts.attrs
@@ -683,14 +741,21 @@ def compute_coupled_sea_ice(
             "units": "unitless",
         }
 
-        ifrac = atmos[ifrac_name].clip(min=0.0, max=1.0)
-        if sea_ice is not None:
+        if source == "sea_ice_dataset":
+            assert sea_ice is not None
             ifrac = (
                 sea_ice[ifrac_name]
                 .fillna(0.0)
                 .clip(min=0.0, max=1.0)
                 .assign_coords({latdim: atmos[latdim], londim: atmos[londim]})
             )
+        else:
+            if ifrac_name not in atmos:
+                raise ValueError(
+                    f"use_atmosphere_sea_ice_fraction is true but {ifrac_name} "
+                    "is not in the atmosphere dataset."
+                )
+            ifrac = atmos[ifrac_name].clip(min=0.0, max=1.0)
 
         sfrac_mod = (1 - lfrac).where(sfrac > 0, 0.0)
         lfrac_mod = 1 - sfrac_mod
@@ -720,7 +785,7 @@ def compute_coupled_sea_ice(
                 ts_name: atmos[ts_name],
             }
         )
-        ds = config.apply_window_avg_and_reindex(
+        ds = config.apply_resampling_and_reindex(
             ds,
             input_field_names.atmosphere,
             input_field_names.time_dim,

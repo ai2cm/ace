@@ -4,7 +4,11 @@ output_directory: /climate-default
 
 coupled_datasets:
   coupled_sea_ice:
-    window_avg:
+    sea_ice_fraction_resampling:
+      window_timedelta: 120h
+      first_timestamp: "0152-10-06T00:00:00"
+      shift_timestamps_to_avg_interval_midpoint: true
+    ts_resampling:
       window_timedelta: 120h
       first_timestamp: "0152-10-06T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
