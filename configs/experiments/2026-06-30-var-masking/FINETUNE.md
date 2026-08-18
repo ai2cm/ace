@@ -39,6 +39,12 @@ verbatim from pre-training.
 - `stepper_training.parameter_init.weights_path`: added, loads
   `/weights/training_checkpoints/best_ckpt.tar`
 - `max_epochs`: `150` -> `20` (fine-tuning is short; set by `FT_MAX_EPOCHS`)
+- **inline inference pruned**: the weight-0.0 multi-year diagnostics
+  (`10year`, `10year_insample`, `long_46year`) are dropped from inline inference
+  (`INLINE_INFERENCE_DROP`) — they cost hundreds-to-thousands of windows per
+  inference-epoch and dominated FT wall-clock. Only `aimip_checkpoint`
+  (weight 1.0, drives checkpoint selection) + the cheap `weather` entries stay.
+  Run the dropped climate diagnostics post-FT via the eval tooling.
 - `stepper.step.config.input_dropout_optimized_steps_only`: `true` — input
   masking applies only on the optimized (last) rollout step, not the
   intermediate `no_grad` steps (no-op for the mask0 cells; matters for mask20).

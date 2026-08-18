@@ -18,12 +18,15 @@ config.yaml the checkpoint was trained with, cached under
      intermediate no_grad steps (a no-op for the mask0 cells). Without it,
      masking would perturb the rollout trajectory feeding the optimized step
      while inference runs unmasked.
+  5. The heavy multi-year diagnostic inferences (INLINE_INFERENCE_DROP) are
+     removed from inline inference -- they dominate FT wall-clock and are
+     eval-only; run them post-FT via the eval tooling.
 
-Everything else -- inference suite, training/validation windows, optimizer
-(FusedAdam), EnsembleLoss (crps 0.9 / energy 0.1, no extra weights), EMA,
-masking level, global-mean-removal, model architecture -- is copied verbatim
-from pre-training, so the fine-tune differs from pre-training only in that it
-rolls out multiple steps over a short schedule.
+Everything else -- training/validation windows, the retained inference entries
+(aimip_checkpoint + weather), optimizer (FusedAdam), EnsembleLoss (crps 0.9 /
+energy 0.1, no extra weights), EMA, masking level, global-mean-removal, model
+architecture -- is copied verbatim from pre-training, so the fine-tune differs
+from pre-training only in that it rolls out multiple steps over a short schedule.
 
 Checkpoint dataset IDs (for the ``/weights`` mount) are resolved from
 ``wandb_to_beaker_map.json`` (refresh with ``update_beaker_map.py``).
@@ -52,6 +55,15 @@ FT_SUFFIX = "-mstepft"
 
 # Fine-tuning is short; cap it well below pre-training's max_epochs (150).
 FT_MAX_EPOCHS = 20
+
+# Heavy multi-year diagnostic inferences dropped from *inline* inference for the
+# short FT. Each is weight 0.0 (they do not drive checkpoint selection -- only
+# aimip_checkpoint, weight 1.0, does) but costs hundreds-to-thousands of windows
+# per inference-epoch (10year: 366, long_46year: 1680), so running them every
+# 10 epochs dominated wall-clock. They are the *final* climate diagnostics and
+# belong in the post-FT eval pass (generate_eval_configs.py / submit_eval_jobs.py),
+# not inline. aimip_checkpoint (selection) and the cheap weather entries stay.
+INLINE_INFERENCE_DROP = ("10year", "10year_insample", "long_46year")
 
 # The one thing taken from the ERA5 baseline multi-step fine-tuning config: the
 # n_forward_steps probability schedule. Everything else comes from pre-training.
@@ -102,6 +114,13 @@ def _to_finetune(pretrain_cfg: dict) -> dict:
     # optimized step while inference runs unmasked (train/inference mismatch).
     # No-op for the mask0 cells (max_masked_vars 0); meaningful for mask20.
     cfg["stepper"]["step"]["config"]["input_dropout_optimized_steps_only"] = True
+    # Drop the heavy multi-year diagnostic inferences from inline inference (see
+    # INLINE_INFERENCE_DROP); they dominate FT wall-clock and are eval-only.
+    inference = cfg.get("inference")
+    if isinstance(inference, list):
+        cfg["inference"] = [
+            e for e in inference if e.get("name") not in INLINE_INFERENCE_DROP
+        ]
     return cfg
 
 
