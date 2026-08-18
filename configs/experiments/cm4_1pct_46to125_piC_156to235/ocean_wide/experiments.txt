@@ -20,3 +20,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # directory's "invalid" rows).
 
 cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|01M09FGGX0XWMEBVV7HEQTN7QB|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs1|01M09FGS32Q75CQ8GDV8T6EG4Z|training|best_inference_ckpt|normal|--min-runtime 8h
