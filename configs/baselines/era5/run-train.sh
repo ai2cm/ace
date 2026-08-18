@@ -80,6 +80,8 @@ run_training() {
   local config_filename="$1"
   local job_name="$2"
   local N_GPUS="${3:-1}"
+  local CLUSTER="${4:-ai2/titan}"
+  local PRIORITY="${5:-high}"
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   should_run "$config_filename" "$job_name" || { echo "skip (filter): $job_name"; return 0; }
@@ -104,19 +106,37 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  # CM_PRIORITY is read by the beaker priority balancer, not by fme: high by
+  # default, overridable per arm by a "# arg: --env CM_PRIORITY=low" config
+  # header. gantry rejects a duplicated --env, so the default is dropped when
+  # the config supplies its own. Only a value right after --env (or the fused
+  # --env=NAME=value form) counts, so a lookalike name (MY_CM_PRIORITY=…), a
+  # quoted header, or the string appearing in some other flag's value keeps the
+  # default instead of silently leaving the job with no usable label.
+  local cm_priority_args=(--env CM_PRIORITY=high) arg prev=""
+  for arg in "${extra_args[@]}"; do
+    if [[ ("$prev" == --env && "$arg" == CM_PRIORITY=*) || "$arg" == --env=CM_PRIORITY=* ]]; then
+      cm_priority_args=()
+      break
+    fi
+    prev="$arg"
+  done
+
   # Target per Jeremy 2026-08-07: ai2/ace workspace, high priority, titan only,
   # 4 GPUs (1-degree runs), CM_PRIORITY=high. --shared-memory 400GiB matches the
   # control runs (4s0rnth6, glvk7uxz) this screen compares against.
+  # Per-arm overrides of cluster/priority go through run_training's optional
+  # 4th/5th arguments (e.g. the GAN arm targets jupiter at urgent).
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
     --description 'ACE2S-ERA5 1-degree baseline cost-reduction screen' \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
-    --priority high \
+    --priority "$PRIORITY" \
     --preemptible \
-    --cluster ai2/titan \
-    --env CM_PRIORITY=high \
+    --cluster "$CLUSTER" \
+    "${cm_priority_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -191,8 +211,10 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-crps50.yaml" \
 
 # GAN discriminator arm (added 2026-08-18): the stochastic pretrain plus a
 # step-conditional discriminator (research repo investigation
-# 2026-08-18-gan-loss-small-scale-precip-spectra; ace PR #1446). The arms
-# above are done or live -- launch this alone:
+# 2026-08-18-gan-loss-small-scale-precip-spectra; ace PR #1446).
+# Target per Jeremy 2026-08-18: jupiter at urgent priority, 8 GPUs,
+# CM_PRIORITY stays high. The arms above are done or live -- launch this
+# alone:
 #   ./run-train.sh gan
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-gan-1-step-pre-training-rs0" 4
+  "ace2s-era5-daily-fg16-sr0p125-gan-1-step-pre-training-rs0" 8 ai2/jupiter urgent
