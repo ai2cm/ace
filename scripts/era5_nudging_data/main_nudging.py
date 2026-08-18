@@ -229,8 +229,8 @@ if __name__ == "__main__":
         help=(
             "Number of worker processes to use to process timestamps in "
             "parallel. Size this to the container's memory limit, not its "
-            "CPU count -- each worker eagerly loads several GB of model-"
-            "level data and buffers a full netCDF file in memory."
+            "CPU count -- each worker eagerly loads several GB of "
+            "model-level data into memory."
         ),
     )
     args = parser.parse_args()

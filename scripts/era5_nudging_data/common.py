@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 
 import fsspec
 import xarray as xr
@@ -80,6 +82,19 @@ def fill_missing_sst_and_sea_ice_values(ds: xr.Dataset) -> xr.Dataset:
 
 
 def to_remote_netcdf(ds: xr.Dataset, destination: str, **kwargs) -> None:
-    netcdf_in_memory = ds.to_netcdf(path=None, engine="h5netcdf", **kwargs)
-    with fsspec.open(destination, "wb") as file:
-        file.write(netcdf_in_memory)
+    """Write a dataset to netCDF and upload it to a (possibly remote) path.
+
+    Writes via the netCDF4 engine to a local temporary file rather than
+    directly to an in-memory buffer, since xarray only supports in-memory
+    writes for the ``scipy`` and ``h5netcdf`` engines. This is worth the
+    extra local write: unlike h5netcdf, the netCDF4 engine writes plain
+    ``str`` attributes using the classic, fixed-length NC_CHAR type rather
+    than the netCDF4-only, variable-length NC_STRING type. This is
+    important, since SHiELD cannot read NC_STRING attributes.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_path = os.path.join(tmpdir, "data.nc")
+        ds.to_netcdf(local_path, engine="netcdf4", **kwargs)
+        with open(local_path, "rb") as local_file:
+            with fsspec.open(destination, "wb") as remote_file:
+                remote_file.write(local_file.read())
