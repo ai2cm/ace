@@ -11,7 +11,6 @@ treatment and control-vs-original-baseline measures run-to-run variance.
 Arms (see the intervention matrix in the reports repo,
 troya/2026-08-18-samudrace-enso-rollout-interventions):
 
-  ctrl     no change (seed only)                         -> run variance
   wint5    ocean loss weights: thetao_1..18 + zos x5     -> 1a
   wint20   ocean loss weights: thetao_1..18 + zos x20    -> 1a
   hzn12    n_coupled_steps 4 -> 12 (60 days); ocean rollout-length outcomes
@@ -153,10 +152,6 @@ def adopt_corrected_lineage(c: dict) -> dict:
     return c
 
 
-def arm_ctrl(c: dict) -> dict:
-    return c
-
-
 def _weights(c: dict, factor: float) -> dict:
     loss = c["stepper_training"]["ocean"]["loss"]
     assert "weights" not in loss, "baseline ocean loss unexpectedly has weights"
@@ -205,7 +200,6 @@ def arm_noohc(c: dict) -> dict:
 
 
 ARMS = {
-    "ctrl": arm_ctrl,
     "wint5": arm_wint5,
     "wint20": arm_wint20,
     "hzn12": arm_hzn12,

@@ -2,9 +2,9 @@
 #
 # Launch the wave-1 ENSO rollout-intervention training arms.
 #
-# Five coupled fine-tune arms (ctrl / wint5 / wint20 / hzn12 / ohc; one change
-# each vs the archived baseline run config, all with the nino readout channels
-# dropped) and one ocean pretrain from scratch (resid). See
+# Four coupled fine-tune arms (wint5 / wint20 / hzn12 / noohc; one change each
+# vs the shared corrected-lineage base, nino readout channels dropped, no
+# dedicated control) and one ocean pretrain from scratch (resid). See
 # make_wave1_configs.py and the reports repo's intervention matrix.
 #
 # Ocean init: the corrected from-scratch Samudra pretrain (OHC + surface-flux
@@ -16,15 +16,15 @@
 # marked a pilot: launch it alone first if memory is a concern).
 #
 # Examples:
-#   ARMS="ctrl" ./launch-wave1.sh                    # single arm
-#   ./launch-wave1.sh                                 # all five FT arms
+#   ARMS="hzn12" ./launch-wave1.sh                   # single arm (memory pilot)
+#   ./launch-wave1.sh                                 # all four FT arms
 #   ARMS="resid" ./launch-wave1.sh                    # the pretrain
 #   DRY_RUN=1 ./launch-wave1.sh                       # print only
 
 set -euo pipefail
 
 JOB_GROUP="${JOB_GROUP:-samudra-enso-rollout-interventions-w1}"
-ARMS="${ARMS:-ctrl wint5 wint20 hzn12 noohc}"
+ARMS="${ARMS:-wint5 wint20 hzn12 noohc}"
 DRY_RUN="${DRY_RUN:-0}"
 N_GPUS="${N_GPUS:-4}"
 
