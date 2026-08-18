@@ -311,12 +311,14 @@ class InferenceEvaluatorConfig:
         atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
             when loading a single coupled checkpoint.
         seed: If set, seeds the random state threaded through the rollout so that
-            stochastic modules (e.g. NoiseConditionedSFNO) in either component
-            produce a reproducible noise sequence, independent of
-            ``coupled_steps_in_memory``. The two components are seeded from
-            distinct values derived from this one, so their noise streams
-            differ. Leave unset (None) for the default non-reproducible
-            behavior. Only affects the stepper rollout (not the
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a
+            reproducible noise sequence, independent of
+            ``coupled_steps_in_memory``. The atmosphere - the only realm that
+            draws noise today - takes this value unchanged, matching an
+            ``fme.ace`` run of the same checkpoint at the same seed; the ocean
+            gets a separate generator at ``seed + 1`` so the two realms cannot
+            draw identical noise. Leave unset (None) for the default
+            non-reproducible behavior. Only affects the stepper rollout (not the
             ``prediction_loader`` comparison path).
     """
 

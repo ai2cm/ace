@@ -44,6 +44,19 @@ def test_apply_config_seed_none_leaves_both_components_unseeded():
     assert result.atmosphere_data is state.atmosphere_data
 
 
+def test_apply_config_seed_gives_the_atmosphere_the_configured_seed():
+    """The atmosphere - the realm that actually consumes a generator today -
+    takes the configured value unchanged, so a coupled run draws the same noise
+    sequence as a single-realm run of the same checkpoint at that seed."""
+    seeded = _coupled_state().apply_config_seed(0)
+    stepper_state = seeded.atmosphere_data.as_batch_data().stepper_state
+    assert stepper_state is not None
+    random_state = stepper_state.random_state
+    assert random_state is not None
+    expected = torch.randn(4, generator=RandomState.from_seed(0).generator)
+    assert torch.equal(torch.randn(4, generator=random_state.generator), expected)
+
+
 def test_apply_config_seed_gives_the_components_different_streams():
     """The components are seeded from the configured value but not from the
     *same* stream: two identical stochastic modules on a shared grid would

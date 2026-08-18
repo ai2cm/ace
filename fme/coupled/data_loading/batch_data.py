@@ -32,13 +32,21 @@ class CoupledPrognosticState:
     def apply_config_seed(self, seed: int | None) -> "CoupledPrognosticState":
         """Return a state whose components are seeded from ``config.seed``.
 
-        Each component gets its own generator, seeded from a *different* value
-        derived from the configured seed (ocean ``seed``, atmosphere
-        ``seed + 1``), following the offset convention of
-        ``fme.core.rand.set_seed``. Seeding both from the same value would make
-        their draws identical, not merely independent, whenever they request the
-        same shapes in the same order - two ``NoiseConditionedSFNO`` components
-        on a shared grid would then see perfectly correlated noise fields.
+        The atmosphere takes the configured value unchanged, so a coupled run
+        draws the same atmospheric noise sequence as an ``fme.ace`` run of the
+        same checkpoint at the same seed. The atmosphere is also the only realm
+        that consumes a generator today: the ocean steppers in use are
+        deterministic, and their stochasticity comes from the atmosphere
+        ensemble they are trained against.
+
+        The ocean gets its own generator seeded at ``seed + 1``, following the
+        offset convention of ``fme.core.rand.set_seed``. The offset is
+        unobservable while the ocean is deterministic; it is there so that a
+        future stochastic ocean stepper does not silently draw the *same* noise
+        as the atmosphere - separate generators are independent, but equal seeds
+        give equal draws whenever both components request the same shapes in the
+        same order, which two ``NoiseConditionedSFNO`` components on a shared
+        grid would.
 
         Precedence is resolved per component (see
         ``PrognosticState.apply_config_seed``): a component carrying a restored
@@ -51,8 +59,8 @@ class CoupledPrognosticState:
         if seed is None:
             return self
         return CoupledPrognosticState(
-            self.ocean_data.apply_config_seed(seed, label="ocean"),
-            self.atmosphere_data.apply_config_seed(seed + 1, label="atmosphere"),
+            self.ocean_data.apply_config_seed(seed + 1, label="ocean"),
+            self.atmosphere_data.apply_config_seed(seed, label="atmosphere"),
         )
 
     def as_batch_data(self) -> "CoupledBatchData":
