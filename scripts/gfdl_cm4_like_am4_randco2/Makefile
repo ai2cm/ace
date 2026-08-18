@@ -90,7 +90,21 @@ push_dataflow: build_dataflow
 enter:
 	docker run --rm -v $$(pwd):/cm4_randco2 -w /cm4_randco2 --entrypoint "/bin/bash" -it $(IMAGE_NAME)
 
-dataflow:
+# The worker image must exist in Artifact Registry before a launch. A missing
+# tag otherwise surfaces only as ImagePullBackOff on the workers: each job
+# boots a VM, never starts its SDK harness, and so never completes a bundle —
+# and throughput-based autoscaling holds the job at one idle worker rather
+# than failing it.
+IMAGE_REPO = $(firstword $(subst :, ,$(IMAGE_NAME)))
+IMAGE_TAG = $(lastword $(subst :, ,$(IMAGE_NAME)))
+check_dataflow_image:
+	@gcloud artifacts docker tags list $(IMAGE_REPO) --format="value(tag)" \
+		2> /dev/null | grep -qx "$(IMAGE_TAG)" || { \
+		echo "ERROR: $(IMAGE_NAME) is absent from Artifact Registry."; \
+		echo "Run 'make push_dataflow' before launching."; \
+		exit 1; }
+
+dataflow: check_dataflow_image
 	$(if $(MEMBER),,$(error set MEMBER to one of: $(MEMBERS)))
 	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
@@ -110,4 +124,4 @@ dataflow_all: $(addprefix dataflow_,$(MEMBERS))
 # nothing to match.
 .PHONY: create_environment smoke_test smoke_test_repeat_fails \
 	check_wetmask_equivalence smoke_tests build_dataflow push_dataflow \
-	enter dataflow dataflow_all
+	check_dataflow_image enter dataflow dataflow_all
