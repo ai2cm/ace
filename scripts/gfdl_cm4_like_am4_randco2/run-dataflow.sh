@@ -40,7 +40,7 @@ DATAFLOW_ARGS=(
     --num_workers 1
     --disk_size_gb 70
     --max_num_workers 100
-    --machine_type n2d-custom-2-49152-ext
+    --machine_type n2d-standard-2
     --worker_disk_type "compute.googleapis.com/projects/vcm-ml/zones/us-central1-c/diskTypes/pd-ssd"
     --number_of_worker_harness_threads 1
 )
