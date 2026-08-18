@@ -1,0 +1,38 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+# ocean_fillmean_clip with a different input-masking scope. train-config.yaml is
+# identical to ocean_fillmean_clip/train-config.yaml outside
+# stepper.input_masking.exclude_names_and_prefixes (verified by diff), so
+# fill_value=mean, max_grad_norm=1.0, the Samudra ch_width, the variable sets
+# and the corrector are all held fixed. No OHC correction here -- that is the
+# separate ocean_fillmean_clip_ohc arm, and the two are deliberately not
+# combined so a result is attributable to one change.
+#
+# The change. Names in exclude_names_and_prefixes are NOT masked. Every arm so
+# far excluded land_fraction plus the ten atmosphere forcing variables; this arm
+# excludes land_fraction and sea_surface_fraction only. So the ten forcings
+# become mean-filled inside the mask, and sea_surface_fraction stops being
+# mean-filled and is seen at its true value there.
+#
+# What it tests. fill_value=mean exists to make the mask edge flat in normalized
+# space, but with the forcings excluded that was only true of the ocean
+# channels: the atmosphere channels still carried real land structure across the
+# edge, so the network could still read the coastline off them. This arm makes
+# the masked region uniform in every channel except the two geometry fields that
+# are meaningful everywhere and are what should carry the mask location. Nothing
+# changes over ocean cells -- masking only rewrites cells where mask_2d == 0.
+#
+# Why these two are safe to exclude: data prep NaNs out land for everything
+# except land_fraction, mask_* and idepth_*, and then explicitly re-fills
+# sea_surface_fraction with 0.0
+# (scripts/data_process/compute_ocean_dataset.py, insert_nans_on_land_surface),
+# so neither excluded name can hand the network a NaN. No config in the repo has
+# excluded sea_surface_fraction before, so confirm a finite first-batch loss
+# before trusting the run.
+#
+# One seed, to get a sense. Read against ocean_fillmean_clip rs0-rs2 at matched
+# epoch on val_1pct_late and inference_1pct.
+#
+# Cluster is jupiter, not the h100 alias (ceres+jupiter): urgent-priority jobs
+# are not available on ceres, so target jupiter directly.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip_maskall|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
