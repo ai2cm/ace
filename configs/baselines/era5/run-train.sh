@@ -188,3 +188,11 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-crps50.yaml" \
 #   ./run-train.sh ft3-bptt-daily-fg16-sr0p125-crps50
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-crps50.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-crps50-ft3-bptt-multi-step-fine-tuning-rs0" 8
+
+# GAN discriminator arm (added 2026-08-18): the stochastic pretrain plus a
+# step-conditional discriminator (research repo investigation
+# 2026-08-18-gan-loss-small-scale-precip-spectra; ace PR #1446). The arms
+# above are done or live -- launch this alone:
+#   ./run-train.sh gan
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-gan-1-step-pre-training-rs0" 4
