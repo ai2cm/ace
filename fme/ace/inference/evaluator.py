@@ -408,7 +408,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
             logging.info("Building validation stepper and aggregator")
             train_stepper_config = config.validation.stepper_training
-            train_stepper = TrainStepper(stepper=stepper, config=train_stepper_config)
+            train_stepper = TrainStepper(
+                stepper=stepper, config=train_stepper_config, training=False
+            )
 
             val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,

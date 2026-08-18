@@ -713,6 +713,8 @@ class Trainer:
                 data["optimization"] = self.optimization.get_state()
             else:
                 data["ema"].pop("ema_params")  # don't need if not saving optimization
+                for key in type(self.stepper).TRAINING_ONLY_STATE_KEYS:
+                    data["stepper"].pop(key, None)
             torch.save(data, temporary_location)
             os.replace(temporary_location, checkpoint_path)
         finally:

@@ -503,6 +503,27 @@ def get_trainer(
     return config, trainer
 
 
+def test_training_only_state_keys_excluded_from_inference_checkpoints(
+    tmp_path: str, monkeypatch
+):
+    """Keys a train stepper declares training-only (e.g. a GAN discriminator's
+    optimizer state) ride only in checkpoints saved with optimization state."""
+    monkeypatch.setattr(
+        TrainStepper, "TRAINING_ONLY_STATE_KEYS", ("dependent_optimizer",)
+    )
+    config, trainer = get_trainer(
+        tmp_path,
+        max_epochs=1,
+        stepper_state={"dependent_optimizer": {"step": 1}},
+    )
+    trainer.train()
+    paths = CheckpointPaths(config.checkpoint_dir)
+    latest = torch.load(paths.latest_checkpoint_path, weights_only=False)
+    assert "dependent_optimizer" in latest["stepper"]
+    best = torch.load(paths.best_checkpoint_path, weights_only=False)
+    assert "dependent_optimizer" not in best["stepper"]
+
+
 @pytest.mark.parametrize(
     "checkpoint_save_epochs",
     [None, Slice(start=2, stop=3), Slice(start=1, step=2)],

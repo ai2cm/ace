@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 from torch import nn
 
@@ -24,6 +24,11 @@ SD = TypeVar("SD")  # stepped data
 
 class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     SelfType = TypeVar("SelfType", bound="TrainStepperABC")
+
+    # Keys in get_state() that exist only to resume training (e.g. a dependent
+    # optimizer's state riding in the stepper payload); the trainer drops them
+    # from checkpoints saved without optimization state.
+    TRAINING_ONLY_STATE_KEYS: ClassVar[tuple[str, ...]] = ()
 
     @abc.abstractmethod
     def train_on_batch(
