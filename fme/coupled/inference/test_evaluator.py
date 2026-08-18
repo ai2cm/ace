@@ -569,9 +569,8 @@ def _save_stochastic_coupled_stepper(
 ) -> tuple[str, MockCoupledData]:
     """A coupled checkpoint whose atmosphere draws noise, and its mock data.
 
-    The noise is what makes the configured seed observable in the output; the
-    ocean module stays deterministic, matching the coupled configurations run
-    today.
+    The noise is what makes the seed observable in the output. The ocean stays
+    deterministic, as in the coupled configurations run today.
     """
     dataset_info, mock_data = _create_dataset_info_for_stepper(
         ocean_in_names=_SEED_OCEAN_IN_NAMES,
@@ -650,9 +649,9 @@ def _run_seeded_evaluator(
 
 @pytest.mark.slow
 def test_evaluator_seed_reproducible(tmp_path: pathlib.Path):
-    """A seeded coupled evaluator run is reproducible end-to-end and independent
-    of ``coupled_steps_in_memory``, while a different seed gives a different
-    answer - which is what makes the reproducibility non-vacuous.
+    """A seeded run is reproducible end-to-end and independent of
+    ``coupled_steps_in_memory``, and a different seed gives a different answer
+    (confirming the noise is active, so the reproducibility is not vacuous).
     """
     checkpoint_path, mock_data = _save_stochastic_coupled_stepper(tmp_path)
     seed0 = _run_seeded_evaluator(tmp_path / "s0", checkpoint_path, mock_data, 0)

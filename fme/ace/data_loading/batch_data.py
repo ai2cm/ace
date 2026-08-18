@@ -172,9 +172,8 @@ class PrognosticState:
 
         Args:
             seed: The configured seed, or None to leave the state unseeded.
-            label: Name of the state for logging, used when more than one state
-                is seeded in a run (e.g. the components of a coupled model) so
-                the log line says which one skipped its seed.
+            label: Name of the state, used to say which one skipped its seed
+                when a run seeds more than one (e.g. coupled components).
         """
         if seed is None:
             return self

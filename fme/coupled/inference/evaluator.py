@@ -313,11 +313,8 @@ class InferenceEvaluatorConfig:
         seed: If set, seeds the random state threaded through the rollout so that
             stochastic modules (e.g. NoiseConditionedSFNO) produce a
             reproducible noise sequence, independent of
-            ``coupled_steps_in_memory``. The atmosphere - the only realm that
-            draws noise today - takes this value unchanged, matching an
-            ``fme.ace`` run of the same checkpoint at the same seed; the ocean
-            gets a separate generator at ``seed + 1`` so the two realms cannot
-            draw identical noise. Leave unset (None) for the default
+            ``coupled_steps_in_memory``. The atmosphere takes this value and the
+            ocean ``seed + 1``. Leave unset (None) for the default
             non-reproducible behavior. Only affects the stepper rollout (not the
             ``prediction_loader`` comparison path).
     """

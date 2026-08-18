@@ -367,10 +367,10 @@ def _run_seeded_inference(
 
 @pytest.mark.slow
 def test_inference_seed_reproducible(tmp_path: pathlib.Path):
-    """A seeded coupled inference run is reproducible end-to-end, while a
-    different seed gives a different answer - which is what makes the
-    reproducibility non-vacuous. Independence from ``coupled_steps_in_memory``
-    is covered on the evaluator entrypoint, which shares the seeding path.
+    """A seeded run is reproducible end-to-end, and a different seed gives a
+    different answer (so the reproducibility is not vacuous). Independence from
+    ``coupled_steps_in_memory`` is covered on the evaluator entrypoint, which
+    shares the seeding path.
     """
     config, _, _ = _setup(
         ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],

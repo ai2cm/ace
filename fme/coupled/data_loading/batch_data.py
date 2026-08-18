@@ -32,29 +32,15 @@ class CoupledPrognosticState:
     def apply_config_seed(self, seed: int | None) -> "CoupledPrognosticState":
         """Return a state whose components are seeded from ``config.seed``.
 
-        The atmosphere takes the configured value unchanged, so a coupled run
-        draws the same atmospheric noise sequence as an ``fme.ace`` run of the
-        same checkpoint at the same seed. The atmosphere is also the only realm
-        that consumes a generator today: the ocean steppers in use are
-        deterministic, and their stochasticity comes from the atmosphere
-        ensemble they are trained against.
+        The atmosphere, the only realm that draws noise today, takes the seed
+        unchanged, so a coupled run matches an ``fme.ace`` run of the same
+        checkpoint at the same seed. The ocean is offset by 1 (as in
+        ``fme.core.rand.set_seed``) so that a future stochastic ocean stepper
+        would not draw the same noise as the atmosphere.
 
-        The ocean gets its own generator seeded at ``seed + 1``, following the
-        offset convention of ``fme.core.rand.set_seed``. The offset is
-        unobservable while the ocean is deterministic; it is there so that a
-        future stochastic ocean stepper does not silently draw the *same* noise
-        as the atmosphere - separate generators are independent, but equal seeds
-        give equal draws whenever both components request the same shapes in the
-        same order, which two ``NoiseConditionedSFNO`` components on a shared
-        grid would.
-
-        Precedence is resolved per component (see
-        ``PrognosticState.apply_config_seed``): a component carrying a restored
-        random state continues it, while a component without one takes its
-        derived config seed. A partially restored coupled state therefore
-        continues one realm and seeds the other, which is deliberate - each
-        realm continues the sequence it was started with, rather than the whole
-        run falling back to one behavior because of the other realm.
+        Precedence is per component (see ``PrognosticState.apply_config_seed``),
+        so a partially restored state deliberately continues one realm and seeds
+        the other.
         """
         if seed is None:
             return self

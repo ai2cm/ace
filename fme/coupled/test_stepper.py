@@ -1199,8 +1199,7 @@ class AddOneWithNoise(torch.nn.Module):
     """``AddOne`` plus a standard-normal draw made through ``fme.core.rand``.
 
     Stands in for a trained stochastic module such as ``NoiseConditionedSFNO``
-    in tests that need seeding to have an observable effect on the output,
-    without paying to build and de-zero-initialize a real one.
+    in tests that need seeding to have an observable effect.
     """
 
     def forward(self, x):
