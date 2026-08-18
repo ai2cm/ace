@@ -2,7 +2,7 @@
 
 set -e
 
-DATE="2026-07-20"
+DATE="2026-08-18"
 WANDB_USERNAME=spencerc_ai2
 CONFIG_FILENAME="ace-som-1000-year-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -13,9 +13,9 @@ INITIAL_CONDITION_TIME=2032-01-01T00:00:00
 
 declare -A INITIAL_CONDITION_DATASETS
 INITIAL_CONDITION_DATASETS=( \
-    ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
-    ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
-    ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
+    # ["1xCO2"]="${INITIAL_CONDITION_ROOT}/1xCO2-ic_0005.zarr" \
+    # ["2xCO2"]="${INITIAL_CONDITION_ROOT}/2xCO2-ic_0005.zarr" \
+    # ["3xCO2"]="${INITIAL_CONDITION_ROOT}/3xCO2-ic_0002.zarr" \
     ["4xCO2"]="${INITIAL_CONDITION_ROOT}/4xCO2-ic_0005.zarr" \
 )
 
@@ -31,11 +31,11 @@ declare -A MODELS=( \
     # [published-baseline-rs3]="01J4BR6J5AW32ZDQ77VZ60P4KT" \
     # [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
     # [no-random-co2-rs1]="01KH4SDCYN1NF2RP2JXZS0WZ1Y" \
-    # [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
+    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
     # [no-random-co2-energy-conserving-rs1]="01KH4SDT1Q5246GZ307W8AW4M3" \
     # [full-rs0]="01KHKJ02SQM8S8T4B6030F94CV" \
     # [full-rs1]="01KHJ5EQ04XTFG46QCKX3TTAHF" \
-    [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
+    # [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
     # [full-energy-conserving-rs1]="01KHCXABVNA3TJW0ZT5F4YDDQT" \
     # ["only-eq-rs0"]="01KP8M1T7F3NGVSPH2J7VNWNN4" \
 )
@@ -43,7 +43,7 @@ declare -A MODELS=( \
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-for seed in {0..0}; do
+for seed in {0..6}; do
     for model in "${!MODELS[@]}"; do
         dataset_id="${MODELS[$model]}"
 
@@ -59,7 +59,7 @@ for seed in {0..0}; do
             "
             python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $override
 
-            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-inference-seed-${seed}"
+            job_name="${DATE}-${model}-${climate}-1000-year-equilibrium-climate-inference-seed-${seed}"
             gantry run \
                 --name $job_name \
                 --description 'Run inference with ACE' \
@@ -67,6 +67,7 @@ for seed in {0..0}; do
                 --workspace ai2/ace \
                 --priority high \
                 --cluster ai2/titan \
+                --env CM_PRIORITY=high \
                 --env WANDB_USERNAME=$WANDB_USERNAME \
                 --env WANDB_NAME=$job_name \
                 --env WANDB_JOB_TYPE=inference \
