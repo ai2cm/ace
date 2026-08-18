@@ -9,6 +9,11 @@ import argparse
 import xarray as xr
 
 PATCHED_MODELS = {
+    # HiRO-ACE-style spatial downscaling baseline: plain single-frame SR,
+    # zero temporal conditioning. n_ens=4 test-inference (see
+    # crps_eval.py's PATCHED_MODELS comment for the full provenance note).
+    # Not on weka -- mounted at /hiro_result only when "hiro" is requested.
+    "hiro": "/hiro_result/test-2023-2024-ens4.zarr",
     # Single-stage coarse-endpoints (v2 of the single-stage architecture),
     # global patch-tiled inference -- ONE contiguous global zarr, so a
     # plain str path (see crps_eval.py's PATCHED_MODELS comment for the

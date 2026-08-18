@@ -49,6 +49,11 @@ COARSE_TRUTH_ZARR = (
 # Same 4-region tiling as crps_eval.py's PATCHED_MODELS -- copied rather than
 # imported since crps_eval.py executes argparse at import time.
 PATCHED_MODELS = {
+    # HiRO-ACE-style spatial downscaling baseline: plain single-frame SR,
+    # zero temporal conditioning. n_ens=4 test-inference (see
+    # crps_eval.py's PATCHED_MODELS comment for the full provenance note).
+    # Not on weka -- mounted at /hiro_result only when "hiro" is requested.
+    "hiro": "/hiro_result/test-2023-2024-ens4.zarr",
     # Single-stage coarse-endpoints (v2 of the single-stage architecture),
     # global patch-tiled inference -- ONE contiguous global zarr, so a
     # plain str path (see crps_eval.py's PATCHED_MODELS comment for the
@@ -252,12 +257,16 @@ def main():
     t1 = cftime.DatetimeJulian(ARGS.year, 9, 1)
 
     print(f"Loading {ARGS.model} JJA {ARGS.year}...")
-    pred = _load_region_tiled(
-        PATCHED_MODELS[ARGS.model],
-        t0,
-        t1,
-        variables=["air_temperature_at_two_meters", "PRATEsfc", "frame_source"],
-    )
+    # hiro (and any other non-video, frame-by-frame-independent model) has
+    # no frame_source -- every frame is scoreable, no interior/endpoint
+    # distinction, so don't request a variable that doesn't exist.
+    pred_spec = PATCHED_MODELS[ARGS.model]
+    probe_path = pred_spec if isinstance(pred_spec, str) else next(iter(pred_spec.values()))
+    has_frame_source = "frame_source" in xr.open_zarr(probe_path).data_vars
+    variables = ["air_temperature_at_two_meters", "PRATEsfc"]
+    if has_frame_source:
+        variables.append("frame_source")
+    pred = _load_region_tiled(pred_spec, t0, t1, variables=variables)
     lat = pred["latitude"].values
     lon = pred["longitude"].values
 
@@ -280,7 +289,10 @@ def main():
         .values
     )
 
-    interior_mask = pred["frame_source"].values == 1
+    if has_frame_source:
+        interior_mask = pred["frame_source"].values == 1
+    else:
+        interior_mask = np.ones(pred.sizes["time"], dtype=bool)
     print(
         f"{pred.sizes['time']} timesteps in window, "
         f"{int(interior_mask.sum())} generated-interior"

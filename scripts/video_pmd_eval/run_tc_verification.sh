@@ -23,6 +23,10 @@ JOB_NAME="tc-verification-${MODEL}-$(date +%s)"
 WORKSPACE="ai2/climate-titan"
 CLUSTER="ai2/saturn"
 KNOWN_TRACKS_DATASET="01KZT2P2PS0QZC5J69PQGE6XK8"
+# "hiro" is not on weka -- its zarr lives in its own Beaker result dataset,
+# mounted at /hiro_result only when requested (same pattern as
+# run_crps_eval.sh).
+HIRO_RESULT_DATASET="01M08MXPM2EA4TX8QCN9WD1HPN"
 CPUS=8
 MEMORY="96GiB"
 
@@ -42,6 +46,14 @@ RECTIFY_B64=$(base64 < scripts/tropical_cyclones/rectify_tc_tracks.py | tr -d '\
 
 COMBINED_ZARR="/climate-default/2026-06-25-temporal-diffusion/inference/tc_combined/${MODEL}-ens0-global-combined.zarr"
 
+MOUNT_ARGS=(
+    --mount "src=weka,ref=climate-default,dst=/climate-default"
+    --mount "src=beaker,ref=$KNOWN_TRACKS_DATASET,dst=/known_tracks"
+)
+if [ "$MODEL" = "hiro" ]; then
+    MOUNT_ARGS+=(--mount "src=beaker,ref=$HIRO_RESULT_DATASET,dst=/hiro_result")
+fi
+
 set +e
 CREATE_OUTPUT=$(beaker session create \
     --bare --detach \
@@ -50,8 +62,7 @@ CREATE_OUTPUT=$(beaker session create \
     --budget ai2/atec-climate \
     --workspace "$WORKSPACE" \
     --image "beaker://$DEPS_ONLY_IMAGE" \
-    --mount src=weka,ref=climate-default,dst=/climate-default \
-    --mount src=beaker,ref="$KNOWN_TRACKS_DATASET",dst=/known_tracks \
+    "${MOUNT_ARGS[@]}" \
     --cpus "$CPUS" \
     --memory "$MEMORY" \
     --gpus 0 \
