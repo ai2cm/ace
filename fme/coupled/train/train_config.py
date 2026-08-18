@@ -109,6 +109,12 @@ class InlineValidationConfig:
             "val_0", changing its wandb keys and output directory.
         weight: weight for this validation's loss in the combined checkpoint
             selection metric. Must be non-negative.
+        evaluate_all_steps: whether to evaluate every forward step in the
+            validation data window. If False, evaluate only the steps the
+            coupled train stepper would evaluate for the batch, which under a
+            stochastic n_steps loss configuration keeps validation cost near
+            training cost, at the price of averaging each per-step loss over
+            only the batches that reached its step.
     """
 
     loader: CoupledDataLoaderConfig
@@ -117,6 +123,7 @@ class InlineValidationConfig:
     )
     name: str | None = None
     weight: float = 1.0
+    evaluate_all_steps: bool = True
 
     def __post_init__(self):
         if self.weight < 0:
@@ -150,7 +157,9 @@ class InlineInferenceConfig:
         n_coupled_steps: number of coupled forward steps to take
         coupled_steps_in_memory: number of coupled forward steps to take before
             re-reading data from disk
-        epochs: epochs on which to run inference. By default runs inference every epoch.
+        epochs: positional slice over the training epochs 1 to max_epochs, so
+            index 0 selects epoch 1. By default runs inference every training
+            epoch.
         aggregator: configuration of inline coupled inference aggregator.
         name: name used as wandb log prefix and output subdirectory. If None,
             defaults to "inference" when there is a single inference config
@@ -244,6 +253,7 @@ def _get_validation_callback(
                 output_dir=output_dir,
             ),
             weight=entry_config.weight,
+            evaluate_all_steps=entry_config.evaluate_all_steps,
         )
         for entry_config, data, name in validation_entries
     ]
@@ -276,6 +286,7 @@ def _get_validate_stepper_callback(
                 aggregator=aggregator,
                 ema=ema,
                 validate_using_ema=validate_using_ema,
+                evaluate_all_steps=entry_config.evaluate_all_steps,
             )
             if entry_config.weight > 0:
                 summary = aggregator.get_summary(label=name)
@@ -375,8 +386,8 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
-        evaluate_before_training: Whether to run validation and inline inference before
-            any training is done.
+        evaluate_before_training: Whether to run all validation and inline
+            inference before any training is done.
         save_best_inference_epoch_checkpoints: Whether to save a separate checkpoint
             for each epoch where best_inference_error achieves a new minimum.
             Checkpoints are saved as best_inference_ckpt_XXXX.tar.
@@ -511,9 +522,12 @@ class TrainConfig:
         inference = self.inference_list
         if not inference:
             return []
-        start_epoch = 0 if self.evaluate_before_training else 1
-        all_epochs = list(range(start_epoch, self.max_epochs + 1))
-        return [set(all_epochs[entry.epochs.slice]) for entry in inference]
+        training_epochs = list(range(1, self.max_epochs + 1))
+        pre_training_epochs = {0} if self.evaluate_before_training else set()
+        return [
+            set(training_epochs[entry.epochs.slice]) | pre_training_epochs
+            for entry in inference
+        ]
 
     def get_inference_epochs(self) -> list[int]:
         epoch_sets = self.get_inference_epoch_sets()
