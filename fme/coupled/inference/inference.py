@@ -135,6 +135,12 @@ class InferenceConfig:
             (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
         atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
             when loading a single coupled checkpoint.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a
+            reproducible noise sequence, independent of
+            ``coupled_steps_in_memory``. The atmosphere takes this value and the
+            ocean ``seed + 1``. Leave unset (None) for the default
+            non-reproducible behavior.
     """
 
     experiment_dir: str
@@ -153,6 +159,7 @@ class InferenceConfig:
     n_ensemble_per_ic: int = 1
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
+    seed: int | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
@@ -275,6 +282,7 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition=initial_condition,
         dataset_info=stepper.training_dataset_info,
     )
+    data.apply_config_seed(config.seed)
     stepper.ocean.backfill_deptho(data.ocean_properties.vertical_coordinate)
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
