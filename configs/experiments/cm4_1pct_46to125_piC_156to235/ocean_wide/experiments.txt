@@ -1,0 +1,26 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+# Rows are not hand-written, but this file is hand-edited. experiment_id is a
+# Beaker id that exists only after submission, and the job runner appends one
+# row per launched job (see append_to_experiments_file in job_runner/lib.sh,
+# called from job_runner/uncoupled_train.sh and job_runner/uncoupled_finetune.sh).
+# A hand-written placeholder row would be duplicated by that append. Editing an
+# existing row by hand is the normal way to drive downstream jobs; see below.
+
+# Rows will arrive under two groups:
+#   cm4_1pct_46to125_piC_156to235-ocean_wide       (pretraining)
+#   cm4_1pct_46to125_piC_156to235-ocean_wide-ft    (finetuning)
+
+# The runner writes them with status "training". The status word is then the
+# hand-edited control for what runs next, and it selects the config by name:
+# job_runner/evaluate.sh acts on ^run_ (excluding ^run_inf_) and reads the tag
+# off the suffix, so status run_ICx1 runs evaluator-config-ICx1.yaml from this
+# directory; job_runner/inference.sh acts on ^run_inf_ the same way. Any other
+# word is inert to both, which is how a row is parked (see the reference
+# directory's "invalid" rows).
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|01M09FGGX0XWMEBVV7HEQTN7QB|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs1|01M09FGS32Q75CQ8GDV8T6EG4Z|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs2|01M09FH1ACEWZA2CZ103X2C396|training|best_inference_ckpt|normal|--min-runtime 8h
