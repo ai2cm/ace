@@ -415,21 +415,20 @@ class CoupledSeaIceConfig:
             to the output dataset. If window_avg is also configured, then the window-
             average is applied to ocean grid cells only based on the forumula
             (1 - ofrac_window_avg) * ts + ofrac_window_avg * ts_window_avg.
-        use_atmosphere_sea_ice_fraction_fallback: If true (default), the
-            atmosphere's own sea ice fraction may be used as the sea ice
-            source when no separate sea ice dataset is provided and the
-            ocean-sourced path does not apply. If false, reaching that
-            fallback raises a ValueError, so a misconfiguration (e.g. a
-            missing ocean sea ice variable, or an unintentionally configured
-            window_avg) fails loudly instead of silently training on the
-            atmosphere's own field.
+        use_atmosphere_sea_ice_fraction_fallback: If true, the atmosphere's own
+            sea ice fraction may be used as the sea ice source when no separate
+            sea ice dataset is provided and the ocean-sourced path does not
+            apply. If false (the default), reaching that fallback raises a
+            ValueError, so a misconfiguration (e.g. a missing ocean sea ice
+            variable, or an unintentionally configured window_avg) fails loudly
+            instead of silently training on the atmosphere's own field.
         timedelta: Time resolution of the sea ice data (default: "6h").
 
     """
 
     window_avg: WindowAvgDatasetConfig | None = None
     include_ts: bool = False
-    use_atmosphere_sea_ice_fraction_fallback: bool = True
+    use_atmosphere_sea_ice_fraction_fallback: bool = False
     timedelta: str = "6h"
 
     def apply_window_avg_and_reindex(

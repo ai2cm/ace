@@ -1,6 +1,7 @@
 import dataclasses
 import os
 import pathlib
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -10,19 +11,29 @@ import yaml
 from fme.ace.data_loading.inference import InferenceInitialConditionIndices
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.inference import ForcingDataLoaderConfig
+from fme.ace.stepper import StepperOverrideConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.data_loading.test_data_loader import create_coupled_data_on_disk
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
+from fme.coupled.inference.evaluator import (
+    StandaloneComponentCheckpointsConfig,
+    StandaloneComponentConfig,
+    load_stepper_config,
+)
 from fme.coupled.inference.inference import (
     ComponentInitialConditionConfig,
     CoupledInitialConditionConfig,
     InferenceConfig,
     main,
 )
-from fme.coupled.inference.test_evaluator import save_coupled_stepper
-from fme.coupled.test_stepper import CoupledDatasetInfoBuilder
+from fme.coupled.inference.test_evaluator import (
+    _create_dataset_info_for_stepper,
+    save_coupled_stepper,
+)
+from fme.coupled.test_stepper import AddOneWithNoise, CoupledDatasetInfoBuilder
 
 
 def _setup(
@@ -36,6 +47,7 @@ def _setup(
     n_initial_conditions: int,
     empty_ocean_forcing: bool = False,
     atmosphere_times_offset: int = 0,
+    atmosphere_builder: ModuleSelector | None = None,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmos_in_names + atmos_out_names)
@@ -80,6 +92,7 @@ def _setup(
         save_standalone_component_checkpoints=True,
         ocean_timedelta=mock_data.ocean.timedelta,
         atmosphere_timedelta=mock_data.atmosphere.timedelta,
+        atmosphere_builder=atmosphere_builder,
     )
     if empty_ocean_forcing:
         atmos_forcing_config = mock_data.dataset_config.atmosphere
@@ -132,8 +145,6 @@ def _setup(
 
 
 def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
-    from unittest.mock import MagicMock
-
     with pytest.raises(
         ValueError,
         match="n_coupled_steps must be divisible by coupled_steps_in_memory",
@@ -147,6 +158,72 @@ def test_inference_n_coupled_steps_divisible_by_coupled_steps_in_memory():
             forcing_loader=MagicMock(),
             coupled_steps_in_memory=2,
         )
+
+
+def test_inference_rejects_top_level_override_with_standalone_checkpoint():
+    standalone = StandaloneComponentCheckpointsConfig(
+        ocean=StandaloneComponentConfig(timedelta="2D", path="ocean.pt"),
+        atmosphere=StandaloneComponentConfig(timedelta="1D", path="atmos.pt"),
+    )
+    with pytest.raises(ValueError, match="single coupled checkpoint"):
+        InferenceConfig(
+            experiment_dir="test",
+            n_coupled_steps=2,
+            checkpoint_path=standalone,
+            logging=MagicMock(),
+            initial_condition=MagicMock(),
+            forcing_loader=MagicMock(),
+            atmosphere_stepper_override=StepperOverrideConfig(
+                prescribed_prognostic_names=["a_prog"]
+            ),
+        )
+
+
+def test_inference_config_threads_ocean_override_to_forcing_window(
+    tmp_path: pathlib.Path,
+):
+    """InferenceConfig routes an ocean override into the loaded stepper config so
+    prescribed prognostics appear in the ocean forcing window.
+    """
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_fraction", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    dataset_info, _ = _create_dataset_info_for_stepper(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        n_coupled_steps=2,
+        n_initial_conditions=1,
+        data_dir=tmp_path / "stepper_data",
+    )
+    ckpt = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmos_in_names=atmos_in_names,
+        atmos_out_names=atmos_out_names,
+        dataset_info=dataset_info,
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_fraction",
+    )
+    assert isinstance(ckpt, str)
+
+    config = InferenceConfig(
+        experiment_dir=str(tmp_path),
+        n_coupled_steps=2,
+        checkpoint_path=ckpt,
+        logging=MagicMock(),
+        initial_condition=MagicMock(),
+        forcing_loader=MagicMock(),
+        ocean_stepper_override=StepperOverrideConfig(
+            prescribed_prognostic_names=["thetao_18"]
+        ),
+    )
+    assert "thetao_18" not in load_stepper_config(ckpt).ocean_forcing_window_names
+    stepper_config = config.load_stepper_config()
+    assert "thetao_18" in stepper_config.ocean_forcing_window_names
 
 
 @pytest.mark.parametrize(
@@ -267,3 +344,50 @@ def test_inference_with_empty_ocean_forcing(
     with mock_wandb() as wandb:
         wandb.configure(log_to_wandb=True)
         main(yaml_config=str(config_filename))
+
+
+def _run_seeded_inference(
+    run_dir: pathlib.Path, base_config: InferenceConfig, seed: int | None
+) -> np.ndarray:
+    """Run the coupled inference entrypoint, returning the atmosphere prognostic."""
+    run_dir.mkdir()
+    config = dataclasses.replace(base_config, experiment_dir=str(run_dir), seed=seed)
+    config_filename = run_dir / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+    ds = xr.open_dataset(
+        run_dir / "atmosphere" / "autoregressive_predictions.nc",
+        decode_timedelta=False,
+    )
+    return ds["a_prog"].values
+
+
+@pytest.mark.slow
+def test_inference_seed_reproducible(tmp_path: pathlib.Path):
+    """A seeded run is reproducible end-to-end, and a different seed gives a
+    different answer (so the reproducibility is not vacuous). Independence from
+    ``coupled_steps_in_memory`` is covered on the evaluator entrypoint, which
+    shares the seeding path.
+    """
+    config, _, _ = _setup(
+        ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],
+        ocean_out_names=["o_prog", "sst", "o_diag"],
+        atmos_in_names=["a_prog", "surface_temperature", "ocean_fraction"],
+        atmos_out_names=["a_prog", "surface_temperature", "a_diag"],
+        tmp_path=tmp_path,
+        n_coupled_steps=2,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=1,
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": AddOneWithNoise()}
+        ),
+    )
+    seed0 = _run_seeded_inference(tmp_path / "s0", config, 0)
+    seed0_again = _run_seeded_inference(tmp_path / "s0_again", config, 0)
+    seed1 = _run_seeded_inference(tmp_path / "s1", config, 1)
+
+    np.testing.assert_array_equal(seed0, seed0_again)
+    assert not np.allclose(seed0, seed1)

@@ -118,9 +118,8 @@ def test_sea_ice_source_priority(
     atmos = _synthetic_atmos(sea_ice_fraction=0.2)
     ocean = _synthetic_ocean(ocean_sea_ice_fraction=0.5 if ocean_has_sea_ice else None)
     sea_ice = _synthetic_sea_ice(0.3) if with_sea_ice_dataset else None
-    result = compute_coupled_sea_ice(
-        atmos, CoupledSeaIceConfig(), sea_ice=sea_ice, ocean=ocean
-    )
+    config = CoupledSeaIceConfig(use_atmosphere_sea_ice_fraction_fallback=True)
+    result = compute_coupled_sea_ice(atmos, config, sea_ice=sea_ice, ocean=ocean)
     np.testing.assert_allclose(result["sea_ice_fraction"].values, expected_ifrac)
 
 
@@ -130,7 +129,9 @@ def test_window_avg_keeps_legacy_path():
     # atmosphere-sourced windowed result from an ocean without sea ice fields
     ramp = np.linspace(0.0, 1.0, N_ATMOS_TIMES)
     atmos = _synthetic_atmos(sea_ice_fraction=ramp)
-    config = CoupledSeaIceConfig(window_avg=WINDOW_AVG)
+    config = CoupledSeaIceConfig(
+        window_avg=WINDOW_AVG, use_atmosphere_sea_ice_fraction_fallback=True
+    )
     result_ice_carrying_ocean = compute_coupled_sea_ice(
         atmos, config, ocean=_synthetic_ocean(ocean_sea_ice_fraction=0.5)
     )
@@ -225,8 +226,10 @@ def test_atmosphere_fallback_disabled_raises(cause):
     with pytest.raises(ValueError, match="use_atmosphere_sea_ice_fraction_fallback"):
         compute_coupled_sea_ice(atmos, disabled, ocean=ocean)
 
-    # same inputs succeed with the default fallback behavior
-    enabled = CoupledSeaIceConfig(window_avg=window_avg)
+    # same inputs succeed with the fallback enabled
+    enabled = CoupledSeaIceConfig(
+        window_avg=window_avg, use_atmosphere_sea_ice_fraction_fallback=True
+    )
     compute_coupled_sea_ice(atmos, enabled, ocean=ocean)
 
 
@@ -264,7 +267,10 @@ def test_legacy_mode_unchanged(with_sea_ice_dataset):
         # sfrac = 1 - lfrac = 0.75; sic = 0.3 / 0.75
         expected_sic = 0.4
         expected_sfrac = 0.75
-    result = compute_coupled_sea_ice(atmos, CoupledSeaIceConfig(), sea_ice=sea_ice)
+    config = CoupledSeaIceConfig(
+        use_atmosphere_sea_ice_fraction_fallback=not with_sea_ice_dataset
+    )
+    result = compute_coupled_sea_ice(atmos, config, sea_ice=sea_ice)
     sfrac_mod = 0.75
     np.testing.assert_allclose(result["ocean_sea_ice_fraction"].values, expected_sic)
     np.testing.assert_allclose(result["sea_surface_fraction"].values, expected_sfrac)

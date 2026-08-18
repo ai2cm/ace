@@ -2,6 +2,7 @@ from .config import (
     ContiguousDistributedSampler,
     DataLoaderConfig,
     PairedDataLoaderConfig,
+    PairedVideoLoaderConfig,
     enforce_lat_bounds,
 )
 from .datasets import (
@@ -24,4 +25,14 @@ from .utils import (
     find_roll_anchor,
     roll_lon_coords,
     scale_tuple,
+)
+from .video_datasets import (
+    PairedVideoBatchData,
+    PairedVideoBatchItem,
+    PairedVideoGriddedData,
+    VideoBatchData,
+    VideoBatchItem,
+    VideoBatchItemDatasetAdapter,
+    VideoFineCoarsePairedDataset,
+    compute_calendar_features,
 )
