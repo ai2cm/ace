@@ -1,0 +1,39 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+# ocean_fillmean_clip + the ocean heat content correction. train-config.yaml is
+# byte-identical to ocean_fillmean_clip/train-config.yaml (fill_value: mean,
+# max_grad_norm: 1.0, same Samudra ch_width and variable sets), so this arm
+# differs from ocean_fillmean_clip in exactly one respect: the
+# ocean_heat_content_correction='scaled_temperature' term appended to the
+# override column. Diff the two files before editing either.
+#
+# What this arm tests. With clipping the 1deg fill_value=mean recipe trains
+# cleanly (3/3 seeds, no training-loss discontinuity) and beats ocean_baseline
+# on val_1pct_late by ~27x the seed spread, but it *loses* the 20-yr inline
+# rollout (inference_1pct 0.056-0.069 vs baseline 0.050-0.053, no overlap) and
+# its 140-yr ICx1 surface salinity tracks the baseline for ~55 years and then
+# diverges monotonically to 2.5-4.5x by years 121-140. That divergence is a
+# slow drift of the deep temperature/salinity state, which is what the OHC
+# correction constrains: it scales predicted potential temperature by a uniform
+# factor so column heat content follows the surface energy flux instead of
+# floating free. If the correction closes the rollout gap, fill_value=mean
+# ports to 1deg after all; if the rollout numbers stay where the clip arm left
+# them, the trade-off is intrinsic to the fill value and the keep-0.0 verdict
+# stands.
+#
+# Not a confound with the flux correction: surface_energy_flux_correction is
+# already on in every arm of this family, including ocean_baseline, via this
+# same override column. Both overrides are listed here because the corrector
+# block in train-config.yaml carries neither.
+#
+# Precedent that the OHC term is constructible on this recipe:
+# cm4_1pctCO2-train_0046to0125-boundary_prescribed/ocean/train-config.yaml runs
+# both corrections on the same 1deg zarrs with hfds_total_area in out_names.
+#
+# One seed only, deliberately: this is a does-it-move-the-needle read against
+# ocean_fillmean_clip rs0-rs2, not a seed-spread measurement. Add rs1/rs2 here
+# only if rs0 closes the inference_1pct gap.
+#
+# Cluster is jupiter, not the h100 alias (ceres+jupiter): urgent-priority jobs
+# are not available on ceres, so target jupiter directly.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip_ohc|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed' stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature'
