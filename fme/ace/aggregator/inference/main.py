@@ -47,6 +47,28 @@ from .video import VideoMetricConfig
 from .zonal_mean import ZonalMeanMetricConfig
 
 wandb = WandB.get_instance()
+
+
+def _summary_logs(name: str, aggregator) -> InferenceLog:
+    """Collect one sub-aggregator's summary logs, tolerating its failure.
+
+    get_summary runs after the whole rollout, so raising here throws away every
+    other aggregator's metrics along with the GPU time that produced them --
+    figure construction in particular is easy to break on an input the rollout
+    itself handled fine. Degrade to a warning instead.
+    """
+    logging.info(f"Getting summary logs for {name} aggregator")
+    try:
+        return aggregator.get_logs(label=name)
+    except Exception:
+        logging.exception(
+            f"Failed to get summary logs for the {name} aggregator; its metrics "
+            "will be missing from this run's summary. Other aggregators are "
+            "unaffected."
+        )
+        return {}
+
+
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
 APPROXIMATELY_EIGHTY_YEARS = datetime.timedelta(days=MIN_YEARS_FOR_FILTERED_TPI * 365)
@@ -668,8 +690,7 @@ class InferenceEvaluatorAggregator(
     def get_summary(self) -> InferenceSummary:
         logs: InferenceLog = {}
         for name, aggregator in self._summary_aggregators.items():
-            logging.info(f"Getting summary logs for {name} aggregator")
-            logs.update(aggregator.get_logs(label=name))
+            logs.update(_summary_logs(name, aggregator))
         if self._step_diagnostics_aggregator is not None:
             logs.update(self._step_diagnostics_aggregator.summary_logs())
         loss = logs.get("time_mean_norm/rmse/channel_mean")
@@ -987,10 +1008,9 @@ class InferenceAggregator(
         return logs
 
     def get_summary(self) -> InferenceSummary:
-        logs = {}
+        logs: InferenceLog = {}
         for name, aggregator in self._summary_aggregators.items():
-            logging.info(f"Getting summary logs for {name} aggregator")
-            logs.update(aggregator.get_logs(label=name))
+            logs.update(_summary_logs(name, aggregator))
         if self._step_diagnostics_aggregator is not None:
             logs.update(self._step_diagnostics_aggregator.summary_logs())
         return InferenceSummary(logs=logs, loss=None)

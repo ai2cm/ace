@@ -1,0 +1,45 @@
+# Smoke arm: the ICx1-80yr uncoupled config at 1600 steps (~1.1 yr), matching
+# the coupled smoke arm's 80 coupled steps. See that config for what to check.
+experiment_dir: /results
+n_forward_steps: 1600
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+# All arms share one noise realization, so an arm-vs-arm difference is the
+# ablation and not a different draw from the stochastic atmosphere.
+seed: 0
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names:
+    - surface_temperature
+    - specific_total_water_0
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  num_data_workers: 4
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+  start_indices:
+    times:
+      - '0046-01-06T00:00:00'
+aggregator:
+  # The corrector's per-variable correction magnitude, as a wandb time series
+  # plus a time-mean map: how much work the energy correction is doing, in the
+  # un-ablated arms as well as the ablated ones. This is the measurement the
+  # coupled evaluator has no aggregator for, so the uncoupled arms carry it.
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: true

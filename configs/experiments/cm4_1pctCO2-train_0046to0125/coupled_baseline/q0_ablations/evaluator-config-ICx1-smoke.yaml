@@ -1,0 +1,72 @@
+# Smoke arm: the ICx1-80yr coupled config at 80 coupled steps (~1.1 yr).
+#
+# Run one arm of each kind through this before launching the 80-year campaign,
+# to confirm the override reached the checkpoint (the dumped config.yaml shows
+# the corrector option as null), and that every requested monthly name is
+# actually present in the prediction data (an absent name only warns).
+experiment_dir: /results
+n_coupled_steps: 80
+coupled_steps_in_memory: 10
+checkpoint_path: /ckpt.tar
+# All arms share one noise realization, so an arm-vs-arm difference is the
+# ablation and not a different draw from the stochastic atmosphere.
+seed: 0
+# No save_step_diagnostics in either realm: the coupled path does not carry the
+# corrector's per-step deltas through to its writers or aggregator (they are
+# dropped when the paired data is built), so requesting them writes nothing. The
+# uncoupled arms carry that measurement instead, via the aggregator's
+# correction-magnitude metrics; plumbing the coupled side is its own task.
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - sst
+      - thetao_9
+      - thetao_18
+      - hfds_total_area
+      - ocean_heat_content
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+    names:
+      - surface_temperature
+      # the field total_energy_budget_correction acts on, on the same top layer
+      # as the prescribed humidity: with the correction off the atmosphere's
+      # energy budget is open, and temperature drift is the signature
+      - air_temperature_0
+      - specific_total_water_0
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+      - '0046-01-06T00:00:00'
+aggregator:
+  log_zonal_mean_images: false
+  log_histograms: false

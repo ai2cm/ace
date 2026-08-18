@@ -44,13 +44,18 @@ from fme.coupled.stepper import (
 def _validate_coupled_component_override(
     override: StepperOverrideConfig | None,
 ) -> None:
-    """Restrict coupled inference overrides to ``prescribed_prognostic_names``.
+    """Restrict coupled inference overrides to the name-preserving ones.
 
     ``CoupledStepperConfig`` caches cross-component forcing-name sets and
-    validates component compatibility at construction. Only
-    ``prescribed_prognostic_names`` is recomputed on demand; an ``ocean``,
+    validates component compatibility at construction. An ``ocean``,
     ``multi_call`` or ``derived_forcings`` override applied afterward would leave
     those caches stale, so reject them rather than silently use stale values.
+
+    ``prescribed_prognostic_names`` is recomputed on demand, and
+    ``disable_corrections`` only switches corrections off inside a component's
+    corrector -- it changes no variable names at all (not ``in_names``,
+    ``out_names`` or ``next_step_input_names``), so neither leaves a stale
+    cache.
     """
     if override is None:
         return
@@ -65,7 +70,8 @@ def _validate_coupled_component_override(
     ]
     if unsupported:
         raise ValueError(
-            "Coupled inference overrides only support prescribed_prognostic_names, "
+            "Coupled inference overrides only support "
+            "prescribed_prognostic_names and disable_corrections, "
             f"but got unsupported override(s): {sorted(unsupported)}."
         )
 
@@ -310,6 +316,12 @@ class InferenceEvaluatorConfig:
             (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
         atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
             when loading a single coupled checkpoint.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO in the atmosphere
+            component) produce a reproducible noise sequence, independent of
+            ``coupled_steps_in_memory``. Leave unset (None) for the default
+            non-reproducible behavior. Only affects the stepper rollout (not the
+            ``prediction_loader`` comparison path).
     """
 
     experiment_dir: str
@@ -327,6 +339,7 @@ class InferenceEvaluatorConfig:
     prediction_loader: InferenceDataLoaderConfig | None = None
     ocean_stepper_override: StepperOverrideConfig | None = None
     atmosphere_stepper_override: StepperOverrideConfig | None = None
+    seed: int | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
@@ -478,6 +491,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         initial_condition=initial_condition_requirements,
         dataset_info=stepper.training_dataset_info,
     )
+    data.apply_config_seed(config.seed)
     stepper.set_eval()
     stepper.ocean.backfill_deptho(data.ocean_properties.vertical_coordinate)
 

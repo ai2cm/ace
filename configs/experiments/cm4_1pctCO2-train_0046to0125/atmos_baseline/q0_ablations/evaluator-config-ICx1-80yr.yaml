@@ -1,0 +1,49 @@
+# Uncoupled (SST-forced) arm of the stratospheric-humidity / energy-corrector
+# ablations, on the pre-trained atmosphere the coupled run was built from.
+#
+# Matched to the coupled arm step for step: same IC, 116800 6-hourly steps
+# = 5840 coupled steps x 20 inner steps = 80 noleap years, 0046-01-06 to
+# 0126-01-06. Arms differ only by the `--override` dotlist in experiments.txt.
+experiment_dir: /results
+n_forward_steps: 116800
+forward_steps_in_memory: 20
+checkpoint_path: /ckpt.tar
+# All arms share one noise realization, so an arm-vs-arm difference is the
+# ablation and not a different draw from the stochastic atmosphere.
+seed: 0
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names:
+    - surface_temperature
+    - specific_total_water_0
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+loader:
+  num_data_workers: 4
+  dataset:
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+        engine: zarr
+  start_indices:
+    times:
+      - '0046-01-06T00:00:00'
+aggregator:
+  # The corrector's per-variable correction magnitude, as a wandb time series
+  # plus a time-mean map: how much work the energy correction is doing, in the
+  # un-ablated arms as well as the ablated ones. This is the measurement the
+  # coupled evaluator has no aggregator for, so the uncoupled arms carry it.
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: true

@@ -1,0 +1,47 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+# Coupled arms of the stratospheric-humidity / energy-corrector ablations.
+# The 8 arms share evaluator-config-ICx1-80yr.yaml and differ only by the
+# `override` column (field 8):
+#
+#   tag              prescribe q0   atmos TEBC   ocean SEFC   ocean OHCC
+#   base                  -            on           on           on
+#   q0                    y            on           on           on
+#   noTEBC                -            off          on           on
+#   q0-noTEBC             y            off          on           on
+#   noSEFC                -            on           off          on
+#   q0-noSEFC             y            on           off          on
+#   noOHCC                -            on           on           off
+#   q0-noOHCC             y            on           on           off
+#
+# The un-prescribed corrector-off arms are the controls: they separate "the
+# corrector reacts to prescribed q0" from "the corrector was doing this all
+# along". q0 is prescribed from the same 1pctCO2 target the arms are scored
+# against, i.e. the emulator's own stratospheric-humidity error is removed.
+#
+# results_dataset is pinned rather than resolved from the experiment id: the
+# training run spans 10 beaker jobs (9 preemptions, then one that finished
+# 15/15 epochs), and this is the finishing job's dataset. Its
+# best_inference_ckpt is epoch 15 (best_inference_error 0.14698).
+#
+# Flip a row's status to `run_ICx1-smoke` to send it through the ~1.1 yr smoke
+# config instead; do that for one arm of each kind before the campaign.
+# Set status to `skip` to leave a row out of a launch.
+#
+# The 8 rows below launched 2026-08-13 and all finished exit 0; they are on
+# `skip` so a later launch does not repeat them. The two rows after them are
+# the out-of-sample reference pair: the same checkpoint and the same base / q0
+# overrides over the whole 1pctCO2 record (evaluator-config-ICx1-140yr.yaml,
+# 0001-01-06 -> 0140-12-27) instead of the in-sample training window. 140 yr is
+# ~1.75x the 80 yr arms' 2.5-3.6 h, hence the longer --min-runtime.
+
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|base|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h||01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|q0|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h|'atmosphere_stepper_override.prescribed_prognostic_names=[specific_total_water_0]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|noTEBC|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h|'atmosphere_stepper_override.disable_corrections=[total_energy_budget_correction]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|q0-noTEBC|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h|'atmosphere_stepper_override.prescribed_prognostic_names=[specific_total_water_0]' 'atmosphere_stepper_override.disable_corrections=[total_energy_budget_correction]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|noSEFC|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h|'ocean_stepper_override.disable_corrections=[surface_energy_flux_correction]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|q0-noSEFC|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h|'atmosphere_stepper_override.prescribed_prognostic_names=[specific_total_water_0]' 'ocean_stepper_override.disable_corrections=[surface_energy_flux_correction]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|noOHCC|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h|'ocean_stepper_override.disable_corrections=[ocean_heat_content_correction]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|q0-noOHCC|01KZ5DWPA1NAHYMC1C516E504M|skip|best_inference_ckpt|high|--min-runtime 4h|'atmosphere_stepper_override.prescribed_prognostic_names=[specific_total_water_0]' 'ocean_stepper_override.disable_corrections=[ocean_heat_content_correction]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|base|01KZ5DWPA1NAHYMC1C516E504M|run_ICx1-140yr|best_inference_ckpt|high|--min-runtime 8h||01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
+cm4_1pctCO2-train_0046to0125-coupled_baseline-fto|q0|01KZ5DWPA1NAHYMC1C516E504M|run_ICx1-140yr|best_inference_ckpt|high|--min-runtime 8h|'atmosphere_stepper_override.prescribed_prognostic_names=[specific_total_water_0]'|01KZDWR8XHZE0V7Z2EBJWTHB6P|ai2/ace|h100||
