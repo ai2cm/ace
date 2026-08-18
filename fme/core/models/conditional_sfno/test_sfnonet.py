@@ -494,7 +494,7 @@ def test_sfnonet_spectral_ratio_preserve_global_mean_spatial_parallel():
     path, so it needs no full-grid quadrature and no rejection."""
     torch.manual_seed(0)
     dist = Distributed.get_instance()
-    if dist.world_size == dist.total_data_parallel_ranks:
+    if not dist.has_spatial_parallelism:
         pytest.skip("no spatial parallelism in this configuration")
     embed_dim = 16
     img_shape = (8, 16)  # divides evenly across spatial ranks

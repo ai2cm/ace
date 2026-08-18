@@ -10,7 +10,7 @@ import torch.utils.data
 
 from fme.core.distributed.shutdown import (
     TERMINATION_SIGNALS,
-    handle_termination_signals,
+    abort_and_exit_on_termination,
 )
 
 
@@ -34,9 +34,9 @@ def test_aborts_then_exits_with_conventional_code_for_signal(sig):
     result = _run_listener_program(
         f"""
         import signal, threading
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
-        with handle_termination_signals(
+        with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True), grace_period=0.1
         ):
             signal.raise_signal(signal.Signals({int(sig)}))
@@ -62,7 +62,7 @@ def test_acts_while_the_main_thread_is_wedged_holding_the_logging_lock():
         """
         import logging, os, signal, sys, threading, time
         logging.basicConfig(level=logging.INFO, stream=sys.stderr)
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         def signal_later():
             time.sleep(0.5)
@@ -70,7 +70,7 @@ def test_acts_while_the_main_thread_is_wedged_holding_the_logging_lock():
 
         threading.Thread(target=signal_later, daemon=True).start()
         lock = threading.Lock()
-        with handle_termination_signals(
+        with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True), grace_period=0.1
         ):
             # stands in for being interrupted mid-emit, inside `Handler.handle`
@@ -94,12 +94,12 @@ def test_exits_even_if_abort_raises():
     result = _run_listener_program(
         """
         import signal, threading
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         def abort():
             raise RuntimeError("no process group")
 
-        with handle_termination_signals(abort=abort, grace_period=0.1):
+        with abort_and_exit_on_termination(abort=abort, grace_period=0.1):
             signal.raise_signal(signal.SIGTERM)
             threading.Event().wait()
         """
@@ -121,9 +121,9 @@ def test_exit_waits_out_the_grace_period():
     program = textwrap.dedent(
         f"""
         import signal, threading
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
-        with handle_termination_signals(
+        with abort_and_exit_on_termination(
             abort=lambda: None, grace_period={grace_period}
         ):
             print("ready", flush=True)
@@ -162,7 +162,7 @@ def test_post_abort_callbacks_run_after_the_abort_and_cannot_stop_the_exit():
         import signal, threading
         from fme.core.distributed.shutdown import (
             add_post_abort_callback,
-            handle_termination_signals,
+            abort_and_exit_on_termination,
         )
 
         released = threading.Event()
@@ -177,7 +177,7 @@ def test_post_abort_callbacks_run_after_the_abort_and_cannot_stop_the_exit():
         add_post_abort_callback(lambda: print("first", flush=True))
         add_post_abort_callback(broken)
         add_post_abort_callback(lambda: print("second", flush=True))
-        with handle_termination_signals(abort=abort, grace_period=0.1):
+        with abort_and_exit_on_termination(abort=abort, grace_period=0.1):
             signal.raise_signal(signal.SIGTERM)
             released.wait()  # blocked "in the collective" until the abort
             raise RuntimeError("rank unwinding after its collective died")
@@ -202,7 +202,7 @@ def test_callbacks_wait_for_the_main_thread_to_stop_running():
         import signal, threading, time
         from fme.core.distributed.shutdown import (
             add_post_abort_callback,
-            handle_termination_signals,
+            abort_and_exit_on_termination,
         )
 
         released = threading.Event()
@@ -212,7 +212,7 @@ def test_callbacks_wait_for_the_main_thread_to_stop_running():
             released.set()
 
         add_post_abort_callback(lambda: print("callback", flush=True))
-        with handle_termination_signals(abort=abort, grace_period=0.1):
+        with abort_and_exit_on_termination(abort=abort, grace_period=0.1):
             signal.raise_signal(signal.SIGTERM)
             released.wait()
             time.sleep(1.0)  # compute continuing between collectives
@@ -236,14 +236,14 @@ def test_callbacks_are_skipped_when_the_main_thread_never_stops():
         import signal, threading
         from fme.core.distributed.shutdown import (
             add_post_abort_callback,
-            handle_termination_signals,
+            abort_and_exit_on_termination,
         )
 
         add_post_abort_callback(lambda: print("callback", flush=True))
-        with handle_termination_signals(
+        with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True),
             grace_period=0.1,
-            park_timeout=0.2,
+            state_freeze_timeout=0.2,
         ):
             signal.raise_signal(signal.SIGTERM)
             threading.Event().wait()  # never unwinds
@@ -264,12 +264,12 @@ def test_a_dead_stderr_cannot_stop_the_abort_or_the_exit():
     result = _run_listener_program(
         """
         import os, signal, threading
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         r, w = os.pipe()
         os.close(r)
         os.dup2(w, 2)  # every stderr write now raises BrokenPipeError
-        with handle_termination_signals(
+        with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True), grace_period=0.1
         ):
             signal.raise_signal(signal.SIGTERM)
@@ -294,7 +294,7 @@ def test_a_main_thread_released_by_the_abort_cannot_exit_first():
     result = _run_listener_program(
         """
         import signal, threading
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         released = threading.Event()
 
@@ -302,7 +302,7 @@ def test_a_main_thread_released_by_the_abort_cannot_exit_first():
             print("abort", flush=True)
             released.set()
 
-        with handle_termination_signals(abort=abort, grace_period=1.0):
+        with abort_and_exit_on_termination(abort=abort, grace_period=1.0):
             signal.raise_signal(signal.SIGTERM)
             released.wait()  # blocked "in the collective" until the abort
             raise RuntimeError("rank unwinding after its collective died")
@@ -327,7 +327,7 @@ def test_a_repeated_signal_cannot_cut_the_grace_period_short(sig):
     program = textwrap.dedent(
         f"""
         import threading
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         released = threading.Event()
 
@@ -336,7 +336,9 @@ def test_a_repeated_signal_cannot_cut_the_grace_period_short(sig):
             released.set()
 
         try:
-            with handle_termination_signals(abort=abort, grace_period={grace_period}):
+            with abort_and_exit_on_termination(
+                abort=abort, grace_period={grace_period}
+            ):
                 print("ready", flush=True)
                 released.wait()  # blocked "in the collective" until the abort
                 raise RuntimeError("rank unwinding after its collective died")
@@ -386,9 +388,9 @@ def test_forked_child_does_not_trigger_the_parent_abort():
     result = _run_listener_program(
         """
         import os, signal, time
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
-        with handle_termination_signals(
+        with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True), grace_period=0.1
         ):
             pid = os.fork()
@@ -425,9 +427,9 @@ def test_second_generation_fork_does_not_close_recycled_fds():
     result = _run_listener_program(
         """
         import os
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
-        with handle_termination_signals(abort=lambda: None, grace_period=0.1):
+        with abort_and_exit_on_termination(abort=lambda: None, grace_period=0.1):
             pid = os.fork()
             if pid == 0:  # worker: its at-fork disarm closed the pipe fds
                 a, b = os.pipe()  # recycle those fd numbers
@@ -462,10 +464,10 @@ def test_other_handled_signals_do_not_trigger_the_abort():
     result = _run_listener_program(
         """
         import os, signal, time
-        from fme.core.distributed.shutdown import handle_termination_signals
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
         signal.signal(signal.SIGCHLD, lambda signum, frame: None)
-        with handle_termination_signals(
+        with abort_and_exit_on_termination(
             abort=lambda: print("abort", flush=True), grace_period=0.1
         ):
             pid = os.fork()
@@ -484,7 +486,7 @@ def test_other_handled_signals_do_not_trigger_the_abort():
 def test_previous_dispositions_are_restored_on_exit():
     original = {sig: signal.getsignal(sig) for sig in TERMINATION_SIGNALS}
 
-    with handle_termination_signals(abort=lambda: None):
+    with abort_and_exit_on_termination(abort=lambda: None):
         for sig in TERMINATION_SIGNALS:
             assert signal.getsignal(sig) is not original[sig]
         assert any(
@@ -506,7 +508,7 @@ def test_no_listener_installed_off_the_main_thread():
     observed = []
 
     def run():
-        with handle_termination_signals(abort=lambda: None):
+        with abort_and_exit_on_termination(abort=lambda: None):
             observed.append(signal.getsignal(signal.SIGTERM))
 
     thread = threading.Thread(target=run)
@@ -521,5 +523,5 @@ def test_no_listener_installed_in_a_dataloader_worker(monkeypatch):
     monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
     original = signal.getsignal(signal.SIGTERM)
 
-    with handle_termination_signals(abort=lambda: None):
+    with abort_and_exit_on_termination(abort=lambda: None):
         assert signal.getsignal(signal.SIGTERM) is original
