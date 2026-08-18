@@ -145,6 +145,23 @@ def source_time_chunk_size(ds: xr.Dataset) -> int:
     return widths.pop()
 
 
+def shard_aligned_chunk_size(read_chunk_size: int, shard_size: int) -> int:
+    """The width to split read chunks to before consolidating into shards.
+
+    ``ConsolidateChunks`` groups a chunk by ``shard_size * (offset //
+    shard_size)`` and asserts the group's first offset is the group key, so
+    every chunk boundary must fall on a shard boundary. A read chunk wider
+    than that alignment straddles one: a 10-timestep read against a
+    365-timestep shard puts a chunk at offset 360 in the group for offset 0
+    and the next, at 370, in a group keyed 365.
+
+    The greatest common divisor is the widest split that lands every boundary
+    on both a read and a shard boundary, and is the read width itself when the
+    read width already divides the shard, leaving the split a no-op.
+    """
+    return math.gcd(read_chunk_size, shard_size)
+
+
 def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     """The 2D ocean wetmask: the NaN pattern of the reference variable's
     first timestep (True over ocean)."""
@@ -363,6 +380,14 @@ def _get_parser() -> argparse.ArgumentParser:
         help="Process only the first N timesteps (for subset test runs)",
     )
     parser.add_argument("--output-path", help="Override the config's output path")
+    parser.add_argument(
+        "--time-shard-size",
+        type=int,
+        help=(
+            "Override the config's output time shard size. Exists so a subset "
+            "test run can cross a shard boundary within a few source chunks"
+        ),
+    )
     return parser
 
 
@@ -377,6 +402,9 @@ def main():
         config.end_time = args.end_time
     if args.output_path is not None:
         config.output.path = args.output_path
+    if args.time_shard_size is not None:
+        config.output.time_shard_size = args.time_shard_size
+        config.output.__post_init__()
     _assert_output_store_absent(config.output.path)
 
     logger.info(
@@ -446,6 +474,20 @@ def main():
         math.ceil(stream_dataset.sizes[TIME_DIM] / chunks[TIME_DIM]),
         chunks[TIME_DIM],
     )
+    split_chunks = {
+        TIME_DIM: shard_aligned_chunk_size(
+            chunks[TIME_DIM], config.output.time_shard_size
+        )
+    }
+    if split_chunks[TIME_DIM] != chunks[TIME_DIM]:
+        logger.info(
+            "[stream:%s] splitting to %d before consolidating into %d-wide "
+            "shards; the %d-wide read does not align with the shard boundary",
+            config.stream.name,
+            split_chunks[TIME_DIM],
+            config.output.time_shard_size,
+            chunks[TIME_DIM],
+        )
     logger.info("[pipeline] starting; writing to %s", config.output.path)
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
         (
@@ -459,6 +501,7 @@ def main():
                 weights_url=config.weights_url,
                 target_grid_name=config.target_grid,
             )
+            | "split" >> xbeam.SplitChunks(split_chunks)
             | "consolidate" >> xbeam.ConsolidateChunks(output_shards)
             | "to_zarr"
             >> xbeam.ChunksToZarr(

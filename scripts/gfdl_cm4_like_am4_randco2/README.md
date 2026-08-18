@@ -98,7 +98,12 @@ identical wetmasks (`make check_wetmask_equivalence`; downstream training and
 analysis assume the stores share one mask — a difference is a
 stop-and-report finding about the sources, not something to conform around),
 and that a repeat run against an existing output store refuses to initialize
-into it (`make smoke_test_repeat_fails`).
+into it (`make smoke_test_repeat_fails`), and that a source chunk straddling
+an output shard boundary is written correctly (`make
+smoke_test_shard_boundary`; the stream is read at the source's own time chunk
+width, which need not divide the output shard, so the boundary case is not
+reachable from a short run at the production shard size — the target shrinks
+the shard instead of lengthening the run).
 
 The nine members were written by one ensemble with identical chunking, so one
 member's smoke-test wall clock is the budget for the rest; a member running

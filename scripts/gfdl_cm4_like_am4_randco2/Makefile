@@ -70,6 +70,31 @@ smoke_test_repeat_fails:
 		--runner DirectRunner \
 		--job_server_timeout 3600
 
+# The source stores are chunked wider than one timestep along time, so a
+# source chunk can straddle an output shard boundary. This runs enough
+# timesteps to cross one within a few source chunks, by shrinking the shard
+# rather than lengthening the run: with a 10-timestep source chunk and a
+# 15-timestep shard, the third chunk starts inside the second shard.
+BOUNDARY_MEMBER ?= $(firstword $(MEMBERS))
+BOUNDARY_NUM_TIMESTEPS ?= 40
+BOUNDARY_TIME_SHARD_SIZE ?= 15
+BOUNDARY_OUTPUT_PATH = $(SMOKE_OUTPUT_ROOT)/boundary-$(BOUNDARY_MEMBER).zarr
+smoke_test_shard_boundary:
+	-gsutil -m -q rm -r $(BOUNDARY_OUTPUT_PATH) 2> /dev/null
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.run \
+		--config $(CONFIG) \
+		--member $(BOUNDARY_MEMBER) \
+		--num-timesteps $(BOUNDARY_NUM_TIMESTEPS) \
+		--time-shard-size $(BOUNDARY_TIME_SHARD_SIZE) \
+		--output-path $(BOUNDARY_OUTPUT_PATH) \
+		--runner DirectRunner \
+		--job_server_timeout 3600
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.check_output \
+		--config $(CONFIG) \
+		--member $(BOUNDARY_MEMBER) \
+		--output-path $(BOUNDARY_OUTPUT_PATH) \
+		--expected-timesteps $(BOUNDARY_NUM_TIMESTEPS)
+
 # Each member derives its wetmask from its own source store; downstream
 # training and analysis assume the nine output stores share one mask.
 check_wetmask_equivalence:
@@ -78,7 +103,7 @@ check_wetmask_equivalence:
 		--members $(MEMBERS)
 
 smoke_tests: check_wetmask_equivalence $(addprefix smoke_test_,$(MEMBERS)) \
-	smoke_test_repeat_fails
+	smoke_test_repeat_fails smoke_test_shard_boundary
 
 build_dataflow:
 	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
@@ -123,5 +148,6 @@ dataflow_all: $(addprefix dataflow_,$(MEMBERS))
 # search for a phony target, which would leave the pattern rules above with
 # nothing to match.
 .PHONY: create_environment smoke_test smoke_test_repeat_fails \
+	smoke_test_shard_boundary \
 	check_wetmask_equivalence smoke_tests build_dataflow push_dataflow \
 	check_dataflow_image enter dataflow dataflow_all
