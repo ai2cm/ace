@@ -20,7 +20,14 @@
 #       bash scripts/video_pmd_eval/run_crps_eval.sh pcn-v1 bb-subset-cons10
 #     With inflation:
 #       bash scripts/video_pmd_eval/run_crps_eval.sh --inflate bb-pcn
+#
+#   "hiro" is not on weka -- its zarr lives in its own Beaker result
+#   dataset (01M08MXPM2EA4TX8QCN9WD1HPN, the n_ens=4 test-inference run),
+#   mounted at /hiro_result only when "hiro" is one of the requested
+#   models (same pattern as run_hiro_vs_video_pmd_compare.sh).
 set -e
+
+HIRO_RESULT_DATASET="01M08MXPM2EA4TX8QCN9WD1HPN"
 
 INFLATE=0
 if [ "${1:-}" = "--inflate" ]; then
@@ -65,6 +72,14 @@ fi
 
 mkdir -p "$RESULT_DIR"
 
+MOUNT_ARGS=(--mount "src=weka,ref=climate-default,dst=/climate-default")
+for m in "${MODELS[@]}"; do
+    if [ "$m" = "hiro" ]; then
+        MOUNT_ARGS+=(--mount "src=beaker,ref=$HIRO_RESULT_DATASET,dst=/hiro_result")
+        break
+    fi
+done
+
 echo "Submitting $SESSION_NAME (models=${MODELS[*]}) to $CLUSTER (workspace $WORKSPACE)..."
 B64=$(base64 < "$PY_SCRIPT" | tr -d '\n')
 PY_MODEL_ARGS_STR="${PY_MODEL_ARGS[*]}"
@@ -76,7 +91,7 @@ CREATE_OUTPUT=$(beaker session create \
     --budget "$BUDGET" \
     --workspace "$WORKSPACE" \
     --image "beaker://$IMAGE" \
-    --mount src=weka,ref=climate-default,dst=/climate-default \
+    "${MOUNT_ARGS[@]}" \
     --cpus "$CPUS" \
     --memory "$MEMORY" \
     --gpus 0 \

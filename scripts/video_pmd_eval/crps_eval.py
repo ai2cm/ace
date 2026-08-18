@@ -133,6 +133,18 @@ FINE_TRUTH_ZARR = (
 # instead. See configs/experiments/2026-08-03-video-pmd-spatiotemporal-25km-100km-*
 # for the 3 region-2/3/4 configs and their boundary-alignment verification.
 PATCHED_MODELS = {
+    # HiRO-ACE-style spatial downscaling baseline: plain single-frame SR,
+    # zero temporal conditioning (fme.downscaling.inference, not the video
+    # trainer). n_ens=4 test-inference (training job v6,
+    # 01KZ1WGMKRX6AKWWQXB8JJWRZP; inference job
+    # 01M08MXPKSG40SBVG48MPH58C5) -- supersedes the original n_ens=1
+    # visual-inspection run (scripts/video_pmd_eval/hiro_vs_video_pmd_compare.py),
+    # which could only be scored deterministically. Not on weka -- lives in
+    # its own Beaker result dataset, mounted at /hiro_result only when
+    # "hiro" is requested (see run_crps_eval.sh). Has no frame_source
+    # (every frame independently generated, no interior/endpoint
+    # distinction) -- load_window's frame_source check handles that.
+    "hiro": "/hiro_result/test-2023-2024-ens4.zarr",
     # Single-stage coarse-endpoints (v2 of the single-stage architecture --
     # true LR-endpoints-in/HR-full-out, no stage-A network, replaces the
     # non-deployable single-stage-v1 design; see
@@ -430,7 +442,16 @@ def load_window(pred_spec, truth_raw, t0, t1):
     t = truth_raw.sel(time=slice(t0, t1)).sel(
         latitude=p.latitude, longitude=p.longitude, method="nearest"
     ).load()
-    interior_mask = p["frame_source"].values == 1
+    # hiro (and any other non-video, frame-by-frame-independent model) has
+    # no frame_source -- every frame is scoreable, no interior/endpoint
+    # distinction. lead_hour is still computed the same way for such a
+    # model, but is not clip-position-meaningful for it (it has no 9-frame
+    # clip structure) -- fine for the pooled CRPS/MSE/spread-skill numbers,
+    # just don't read its per-lead-hour breakdown as informative.
+    if "frame_source" in p:
+        interior_mask = p["frame_source"].values == 1
+    else:
+        interior_mask = np.ones(p.sizes["time"], dtype=bool)
     lead_hour = (np.arange(p.sizes["time"]) % CLIP_STRIDE) * TIME_STEP_HOURS
     return p, t, interior_mask, lead_hour
 
