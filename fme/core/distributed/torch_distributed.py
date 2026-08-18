@@ -44,6 +44,15 @@ class TorchDistributed(DistributedBackend):
             # behind, GiB of it across several persistent worker pools per rank.
             self._rank, self.world_size = _rank_metadata_from_env()
             return
+        # The NCCL watchdog polls each collective's CUDA events on its own
+        # thread and by default rethrows any CUDA error it meets there; an
+        # exception on a thread with no handler is a std::terminate, killing
+        # the rank instantly and bypassing the shutdown path's settle and
+        # grace periods (five ranks died this way, mid-shutdown, in the
+        # 2026-08-13 preemption fabric fault). The same error still surfaces
+        # on the main thread at its next sync of that work, so the watchdog
+        # is downgraded to logging. Read once, at process group construction.
+        os.environ.setdefault("TORCH_NCCL_RETHROW_CUDA_ERRORS", "0")
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if not torch.distributed.is_initialized():
                 if using_gpu():
