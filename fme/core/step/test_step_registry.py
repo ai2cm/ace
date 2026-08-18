@@ -33,6 +33,10 @@ class MockStep(StepABC):
         return self._config
 
     @property
+    def corrector_modified_names(self) -> frozenset[str]:
+        return frozenset()
+
+    @property
     def modules(self):
         raise NotImplementedError()
 

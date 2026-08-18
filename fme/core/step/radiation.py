@@ -106,7 +106,12 @@ class SeparateRadiationStepConfig(StepConfigABC):
         init_weights: Callable[[list[nn.Module]], None],
     ) -> "SeparateRadiationStep":
         logging.info("Initializing stepper from provided config")
-        corrector = self.corrector.get_corrector(dataset_info)
+        corrector = self.corrector.get_corrector(
+            dataset_info,
+            input_names=self.input_names,
+            gen_names=self.output_names,
+            forcing_names=self.next_step_input_names,
+        )
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SeparateRadiationStep(
             config=self,
@@ -311,6 +316,10 @@ class SeparateRadiationStep(StepABC):
     @property
     def config(self) -> SeparateRadiationStepConfig:
         return self._config
+
+    @property
+    def corrector_modified_names(self) -> frozenset[str]:
+        return self._corrector.modified_names
 
     @property
     def surface_temperature_name(self) -> str | None:

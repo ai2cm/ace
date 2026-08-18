@@ -12,7 +12,7 @@ from fme.core.ensemble import get_crps, get_energy_score
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -812,6 +812,51 @@ class LossConfig:
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
             raise NotImplementedError(self.global_mean_type)
 
+    def validate(
+        self,
+        *,
+        pointwise_against_target: bool = False,
+        absolute_scale: bool = False,
+    ) -> None:
+        """Raise if this configuration does not satisfy the named invariants.
+
+        Args:
+            pointwise_against_target: Require a loss which compares one
+                deterministic prediction against target values pointwise.
+                ``EnsembleLoss`` compares distributions, ``NaN`` ignores the
+                prediction, and a global-mean term is not pointwise, so all
+                three are rejected.
+            absolute_scale: Require a loss whose value does not depend on the
+                magnitude of the target. ``LpLoss`` divides by the target norm,
+                so a caller whose target is a constant field gets a value
+                rescaled by that constant, and ``0/0`` where it is zero.
+        """
+        if pointwise_against_target:
+            if self.type in ("EnsembleLoss", "NaN"):
+                raise ValueError(
+                    f"loss type {self.type!r} does not compare one prediction "
+                    "against target values pointwise."
+                )
+            if self.global_mean_type is not None:
+                raise ValueError(
+                    "global_mean_type is not a pointwise comparison against "
+                    "target values."
+                )
+        if absolute_scale:
+            if self.type == "LpLoss":
+                raise ValueError(
+                    "loss type 'LpLoss' is relative: it divides by the norm of "
+                    "the target, so its value depends on the target magnitude. "
+                    "Use an absolute loss such as 'MSE', 'L1', or "
+                    "'AreaWeightedMSE' here."
+                )
+            if self.global_mean_type == "LpLoss":
+                raise ValueError(
+                    "global_mean_type 'LpLoss' is relative: it divides by the "
+                    "norm of the target global mean, so its value depends on "
+                    "the target magnitude."
+                )
+
     def build(
         self,
         gridded_operations: GriddedOperations | None,
@@ -974,4 +1019,209 @@ class StepLossConfig:
                 normalizer=normalizer,
             ),
             sqrt_loss_decay_constant=self.sqrt_loss_step_decay_constant,
+        )
+
+
+class CorrectorRegularizer(torch.nn.Module):
+    """A penalty pushing selected correction deltas toward zero.
+
+    Holds the three things the penalty is: the loss taken over the selected
+    deltas, the names it is taken over, and the weight it enters the step total
+    with.
+    """
+
+    def __init__(self, loss: WeightedMappingLoss, names: list[str], weight: float):
+        """
+        Args:
+            loss: The loss applied to the normalized deltas against zeros.
+            names: The names the penalty is taken over.
+            weight: The weight applied to the penalty in the step total.
+        """
+        super().__init__()
+        self._loss = loss
+        self._names = names
+        self._weight = weight
+
+    @property
+    def weight(self) -> float:
+        return self._weight
+
+    @property
+    def names(self) -> list[str]:
+        return list(self._names)
+
+    def forward(
+        self, deltas: TensorMapping, data_mask: TensorMapping | None = None
+    ) -> LossOutput:
+        """Penalty over the selected deltas, per channel.
+
+        The deltas are compared against zeros in loss-normalized space, so with
+        an affine normalizer the means cancel and this penalizes ``delta/std``.
+        The mask is the main loss's, so both halves of the step total average
+        over the same samples per channel.
+
+        NaN-filled delta points are zeroed on both sides by
+        ``WeightedMappingLoss``, matching how the main loss treats a NaN
+        target: they enter the channel mean contributing zero, so the penalty
+        is diluted by the masked fraction rather than renormalized over the
+        kept points. With ``fill_nans_on_normalize`` set on the loss
+        normalizer the NaN is filled before that mask is taken, and no point
+        is zeroed at all.
+        """
+        selected: TensorDict = {}
+        targets: TensorDict = {}
+        for name in self._names:
+            _require_delta(deltas, name, "regularization")
+            delta = deltas[name]
+            selected[name] = delta
+            # NaN target where the delta is NaN-filled; see the docstring for
+            # what the downstream loss does with it.
+            targets[name] = torch.where(
+                delta.isnan(),
+                torch.full_like(delta, torch.nan),
+                torch.zeros_like(delta),
+            )
+        return self._loss(selected, targets, data_mask)
+
+
+class CorrectorLoss(torch.nn.Module):
+    """Loss for corrector optimization.
+
+    Owns both features that consume the correction deltas of a ``StepOutput``:
+    pre-corrector optimization and corrector regularization.
+    """
+
+    def __init__(
+        self,
+        precorrector_names: list[str] | None,
+        regularizer: CorrectorRegularizer | None,
+    ):
+        """
+        Args:
+            precorrector_names: Names whose main-loss prediction is the
+                pre-corrector network output, or None when the feature is off.
+            regularizer: The penalty over the selected deltas, or None when
+                the feature is off.
+        """
+        super().__init__()
+        self._precorrector_names = precorrector_names
+        self._regularizer = regularizer
+
+    @property
+    def penalty_weight(self) -> float:
+        """The weight the penalty enters the step total with, 1.0 with no penalty."""
+        if self._regularizer is None:
+            return 1.0
+        return self._regularizer.weight
+
+    def pre_corrector_outputs(
+        self, predict_dict: TensorMapping, deltas: TensorMapping
+    ) -> TensorDict:
+        """``predict_dict[k] - deltas[k]`` for the selected names, else
+        ``predict_dict[k]``; raises when a selected name is missing.
+        """
+        net_output = dict(predict_dict)
+        if self._precorrector_names is None or len(deltas) == 0:
+            return net_output
+        for name in self._precorrector_names:
+            _require_delta(deltas, name, "precorrector_optimization")
+            net_output[name] = predict_dict[name] - deltas[name]
+        return net_output
+
+    def penalty(
+        self, deltas: TensorMapping, data_mask: TensorMapping | None = None
+    ) -> LossOutput | None:
+        """The regularizer's penalty, or None when the feature is off or the
+        deltas are empty.
+        """
+        if self._regularizer is None or len(deltas) == 0:
+            return None
+        return self._regularizer(deltas, data_mask)
+
+
+def _require_delta(deltas: TensorMapping, name: str, feature: str) -> None:
+    if name not in deltas:
+        raise ValueError(
+            f"{feature} selects {name!r}, but the corrector produced no delta "
+            f"for it; it produced deltas for {sorted(deltas)}. An active "
+            "corrector must produce deltas for every selected name."
+        )
+
+
+@dataclasses.dataclass
+class StepOutputLossOutput:
+    """The loss of one step, main term plus the corrector penalty.
+
+    Parameters:
+        main: The main ``StepLoss`` output.
+        corrector_penalty: The penalty's own per-channel ``LossOutput``, or
+            None when there is no penalty.
+        corrector_penalty_weight: The weight applied to the penalty in
+            ``total()``.
+    """
+
+    main: LossOutput
+    corrector_penalty: LossOutput | None = None
+    corrector_penalty_weight: float = 1.0
+
+    def total(self) -> torch.Tensor:
+        """``main.total() + weight * corrector_penalty.total()``."""
+        # The penalty rides the per-step total, so one backward() call
+        # carries it; a second would double-backward under accumulation.
+        total = self.main.total()
+        if self.corrector_penalty is not None:
+            total = (
+                total + self.corrector_penalty_weight * self.corrector_penalty.total()
+            )
+        return total
+
+    def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
+        """Per-channel main-loss values; the penalty is in ``total()`` only."""
+        return self.main.get_channel_losses()
+
+
+class StepOutputLoss(torch.nn.Module):
+    """``StepLoss`` plus the corrector-delta terms of a ``StepOutput``.
+
+    Deltas come from the ``StepOutput``, never the inference-only
+    ``StepDiagnostics`` carriage. The penalty takes no per-step decay, and the
+    two corrector features may be enabled together.
+    """
+
+    def __init__(self, step_loss: StepLoss, corrector_loss: CorrectorLoss | None):
+        super().__init__()
+        self.step_loss = step_loss
+        self.corrector_loss = corrector_loss
+
+    def forward(
+        self,
+        predict_dict: TensorMapping,
+        target_dict: TensorMapping,
+        step: int,
+        data_mask: TensorMapping | None = None,
+        deltas: TensorMapping | None = None,
+    ) -> StepOutputLossOutput:
+        """
+        Args:
+            predict_dict: The predicted (corrected) data.
+            target_dict: The target data.
+            step: The step number, indexed from 0 for the first step.
+            data_mask: Optional per-variable boolean masks forwarded to the
+                main loss.
+            deltas: The corrector's per-variable correction deltas, empty or
+                None when the corrector was inactive.
+        """
+        if self.corrector_loss is None or deltas is None or len(deltas) == 0:
+            # Inert path: exactly the StepLoss result. An epoch-disabled
+            # corrector lands here.
+            return StepOutputLossOutput(
+                main=self.step_loss(predict_dict, target_dict, step, data_mask)
+            )
+        # Pre-corrector outputs first, so StepLoss never sees a delta.
+        net_output = self.corrector_loss.pre_corrector_outputs(predict_dict, deltas)
+        main = self.step_loss(net_output, target_dict, step, data_mask)
+        return StepOutputLossOutput(
+            main=main,
+            corrector_penalty=self.corrector_loss.penalty(deltas, data_mask),
+            corrector_penalty_weight=self.corrector_loss.penalty_weight,
         )

@@ -244,7 +244,12 @@ class SingleModuleStepConfig(StepConfigABC):
         init_weights: Callable[[list[nn.Module]], None],
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
-        corrector = self.corrector.get_corrector(dataset_info)
+        corrector = self.corrector.get_corrector(
+            dataset_info,
+            input_names=self.input_names,
+            gen_names=self.output_names,
+            forcing_names=self.next_step_input_names,
+        )
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SingleModuleStep(
             config=self,
@@ -353,6 +358,10 @@ class SingleModuleStep(StepABC):
     @property
     def config(self) -> SingleModuleStepConfig:
         return self._config
+
+    @property
+    def corrector_modified_names(self) -> frozenset[str]:
+        return self._corrector.modified_names
 
     @property
     def normalizer(self) -> StandardNormalizer:
@@ -673,10 +682,9 @@ def step_with_adjustments(
         )
         result = corrector(input, output, next_step_input_data, corrector_state)
         output = result.corrected
-        # Detach the corrector diagnostic tensors.
-        diagnostics = CorrectorDiagnostics(
-            delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
-        )
+        # The deltas stay on the autograd graph so a training loss can
+        # differentiate through the correction.
+        diagnostics = result.diagnostics
         if result.corrector_state is not None:
             # Preserve the incoming state's other fields (e.g. random_state)
             # rather than rebuilding from scratch, so StepperState stays

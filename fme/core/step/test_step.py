@@ -750,12 +750,45 @@ def test_step_with_prescribed_prognostic_overwrites_output():
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
 
 
-def test_step_returns_step_output_with_populated_detached_delta():
+def test_corrector_deltas_stay_attached():
+    # The deltas are never detached at the step boundary, while the corrected
+    # output is the same as it is with the graph switched off.
     selector = get_single_module_with_atmosphere_corrector_selector()
     img_shape = DEFAULT_IMG_SHAPE
     step = get_step(selector, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
     next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
+    args = StepArgs(
+        input=input_data,
+        next_step_input_data=next_step_input_data,
+        labels=None,
+    )
+    result = step.step(args=args)
+    assert isinstance(result, StepOutput)
+    delta = result.corrector_diagnostics.delta
+    assert delta  # the atmosphere corrector modifies fields
+    for name, tensor in delta.items():
+        assert name in result.output
+        assert tensor.grad_fn is not None
+
+    with torch.no_grad():
+        reference = step.step(args=args)
+    for name, value in reference.output.items():
+        torch.testing.assert_close(result.output[name], value)
+
+
+def test_step_exposes_corrector_modified_names():
+    # corrector_modified_names is populated for a step with a corrector, empty
+    # for a step without one, and forwarded through MultiCallStep.
+    step = get_step(
+        get_single_module_with_atmosphere_corrector_selector(), DEFAULT_IMG_SHAPE
+    )
+    modified_names = step.corrector_modified_names
+    assert len(modified_names) > 0
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, 2
+    )
     result = step.step(
         args=StepArgs(
             input=input_data,
@@ -763,12 +796,48 @@ def test_step_returns_step_output_with_populated_detached_delta():
             labels=None,
         ),
     )
-    assert isinstance(result, StepOutput)
-    delta = result.corrector_diagnostics.delta
-    assert delta  # the atmosphere corrector modifies fields
-    for name, tensor in delta.items():
-        assert name in result.output
-        assert not tensor.requires_grad  # detached at the step boundary
+    assert set(result.corrector_diagnostics.delta) == set(modified_names)
+
+    assert (
+        get_step(
+            get_single_module_selector(), DEFAULT_IMG_SHAPE
+        ).corrector_modified_names
+        == frozenset()
+    )
+
+    multi_call_step = get_step(
+        _multi_call_with_corrector_selector(force_positive_names=["prog_a"]),
+        DEFAULT_IMG_SHAPE,
+    )
+    assert isinstance(multi_call_step, MultiCallStep)
+    assert multi_call_step.corrector_modified_names == frozenset({"prog_a"})
+
+
+def _multi_call_with_corrector_selector(
+    force_positive_names: list[str],
+) -> StepSelector:
+    wrapped_config = dataclasses.replace(
+        get_separate_radiation_config(),
+        corrector=AtmosphereCorrectorConfig(
+            force_positive_names=force_positive_names,
+        ),
+    )
+    return StepSelector(
+        type="multi_call",
+        config=dataclasses.asdict(
+            MultiCallStepConfig(
+                wrapped_step=StepSelector(
+                    type="separate_radiation",
+                    config=dataclasses.asdict(wrapped_config),
+                ),
+                config=MultiCallConfig(
+                    forcing_name="forcing_rad",
+                    forcing_multipliers={"double": 2.0},
+                    output_names=["diagnostic_rad"],
+                ),
+            ),
+        ),
+    )
 
 
 def test_step_empty_delta_when_no_corrector():

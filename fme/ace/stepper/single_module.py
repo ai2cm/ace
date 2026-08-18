@@ -27,6 +27,7 @@ from fme.ace.stepper.parameter_init import (
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.loss_config import CorrectorLossConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
@@ -35,7 +36,13 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
-from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.loss import (
+    ChannelLossInfo,
+    CorrectorLoss,
+    StepLoss,
+    StepLossConfig,
+    StepOutputLoss,
+)
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -888,6 +895,28 @@ class Stepper:
             normalizer=loss_normalizer,
         )
 
+    def build_corrector_loss(
+        self, corrector_loss: CorrectorLossConfig | None
+    ) -> CorrectorLoss | None:
+        """Validate and build the corrector-delta half of the training loss,
+        if configured.
+
+        Args:
+            corrector_loss: Optional. With the null default, this method builds
+                nothing.
+
+        Returns:
+            A CorrectorLoss, or None when no corrector loss is configured.
+        """
+        if corrector_loss is None:
+            return None
+        return corrector_loss.build(
+            self._step_obj.corrector_modified_names,
+            normalizer=self._step_obj.get_loss_normalizer(),
+            gridded_operations=self._dataset_info.gridded_operations,
+            channel_dim=self.CHANNEL_DIM,
+        )
+
     @property
     def config(self) -> StepperConfig:
         return self._config
@@ -1503,6 +1532,8 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        corrector_loss: Optional configuration for consuming the corrector's
+            correction deltas in the loss.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1512,6 +1543,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    corrector_loss: CorrectorLossConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1634,7 +1666,10 @@ class TrainStepper(
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
-        self._loss_obj = self._stepper.build_loss(config.loss)
+        self._loss_obj = StepOutputLoss(
+            self._stepper.build_loss(config.loss),
+            self._stepper.build_corrector_loss(config.corrector_loss),
+        )
 
     def train_on_batch(
         self,
@@ -1752,9 +1787,16 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step = next(output_iterator).output
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                step_output = next(output_iterator)
+                gen_step = unfold_ensemble_dim(
+                    step_output.output, n_ensemble=n_ensemble
+                )
                 output_list.append(gen_step)
+                # Deltas come from the StepOutput, never the StepDiagnostics carriage.
+                deltas = unfold_ensemble_dim(
+                    dict(step_output.corrector_diagnostics.delta),
+                    n_ensemble=n_ensemble,
+                )
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1770,6 +1812,7 @@ class TrainStepper(
                     metrics=metrics,
                     weighted_sums=weighted_sums,
                     total_counts=total_counts,
+                    deltas=deltas,
                 )
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
@@ -1785,12 +1828,14 @@ class TrainStepper(
         metrics: dict[str, float],
         weighted_sums: dict[str, torch.Tensor],
         total_counts: dict[str, int],
+        deltas: TensorMapping,
     ) -> torch.Tensor:
         step_loss = self._loss_obj(
             gen_step,
             target_step,
             step=step,
             data_mask=data_mask,
+            deltas=deltas,
         )
         step_total_loss = step_loss.total()
         metrics[f"loss_step_{step}"] = step_total_loss.detach()

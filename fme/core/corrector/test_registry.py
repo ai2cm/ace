@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Collection
 
 import pytest
 import torch
@@ -11,6 +12,7 @@ from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     CorrectionSequence,
     CorrectorABC,
+    CorrectorConfigABC,
     EpochScheduledCorrector,
 )
 from fme.core.corrector.state import CorrectorState
@@ -24,7 +26,22 @@ def _get_dataset_info() -> DatasetInfo:
     return DatasetInfo(
         vertical_coordinate=NullVerticalCoordinate(),
         gridded_operations=LatLonOperations(area_weights=torch.ones(2, 2)),
+        img_shape=(2, 2),
         timestep=datetime.timedelta(hours=6),
+    )
+
+
+def _get_corrector(
+    config: CorrectorConfigABC,
+    input_names: Collection[str] = (),
+    gen_names: Collection[str] = (),
+    forcing_names: Collection[str] = (),
+) -> CorrectorABC:
+    return config.get_corrector(
+        _get_dataset_info(),
+        input_names=input_names,
+        gen_names=gen_names,
+        forcing_names=forcing_names,
     )
 
 
@@ -42,12 +59,12 @@ def test_corrector_disabled_epochs_must_be_non_negative():
     ],
 )
 def test_corrector_configs_wrap_when_disabled_epochs_set(config):
-    corrector = config.get_corrector(_get_dataset_info())
+    corrector = _get_corrector(config)
     assert isinstance(corrector, EpochScheduledCorrector)
 
 
 def test_corrector_not_wrapped_when_disabled_epochs_zero():
-    corrector = AtmosphereCorrectorConfig().get_corrector(_get_dataset_info())
+    corrector = _get_corrector(AtmosphereCorrectorConfig())
     assert not isinstance(corrector, EpochScheduledCorrector)
     # the bare corrector inherits the base no-op lifecycle methods
     assert corrector.train(False) is corrector
@@ -72,14 +89,12 @@ def test_corrector_selector_disabled_epochs_set_on_wrapped_config():
         type="atmosphere_corrector",
         config={"corrector_disabled_epochs": 1},
     )
-    corrector = selector.get_corrector(_get_dataset_info())
+    corrector = _get_corrector(selector)
     assert isinstance(corrector, EpochScheduledCorrector)
 
 
 def test_scheduled_corrector_requires_state_when_disabled_epochs_configured():
-    corrector = AtmosphereCorrectorConfig(corrector_disabled_epochs=1).get_corrector(
-        _get_dataset_info()
-    )
+    corrector = _get_corrector(AtmosphereCorrectorConfig(corrector_disabled_epochs=1))
     with pytest.raises(ValueError, match="corrector_disabled"):
         corrector.load_state({})
 
@@ -89,6 +104,20 @@ class _LifecycleRecordingCorrector(CorrectorABC):
         self.train_modes: list[bool] = []
         self.epochs: list[int] = []
         self.loaded_state: dict[str, object] | None = None
+        self.discovery_calls = 0
+
+    @property
+    def modified_names(self) -> frozenset[str]:
+        return frozenset({"wrapped_delta"})
+
+    def discover_modified_names(
+        self,
+        input_names: Collection[str],
+        gen_names: Collection[str],
+        forcing_names: Collection[str],
+        img_shape: tuple[int, int],
+    ) -> None:
+        self.discovery_calls += 1
 
     def train(self, mode: bool = True) -> "_LifecycleRecordingCorrector":
         self.train_modes.append(mode)
@@ -123,14 +152,28 @@ def test_scheduled_corrector_forwards_lifecycle_and_state():
     corrector.set_epoch(3)
     state = corrector.get_state()
     corrector.load_state(state)
+    corrector.discover_modified_names([], [], [], (2, 2))
 
     assert wrapped.train_modes == [False]
     assert wrapped.epochs == [3]
+    assert wrapped.discovery_calls == 1
+    # forwarded independent of the epoch-disabled state
+    assert corrector.modified_names == frozenset({"wrapped_delta"})
     assert state == {
         "corrector_disabled": False,
         "wrapped": {"wrapped_value": 3},
     }
     assert wrapped.loaded_state == {"wrapped_value": 3}
+
+
+def test_modified_names_raises_before_discovery():
+    # a CorrectionSequence built without going through get_corrector has never
+    # run discovery, and says so rather than reporting "modifies nothing".
+    corrector = CorrectionSequence([ConstantOffsetCorrection("a", 1.0)])
+    with pytest.raises(RuntimeError, match="discovery has not run"):
+        corrector.modified_names
+    corrector.discover_modified_names(["a"], ["a"], [], (2, 2))
+    assert corrector.modified_names == frozenset({"a"})
 
 
 class ConstantOffsetCorrection:
@@ -203,3 +246,36 @@ def test_epoch_scheduled_corrector_disabled_returns_empty_diagnostics():
     enabled = corrector({}, gen_data, {}, None)
     assert set(enabled.modified_names) == {"a"}
     torch.testing.assert_close(enabled.diagnostics.delta["a"], torch.full((2, 2), 1.0))
+
+
+def test_construction_records_modified_names():
+    config = OceanCorrectorConfig(force_positive_names=["a", "b"])
+    corrector = _get_corrector(config, gen_names=["a", "b", "c"])
+    gen_data = {
+        "a": torch.zeros(2, 2),
+        "b": torch.zeros(2, 2),
+        "c": torch.zeros(2, 2),
+    }
+    result = corrector({}, gen_data, {}, None)
+    # construction records exactly the delta keys a real call produces
+    assert corrector.modified_names == frozenset(result.diagnostics.delta)
+    assert corrector.modified_names == frozenset({"a", "b"})
+
+
+def test_discovery_through_epoch_schedule():
+    config = OceanCorrectorConfig(
+        force_positive_names=["a"], corrector_disabled_epochs=1
+    )
+    corrector = _get_corrector(config, gen_names=["a", "b"])
+    assert isinstance(corrector, EpochScheduledCorrector)
+    corrector.train(True)  # disabled for train-mode steps in the first epoch
+    # modified_names describes what the corrector produces when active, so it is
+    # independent of the epoch-disabled state
+    assert corrector.modified_names == frozenset({"a"})
+    corrector.set_epoch(2)  # enabled
+    assert corrector.modified_names == frozenset({"a"})
+
+
+def test_modified_names_empty_without_corrections():
+    corrector = _get_corrector(AtmosphereCorrectorConfig(), gen_names=["a"])
+    assert corrector.modified_names == frozenset()

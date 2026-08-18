@@ -55,7 +55,9 @@ class CorrectorSelector(CorrectorConfigABC):
         self,
         dataset_info: DatasetInfo,
     ) -> CorrectorABC:
-        # The wrapped config's get_corrector applies its own
-        # corrector_disabled_epochs; the selector never schedules (guarded in
-        # __post_init__), so no double-wrapping is possible.
-        return self._corrector_config_instance.get_corrector(dataset_info)
+        # The wrapped config's build applies its own corrector_disabled_epochs;
+        # the selector never schedules (guarded in __post_init__), so no
+        # double-wrapping is possible. Building rather than calling the wrapped
+        # config's get_corrector keeps modified-name discovery to the single
+        # pass run by the selector's own get_corrector.
+        return self._corrector_config_instance.build_without_discovery(dataset_info)

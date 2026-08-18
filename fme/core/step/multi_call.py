@@ -273,6 +273,10 @@ class MultiCallStep(StepABC):
         return self._config
 
     @property
+    def corrector_modified_names(self) -> frozenset[str]:
+        return self._wrapped_step.corrector_modified_names
+
+    @property
     def modules(self) -> torch.nn.ModuleList:
         return self._wrapped_step.modules
 
