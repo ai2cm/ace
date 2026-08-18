@@ -1018,6 +1018,54 @@ def test_save_best_inference_epoch_ckpts(tmp_path: str):
     assert best_inference_checkpoint["epoch"] == 3
 
 
+def test_nan_inference_error_does_not_mask_best(tmp_path: str):
+    """A diverged epoch must not erase the best inference error we report.
+
+    min(nan, x) is nan, so an epoch whose inference error diverged used to be
+    logged as the best-so-far, and wandb's run summary keeps the last logged
+    value.
+    """
+    max_epochs = 4
+    n_train_batches = 5
+    train_losses = np.array([0.5, 0.4, 0.3, 0.2])
+    val_losses = np.array([0.6, 0.5, 0.4, 0.3])
+    inference_losses = np.array([0.1, np.nan, 0.05, np.nan])
+
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True)._configure_wandb(
+            experiment_dir=tmp_path, config={}, resumable=True
+        )
+        config, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            train_losses=train_losses,
+            validation_losses=val_losses,
+            inference_losses=inference_losses,
+            n_train_batches=n_train_batches,
+            validate_using_ema=False,
+        )
+        trainer.train()
+        epoch_logs = [
+            logs for logs in wandb.get_logs() if "best_inference_error" in logs
+        ]
+
+    assert [logs["best_inference_error"] for logs in epoch_logs] == [
+        0.1,
+        0.1,
+        0.05,
+        0.05,
+    ]
+    assert trainer._best_inference_error == 0.05
+
+    best_inference_checkpoint = torch.load(
+        CheckpointPaths(config.checkpoint_dir).best_inference_checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert best_inference_checkpoint["best_inference_error"] == 0.05
+    assert best_inference_checkpoint["epoch"] == 3
+
+
 def test_save_best_inference_epoch_ckpts_disabled(tmp_path: str):
     """Test that when save_best_inference_epoch_checkpoints is False, no
     epoch-specific checkpoints are saved."""
