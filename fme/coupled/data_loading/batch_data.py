@@ -32,14 +32,27 @@ class CoupledPrognosticState:
     def apply_config_seed(self, seed: int | None) -> "CoupledPrognosticState":
         """Return a state whose components are seeded from ``config.seed``.
 
-        Each component gets its own generator seeded from the same value; they
-        are separate models, so their noise sequences do not interact. See
-        ``PrognosticState.apply_config_seed`` for the precedence rule when a
-        random state is already present.
+        Each component gets its own generator, seeded from a *different* value
+        derived from the configured seed (ocean ``seed``, atmosphere
+        ``seed + 1``), following the offset convention of
+        ``fme.core.rand.set_seed``. Seeding both from the same value would make
+        their draws identical, not merely independent, whenever they request the
+        same shapes in the same order - two ``NoiseConditionedSFNO`` components
+        on a shared grid would then see perfectly correlated noise fields.
+
+        Precedence is resolved per component (see
+        ``PrognosticState.apply_config_seed``): a component carrying a restored
+        random state continues it, while a component without one takes its
+        derived config seed. A partially restored coupled state therefore
+        continues one realm and seeds the other, which is deliberate - each
+        realm continues the sequence it was started with, rather than the whole
+        run falling back to one behavior because of the other realm.
         """
+        if seed is None:
+            return self
         return CoupledPrognosticState(
-            self.ocean_data.apply_config_seed(seed),
-            self.atmosphere_data.apply_config_seed(seed),
+            self.ocean_data.apply_config_seed(seed, label="ocean"),
+            self.atmosphere_data.apply_config_seed(seed + 1, label="atmosphere"),
         )
 
     def as_batch_data(self) -> "CoupledBatchData":

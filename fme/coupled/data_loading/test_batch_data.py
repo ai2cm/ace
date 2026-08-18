@@ -44,7 +44,24 @@ def test_apply_config_seed_none_leaves_both_components_unseeded():
     assert result.atmosphere_data is state.atmosphere_data
 
 
+def test_apply_config_seed_gives_the_components_different_streams():
+    """The components are seeded from the configured value but not from the
+    *same* stream: two identical stochastic modules on a shared grid would
+    otherwise draw bitwise-identical noise fields in the two realms."""
+    seeded = _coupled_state().apply_config_seed(0)
+    draws = []
+    for component in (seeded.ocean_data, seeded.atmosphere_data):
+        stepper_state = component.as_batch_data().stepper_state
+        assert stepper_state is not None
+        random_state = stepper_state.random_state
+        assert random_state is not None
+        draws.append(torch.randn(4, generator=random_state.generator))
+    assert not torch.equal(draws[0], draws[1])
+
+
 def test_apply_config_seed_defers_to_a_restored_random_state():
+    """Precedence is resolved per component, so a half-restored coupled restart
+    continues the realm that has a restored generator and seeds the other."""
     restored = RandomState.from_seed(11)
     state = CoupledPrognosticState(
         ocean_data=_prognostic_state("sst"),

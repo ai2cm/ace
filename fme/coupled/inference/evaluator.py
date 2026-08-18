@@ -311,10 +311,12 @@ class InferenceEvaluatorConfig:
         atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
             when loading a single coupled checkpoint.
         seed: If set, seeds the random state threaded through the rollout so that
-            stochastic modules (e.g. NoiseConditionedSFNO in the atmosphere
-            component) produce a reproducible noise sequence, independent of
-            ``coupled_steps_in_memory``. Leave unset (None) for the default
-            non-reproducible behavior. Only affects the stepper rollout (not the
+            stochastic modules (e.g. NoiseConditionedSFNO) in either component
+            produce a reproducible noise sequence, independent of
+            ``coupled_steps_in_memory``. The two components are seeded from
+            distinct values derived from this one, so their noise streams
+            differ. Leave unset (None) for the default non-reproducible
+            behavior. Only affects the stepper rollout (not the
             ``prediction_loader`` comparison path).
     """
 

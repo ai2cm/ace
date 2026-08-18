@@ -157,7 +157,7 @@ class PrognosticState:
             )
         )
 
-    def apply_config_seed(self, seed: int | None) -> "PrognosticState":
+    def apply_config_seed(self, seed: int | None, label: str = "") -> "PrognosticState":
         """Return a state seeded from ``config.seed``, unless one is already
         present.
 
@@ -172,13 +172,17 @@ class PrognosticState:
 
         Args:
             seed: The configured seed, or None to leave the state unseeded.
+            label: Name of the state for logging, used when more than one state
+                is seeded in a run (e.g. the components of a coupled model) so
+                the log line says which one skipped its seed.
         """
         if seed is None:
             return self
         stepper_state = self._data.stepper_state
         if stepper_state is not None and stepper_state.random_state is not None:
+            subject = f"the {label} config seed" if label else "config seed"
             logging.info(
-                "Ignoring config seed because a random state was restored from "
+                f"Ignoring {subject} because a random state was restored from "
                 "the restart stepper state; the restored generator continues "
                 "instead."
             )

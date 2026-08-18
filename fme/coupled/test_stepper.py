@@ -24,6 +24,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.rand import randn_like
 from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
@@ -1192,6 +1193,18 @@ class AddOne(torch.nn.Module):
 class TimesTwo(torch.nn.Module):
     def forward(self, x):
         return 2 * x
+
+
+class AddOneWithNoise(torch.nn.Module):
+    """``AddOne`` plus a standard-normal draw made through ``fme.core.rand``.
+
+    Stands in for a trained stochastic module such as ``NoiseConditionedSFNO``
+    in tests that need seeding to have an observable effect on the output,
+    without paying to build and de-zero-initialize a real one.
+    """
+
+    def forward(self, x):
+        return x + 1 + randn_like(x)
 
 
 def get_stepper_config(
