@@ -261,9 +261,7 @@ class StepABC(abc.ABC):
         """The delta keys the step's corrector produces when active.
 
         The single introspection surface for build-time corrector-loss
-        validation. Default implementation returns an empty frozenset: a step
-        with no corrector, or a corrector which modifies nothing. Steps which
-        wrap another step forward this to the wrapped step.
+        validation.
         """
         return frozenset()
 

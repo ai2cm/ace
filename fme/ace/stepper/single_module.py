@@ -912,7 +912,6 @@ class Stepper:
             return None
         return corrector_loss.build(
             self._step_obj.corrector_modified_names,
-            prescribed_prognostic_names=self.get_prescribed_prognostic_names(),
             normalizer=self._step_obj.get_loss_normalizer(),
             gridded_operations=self._dataset_info.gridded_operations,
             channel_dim=self.CHANNEL_DIM,
@@ -1774,8 +1773,6 @@ class TrainStepper(
                     total_counts=total_counts,
                     deltas=deltas,
                 )
-            # The penalty rides the per-step total, so one accumulate_loss call
-            # carries it; a second would double-backward under accumulation.
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
         return output_list, _finalize_per_channel_losses(weighted_sums, total_counts)

@@ -1,5 +1,4 @@
 import dataclasses
-from collections.abc import Collection
 
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import CorrectorLoss, LossConfig, WeightedMappingLoss
@@ -100,7 +99,6 @@ class CorrectorLossConfig:
     def build(
         self,
         corrector_modified_names: frozenset[str],
-        prescribed_prognostic_names: Collection[str],
         normalizer: StandardNormalizer,
         gridded_operations: GriddedOperations | None,
         channel_dim: int = -3,
@@ -108,13 +106,12 @@ class CorrectorLossConfig:
         """Validate the configured selections and build the corrector loss.
 
         All name validation happens here, when the run starts: entries are
-        checked against the modified names minus the prescribed prognostics.
+        checked against the names the corrector modifies. A selected name whose
+        delta does not reach the loss at runtime raises there instead.
 
         Args:
             corrector_modified_names: The delta keys the step's corrector
                 produces when active.
-            prescribed_prognostic_names: Names whose deltas are dropped by
-                ``step_with_adjustments`` after the prescribed overwrite.
             normalizer: The loss normalizer, used to normalize the deltas.
             gridded_operations: Gridded operations for losses that need the
                 horizontal dimensions.
@@ -125,36 +122,21 @@ class CorrectorLossConfig:
                 "corrector_loss is configured but the corrector modifies no "
                 "variables, so there are no correction deltas to consume."
             )
-        prescribed = frozenset(prescribed_prognostic_names)
-        loss_visible_names = corrector_modified_names - prescribed
-        dropped_names = corrector_modified_names & prescribed
 
         def _validated_matches(
             selection: NameAndPrefixSelection, feature: str
         ) -> list[str]:
-            unmatched = selection.unmatched_entries(loss_visible_names)
+            unmatched = selection.unmatched_entries(corrector_modified_names)
             if unmatched:
-                reasons = []
-                for entry in unmatched:
-                    entry_selection = NameAndPrefixSelection((entry,))
-                    dropped = entry_selection.matched(dropped_names)
-                    if dropped:
-                        reasons.append(
-                            f"{entry!r} selects only prescribed prognostic "
-                            f"variables {dropped}, whose correction deltas "
-                            "step_with_adjustments drops after the prescribed "
-                            "overwrite, so they never reach the loss"
-                        )
-                    else:
-                        reasons.append(
-                            f"{entry!r} selects no variable the corrector modifies"
-                        )
                 raise ValueError(
                     f"{feature} has entries that select nothing usable: "
-                    + "; ".join(reasons)
+                    + "; ".join(
+                        f"{entry!r} selects no variable the corrector modifies"
+                        for entry in unmatched
+                    )
                     + f". The corrector modifies {sorted(corrector_modified_names)}."
                 )
-            return selection.matched(loss_visible_names)
+            return selection.matched(corrector_modified_names)
 
         precorrector_names = None
         if self.precorrector_optimization is not None:
@@ -166,6 +148,7 @@ class CorrectorLossConfig:
                 "precorrector_optimization",
             )
         regularizer = None
+        regularizer_names = None
         penalty_weight = 1.0
         if self.regularization is not None:
             assert self.regularization.names_and_prefixes is not None
@@ -184,5 +167,6 @@ class CorrectorLossConfig:
         return CorrectorLoss(
             precorrector_names=precorrector_names,
             regularizer=regularizer,
+            regularizer_names=regularizer_names,
             penalty_weight=penalty_weight,
         )

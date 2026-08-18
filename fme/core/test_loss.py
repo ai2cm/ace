@@ -1077,6 +1077,7 @@ def _corrector_loss(
     return CorrectorLoss(
         precorrector_names=precorrector_names,
         regularizer=regularizer,
+        regularizer_names=regularizer_names,
         penalty_weight=penalty_weight,
     )
 
@@ -1090,7 +1091,7 @@ def _expected_penalty(deltas, names) -> torch.Tensor:
 
 
 def test_step_output_loss_without_corrector_loss_unchanged():
-    # GOAL: with corrector_loss None, total() and get_channel_losses() match a
+    # with corrector_loss None, total() and get_channel_losses() match a
     # bare StepLoss, deltas ignored.
     predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
     bare = _corrector_step_loss()(predict, target, 0)
@@ -1107,7 +1108,7 @@ def test_step_output_loss_without_corrector_loss_unchanged():
 
 
 def test_pre_corrector_outputs_selected_only():
-    # GOAL: the main loss sees output − delta for the configured names only;
+    # the main loss sees output − delta for the configured names only;
     # other keys use the network output as-is; targets untouched.
     predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
     corrector_loss = _corrector_loss(precorrector_names=["a"])
@@ -1127,7 +1128,7 @@ def test_pre_corrector_outputs_selected_only():
 
 
 def test_penalty_analytic_value():
-    # GOAL: penalty equals the hand-computed mean of (delta/std)^2 — normalizer
+    # penalty equals the hand-computed mean of (delta/std)^2 — normalizer
     # means cancel against the zeros target.
     deltas = _delta_dict()
     penalty = _corrector_loss(regularizer_names=_CORRECTOR_NAMES).penalty(deltas)
@@ -1138,7 +1139,7 @@ def test_penalty_analytic_value():
 
 
 def test_penalty_masked_points_drop():
-    # GOAL: NaN-filled delta points contribute nothing; penalty and gradients
+    # NaN-filled delta points contribute nothing; penalty and gradients
     # stay finite.
     deltas = _delta_dict()
     masked = deltas["a"].clone()
@@ -1157,7 +1158,7 @@ def test_penalty_masked_points_drop():
 
 
 def test_total_and_channel_decomposition():
-    # GOAL: total() == main.total() + weight * penalty.total(), and
+    # total() == main.total() + weight * penalty.total(), and
     # get_channel_losses() equals the bare StepLoss channels — no penalty
     # anywhere per channel.
     predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
@@ -1183,7 +1184,7 @@ def test_total_and_channel_decomposition():
 
 
 def test_penalty_uses_the_data_mask():
-    # GOAL: with a data_mask hiding one sample of a selected variable, that
+    # with a data_mask hiding one sample of a selected variable, that
     # sample contributes to neither half of total().
     predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
     keep = torch.ones(_CORRECTOR_SHAPE[0], dtype=torch.bool, device=get_device())
@@ -1210,7 +1211,7 @@ def test_penalty_uses_the_data_mask():
 
 @pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
 def test_missing_selected_delta_raises(feature):
-    # GOAL: a non-empty delta dict lacking a selected name raises.
+    # a non-empty delta dict lacking a selected name raises.
     predict, target = _predict_dict(), _target_dict()
     deltas = {k: v for k, v in _delta_dict().items() if k != "a"}
     if feature == "precorrector_optimization":
@@ -1224,7 +1225,7 @@ def test_missing_selected_delta_raises(feature):
 
 @pytest.mark.parametrize("deltas", [None, {}])
 def test_empty_deltas_inert(deltas):
-    # GOAL: empty deltas ⇒ no pre-corrector swap, no penalty; result matches
+    # empty deltas ⇒ no pre-corrector swap, no penalty; result matches
     # the unconfigured case.
     predict, target = _predict_dict(), _target_dict()
     corrector_loss = _corrector_loss(

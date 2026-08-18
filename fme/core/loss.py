@@ -978,7 +978,7 @@ class StepLossConfig:
 
 
 class CorrectorLoss(torch.nn.Module):
-    """The corrector-delta half of the training loss.
+    """Loss for corrector optimization.
 
     Owns both features that consume the correction deltas of a ``StepOutput``:
     pre-corrector optimization and corrector regularization.
@@ -988,6 +988,7 @@ class CorrectorLoss(torch.nn.Module):
         self,
         precorrector_names: list[str] | None,
         regularizer: WeightedMappingLoss | None,
+        regularizer_names: list[str] | None,
         penalty_weight: float,
     ):
         """
@@ -996,11 +997,14 @@ class CorrectorLoss(torch.nn.Module):
                 pre-corrector network output, or None when the feature is off.
             regularizer: The penalty over the selected deltas, or None when
                 the feature is off.
+            regularizer_names: The names the penalty is taken over, or None
+                when the feature is off.
             penalty_weight: The weight applied to the penalty.
         """
         super().__init__()
         self._precorrector_names = precorrector_names
         self._regularizer = regularizer
+        self._regularizer_names = regularizer_names
         self._penalty_weight = penalty_weight
 
     @property
@@ -1036,7 +1040,8 @@ class CorrectorLoss(torch.nn.Module):
             return None
         selected: TensorDict = {}
         targets: TensorDict = {}
-        for name in self._regularizer.packer.names:
+        assert self._regularizer_names is not None
+        for name in self._regularizer_names:
             _require_delta(deltas, name, "regularization")
             delta = deltas[name]
             selected[name] = delta
@@ -1076,6 +1081,8 @@ class StepOutputLossOutput:
 
     def total(self) -> torch.Tensor:
         """``main.total() + weight * corrector_penalty.total()``."""
+        # The penalty rides the per-step total, so one backward() call
+        # carries it; a second would double-backward under accumulation.
         total = self.main.total()
         if self.corrector_penalty is not None:
             total = (
@@ -1120,7 +1127,7 @@ class StepOutputLoss(torch.nn.Module):
                 None when the corrector was inactive.
         """
         if self.corrector_loss is None or deltas is None or len(deltas) == 0:
-            # Inert path: exactly today's StepLoss result. An epoch-disabled
+            # Inert path: exactly the StepLoss result. An epoch-disabled
             # corrector lands here.
             return StepOutputLossOutput(
                 main=self.step_loss(predict_dict, target_dict, step, data_mask)
@@ -1128,8 +1135,6 @@ class StepOutputLoss(torch.nn.Module):
         # Pre-corrector outputs first, so StepLoss never sees a delta.
         net_output = self.corrector_loss.pre_corrector_outputs(predict_dict, deltas)
         main = self.step_loss(net_output, target_dict, step, data_mask)
-        # The penalty comes from the original deltas, not the pre-corrector
-        # outputs the main loss saw.
         return StepOutputLossOutput(
             main=main,
             corrector_penalty=self.corrector_loss.penalty(deltas, data_mask),

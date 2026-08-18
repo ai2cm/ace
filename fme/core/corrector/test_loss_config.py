@@ -1,4 +1,4 @@
-from collections.abc import Collection, Iterable
+from collections.abc import Iterable
 
 import pytest
 import torch
@@ -45,18 +45,16 @@ def _normalizer(names: Iterable[str] = _NAMES) -> StandardNormalizer:
 def _build(
     config: CorrectorLossConfig,
     corrector_modified_names: frozenset[str] = _MODIFIED,
-    prescribed_prognostic_names: Collection[str] = (),
 ) -> CorrectorLoss:
     return config.build(
         corrector_modified_names,
-        prescribed_prognostic_names=prescribed_prognostic_names,
         normalizer=_normalizer(sorted(corrector_modified_names | frozenset(_NAMES))),
         gridded_operations=None,
     )
 
 
 def test_config_post_init_errors():
-    # GOAL: both features None; a present feature with names_and_prefixes None
+    # both features None; a present feature with names_and_prefixes None
     # or empty; weight <= 0; EnsembleLoss / NaN / global_mean_type — each
     # raises in __post_init__.
     with pytest.raises(ValueError, match="at least one"):
@@ -84,7 +82,7 @@ def test_config_post_init_errors():
 @pytest.mark.parametrize("entry", ["missing_var", "missing_"])
 @pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
 def test_build_errors_on_entry_matching_no_modified_name(entry, feature):
-    # GOAL: an entry matching no corrector-modified name raises at build.
+    # an entry matching no corrector-modified name raises at build.
     # PARAMETERIZE: entry in {exact name, trailing-underscore prefix}.
     if feature == "precorrector_optimization":
         config = CorrectorLossConfig(
@@ -101,7 +99,7 @@ def test_build_errors_on_entry_matching_no_modified_name(entry, feature):
 
 
 def test_build_errors_without_modified_names():
-    # GOAL: empty corrector_modified_names raises.
+    # empty corrector_modified_names raises.
     config = CorrectorLossConfig(
         precorrector_optimization=PreCorrectorOptimizationConfig(
             names_and_prefixes=["a"]
@@ -111,29 +109,9 @@ def test_build_errors_without_modified_names():
         _build(config, corrector_modified_names=frozenset())
 
 
-@pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
-def test_build_errors_on_prescribed_prognostic_entry(feature):
-    # GOAL: an entry matching only a prescribed prognostic name raises, and the
-    # message says the delta is dropped after the prescribed overwrite.
-    if feature == "precorrector_optimization":
-        config = CorrectorLossConfig(
-            precorrector_optimization=PreCorrectorOptimizationConfig(
-                names_and_prefixes=["a"]
-            )
-        )
-    else:
-        config = CorrectorLossConfig(
-            regularization=CorrectorRegularizationConfig(names_and_prefixes=["a"])
-        )
-    with pytest.raises(ValueError, match="prescribed overwrite"):
-        _build(config, prescribed_prognostic_names={"a"})
-    # the same entry builds when the name is loss-visible
-    _build(config)
-
-
 def test_build_regularizer_packs_matched_names():
-    # GOAL: the built WeightedMappingLoss packs exactly
-    # selection.matched(loss_visible_names); a prefix entry matches all its
+    # the built WeightedMappingLoss packs exactly
+    # selection.matched(corrector_modified_names); a prefix entry matches all its
     # level names.
     config = CorrectorLossConfig(
         regularization=CorrectorRegularizationConfig(

@@ -682,12 +682,8 @@ def step_with_adjustments(
         )
         result = corrector(input, output, next_step_input_data, corrector_state)
         output = result.corrected
-        # The deltas are never detached: they stay on the autograd graph so a
-        # training loss can differentiate through the correction. Detaching
-        # would free nothing, since ``delta = corrected - network_output`` and
-        # ``corrected`` is a step output whose subgraph is retained until
-        # backward anyway. Non-optimized steps run under ``torch.no_grad()``,
-        # where there is no graph to detach from.
+        # The deltas stay on the autograd graph so a training loss can
+        # differentiate through the correction.
         diagnostics = result.diagnostics
         if result.corrector_state is not None:
             # Preserve the incoming state's other fields (e.g. random_state)

@@ -271,9 +271,10 @@ class CorrectionSequence(CorrectorABC):
                 img_shape,
             )
 
-        result = self(
-            _zeros(input_names), _zeros(gen_names), _zeros(forcing_names), None
-        )
+        with torch.no_grad():
+            result = self(
+                _zeros(input_names), _zeros(gen_names), _zeros(forcing_names), None
+            )
         self._modified_names = frozenset(result.diagnostics.delta.keys())
 
     def __call__(
