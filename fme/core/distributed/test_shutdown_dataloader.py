@@ -81,7 +81,7 @@ _DRIVER = textwrap.dedent(
 
 
     dist = Distributed.get_instance()
-    # Production passes `instance.abort` to `handle_termination_signals`;
+    # Production passes `instance.abort` to `abort_and_exit_on_termination`;
     # wrapping it here observes which process ran it, without touching
     # production code.
     backend_abort = dist.abort
@@ -246,7 +246,7 @@ def test_dataloader_workers_do_not_abort_when_the_group_is_signalled(tmp_path):
             "start_method=fork" in started[pid]
         ), f"worker {pid} was not fork-started: {started[pid]}"
         # the at-fork disarm restored the default disposition; the parent's
-        # ignore-handler would read as `_ignore_signal` here
+        # routing handler would read as `_route_to_listener` here
         assert (
             "sigint=<Handlers.SIG_DFL" in started[pid]
         ), f"worker {pid} was not disarmed at fork: {started[pid]}"

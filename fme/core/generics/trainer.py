@@ -355,10 +355,10 @@ class Trainer:
                     )
 
         dist = Distributed.get_instance()
-        if dist.world_size == dist.total_data_parallel_ranks:
+        if not dist.has_spatial_parallelism:
             # rank 0 holds the full model state, so the save needs no other
-            # rank's cooperation; a domain-parallel stepper's state is sharded,
-            # and assembling it would need the aborted communicators
+            # rank's cooperation; a spatially-parallel stepper's state is
+            # sharded, and assembling it would need the aborted communicators
             add_post_abort_callback(save_restart_checkpoints_on_terminate)
 
     def switch_off_grad(self, model: torch.nn.Module):
