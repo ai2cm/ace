@@ -11,11 +11,13 @@ spec:
         secretName: gcp-key
   arguments:
     parameters:
-    - name: python_script
+    - name: common_script
+    - name: main_script
     - name: start_datetime
     - name: end_datetime
     - name: destination
-    - name: n_workers
+    - name: extra_args
+      value: ""
   templates:
     - name: process
       tolerations:
@@ -23,7 +25,7 @@ spec:
           key: dedicated
           value: med-sim-pool
       container:
-        image: us-central1-docker.pkg.dev/vcm-ml/full-model/era5-nudging-data:v2026.07.0
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/era5-nudging-data:v2026.08.0
         imagePullPolicy: Always
         resources:
           limits:
@@ -35,15 +37,19 @@ spec:
         command: ["bash", "-c", "-e"]
         args:
           - |
-            cat << EOF > process.py
-            {{workflow.parameters.python_script}}
+            cat << 'EOF' > common.py
+            {{workflow.parameters.common_script}}
             EOF
 
-            python process.py \
+            cat << 'EOF' > main.py
+            {{workflow.parameters.main_script}}
+            EOF
+
+            python main.py \
               --start-datetime "{{workflow.parameters.start_datetime}}" \
               --end-datetime "{{workflow.parameters.end_datetime}}" \
               --destination "{{workflow.parameters.destination}}" \
-              --n-workers "{{workflow.parameters.n_workers}}"
+              {{workflow.parameters.extra_args}}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json

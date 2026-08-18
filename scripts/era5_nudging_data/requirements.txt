@@ -1,7 +1,9 @@
 cftime
+dask
 fsspec
 gcsfs
 h5netcdf
 h5py
+scipy
 xarray
 zarr

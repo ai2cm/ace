@@ -44,11 +44,12 @@ fi
 
 # Capture the output of the argo submit command
 output=$(argo submit argo_workflow.yaml \
-    -p python_script="$(< process.py)" \
+    -p common_script="$(< common.py)" \
+    -p main_script="$(< main_nudging.py)" \
     -p start_datetime="${START_DATETIME}" \
     -p end_datetime="${END_DATETIME}" \
     -p destination="${DESTINATION}" \
-    -p n_workers="${N_WORKERS}")
+    -p extra_args="--n-workers ${N_WORKERS}")
 
 # Extract the job name from the output
 job_name=$(echo "$output" | grep 'Name:' | awk '{print $2}')
