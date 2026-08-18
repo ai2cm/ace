@@ -1,0 +1,5 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2
