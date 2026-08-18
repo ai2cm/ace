@@ -6,7 +6,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 from common import (
     CITATIONS,
     LATITUDE_DIMENSION,

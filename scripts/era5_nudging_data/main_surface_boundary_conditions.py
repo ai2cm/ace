@@ -3,7 +3,6 @@ import logging
 
 import pandas as pd
 import xarray as xr
-
 from common import (
     CITATIONS,
     LATITUDE_DIMENSION,
