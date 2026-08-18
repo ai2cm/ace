@@ -88,8 +88,10 @@ DEFAULT_STATE_FREEZE_TIMEOUT = 5.0
 # early would free buffers that a wedged peer's waiting kernels still poll
 # (see _wait_for_main_thread_to_park). With the settle period, abort,
 # post-abort callbacks, and grace period behind it, the sum must fit the same
-# 30s budget.
-DEFAULT_PARK_DEADLINE = 10.0
+# 30s budget -- and the restart checkpoint, a post-abort callback, only gets
+# what remains of that budget after the abort time (hardware-trial writes took
+# ~19s), so the deadline stays as small as the batch tail allows.
+DEFAULT_PARK_DEADLINE = 5.0
 
 # How long past the park deadline a parked rank holds its abort, so that
 # every wedged peer's deadline abort has already killed its kernels -- despite
