@@ -18,3 +18,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # directory; job_runner/inference.sh acts on ^run_inf_ the same way. Any other
 # word is inert to both, which is how a row is parked (see the reference
 # directory's "invalid" rows).
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|01M09FGGX0XWMEBVV7HEQTN7QB|training|best_inference_ckpt|normal|--min-runtime 8h
