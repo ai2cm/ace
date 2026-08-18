@@ -7,9 +7,9 @@
 # dropped) and one ocean pretrain from scratch (resid). See
 # make_wave1_configs.py and the reports repo's intervention matrix.
 #
-# Prerequisite (one-time): the trimmed ocean checkpoint. Run trim_ocean_ckpt.py
-# per its docstring and set TRIMMED_OCEAN_CKPT_DATASET to the resulting Beaker
-# dataset id. The FT arms refuse to launch without it.
+# Ocean init: the corrected from-scratch Samudra pretrain (OHC + surface-flux
+# correctors on during pretraining), whose in/out names match these configs
+# exactly -- no checkpoint surgery needed.
 #
 # Cost note: the baseline FT ran 4 GPUs x ~2.5 days. Budget ~250 GPU-hours per
 # FT arm; hzn12's 3x window may run longer or need batch_size reduced (it is
@@ -24,12 +24,13 @@
 set -euo pipefail
 
 JOB_GROUP="${JOB_GROUP:-samudra-enso-rollout-interventions-w1}"
-ARMS="${ARMS:-ctrl wint5 wint20 hzn12 ohc}"
+ARMS="${ARMS:-ctrl wint5 wint20 hzn12 noohc}"
 DRY_RUN="${DRY_RUN:-0}"
 N_GPUS="${N_GPUS:-4}"
 
 ATMOS_CKPT_DATASET="${ATMOS_CKPT_DATASET:-01KJ70WK2NH4T2T4AVAAPYFSHA}"
-TRIMMED_OCEAN_CKPT_DATASET="${TRIMMED_OCEAN_CKPT_DATASET:-}"
+# troya/cm4-samudra-1pct-ocean-train-using-ufs-var-subset-ohc-hdfs-correctors
+OCEAN_CKPT_DATASET="${OCEAN_CKPT_DATASET:-01KW2BQ83EGZ90WZ74CZ4TJATN}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -45,15 +46,12 @@ launch() {
   local config="${CONFIG_DIR}/${arm}.yaml"
   local module="fme.coupled.train"
   local mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
-                --dataset "${TRIMMED_OCEAN_CKPT_DATASET}:/ocean_ckpt.tar")
+                --dataset "${OCEAN_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar")
 
   if [[ "$arm" == "resid" ]]; then
     config="${CONFIG_DIR}/resid-pretrain.yaml"
     module="fme.ace.train"
     mounts=()
-  elif [[ -z "$TRIMMED_OCEAN_CKPT_DATASET" && "$DRY_RUN" != "1" ]]; then
-    echo "TRIMMED_OCEAN_CKPT_DATASET is not set; run trim_ocean_ckpt.py first" >&2
-    exit 1
   fi
 
   python "${SCRIPT_PATH}/make_wave1_configs.py" >/dev/null

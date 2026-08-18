@@ -289,8 +289,6 @@ stepper:
                 remove_negative_ocean_fraction: false
                 zero_where_ice_free_names:
                 - sea_ice_volume
-              ocean_heat_content_correction:
-                method: scaled_temperature
           next_step_forcing_names:
           - DLWRFsfc
           - DSWRFsfc

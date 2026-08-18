@@ -164,6 +164,7 @@ stepper_training:
         crps_weight: 0.9
         energy_score_weight: 0.1
       weights:
+        thetao_0: 5.0
         thetao_1: 5.0
         thetao_2: 5.0
         thetao_3: 5.0
@@ -172,16 +173,26 @@ stepper_training:
         thetao_6: 5.0
         thetao_7: 5.0
         thetao_8: 5.0
-        thetao_9: 5.0
-        thetao_10: 5.0
-        thetao_11: 5.0
-        thetao_12: 5.0
-        thetao_13: 5.0
-        thetao_14: 5.0
-        thetao_15: 5.0
-        thetao_16: 5.0
-        thetao_17: 5.0
-        thetao_18: 5.0
+        uo_0: 5.0
+        uo_1: 5.0
+        uo_2: 5.0
+        uo_3: 5.0
+        uo_4: 5.0
+        uo_5: 5.0
+        uo_6: 5.0
+        uo_7: 5.0
+        uo_8: 5.0
+        vo_0: 5.0
+        vo_1: 5.0
+        vo_2: 5.0
+        vo_3: 5.0
+        vo_4: 5.0
+        vo_5: 5.0
+        vo_6: 5.0
+        vo_7: 5.0
+        vo_8: 5.0
+        ssu: 5.0
+        ssv: 5.0
         zos: 5.0
   atmosphere:
     parameter_init:
@@ -309,6 +320,10 @@ stepper:
                 remove_negative_ocean_fraction: false
                 zero_where_ice_free_names:
                 - sea_ice_volume
+              surface_energy_flux_correction:
+                method: prescribed
+              ocean_heat_content_correction:
+                method: scaled_temperature
           next_step_forcing_names:
           - DLWRFsfc
           - DSWRFsfc

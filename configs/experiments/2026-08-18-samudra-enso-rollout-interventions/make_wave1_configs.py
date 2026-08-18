@@ -45,7 +45,20 @@ HERE = Path(__file__).resolve().parent
 BASELINE = HERE / "baseline-ft-run-config.yaml"
 BASELINE_PRETRAIN = HERE / "baseline-pretrain-run-config.yaml"
 
-INTERIOR = [f"thetao_{k}" for k in range(1, 19)] + ["zos"]
+# ENSO-active upper ocean: temperature AND velocities from the surface down
+# through the thermocline band, plus SSH (the thermocline-displacement
+# signature). Layer interfaces put levels 0..8 at 0-450 m; level 9 starts at
+# 450 m and the column continues to 6.5 km, well below anything ENSO touches.
+# The 450 m cutoff matches the diagnosis's subsurface-LIM evidence, which also
+# stopped at 450 m. Velocities are included on the currents-arm result
+# (prescribing them recovered lead-12 skill to 0.79).
+ENSO_LEVELS = list(range(0, 9))  # 0-450 m
+ENSO_ACTIVE = (
+    [f"thetao_{k}" for k in ENSO_LEVELS]
+    + [f"uo_{k}" for k in ENSO_LEVELS]
+    + [f"vo_{k}" for k in ENSO_LEVELS]
+    + ["ssu", "ssv", "zos"]
+)
 
 
 NINO_CHANNELS = [f"nino34_lead_{k:02d}" for k in range(1, 13)]
@@ -102,6 +115,44 @@ def strip_nino_channels(c: dict) -> dict:
     return c
 
 
+CORRECTED_PRETRAIN = HERE / "corrected-pretrain-run-config.yaml"
+# Ocean init for all FT arms: the corrected from-scratch Samudra pretrain
+# (troya/cm4-samudra-1pct-ocean-train-using-ufs-var-subset-ohc-hdfs-correctors,
+# Beaker dataset 01KW2BQ83EGZ90WZ74CZ4TJATN). Its in/out names match the
+# stripped nino lineage exactly, including order, so weights drop in with no
+# checkpoint surgery, and it was pretrained WITH the heat-content and
+# surface-flux corrections on.
+
+
+def adopt_corrected_lineage(c: dict) -> dict:
+    """Carry the corrected pretrain's constraints into the coupled FT.
+
+    Sets the FT ocean corrector to the pretrain's exactly (full salinity
+    positivity list, sea-ice fix, surface_energy_flux_correction and
+    ocean_heat_content_correction), so the constraint the ocean was trained
+    under stays active through fine-tuning and inference.
+    """
+    with open(CORRECTED_PRETRAIN) as f:
+        pre = yaml.safe_load(f)
+
+    def find(d):
+        if isinstance(d, dict):
+            if "out_names" in d and "in_names" in d:
+                return d
+            for v in d.values():
+                r = find(v)
+                if r:
+                    return r
+        return None
+
+    step = c["stepper"]["ocean"]["stepper"]["step"]["config"]
+    pre_step = find(pre)
+    assert step["out_names"] == pre_step["out_names"]
+    assert step["in_names"] == pre_step["in_names"]
+    step["corrector"] = copy.deepcopy(pre_step["corrector"])
+    return c
+
+
 def arm_ctrl(c: dict) -> dict:
     return c
 
@@ -109,7 +160,7 @@ def arm_ctrl(c: dict) -> dict:
 def _weights(c: dict, factor: float) -> dict:
     loss = c["stepper_training"]["ocean"]["loss"]
     assert "weights" not in loss, "baseline ocean loss unexpectedly has weights"
-    loss["weights"] = {name: factor for name in INTERIOR}
+    loss["weights"] = {name: factor for name in ENSO_ACTIVE}
     return c
 
 
@@ -140,14 +191,16 @@ def arm_hzn12(c: dict) -> dict:
     return c
 
 
-def arm_ohc(c: dict) -> dict:
-    step = c["stepper"]["ocean"]["stepper"]["step"]["config"]
-    corr = step["corrector"]["config"]
-    assert "ocean_heat_content_correction" not in corr
-    # scaled_temperature is the method the corrected sibling fine-tunes use.
-    # The budget's flux term comes from the ocean's own predicted
-    # hfds_total_area, which is already in out_names.
-    corr["ocean_heat_content_correction"] = {"method": "scaled_temperature"}
+def arm_noohc(c: dict) -> dict:
+    """Ablation: corrections OFF during fine-tuning (still on in pretraining).
+
+    With the corrected pretrain as everyone's init, the attribution question
+    inverts: does keeping the budget constraints active through fine-tuning
+    matter, given the dynamics were learned under them?
+    """
+    corr = c["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"]
+    assert corr.pop("ocean_heat_content_correction", None) is not None
+    assert corr.pop("surface_energy_flux_correction", None) is not None
     return c
 
 
@@ -156,7 +209,7 @@ ARMS = {
     "wint5": arm_wint5,
     "wint20": arm_wint20,
     "hzn12": arm_hzn12,
-    "ohc": arm_ohc,
+    "noohc": arm_noohc,
 }
 
 
@@ -197,10 +250,10 @@ def make_resid_pretrain(seed: int) -> dict:
     channels, plus residual_prediction. The coupled FT on the resulting
     checkpoint is stage 2.
     """
-    with open(BASELINE_PRETRAIN) as f:
+    with open(CORRECTED_PRETRAIN) as f:
         c = yaml.safe_load(f)
-    c = strip_nino_channels_pretrain(c)
     step = c["stepper"]["step"]["config"]
+    assert not any(n.startswith("nino34_lead") for n in step["out_names"])
     assert not step.get("residual_prediction")
     step["residual_prediction"] = True
     c["seed"] = seed
@@ -222,7 +275,9 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for arm in args.arms:
-        c = ARMS[arm](strip_nino_channels(copy.deepcopy(load_baseline())))
+        c = ARMS[arm](
+            adopt_corrected_lineage(strip_nino_channels(copy.deepcopy(load_baseline())))
+        )
         c["seed"] = args.seed
         c["experiment_dir"] = "/results"  # run name comes from WANDB_NAME env
         path = args.out_dir / f"{arm}.yaml"
