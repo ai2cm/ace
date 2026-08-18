@@ -7,6 +7,7 @@ from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
     CorrectorLoss,
+    CorrectorRegularizer,
     CRPSLoss,
     EnergyScoreLoss,
     EnsembleComponentLoss,
@@ -1067,18 +1068,20 @@ def _corrector_loss(
 ) -> CorrectorLoss:
     regularizer = None
     if regularizer_names is not None:
-        regularizer = WeightedMappingLoss(
-            loss=LossConfig(type="MSE").build(gridded_operations=None),
-            weights={},
-            out_names=regularizer_names,
-            normalizer=_corrector_normalizer(),
-            channel_dim=-3,
+        regularizer = CorrectorRegularizer(
+            loss=WeightedMappingLoss(
+                loss=LossConfig(type="MSE").build(gridded_operations=None),
+                weights={},
+                out_names=regularizer_names,
+                normalizer=_corrector_normalizer(),
+                channel_dim=-3,
+            ),
+            names=regularizer_names,
+            weight=penalty_weight,
         )
     return CorrectorLoss(
         precorrector_names=precorrector_names,
         regularizer=regularizer,
-        regularizer_names=regularizer_names,
-        penalty_weight=penalty_weight,
     )
 
 

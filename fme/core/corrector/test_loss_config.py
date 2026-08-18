@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 
+import dacite
 import pytest
 import torch
 
@@ -54,17 +55,14 @@ def _build(
 
 
 def test_config_post_init_errors():
-    # both features None; a present feature with names_and_prefixes None
-    # or empty; weight <= 0; EnsembleLoss / NaN / global_mean_type — each
-    # raises in __post_init__.
+    # both features None; a present feature selecting nothing; weight <= 0;
+    # EnsembleLoss / NaN / global_mean_type — each raises in __post_init__.
     with pytest.raises(ValueError, match="at least one"):
         CorrectorLossConfig()
-    empty_selections: list[list[str] | None] = [None, []]
-    for names in empty_selections:
-        with pytest.raises(ValueError, match="names_and_prefixes"):
-            PreCorrectorOptimizationConfig(names_and_prefixes=names)
-        with pytest.raises(ValueError, match="names_and_prefixes"):
-            CorrectorRegularizationConfig(names_and_prefixes=names)
+    with pytest.raises(ValueError, match="names_and_prefixes"):
+        PreCorrectorOptimizationConfig(names_and_prefixes=[])
+    with pytest.raises(ValueError, match="names_and_prefixes"):
+        CorrectorRegularizationConfig(names_and_prefixes=[])
     for weight in (0.0, -1.0):
         with pytest.raises(ValueError, match="weight"):
             CorrectorRegularizationConfig(names_and_prefixes=["a"], weight=weight)
@@ -77,6 +75,17 @@ def test_config_post_init_errors():
         CorrectorRegularizationConfig(
             names_and_prefixes=["a"], loss=LossConfig(global_mean_type="LpLoss")
         )
+
+
+@pytest.mark.parametrize(
+    "feature_config",
+    [PreCorrectorOptimizationConfig, CorrectorRegularizationConfig],
+)
+def test_names_and_prefixes_is_required_by_dacite(feature_config):
+    # the YAML path, not the constructor: omitting the selection is a
+    # missing-value error from dacite, not a config that parses and no-ops.
+    with pytest.raises(dacite.exceptions.MissingValueError):
+        dacite.from_dict(feature_config, {}, config=dacite.Config(strict=True))
 
 
 @pytest.mark.parametrize("entry", ["missing_var", "missing_"])

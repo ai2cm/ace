@@ -104,6 +104,20 @@ class _LifecycleRecordingCorrector(CorrectorABC):
         self.train_modes: list[bool] = []
         self.epochs: list[int] = []
         self.loaded_state: dict[str, object] | None = None
+        self.discovery_calls = 0
+
+    @property
+    def modified_names(self) -> frozenset[str]:
+        return frozenset({"wrapped_delta"})
+
+    def discover_modified_names(
+        self,
+        input_names: Collection[str],
+        gen_names: Collection[str],
+        forcing_names: Collection[str],
+        img_shape: tuple[int, int],
+    ) -> None:
+        self.discovery_calls += 1
 
     def train(self, mode: bool = True) -> "_LifecycleRecordingCorrector":
         self.train_modes.append(mode)
@@ -138,14 +152,28 @@ def test_scheduled_corrector_forwards_lifecycle_and_state():
     corrector.set_epoch(3)
     state = corrector.get_state()
     corrector.load_state(state)
+    corrector.discover_modified_names([], [], [], (2, 2))
 
     assert wrapped.train_modes == [False]
     assert wrapped.epochs == [3]
+    assert wrapped.discovery_calls == 1
+    # forwarded independent of the epoch-disabled state
+    assert corrector.modified_names == frozenset({"wrapped_delta"})
     assert state == {
         "corrector_disabled": False,
         "wrapped": {"wrapped_value": 3},
     }
     assert wrapped.loaded_state == {"wrapped_value": 3}
+
+
+def test_modified_names_raises_before_discovery():
+    # a CorrectionSequence built without going through get_corrector has never
+    # run discovery, and says so rather than reporting "modifies nothing".
+    corrector = CorrectionSequence([ConstantOffsetCorrection("a", 1.0)])
+    with pytest.raises(RuntimeError, match="discovery has not run"):
+        corrector.modified_names
+    corrector.discover_modified_names(["a"], ["a"], [], (2, 2))
+    assert corrector.modified_names == frozenset({"a"})
 
 
 class ConstantOffsetCorrection:

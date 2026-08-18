@@ -812,6 +812,28 @@ class LossConfig:
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
             raise NotImplementedError(self.global_mean_type)
 
+    def validate(self, *, pointwise_against_target: bool = False) -> None:
+        """Raise if this configuration does not satisfy the named invariants.
+
+        Args:
+            pointwise_against_target: Require a loss which compares one
+                deterministic prediction against target values pointwise.
+                ``EnsembleLoss`` compares distributions, ``NaN`` ignores the
+                prediction, and a global-mean term is not pointwise, so all
+                three are rejected.
+        """
+        if pointwise_against_target:
+            if self.type in ("EnsembleLoss", "NaN"):
+                raise ValueError(
+                    f"loss type {self.type!r} does not compare one prediction "
+                    "against target values pointwise."
+                )
+            if self.global_mean_type is not None:
+                raise ValueError(
+                    "global_mean_type is not a pointwise comparison against "
+                    "target values."
+                )
+
     def build(
         self,
         gridded_operations: GriddedOperations | None,
@@ -977,6 +999,59 @@ class StepLossConfig:
         )
 
 
+class CorrectorRegularizer(torch.nn.Module):
+    """A penalty pushing selected correction deltas toward zero.
+
+    Holds the three things the penalty is: the loss taken over the selected
+    deltas, the names it is taken over, and the weight it enters the step total
+    with.
+    """
+
+    def __init__(self, loss: WeightedMappingLoss, names: list[str], weight: float):
+        """
+        Args:
+            loss: The loss applied to the normalized deltas against zeros.
+            names: The names the penalty is taken over.
+            weight: The weight applied to the penalty in the step total.
+        """
+        super().__init__()
+        self._loss = loss
+        self._names = names
+        self._weight = weight
+
+    @property
+    def weight(self) -> float:
+        return self._weight
+
+    @property
+    def names(self) -> list[str]:
+        return list(self._names)
+
+    def forward(
+        self, deltas: TensorMapping, data_mask: TensorMapping | None = None
+    ) -> LossOutput:
+        """Penalty over the selected deltas, per channel.
+
+        The deltas are compared against zeros in loss-normalized space, so with
+        an affine normalizer the means cancel and this penalizes ``delta/std``.
+        The mask is the main loss's, so both halves of the step total average
+        over the same samples per channel.
+        """
+        selected: TensorDict = {}
+        targets: TensorDict = {}
+        for name in self._names:
+            _require_delta(deltas, name, "regularization")
+            delta = deltas[name]
+            selected[name] = delta
+            # NaN target where the delta is NaN-filled, so masked points drop out.
+            targets[name] = torch.where(
+                delta.isnan(),
+                torch.full_like(delta, torch.nan),
+                torch.zeros_like(delta),
+            )
+        return self._loss(selected, targets, data_mask)
+
+
 class CorrectorLoss(torch.nn.Module):
     """Loss for corrector optimization.
 
@@ -987,9 +1062,7 @@ class CorrectorLoss(torch.nn.Module):
     def __init__(
         self,
         precorrector_names: list[str] | None,
-        regularizer: WeightedMappingLoss | None,
-        regularizer_names: list[str] | None,
-        penalty_weight: float,
+        regularizer: CorrectorRegularizer | None,
     ):
         """
         Args:
@@ -997,19 +1070,17 @@ class CorrectorLoss(torch.nn.Module):
                 pre-corrector network output, or None when the feature is off.
             regularizer: The penalty over the selected deltas, or None when
                 the feature is off.
-            regularizer_names: The names the penalty is taken over, or None
-                when the feature is off.
-            penalty_weight: The weight applied to the penalty.
         """
         super().__init__()
         self._precorrector_names = precorrector_names
         self._regularizer = regularizer
-        self._regularizer_names = regularizer_names
-        self._penalty_weight = penalty_weight
 
     @property
     def penalty_weight(self) -> float:
-        return self._penalty_weight
+        """The weight the penalty enters the step total with, 1.0 with no penalty."""
+        if self._regularizer is None:
+            return 1.0
+        return self._regularizer.weight
 
     def pre_corrector_outputs(
         self, predict_dict: TensorMapping, deltas: TensorMapping
@@ -1028,30 +1099,12 @@ class CorrectorLoss(torch.nn.Module):
     def penalty(
         self, deltas: TensorMapping, data_mask: TensorMapping | None = None
     ) -> LossOutput | None:
-        """Penalty over the selected deltas, per channel, or None when the
-        feature is off or the deltas are empty.
-
-        The deltas are compared against zeros in loss-normalized space, so with
-        an affine normalizer the means cancel and this penalizes ``delta/std``.
-        The mask is the main loss's, so both halves of the step total average
-        over the same samples per channel.
+        """The regularizer's penalty, or None when the feature is off or the
+        deltas are empty.
         """
         if self._regularizer is None or len(deltas) == 0:
             return None
-        selected: TensorDict = {}
-        targets: TensorDict = {}
-        assert self._regularizer_names is not None
-        for name in self._regularizer_names:
-            _require_delta(deltas, name, "regularization")
-            delta = deltas[name]
-            selected[name] = delta
-            # NaN target where the delta is NaN-filled, so masked points drop out.
-            targets[name] = torch.where(
-                delta.isnan(),
-                torch.full_like(delta, torch.nan),
-                torch.zeros_like(delta),
-            )
-        return self._regularizer(selected, targets, data_mask)
+        return self._regularizer(deltas, data_mask)
 
 
 def _require_delta(deltas: TensorMapping, name: str, feature: str) -> None:

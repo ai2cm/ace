@@ -75,7 +75,7 @@ class CorrectorConfigABC(abc.ABC):
             forcing_names: Names present in the corrector's ``forcing_data``.
         """
         corrector = self._build_corrector(dataset_info)
-        corrector._discover_modified_names(
+        corrector.discover_modified_names(
             input_names=input_names,
             gen_names=gen_names,
             forcing_names=forcing_names,
@@ -177,15 +177,17 @@ class CorrectorABC(abc.ABC):
         """Load corrector checkpoint state. Default implementation is a no-op."""
 
     @property
+    @abc.abstractmethod
     def modified_names(self) -> frozenset[str]:
         """The delta keys this corrector produces when active.
 
-        Default implementation returns an empty frozenset: a corrector which
-        modifies nothing.
+        Raises if ``discover_modified_names`` has not run, so that "discovery
+        never happened" is never reported as "this corrector modifies nothing".
         """
-        return frozenset()
+        ...
 
-    def _discover_modified_names(
+    @abc.abstractmethod
+    def discover_modified_names(
         self,
         input_names: Collection[str],
         gen_names: Collection[str],
@@ -196,9 +198,9 @@ class CorrectorABC(abc.ABC):
         them available as ``modified_names``.
 
         Called by ``CorrectorConfigABC.get_corrector`` during construction, not
-        by corrector users. Default implementation is a no-op, leaving
-        ``modified_names`` empty.
+        by corrector users; this is the second phase of that two-phase build.
         """
+        ...
 
     @abc.abstractmethod
     def __call__(
@@ -236,13 +238,19 @@ class CorrectionSequence(CorrectorABC):
 
     def __init__(self, corrections: list[Correction]):
         self._corrections = corrections
-        self._modified_names: frozenset[str] = frozenset()
+        self._modified_names: frozenset[str] | None = None
 
     @property
     def modified_names(self) -> frozenset[str]:
+        if self._modified_names is None:
+            raise RuntimeError(
+                "modified_names is unavailable because discovery has not run; "
+                "build correctors through CorrectorConfigABC.get_corrector, "
+                "which runs it as part of construction."
+            )
         return self._modified_names
 
-    def _discover_modified_names(
+    def discover_modified_names(
         self,
         input_names: Collection[str],
         gen_names: Collection[str],
@@ -339,14 +347,14 @@ class EpochScheduledCorrector(CorrectorABC):
         # state: these describe what the corrector produces when active.
         return self._wrapped.modified_names
 
-    def _discover_modified_names(
+    def discover_modified_names(
         self,
         input_names: Collection[str],
         gen_names: Collection[str],
         forcing_names: Collection[str],
         img_shape: tuple[int, int],
     ) -> None:
-        self._wrapped._discover_modified_names(
+        self._wrapped.discover_modified_names(
             input_names, gen_names, forcing_names, img_shape
         )
 

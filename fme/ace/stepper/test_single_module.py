@@ -6,7 +6,7 @@ import pathlib
 import unittest
 import unittest.mock
 from collections import namedtuple
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import Literal
 from unittest.mock import patch
 
@@ -1606,6 +1606,19 @@ class _RecordingCorrector(CorrectorABC):
     def __init__(self):
         self.call_count = 0
         self.seen_states: list[CorrectorState | None] = []
+
+    @property
+    def modified_names(self) -> frozenset[str]:
+        return frozenset()
+
+    def discover_modified_names(
+        self,
+        input_names: Collection[str],
+        gen_names: Collection[str],
+        forcing_names: Collection[str],
+        img_shape: tuple[int, int],
+    ) -> None:
+        pass
 
     def __call__(
         self,
@@ -3283,7 +3296,7 @@ def _corrector_loss_stepper(
             corrector = EpochScheduledCorrector(
                 wrapped=corrector, disabled_epochs=disabled_epochs
             )
-        corrector._discover_modified_names(
+        corrector.discover_modified_names(
             input_names=step.input_names,
             gen_names=step.output_names,
             forcing_names=[],
