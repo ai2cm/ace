@@ -363,6 +363,15 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                 "frozen_precipitation_rate", []
             ):
                 diagnosed_prefixes[p] = "clip_frozen_precipitation"
+        advection_recomputed = (
+            self.moisture_budget_correction is not None
+            and self.moisture_budget_correction.startswith("advection")
+        )
+        if self.zero_global_mean_moisture_advection and not advection_recomputed:
+            for p in ATMOSPHERE_FIELD_NAME_PREFIXES[
+                "tendency_of_total_water_path_due_to_advection"
+            ]:
+                diagnosed_prefixes[p] = "zero_global_mean_moisture_advection"
 
         collision = set(self.force_positive_names) & set(diagnosed_prefixes)
         if collision:
@@ -387,10 +396,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             corrections.append(
                 ConserveDryAir(area_weighted_mean, vertical_coordinate, precision)
             )
-        advection_recomputed = (
-            self.moisture_budget_correction is not None
-            and self.moisture_budget_correction.startswith("advection")
-        )
         if self.zero_global_mean_moisture_advection and not advection_recomputed:
             # Skip when the moisture budget correction recomputes advection
             # from scratch (a diagnosis), since that supersedes the
