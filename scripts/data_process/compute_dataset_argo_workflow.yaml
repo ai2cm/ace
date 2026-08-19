@@ -16,6 +16,7 @@ spec:
     - name: combine_stats_script
     - name: upload_stats_script
     - name: time_coarsen_script
+    - name: fs_utils_script
     - name: config
     - name: names
     - name: run_directories
@@ -41,6 +42,8 @@ spec:
               value: "{{workflow.parameters.get_stats_script}}"
             - name: time_coarsen_script
               value: "{{workflow.parameters.time_coarsen_script}}"
+            - name: fs_utils_script
+              value: "{{workflow.parameters.fs_utils_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
             - name: names
@@ -63,6 +66,8 @@ spec:
               value: "{{workflow.parameters.time_coarsen_script}}"
             - name: stats_script
               value: "{{workflow.parameters.get_stats_script}}"
+            - name: fs_utils_script
+              value: "{{workflow.parameters.fs_utils_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
             - name: run
@@ -77,6 +82,8 @@ spec:
             parameters:
             - name: python_script
               value: "{{workflow.parameters.get_stats_script}}"
+            - name: fs_utils_script
+              value: "{{workflow.parameters.fs_utils_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
             - name: run
@@ -102,6 +109,8 @@ spec:
               value: "{{workflow.parameters.upload_stats_script}}"
             - name: stats_script
               value: "{{workflow.parameters.get_stats_script}}"
+            - name: fs_utils_script
+              value: "{{workflow.parameters.fs_utils_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
     - name: compute-fme-dataset-individual
@@ -113,6 +122,7 @@ spec:
         parameters:
           - name: python_script
           - name: stats_script
+          - name: fs_utils_script
           - name: config
           - name: names
           - name: run_directories
@@ -136,6 +146,10 @@ spec:
 
             cat << EOF > get_stats.py
             {{inputs.parameters.stats_script}}
+            EOF
+
+            cat << EOF > fs_utils.py
+            {{inputs.parameters.fs_utils_script}}
             EOF
 
             cat << EOF > config.yaml
@@ -171,6 +185,8 @@ spec:
               parameters:
               - name: python_script
                 value: "{{workflow.parameters.get_stats_script}}"
+              - name: fs_utils_script
+                value: "{{workflow.parameters.fs_utils_script}}"
               - name: config
                 value: "{{workflow.parameters.config}}"
               - name: run
@@ -195,6 +211,7 @@ spec:
         parameters:
           - name: python_script
           - name: stats_script
+          - name: fs_utils_script
           - name: config
           - name: run
       container:
@@ -215,6 +232,10 @@ spec:
 
             cat << EOF > get_stats.py
             {{inputs.parameters.stats_script}}
+            EOF
+
+            cat << EOF > fs_utils.py
+            {{inputs.parameters.fs_utils_script}}
             EOF
 
             cat << EOF > config.yaml
@@ -240,6 +261,7 @@ spec:
       inputs:
         parameters:
           - name: python_script
+          - name: fs_utils_script
           - name: config
           - name: run
       container:
@@ -256,6 +278,10 @@ spec:
           - |
             cat << EOF > script.py
             {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > fs_utils.py
+            {{inputs.parameters.fs_utils_script}}
             EOF
 
             cat << EOF > config.yaml
@@ -320,6 +346,7 @@ spec:
         parameters:
           - name: python_script
           - name: stats_script
+          - name: fs_utils_script
           - name: config
       container:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.12.0
@@ -339,6 +366,10 @@ spec:
 
             cat << EOF > get_stats.py
             {{inputs.parameters.stats_script}}
+            EOF
+
+            cat << EOF > fs_utils.py
+            {{inputs.parameters.fs_utils_script}}
             EOF
 
             cat << EOF > config.yaml
