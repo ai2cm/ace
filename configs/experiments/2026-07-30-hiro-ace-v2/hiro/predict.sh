@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="predict-25-3km-perfect-pred-xshield-2023-tc-tracks"
+JOB_NAME="predict-all-ace2s-tcs-max-snapshot"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="pred-25-3km-xshield-2023-tc-tracks.yaml"
+CONFIG_FILENAME="pred-all-ace2s-tcs-max-snapshot.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -21,8 +21,9 @@ NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 
-
-EXISTING_RESULTS_DATASET=01KYT6C60VZHDM1AFQJ42PTNRK
+EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRGZT4X2QCW2RFH7WN7X8BYA
+EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRBYGNYJ6FD7PGNF3VVHQ5V1
+#EXISTING_RESULTS_DATASET=01KYT6C60VZHDM1AFQJ42PTNRK
 wandb_group=""
 
 #--not-preemptible \
@@ -34,8 +35,8 @@ wandb_group=""
     # --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
 gantry run \
     --name $JOB_NAME \
-    --description 'Run 25km to 3km evaluation on ACE2S-SHiELD' \
-    --workspace ai2/climate-titan \
+    --description 'Run 100km to 3km evaluation on ACE2S-SHiELD' \
+    --workspace ai2/ace \
     --priority urgent \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
@@ -43,10 +44,12 @@ gantry run \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
     --env WANDB_RUN_GROUP=$wandb_group \
+    --env CM_PRIORITY=HIGH \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints  \
+    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
