@@ -9,6 +9,7 @@ from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.models.swin_transformer import SwinTransformerNet
 from fme.core.models.swin_transformer.boundary_padding import TensorPaddingConfig
+from fme.core.stacker import ColumnLayout, infer_column_layout
 
 
 class _ContextWrappedModule(nn.Module):
@@ -33,6 +34,34 @@ class _ContextWrappedModule(nn.Module):
             noise=None,
         )
         return self.module(x, context)
+
+
+def _resolve_column_layouts(
+    cross_level_attention: bool,
+    in_names: list[str] | None,
+    out_names: list[str] | None,
+) -> tuple[ColumnLayout | None, ColumnLayout | None]:
+    """Infer the vertical layout of the input and output channels.
+
+    Returns ``(None, None)`` when cross-level attention is disabled, leaving
+    the network as a plain 2D model with levels stacked into channels.
+    """
+    if not cross_level_attention:
+        return None, None
+    if in_names is None or out_names is None:
+        raise ValueError(
+            "cross_level_attention requires channel names, which the caller did "
+            "not provide. This step type does not support cross-level attention."
+        )
+    in_layout = infer_column_layout(in_names)
+    out_layout = infer_column_layout(out_names)
+    if in_layout is None or out_layout is None:
+        raise ValueError(
+            "cross_level_attention requires vertically resolved variables "
+            "(names ending in _<level>) among both the input and output "
+            "channels, but found none."
+        )
+    return in_layout, out_layout
 
 
 @ModuleSelector.register("SwinTransformer")
@@ -61,6 +90,14 @@ class SwinTransformerBuilder(ModuleConfig):
             and applies cos-lat scaling to CPB longitude offsets. Set to False
             to use plain log-spaced CPB offsets (Swin V2 style) without a
             latitude requirement.
+        cross_level_attention: When True, vertically resolved variables (names
+            ending in ``_<level>``) are embedded per level rather than stacked
+            into channels, and each block attends along the vertical axis,
+            matching ArchesWeather's ``axis_attn``. Surface fields become one
+            additional token in that axis. This multiplies the number of latent
+            tokens by ``n_levels + 1``, so ``embed_dim`` should be reduced to
+            keep the cost comparable.
+        column_num_heads: Number of attention heads for cross-level attention.
     """
 
     embed_dim: int = 96
@@ -75,6 +112,8 @@ class SwinTransformerBuilder(ModuleConfig):
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
+    cross_level_attention: bool = False
+    column_num_heads: int = 8
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -112,6 +151,9 @@ class SwinTransformerBuilder(ModuleConfig):
             if self.padding_conf is not None
             else None
         )
+        in_layout, out_layout = _resolve_column_layouts(
+            self.cross_level_attention, in_names, out_names
+        )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -128,6 +170,9 @@ class SwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            in_layout=in_layout,
+            out_layout=out_layout,
+            column_num_heads=self.column_num_heads,
         )
         return _ContextWrappedModule(net)
 
@@ -161,6 +206,14 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             and applies cos-lat scaling to CPB longitude offsets. Set to False
             to use plain log-spaced CPB offsets (Swin V2 style) without a
             latitude requirement.
+        cross_level_attention: When True, vertically resolved variables (names
+            ending in ``_<level>``) are embedded per level rather than stacked
+            into channels, and each block attends along the vertical axis,
+            matching ArchesWeather's ``axis_attn``. Surface fields become one
+            additional token in that axis. This multiplies the number of latent
+            tokens by ``n_levels + 1``, so ``embed_dim`` should be reduced to
+            keep the cost comparable.
+        column_num_heads: Number of attention heads for cross-level attention.
     """
 
     embed_dim: int = 96
@@ -176,6 +229,8 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     cpb_hidden_dim: int = 64
     padding_conf: TensorPaddingConfig | None = None
     use_cpb_scaling: bool = True
+    cross_level_attention: bool = False
+    column_num_heads: int = 8
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -215,6 +270,9 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             if self.padding_conf is not None
             else None
         )
+        in_layout, out_layout = _resolve_column_layouts(
+            self.cross_level_attention, in_names, out_names
+        )
         net = SwinTransformerNet(
             in_chans=n_in_channels,
             out_chans=n_out_channels,
@@ -232,6 +290,9 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             cpb_hidden_dim=self.cpb_hidden_dim,
             lat_coords=lat_coords,
             padding_conf=padding_conf,
+            in_layout=in_layout,
+            out_layout=out_layout,
+            column_num_heads=self.column_num_heads,
         )
         return NoiseConditionedModel(
             net,

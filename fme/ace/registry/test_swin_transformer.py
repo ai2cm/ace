@@ -302,3 +302,61 @@ def test_nc_swin_transformer_no_cpb_scaling_builds_without_lat_coords():
     )
     x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
     assert module(x).shape == (2, n_out, *IMG_SHAPE)
+
+
+_COLUMN_IN = ["land_fraction", "DSWRFtoa"] + [
+    f"{prefix}_{level}" for prefix in ["t", "q"] for level in range(4)
+]
+_COLUMN_OUT = [f"{prefix}_{level}" for prefix in ["t", "q"] for level in range(4)] + [
+    "PRATEsfc"
+]
+
+
+def test_cross_level_attention_builds_a_vertical_axis():
+    """The builder must actually give the net a level axis to attend over."""
+    module = _nc_builder(cross_level_attention=True).build(
+        n_in_channels=len(_COLUMN_IN),
+        n_out_channels=len(_COLUMN_OUT),
+        dataset_info=_get_dataset_info(),
+        in_names=_COLUMN_IN,
+        out_names=_COLUMN_OUT,
+    )
+    assert isinstance(module, NoiseConditionedModel)
+    # 4 levels plus the surface token.
+    assert module.conditional_model.n_tokens == 5
+    out = module(torch.randn(2, len(_COLUMN_IN), *IMG_SHAPE, device=fme.get_device()))
+    assert out.shape == (2, len(_COLUMN_OUT), *IMG_SHAPE)
+
+
+def test_without_cross_level_attention_net_stays_flat():
+    module = _nc_builder(cross_level_attention=False).build(
+        n_in_channels=len(_COLUMN_IN),
+        n_out_channels=len(_COLUMN_OUT),
+        dataset_info=_get_dataset_info(),
+        in_names=_COLUMN_IN,
+        out_names=_COLUMN_OUT,
+    )
+    assert isinstance(module, NoiseConditionedModel)
+    assert module.conditional_model.n_tokens == 1
+
+
+def test_cross_level_attention_without_names_raises():
+    """A step type that cannot supply names must fail loudly, not silently."""
+    with pytest.raises(ValueError, match="did not provide"):
+        _nc_builder(cross_level_attention=True).build(
+            n_in_channels=len(_COLUMN_IN),
+            n_out_channels=len(_COLUMN_OUT),
+            dataset_info=_get_dataset_info(),
+        )
+
+
+def test_cross_level_attention_without_levels_raises():
+    flat = ["land_fraction", "DSWRFtoa"]
+    with pytest.raises(ValueError, match="vertically resolved"):
+        _nc_builder(cross_level_attention=True).build(
+            n_in_channels=len(flat),
+            n_out_channels=len(flat),
+            dataset_info=_get_dataset_info(),
+            in_names=flat,
+            out_names=flat,
+        )
