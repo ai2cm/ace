@@ -138,13 +138,12 @@ class OceanData:
         self._pending_deltas[prefix] = value - original
         self._data[prefix] = value
 
-    def correct_all_levels(
-        self, standard_name: str, value: torch.Tensor
-    ) -> None:
+    def correct_all_levels(self, standard_name: str, value: torch.Tensor) -> None:
         """Apply corrective deltas for a multi-level (Stacker) variable.
 
         Args:
-            standard_name: The standard name (e.g. ``"sea_water_potential_temperature"``).
+            standard_name: The standard name
+                (e.g. ``"sea_water_potential_temperature"``).
             value: Tensor with shape ``(..., n_levels)``.
         """
         names = self._stacker.get_all_level_names(standard_name, self._data)
@@ -153,8 +152,6 @@ class OceanData:
 
     def result(self) -> CorrectorOutput:
         """Return the ``CorrectorOutput`` with all pending corrections applied."""
-        from fme.core.corrector.output import CorrectorOutput  # noqa: F811
-
         assert self._corrector_output is not None
         return self._corrector_output.apply_correction(
             diagnosed=self._pending_diagnosed,

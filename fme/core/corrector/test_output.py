@@ -2,10 +2,7 @@ import pytest
 import torch
 
 from fme import get_device
-from fme.core.corrector.output import (
-    CorrectorDiagnostics,
-    CorrectorOutput,
-)
+from fme.core.corrector.output import CorrectorDiagnostics, CorrectorOutput
 from fme.core.corrector.state import CorrectorState
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 from fme.core.spatial_masking import NullSpatialMasking
@@ -27,7 +24,6 @@ def test_corrector_output_defaults():
     # defaults: empty diagnostics, no corrector state
     assert output.diagnostics.delta == {}
     assert output.corrector_state is None
-
 
 
 def test_apply_output_masking_masks_delta_and_returns_new_object():
@@ -70,9 +66,7 @@ def test_modified_names_from_delta():
 def test_modified_names_from_pre_diagnosis():
     output = CorrectorOutput(
         corrected={"a": torch.zeros(2)},
-        diagnostics=CorrectorDiagnostics(
-            pre_diagnosis_fields={"a": torch.ones(2)}
-        ),
+        diagnostics=CorrectorDiagnostics(pre_diagnosis_fields={"a": torch.ones(2)}),
     )
     assert output.modified_names == {"a"}
 
@@ -105,7 +99,6 @@ def test_with_state_returns_new_output_with_given_state():
 
 
 def test_with_state_preserves_seed_state():
-    seed = {"a": torch.full((2,), 10.0)}
     output = CorrectorOutput(corrected={"a": torch.zeros(2)})
     after = output.apply_correction(diagnosed={"a": torch.ones(2)}, deltas={})
     # after has _seed_state set; with_state must carry it through
@@ -146,9 +139,7 @@ def test_apply_correction_diagnosis_records_seed_state():
     # corrected has the diagnosed value
     torch.testing.assert_close(after.corrected["a"], new_val)
     # pre_diagnosis_fields records the seed state
-    torch.testing.assert_close(
-        after.diagnostics.pre_diagnosis_fields["a"], seed_val
-    )
+    torch.testing.assert_close(after.diagnostics.pre_diagnosis_fields["a"], seed_val)
 
 
 def test_apply_correction_diagnosis_on_absent_field_raises():
@@ -159,25 +150,15 @@ def test_apply_correction_diagnosis_on_absent_field_raises():
 
 def test_apply_correction_diagnosis_after_delta_raises():
     output = CorrectorOutput(corrected={"a": torch.zeros(2)})
-    after_delta = output.apply_correction(
-        diagnosed={}, deltas={"a": torch.ones(2)}
-    )
+    after_delta = output.apply_correction(diagnosed={}, deltas={"a": torch.ones(2)})
     with pytest.raises(ValueError, match="cannot diagnose"):
-        after_delta.apply_correction(
-            diagnosed={"a": torch.full((2,), 5.0)}, deltas={}
-        )
+        after_delta.apply_correction(diagnosed={"a": torch.full((2,), 5.0)}, deltas={})
 
 
 def test_apply_correction_later_diagnosis_supersedes_earlier():
-    output = CorrectorOutput(
-        corrected={"a": torch.full((2,), 10.0, device=DEVICE)}
-    )
-    first = output.apply_correction(
-        diagnosed={"a": torch.full((2,), 20.0)}, deltas={}
-    )
-    second = first.apply_correction(
-        diagnosed={"a": torch.full((2,), 30.0)}, deltas={}
-    )
+    output = CorrectorOutput(corrected={"a": torch.full((2,), 10.0, device=DEVICE)})
+    first = output.apply_correction(diagnosed={"a": torch.full((2,), 20.0)}, deltas={})
+    second = first.apply_correction(diagnosed={"a": torch.full((2,), 30.0)}, deltas={})
     # corrected reflects the later diagnosis
     torch.testing.assert_close(second.corrected["a"], torch.full((2,), 30.0))
     # pre_diagnosis_fields still records the SEED state (10.0), not the
@@ -189,21 +170,15 @@ def test_apply_correction_later_diagnosis_supersedes_earlier():
 
 
 def test_apply_correction_delta_after_diagnosis_allowed():
-    output = CorrectorOutput(
-        corrected={"a": torch.full((2,), 10.0, device=DEVICE)}
-    )
+    output = CorrectorOutput(corrected={"a": torch.full((2,), 10.0, device=DEVICE)})
     diagnosed = output.apply_correction(
         diagnosed={"a": torch.full((2,), 50.0)}, deltas={}
     )
-    after_delta = diagnosed.apply_correction(
-        diagnosed={}, deltas={"a": torch.ones(2)}
-    )
+    after_delta = diagnosed.apply_correction(diagnosed={}, deltas={"a": torch.ones(2)})
     # corrected = diagnosed value + delta
     torch.testing.assert_close(after_delta.corrected["a"], torch.full((2,), 51.0))
     # delta records only the additive part
-    torch.testing.assert_close(
-        after_delta.diagnostics.delta["a"], torch.ones(2)
-    )
+    torch.testing.assert_close(after_delta.diagnostics.delta["a"], torch.ones(2))
     # pre_diagnosis_fields retains the seed
     torch.testing.assert_close(
         after_delta.diagnostics.pre_diagnosis_fields["a"],
@@ -230,9 +205,7 @@ def test_apply_correction_seed_state_is_initial_corrected():
     after_diag = after_delta.apply_correction(
         diagnosed={"b": torch.full((2,), 99.0)}, deltas={}
     )
-    torch.testing.assert_close(
-        after_diag.diagnostics.pre_diagnosis_fields["b"], seed_b
-    )
+    torch.testing.assert_close(after_diag.diagnostics.pre_diagnosis_fields["b"], seed_b)
 
 
 # ---- aliasing invariant ----
@@ -282,9 +255,7 @@ def test_aliasing_mutate_corrected_does_not_affect_seed():
 
 def test_apply_correction_preserves_corrector_state():
     state = CorrectorState(global_dry_air_mass=torch.tensor([1.0]))
-    output = CorrectorOutput(
-        corrected={"a": torch.zeros(2)}, corrector_state=state
-    )
+    output = CorrectorOutput(corrected={"a": torch.zeros(2)}, corrector_state=state)
     after = output.apply_correction(diagnosed={}, deltas={"a": torch.ones(2)})
     assert after.corrector_state is state
 

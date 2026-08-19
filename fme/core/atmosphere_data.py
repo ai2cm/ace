@@ -220,17 +220,13 @@ class AtmosphereData:
     def diagnose_frozen_precipitation_rate(self, value: torch.Tensor) -> None:
         self._diagnose("frozen_precipitation_rate", value)
 
-    def diagnose_all_levels(
-        self, standard_name: str, value: torch.Tensor
-    ) -> None:
+    def diagnose_all_levels(self, standard_name: str, value: torch.Tensor) -> None:
         """Record a diagnosis for a multi-level (Stacker) variable."""
         names = self.get_all_vertical_level_names(standard_name)
         for k, name in enumerate(names):
             self._diagnose_prefix(name, value[..., k])
 
-    def correct_all_levels(
-        self, standard_name: str, value: torch.Tensor
-    ) -> None:
+    def correct_all_levels(self, standard_name: str, value: torch.Tensor) -> None:
         """Apply corrective deltas for a multi-level (Stacker) variable.
 
         Args:
@@ -247,7 +243,7 @@ class AtmosphereData:
         Raises ``AssertionError`` when called on an instance not created via
         :meth:`for_correction`.
         """
-        from fme.core.corrector.output import CorrectorOutput  # noqa: F811
+        from fme.core.corrector.output import CorrectorOutput  # noqa: F811, F401
 
         assert self._corrector_output is not None
         return self._corrector_output.apply_correction(

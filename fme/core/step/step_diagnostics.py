@@ -114,20 +114,14 @@ class StepDiagnostics:
             data_vars = {}
             for name, tensor in mapping.items():
                 array = tensor.detach().cpu().numpy()
-                dims = ["sample", "time"] + [
-                    f"dim_{i}" for i in range(array.ndim - 2)
-                ]
+                dims = ["sample", "time"] + [f"dim_{i}" for i in range(array.ndim - 2)]
                 data_vars[name] = xr.DataArray(array, dims=dims)
             ds = xr.Dataset(data_vars)
-            return ds.assign_coords(
-                valid_time=(("sample", "time"), time.values)
-            )
+            return ds.assign_coords(valid_time=(("sample", "time"), time.values))
 
         result: dict[str, xr.Dataset] = {
             CORRECTION_DELTAS: _to_dataset(self.delta),
         }
         if self.pre_diagnosis_fields:
-            result[PRE_DIAGNOSIS_FIELDS] = _to_dataset(
-                self.pre_diagnosis_fields
-            )
+            result[PRE_DIAGNOSIS_FIELDS] = _to_dataset(self.pre_diagnosis_fields)
         return result

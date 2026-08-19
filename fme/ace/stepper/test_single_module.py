@@ -1604,6 +1604,8 @@ class _RecordingCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
+        *,
+        seed: CorrectorOutput | None = None,
     ) -> CorrectorOutput:
         self.call_count += 1
         self.seen_states.append(corrector_state)

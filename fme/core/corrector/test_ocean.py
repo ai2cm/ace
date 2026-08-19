@@ -525,7 +525,9 @@ def test_ocean_corrector_delta_matches_modified_returns():
     # so_0 is clamped via delta; sea_ice_fraction/HI/HS are diagnosed
     assert set(result.diagnostics.delta) == {"so_0"}
     assert set(result.diagnostics.pre_diagnosis_fields) == {
-        "sea_ice_fraction", "HI", "HS",
+        "sea_ice_fraction",
+        "HI",
+        "HS",
     }
     for name, delta in result.diagnostics.delta.items():
         torch.testing.assert_close(delta, result.corrected[name] - gen_data[name])

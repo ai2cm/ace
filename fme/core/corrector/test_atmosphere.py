@@ -537,9 +537,7 @@ def test__force_conserve_total_energy(negative_pressure: bool):
 
     # ensure the corrected global mean MSE path is what we expect
     input = AtmosphereData(input_data, vertical_coord)
-    corrected_gen = AtmosphereData(
-        corrected_gen_data | forcing_data, vertical_coord
-    )
+    corrected_gen = AtmosphereData(corrected_gen_data | forcing_data, vertical_coord)
     input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path)
     corrected_gen_gm_mse = ops.area_weighted_mean(corrected_gen.total_energy_ace2_path)
     predicted_mse_tendency = (

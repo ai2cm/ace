@@ -158,7 +158,8 @@ class SeaIceFractionCorrection:
     ) -> CorrectorOutput:
         """Apply sea-ice-fraction constraints as a diagnosis."""
         diagnosed = self.config(
-            accumulated_output.corrected, input_data,
+            accumulated_output.corrected,
+            input_data,
             keep_gradient=self.keep_gradient,
         )
         return accumulated_output.apply_correction(diagnosed=diagnosed, deltas={})
@@ -225,9 +226,7 @@ class OceanHeatContentCorrection:
                 "Ocean heat content correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        gen = OceanData.for_correction(
-            accumulated_output, self.vertical_coordinate
-        )
+        gen = OceanData.for_correction(accumulated_output, self.vertical_coordinate)
         _force_conserve_ocean_heat_content(
             input_data,
             gen,
@@ -490,7 +489,8 @@ def _force_conserve_ocean_heat_content(
     # apply same temperature correction to all vertical layers
     gen.correct_all_levels(
         "sea_water_potential_temperature",
-        gen.sea_water_potential_temperature * heat_content_correction_ratio.unsqueeze(-1),
+        gen.sea_water_potential_temperature
+        * heat_content_correction_ratio.unsqueeze(-1),
     )
     if "sst" in gen_data:
         gen._correct_prefix(

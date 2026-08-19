@@ -725,10 +725,7 @@ def step_with_adjustments(
             k: v.detach()
             for k, v in corrector_output.diagnostics.pre_diagnosis_fields.items()
         },
-        delta={
-            k: v.detach()
-            for k, v in corrector_output.diagnostics.delta.items()
-        },
+        delta={k: v.detach() for k, v in corrector_output.diagnostics.delta.items()},
     )
 
     return StepOutput(

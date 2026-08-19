@@ -179,9 +179,7 @@ class CorrectorOutput:
             _seed_state=seed,
         )
 
-    def with_state(
-        self, corrector_state: CorrectorState | None
-    ) -> "CorrectorOutput":
+    def with_state(self, corrector_state: CorrectorState | None) -> "CorrectorOutput":
         """Return a copy with a different ``corrector_state``; everything else
         (including ``_seed_state``) is shared, not copied.
         """
@@ -191,5 +189,3 @@ class CorrectorOutput:
             corrector_state=corrector_state,
             _seed_state=self._seed_state,
         )
-
-
