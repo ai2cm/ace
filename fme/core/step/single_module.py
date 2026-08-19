@@ -675,7 +675,11 @@ def step_with_adjustments(
         output = result.corrected
         # Detach the corrector diagnostic tensors.
         diagnostics = CorrectorDiagnostics(
-            delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
+            pre_diagnosis_fields={
+                k: v.detach()
+                for k, v in result.diagnostics.pre_diagnosis_fields.items()
+            },
+            delta={k: v.detach() for k, v in result.diagnostics.delta.items()},
         )
         if result.corrector_state is not None:
             # Preserve the incoming state's other fields (e.g. random_state)
@@ -720,11 +724,16 @@ def step_with_adjustments(
     # corrector never modified).
     if prescribed_prognostic_names:
         diagnostics = CorrectorDiagnostics(
+            pre_diagnosis_fields={
+                name: value
+                for name, value in diagnostics.pre_diagnosis_fields.items()
+                if name not in prescribed_prognostic_names
+            },
             delta={
                 name: value
                 for name, value in diagnostics.delta.items()
                 if name not in prescribed_prognostic_names
-            }
+            },
         )
     return StepOutput(
         output=output,

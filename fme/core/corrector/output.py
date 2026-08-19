@@ -98,7 +98,7 @@ class CorrectorDiagnostics:
                 no-op ``NullSpatialMasking``).
         """
         return CorrectorDiagnostics(
-            pre_diagnosis_fields=self.pre_diagnosis_fields,
+            pre_diagnosis_fields=masking(self.pre_diagnosis_fields),
             delta=masking(self.delta),
         )
 
