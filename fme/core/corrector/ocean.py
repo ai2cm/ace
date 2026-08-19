@@ -216,21 +216,19 @@ class OceanHeatContentCorrection:
                 "Ocean heat content correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        changed = _force_conserve_ocean_heat_content(
+        gen = OceanData.for_correction(
+            accumulated_output, self.vertical_coordinate
+        )
+        _force_conserve_ocean_heat_content(
             input_data,
-            accumulated_output.corrected,
+            gen,
             forcing_data,
             self.area_weighted_mean,
-            self.vertical_coordinate,
             self.timestep_seconds,
             self.method,
             self.unaccounted_heating,
         )
-        deltas = {
-            name: changed[name] - accumulated_output.corrected[name]
-            for name in changed
-        }
-        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+        return gen.result()
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -407,29 +405,36 @@ def _correct_hfds(
 
 def _force_conserve_ocean_heat_content(
     input_data: TensorMapping,
-    gen_data: TensorMapping,
+    gen: OceanData,
     forcing_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HasOceanDepthIntegral,
     timestep_seconds: float,
     method: Literal["scaled_temperature"] = "scaled_temperature",
     unaccounted_heating: float = 0.0,
-) -> TensorDict:
+) -> None:
+    """Apply ocean heat content conservation to *gen*.
+
+    Corrections are recorded through ``gen.correct_all_levels`` and
+    ``gen._correct_prefix``; the caller is responsible for calling
+    ``gen.result()``.
+    """
     if method != "scaled_temperature":
         raise NotImplementedError(
             f"Method {method!r} not implemented for ocean heat content conservation"
         )
+    gen_data = gen.data
     if "hfds" in gen_data and "hfds" in forcing_data:
         raise ValueError(
             "Net downward surface heat flux cannot be present in both gen_data and "
             "forcing_data."
         )
+    vertical_coordinate = gen._depth_coordinate
+    assert vertical_coordinate is not None
     input = OceanData(input_data, vertical_coordinate)
     if input.ocean_heat_content is None:
         raise ValueError(
             "ocean_heat_content is required to force ocean heat content conservation"
         )
-    gen = OceanData(gen_data, vertical_coordinate)
     forcing = OceanData(forcing_data)
     global_gen_ocean_heat_content = area_weighted_mean(
         gen.ocean_heat_content,
@@ -442,19 +447,16 @@ def _force_conserve_ocean_heat_content(
         name="ocean_heat_content",
     )
     try:
-        # First priority: pre-weighted heat flux in gen_data
         net_energy_flux_into_ocean = (
             gen.net_downward_surface_heat_flux_total_area
             + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
         )
     except KeyError:
         try:
-            # Second priority: standard heat flux in gen_data
             net_energy_flux_into_ocean = (
                 gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
             ) * forcing.sea_surface_fraction
         except KeyError:
-            # Third priority: standard heat flux in input_data
             net_energy_flux_into_ocean = (
                 input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
             ) * forcing.sea_surface_fraction
@@ -470,13 +472,14 @@ def _force_conserve_ocean_heat_content(
         global_input_ocean_heat_content + expected_change_ocean_heat_content
     ) / global_gen_ocean_heat_content
     # apply same temperature correction to all vertical layers
-    out: TensorDict = {}
-    n_levels = gen.sea_water_potential_temperature.shape[-1]
-    for k in range(n_levels):
-        name = f"thetao_{k}"
-        out[name] = gen.data[name] * heat_content_correction_ratio
-    if "sst" in gen.data:
-        out["sst"] = (  # assuming sst in Kelvin
-            gen.data["sst"] - FREEZING_TEMPERATURE_KELVIN
-        ) * heat_content_correction_ratio + FREEZING_TEMPERATURE_KELVIN
-    return out
+    gen.correct_all_levels(
+        "sea_water_potential_temperature",
+        gen.sea_water_potential_temperature * heat_content_correction_ratio.unsqueeze(-1),
+    )
+    if "sst" in gen_data:
+        gen._correct_prefix(
+            "sst",
+            (gen_data["sst"] - FREEZING_TEMPERATURE_KELVIN)
+            * heat_content_correction_ratio
+            + FREEZING_TEMPERATURE_KELVIN,
+        )

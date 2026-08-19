@@ -1,13 +1,18 @@
+from __future__ import annotations
+
 import math
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import torch
 
 from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, SPECIFIC_HEAT_OF_SEA_WATER_CM4
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
+
+if TYPE_CHECKING:
+    from fme.core.corrector.output import CorrectorOutput
 
 OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
     {
@@ -77,6 +82,31 @@ class OceanData:
         self._depth_coordinate = depth_coordinate
         self._stacker = Stacker(ocean_field_name_prefixes)
         self._cell_area_provider = cell_area_provider
+        # CorrectorOutput wrapping (set by ``for_correction``).
+        self._corrector_output: CorrectorOutput | None = None
+        self._pending_deltas: TensorDict = {}
+        self._pending_diagnosed: TensorDict = {}
+
+    @classmethod
+    def for_correction(
+        cls,
+        accumulated_output: CorrectorOutput,
+        depth_coordinate: HasOceanDepthIntegral | None = None,
+        ocean_field_name_prefixes: Mapping[str, list[str]] = OCEAN_FIELD_NAME_PREFIXES,
+    ) -> OceanData:
+        """Create an ``OceanData`` for applying corrections.
+
+        Reads go through the accumulated output's ``corrected`` dict.
+        Corrections are tracked internally and applied to the
+        ``CorrectorOutput`` by calling :meth:`result`.
+        """
+        obj = cls(
+            accumulated_output.corrected,
+            depth_coordinate,
+            ocean_field_name_prefixes,
+        )
+        obj._corrector_output = accumulated_output
+        return obj
 
     @property
     def data(self) -> TensorDict:
@@ -98,6 +128,40 @@ class OceanData:
 
     def _set_prefix(self, prefix, value):
         self.data[prefix] = value
+
+    # ---- correction verbs (require ``for_correction``) --------------------
+
+    def _correct_prefix(self, prefix: str, value: torch.Tensor) -> None:
+        """Record a corrective delta for a concrete data key."""
+        assert self._corrector_output is not None
+        original = self._corrector_output.corrected[prefix]
+        self._pending_deltas[prefix] = value - original
+        self._data[prefix] = value
+
+    def correct_all_levels(
+        self, standard_name: str, value: torch.Tensor
+    ) -> None:
+        """Apply corrective deltas for a multi-level (Stacker) variable.
+
+        Args:
+            standard_name: The standard name (e.g. ``"sea_water_potential_temperature"``).
+            value: Tensor with shape ``(..., n_levels)``.
+        """
+        names = self._stacker.get_all_level_names(standard_name, self._data)
+        for k, name in enumerate(names):
+            self._correct_prefix(name, value[..., k])
+
+    def result(self) -> CorrectorOutput:
+        """Return the ``CorrectorOutput`` with all pending corrections applied."""
+        from fme.core.corrector.output import CorrectorOutput  # noqa: F811
+
+        assert self._corrector_output is not None
+        return self._corrector_output.apply_correction(
+            diagnosed=self._pending_diagnosed,
+            deltas=self._pending_deltas,
+        )
+
+    # ---- read accessors ---------------------------------------------------
 
     def _get(self, name):
         for prefix in self._prefix_map[name]:
