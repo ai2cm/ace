@@ -339,12 +339,42 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         area_weighted_mean = gridded_operations.area_weighted_mean
         timestep_seconds = timestep.total_seconds()
         corrections: list[Correction] = []
-        if len(self.force_positive_names) > 0:
-            # do this step before imposing other conservation correctors, since
-            # otherwise it could end up creating violations of those constraints.
+
+        # Fields that will be diagnosed (replaced wholesale) by later
+        # corrections.  A ForcePositive delta on such a field would be
+        # erased by the diagnosis, so it is excluded from the clamp list.
+        diagnosed_prefixes: set[str] = set()
+        if self.moisture_budget_correction is not None:
+            from fme.core.atmosphere_data import ATMOSPHERE_FIELD_NAME_PREFIXES
+
+            if self.moisture_budget_correction.endswith("precipitation"):
+                diagnosed_prefixes.update(
+                    ATMOSPHERE_FIELD_NAME_PREFIXES["precipitation_rate"]
+                )
+            elif self.moisture_budget_correction.endswith("evaporation"):
+                diagnosed_prefixes.update(
+                    ATMOSPHERE_FIELD_NAME_PREFIXES["latent_heat_flux"]
+                )
+            if self.moisture_budget_correction.startswith("advection"):
+                diagnosed_prefixes.update(
+                    ATMOSPHERE_FIELD_NAME_PREFIXES[
+                        "tendency_of_total_water_path_due_to_advection"
+                    ]
+                )
+        if self.clip_frozen_precipitation:
+            diagnosed_prefixes.update(
+                ATMOSPHERE_FIELD_NAME_PREFIXES.get(
+                    "frozen_precipitation_rate", []
+                )
+            )
+
+        effective_fp_names = [
+            n for n in self.force_positive_names if n not in diagnosed_prefixes
+        ]
+        if len(effective_fp_names) > 0:
             corrections.append(
                 ForcePositive(
-                    self.force_positive_names,
+                    effective_fp_names,
                     keep_gradient=self.keep_gradient_through_clamps,
                 )
             )
@@ -356,7 +386,14 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             corrections.append(
                 ConserveDryAir(area_weighted_mean, vertical_coordinate, precision)
             )
-        if self.zero_global_mean_moisture_advection:
+        advection_recomputed = (
+            self.moisture_budget_correction is not None
+            and self.moisture_budget_correction.startswith("advection")
+        )
+        if self.zero_global_mean_moisture_advection and not advection_recomputed:
+            # Skip when the moisture budget correction recomputes advection
+            # from scratch (a diagnosis), since that supersedes the
+            # zero-global-mean correction.
             corrections.append(ZeroGlobalMeanMoistureAdvection(area_weighted_mean))
         if self.moisture_budget_correction is not None:
             corrections.append(
@@ -457,7 +494,7 @@ def _force_zero_global_mean_moisture_advection(
     mean_moisture_advection = area_weighted_mean(
         gen.tendency_of_total_water_path_due_to_advection,
     )
-    gen.correct_tendency_of_total_water_path_due_to_advection(
+    gen.diagnose_tendency_of_total_water_path_due_to_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
     )
@@ -470,7 +507,7 @@ def _clip_frozen_precipitation(gen: AtmosphereData) -> None:
     """
     if "total_frozen_precipitation_rate" not in gen.data:
         return
-    gen.correct_frozen_precipitation_rate(
+    gen.diagnose_frozen_precipitation_rate(
         torch.minimum(gen.frozen_precipitation_rate, gen.precipitation_rate)
     )
 
@@ -505,7 +542,7 @@ def _force_conserve_moisture(
         new_precipitation_global_mean = (
             evaporation_global_mean - twp_tendency_global_mean
         )
-        gen.correct_precipitation_rate(
+        gen.diagnose_precipitation_rate(
             gen.precipitation_rate
             * (new_precipitation_global_mean / precipitation_global_mean)
         )
@@ -513,7 +550,7 @@ def _force_conserve_moisture(
         new_evaporation_global_mean = (
             twp_tendency_global_mean + precipitation_global_mean
         )
-        gen.correct_evaporation_rate(
+        gen.diagnose_evaporation_rate(
             gen.evaporation_rate
             * (new_evaporation_global_mean / evaporation_global_mean)
         )
@@ -521,7 +558,7 @@ def _force_conserve_moisture(
         new_advection = twp_total_tendency - (
             gen.evaporation_rate - gen.precipitation_rate
         )
-        gen.correct_tendency_of_total_water_path_due_to_advection(new_advection)
+        gen.diagnose_tendency_of_total_water_path_due_to_advection(new_advection)
 
 
 def _force_conserve_total_energy(

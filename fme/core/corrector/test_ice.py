@@ -70,11 +70,16 @@ def test_ice_budget_correction_returns_only_modified():
     corrector = _build_ice_corrector(corrected_variables)
     input_data, gen_data = _ice_test_data()
     result = corrector(input_data, gen_data, {}, None)
-    # modified set is the processed prognostic key plus its three budget terms
+    # modified set is the processed prognostic key plus its three budget terms,
+    # all recorded as diagnoses (wholesale replacement)
     assert set(result.modified_names) == {"siconc", "LSRCc", "LSNKc", "XPRTc"}
-    assert set(result.diagnostics.delta) == set(result.modified_names)
-    for name, delta in result.diagnostics.delta.items():
-        torch.testing.assert_close(delta, result.corrected[name] - gen_data[name])
+    assert set(result.diagnostics.pre_diagnosis_fields) == set(result.modified_names)
+    assert set(result.diagnostics.delta) == set()
+    for name in result.diagnostics.pre_diagnosis_fields:
+        # pre_diagnosis_fields records the seed (raw gen_data)
+        torch.testing.assert_close(
+            result.diagnostics.pre_diagnosis_fields[name], gen_data[name]
+        )
     # the uncorrected field is absent from the set
     assert "other" not in result.modified_names
 

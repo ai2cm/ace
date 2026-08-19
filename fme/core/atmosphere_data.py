@@ -192,6 +192,42 @@ class AtmosphereData:
     def correct_frozen_precipitation_rate(self, value: torch.Tensor) -> None:
         self._correct("frozen_precipitation_rate", value)
 
+    def _diagnose(self, name: str, value: torch.Tensor) -> None:
+        """Record a diagnosis (wholesale replacement) for *name*."""
+        for prefix in self._prefix_map[name]:
+            if prefix in self._data:
+                self._diagnose_prefix(prefix, value)
+                return
+        raise KeyError(name)
+
+    def _diagnose_prefix(self, prefix: str, value: torch.Tensor) -> None:
+        """Record a diagnosis for a concrete data key."""
+        assert self._corrector_output is not None
+        self._pending_diagnosed[prefix] = value
+        self._data[prefix] = value
+
+    def diagnose_precipitation_rate(self, value: torch.Tensor) -> None:
+        self._diagnose("precipitation_rate", value)
+
+    def diagnose_evaporation_rate(self, value: torch.Tensor) -> None:
+        self._diagnose("latent_heat_flux", value * LATENT_HEAT_OF_VAPORIZATION)
+
+    def diagnose_tendency_of_total_water_path_due_to_advection(
+        self, value: torch.Tensor
+    ) -> None:
+        self._diagnose("tendency_of_total_water_path_due_to_advection", value)
+
+    def diagnose_frozen_precipitation_rate(self, value: torch.Tensor) -> None:
+        self._diagnose("frozen_precipitation_rate", value)
+
+    def diagnose_all_levels(
+        self, standard_name: str, value: torch.Tensor
+    ) -> None:
+        """Record a diagnosis for a multi-level (Stacker) variable."""
+        names = self.get_all_vertical_level_names(standard_name)
+        for k, name in enumerate(names):
+            self._diagnose_prefix(name, value[..., k])
+
     def correct_all_levels(
         self, standard_name: str, value: torch.Tensor
     ) -> None:

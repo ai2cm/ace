@@ -156,16 +156,12 @@ class SeaIceFractionCorrection:
         forcing_data: TensorMapping,
         accumulated_output: CorrectorOutput,
     ) -> CorrectorOutput:
-        """Apply sea-ice-fraction constraints as deltas."""
-        changed = self.config(
+        """Apply sea-ice-fraction constraints as a diagnosis."""
+        diagnosed = self.config(
             accumulated_output.corrected, input_data,
             keep_gradient=self.keep_gradient,
         )
-        deltas = {
-            name: changed[name] - accumulated_output.corrected[name]
-            for name in changed
-        }
-        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+        return accumulated_output.apply_correction(diagnosed=diagnosed, deltas={})
 
 
 @dataclasses.dataclass
@@ -180,18 +176,14 @@ class SurfaceEnergyFluxCorrection:
         forcing_data: TensorMapping,
         accumulated_output: CorrectorOutput,
     ) -> CorrectorOutput:
-        """Apply surface energy flux correction as deltas."""
-        changed = _correct_hfds(
+        """Apply surface energy flux correction as a diagnosis."""
+        diagnosed = _correct_hfds(
             input_data,
             accumulated_output.corrected,
             forcing_data,
             method=self.method,
         )
-        deltas = {
-            name: changed[name] - accumulated_output.corrected[name]
-            for name in changed
-        }
-        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+        return accumulated_output.apply_correction(diagnosed=diagnosed, deltas={})
 
 
 @dataclasses.dataclass

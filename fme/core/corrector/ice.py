@@ -152,12 +152,14 @@ class IceBudgetCorrectionConfig:
         work = {key: value.double() for key, value in gen_data.items()}
         modified: TensorDict = {}
 
-        sic_vars = {"siconc", "sea_ice_fraction", "ocean_sea_ice_fraction"}
+        sic_vars = ["ocean_sea_ice_fraction", "sea_ice_fraction", "siconc"]
         mask_var = None
         if "simass" in self.corrected_variables:
             mask_var = "simass"
         else:
-            sic_in_corrected = sic_vars.intersection(self.corrected_variables.keys())
+            sic_in_corrected = set(sic_vars).intersection(
+                self.corrected_variables.keys()
+            )
             if sic_in_corrected:
                 mask_var = next(iter(sic_in_corrected))
 
@@ -216,15 +218,11 @@ class IceBudgetCorrection:
         forcing_data: TensorMapping,
         accumulated_output: CorrectorOutput,
     ) -> CorrectorOutput:
-        """Apply ice budget correction as deltas."""
-        changed = self.config(
+        """Apply ice budget correction as a diagnosis."""
+        diagnosed = self.config(
             accumulated_output.corrected, input_data, self.timestep_seconds
         )
-        deltas = {
-            name: changed[name] - accumulated_output.corrected[name]
-            for name in changed
-        }
-        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+        return accumulated_output.apply_correction(diagnosed=diagnosed, deltas={})
 
 
 @CorrectorSelector.register("ice_corrector")

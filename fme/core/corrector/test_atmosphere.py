@@ -772,20 +772,29 @@ def test_atmosphere_corrector_delta_matches_modified_returns():
         tensor_shape
     )
     result = corrector(input_data, gen_data, forcing_data, None)
-    # delta keys are exactly the corrector's modified names
-    assert set(result.diagnostics.delta) == set(result.modified_names)
-    # and each delta is exactly corrected - input gen_data
+    # modified_names = delta keys | pre_diagnosis_fields keys
+    assert set(result.modified_names) == (
+        set(result.diagnostics.delta) | set(result.diagnostics.pre_diagnosis_fields)
+    )
+    # delta entries: corrected - input gen_data
     for name, delta in result.diagnostics.delta.items():
         torch.testing.assert_close(delta, result.corrected[name] - gen_data[name])
-    # the modified set: surface pressure, advection tendency, precipitation, and
-    # every air temperature level (the fields written by the enabled options)
-    assert set(result.modified_names) == {
+    # pre_diagnosis_fields entries record the seed (raw network output)
+    for name in result.diagnostics.pre_diagnosis_fields:
+        torch.testing.assert_close(
+            result.diagnostics.pre_diagnosis_fields[name], gen_data[name]
+        )
+    # the modified set: surface pressure and air temperatures via delta;
+    # precipitation, advection, and frozen precip via diagnosis
+    assert set(result.diagnostics.delta) == {
         "PRESsfc",
-        "tendency_of_total_water_path_due_to_advection",
-        "PRATEsfc",
-        "total_frozen_precipitation_rate",
         "air_temperature_0",
         "air_temperature_1",
+    }
+    assert set(result.diagnostics.pre_diagnosis_fields) == {
+        "PRATEsfc",
+        "tendency_of_total_water_path_due_to_advection",
+        "total_frozen_precipitation_rate",
     }
 
 

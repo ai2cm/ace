@@ -518,10 +518,21 @@ def test_ocean_corrector_delta_matches_modified_returns():
         "HS": torch.rand(IMG_SHAPE, device=DEVICE) * 5,
     }
     result = corrector(input_data, gen_data, {}, None)
-    # delta keys are exactly the corrector's modified names
-    assert set(result.diagnostics.delta) == set(result.modified_names)
+    # modified_names = delta keys | pre_diagnosis_fields keys
+    assert set(result.modified_names) == (
+        set(result.diagnostics.delta) | set(result.diagnostics.pre_diagnosis_fields)
+    )
+    # so_0 is clamped via delta; sea_ice_fraction/HI/HS are diagnosed
+    assert set(result.diagnostics.delta) == {"so_0"}
+    assert set(result.diagnostics.pre_diagnosis_fields) == {
+        "sea_ice_fraction", "HI", "HS",
+    }
     for name, delta in result.diagnostics.delta.items():
         torch.testing.assert_close(delta, result.corrected[name] - gen_data[name])
+    for name in result.diagnostics.pre_diagnosis_fields:
+        torch.testing.assert_close(
+            result.diagnostics.pre_diagnosis_fields[name], gen_data[name]
+        )
     assert set(result.modified_names) == {"so_0", "sea_ice_fraction", "HI", "HS"}
     # the uncorrected field passes through unchanged and is absent from the set
     assert "so_1" not in result.modified_names
