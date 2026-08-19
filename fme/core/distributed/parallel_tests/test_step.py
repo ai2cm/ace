@@ -183,7 +183,7 @@ def get_single_module_with_atmosphere_corrector_selector(
                     conserve_dry_air=True,
                     zero_global_mean_moisture_advection=True,
                     moisture_budget_correction="advection_and_precipitation",
-                    force_positive_names=["PRATEsfc"],
+                    force_positive_names=["LHTFLsfc"],
                     total_energy_budget_correction=EnergyBudgetConfig(
                         "constant_temperature"
                     ),

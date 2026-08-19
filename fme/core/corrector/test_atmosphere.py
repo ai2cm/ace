@@ -724,7 +724,7 @@ def _build_full_atmosphere_corrector(tensor_shape):
         conserve_dry_air=True,
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction="advection_and_precipitation",
-        force_positive_names=["PRATEsfc"],
+        force_positive_names=["LHTFLsfc"],
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
         clip_frozen_precipitation=True,
     )
@@ -784,12 +784,13 @@ def test_atmosphere_corrector_delta_matches_modified_returns():
         torch.testing.assert_close(
             result.diagnostics.pre_diagnosis_fields[name], gen_data[name]
         )
-    # the modified set: surface pressure and air temperatures via delta;
-    # precipitation, advection, and frozen precip via diagnosis
+    # the modified set: surface pressure, air temperatures, and latent heat
+    # flux via delta; precipitation, advection, and frozen precip via diagnosis
     assert set(result.diagnostics.delta) == {
         "PRESsfc",
         "air_temperature_0",
         "air_temperature_1",
+        "LHTFLsfc",
     }
     assert set(result.diagnostics.pre_diagnosis_fields) == {
         "PRATEsfc",

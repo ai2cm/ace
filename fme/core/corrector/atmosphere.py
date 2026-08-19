@@ -342,39 +342,40 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
 
         # Fields that will be diagnosed (replaced wholesale) by later
         # corrections.  A ForcePositive delta on such a field would be
-        # erased by the diagnosis, so it is excluded from the clamp list.
-        diagnosed_prefixes: set[str] = set()
+        # erased by the diagnosis, so a collision is rejected at build time.
+        from fme.core.atmosphere_data import ATMOSPHERE_FIELD_NAME_PREFIXES
+
+        diagnosed_prefixes: dict[str, str] = {}  # prefix -> source config key
         if self.moisture_budget_correction is not None:
-            from fme.core.atmosphere_data import ATMOSPHERE_FIELD_NAME_PREFIXES
-
             if self.moisture_budget_correction.endswith("precipitation"):
-                diagnosed_prefixes.update(
-                    ATMOSPHERE_FIELD_NAME_PREFIXES["precipitation_rate"]
-                )
+                for p in ATMOSPHERE_FIELD_NAME_PREFIXES["precipitation_rate"]:
+                    diagnosed_prefixes[p] = "moisture_budget_correction"
             elif self.moisture_budget_correction.endswith("evaporation"):
-                diagnosed_prefixes.update(
-                    ATMOSPHERE_FIELD_NAME_PREFIXES["latent_heat_flux"]
-                )
+                for p in ATMOSPHERE_FIELD_NAME_PREFIXES["latent_heat_flux"]:
+                    diagnosed_prefixes[p] = "moisture_budget_correction"
             if self.moisture_budget_correction.startswith("advection"):
-                diagnosed_prefixes.update(
-                    ATMOSPHERE_FIELD_NAME_PREFIXES[
-                        "tendency_of_total_water_path_due_to_advection"
-                    ]
-                )
+                for p in ATMOSPHERE_FIELD_NAME_PREFIXES[
+                    "tendency_of_total_water_path_due_to_advection"
+                ]:
+                    diagnosed_prefixes[p] = "moisture_budget_correction"
         if self.clip_frozen_precipitation:
-            diagnosed_prefixes.update(
-                ATMOSPHERE_FIELD_NAME_PREFIXES.get(
-                    "frozen_precipitation_rate", []
-                )
-            )
+            for p in ATMOSPHERE_FIELD_NAME_PREFIXES.get(
+                "frozen_precipitation_rate", []
+            ):
+                diagnosed_prefixes[p] = "clip_frozen_precipitation"
 
-        effective_fp_names = [
-            n for n in self.force_positive_names if n not in diagnosed_prefixes
-        ]
-        if len(effective_fp_names) > 0:
+        collision = set(self.force_positive_names) & set(diagnosed_prefixes)
+        if collision:
+            sources = sorted({diagnosed_prefixes[n] for n in collision})
+            raise ValueError(
+                f"force_positive_names {sorted(collision)} overlap with fields "
+                f"diagnosed by {', '.join(sources)}: remove them from "
+                f"force_positive_names or disable the diagnosing correction"
+            )
+        if len(self.force_positive_names) > 0:
             corrections.append(
                 ForcePositive(
-                    effective_fp_names,
+                    self.force_positive_names,
                     keep_gradient=self.keep_gradient_through_clamps,
                 )
             )
