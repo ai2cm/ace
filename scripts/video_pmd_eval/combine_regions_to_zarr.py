@@ -9,6 +9,15 @@ import argparse
 import xarray as xr
 
 PATCHED_MODELS = {
+    # No-temporal-attention ablation of st-singlestage-coarse-endpoints-flat
+    # (see crps_eval.py's PATCHED_MODELS comment for the full provenance
+    # note). Global patch-tiled inference, ONE contiguous global zarr on
+    # weka -- plain str path.
+    "st-singlestage-coarse-endpoints-flat-no-temporal-attn": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat-no-temporal-attn/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
     # HiRO-ACE-style spatial downscaling baseline: plain single-frame SR,
     # zero temporal conditioning. n_ens=4 test-inference (see
     # crps_eval.py's PATCHED_MODELS comment for the full provenance note).

@@ -133,6 +133,19 @@ FINE_TRUTH_ZARR = (
 # instead. See configs/experiments/2026-08-03-video-pmd-spatiotemporal-25km-100km-*
 # for the 3 region-2/3/4 configs and their boundary-alignment verification.
 PATCHED_MODELS = {
+    # No-temporal-attention ablation of st-singlestage-coarse-endpoints-flat
+    # (see configs/experiments/2026-08-14-video-pmd-spatiotemporal-25km-100km-singlestage-coarse-endpoints-flat-no-temporal-attn/
+    # and fme/downscaling/modules/video_modules.py's mid-block fix) -- our
+    # own HiRO-style baseline: same coarse_endpoints_only architecture, zero
+    # temporal attention anywhere (temporal_attention_levels: []), 31
+    # epochs (matches the flat model's actual completed training). Global
+    # patch-tiled inference, ONE contiguous global zarr on weka -- plain
+    # str path, no special mount needed (unlike hiro).
+    "st-singlestage-coarse-endpoints-flat-no-temporal-attn": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat-no-temporal-attn/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
     # HiRO-ACE-style spatial downscaling baseline: plain single-frame SR,
     # zero temporal conditioning (fme.downscaling.inference, not the video
     # trainer). n_ens=4 test-inference (training job v6,
