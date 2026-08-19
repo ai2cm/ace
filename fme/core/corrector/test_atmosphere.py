@@ -833,3 +833,67 @@ def test_atmosphere_corrector_empty_delta_when_nothing_modified():
     assert set(result.modified_names) == set()
     for name in gen_data:
         torch.testing.assert_close(result.corrected[name], gen_data[name])
+
+
+@pytest.mark.parametrize(
+    "config_kwargs",
+    [
+        pytest.param(
+            {
+                "force_positive_names": ["LHTFLsfc"],
+                "conserve_dry_air": True,
+                "moisture_budget_correction": "advection_and_precipitation",
+                "total_energy_budget_correction": EnergyBudgetConfig(
+                    "constant_temperature"
+                ),
+            },
+            id="fp+dry_air+advection_precip+energy",
+        ),
+        pytest.param(
+            {
+                "force_positive_names": ["LHTFLsfc"],
+                "conserve_dry_air": True,
+                "moisture_budget_correction": "precipitation",
+                "total_energy_budget_correction": EnergyBudgetConfig(
+                    "constant_temperature"
+                ),
+            },
+            id="fp+dry_air+precip+energy",
+        ),
+        pytest.param(
+            {
+                "conserve_dry_air": True,
+                "moisture_budget_correction": "advection_and_evaporation",
+            },
+            id="dry_air+advection_evaporation",
+        ),
+        pytest.param(
+            {
+                "force_positive_names": ["LHTFLsfc"],
+                "total_energy_budget_correction": EnergyBudgetConfig(
+                    "constant_temperature"
+                ),
+            },
+            id="fp+energy",
+        ),
+    ],
+)
+def test_correction_ordering_does_not_violate_diagnosis_after_delta(config_kwargs):
+    """The correction ordering for representative config combinations must not
+    trigger a diagnosis-after-delta ValueError. This validates that deltas
+    (force_positive, conserve_dry_air, energy) precede diagnoses
+    (moisture_budget_correction) in the built correction sequence."""
+    torch.manual_seed(0)
+    tensor_shape = (2, 5, 5)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    ops = LatLonOperations(
+        0.5 + torch.rand(size=(tensor_shape[-2], 1)).broadcast_to(size=tensor_shape)
+    )
+    config = AtmosphereCorrectorConfig(**config_kwargs)
+    corrector = config._build(ops, vertical_coord, datetime.timedelta(seconds=3600))
+    # Must not raise ValueError from the diagnosis-after-delta rule.
+    result = corrector(input_data, gen_data, forcing_data, None)
+    # Sanity: every corrected key matches gen_data keys.
+    assert set(result.corrected) == set(gen_data)
