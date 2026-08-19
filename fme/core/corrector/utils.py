@@ -1,8 +1,6 @@
 import dataclasses
 
 import torch
-from ace.fme.core.corrector.output import CorrectorOutput
-
 from fme.core.corrector.state import CorrectorState
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -63,22 +61,16 @@ class ForcePositive:
     def __call__(
         self,
         input_data: TensorMapping,
+        gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
-        accumulated_output: CorrectorOutput,
-    ) -> CorrectorOutput:
+    ) -> tuple[TensorDict, CorrectorState | None]:
         """
         Returns:
             A tuple whose ``TensorDict`` contains only the clamped fields
             (``self.names``) modified by this correction.
         """
         clamped = _force_positive(
-            accumulated_output.corrected, self.names, keep_gradient=self.keep_gradient
+            gen_data, self.names, keep_gradient=self.keep_gradient
         )
-        return accumulated_output.apply_correction(
-            diagnosed={},
-            deltas={
-                name: clamped[name] - accumulated_output.corrected[name]
-                for name in self.names
-            },
-        )
+        return clamped, corrector_state

@@ -68,22 +68,20 @@ class CorrectorConfigABC(abc.ABC):
 
 
 class Correction(Protocol):
-    """A single correction applied to ``gen_data`` by a corrector.
+    """A single correction applied to generated data by a corrector.
 
     Each correction is a self-contained callable object that bundles its own
     parameters and operators (e.g. an area-weighted-mean operator or a vertical
-    coordinate) and applies one conservation/positivity step. A corrector holds
-    an ordered sequence of these and simply applies them in turn, so it does not
-    need to read any config fields itself. The signature mirrors
-    ``CorrectorABC.__call__`` so corrections compose: a correction that does not
-    maintain state passes ``corrector_state`` through unchanged.
+    coordinate) and applies one conservation/positivity step.  A corrector
+    holds an ordered sequence of these and folds them through a
+    ``CorrectorOutput``, so it does not need to read any config fields itself.
 
-    Each ``__call__`` returns a ``TensorDict`` containing **only the fields this
-    correction modified** -- not the full ``gen_data``. The caller dict-updates
-    ``gen_data`` with the returned subset and takes its keys as the set of
-    variables the correction is responsible for writing. Because the returned
-    dict is exactly what gets applied, the returned keys are the single source of
-    truth for what changed and cannot drift from the write.
+    Each ``__call__`` receives the accumulated ``CorrectorOutput`` from prior
+    corrections in the sequence and returns a new ``CorrectorOutput`` whose
+    ``corrected`` and ``diagnostics`` reflect this correction's writes.
+    Corrections that only apply additive deltas call
+    ``accumulated_output.apply_correction(diagnosed={}, deltas=...)``; those
+    that replace a field wholesale pass it via ``diagnosed``.
     """
 
     def __call__(
@@ -92,10 +90,11 @@ class Correction(Protocol):
         forcing_data: TensorMapping,
         accumulated_output: CorrectorOutput,
     ) -> CorrectorOutput:
-        """
+        """Apply this correction.
+
         Returns:
-            A tuple ``(modified, corrector_state)`` where ``modified`` contains
-            only the fields modified by this correction.
+            A ``CorrectorOutput`` carrying the updated corrected data,
+            accumulated diagnostics, and corrector state.
         """
         ...
 

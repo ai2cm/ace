@@ -36,26 +36,40 @@ class CorrectorDiagnostics:
         ``pre_diagnosis_fields`` and the given diagnostics added to ``delta``; ``self``
         is not mutated.
 
+        Composition rules:
+
+        - A field that already carries a delta cannot be diagnosed (the
+          additive delta would become meaningless after a wholesale
+          replacement).
+        - A field *can* be diagnosed more than once; the later diagnosis
+          supersedes the earlier one in ``corrected``, while
+          ``pre_diagnosis_fields`` retains the seed-state value recorded by
+          the first diagnosis.
+
         Args:
-            pre_correction_state: The state before the correction represented by
-                diagnosed and deltas was applied. This is used to record the
-                pre-diagnosis fields for cases where that field is used in the course of
-                determining the diagnosed field. The pre-diagnosed field in this case is
-                not meant to have the same physical meaning as the diagnosed field.
+            pre_correction_state: The seed state (raw network output at the
+                start of the correction fold).  ``pre_diagnosis_fields``
+                records the value from this dict, so the stored
+                pre-diagnosis value is always the network output before any
+                correction ran.
             diagnosed: Fields replaced with diagnosed values.
             deltas: Corrective deltas to apply.
         """
-        already_diagnosed = set(diagnosed.keys()).intersection(
-            self.pre_diagnosis_fields.keys()
-        )
-        if already_diagnosed:
+        # Diagnosis after delta raises.
+        delta_then_diagnosed = set(diagnosed.keys()) & set(self.delta.keys())
+        if delta_then_diagnosed:
             raise ValueError(
-                f"diagnosed fields {already_diagnosed} cannot be diagnosed again; "
-                "they were already diagnosed in this step"
+                f"cannot diagnose fields {delta_then_diagnosed} that already "
+                "carry a delta; diagnosis after delta is not allowed"
             )
+
         new_pre_diagnosis_fields = {**self.pre_diagnosis_fields}
         for name in diagnosed.keys():
-            new_pre_diagnosis_fields[name] = pre_correction_state[name]
+            # Record the seed-state value only on the *first* diagnosis; a
+            # later re-diagnosis supersedes the corrected value but the
+            # pre-diagnosis snapshot stays at the seed.
+            if name not in new_pre_diagnosis_fields:
+                new_pre_diagnosis_fields[name] = pre_correction_state[name]
         new_deltas = {**self.delta}
         for name, value in deltas.items():
             if name in new_deltas:
@@ -106,6 +120,26 @@ class CorrectorOutput:
     )
     corrector_state: CorrectorState | None = None
 
+    # Internal: the seed state from the start of the correction fold,
+    # captured on the first ``apply_correction`` call and propagated
+    # thereafter. Stored by reference (corrections operate out-of-place, so
+    # the original dict is never mutated).
+    _seed_state: TensorMapping | None = dataclasses.field(
+        default=None, repr=False, compare=False
+    )
+
+    @property
+    def modified_names(self) -> set[str]:
+        """The set of variable names modified by the corrector.
+
+        A variable is considered modified if it has a delta (additive
+        correction) or a pre-diagnosis entry (wholesale replacement), i.e.
+        ``delta.keys() | pre_diagnosis_fields.keys()``.
+        """
+        return set(self.diagnostics.delta.keys()) | set(
+            self.diagnostics.pre_diagnosis_fields.keys()
+        )
+
     def apply_correction(
         self, diagnosed: TensorMapping, deltas: TensorMapping
     ) -> "CorrectorOutput":
@@ -114,20 +148,46 @@ class CorrectorOutput:
         is not mutated.
 
         Args:
-            diagnosed: Fields replaced with diagnosed values.
-            deltas: Corrective deltas to apply.
+            diagnosed: Fields replaced with diagnosed values.  Every key must
+                already exist in ``corrected``.
+            deltas: Corrective deltas to apply.  Every key must already exist
+                in ``corrected``.
         """
-        new_diagnostics = self.diagnostics.apply_correction(diagnosed, deltas)
+        for name in diagnosed:
+            if name not in self.corrected:
+                raise ValueError(
+                    f"diagnosed field '{name}' is not present in corrected data"
+                )
+        for name in deltas:
+            if name not in self.corrected:
+                raise ValueError(
+                    f"delta field '{name}' is not present in corrected data"
+                )
+
+        seed = self._seed_state if self._seed_state is not None else self.corrected
+        new_diagnostics = self.diagnostics.apply_correction(seed, diagnosed, deltas)
         new_corrected = {**self.corrected, **diagnosed}
         for name, value in deltas.items():
-            if name not in new_corrected:
-                raise ValueError(f"delta supplied for unknown variable {name}")
             new_corrected[name] = new_corrected[name] + value
 
         return CorrectorOutput(
             corrected=new_corrected,
             diagnostics=new_diagnostics,
             corrector_state=self.corrector_state,
+            _seed_state=seed,
+        )
+
+    def with_state(
+        self, corrector_state: CorrectorState | None
+    ) -> "CorrectorOutput":
+        """Return a copy with a different ``corrector_state``; everything else
+        (including ``_seed_state``) is shared, not copied.
+        """
+        return CorrectorOutput(
+            corrected=self.corrected,
+            diagnostics=self.diagnostics,
+            corrector_state=corrector_state,
+            _seed_state=self._seed_state,
         )
 
 
