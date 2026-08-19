@@ -1,5 +1,4 @@
 import dataclasses
-from collections.abc import Iterable
 
 from fme.core.corrector.state import CorrectorState
 from fme.core.spatial_masking import SpatialMasking
@@ -191,28 +190,3 @@ class CorrectorOutput:
         )
 
 
-def build_corrector_diagnostics(
-    input_snapshot: TensorMapping,
-    corrected: TensorMapping,
-    touched_names: Iterable[str],
-) -> CorrectorDiagnostics:
-    """Build correction-delta diagnostics over an explicit set of touched names.
-
-    Produces ``delta[name] = corrected[name] - input_snapshot[name]`` for each
-    ``name`` in ``touched_names``.
-
-    The returned tensors are *not* detached from the autograd graph here.
-
-    Args:
-        input_snapshot: The corrector's input generated data, snapshotted at
-            entry. Must contain every name in ``touched_names``.
-        corrected: The corrector's output generated data. Must contain every
-            name in ``touched_names``.
-        touched_names: The variable names the corrector declares it writes.
-
-    Returns:
-        A ``CorrectorDiagnostics`` whose ``delta`` is keyed exactly by
-        ``touched_names``.
-    """
-    delta = {name: corrected[name] - input_snapshot[name] for name in touched_names}
-    return CorrectorDiagnostics(delta=delta)

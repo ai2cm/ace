@@ -5,7 +5,7 @@ from typing import Any, Protocol, Self, final
 
 import dacite
 
-from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnostics
+from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.typing_ import TensorMapping
@@ -174,26 +174,13 @@ class CorrectionSequence(CorrectorABC):
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> CorrectorOutput:
-        # Snapshot the entry data (holding references); corrections apply
-        # out-of-place, so these tensors are never mutated and can be diffed
-        # against the corrected output to build the per-variable delta.
-        snapshot = dict(gen_data)
-        gen_data = dict(gen_data)
-        modified: set[str] = set()
-        for correction in self._corrections:
-            changed, corrector_state = correction(
-                input_data, gen_data, forcing_data, corrector_state
-            )
-            # ``changed`` holds only the fields this correction modified; its
-            # keys are the set of variables it is responsible for writing.
-            gen_data.update(changed)
-            modified |= changed.keys()
-        corrected = dict(gen_data)
-        return CorrectorOutput(
-            corrected=corrected,
-            diagnostics=build_corrector_diagnostics(snapshot, corrected, modified),
+        accumulated = CorrectorOutput(
+            corrected=dict(gen_data),
             corrector_state=corrector_state,
         )
+        for correction in self._corrections:
+            accumulated = correction(input_data, forcing_data, accumulated)
+        return accumulated
 
 
 class EpochScheduledCorrector(CorrectorABC):

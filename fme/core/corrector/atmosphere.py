@@ -12,6 +12,7 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
+from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     Correction,
     CorrectionSequence,
@@ -65,15 +66,10 @@ class ConserveDryAir:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction (the surface pressure adjusted to conserve dry air).
-        """
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply dry-air conservation as a delta on the accumulated output."""
         if self.vertical_coordinate is None:
             raise ValueError(
                 "conserve_dry_air is set to True, but no vertical coordinate is "
@@ -81,20 +77,25 @@ class ConserveDryAir:
             )
         corrector_state = _seed_global_dry_air_mass(
             input_data=input_data,
-            corrector_state=corrector_state,
+            corrector_state=accumulated_output.corrector_state,
             area_weighted_mean=self.area_weighted_mean,
             vertical_coordinate=self.vertical_coordinate,
             precision=self.precision,
         )
         assert corrector_state.global_dry_air_mass is not None
-        corrected = _adjust_gen_dry_air_to_target(
-            gen_data,
+        changed = _adjust_gen_dry_air_to_target(
+            accumulated_output.corrected,
             target_global_dry_air=corrector_state.global_dry_air_mass,
             area_weighted_mean=self.area_weighted_mean,
             vertical_coordinate=self.vertical_coordinate,
             precision=self.precision,
         )
-        return corrected, corrector_state
+        deltas = {
+            name: changed[name] - accumulated_output.corrected[name]
+            for name in changed
+        }
+        result = accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+        return result.with_state(corrector_state)
 
 
 @dataclasses.dataclass
@@ -106,20 +107,19 @@ class ZeroGlobalMeanMoistureAdvection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the field modified by this
-            correction (the moisture advection tendency).
-        """
-        corrected = _force_zero_global_mean_moisture_advection(
-            gen_data=gen_data,
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply zero global-mean moisture advection as a delta."""
+        changed = _force_zero_global_mean_moisture_advection(
+            gen_data=accumulated_output.corrected,
             area_weighted_mean=self.area_weighted_mean,
         )
-        return corrected, corrector_state
+        deltas = {
+            name: changed[name] - accumulated_output.corrected[name]
+            for name in changed
+        }
+        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
 
 
 @dataclasses.dataclass
@@ -147,21 +147,17 @@ class MoistureBudgetCorrection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction.
-        """
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply moisture budget correction as deltas."""
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Moisture budget correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        corrected = _force_conserve_moisture(
+        gen_data = accumulated_output.corrected
+        changed = _force_conserve_moisture(
             input_data=input_data,
             gen_data=gen_data,
             area_weighted_mean=self.area_weighted_mean,
@@ -173,9 +169,12 @@ class MoistureBudgetCorrection:
             # Clip frozen precipitation against the (possibly corrected) total
             # precipitation rate. Done here, after the budget correction, so the
             # ceiling is the final precipitation rate.
-            frozen_clip = _clip_frozen_precipitation({**gen_data, **corrected})
-            corrected = {**corrected, **frozen_clip}
-        return corrected, corrector_state
+            frozen_clip = _clip_frozen_precipitation({**gen_data, **changed})
+            changed = {**changed, **frozen_clip}
+        deltas = {
+            name: changed[name] - gen_data[name] for name in changed
+        }
+        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
 
 
 @dataclasses.dataclass
@@ -191,23 +190,18 @@ class TotalEnergyBudgetCorrection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction (the air temperature at every vertical level).
-        """
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply total energy budget correction as deltas."""
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Energy budget correction is turned on, but no vertical coordinate"
                 " is available."
             )
-        corrected = _force_conserve_total_energy(
+        changed = _force_conserve_total_energy(
             input_data=input_data,
-            gen_data=gen_data,
+            gen_data=accumulated_output.corrected,
             forcing_data=forcing_data,
             area_weighted_mean=self.area_weighted_mean,
             vertical_coordinate=self.vertical_coordinate,
@@ -215,7 +209,11 @@ class TotalEnergyBudgetCorrection:
             method=self.method,
             unaccounted_heating=self.unaccounted_heating,
         )
-        return corrected, corrector_state
+        deltas = {
+            name: changed[name] - accumulated_output.corrected[name]
+            for name in changed
+        }
+        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
 
 
 @CorrectorSelector.register("atmosphere_corrector")

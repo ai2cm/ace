@@ -11,12 +11,12 @@ from fme.core.constants import (
     LATENT_HEAT_OF_VAPORIZATION,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
+from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     Correction,
     CorrectionSequence,
     CorrectorConfigABC,
 )
-from fme.core.corrector.state import CorrectorState
 from fme.core.corrector.utils import ForcePositive, replace_value_keep_gradient
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
@@ -153,20 +153,19 @@ class SeaIceFractionCorrection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction (the sea ice fraction and the fields zeroed where
-            ice-free). ``SeaIceFractionConfig.__call__`` already returns only
-            those fields, preserving the straight-through estimator when
-            ``keep_gradient`` is set.
-        """
-        corrected = self.config(gen_data, input_data, keep_gradient=self.keep_gradient)
-        return corrected, corrector_state
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply sea-ice-fraction constraints as deltas."""
+        changed = self.config(
+            accumulated_output.corrected, input_data,
+            keep_gradient=self.keep_gradient,
+        )
+        deltas = {
+            name: changed[name] - accumulated_output.corrected[name]
+            for name in changed
+        }
+        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
 
 
 @dataclasses.dataclass
@@ -178,22 +177,21 @@ class SurfaceEnergyFluxCorrection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the field modified by this
-            correction (the net downward surface heat flux, ``hfds``).
-        """
-        corrected = _correct_hfds(
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply surface energy flux correction as deltas."""
+        changed = _correct_hfds(
             input_data,
-            gen_data,
+            accumulated_output.corrected,
             forcing_data,
             method=self.method,
         )
-        return corrected, corrector_state
+        deltas = {
+            name: changed[name] - accumulated_output.corrected[name]
+            for name in changed
+        }
+        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
 
 
 @dataclasses.dataclass
@@ -209,24 +207,18 @@ class OceanHeatContentCorrection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction (the potential temperature at every depth level, and
-            the sea surface temperature when present).
-        """
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply ocean heat content conservation as deltas."""
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Ocean heat content correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        corrected = _force_conserve_ocean_heat_content(
+        changed = _force_conserve_ocean_heat_content(
             input_data,
-            gen_data,
+            accumulated_output.corrected,
             forcing_data,
             self.area_weighted_mean,
             self.vertical_coordinate,
@@ -234,7 +226,11 @@ class OceanHeatContentCorrection:
             self.method,
             self.unaccounted_heating,
         )
-        return corrected, corrector_state
+        deltas = {
+            name: changed[name] - accumulated_output.corrected[name]
+            for name in changed
+        }
+        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
 
 
 @CorrectorSelector.register("ocean_corrector")

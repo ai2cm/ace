@@ -1,7 +1,8 @@
 import dataclasses
 
 import torch
-from fme.core.corrector.state import CorrectorState
+
+from fme.core.corrector.output import CorrectorOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -46,8 +47,8 @@ def _force_positive(
 class ForcePositive:
     """Correction that clamps the named generated fields to be non-negative.
 
-    Implements the ``Correction`` protocol; ``input_data``, ``forcing_data`` and
-    ``corrector_state`` are unused and passed through.
+    Implements the ``Correction`` protocol; ``input_data`` and
+    ``forcing_data`` are unused.
 
     If ``keep_gradient`` is True, the clamp is applied with a straight-through
     estimator (see :func:`replace_value_keep_gradient`): the forward value is
@@ -61,16 +62,22 @@ class ForcePositive:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply force-positive clamping as deltas on the accumulated output.
+
         Returns:
-            A tuple whose ``TensorDict`` contains only the clamped fields
-            (``self.names``) modified by this correction.
+            A ``CorrectorOutput`` with clamping deltas applied for each field
+            in ``self.names``.
         """
         clamped = _force_positive(
-            gen_data, self.names, keep_gradient=self.keep_gradient
+            accumulated_output.corrected, self.names, keep_gradient=self.keep_gradient
         )
-        return clamped, corrector_state
+        return accumulated_output.apply_correction(
+            diagnosed={},
+            deltas={
+                name: clamped[name] - accumulated_output.corrected[name]
+                for name in self.names
+            },
+        )

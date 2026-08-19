@@ -134,7 +134,7 @@ def test_scheduled_corrector_forwards_lifecycle_and_state():
 
 
 class ConstantOffsetCorrection:
-    """Adds a constant offset to one named field, returning only that field."""
+    """Adds a constant offset to one named field as a delta."""
 
     def __init__(self, name: str, offset: float):
         self._name = name
@@ -143,11 +143,17 @@ class ConstantOffsetCorrection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[dict, CorrectorState | None]:
-        return {self._name: gen_data[self._name] + self._offset}, corrector_state
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        return accumulated_output.apply_correction(
+            diagnosed={},
+            deltas={
+                self._name: torch.full_like(
+                    accumulated_output.corrected[self._name], self._offset
+                )
+            },
+        )
 
 
 def test_correction_sequence_accumulates_modified_keys():

@@ -3,12 +3,12 @@ import datetime
 
 import torch
 
+from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
     Correction,
     CorrectionSequence,
     CorrectorConfigABC,
 )
-from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -213,20 +213,18 @@ class IceBudgetCorrection:
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
-        """
-        Returns:
-            A tuple whose ``TensorDict`` contains only the fields modified by
-            this correction (each reconstructed prognostic variable and its
-            budget terms); empty when no variables are corrected.
-            ``IceBudgetCorrectionConfig.__call__`` already returns only those
-            fields.
-        """
-        corrected = self.config(gen_data, input_data, self.timestep_seconds)
-        return corrected, corrector_state
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        """Apply ice budget correction as deltas."""
+        changed = self.config(
+            accumulated_output.corrected, input_data, self.timestep_seconds
+        )
+        deltas = {
+            name: changed[name] - accumulated_output.corrected[name]
+            for name in changed
+        }
+        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
 
 
 @CorrectorSelector.register("ice_corrector")
