@@ -5,6 +5,7 @@ import os
 import pathlib
 import unittest
 import unittest.mock
+import warnings
 from collections import namedtuple
 from collections.abc import Iterable, Mapping
 from typing import Literal
@@ -1455,6 +1456,17 @@ def _rollout_dropout_indicators(
     return indicators
 
 
+def _inert_dropout_warnings(
+    recorded: Iterable[warnings.WarningMessage],
+) -> list[str]:
+    """Recorded warnings about an input-dropout schedule that cannot take effect."""
+    return [
+        str(w.message)
+        for w in recorded
+        if "input_dropout_optimized_steps_only is set" in str(w.message)
+    ]
+
+
 @pytest.mark.parametrize("optimized_steps_only", [True, False])
 def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
     optimized_steps_only: bool,
@@ -1464,29 +1476,44 @@ def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
     With optimize_last_step_only the training loop runs every step but the last
     under no_grad, so with the flag set the two non-optimized steps see "a"
     present (1.0) and only the final optimized step sees it dropped (0.0),
-    while the default masks every step.
+    while the default masks every step. The schedule takes effect either way,
+    so no inert-schedule warning is emitted.
     """
-    indicators = _rollout_dropout_indicators(
-        optimized_steps_only=optimized_steps_only,
-        optimize_last_step_only=True,
-    )
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        indicators = _rollout_dropout_indicators(
+            optimized_steps_only=optimized_steps_only,
+            optimize_last_step_only=True,
+        )
+    assert not _inert_dropout_warnings(recorded)
     expected = [1.0, 1.0, 0.0] if optimized_steps_only else [0.0, 0.0, 0.0]
     assert indicators == expected
 
 
-@pytest.mark.parametrize("optimized_steps_only", [True, False])
-def test_input_dropout_optimized_steps_only_noop_without_last_step_only(
-    optimized_steps_only: bool,
-):
-    """Without optimize_last_step_only every single-module step is optimized.
+def test_input_dropout_optimized_steps_only_warns_without_last_step_only():
+    """Without optimize_last_step_only the flag is inert, and that is warned.
 
     The rollout is exactly as long as the sampled loss length here, so no step
-    runs under no_grad and the flag cannot change which steps are masked.
+    runs under no_grad and every step is still masked. Building the train
+    stepper warns rather than silently ignoring the setting.
     """
-    indicators = _rollout_dropout_indicators(
-        optimized_steps_only=optimized_steps_only,
-        optimize_last_step_only=False,
-    )
+    with pytest.warns(UserWarning, match="every forward step of this rollout"):
+        indicators = _rollout_dropout_indicators(
+            optimized_steps_only=True,
+            optimize_last_step_only=False,
+        )
+    assert indicators == [0.0, 0.0, 0.0]
+
+
+def test_input_dropout_masks_every_step_without_optimized_steps_only():
+    """Plain input_dropout masks every step and has no schedule to warn about."""
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        indicators = _rollout_dropout_indicators(
+            optimized_steps_only=False,
+            optimize_last_step_only=False,
+        )
+    assert not _inert_dropout_warnings(recorded)
     assert indicators == [0.0, 0.0, 0.0]
 
 

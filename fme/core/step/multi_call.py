@@ -216,6 +216,10 @@ class MultiCallStepConfig(StepConfigABC):
     def allow_missing_variables(self) -> bool:
         return self.wrapped_step.allow_missing_variables
 
+    @property
+    def input_dropout_optimized_steps_only(self) -> bool:
+        return self.wrapped_step.input_dropout_optimized_steps_only
+
     @classmethod
     def from_state(cls, state) -> "MultiCallStepConfig":
         return dacite.from_dict(cls, state, config=dacite.Config(strict=True))

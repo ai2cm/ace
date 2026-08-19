@@ -124,6 +124,17 @@ class StepConfigABC(abc.ABC):
     def allow_missing_variables(self) -> bool:
         pass
 
+    @property
+    def input_dropout_optimized_steps_only(self) -> bool:
+        """Whether input dropout is confined to optimized forward steps.
+
+        Lets the training config warn about a dropout schedule that cannot
+        take effect, without inspecting concrete step config types. Concrete
+        rather than abstract because step types without input dropout have
+        nothing to answer; wrapping configs delegate to the wrapped config.
+        """
+        return False
+
     @abc.abstractmethod
     def load(self):
         """
@@ -233,6 +244,10 @@ class StepSelector(StepConfigABC):
     @property
     def allow_missing_variables(self) -> bool:
         return self._step_config_instance.allow_missing_variables
+
+    @property
+    def input_dropout_optimized_steps_only(self) -> bool:
+        return self._step_config_instance.input_dropout_optimized_steps_only
 
     def load(self):
         self._step_config_instance.load()

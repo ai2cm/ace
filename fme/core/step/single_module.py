@@ -83,8 +83,12 @@ class SingleModuleStepConfig(StepConfigABC):
             non-optimized rollout steps unmasked. Gated on gradients being
             enabled, which is how the training loss loops mark an optimized
             step, so any train-mode call made under ``torch.no_grad`` also
-            skips dropout. Requires ``input_dropout``. Defaults to False (all
-            training steps masked).
+            skips dropout. Which steps that excludes depends on the training
+            loop: with ``optimize_last_step_only`` it is every step but the
+            last, while in the coupled trainer a realm whose ``loss_weight``
+            is 0.0 has no optimized steps at all and so receives no input
+            dropout for the entire run. Requires ``input_dropout``. Defaults
+            to False (all training steps masked).
     """
 
     builder: ModuleSelector
