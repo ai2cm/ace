@@ -428,6 +428,7 @@ class SingleModuleStep(StepABC):
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
                 labels=args.labels,
+                time_fraction=args.time_fraction,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
@@ -473,6 +474,10 @@ class SingleModuleStep(StepABC):
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
+
+    @property
+    def requires_time_fraction(self) -> bool:
+        return self.module.requires_time_fraction
 
     def train(self, mode: bool = True) -> StepABC:
         super().train(mode)

@@ -214,6 +214,9 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             tokens by ``n_levels + 1``, so ``embed_dim`` should be reduced to
             keep the cost comparable.
         column_num_heads: Number of attention heads for cross-level attention.
+        time_embed_dim: Dimension of the day-of-year embedding injected through
+            each block's ``ConditionalLayerNorm``. 0 (default) disables
+            calendar conditioning.
     """
 
     embed_dim: int = 96
@@ -231,6 +234,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
     use_cpb_scaling: bool = True
     cross_level_attention: bool = False
     column_num_heads: int = 8
+    time_embed_dim: int = 0
 
     def __post_init__(self):
         if isinstance(self.padding_conf, dict):
@@ -249,7 +253,7 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
         label_embed_dim = self.label_embed_dim
         effective_label_dim = label_embed_dim if label_embed_dim > 0 else n_labels
         context_config = ContextConfig(
-            embed_dim_scalar=0,
+            embed_dim_scalar=self.time_embed_dim,
             embed_dim_labels=effective_label_dim,
             embed_dim_noise=self.noise_embed_dim,
             embed_dim_pos=0,
@@ -302,4 +306,5 @@ class NoiseConditionedSwinTransformerBuilder(ModuleConfig):
             n_labels=n_labels,
             label_embed_dim=label_embed_dim,
             inverse_sht=None,
+            time_embed_dim=self.time_embed_dim,
         )

@@ -81,22 +81,45 @@ class Module:
         self._label_encoding = label_encoding
 
     def __call__(
-        self, input: torch.Tensor, labels: BatchLabels | None = None
+        self,
+        input: torch.Tensor,
+        labels: BatchLabels | None = None,
+        time_fraction: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if labels is not None and self._label_encoding is None:
             raise TypeError("Labels are not allowed for unconditional models")
+
+        # Only forward time_fraction when it is set: most modules take
+        # (input) or (input, labels) and would raise a TypeError on an
+        # unexpected keyword argument. Modules that require it raise
+        # themselves when it is absent.
+        extra: dict[str, Any] = {}
+        if time_fraction is not None:
+            extra["time_fraction"] = time_fraction
 
         if self._label_encoding is not None:
             if labels is None:
                 raise TypeError("Labels are required for conditional models")
             encoded_labels = labels.conform_to_encoding(self._label_encoding)
-            return self._module(input, labels=encoded_labels.tensor)
+            return self._module(input, labels=encoded_labels.tensor, **extra)
         else:
-            return self._module(input)
+            return self._module(input, **extra)
 
     @property
     def torch_module(self) -> nn.Module:
         return self._module
+
+    @property
+    def requires_time_fraction(self) -> bool:
+        """Whether the wrapped module conditions on the time of year.
+
+        Searches submodules because the model is wrapped for distributed
+        training before this is queried.
+        """
+        return any(
+            getattr(module, "time_embedder", None) is not None
+            for module in self._module.modules()
+        )
 
     def get_state(self) -> dict[str, Any]:
         if self._label_encoding is not None:

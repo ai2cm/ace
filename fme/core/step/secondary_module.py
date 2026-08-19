@@ -439,6 +439,18 @@ class SecondaryModuleStep(StepABC):
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
 
+    @property
+    def requires_time_fraction(self) -> bool:
+        if self.module.requires_time_fraction or (
+            self.secondary_module.requires_time_fraction
+        ):
+            raise NotImplementedError(
+                "SecondaryModuleStep does not pass time_fraction to its "
+                "modules, so time-of-year conditioning is not supported here. "
+                "Use the single_module step type instead."
+            )
+        return False
+
     def train(self, mode: bool = True) -> StepABC:
         super().train(mode)
         self._corrector.train(mode)

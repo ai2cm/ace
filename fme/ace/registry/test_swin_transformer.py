@@ -360,3 +360,26 @@ def test_cross_level_attention_without_levels_raises():
             in_names=flat,
             out_names=flat,
         )
+
+
+def test_time_embed_dim_requires_time_fraction():
+    """Calendar conditioning must be live, and must fail loudly when unfed."""
+    n_in, n_out = 5, 3
+    module = _nc_builder(time_embed_dim=8).build(
+        n_in_channels=n_in, n_out_channels=n_out, dataset_info=_get_dataset_info()
+    )
+    assert isinstance(module, NoiseConditionedModel)
+    assert module.time_embedder is not None
+    x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
+    with pytest.raises(ValueError, match="time_fraction is required"):
+        module(x)
+    out = module(x, time_fraction=torch.rand(2, device=fme.get_device()))
+    assert out.shape == (2, n_out, *IMG_SHAPE)
+
+
+def test_no_time_embed_dim_leaves_conditioning_absent():
+    module = _nc_builder().build(
+        n_in_channels=5, n_out_channels=3, dataset_info=_get_dataset_info()
+    )
+    assert isinstance(module, NoiseConditionedModel)
+    assert module.time_embedder is None
