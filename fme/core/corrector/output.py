@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Iterable, KeysView
+from collections.abc import Iterable
 
 from fme.core.corrector.state import CorrectorState
 from fme.core.spatial_masking import SpatialMasking
@@ -10,14 +10,62 @@ from fme.core.typing_ import TensorDict, TensorMapping
 class CorrectorDiagnostics:
     """The diagnostic effect of a corrector on a single step.
 
+    Only one pre-diagnosis value may be recorded per field, but an arbitrary number of
+    deltas may be accumulated for any field, including one with a pre-diagnosis value.
+
     Parameters:
+        pre_diagnosis_fields: The values of any fields the corrector diagnosed
+            (i.e. replaced with a new value) before the diagnosis was applied.
+            Empty when no corrector ran or none diagnosed anything.
         delta: ``corrected[name] - network_output[name]`` for each variable the
             corrector declares it touched. The network's raw pre-correction
             value is recoverable as ``corrected[name] - delta[name]``. Empty when
             no corrector ran or none modified anything.
     """
 
+    pre_diagnosis_fields: TensorMapping = dataclasses.field(default_factory=dict)
     delta: TensorMapping = dataclasses.field(default_factory=dict)
+
+    def apply_correction(
+        self,
+        pre_correction_state: TensorMapping,
+        diagnosed: TensorMapping,
+        deltas: TensorMapping,
+    ) -> "CorrectorDiagnostics":
+        """Return a new ``CorrectorDiagnostics`` with the given correction applied to
+        ``pre_diagnosis_fields`` and the given diagnostics added to ``delta``; ``self``
+        is not mutated.
+
+        Args:
+            pre_correction_state: The state before the correction represented by
+                diagnosed and deltas was applied. This is used to record the
+                pre-diagnosis fields for cases where that field is used in the course of
+                determining the diagnosed field. The pre-diagnosed field in this case is
+                not meant to have the same physical meaning as the diagnosed field.
+            diagnosed: Fields replaced with diagnosed values.
+            deltas: Corrective deltas to apply.
+        """
+        already_diagnosed = set(diagnosed.keys()).intersection(
+            self.pre_diagnosis_fields.keys()
+        )
+        if already_diagnosed:
+            raise ValueError(
+                f"diagnosed fields {already_diagnosed} cannot be diagnosed again; "
+                "they were already diagnosed in this step"
+            )
+        new_pre_diagnosis_fields = {**self.pre_diagnosis_fields}
+        for name in diagnosed.keys():
+            new_pre_diagnosis_fields[name] = pre_correction_state[name]
+        new_deltas = {**self.delta}
+        for name, value in deltas.items():
+            if name in new_deltas:
+                new_deltas[name] = new_deltas[name] + value
+            else:
+                new_deltas[name] = value
+        return CorrectorDiagnostics(
+            pre_diagnosis_fields=new_pre_diagnosis_fields,
+            delta=new_deltas,
+        )
 
     def apply_output_masking(self, masking: SpatialMasking) -> "CorrectorDiagnostics":
         """Return a new ``CorrectorDiagnostics`` with the output spatial masking
@@ -36,7 +84,10 @@ class CorrectorDiagnostics:
             masking: The stepper's output spatial masking (NaN-fill, or the
                 no-op ``NullSpatialMasking``).
         """
-        return CorrectorDiagnostics(delta=masking(self.delta))
+        return CorrectorDiagnostics(
+            pre_diagnosis_fields=self.pre_diagnosis_fields,
+            delta=masking(self.delta),
+        )
 
 
 @dataclasses.dataclass
@@ -55,14 +106,29 @@ class CorrectorOutput:
     )
     corrector_state: CorrectorState | None = None
 
-    @property
-    def modified_names(self) -> KeysView[str]:
-        """Names of the variables the corrector modified this step.
+    def apply_correction(
+        self, diagnosed: TensorMapping, deltas: TensorMapping
+    ) -> "CorrectorOutput":
+        """Return a new ``CorrectorOutput`` with the given correction applied to
+        ``corrected`` and the given diagnostics added to ``diagnostics``; ``self``
+        is not mutated.
 
-        These are exactly the keys of the diagnostics ``delta``, i.e. the union
-        of the fields returned by each applied correction.
+        Args:
+            diagnosed: Fields replaced with diagnosed values.
+            deltas: Corrective deltas to apply.
         """
-        return self.diagnostics.delta.keys()
+        new_diagnostics = self.diagnostics.apply_correction(diagnosed, deltas)
+        new_corrected = {**self.corrected, **diagnosed}
+        for name, value in deltas.items():
+            if name not in new_corrected:
+                raise ValueError(f"delta supplied for unknown variable {name}")
+            new_corrected[name] = new_corrected[name] + value
+
+        return CorrectorOutput(
+            corrected=new_corrected,
+            diagnostics=new_diagnostics,
+            corrector_state=self.corrector_state,
+        )
 
 
 def build_corrector_diagnostics(

@@ -8,7 +8,7 @@ import dacite
 from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnostics
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorMapping
 
 
 @dataclasses.dataclass
@@ -89,10 +89,9 @@ class Correction(Protocol):
     def __call__(
         self,
         input_data: TensorMapping,
-        gen_data: TensorMapping,
         forcing_data: TensorMapping,
-        corrector_state: CorrectorState | None,
-    ) -> tuple[TensorDict, CorrectorState | None]:
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
         """
         Returns:
             A tuple ``(modified, corrector_state)`` where ``modified`` contains
