@@ -204,6 +204,11 @@ stepper_training:
     weights:
       h500: 5.0
 stepper:
+  derived_forcings:
+    insolation:
+      insolation_name: DSWRFtoa
+      solar_constant:
+        value: 1360.782
   step:
     type: single_module
     config:
