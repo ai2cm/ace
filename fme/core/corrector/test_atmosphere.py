@@ -9,6 +9,7 @@ import torch
 
 from fme.core import AtmosphereData, metrics
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.corrector.output import CorrectorOutput
 from fme.core.derived_variables import total_water_path_budget_residual
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
@@ -97,10 +98,12 @@ def test_force_no_global_mean_moisture_advection():
         dim=[-2, -1],
     )
     assert (original_mean.abs() > 0.0).all()
-    fixed_data = _force_zero_global_mean_moisture_advection(
-        data,
+    gen = AtmosphereData.for_correction(CorrectorOutput(corrected=dict(data)))
+    _force_zero_global_mean_moisture_advection(
+        gen=gen,
         area_weighted_mean=LatLonOperations(area_weights).area_weighted_mean,
     )
+    fixed_data = gen.result().corrected
     new_mean = metrics.weighted_mean(
         fixed_data["tendency_of_total_water_path_due_to_advection"],
         weights=area_weights,
@@ -151,17 +154,19 @@ def test_adjust_gen_dry_air_to_target(size: tuple[int, ...], use_area: bool):
         ),
         keepdim=True,
     )
-    fixed_out_data = _adjust_gen_dry_air_to_target(
-        out_data,
+    gen = AtmosphereData.for_correction(
+        CorrectorOutput(corrected=dict(out_data)), vertical_coordinate
+    )
+    _adjust_gen_dry_air_to_target(
+        gen,
         target_global_dry_air=target,
-        vertical_coordinate=vertical_coordinate,
         area_weighted_mean=gridded_operations.area_weighted_mean,
         precision=torch.float64,
     )
-    # the helper returns only the modified surface pressure; merge it back onto
-    # the full input state to evaluate conservation.
-    assert set(fixed_out_data) == {"PRESsfc"}
-    merged_out = {**out_data, **fixed_out_data}
+    result = gen.result()
+    # the helper modifies only the surface pressure
+    assert result.modified_names == {"PRESsfc"}
+    merged_out = {**out_data, **result.corrected}
     new_data = {k: torch.stack([v, merged_out[k]], dim=1) for k, v in in_data.items()}
     new_nonconservation = get_dry_air_nonconservation(
         new_data,
@@ -244,16 +249,18 @@ def test_force_conserve_moisture(
     assert np.any(np.abs(original_budget_residual) > 0.0)
     in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
     out_data = {k: v.select(dim=1, index=1) for k, v in data.items()}
-    fixed_out_data = _force_conserve_moisture(
+    gen = AtmosphereData.for_correction(
+        CorrectorOutput(corrected=dict(out_data)), vertical_coordinate
+    )
+    _force_conserve_moisture(
         in_data,
-        out_data,
-        vertical_coordinate=vertical_coordinate,
+        gen=gen,
         area_weighted_mean=ops.area_weighted_mean,
         timestep_seconds=TIMESTEP.total_seconds(),
         terms_to_modify=terms_to_modify,
     )
-    # the helper returns only the modified budget terms; merge them back onto
-    # the full output state to evaluate the budget residual.
+    fixed_out_data = gen.result().corrected
+    # merge the corrected output with the original to evaluate the residual
     merged_out = {**out_data, **fixed_out_data}
     new_data = {k: torch.stack([v, merged_out[k]], dim=1) for k, v in in_data.items()}
     new_budget_residual = total_water_path_budget_residual(
@@ -282,9 +289,12 @@ def test_clip_frozen_precipitation():
         "PRATEsfc": torch.tensor([[1.0, 2.0], [3.0, 0.0]]),
         "total_frozen_precipitation_rate": torch.tensor([[2.0, 1.0], [3.0, 0.5]]),
     }
-    fixed_data = _clip_frozen_precipitation(data)
-    # only the modified field is returned, following the Correction contract.
-    assert set(fixed_data) == {"total_frozen_precipitation_rate"}
+    gen = AtmosphereData.for_correction(CorrectorOutput(corrected=dict(data)))
+    _clip_frozen_precipitation(gen)
+    result = gen.result()
+    fixed_data = result.corrected
+    # only the frozen precipitation field is modified
+    assert result.modified_names == {"total_frozen_precipitation_rate"}
     # frozen precip is clipped to total precip where it exceeds it, and left
     # unchanged where it is already below total precip.
     torch.testing.assert_close(
@@ -294,7 +304,11 @@ def test_clip_frozen_precipitation():
     # the resulting frozen precip never exceeds total precip
     assert torch.all(fixed_data["total_frozen_precipitation_rate"] <= data["PRATEsfc"])
     # when frozen precip is not predicted, the clip is a no-op
-    assert _clip_frozen_precipitation({"PRATEsfc": data["PRATEsfc"]}) == {}
+    gen_noop = AtmosphereData.for_correction(
+        CorrectorOutput(corrected={"PRATEsfc": data["PRATEsfc"]})
+    )
+    _clip_frozen_precipitation(gen_noop)
+    assert gen_noop.result().modified_names == set()
 
 
 def _with_frozen_precip_exceeding_total(gen_data: TensorMapping) -> dict:
@@ -493,35 +507,38 @@ def test__force_conserve_total_energy(negative_pressure: bool):
     if negative_pressure:
         input_data["PRESsfc"] = -1 * input_data["PRESsfc"]
 
-    corrected_gen_data = _force_conserve_total_energy(
+    gen = AtmosphereData.for_correction(
+        CorrectorOutput(corrected=dict(gen_data)), vertical_coord
+    )
+    _force_conserve_total_energy(
         input_data=input_data,
-        gen_data=gen_data,
+        gen=gen,
         forcing_data=forcing_data,
         area_weighted_mean=ops.area_weighted_mean,
-        vertical_coordinate=vertical_coord,
         timestep_seconds=timestep.total_seconds(),
         unaccounted_heating=extra_heating,
     )
+    result = gen.result()
+    corrected_gen_data = result.corrected
 
-    # only air temperature is modified; every other field is absent from the
-    # returned subset (not merely unchanged).
+    # only air temperature is modified
     for name in gen_data:
         if "air_temperature" in name:
             assert not torch.allclose(
                 corrected_gen_data[name], gen_data[name], rtol=1e-6
             )
         else:
-            assert name not in corrected_gen_data
+            assert name not in result.modified_names
 
-    # ensure forcing variables are not in the corrected data
+    # ensure forcing variables injected for the computation do not leak into
+    # the delta
     for name in forcing_data:
-        assert name not in corrected_gen_data
+        assert name not in result.modified_names
 
-    # ensure the corrected global mean MSE path is what we expect; merge the
-    # modified temperatures back onto the full state to evaluate it.
+    # ensure the corrected global mean MSE path is what we expect
     input = AtmosphereData(input_data, vertical_coord)
     corrected_gen = AtmosphereData(
-        gen_data | corrected_gen_data | forcing_data, vertical_coord
+        corrected_gen_data | forcing_data, vertical_coord
     )
     input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path)
     corrected_gen_gm_mse = ops.area_weighted_mean(corrected_gen.total_energy_ace2_path)
@@ -545,9 +562,6 @@ def test__force_conserve_total_energy(negative_pressure: bool):
 
     # ensure we can backpropagate through the result without anomalies
     with torch.autograd.detect_anomaly():
-        # Take the sum to reduce corrected_gen_data to a scalar prior to
-        # backpropagation to avoid the need to provide a gradient argument
-        # to backward.
         sum(tensor.sum() for tensor in corrected_gen_data.values()).backward()
 
 
@@ -564,17 +578,19 @@ def test__force_conserve_energy_doesnt_clobber():
     # add a prognostic variable to the forcing data
     forcing_data["PRESsfc"] = 10.0 + torch.rand(size=tensor_shape)
 
-    corrected_gen_data = _force_conserve_total_energy(
+    gen = AtmosphereData.for_correction(
+        CorrectorOutput(corrected=dict(gen_data)), vertical_coord
+    )
+    _force_conserve_total_energy(
         input_data=input_data,
-        gen_data=gen_data,
+        gen=gen,
         forcing_data=forcing_data,
         area_weighted_mean=ops.area_weighted_mean,
-        vertical_coordinate=vertical_coord,
         timestep_seconds=timestep.total_seconds(),
     )
-    # PRESsfc is not modified by the energy correction, so it is absent from the
-    # returned subset -- the forcing copy cannot leak into the output.
-    assert "PRESsfc" not in corrected_gen_data
+    result = gen.result()
+    # PRESsfc is not modified by the energy correction
+    assert "PRESsfc" not in result.modified_names
 
 
 @pytest.mark.parametrize(

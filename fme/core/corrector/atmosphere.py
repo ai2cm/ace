@@ -23,7 +23,7 @@ from fme.core.corrector.utils import ForcePositive
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorMapping
 
 
 class AreaWeightedMean(Protocol):
@@ -83,19 +83,16 @@ class ConserveDryAir:
             precision=self.precision,
         )
         assert corrector_state.global_dry_air_mass is not None
-        changed = _adjust_gen_dry_air_to_target(
-            accumulated_output.corrected,
+        gen = AtmosphereData.for_correction(
+            accumulated_output, self.vertical_coordinate
+        )
+        _adjust_gen_dry_air_to_target(
+            gen,
             target_global_dry_air=corrector_state.global_dry_air_mass,
             area_weighted_mean=self.area_weighted_mean,
-            vertical_coordinate=self.vertical_coordinate,
             precision=self.precision,
         )
-        deltas = {
-            name: changed[name] - accumulated_output.corrected[name]
-            for name in changed
-        }
-        result = accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
-        return result.with_state(corrector_state)
+        return gen.result().with_state(corrector_state)
 
 
 @dataclasses.dataclass
@@ -111,15 +108,12 @@ class ZeroGlobalMeanMoistureAdvection:
         accumulated_output: CorrectorOutput,
     ) -> CorrectorOutput:
         """Apply zero global-mean moisture advection as a delta."""
-        changed = _force_zero_global_mean_moisture_advection(
-            gen_data=accumulated_output.corrected,
+        gen = AtmosphereData.for_correction(accumulated_output)
+        _force_zero_global_mean_moisture_advection(
+            gen=gen,
             area_weighted_mean=self.area_weighted_mean,
         )
-        deltas = {
-            name: changed[name] - accumulated_output.corrected[name]
-            for name in changed
-        }
-        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+        return gen.result()
 
 
 @dataclasses.dataclass
@@ -156,25 +150,19 @@ class MoistureBudgetCorrection:
                 "Moisture budget correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        gen_data = accumulated_output.corrected
-        changed = _force_conserve_moisture(
+        gen = AtmosphereData.for_correction(
+            accumulated_output, self.vertical_coordinate
+        )
+        _force_conserve_moisture(
             input_data=input_data,
-            gen_data=gen_data,
+            gen=gen,
             area_weighted_mean=self.area_weighted_mean,
-            vertical_coordinate=self.vertical_coordinate,
             timestep_seconds=self.timestep_seconds,
             terms_to_modify=self.terms_to_modify,
         )
         if self.clip_frozen_precipitation:
-            # Clip frozen precipitation against the (possibly corrected) total
-            # precipitation rate. Done here, after the budget correction, so the
-            # ceiling is the final precipitation rate.
-            frozen_clip = _clip_frozen_precipitation({**gen_data, **changed})
-            changed = {**changed, **frozen_clip}
-        deltas = {
-            name: changed[name] - gen_data[name] for name in changed
-        }
-        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+            _clip_frozen_precipitation(gen)
+        return gen.result()
 
 
 @dataclasses.dataclass
@@ -199,21 +187,19 @@ class TotalEnergyBudgetCorrection:
                 "Energy budget correction is turned on, but no vertical coordinate"
                 " is available."
             )
-        changed = _force_conserve_total_energy(
+        gen = AtmosphereData.for_correction(
+            accumulated_output, self.vertical_coordinate
+        )
+        _force_conserve_total_energy(
             input_data=input_data,
-            gen_data=accumulated_output.corrected,
+            gen=gen,
             forcing_data=forcing_data,
             area_weighted_mean=self.area_weighted_mean,
-            vertical_coordinate=self.vertical_coordinate,
             timestep_seconds=self.timestep_seconds,
             method=self.method,
             unaccounted_heating=self.unaccounted_heating,
         )
-        deltas = {
-            name: changed[name] - accumulated_output.corrected[name]
-            for name in changed
-        }
-        return accumulated_output.apply_correction(diagnosed={}, deltas=deltas)
+        return gen.result()
 
 
 @CorrectorSelector.register("atmosphere_corrector")
@@ -426,25 +412,22 @@ def _seed_global_dry_air_mass(
 
 
 def _adjust_gen_dry_air_to_target(
-    gen_data: TensorMapping,
+    gen: AtmosphereData,
     target_global_dry_air: torch.Tensor,
     area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HasAtmosphereVerticalIntegral,
     precision: torch.dtype,
-) -> TensorDict:
-    """Adjust gen_data's surface pressure so its global mean dry-air mass
+) -> None:
+    """Adjust *gen*'s surface pressure so its global mean dry-air mass
     matches ``target_global_dry_air``.
 
-    Adds a globally-constant correction to the dry air pressure of each column
-    and then solves for the surface pressure consistent with that adjusted
-    dry-air pressure given gen_data's specific total water:
-
-        dry_air = ps - sum_k((ak_diff + bk_diff * ps) * wat_k)
-        ps = (dry_air + sum_k(ak_diff * wat_k)) / (1 - sum_k(bk_diff * wat_k))
+    The correction is recorded through ``gen.correct_surface_pressure``;
+    the caller is responsible for calling ``gen.result()`` to produce the
+    ``CorrectorOutput``.
     """
-    gen = AtmosphereData(gen_data, vertical_coordinate)
     if gen.surface_pressure is None:
         raise ValueError("surface_pressure is required to force dry air conservation")
+    vertical_coordinate = gen._vertical_coordinate
+    assert vertical_coordinate is not None
     gen_dry_air = gen.surface_pressure_due_to_dry_air
     global_gen_dry_air = area_weighted_mean(gen_dry_air.to(precision), keepdim=True)
     error = global_gen_dry_air - target_global_dry_air.to(precision)
@@ -458,66 +441,44 @@ def _adjust_gen_dry_air_to_target(
     new_pressure = (new_gen_dry_air + (ak_diff * wat).sum(-1)) / (
         1 - (bk_diff * wat).sum(-1)
     )
-    gen.set_surface_pressure(new_pressure.to(dtype=gen.surface_pressure.dtype))
-    return gen.modified_data
+    gen.correct_surface_pressure(new_pressure.to(dtype=gen.surface_pressure.dtype))
 
 
 def _force_zero_global_mean_moisture_advection(
-    gen_data: TensorMapping,
+    gen: AtmosphereData,
     area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
-) -> TensorDict:
-    """
-    Update the generated data so advection conserves moisture.
+) -> None:
+    """Update *gen* so advection conserves moisture.
 
     Does so by adding a constant offset to the moisture advective tendency.
-
-    Args:
-        gen_data: The generated data.
-        area_weighted_mean: Computes an area-weighted mean,
-            removing horizontal dimensions.
+    The correction is recorded through ``gen.correct_*``; the caller is
+    responsible for calling ``gen.result()``.
     """
-    gen = AtmosphereData(gen_data)
-
     mean_moisture_advection = area_weighted_mean(
         gen.tendency_of_total_water_path_due_to_advection,
     )
-    gen.set_tendency_of_total_water_path_due_to_advection(
+    gen.correct_tendency_of_total_water_path_due_to_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
     )
-    return gen.modified_data
 
 
-def _clip_frozen_precipitation(gen_data: TensorMapping) -> TensorDict:
+def _clip_frozen_precipitation(gen: AtmosphereData) -> None:
+    """Clip the frozen precipitation rate to be at most the total precipitation
+    rate.  A no-op when the frozen precipitation rate is not among *gen*'s
+    fields.  The correction is recorded through ``gen.correct_*``.
     """
-    Clip the frozen precipitation rate to be at most the total precipitation rate.
-
-    Frozen precipitation is a component of total precipitation, so its rate cannot
-    physically exceed the total precipitation rate. This clips
-    ``total_frozen_precipitation_rate`` to ``min(total_frozen_precipitation_rate,
-    PRATEsfc)`` in each grid cell.
-
-    If the frozen precipitation rate is not among the generated fields (i.e. it is
-    not predicted), this is a no-op and returns an empty mapping.
-
-    Args:
-        gen_data: The generated data, which must contain the total precipitation
-            rate when the frozen precipitation rate is predicted.
-    """
-    if "total_frozen_precipitation_rate" not in gen_data:
-        return {}
-    gen = AtmosphereData(gen_data)
-    gen.set_frozen_precipitation_rate(
+    if "total_frozen_precipitation_rate" not in gen.data:
+        return
+    gen.correct_frozen_precipitation_rate(
         torch.minimum(gen.frozen_precipitation_rate, gen.precipitation_rate)
     )
-    return gen.modified_data
 
 
 def _force_conserve_moisture(
     input_data: TensorMapping,
-    gen_data: TensorMapping,
+    gen: AtmosphereData,
     area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HasAtmosphereVerticalIntegral,
     timestep_seconds: float,
     terms_to_modify: Literal[
         "precipitation",
@@ -525,32 +486,13 @@ def _force_conserve_moisture(
         "advection_and_precipitation",
         "advection_and_evaporation",
     ],
-) -> TensorDict:
+) -> None:
+    """Update *gen* to conserve moisture.
+
+    Corrections are recorded through ``gen.correct_*``; the caller is
+    responsible for calling ``gen.result()``.  *input_data* is read-only.
     """
-    Update the generated data to conserve moisture.
-
-    Does so while conserving total dry air in each column.
-
-    Assumes the global mean advective tendency of moisture is zero. This assumption
-    means any existing global mean advective tendency will be set to zero
-    if the advective tendency is re-computed.
-
-    Args:
-        input_data: The input data.
-        gen_data: The generated data one timestep after the input data.
-        area_weighted_mean: Computes an area-weighted mean,
-            removing horizontal dimensions.
-        vertical_coordinate: The sigma coordinates.
-        timestep_seconds: Timestep of the model in seconds.
-        terms_to_modify: Which terms to modify, in addition to modifying surface
-            pressure to conserve dry air mass. One of:
-            - "precipitation": modify precipitation only
-            - "evaporation": modify evaporation only
-            - "advection_and_precipitation": modify advection and precipitation
-            - "advection_and_evaporation": modify advection and evaporation
-    """
-    input = AtmosphereData(input_data, vertical_coordinate)
-    gen = AtmosphereData(gen_data, vertical_coordinate)
+    input = AtmosphereData(input_data, gen._vertical_coordinate)
 
     gen_total_water_path = gen.total_water_path
     twp_total_tendency = (
@@ -560,80 +502,58 @@ def _force_conserve_moisture(
     evaporation_global_mean = area_weighted_mean(gen.evaporation_rate, keepdim=True)
     precipitation_global_mean = area_weighted_mean(gen.precipitation_rate, keepdim=True)
     if terms_to_modify.endswith("precipitation"):
-        # We want to achieve
-        #     global_mean(twp_total_tendency) = (
-        #         global_mean(evaporation_rate)
-        #         - global_mean(precipitation_rate)
-        #     )
-        # so we modify precipitation_rate to achieve this. Note we have
-        # assumed the global mean advection tendency is zero.
-        # First, we find the required global-mean precipitation rate
-        #     new_global_precip_rate = (
-        #         global_mean(evaporation_rate)
-        #         - global_mean(twp_total_tendency)
-        #     )
         new_precipitation_global_mean = (
             evaporation_global_mean - twp_tendency_global_mean
         )
-        # Because scalar multiplication commutes with summation, we can
-        # achieve this by multiplying each gridcell's precipitation rate
-        # by the ratio of the new global mean to the current global mean.
-        #    new_precip_rate = (
-        #        new_global_precip_rate / current_global_precip_rate
-        #    ) * current_precip_rate
-        gen.set_precipitation_rate(
+        gen.correct_precipitation_rate(
             gen.precipitation_rate
             * (new_precipitation_global_mean / precipitation_global_mean)
         )
     elif terms_to_modify.endswith("evaporation"):
-        # Derived similarly as for "precipitation" case.
         new_evaporation_global_mean = (
             twp_tendency_global_mean + precipitation_global_mean
         )
-        gen.set_evaporation_rate(
+        gen.correct_evaporation_rate(
             gen.evaporation_rate
             * (new_evaporation_global_mean / evaporation_global_mean)
         )
     if terms_to_modify.startswith("advection"):
-        # Having already corrected the global-mean budget, we recompute
-        # advection based on assumption that the columnwise
-        # moisture budget closes. Correcting the global mean budget first
-        # is important to ensure the resulting advection has zero global mean.
         new_advection = twp_total_tendency - (
             gen.evaporation_rate - gen.precipitation_rate
         )
-        gen.set_tendency_of_total_water_path_due_to_advection(new_advection)
-    return gen.modified_data
+        gen.correct_tendency_of_total_water_path_due_to_advection(new_advection)
 
 
 def _force_conserve_total_energy(
     input_data: TensorMapping,
-    gen_data: TensorMapping,
+    gen: AtmosphereData,
     forcing_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HasAtmosphereVerticalIntegral,
     timestep_seconds: float,
     method: Literal["constant_temperature"] = "constant_temperature",
     unaccounted_heating: float = 0.0,
-) -> TensorDict:
-    """Apply a correction to the generated data to conserve total energy.
+) -> None:
+    """Apply a correction to *gen* to conserve total energy.
 
-    This function also inserts the unaccounted heating into the generated data.
+    Corrections are recorded through ``gen.correct_all_levels``; the caller
+    is responsible for calling ``gen.result()``.
     """
     if method != "constant_temperature":
         raise NotImplementedError(
             f"Method {method} not implemented for total energy conservation"
         )
+    vertical_coordinate = gen._vertical_coordinate
+    assert vertical_coordinate is not None
     input = AtmosphereData(input_data, vertical_coordinate)
     forcing = AtmosphereData(forcing_data)
     required_forcing = {
         "DSWRFtoa": forcing.toa_down_sw_radiative_flux,
         "HGTsfc": forcing.surface_height,
     }
-    atmosphere_data = dict(gen_data)
+    # Temporarily inject forcing fields so the energy computation can read
+    # them; they are NOT correction targets.
     for name, tensor in required_forcing.items():
-        atmosphere_data[name] = tensor
-    gen = AtmosphereData(atmosphere_data, vertical_coordinate)
+        gen._data[name] = tensor
 
     gen_energy_path = gen.total_energy_ace2_path
     input_energy_path = input.total_energy_ace2_path
@@ -652,15 +572,15 @@ def _force_conserve_total_energy(
 
     energy_correction = desired_energy_path_global_mean - gen_energy_path_global_mean
     energy_to_temperature_factor = _energy_correction_factor(gen, vertical_coordinate)
-    # take global mean to impose a spatially uniform temperature correction
     energy_to_temp_factor_gm = area_weighted_mean(energy_to_temperature_factor, True)
     temperature_correction = energy_correction / energy_to_temp_factor_gm
 
-    # apply same temperature correction to all vertical layers
-    air_temperature_names = gen.get_all_vertical_level_names("air_temperature")
-    return {
-        name: gen.data[name] + temperature_correction for name in air_temperature_names
-    }
+    # temperature_correction is (batch, 1, 1); unsqueeze to broadcast
+    # against the stacked (batch, lat, lon, n_levels) air temperature.
+    gen.correct_all_levels(
+        "air_temperature",
+        gen.air_temperature + temperature_correction.unsqueeze(-1),
+    )
 
 
 def _energy_correction_factor(

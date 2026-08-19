@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import torch
 
@@ -14,6 +16,9 @@ from fme.core.constants import (
 )
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
+
+if TYPE_CHECKING:
+    from fme.core.corrector.output import CorrectorOutput
 
 ATMOSPHERE_FIELD_NAME_PREFIXES = {
     "specific_total_water": ["specific_total_water_", "STW_"],
@@ -96,6 +101,31 @@ class AtmosphereData:
         self._stacker = Stacker(atmosphere_field_name_prefixes)
         # Concrete data keys written through this instance's ``set_*`` methods.
         self._modified_keys: set[str] = set()
+        # CorrectorOutput wrapping (set by ``for_correction``).
+        self._corrector_output: CorrectorOutput | None = None
+        self._pending_deltas: TensorDict = {}
+        self._pending_diagnosed: TensorDict = {}
+
+    @classmethod
+    def for_correction(
+        cls,
+        accumulated_output: CorrectorOutput,
+        vertical_coordinate: HasAtmosphereVerticalIntegral | None = None,
+        atmosphere_field_name_prefixes: Mapping[str, list[str]] | None = None,
+    ) -> AtmosphereData:
+        """Create an ``AtmosphereData`` for applying corrections.
+
+        Reads go through the accumulated output's ``corrected`` dict.
+        Corrections are tracked internally and applied to the
+        ``CorrectorOutput`` by calling :meth:`result`.
+        """
+        obj = cls(
+            accumulated_output.corrected,
+            vertical_coordinate,
+            atmosphere_field_name_prefixes,
+        )
+        obj._corrector_output = accumulated_output
+        return obj
 
     @property
     def data(self) -> TensorDict:
@@ -127,6 +157,69 @@ class AtmosphereData:
         clones).
         """
         return {key: self._data[key] for key in self._modified_keys}
+
+    # ---- correction verbs (require ``for_correction``) --------------------
+
+    def _correct(self, name: str, value: torch.Tensor) -> None:
+        """Record a corrective delta for *name* (a standard name)."""
+        for prefix in self._prefix_map[name]:
+            if prefix in self._data:
+                self._correct_prefix(prefix, value)
+                return
+        raise KeyError(name)
+
+    def _correct_prefix(self, prefix: str, value: torch.Tensor) -> None:
+        """Record a corrective delta for a concrete data key."""
+        assert self._corrector_output is not None
+        original = self._corrector_output.corrected[prefix]
+        self._pending_deltas[prefix] = value - original
+        self._data[prefix] = value
+
+    def correct_surface_pressure(self, value: torch.Tensor) -> None:
+        self._correct("surface_pressure", value)
+
+    def correct_precipitation_rate(self, value: torch.Tensor) -> None:
+        self._correct("precipitation_rate", value)
+
+    def correct_evaporation_rate(self, value: torch.Tensor) -> None:
+        self._correct("latent_heat_flux", value * LATENT_HEAT_OF_VAPORIZATION)
+
+    def correct_tendency_of_total_water_path_due_to_advection(
+        self, value: torch.Tensor
+    ) -> None:
+        self._correct("tendency_of_total_water_path_due_to_advection", value)
+
+    def correct_frozen_precipitation_rate(self, value: torch.Tensor) -> None:
+        self._correct("frozen_precipitation_rate", value)
+
+    def correct_all_levels(
+        self, standard_name: str, value: torch.Tensor
+    ) -> None:
+        """Apply corrective deltas for a multi-level (Stacker) variable.
+
+        Args:
+            standard_name: The standard name (e.g. ``"air_temperature"``).
+            value: Tensor with shape ``(..., n_levels)``.
+        """
+        names = self.get_all_vertical_level_names(standard_name)
+        for k, name in enumerate(names):
+            self._correct_prefix(name, value[..., k])
+
+    def result(self) -> CorrectorOutput:
+        """Return the ``CorrectorOutput`` with all pending corrections applied.
+
+        Raises ``AssertionError`` when called on an instance not created via
+        :meth:`for_correction`.
+        """
+        from fme.core.corrector.output import CorrectorOutput  # noqa: F811
+
+        assert self._corrector_output is not None
+        return self._corrector_output.apply_correction(
+            diagnosed=self._pending_diagnosed,
+            deltas=self._pending_deltas,
+        )
+
+    # ---- read accessors ---------------------------------------------------
 
     def _get(self, name):
         for prefix in self._prefix_map[name]:
