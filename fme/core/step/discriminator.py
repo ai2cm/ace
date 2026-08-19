@@ -272,8 +272,9 @@ def _r1_gradient_penalty(
 ) -> torch.Tensor:
     """R1 gradient penalty (Mescheder et al. 2018) on real data.
 
-    Returns the area-weighted mean of ``||∇_x D(x)||²`` over the real
-    inputs — the unweighted penalty; the caller multiplies by ``λ/2``.
+    Returns ``E_x[||∇_x D(x)||²]`` — the area-weighted spatial mean of
+    the squared gradient norm (summed over the channel dimension), averaged
+    over the batch. The caller multiplies by ``λ/2``.
     ``create_graph=True`` so the penalty's own gradients flow into the
     discriminator's optimizer step.
     """
@@ -282,8 +283,10 @@ def _r1_gradient_penalty(
         inputs=real_inputs,
         create_graph=True,
     )
-    grad_sq = grads.square()
-    return gridded_operations.area_weighted_mean(grad_sq).mean()
+    # sum over channels to get per-pixel ||grad||², then area-weighted
+    # spatial mean, then batch mean
+    grad_norm_sq = grads.square().sum(dim=-3, keepdim=True)
+    return gridded_operations.area_weighted_mean(grad_norm_sq).mean()
 
 
 def compute_discriminator_losses(
