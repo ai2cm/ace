@@ -92,6 +92,10 @@ at epoch 0, so re-submitting a variant that is already running discards its
 progress; launching the `-mstepft` set has to be an explicit `--variant best`
 (or `all`).
 
+To submit one cell rather than a whole set, name its config file(s)
+positionally — that bypasses `--variant`, so it works regardless of which
+variant the config belongs to.
+
 ```bash
 # regenerate all eight run_configs/*-mstepft*.yaml (needs current dataset IDs)
 python generate_finetune_configs.py
@@ -102,6 +106,11 @@ python submit_finetune_jobs.py --dry-run \
 
 # submit the -mstepftaimip set to titan (4 B200 GPUs / 400GiB each)
 python submit_finetune_jobs.py --variant aimip \
+  --beaker-cluster ai2/titan --beaker-priority high --beaker-workspace ai2/ace
+
+# ...or just one cell, whatever its variant
+python submit_finetune_jobs.py \
+  ace-train-config-4deg-nc-sfno-era5-gmron-mask0-seed1-v5-mstepft.yaml \
   --beaker-cluster ai2/titan --beaker-priority high --beaker-workspace ai2/ace
 
 # ...or submit to jupiter (8 H100 GPUs)

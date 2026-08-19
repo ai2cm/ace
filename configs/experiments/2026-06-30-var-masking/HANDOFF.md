@@ -171,6 +171,10 @@ python -m fme.ace.validate_config --config_type train \
 # -mstepft runs from epoch 0, so pass it only on purpose.
 python submit_finetune_jobs.py --variant aimip --beaker-cluster ai2/titan \
   --beaker-priority high --beaker-workspace ai2/ace
+# Naming config file(s) positionally submits just those and bypasses --variant:
+python submit_finetune_jobs.py \
+  ace-train-config-4deg-nc-sfno-era5-gmron-mask0-seed1-v5-mstepft.yaml \
+  --beaker-cluster ai2/titan --beaker-priority high --beaker-workspace ai2/ace
 # NOTE: gantry is slow (~20s/job); a 4-job submit can exceed a 2-min shell
 # timeout. If it does, only some land — check which, then submit the rest via
 # run-ace-train.sh directly (see submit_finetune_jobs.py for the env it sets).
@@ -202,10 +206,9 @@ see the top-level project notes). Plot `-bestinf`.
    last three commits has been launched:
    - the four `-mstepftaimip` configs (`--variant aimip`, the default);
    - the `gmron-mask0-seed1` `-mstepft` config, whose cell has no live run since
-     the seed2 experiment was superseded. Submitting it means `--variant best`,
-     which also re-submits the other three `-mstepft` cells and **restarts the
-     two live ones from epoch 0** — so submit that one via `run-ace-train.sh`
-     directly rather than through `submit_finetune_jobs.py`.
+     the seed2 experiment was superseded. Do **not** use `--variant best` for it
+     — that also re-submits the other three `-mstepft` cells and restarts the
+     two live ones from epoch 0. Name the config positionally instead.
    - `gmroff-mask20-seed1` `-mstepft` exited 1 on 08-19 and needs triage.
 2. **PR `input_dropout_optimized_steps_only` to main.** It's a clean, tested,
    self-contained fme/core commit (`0ddbbacf1`) that's generally useful; currently
