@@ -80,20 +80,11 @@ class SingleModuleStepConfig(StepConfigABC):
             inference (eval mode).
         input_dropout_optimized_steps_only: When True, ``input_dropout`` is
             applied only on forward steps that are being optimized, leaving
-            non-optimized rollout steps unmasked. Implemented by skipping the
-            dropout draw whenever gradients are disabled (``torch.no_grad``),
-            which is the context the training loss loops use for their
-            non-optimized steps. It therefore only changes behavior when the
-            surrounding loop leaves some rollout step unoptimized: in the
-            single-module loop that means ``optimize_last_step_only``, since
-            otherwise the rollout is exactly as long as the sampled loss
-            length; the coupled loop additionally leaves steps unoptimized
-            under a zero realm loss weight, single-component-per-batch
-            selection, or a realm step-count mismatch. Because the gate reads
-            the grad state rather than an explicit per-step flag, any
-            train-mode call made under ``no_grad`` also skips dropout.
-            Requires ``input_dropout``. Defaults to False (all training steps
-            masked).
+            non-optimized rollout steps unmasked. Gated on gradients being
+            enabled, which is how the training loss loops mark an optimized
+            step, so any train-mode call made under ``torch.no_grad`` also
+            skips dropout. Requires ``input_dropout``. Defaults to False (all
+            training steps masked).
     """
 
     builder: ModuleSelector

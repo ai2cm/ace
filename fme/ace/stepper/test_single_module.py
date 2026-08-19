@@ -1480,9 +1480,8 @@ def test_input_dropout_optimized_steps_only_noop_without_last_step_only(
 ):
     """Without optimize_last_step_only every single-module step is optimized.
 
-    This loop's rollout length is the sampled loss length, so no step runs
-    under no_grad and the flag cannot change which steps are masked. The
-    coupled loop can leave steps unoptimized by other means.
+    The rollout is exactly as long as the sampled loss length here, so no step
+    runs under no_grad and the flag cannot change which steps are masked.
     """
     indicators = _rollout_dropout_indicators(
         optimized_steps_only=optimized_steps_only,
