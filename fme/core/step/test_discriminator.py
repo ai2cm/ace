@@ -234,6 +234,49 @@ def test_detached_diagnostics_carry_no_graph():
         assert diagnostic.grad_fn is None
 
 
+def test_r1_penalty_increases_loss_and_penalizes_gradients():
+    """With R1 enabled the total loss exceeds the base real+fake loss, and
+    the penalty itself is positive and differentiable."""
+    discriminator = _get_discriminator(module=_ChannelMeanLogits(weight=0.5))
+    real_input, real_output = _get_pair()
+    fake_input, fake_output = _get_pair()
+    pair = _get_gan_pair(real_input, real_output, fake_input, fake_output)
+    base = compute_discriminator_losses(
+        discriminator=discriminator,
+        gridded_operations=_get_gridded_operations(),
+        pairs=[pair],
+    )
+    real_input2, real_output2 = _get_pair()
+    fake_input2, fake_output2 = _get_pair()
+    pair2 = _get_gan_pair(real_input2, real_output2, fake_input2, fake_output2)
+    with_r1 = compute_discriminator_losses(
+        discriminator=discriminator,
+        gridded_operations=_get_gridded_operations(),
+        pairs=[pair2],
+        r1_penalty_coefficient=10.0,
+    )
+    assert with_r1.r1_penalty > 0
+    assert with_r1.loss > base.loss_real + base.loss_fake
+    with_r1.loss.backward()
+    (weight,) = discriminator.modules[0].parameters()
+    assert weight.grad is not None
+
+
+def test_r1_penalty_zero_when_disabled():
+    discriminator = _get_discriminator(module=_ChannelMeanLogits(weight=0.5))
+    real_input, real_output = _get_pair()
+    fake_input, fake_output = _get_pair()
+    losses = compute_discriminator_losses(
+        discriminator=discriminator,
+        gridded_operations=_get_gridded_operations(),
+        pairs=[_get_gan_pair(real_input, real_output, fake_input, fake_output)],
+        r1_penalty_coefficient=0.0,
+    )
+    torch.testing.assert_close(
+        losses.r1_penalty, torch.tensor(0.0, device=losses.r1_penalty.device)
+    )
+
+
 def test_train_mode_toggles():
     discriminator = _get_discriminator()
     assert discriminator.training
