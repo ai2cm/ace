@@ -3,6 +3,7 @@
 # = that run's 1-step pre-training config, with only: n_forward_steps swapped for the
 #   multi-step schedule, parameter_init added, max_epochs capped at 20, and
 #   input_dropout_optimized_steps_only set (see generate_finetune_configs.py).
+# fine-tuning starts from training_checkpoints/best_ckpt.tar
 seed: 0
 experiment_dir: /results
 save_checkpoint: true

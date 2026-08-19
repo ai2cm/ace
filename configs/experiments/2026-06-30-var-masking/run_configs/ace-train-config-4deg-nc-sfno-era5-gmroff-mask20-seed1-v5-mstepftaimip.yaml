@@ -1,9 +1,9 @@
-# arg: --dataset 01KZEZNEAASGS4JAJKSQB192GF:/weights
-# source pre-training run: ace2-var-mask-nc-sfno-era5-gmroff-mask0-seed1-v5
+# arg: --dataset 01KZEFBKGFJ2V38N8V9HNAVZ27:/weights
+# source pre-training run: ace2-var-mask-nc-sfno-era5-gmroff-mask20-seed1-v5
 # = that run's 1-step pre-training config, with only: n_forward_steps swapped for the
 #   multi-step schedule, parameter_init added, max_epochs capped at 20, and
 #   input_dropout_optimized_steps_only set (see generate_finetune_configs.py).
-# fine-tuning starts from training_checkpoints/best_ckpt.tar
+# fine-tuning starts from training_checkpoints/best_inference_ckpt.tar
 seed: 1
 experiment_dir: /results
 save_checkpoint: true
@@ -332,7 +332,7 @@ stepper_training:
       crps_weight: 0.9
       energy_score_weight: 0.1
   parameter_init:
-    weights_path: /weights/training_checkpoints/best_ckpt.tar
+    weights_path: /weights/training_checkpoints/best_inference_ckpt.tar
 stepper:
   step:
     type: single_module
@@ -480,6 +480,6 @@ stepper:
       - h500
       input_dropout:
         default:
-          max_masked_vars: 0
+          max_masked_vars: 20
       include_channel_mask_inputs: true
       input_dropout_optimized_steps_only: true

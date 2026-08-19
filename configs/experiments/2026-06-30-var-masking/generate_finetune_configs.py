@@ -2,7 +2,7 @@
 
 Each fine-tune config is the run's **exact 1-step pre-training config** (the
 config.yaml the checkpoint was trained with, cached under
-``pretrain_source_configs/``) with only three changes:
+``pretrain_source_configs/``) with only these changes:
 
   1. ``stepper_training.n_forward_steps`` is swapped from ``1`` to the multi-step
      probability schedule used by the ERA5 baseline multi-step fine-tune
@@ -28,6 +28,13 @@ energy 0.1, no extra weights), EMA, masking level, global-mean-removal, model
 architecture -- is copied verbatim from pre-training, so the fine-tune differs
 from pre-training only in that it rolls out multiple steps over a short schedule.
 
+Two configs are written per cell, one per entry in FT_VARIANTS -- they are
+identical except for which pre-training checkpoint ``parameter_init`` loads:
+``-mstepft`` starts from ``best_ckpt.tar`` (lowest validation loss) and
+``-mstepftaimip`` from ``best_inference_ckpt.tar`` (lowest inference error on
+the weight-1.0 ``aimip_checkpoint`` entry). Pre-training writes both, so which
+one to fine-tune from is an open question these two variants answer empirically.
+
 Checkpoint dataset IDs (for the ``/weights`` mount) are resolved from
 ``wandb_to_beaker_map.json`` (refresh with ``update_beaker_map.py``).
 
@@ -47,11 +54,25 @@ HERE = pathlib.Path(__file__).parent
 DEFAULT_SOURCE_MAP = HERE / "wandb_to_beaker_map.json"
 PRETRAIN_CONFIGS_DIR = HERE / "pretrain_source_configs"
 
-# Checkpoint file loaded for fine-tuning, matching the ERA5 baseline recipe.
-CHECKPOINT_NAME = "training_checkpoints/best_ckpt.tar"
-
-# Suffix distinguishing a fine-tune config/run from its pre-training source.
-FT_SUFFIX = "-mstepft"
+# Fine-tune variants, generated for every cell: (config/run-name suffix, source
+# checkpoint loaded into parameter_init). The two differ only in which epoch of
+# the pre-training run they start from -- pre-training writes both.
+#
+#   -mstepft       best_ckpt.tar            lowest validation loss; matches the
+#                                           ERA5 baseline fine-tuning recipe.
+#   -mstepftaimip  best_inference_ckpt.tar  lowest inference error, which for
+#                                           these runs means the weight-1.0
+#                                           aimip_checkpoint entry -- the same
+#                                           criterion the -bestinf evaluations
+#                                           report on.
+#
+# Suffixes must not end in one of update_beaker_map.py's SKIP_SUFFIXES
+# ("-bestinf", "-besttrain", "-lastepoch"), or the fine-tune runs are filtered
+# out of the run -> dataset map.
+FT_VARIANTS = (
+    ("-mstepft", "training_checkpoints/best_ckpt.tar"),
+    ("-mstepftaimip", "training_checkpoints/best_inference_ckpt.tar"),
+)
 
 # Fine-tuning is short; cap it well below pre-training's max_epochs (150).
 FT_MAX_EPOCHS = 20
@@ -86,24 +107,24 @@ SELECTED_SOURCES = {
 }
 
 
-def source_run_to_config_stem(source_run_name: str) -> str:
+def source_run_to_config_stem(source_run_name: str, ft_suffix: str) -> str:
     """Config stem for a source run name.
 
     ace2-var-mask-nc-sfno-era5-gmroff-mask0-seed1-v5
     -> ace-train-config-4deg-nc-sfno-era5-gmroff-mask0-seed1-v5-mstepft
     """
     suffix = source_run_name.removeprefix(WANDB_PREFIX)
-    return f"{CONFIG_PREFIX}{suffix}{FT_SUFFIX}"
+    return f"{CONFIG_PREFIX}{suffix}{ft_suffix}"
 
 
-def _to_finetune(pretrain_cfg: dict) -> dict:
+def _to_finetune(pretrain_cfg: dict, checkpoint_name: str) -> dict:
     """Return a fine-tune config: pre-training config with only the multi-step
     schedule, checkpoint weight-loading, and shorter max_epochs changed.
     """
     cfg = copy.deepcopy(pretrain_cfg)
     st = cfg.setdefault("stepper_training", {})
     st["n_forward_steps"] = copy.deepcopy(MULTISTEP_SCHEDULE)
-    st["parameter_init"] = {"weights_path": f"/weights/{CHECKPOINT_NAME}"}
+    st["parameter_init"] = {"weights_path": f"/weights/{checkpoint_name}"}
     cfg["max_epochs"] = FT_MAX_EPOCHS
     # Mask only the optimized (last) step of each rollout, not the intermediate
     # no_grad steps -- otherwise masking perturbs the trajectory feeding the
@@ -123,9 +144,12 @@ def _to_finetune(pretrain_cfg: dict) -> dict:
 def generate_finetune_config(
     source_run_name: str,
     beaker_dataset_id: str,
+    ft_suffix: str,
+    checkpoint_name: str,
     existing_only: bool,
 ) -> None:
-    out_path = RUN_CONFIGS_DIR / f"{source_run_to_config_stem(source_run_name)}.yaml"
+    stem = source_run_to_config_stem(source_run_name, ft_suffix)
+    out_path = RUN_CONFIGS_DIR / f"{stem}.yaml"
     if existing_only and not out_path.exists():
         print(f"Skipped {out_path.name}")
         return
@@ -138,7 +162,7 @@ def generate_finetune_config(
             f"`beaker dataset stream-file {beaker_dataset_id} config.yaml`."
         )
     pretrain_cfg = yaml.safe_load(pretrain_path.read_text())
-    cfg = _to_finetune(pretrain_cfg)
+    cfg = _to_finetune(pretrain_cfg, checkpoint_name)
 
     header = (
         f"# arg: --dataset {beaker_dataset_id}:/weights\n"
@@ -148,11 +172,12 @@ def generate_finetune_config(
         f" max_epochs capped at {FT_MAX_EPOCHS}, and\n#"
         "   input_dropout_optimized_steps_only set"
         " (see generate_finetune_configs.py).\n"
+        f"# fine-tuning starts from {checkpoint_name}\n"
     )
     with out_path.open("w") as f:
         f.write(header)
         yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
-    print(f"Wrote {out_path.name}  (weights: {beaker_dataset_id})")
+    print(f"Wrote {out_path.name}  (weights: {beaker_dataset_id}/{checkpoint_name})")
 
 
 def main() -> None:
@@ -182,7 +207,14 @@ def main() -> None:
         if dataset_id is None:
             missing.append((cell, source_run_name))
             continue
-        generate_finetune_config(source_run_name, dataset_id, args.existing_only)
+        for ft_suffix, checkpoint_name in FT_VARIANTS:
+            generate_finetune_config(
+                source_run_name,
+                dataset_id,
+                ft_suffix,
+                checkpoint_name,
+                args.existing_only,
+            )
 
     if missing:
         lines = "\n".join(f"  {cell}: {run}" for cell, run in missing)
