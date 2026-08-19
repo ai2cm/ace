@@ -231,6 +231,7 @@ class VideoTrainer:
     def train_one_epoch(self) -> None:
         self.model.module.train()
         wandb = WandB.get_instance()
+        dist = Distributed.get_instance()
         loss_vs_noise = (
             LossVsNoiseAggregator() if self.config.log_loss_vs_noise else None
         )
@@ -238,6 +239,7 @@ class VideoTrainer:
         epoch_loss = 0.0
         n_batches = 0
         for i, batch in enumerate(self.train_data.loader):
+            dist.park_if_terminating()
             if (
                 self.config.max_train_batches is not None
                 and i >= self.config.max_train_batches
@@ -270,6 +272,7 @@ class VideoTrainer:
     @torch.no_grad()
     def valid_one_epoch(self) -> dict[str, float]:
         self.model.module.eval()
+        dist = Distributed.get_instance()
         total_loss = 0.0
         total_gen_mae = 0.0
         loss_vs_noise = (
@@ -278,6 +281,7 @@ class VideoTrainer:
         n_batches = 0
         with self._validation_context():
             for j, batch in enumerate(self.validation_data.loader):
+                dist.park_if_terminating()
                 if (
                     self.config.max_val_batches is not None
                     and j >= self.config.max_val_batches
@@ -294,7 +298,7 @@ class VideoTrainer:
         stats = torch.tensor(
             [total_loss, total_gen_mae, float(n_batches)], device=get_device()
         )
-        Distributed.get_instance().reduce_sum(stats)
+        dist.reduce_sum(stats)
         total_loss, total_gen_mae, n_total = stats.tolist()
         if n_total == 0:
             raise RuntimeError("Empty validation batch generator")
@@ -343,9 +347,9 @@ class VideoTrainer:
             n = min(self.config.num_visualization_examples, len(batch.fine))
             for i in range(n):
                 for name in self.model.out_names:
-                    gt = batch.fine.data[name][i].float().cpu()
+                    truth = batch.fine.data[name][i].float().cpu()
                     pred = generated[name][i, 0].float().cpu()
-                    fig = _video_comparison_figure(gt, pred, name, i)
+                    fig = _video_comparison_figure(truth, pred, name, i)
                     logs[f"val_viz/example_{i}/{name}"] = wandb.Image(fig)
                     plt.close(fig)
         wandb.log(logs, step=self.num_batches_seen)
@@ -369,6 +373,7 @@ class VideoTrainer:
         viz = None
         with self._validation_context():
             for b, batch in enumerate(self.test_data.loader):
+                dist.park_if_terminating()
                 if (
                     self.config.max_test_batches is not None
                     and b >= self.config.max_test_batches
@@ -378,14 +383,18 @@ class VideoTrainer:
                     batch, n_samples=self.config.generate_n_samples
                 )
                 for c, name in enumerate(names):
-                    gt = batch.fine.data[name].float()
+                    truth = batch.fine.data[name].float()
                     pred = generated[name].float().mean(dim=1)
-                    lin = _linear_interp_endpoints(gt)
-                    gi, pi, li = gt[:, interior], pred[:, interior], lin[:, interior]
-                    acc[c, 0] += (pi - gi).abs().sum()
-                    acc[c, 1] += (pi - gi).pow(2).sum()
-                    acc[c, 2] += (li - gi).abs().sum()
-                    acc[c, 3] += gi.numel()
+                    lin = _linear_interp_endpoints(truth)
+                    truth_i, pred_i, lin_i = (
+                        truth[:, interior],
+                        pred[:, interior],
+                        lin[:, interior],
+                    )
+                    acc[c, 0] += (pred_i - truth_i).abs().sum()
+                    acc[c, 1] += (pred_i - truth_i).pow(2).sum()
+                    acc[c, 2] += (lin_i - truth_i).abs().sum()
+                    acc[c, 3] += truth_i.numel()
                 if b == 0 and dist.is_root():
                     viz = (batch, generated)
         dist.reduce_sum(acc)
@@ -415,9 +424,9 @@ class VideoTrainer:
             n = min(self.config.num_visualization_examples, len(batch.fine))
             for i in range(n):
                 for name in names:
-                    gt = batch.fine.data[name][i].float().cpu()
+                    truth = batch.fine.data[name][i].float().cpu()
                     pred = generated[name][i].float().mean(dim=0).cpu()
-                    fig = _video_comparison_figure(gt, pred, name, i)
+                    fig = _video_comparison_figure(truth, pred, name, i)
                     logs[f"test_viz/example_{i}/{name}"] = wandb.Image(fig)
                     plt.close(fig)
         wandb.log(logs, step=self.num_batches_seen)
