@@ -1,12 +1,19 @@
 """Submit a gantry training job for each multi-step fine-tuning config.
 
-Each ``*-mstepft.yaml`` config in run_configs/ (from
-generate_finetune_configs.py) is submitted via run-ace-train.sh, which validates
-it and calls gantry. All fine-tunes are v5 (1-degree) and take the 400GiB
-footprint; GPU count is per-cluster (titan/B200 = 4, jupiter/H100 = 8).
+Each fine-tuning config in run_configs/ (from generate_finetune_configs.py) is
+submitted via run-ace-train.sh, which validates it and calls gantry. All
+fine-tunes are v5 (1-degree) and take the 400GiB footprint; GPU count is
+per-cluster (titan/B200 = 4, jupiter/H100 = 8).
+
+generate_finetune_configs.py writes one config per (cell, FT_VARIANTS entry),
+so ``--variant`` selects which set to submit. It defaults to ``aimip`` rather
+than ``all`` because the ``-mstepft`` (best_ckpt) runs were submitted first and
+are long-lived: a resubmit writes a new /results and restarts fine-tuning at
+epoch 0, discarding their progress. Pass ``--variant all`` deliberately.
 
 Usage:
     python submit_finetune_jobs.py [--dry-run]
+                                   [--variant {aimip,best,all}]
                                    [--beaker-workspace WORKSPACE]
                                    [--beaker-cluster CLUSTER [CLUSTER ...]]
                                    [--beaker-priority PRIORITY]
@@ -23,6 +30,15 @@ HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
 WANDB_PROJECT = "VarMasking8"
 WANDB_GROUP = "ace2-var-masking-mstepft-2026-06-30"
+
+# Config-stem suffix per --variant choice, matching FT_VARIANTS in
+# generate_finetune_configs.py. "all" is spelled as a tuple of both so the glob
+# below stays a simple suffix match.
+VARIANT_SUFFIXES = {
+    "aimip": ("-mstepftaimip",),
+    "best": ("-mstepft",),
+    "all": ("-mstepft", "-mstepftaimip"),
+}
 
 # All fine-tunes are v5 (1-degree); the run-ace-train.sh defaults (N_GPUS=2 /
 # 100GiB) are for the 4-degree runs, so we override the footprint here.
@@ -73,6 +89,16 @@ def main() -> None:
         "--dry-run", action="store_true", help="Print commands without executing them."
     )
     parser.add_argument(
+        "--variant",
+        choices=sorted(VARIANT_SUFFIXES),
+        default="aimip",
+        help=(
+            "Which fine-tune variant to submit: aimip (best_inference_ckpt),"
+            " best (best_ckpt), or all. Default: aimip -- submitting 'best'"
+            " restarts those runs from epoch 0."
+        ),
+    )
+    parser.add_argument(
         "--beaker-workspace",
         default="ai2/climate-titan",
         help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
@@ -91,16 +117,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    suffixes = VARIANT_SUFFIXES[args.variant]
     configs = sorted(
         path.name
-        for path in RUN_CONFIGS_DIR.glob("*-mstepft.yaml")
-        if path.name.startswith(CONFIG_PREFIX)
+        for path in RUN_CONFIGS_DIR.glob("*-mstepft*.yaml")
+        if path.name.startswith(CONFIG_PREFIX) and path.stem.endswith(suffixes)
     )
     if not configs:
         raise FileNotFoundError(
-            f"no fine-tune configs in {RUN_CONFIGS_DIR} — run "
+            f"no {args.variant} fine-tune configs in {RUN_CONFIGS_DIR} — run "
             "generate_finetune_configs.py first"
         )
+    print(f"Submitting {len(configs)} {args.variant} fine-tune config(s).")
 
     n_gpus = n_gpus_for_clusters(args.beaker_cluster)
     base_env = {
