@@ -666,6 +666,19 @@ def step_with_adjustments(
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
+    # Ocean prescription and prescribed prognostics run before the corrector
+    # so the corrector operates on the state with prescribed fields already
+    # in place, eliminating overlap guards and post-hoc filtering.
+    if ocean is not None:
+        output = ocean(input, output, next_step_input_data)
+    for name in prescribed_prognostic_names:
+        if name in next_step_input_data:
+            output = {**output, name: next_step_input_data[name]}
+        else:
+            raise ValueError(
+                f"prescribed_prognostic_name '{name}' not in next_step_input_data"
+            )
+
     diagnostics = CorrectorDiagnostics()
     if corrector is not None:
         corrector_state: CorrectorState | None = (
@@ -682,9 +695,6 @@ def step_with_adjustments(
             delta={k: v.detach() for k, v in result.diagnostics.delta.items()},
         )
         if result.corrector_state is not None:
-            # Preserve the incoming state's other fields (e.g. random_state)
-            # rather than rebuilding from scratch, so StepperState stays
-            # coherent across step calls.
             stepper_state = (
                 StepperState(corrector_state=result.corrector_state)
                 if stepper_state is None
@@ -693,48 +703,6 @@ def step_with_adjustments(
                 )
             )
 
-    # The ocean surface temperature prescription runs after the corrector and is
-    # excluded from the diagnostics. Its written name must stay disjoint from the
-    # corrector's modified names, or ``delta = output - input_snapshot`` would no
-    # longer be exact for an overlapping variable. A prescribed prognostic
-    # overwrite is exempt from this guard: it is an intentional "use the given
-    # value regardless of what the network or corrector produced" operation, and
-    # the corrector's delta for the overwritten variable is dropped below so the
-    # reported delta stays exact for every variable it still contains.
-    if ocean is not None:
-        overlap = {ocean.surface_temperature_name} & set(diagnostics.delta)
-        if overlap:
-            raise ValueError(
-                "post-corrector adjustment names overlap the corrector's modified "
-                f"names: {sorted(overlap)}"
-            )
-
-    if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
-    for name in prescribed_prognostic_names:
-        if name in next_step_input_data:
-            output = {**output, name: next_step_input_data[name]}
-        else:
-            raise ValueError(
-                f"prescribed_prognostic_name '{name}' not in next_step_input_data"
-            )
-    # A prescribed overwrite replaces the output with the prescribed value, so the
-    # corrector's delta for that variable no longer describes the returned output.
-    # Drop prescribed names from the reported delta (a no-op for names the
-    # corrector never modified).
-    if prescribed_prognostic_names:
-        diagnostics = CorrectorDiagnostics(
-            pre_diagnosis_fields={
-                name: value
-                for name, value in diagnostics.pre_diagnosis_fields.items()
-                if name not in prescribed_prognostic_names
-            },
-            delta={
-                name: value
-                for name, value in diagnostics.delta.items()
-                if name not in prescribed_prognostic_names
-            },
-        )
     return StepOutput(
         output=output,
         stepper_state=stepper_state,

@@ -841,11 +841,10 @@ def test_step_boundary_disjointness_passes_when_disjoint():
 
 
 def test_step_prescribed_prognostic_shadows_corrector_modified_name():
-    # corrector modifies diagnostic_main and the post-corrector prescription
-    # also writes diagnostic_main. Prescribing a corrector-modified variable is
-    # a supported, silent operation: the step runs, the prescribed value wins in
-    # the output, and diagnostic_main is dropped from the reported delta (its
-    # corrector delta no longer describes the overwritten output).
+    # Prescribed prognostics run before the corrector, so the corrector sees
+    # the prescribed value.  ForcePositive clamps to >= 0; since the
+    # prescribed value is already positive (42.0), the delta is zero but the
+    # field still appears in the corrector's modified set.
     selector = _single_module_corrector_prescribed_selector(
         force_positive_names=["diagnostic_main"],
         prescribed_prognostic_names=["diagnostic_main"],
@@ -863,8 +862,14 @@ def test_step_prescribed_prognostic_shadows_corrector_modified_name():
             labels=None,
         ),
     )
+    # The corrector operates on the prescribed value; since it is positive,
+    # the clamp is a no-op and the output is the prescribed value.
     torch.testing.assert_close(result.output["diagnostic_main"], prescribed_value)
-    assert "diagnostic_main" not in result.corrector_diagnostics.delta
+    # The clamping delta is zero (the field was already non-negative).
+    torch.testing.assert_close(
+        result.corrector_diagnostics.delta["diagnostic_main"],
+        torch.zeros_like(prescribed_value),
+    )
 
 
 def _single_module_ocean_corrector_selector(
@@ -898,9 +903,10 @@ def _single_module_ocean_corrector_selector(
     )
 
 
-def test_step_boundary_disjointness_raises_on_ocean_overlap():
-    # corrector modifies surface_temperature and the ocean prescription also
-    # writes surface_temperature -> the ocean overlap remains a hard error.
+def test_step_ocean_corrector_overlap_allowed():
+    # Ocean prescription and corrector may both touch surface_temperature;
+    # the ocean runs first, then the corrector (ForcePositive clamp) operates
+    # on the prescribed value.  No overlap error is raised.
     selector = _single_module_ocean_corrector_selector(
         force_positive_names=["surface_temperature"],
     )
@@ -908,39 +914,14 @@ def test_step_boundary_disjointness_raises_on_ocean_overlap():
     step = get_step(selector, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
     next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
-    with pytest.raises(ValueError, match="overlap"):
-        step.step(
-            args=StepArgs(
-                input=input_data,
-                next_step_input_data=next_step_input_data,
-                labels=None,
-            ),
-        )
-
-
-def test_step_ocean_overlap_raises_even_when_name_also_prescribed():
-    # A name that is both the ocean surface_temperature_name and a prescribed
-    # prognostic still triggers the ocean overlap guard when the corrector
-    # modifies it. The prescribed exemption does not suppress the ocean raise:
-    # the guard runs against the full corrector delta before the delta filter.
-    # No correction currently touches surface_temperature, so this locks the
-    # guard down for whoever adds one.
-    selector = _single_module_ocean_corrector_selector(
-        force_positive_names=["surface_temperature"],
-        prescribed_prognostic_names=["surface_temperature"],
+    result = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=None,
+        ),
     )
-    img_shape = DEFAULT_IMG_SHAPE
-    step = get_step(selector, img_shape)
-    input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
-    next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
-    with pytest.raises(ValueError, match="overlap"):
-        step.step(
-            args=StepArgs(
-                input=input_data,
-                next_step_input_data=next_step_input_data,
-                labels=None,
-            ),
-        )
+    assert "surface_temperature" in result.corrector_diagnostics.delta
 
 
 def test_multi_step_prescribed_corrected_collision_stacks_diagnostics():
@@ -969,11 +950,13 @@ def test_multi_step_prescribed_corrected_collision_stacks_diagnostics():
         stepper_state = result.stepper_state
         outputs.append(result)
     for result in outputs:
-        assert "diagnostic_main" not in result.corrector_diagnostics.delta
+        # With prescribed prognostics before the corrector, both fields
+        # appear in the delta (ForcePositive clamps both).
+        assert "diagnostic_main" in result.corrector_diagnostics.delta
         assert "diagnostic_rad" in result.corrector_diagnostics.delta
     stacked = StepOutput.stack_diagnostics(outputs)
     assert stacked is not None
-    assert set(stacked.delta) == {"diagnostic_rad"}
+    assert set(stacked.delta) == {"diagnostic_main", "diagnostic_rad"}
 
 
 def test_secondary_module_empty_names_raises():
