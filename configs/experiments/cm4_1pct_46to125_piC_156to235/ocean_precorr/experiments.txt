@@ -11,3 +11,5 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|training|best_inference_ckpt|normal|--min-runtime 8h
