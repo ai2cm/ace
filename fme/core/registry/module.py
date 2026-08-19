@@ -86,6 +86,16 @@ class Module:
             return self._module(input)
 
     @property
+    def is_conditional(self) -> bool:
+        """Whether this module consumes labels.
+
+        Labels also drive per-group normalization, which is independent of
+        conditioning, so callers must check this before forwarding labels
+        rather than assuming labels imply a conditional module.
+        """
+        return self._label_encoding is not None
+
+    @property
     def torch_module(self) -> nn.Module:
         return self._module
 
@@ -196,7 +206,12 @@ class ModuleSelector:
         if self.conditional:
             label_encoding = LabelEncoding(sorted(list(dataset_info.all_labels)))
         else:
+            # Labels can be present for reasons other than conditioning, such
+            # as selecting per-group normalization constants. An unconditional
+            # module is never given them, so it is built as if the dataset had
+            # none rather than sizing dead label weights it cannot use.
             label_encoding = None
+            dataset_info = dataset_info.without_labels()
         module = self._instance.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,

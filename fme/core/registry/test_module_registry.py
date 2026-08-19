@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import pathlib
+import unittest.mock
 from collections.abc import Iterable
 from typing import Any
 
@@ -99,12 +100,64 @@ def test_build_conditional():
         CONDITIONAL_BUILDERS.remove("mock")
 
 
+def test_build_unconditional_hides_labels_from_builder():
+    """An unconditional module is built as if the dataset carried no labels.
+
+    Labels may be present for reasons unrelated to conditioning, such as
+    selecting per-group normalization constants. A builder that sizes weights
+    from ``all_labels`` must not see them, or it allocates label weights the
+    module is never given labels to use.
+    """
+    selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
+    seen: list[set[str]] = []
+    original_build = selector.module_config.build
+
+    def _record(n_in_channels, n_out_channels, dataset_info):
+        seen.append(set(dataset_info.all_labels))
+        return original_build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            dataset_info=dataset_info,
+        )
+
+    with unittest.mock.patch.object(selector.module_config, "build", _record):
+        module = selector.build(
+            n_in_channels=1,
+            n_out_channels=1,
+            dataset_info=DatasetInfo(all_labels={"a", "b"}, img_shape=(16, 32)),
+        )
+    assert seen == [set()]
+    assert module._label_encoding is None
+
+
+def test_unconditional_build_is_unaffected_by_dataset_labels():
+    """Labeling a dataset does not change an unconditional module.
+
+    Per-group normalization requires labels on the data, so this is what makes
+    a labeled control comparable to an unlabeled one: only a conditional module
+    should see any difference.
+    """
+    selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
+    shapes = []
+    for all_labels in (set(), {"a", "b"}):
+        set_seed(0)
+        module = selector.build(
+            n_in_channels=1,
+            n_out_channels=1,
+            dataset_info=DatasetInfo(all_labels=all_labels, img_shape=(16, 32)),
+        )
+        shapes.append({k: v.shape for k, v in module.torch_module.state_dict().items()})
+    assert shapes[0] == shapes[1]
+
+
 def test_module_selector_raises_with_bad_config():
     with pytest.raises(dacite.UnexpectedDataError):
         ModuleSelector(type="mock", config={"non_existent_key": 1})
 
 
-def get_dbc2925_ncsfno_module() -> tuple[ModuleSelector, Module]:
+def get_dbc2925_ncsfno_module(
+    conditional: bool = True,
+) -> tuple[ModuleSelector, Module]:
     img_shape = (9, 18)
     n_in_channels = 5
     n_out_channels = 6
@@ -126,6 +179,11 @@ def get_dbc2925_ncsfno_module() -> tuple[ModuleSelector, Module]:
     )
     selector = ModuleSelector(
         type="NoiseConditionedSFNO",
+        # The frozen checkpoint holds label weights sized from all_labels, so
+        # it is a conditional module. Pass conditional=False to build the same
+        # architecture the way an unconditional config does; see
+        # test_unconditional_build_drops_only_the_label_weights.
+        conditional=conditional,
         config={
             "embed_dim": 8,
             "noise_embed_dim": 4,
@@ -168,6 +226,8 @@ def get_noise_conditioned_sfno_module() -> tuple[ModuleSelector, Module]:
     )
     selector = ModuleSelector(
         type="NoiseConditionedSFNO",
+        # label_embed_dim > 0 requires labels, so this module is conditional.
+        conditional=True,
         config={
             "embed_dim": 8,
             "noise_embed_dim": 4,
@@ -251,6 +311,28 @@ def test_frozen_module_backwards_compatibility(selector_name: str):
     _, module = FROZEN_BUILDERS[selector_name]()
     loaded_state_dict = load_state(selector_name)
     module.load_state(loaded_state_dict)
+
+
+def test_unconditional_build_drops_only_the_label_weights():
+    """An unconditional build of a labeled dataset omits the label weights.
+
+    ``ModuleSelector.build`` hides labels from an unconditional builder, so a
+    module that used to allocate label weights it was never given now does
+    not. This pins down that the change removes exactly those parameters and
+    leaves the rest of the architecture untouched -- the frozen fixtures are
+    built ``conditional=True`` to match what their .pt files hold, so they
+    cannot show it.
+    """
+    set_seed(0)
+    _, conditional = get_dbc2925_ncsfno_module(conditional=True)
+    set_seed(0)
+    _, unconditional = get_dbc2925_ncsfno_module(conditional=False)
+
+    conditional_keys = set(conditional.torch_module.state_dict())
+    unconditional_keys = set(unconditional.torch_module.state_dict())
+    label_keys = {k for k in conditional_keys if "_labels." in k}
+    assert label_keys, "expected the conditional build to allocate label weights"
+    assert unconditional_keys == conditional_keys - label_keys
 
 
 LATEST_BUILDERS = {

@@ -251,6 +251,26 @@ class DatasetInfo:
             all_labels=self._all_labels,
         )
 
+    def without_labels(self) -> "DatasetInfo":
+        """
+        Return a new DatasetInfo with no dataset labels.
+
+        Used when building an unconditional module: labels may be present for
+        reasons unrelated to conditioning (e.g. selecting per-group
+        normalization constants), and a module which does not condition on them
+        must not size any label-dependent weights from them.
+        """
+        return DatasetInfo(
+            horizontal_coordinates=self._horizontal_coordinates,
+            vertical_coordinate=self._vertical_coordinate,
+            spatial_mask_provider=self._spatial_mask_provider,
+            timestep=self._timestep,
+            variable_metadata=self._variable_metadata,
+            gridded_operations=self._gridded_operations,
+            img_shape=self._img_shape,
+            all_labels=set(),
+        )
+
     def update_vertical_coordinate(
         self, new_vertical_coordinate: VerticalCoordinate | None
     ) -> "DatasetInfo":
