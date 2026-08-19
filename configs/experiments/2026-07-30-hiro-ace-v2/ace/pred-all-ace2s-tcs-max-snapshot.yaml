@@ -53,6898 +53,6898 @@ events:
   date: 2014-01-05T12:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 41.5
-    stop: 57.5
+    start: 42
+    stop: 58
 - name: tc_001_20140119T18
   n_samples: 8
   date: 2014-01-19T18:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 34.5
-    stop: 50.5
+    start: 34
+    stop: 50
 - name: tc_002_20140119T00
   n_samples: 8
   date: 2014-01-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 43.5
-    stop: 59.5
+    start: 44
+    stop: 60
 - name: tc_003_20140123T00
   n_samples: 8
   date: 2014-01-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 62.5
-    stop: 78.5
+    start: 62
+    stop: 78
 - name: tc_004_20140128T18
   n_samples: 8
   date: 2014-01-28T18:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 105.5
-    stop: 121.5
+    start: 106
+    stop: 122
 - name: tc_005_20140208T12
   n_samples: 8
   date: 2014-02-08T12:00
   save_generated_samples: true
   lat_extent:
-    start: -32.432034
-    stop: -16.432034
+    start: -32
+    stop: -16
   lon_extent:
-    start: 54.5
-    stop: 70.5
+    start: 54
+    stop: 70
 - name: tc_006_20140130T06
   n_samples: 8
   date: 2014-01-30T06:00
   save_generated_samples: true
   lat_extent:
-    start: 31.3904
-    stop: 47.3904
+    start: 31
+    stop: 47
   lon_extent:
-    start: 205.5
-    stop: 221.5
+    start: 206
+    stop: 222
 - name: tc_007_20140202T18
   n_samples: 8
   date: 2014-02-02T18:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 96.5
-    stop: 112.5
+    start: 96
+    stop: 112
 - name: tc_008_20140204T06
   n_samples: 8
   date: 2014-02-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: 40.365402
-    stop: 56.365402
+    start: 40
+    stop: 56
   lon_extent:
-    start: 173.5
-    stop: 189.5
+    start: 174
+    stop: 190
 - name: tc_009_20140219T06
   n_samples: 8
   date: 2014-02-19T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 99.5
-    stop: 115.5
+    start: 100
+    stop: 116
 - name: tc_010_20140218T12
   n_samples: 8
   date: 2014-02-18T12:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 62.5
-    stop: 78.5
+    start: 62
+    stop: 78
 - name: tc_011_20140303T00
   n_samples: 8
   date: 2014-03-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: -33.429258000000004
-    stop: -17.429258
+    start: -33
+    stop: -17
   lon_extent:
-    start: 28.5
-    stop: 44.5
+    start: 28
+    stop: 44
 - name: tc_012_20140305T06
   n_samples: 8
   date: 2014-03-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 55.5
-    stop: 71.5
+    start: 56
+    stop: 72
 - name: tc_013_20140308T18
   n_samples: 8
   date: 2014-03-08T18:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 110.5
-    stop: 126.5
+    start: 110
+    stop: 126
 - name: tc_014_20140313T12
   n_samples: 8
   date: 2014-03-13T12:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 146.5
-    stop: 162.5
+    start: 146
+    stop: 162
 - name: tc_015_20140317T00
   n_samples: 8
   date: 2014-03-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 78.5
-    stop: 94.5
+    start: 78
+    stop: 94
 - name: tc_016_20140317T06
   n_samples: 8
   date: 2014-03-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 99.5
-    stop: 115.5
+    start: 100
+    stop: 116
 - name: tc_017_20140324T18
   n_samples: 8
   date: 2014-03-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 54.5
-    stop: 70.5
+    start: 54
+    stop: 70
 - name: tc_018_20140326T00
   n_samples: 8
   date: 2014-03-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 174.5
-    stop: 190.5
+    start: 174
+    stop: 190
 - name: tc_019_20140409T18
   n_samples: 8
   date: 2014-04-09T18:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 152.5
-    stop: 168.5
+    start: 152
+    stop: 168
 - name: tc_020_20140413T00
   n_samples: 8
   date: 2014-04-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 83.5
-    stop: 99.5
+    start: 84
+    stop: 100
 - name: tc_021_20140429T00
   n_samples: 8
   date: 2014-04-29T00:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 164.5
-    stop: 180.5
+    start: 164
+    stop: 180
 - name: tc_022_20140501T00
   n_samples: 8
   date: 2014-05-01T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_023_20140505T00
   n_samples: 8
   date: 2014-05-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 153.5
-    stop: 169.5
+    start: 154
+    stop: 170
 - name: tc_024_20140511T06
   n_samples: 8
   date: 2014-05-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_025_20140516T12
   n_samples: 8
   date: 2014-05-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 134.5
-    stop: 150.5
+    start: 134
+    stop: 150
 - name: tc_026_20140525T00
   n_samples: 8
   date: 2014-05-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 132.5
-    stop: 148.5
+    start: 132
+    stop: 148
 - name: tc_027_20140528T12
   n_samples: 8
   date: 2014-05-28T12:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 127.5
-    stop: 143.5
+    start: 128
+    stop: 144
 - name: tc_028_20140608T18
   n_samples: 8
   date: 2014-06-08T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_029_20140612T00
   n_samples: 8
   date: 2014-06-12T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_030_20140606T12
   n_samples: 8
   date: 2014-06-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: -42.404282
-    stop: -26.404282000000002
+    start: -42
+    stop: -26
   lon_extent:
-    start: 227.5
-    stop: 243.5
+    start: 228
+    stop: 244
 - name: tc_031_20140620T12
   n_samples: 8
   date: 2014-06-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 240.5
-    stop: 256.5
+    start: 240
+    stop: 256
 - name: tc_032_20140629T12
   n_samples: 8
   date: 2014-06-29T12:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_033_20140707T12
   n_samples: 8
   date: 2014-07-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 235.5
-    stop: 251.5
+    start: 236
+    stop: 252
 - name: tc_034_20140705T18
   n_samples: 8
   date: 2014-07-05T18:00
   save_generated_samples: true
   lat_extent:
-    start: -52.376514
-    stop: -36.376514
+    start: -52
+    stop: -36
   lon_extent:
-    start: 184.5
-    stop: 200.5
+    start: 184
+    stop: 200
 - name: tc_035_20140711T12
   n_samples: 8
   date: 2014-07-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 158.5
-    stop: 174.5
+    start: 158
+    stop: 174
 - name: tc_036_20140711T06
   n_samples: 8
   date: 2014-07-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_037_20140720T00
   n_samples: 8
   date: 2014-07-20T00:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 149.5
-    stop: 165.5
+    start: 150
+    stop: 166
 - name: tc_038_20140720T06
   n_samples: 8
   date: 2014-07-20T06:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 143.5
-    stop: 159.5
+    start: 144
+    stop: 160
 - name: tc_039_20140802T12
   n_samples: 8
   date: 2014-08-02T12:00
   save_generated_samples: true
   lat_extent:
-    start: 30.393177
-    stop: 46.393177
+    start: 30
+    stop: 46
   lon_extent:
-    start: 149.5
-    stop: 165.5
+    start: 150
+    stop: 166
 - name: tc_040_20140807T06
   n_samples: 8
   date: 2014-08-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 135.5
-    stop: 151.5
+    start: 136
+    stop: 152
 - name: tc_041_20140816T06
   n_samples: 8
   date: 2014-08-16T06:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 234.5
-    stop: 250.5
+    start: 234
+    stop: 250
 - name: tc_042_20140820T18
   n_samples: 8
   date: 2014-08-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 131.5
-    stop: 147.5
+    start: 132
+    stop: 148
 - name: tc_043_20140826T06
   n_samples: 8
   date: 2014-08-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_044_20140825T12
   n_samples: 8
   date: 2014-08-25T12:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 227.5
-    stop: 243.5
+    start: 228
+    stop: 244
 - name: tc_045_20140831T00
   n_samples: 8
   date: 2014-08-31T00:00
   save_generated_samples: true
   lat_extent:
-    start: 45.351505
-    stop: 61.351505
+    start: 45
+    stop: 61
   lon_extent:
-    start: 171.5
-    stop: 187.5
+    start: 172
+    stop: 188
 - name: tc_046_20140902T06
   n_samples: 8
   date: 2014-09-02T06:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 239.5
-    stop: 255.5
+    start: 240
+    stop: 256
 - name: tc_047_20140906T06
   n_samples: 8
   date: 2014-09-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 131.5
-    stop: 147.5
+    start: 132
+    stop: 148
 - name: tc_048_20140903T18
   n_samples: 8
   date: 2014-09-03T18:00
   save_generated_samples: true
   lat_extent:
-    start: 31.3904
-    stop: 47.3904
+    start: 31
+    stop: 47
   lon_extent:
-    start: 304.5
-    stop: 320.5
+    start: 304
+    stop: 320
 - name: tc_049_20140912T00
   n_samples: 8
   date: 2014-09-12T00:00
   save_generated_samples: true
   lat_extent:
-    start: 25.407058999999997
-    stop: 41.407059
+    start: 25
+    stop: 41
   lon_extent:
-    start: 179.5
-    stop: 195.5
+    start: 180
+    stop: 196
 - name: tc_050_20140916T06
   n_samples: 8
   date: 2014-09-16T06:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 158.5
-    stop: 174.5
+    start: 158
+    stop: 174
 - name: tc_051_20140912T06
   n_samples: 8
   date: 2014-09-12T06:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 244.5
-    stop: 260.5
+    start: 244
+    stop: 260
 - name: tc_052_20140917T06
   n_samples: 8
   date: 2014-09-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 297.5
-    stop: 313.5
+    start: 298
+    stop: 314
 - name: tc_053_20140929T00
   n_samples: 8
   date: 2014-09-29T00:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 141.5
-    stop: 157.5
+    start: 142
+    stop: 158
 - name: tc_054_20141006T06
   n_samples: 8
   date: 2014-10-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_055_20141009T00
   n_samples: 8
   date: 2014-10-09T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_056_20141006T06
   n_samples: 8
   date: 2014-10-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: -14.481969
-    stop: 1.5180309999999997
+    start: -14
+    stop: 2
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_057_20141015T00
   n_samples: 8
   date: 2014-10-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 155.5
-    stop: 171.5
+    start: 156
+    stop: 172
 - name: tc_058_20141109T12
   n_samples: 8
   date: 2014-11-09T12:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 141.5
-    stop: 157.5
+    start: 142
+    stop: 158
 - name: tc_059_20141103T12
   n_samples: 8
   date: 2014-11-03T12:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_060_20141107T00
   n_samples: 8
   date: 2014-11-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 81.5
-    stop: 97.5
+    start: 82
+    stop: 98
 - name: tc_061_20141121T12
   n_samples: 8
   date: 2014-11-21T12:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 154.5
-    stop: 170.5
+    start: 154
+    stop: 170
 - name: tc_062_20141120T12
   n_samples: 8
   date: 2014-11-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 45.5
-    stop: 61.5
+    start: 46
+    stop: 62
 - name: tc_063_20141122T18
   n_samples: 8
   date: 2014-11-22T18:00
   save_generated_samples: true
   lat_extent:
-    start: -19.4681
-    stop: -3.4680999999999997
+    start: -19
+    stop: -3
   lon_extent:
-    start: 66.5
-    stop: 82.5
+    start: 66
+    stop: 82
 - name: tc_064_20141122T12
   n_samples: 8
   date: 2014-11-22T12:00
   save_generated_samples: true
   lat_extent:
-    start: -0.520804
-    stop: 15.479196
+    start: -1
+    stop: 15
   lon_extent:
-    start: 83.5
-    stop: 99.5
+    start: 84
+    stop: 100
 - name: tc_065_20141207T00
   n_samples: 8
   date: 2014-12-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_066_20141211T00
   n_samples: 8
   date: 2014-12-11T00:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 61.5
-    stop: 77.5
+    start: 62
+    stop: 78
 - name: tc_067_20141216T12
   n_samples: 8
   date: 2014-12-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 51.5
-    stop: 67.5
+    start: 52
+    stop: 68
 - name: tc_068_20141227T06
   n_samples: 8
   date: 2014-12-27T06:00
   save_generated_samples: true
   lat_extent:
-    start: -35.423708000000005
-    stop: -19.423708
+    start: -35
+    stop: -19
   lon_extent:
-    start: 61.5
-    stop: 77.5
+    start: 62
+    stop: 78
 - name: tc_069_20150104T06
   n_samples: 8
   date: 2015-01-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: -31.434807
-    stop: -15.434807
+    start: -31
+    stop: -15
   lon_extent:
-    start: 186.5
-    stop: 202.5
+    start: 186
+    stop: 202
 - name: tc_070_20150106T12
   n_samples: 8
   date: 2015-01-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 66.5
-    stop: 82.5
+    start: 66
+    stop: 82
 - name: tc_071_20150112T00
   n_samples: 8
   date: 2015-01-12T00:00
   save_generated_samples: true
   lat_extent:
-    start: -0.520804
-    stop: 15.479196
+    start: -1
+    stop: 15
   lon_extent:
-    start: 128.5
-    stop: 144.5
+    start: 128
+    stop: 144
 - name: tc_072_20150112T12
   n_samples: 8
   date: 2015-01-12T12:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 172.5
-    stop: 188.5
+    start: 172
+    stop: 188
 - name: tc_073_20150118T18
   n_samples: 8
   date: 2015-01-18T18:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 68.5
-    stop: 84.5
+    start: 68
+    stop: 84
 - name: tc_074_20150124T18
   n_samples: 8
   date: 2015-01-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_075_20150131T00
   n_samples: 8
   date: 2015-01-31T00:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_076_20150204T06
   n_samples: 8
   date: 2015-02-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 169.5
-    stop: 185.5
+    start: 170
+    stop: 186
 - name: tc_077_20150217T12
   n_samples: 8
   date: 2015-02-17T12:00
   save_generated_samples: true
   lat_extent:
-    start: -37.418159
-    stop: -21.418159
+    start: -37
+    stop: -21
   lon_extent:
-    start: 166.5
-    stop: 182.5
+    start: 166
+    stop: 182
 - name: tc_078_20150217T00
   n_samples: 8
   date: 2015-02-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: 35.379295
-    stop: 51.379295
+    start: 35
+    stop: 51
   lon_extent:
-    start: 175.5
-    stop: 191.5
+    start: 176
+    stop: 192
 - name: tc_079_20150223T00
   n_samples: 8
   date: 2015-02-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 41.5
-    stop: 57.5
+    start: 42
+    stop: 58
 - name: tc_080_20150307T12
   n_samples: 8
   date: 2015-03-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 97.5
-    stop: 113.5
+    start: 98
+    stop: 114
 - name: tc_081_20150323T18
   n_samples: 8
   date: 2015-03-23T18:00
   save_generated_samples: true
   lat_extent:
-    start: 0.4764210000000002
-    stop: 16.476421000000002
+    start: 0
+    stop: 16
   lon_extent:
-    start: 62.5
-    stop: 78.5
+    start: 62
+    stop: 78
 - name: tc_082_20150403T00
   n_samples: 8
   date: 2015-04-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 64.5
-    stop: 80.5
+    start: 64
+    stop: 80
 - name: tc_083_20150411T12
   n_samples: 8
   date: 2015-04-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 147.5
-    stop: 163.5
+    start: 148
+    stop: 164
 - name: tc_084_20150412T06
   n_samples: 8
   date: 2015-04-12T06:00
   save_generated_samples: true
   lat_extent:
-    start: 2.4708740000000002
-    stop: 18.470874000000002
+    start: 2
+    stop: 18
   lon_extent:
-    start: 80.5
-    stop: 96.5
+    start: 80
+    stop: 96
 - name: tc_085_20150419T00
   n_samples: 8
   date: 2015-04-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 139.5
-    stop: 155.5
+    start: 140
+    stop: 156
 - name: tc_086_20150426T12
   n_samples: 8
   date: 2015-04-26T12:00
   save_generated_samples: true
   lat_extent:
-    start: 2.4708740000000002
-    stop: 18.470874000000002
+    start: 2
+    stop: 18
   lon_extent:
-    start: 154.5
-    stop: 170.5
+    start: 154
+    stop: 170
 - name: tc_087_20150428T00
   n_samples: 8
   date: 2015-04-28T00:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 46.5
-    stop: 62.5
+    start: 46
+    stop: 62
 - name: tc_088_20150506T00
   n_samples: 8
   date: 2015-05-06T00:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 147.5
-    stop: 163.5
+    start: 148
+    stop: 164
 - name: tc_089_20150512T12
   n_samples: 8
   date: 2015-05-12T12:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 237.5
-    stop: 253.5
+    start: 238
+    stop: 254
 - name: tc_090_20150513T18
   n_samples: 8
   date: 2015-05-13T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 246.5
-    stop: 262.5
+    start: 246
+    stop: 262
 - name: tc_091_20150518T06
   n_samples: 8
   date: 2015-05-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 53.5
-    stop: 69.5
+    start: 54
+    stop: 70
 - name: tc_092_20150603T00
   n_samples: 8
   date: 2015-06-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 133.5
-    stop: 149.5
+    start: 134
+    stop: 150
 - name: tc_093_20150604T12
   n_samples: 8
   date: 2015-06-04T12:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 245.5
-    stop: 261.5
+    start: 246
+    stop: 262
 - name: tc_094_20150616T00
   n_samples: 8
   date: 2015-06-16T00:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 236.5
-    stop: 252.5
+    start: 236
+    stop: 252
 - name: tc_095_20150624T06
   n_samples: 8
   date: 2015-06-24T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 123.5
-    stop: 139.5
+    start: 124
+    stop: 140
 - name: tc_096_20150620T18
   n_samples: 8
   date: 2015-06-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_097_20150629T12
   n_samples: 8
   date: 2015-06-29T12:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 131.5
-    stop: 147.5
+    start: 132
+    stop: 148
 - name: tc_098_20150711T18
   n_samples: 8
   date: 2015-07-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 221.5
-    stop: 237.5
+    start: 222
+    stop: 238
 - name: tc_099_20150712T00
   n_samples: 8
   date: 2015-07-12T00:00
   save_generated_samples: true
   lat_extent:
-    start: 30.393177
-    stop: 46.393177
+    start: 30
+    stop: 46
   lon_extent:
-    start: 162.5
-    stop: 178.5
+    start: 162
+    stop: 178
 - name: tc_100_20150718T12
   n_samples: 8
   date: 2015-07-18T12:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_101_20150717T00
   n_samples: 8
   date: 2015-07-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 153.5
-    stop: 169.5
+    start: 154
+    stop: 170
 - name: tc_102_20150722T06
   n_samples: 8
   date: 2015-07-22T06:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 213.5
-    stop: 229.5
+    start: 214
+    stop: 230
 - name: tc_103_20150722T00
   n_samples: 8
   date: 2015-07-22T00:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 132.5
-    stop: 148.5
+    start: 132
+    stop: 148
 - name: tc_104_20150726T00
   n_samples: 8
   date: 2015-07-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_105_20150722T18
   n_samples: 8
   date: 2015-07-22T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 226.5
-    stop: 242.5
+    start: 226
+    stop: 242
 - name: tc_106_20150806T06
   n_samples: 8
   date: 2015-08-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_107_20150807T12
   n_samples: 8
   date: 2015-08-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 127.5
-    stop: 143.5
+    start: 128
+    stop: 144
 - name: tc_108_20150807T12
   n_samples: 8
   date: 2015-08-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 210.5
-    stop: 226.5
+    start: 210
+    stop: 226
 - name: tc_109_20150809T06
   n_samples: 8
   date: 2015-08-09T06:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 151.5
-    stop: 167.5
+    start: 152
+    stop: 168
 - name: tc_110_20150820T06
   n_samples: 8
   date: 2015-08-20T06:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 106.5
-    stop: 122.5
+    start: 106
+    stop: 122
 - name: tc_111_20150821T06
   n_samples: 8
   date: 2015-08-21T06:00
   save_generated_samples: true
   lat_extent:
-    start: 33.38485
-    stop: 49.38485
+    start: 33
+    stop: 49
   lon_extent:
-    start: 172.5
-    stop: 188.5
+    start: 172
+    stop: 188
 - name: tc_112_20150825T18
   n_samples: 8
   date: 2015-08-25T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 204.5
-    stop: 220.5
+    start: 204
+    stop: 220
 - name: tc_113_20150828T06
   n_samples: 8
   date: 2015-08-28T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_114_20150904T00
   n_samples: 8
   date: 2015-09-04T00:00
   save_generated_samples: true
   lat_extent:
-    start: 26.404282000000002
-    stop: 42.404282
+    start: 26
+    stop: 42
   lon_extent:
-    start: 151.5
-    stop: 167.5
+    start: 152
+    stop: 168
 - name: tc_115_20150905T00
   n_samples: 8
   date: 2015-09-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 221.5
-    stop: 237.5
+    start: 222
+    stop: 238
 - name: tc_116_20150831T00
   n_samples: 8
   date: 2015-08-31T00:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 244.5
-    stop: 260.5
+    start: 244
+    stop: 260
 - name: tc_117_20150918T06
   n_samples: 8
   date: 2015-09-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_118_20150911T18
   n_samples: 8
   date: 2015-09-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 151.5
-    stop: 167.5
+    start: 152
+    stop: 168
 - name: tc_119_20150912T18
   n_samples: 8
   date: 2015-09-12T18:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 188.5
-    stop: 204.5
+    start: 188
+    stop: 204
 - name: tc_120_20150918T06
   n_samples: 8
   date: 2015-09-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: 32.387623
-    stop: 48.387623
+    start: 32
+    stop: 48
   lon_extent:
-    start: 140.5
-    stop: 156.5
+    start: 140
+    stop: 156
 - name: tc_121_20150921T06
   n_samples: 8
   date: 2015-09-21T06:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 140.5
-    stop: 156.5
+    start: 140
+    stop: 156
 - name: tc_122_20150920T18
   n_samples: 8
   date: 2015-09-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_123_20150927T00
   n_samples: 8
   date: 2015-09-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 131.5
-    stop: 147.5
+    start: 132
+    stop: 148
 - name: tc_124_20151001T06
   n_samples: 8
   date: 2015-10-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_125_20150930T06
   n_samples: 8
   date: 2015-09-30T06:00
   save_generated_samples: true
   lat_extent:
-    start: -16.476421000000002
-    stop: -0.4764210000000002
+    start: -16
+    stop: 0
   lon_extent:
-    start: 156.5
-    stop: 172.5
+    start: 156
+    stop: 172
 - name: tc_126_20151004T00
   n_samples: 8
   date: 2015-10-04T00:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 129.5
-    stop: 145.5
+    start: 130
+    stop: 146
 - name: tc_127_20151006T12
   n_samples: 8
   date: 2015-10-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 298.5
-    stop: 314.5
+    start: 298
+    stop: 314
 - name: tc_128_20151006T00
   n_samples: 8
   date: 2015-10-06T00:00
   save_generated_samples: true
   lat_extent:
-    start: 0.4764210000000002
-    stop: 16.476421000000002
+    start: 0
+    stop: 16
   lon_extent:
-    start: 95.5
-    stop: 111.5
+    start: 96
+    stop: 112
 - name: tc_129_20151014T18
   n_samples: 8
   date: 2015-10-14T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 230.5
-    stop: 246.5
+    start: 230
+    stop: 246
 - name: tc_130_20151015T18
   n_samples: 8
   date: 2015-10-15T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_131_20151016T12
   n_samples: 8
   date: 2015-10-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 136.5
-    stop: 152.5
+    start: 136
+    stop: 152
 - name: tc_132_20151025T00
   n_samples: 8
   date: 2015-10-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 151.5
-    stop: 167.5
+    start: 152
+    stop: 168
 - name: tc_133_20151019T00
   n_samples: 8
   date: 2015-10-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 162.5
-    stop: 178.5
+    start: 162
+    stop: 178
 - name: tc_134_20151018T06
   n_samples: 8
   date: 2015-10-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 242.5
-    stop: 258.5
+    start: 242
+    stop: 258
 - name: tc_135_20151016T12
   n_samples: 8
   date: 2015-10-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 286.5
-    stop: 302.5
+    start: 286
+    stop: 302
 - name: tc_136_20151021T06
   n_samples: 8
   date: 2015-10-21T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 167.5
-    stop: 183.5
+    start: 168
+    stop: 184
 - name: tc_137_20151103T00
   n_samples: 8
   date: 2015-11-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: -1.5180309999999997
-    stop: 14.481969
+    start: -2
+    stop: 14
   lon_extent:
-    start: 88.5
-    stop: 104.5
+    start: 88
+    stop: 104
 - name: tc_138_20151107T00
   n_samples: 8
   date: 2015-11-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_139_20151108T12
   n_samples: 8
   date: 2015-11-08T12:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 110.5
-    stop: 126.5
+    start: 110
+    stop: 126
 - name: tc_140_20151107T00
   n_samples: 8
   date: 2015-11-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 174.5
-    stop: 190.5
+    start: 174
+    stop: 190
 - name: tc_141_20151116T12
   n_samples: 8
   date: 2015-11-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: -21.462550999999998
-    stop: -5.4625509999999995
+    start: -21
+    stop: -5
   lon_extent:
-    start: 164.5
-    stop: 180.5
+    start: 164
+    stop: 180
 - name: tc_142_20151117T00
   n_samples: 8
   date: 2015-11-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_143_20151122T18
   n_samples: 8
   date: 2015-11-22T18:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 123.5
-    stop: 139.5
+    start: 124
+    stop: 140
 - name: tc_144_20151127T18
   n_samples: 8
   date: 2015-11-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: -15.479196
-    stop: 0.520804
+    start: -15
+    stop: 1
   lon_extent:
-    start: 44.5
-    stop: 60.5
+    start: 44
+    stop: 60
 - name: tc_145_20151203T18
   n_samples: 8
   date: 2015-12-03T18:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 49.5
-    stop: 65.5
+    start: 50
+    stop: 66
 - name: tc_146_20151209T06
   n_samples: 8
   date: 2015-12-09T06:00
   save_generated_samples: true
   lat_extent:
-    start: -21.462550999999998
-    stop: -5.4625509999999995
+    start: -21
+    stop: -5
   lon_extent:
-    start: 177.5
-    stop: 193.5
+    start: 178
+    stop: 194
 - name: tc_147_20151208T18
   n_samples: 8
   date: 2015-12-08T18:00
   save_generated_samples: true
   lat_extent:
-    start: -4.509709
-    stop: 11.490291
+    start: -5
+    stop: 11
   lon_extent:
-    start: 171.5
-    stop: 187.5
+    start: 172
+    stop: 188
 - name: tc_148_20151213T18
   n_samples: 8
   date: 2015-12-13T18:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 77.5
-    stop: 93.5
+    start: 78
+    stop: 94
 - name: tc_149_20151212T18
   n_samples: 8
   date: 2015-12-12T18:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 74.5
-    stop: 90.5
+    start: 74
+    stop: 90
 - name: tc_150_20151227T00
   n_samples: 8
   date: 2015-12-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: -33.429258000000004
-    stop: -17.429258
+    start: -33
+    stop: -17
   lon_extent:
-    start: 181.5
-    stop: 197.5
+    start: 182
+    stop: 198
 - name: tc_151_20151223T00
   n_samples: 8
   date: 2015-12-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 57.5
-    stop: 73.5
+    start: 58
+    stop: 74
 - name: tc_152_20160110T00
   n_samples: 8
   date: 2016-01-10T00:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 205.5
-    stop: 221.5
+    start: 206
+    stop: 222
 - name: tc_153_20160116T00
   n_samples: 8
   date: 2016-01-16T00:00
   save_generated_samples: true
   lat_extent:
-    start: -31.434807
-    stop: -15.434807
+    start: -31
+    stop: -15
   lon_extent:
-    start: 157.5
-    stop: 173.5
+    start: 158
+    stop: 174
 - name: tc_154_20160114T12
   n_samples: 8
   date: 2016-01-14T12:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 112.5
-    stop: 128.5
+    start: 112
+    stop: 128
 - name: tc_155_20160121T18
   n_samples: 8
   date: 2016-01-21T18:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 91.5
-    stop: 107.5
+    start: 92
+    stop: 108
 - name: tc_156_20160122T00
   n_samples: 8
   date: 2016-01-22T00:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 184.5
-    stop: 200.5
+    start: 184
+    stop: 200
 - name: tc_157_20160131T06
   n_samples: 8
   date: 2016-01-31T06:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 72.5
-    stop: 88.5
+    start: 72
+    stop: 88
 - name: tc_158_20160207T12
   n_samples: 8
   date: 2016-02-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 54.5
-    stop: 70.5
+    start: 54
+    stop: 70
 - name: tc_159_20160207T12
   n_samples: 8
   date: 2016-02-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 164.5
-    stop: 180.5
+    start: 164
+    stop: 180
 - name: tc_160_20160210T12
   n_samples: 8
   date: 2016-02-10T12:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_161_20160219T00
   n_samples: 8
   date: 2016-02-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 67.5
-    stop: 83.5
+    start: 68
+    stop: 84
 - name: tc_162_20160229T12
   n_samples: 8
   date: 2016-02-29T12:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 165.5
-    stop: 181.5
+    start: 166
+    stop: 182
 - name: tc_163_20160303T00
   n_samples: 8
   date: 2016-03-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 197.5
-    stop: 213.5
+    start: 198
+    stop: 214
 - name: tc_164_20160404T06
   n_samples: 8
   date: 2016-04-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: -32.432034
-    stop: -16.432034
+    start: -32
+    stop: -16
   lon_extent:
-    start: 65.5
-    stop: 81.5
+    start: 66
+    stop: 82
 - name: tc_165_20160413T00
   n_samples: 8
   date: 2016-04-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: 2.4708740000000002
-    stop: 18.470874000000002
+    start: 2
+    stop: 18
   lon_extent:
-    start: 52.5
-    stop: 68.5
+    start: 52
+    stop: 68
 - name: tc_166_20160430T00
   n_samples: 8
   date: 2016-04-30T00:00
   save_generated_samples: true
   lat_extent:
-    start: -19.4681
-    stop: -3.4680999999999997
+    start: -19
+    stop: -3
   lon_extent:
-    start: 112.5
-    stop: 128.5
+    start: 112
+    stop: 128
 - name: tc_167_20160501T18
   n_samples: 8
   date: 2016-05-01T18:00
   save_generated_samples: true
   lat_extent:
-    start: -19.4681
-    stop: -3.4680999999999997
+    start: -19
+    stop: -3
   lon_extent:
-    start: 64.5
-    stop: 80.5
+    start: 64
+    stop: 80
 - name: tc_168_20160505T00
   n_samples: 8
   date: 2016-05-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 105.5
-    stop: 121.5
+    start: 106
+    stop: 122
 - name: tc_169_20160509T06
   n_samples: 8
   date: 2016-05-09T06:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 129.5
-    stop: 145.5
+    start: 130
+    stop: 146
 - name: tc_170_20160518T18
   n_samples: 8
   date: 2016-05-18T18:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_171_20160529T06
   n_samples: 8
   date: 2016-05-29T06:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 57.5
-    stop: 73.5
+    start: 58
+    stop: 74
 - name: tc_172_20160611T06
   n_samples: 8
   date: 2016-06-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 238.5
-    stop: 254.5
+    start: 238
+    stop: 254
 - name: tc_173_20160620T12
   n_samples: 8
   date: 2016-06-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_174_20160706T00
   n_samples: 8
   date: 2016-07-06T00:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_175_20160719T06
   n_samples: 8
   date: 2016-07-19T06:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 136.5
-    stop: 152.5
+    start: 136
+    stop: 152
 - name: tc_176_20160722T12
   n_samples: 8
   date: 2016-07-22T12:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 152.5
-    stop: 168.5
+    start: 152
+    stop: 168
 - name: tc_177_20160724T06
   n_samples: 8
   date: 2016-07-24T06:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 133.5
-    stop: 149.5
+    start: 134
+    stop: 150
 - name: tc_178_20160726T06
   n_samples: 8
   date: 2016-07-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: -48.387623
-    stop: -32.387623
+    start: -48
+    stop: -32
   lon_extent:
-    start: 177.5
-    stop: 193.5
+    start: 178
+    stop: 194
 - name: tc_179_20160808T18
   n_samples: 8
   date: 2016-08-08T18:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_180_20160811T12
   n_samples: 8
   date: 2016-08-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 230.5
-    stop: 246.5
+    start: 230
+    stop: 246
 - name: tc_181_20160813T12
   n_samples: 8
   date: 2016-08-13T12:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 165.5
-    stop: 181.5
+    start: 166
+    stop: 182
 - name: tc_182_20160820T12
   n_samples: 8
   date: 2016-08-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 111.5
-    stop: 127.5
+    start: 112
+    stop: 128
 - name: tc_183_20160825T00
   n_samples: 8
   date: 2016-08-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: 45.351505
-    stop: 61.351505
+    start: 45
+    stop: 61
   lon_extent:
-    start: 166.5
-    stop: 182.5
+    start: 166
+    stop: 182
 - name: tc_184_20160826T00
   n_samples: 8
   date: 2016-08-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 196.5
-    stop: 212.5
+    start: 196
+    stop: 212
 - name: tc_185_20160825T00
   n_samples: 8
   date: 2016-08-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_186_20160903T00
   n_samples: 8
   date: 2016-09-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_187_20160907T12
   n_samples: 8
   date: 2016-09-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 135.5
-    stop: 151.5
+    start: 136
+    stop: 152
 - name: tc_188_20160831T18
   n_samples: 8
   date: 2016-08-31T18:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_189_20160907T00
   n_samples: 8
   date: 2016-09-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 26.404282000000002
-    stop: 42.404282
+    start: 26
+    stop: 42
   lon_extent:
-    start: 162.5
-    stop: 178.5
+    start: 162
+    stop: 178
 - name: tc_190_20160916T06
   n_samples: 8
   date: 2016-09-16T06:00
   save_generated_samples: true
   lat_extent:
-    start: 25.407058999999997
-    stop: 41.407059
+    start: 25
+    stop: 41
   lon_extent:
-    start: 127.5
-    stop: 143.5
+    start: 128
+    stop: 144
 - name: tc_191_20160914T06
   n_samples: 8
   date: 2016-09-14T06:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_192_20160924T12
   n_samples: 8
   date: 2016-09-24T12:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 229.5
-    stop: 245.5
+    start: 230
+    stop: 246
 - name: tc_193_20161001T06
   n_samples: 8
   date: 2016-10-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 241.5
-    stop: 257.5
+    start: 242
+    stop: 258
 - name: tc_194_20161001T06
   n_samples: 8
   date: 2016-10-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_195_20161013T06
   n_samples: 8
   date: 2016-10-13T06:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 122.5
-    stop: 138.5
+    start: 122
+    stop: 138
 - name: tc_196_20161010T06
   n_samples: 8
   date: 2016-10-10T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 230.5
-    stop: 246.5
+    start: 230
+    stop: 246
 - name: tc_197_20161018T18
   n_samples: 8
   date: 2016-10-18T18:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_198_20161020T00
   n_samples: 8
   date: 2016-10-20T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_199_20161105T18
   n_samples: 8
   date: 2016-11-05T18:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_200_20161109T12
   n_samples: 8
   date: 2016-11-09T12:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 114.5
-    stop: 130.5
+    start: 114
+    stop: 130
 - name: tc_201_20161121T00
   n_samples: 8
   date: 2016-11-21T00:00
   save_generated_samples: true
   lat_extent:
-    start: -17.473647
-    stop: -1.4736469999999997
+    start: -17
+    stop: -1
   lon_extent:
-    start: 77.5
-    stop: 93.5
+    start: 78
+    stop: 94
 - name: tc_202_20161127T18
   n_samples: 8
   date: 2016-11-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_203_20161202T06
   n_samples: 8
   date: 2016-12-02T06:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 120.5
-    stop: 136.5
+    start: 120
+    stop: 136
 - name: tc_204_20161130T18
   n_samples: 8
   date: 2016-11-30T18:00
   save_generated_samples: true
   lat_extent:
-    start: -7.501387
-    stop: 8.498613
+    start: -8
+    stop: 8
   lon_extent:
-    start: 41.5
-    stop: 57.5
+    start: 42
+    stop: 58
 - name: tc_205_20161210T12
   n_samples: 8
   date: 2016-12-10T12:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 123.5
-    stop: 139.5
+    start: 124
+    stop: 140
 - name: tc_206_20161218T06
   n_samples: 8
   date: 2016-12-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 168.5
-    stop: 184.5
+    start: 168
+    stop: 184
 - name: tc_207_20161223T12
   n_samples: 8
   date: 2016-12-23T12:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 164.5
-    stop: 180.5
+    start: 164
+    stop: 180
 - name: tc_208_20170120T06
   n_samples: 8
   date: 2017-01-20T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 167.5
-    stop: 183.5
+    start: 168
+    stop: 184
 - name: tc_209_20170118T18
   n_samples: 8
   date: 2017-01-18T18:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 112.5
-    stop: 128.5
+    start: 112
+    stop: 128
 - name: tc_210_20170125T12
   n_samples: 8
   date: 2017-01-25T12:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 159.5
-    stop: 175.5
+    start: 160
+    stop: 176
 - name: tc_211_20170206T06
   n_samples: 8
   date: 2017-02-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 54.5
-    stop: 70.5
+    start: 54
+    stop: 70
 - name: tc_212_20170208T12
   n_samples: 8
   date: 2017-02-08T12:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 31.5
-    stop: 47.5
+    start: 32
+    stop: 48
 - name: tc_213_20170202T00
   n_samples: 8
   date: 2017-02-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 185.5
-    stop: 201.5
+    start: 186
+    stop: 202
 - name: tc_214_20170214T00
   n_samples: 8
   date: 2017-02-14T00:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 165.5
-    stop: 181.5
+    start: 166
+    stop: 182
 - name: tc_215_20170303T06
   n_samples: 8
   date: 2017-03-03T06:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 31.5
-    stop: 47.5
+    start: 32
+    stop: 48
 - name: tc_216_20170311T06
   n_samples: 8
   date: 2017-03-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: -2.515256
-    stop: 13.484744
+    start: -3
+    stop: 13
   lon_extent:
-    start: 76.5
-    stop: 92.5
+    start: 76
+    stop: 92
 - name: tc_217_20170306T12
   n_samples: 8
   date: 2017-03-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: -31.434807
-    stop: -15.434807
+    start: -31
+    stop: -15
   lon_extent:
-    start: 156.5
-    stop: 172.5
+    start: 156
+    stop: 172
 - name: tc_218_20170311T12
   n_samples: 8
   date: 2017-03-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: -43.401505
-    stop: -27.401505
+    start: -43
+    stop: -27
   lon_extent:
-    start: 172.5
-    stop: 188.5
+    start: 172
+    stop: 188
 - name: tc_219_20170317T12
   n_samples: 8
   date: 2017-03-17T12:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 155.5
-    stop: 171.5
+    start: 156
+    stop: 172
 - name: tc_220_20170318T06
   n_samples: 8
   date: 2017-03-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: -21.462550999999998
-    stop: -5.4625509999999995
+    start: -21
+    stop: -5
   lon_extent:
-    start: 128.5
-    stop: 144.5
+    start: 128
+    stop: 144
 - name: tc_221_20170405T00
   n_samples: 8
   date: 2017-04-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 157.5
-    stop: 173.5
+    start: 158
+    stop: 174
 - name: tc_222_20170416T00
   n_samples: 8
   date: 2017-04-16T00:00
   save_generated_samples: true
   lat_extent:
-    start: -21.462550999999998
-    stop: -5.4625509999999995
+    start: -21
+    stop: -5
   lon_extent:
-    start: 190.5
-    stop: 206.5
+    start: 190
+    stop: 206
 - name: tc_223_20170420T06
   n_samples: 8
   date: 2017-04-20T06:00
   save_generated_samples: true
   lat_extent:
-    start: -18.470874000000002
-    stop: -2.4708740000000002
+    start: -18
+    stop: -2
   lon_extent:
-    start: 92.5
-    stop: 108.5
+    start: 92
+    stop: 108
 - name: tc_224_20170508T06
   n_samples: 8
   date: 2017-05-08T06:00
   save_generated_samples: true
   lat_extent:
-    start: -17.473647
-    stop: -1.4736469999999997
+    start: -17
+    stop: -1
   lon_extent:
-    start: 71.5
-    stop: 87.5
+    start: 72
+    stop: 88
 - name: tc_225_20170530T00
   n_samples: 8
   date: 2017-05-30T00:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_226_20170530T00
   n_samples: 8
   date: 2017-05-30T00:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 80.5
-    stop: 96.5
+    start: 80
+    stop: 96
 - name: tc_227_20170617T06
   n_samples: 8
   date: 2017-06-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 250.5
-    stop: 266.5
+    start: 250
+    stop: 266
 - name: tc_228_20170629T00
   n_samples: 8
   date: 2017-06-29T00:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_229_20170625T18
   n_samples: 8
   date: 2017-06-25T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 242.5
-    stop: 258.5
+    start: 242
+    stop: 258
 - name: tc_230_20170629T18
   n_samples: 8
   date: 2017-06-29T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 138.5
-    stop: 154.5
+    start: 138
+    stop: 154
 - name: tc_231_20170705T12
   n_samples: 8
   date: 2017-07-05T12:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 236.5
-    stop: 252.5
+    start: 236
+    stop: 252
 - name: tc_232_20170710T12
   n_samples: 8
   date: 2017-07-10T12:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 246.5
-    stop: 262.5
+    start: 246
+    stop: 262
 - name: tc_233_20170713T00
   n_samples: 8
   date: 2017-07-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 114.5
-    stop: 130.5
+    start: 114
+    stop: 130
 - name: tc_234_20170719T06
   n_samples: 8
   date: 2017-07-19T06:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 139.5
-    stop: 155.5
+    start: 140
+    stop: 156
 - name: tc_235_20170722T00
   n_samples: 8
   date: 2017-07-22T00:00
   save_generated_samples: true
   lat_extent:
-    start: -12.487517
-    stop: 3.5124829999999996
+    start: -12
+    stop: 4
   lon_extent:
-    start: 83.5
-    stop: 99.5
+    start: 84
+    stop: 100
 - name: tc_236_20170725T00
   n_samples: 8
   date: 2017-07-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 234.5
-    stop: 250.5
+    start: 234
+    stop: 250
 - name: tc_237_20170731T06
   n_samples: 8
   date: 2017-07-31T06:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 282.5
-    stop: 298.5
+    start: 282
+    stop: 298
 - name: tc_238_20170805T06
   n_samples: 8
   date: 2017-08-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_239_20170804T06
   n_samples: 8
   date: 2017-08-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 114.5
-    stop: 130.5
+    start: 114
+    stop: 130
 - name: tc_240_20170804T12
   n_samples: 8
   date: 2017-08-04T12:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 267.5
-    stop: 283.5
+    start: 268
+    stop: 284
 - name: tc_241_20170808T12
   n_samples: 8
   date: 2017-08-08T12:00
   save_generated_samples: true
   lat_extent:
-    start: -13.484744
-    stop: 2.515256
+    start: -13
+    stop: 3
   lon_extent:
-    start: 81.5
-    stop: 97.5
+    start: 82
+    stop: 98
 - name: tc_242_20170813T00
   n_samples: 8
   date: 2017-08-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 146.5
-    stop: 162.5
+    start: 146
+    stop: 162
 - name: tc_243_20170820T18
   n_samples: 8
   date: 2017-08-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: 29.395954000000003
-    stop: 45.395954
+    start: 29
+    stop: 45
   lon_extent:
-    start: 319.5
-    stop: 335.5
+    start: 320
+    stop: 336
 - name: tc_244_20170825T18
   n_samples: 8
   date: 2017-08-25T18:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 293.5
-    stop: 309.5
+    start: 294
+    stop: 310
 - name: tc_245_20170819T18
   n_samples: 8
   date: 2017-08-19T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 123.5
-    stop: 139.5
+    start: 124
+    stop: 140
 - name: tc_246_20170823T00
   n_samples: 8
   date: 2017-08-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 105.5
-    stop: 121.5
+    start: 106
+    stop: 122
 - name: tc_247_20170826T12
   n_samples: 8
   date: 2017-08-26T12:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 231.5
-    stop: 247.5
+    start: 232
+    stop: 248
 - name: tc_248_20170902T00
   n_samples: 8
   date: 2017-09-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 110.5
-    stop: 126.5
+    start: 110
+    stop: 126
 - name: tc_249_20170905T06
   n_samples: 8
   date: 2017-09-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_250_20170904T00
   n_samples: 8
   date: 2017-09-04T00:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 280.5
-    stop: 296.5
+    start: 280
+    stop: 296
 - name: tc_251_20170907T06
   n_samples: 8
   date: 2017-09-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 283.5
-    stop: 299.5
+    start: 284
+    stop: 300
 - name: tc_252_20170913T00
   n_samples: 8
   date: 2017-09-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 199.5
-    stop: 215.5
+    start: 200
+    stop: 216
 - name: tc_253_20170913T18
   n_samples: 8
   date: 2017-09-13T18:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 239.5
-    stop: 255.5
+    start: 240
+    stop: 256
 - name: tc_254_20170918T12
   n_samples: 8
   date: 2017-09-18T12:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 113.5
-    stop: 129.5
+    start: 114
+    stop: 130
 - name: tc_255_20170918T18
   n_samples: 8
   date: 2017-09-18T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 245.5
-    stop: 261.5
+    start: 246
+    stop: 262
 - name: tc_256_20171001T12
   n_samples: 8
   date: 2017-10-01T12:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 51.5
-    stop: 67.5
+    start: 52
+    stop: 68
 - name: tc_257_20171003T06
   n_samples: 8
   date: 2017-10-03T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 114.5
-    stop: 130.5
+    start: 114
+    stop: 130
 - name: tc_258_20171007T06
   n_samples: 8
   date: 2017-10-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 113.5
-    stop: 129.5
+    start: 114
+    stop: 130
 - name: tc_259_20171007T06
   n_samples: 8
   date: 2017-10-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 131.5
-    stop: 147.5
+    start: 132
+    stop: 148
 - name: tc_260_20171011T06
   n_samples: 8
   date: 2017-10-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 89.5
-    stop: 105.5
+    start: 90
+    stop: 106
 - name: tc_261_20171016T18
   n_samples: 8
   date: 2017-10-16T18:00
   save_generated_samples: true
   lat_extent:
-    start: 25.407058999999997
-    stop: 41.407059
+    start: 25
+    stop: 41
   lon_extent:
-    start: 132.5
-    stop: 148.5
+    start: 132
+    stop: 148
 - name: tc_262_20171019T12
   n_samples: 8
   date: 2017-10-19T12:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 48.5
-    stop: 64.5
+    start: 48
+    stop: 64
 - name: tc_263_20171026T00
   n_samples: 8
   date: 2017-10-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 108.5
-    stop: 124.5
+    start: 108
+    stop: 124
 - name: tc_264_20171115T00
   n_samples: 8
   date: 2017-11-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: 41.362625
-    stop: 57.362625
+    start: 41
+    stop: 57
   lon_extent:
-    start: 310.5
-    stop: 326.5
+    start: 310
+    stop: 326
 - name: tc_265_20171126T06
   n_samples: 8
   date: 2017-11-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 81.5
-    stop: 97.5
+    start: 82
+    stop: 98
 - name: tc_266_20171126T12
   n_samples: 8
   date: 2017-11-26T12:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 51.5
-    stop: 67.5
+    start: 52
+    stop: 68
 - name: tc_267_20171206T00
   n_samples: 8
   date: 2017-12-06T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_268_20171206T18
   n_samples: 8
   date: 2017-12-06T18:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 55.5
-    stop: 71.5
+    start: 56
+    stop: 72
 - name: tc_269_20171213T06
   n_samples: 8
   date: 2017-12-13T06:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 60.5
-    stop: 76.5
+    start: 60
+    stop: 76
 - name: tc_270_20171223T00
   n_samples: 8
   date: 2017-12-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: -37.418159
-    stop: -21.418159
+    start: -37
+    stop: -21
   lon_extent:
-    start: 50.5
-    stop: 66.5
+    start: 50
+    stop: 66
 - name: tc_271_20171220T06
   n_samples: 8
   date: 2017-12-20T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 157.5
-    stop: 173.5
+    start: 158
+    stop: 174
 - name: tc_272_20171228T18
   n_samples: 8
   date: 2017-12-28T18:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_273_20171231T00
   n_samples: 8
   date: 2017-12-31T00:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 33.5
-    stop: 49.5
+    start: 34
+    stop: 50
 - name: tc_274_20180110T06
   n_samples: 8
   date: 2018-01-10T06:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 154.5
-    stop: 170.5
+    start: 154
+    stop: 170
 - name: tc_275_20180106T18
   n_samples: 8
   date: 2018-01-06T18:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 79.5
-    stop: 95.5
+    start: 80
+    stop: 96
 - name: tc_276_20180109T18
   n_samples: 8
   date: 2018-01-09T18:00
   save_generated_samples: true
   lat_extent:
-    start: -37.418159
-    stop: -21.418159
+    start: -37
+    stop: -21
   lon_extent:
-    start: 191.5
-    stop: 207.5
+    start: 192
+    stop: 208
 - name: tc_277_20180116T00
   n_samples: 8
   date: 2018-01-16T00:00
   save_generated_samples: true
   lat_extent:
-    start: -22.459777000000003
-    stop: -6.459777000000001
+    start: -22
+    stop: -6
   lon_extent:
-    start: 57.5
-    stop: 73.5
+    start: 58
+    stop: 74
 - name: tc_278_20180124T18
   n_samples: 8
   date: 2018-01-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: -34.426483000000005
-    stop: -18.426483
+    start: -34
+    stop: -18
   lon_extent:
-    start: 49.5
-    stop: 65.5
+    start: 50
+    stop: 66
 - name: tc_279_20180128T18
   n_samples: 8
   date: 2018-01-28T18:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 110.5
-    stop: 126.5
+    start: 110
+    stop: 126
 - name: tc_280_20180209T12
   n_samples: 8
   date: 2018-02-09T12:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 68.5
-    stop: 84.5
+    start: 68
+    stop: 84
 - name: tc_281_20180202T18
   n_samples: 8
   date: 2018-02-02T18:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 181.5
-    stop: 197.5
+    start: 182
+    stop: 198
 - name: tc_282_20180221T06
   n_samples: 8
   date: 2018-02-21T06:00
   save_generated_samples: true
   lat_extent:
-    start: -31.434807
-    stop: -15.434807
+    start: -31
+    stop: -15
   lon_extent:
-    start: 29.5
-    stop: 45.5
+    start: 30
+    stop: 46
 - name: tc_283_20180225T18
   n_samples: 8
   date: 2018-02-25T18:00
   save_generated_samples: true
   lat_extent:
-    start: -0.520804
-    stop: 15.479196
+    start: -1
+    stop: 15
   lon_extent:
-    start: 143.5
-    stop: 159.5
+    start: 144
+    stop: 160
 - name: tc_284_20180301T06
   n_samples: 8
   date: 2018-03-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: -32.432034
-    stop: -16.432034
+    start: -32
+    stop: -16
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_285_20180222T12
   n_samples: 8
   date: 2018-02-22T12:00
   save_generated_samples: true
   lat_extent:
-    start: -3.5124829999999996
-    stop: 12.487517
+    start: -4
+    stop: 12
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_286_20180303T06
   n_samples: 8
   date: 2018-03-03T06:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_287_20180312T18
   n_samples: 8
   date: 2018-03-12T18:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 139.5
-    stop: 155.5
+    start: 140
+    stop: 156
 - name: tc_288_20180311T00
   n_samples: 8
   date: 2018-03-11T00:00
   save_generated_samples: true
   lat_extent:
-    start: -19.4681
-    stop: -3.4680999999999997
+    start: -19
+    stop: -3
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_289_20180326T12
   n_samples: 8
   date: 2018-03-26T12:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 53.5
-    stop: 69.5
+    start: 54
+    stop: 70
 - name: tc_290_20180324T18
   n_samples: 8
   date: 2018-03-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_291_20180429T12
   n_samples: 8
   date: 2018-04-29T12:00
   save_generated_samples: true
   lat_extent:
-    start: 27.401505
-    stop: 43.401505
+    start: 27
+    stop: 43
   lon_extent:
-    start: 132.5
-    stop: 148.5
+    start: 132
+    stop: 148
 - name: tc_292_20180425T00
   n_samples: 8
   date: 2018-04-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: -21.462550999999998
-    stop: -5.4625509999999995
+    start: -21
+    stop: -5
   lon_extent:
-    start: 70.5
-    stop: 86.5
+    start: 70
+    stop: 86
 - name: tc_293_20180507T00
   n_samples: 8
   date: 2018-05-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 244.5
-    stop: 260.5
+    start: 244
+    stop: 260
 - name: tc_294_20180511T00
   n_samples: 8
   date: 2018-05-11T00:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 108.5
-    stop: 124.5
+    start: 108
+    stop: 124
 - name: tc_295_20180516T18
   n_samples: 8
   date: 2018-05-16T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 135.5
-    stop: 151.5
+    start: 136
+    stop: 152
 - name: tc_296_20180528T18
   n_samples: 8
   date: 2018-05-28T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_297_20180526T18
   n_samples: 8
   date: 2018-05-26T18:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 105.5
-    stop: 121.5
+    start: 106
+    stop: 122
 - name: tc_298_20180614T18
   n_samples: 8
   date: 2018-06-14T18:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_299_20180622T12
   n_samples: 8
   date: 2018-06-22T12:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_300_20180706T12
   n_samples: 8
   date: 2018-07-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 128.5
-    stop: 144.5
+    start: 128
+    stop: 144
 - name: tc_301_20180706T06
   n_samples: 8
   date: 2018-07-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 99.5
-    stop: 115.5
+    start: 100
+    stop: 116
 - name: tc_302_20180715T12
   n_samples: 8
   date: 2018-07-15T12:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 205.5
-    stop: 221.5
+    start: 206
+    stop: 222
 - name: tc_303_20180718T12
   n_samples: 8
   date: 2018-07-18T12:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 127.5
-    stop: 143.5
+    start: 128
+    stop: 144
 - name: tc_304_20180724T06
   n_samples: 8
   date: 2018-07-24T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 215.5
-    stop: 231.5
+    start: 216
+    stop: 232
 - name: tc_305_20180719T12
   n_samples: 8
   date: 2018-07-19T12:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 137.5
-    stop: 153.5
+    start: 138
+    stop: 154
 - name: tc_306_20180725T18
   n_samples: 8
   date: 2018-07-25T18:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 235.5
-    stop: 251.5
+    start: 236
+    stop: 252
 - name: tc_307_20180726T12
   n_samples: 8
   date: 2018-07-26T12:00
   save_generated_samples: true
   lat_extent:
-    start: 25.407058999999997
-    stop: 41.407059
+    start: 25
+    stop: 41
   lon_extent:
-    start: 133.5
-    stop: 149.5
+    start: 134
+    stop: 150
 - name: tc_308_20180730T12
   n_samples: 8
   date: 2018-07-30T12:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_309_20180805T00
   n_samples: 8
   date: 2018-08-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_310_20180810T06
   n_samples: 8
   date: 2018-08-10T06:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_311_20180807T18
   n_samples: 8
   date: 2018-08-07T18:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 239.5
-    stop: 255.5
+    start: 240
+    stop: 256
 - name: tc_312_20180811T18
   n_samples: 8
   date: 2018-08-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 161.5
-    stop: 177.5
+    start: 162
+    stop: 178
 - name: tc_313_20180827T18
   n_samples: 8
   date: 2018-08-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 139.5
-    stop: 155.5
+    start: 140
+    stop: 156
 - name: tc_314_20180903T00
   n_samples: 8
   date: 2018-09-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: 25.407058999999997
-    stop: 41.407059
+    start: 25
+    stop: 41
   lon_extent:
-    start: 143.5
-    stop: 159.5
+    start: 144
+    stop: 160
 - name: tc_315_20180901T12
   n_samples: 8
   date: 2018-09-01T12:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 230.5
-    stop: 246.5
+    start: 230
+    stop: 246
 - name: tc_316_20180905T06
   n_samples: 8
   date: 2018-09-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: 29.395954000000003
-    stop: 45.395954
+    start: 29
+    stop: 45
   lon_extent:
-    start: 286.5
-    stop: 302.5
+    start: 286
+    stop: 302
 - name: tc_317_20180907T12
   n_samples: 8
   date: 2018-09-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 163.5
-    stop: 179.5
+    start: 164
+    stop: 180
 - name: tc_318_20180909T00
   n_samples: 8
   date: 2018-09-09T00:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 123.5
-    stop: 139.5
+    start: 124
+    stop: 140
 - name: tc_319_20180914T00
   n_samples: 8
   date: 2018-09-14T00:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 230.5
-    stop: 246.5
+    start: 230
+    stop: 246
 - name: tc_320_20180916T00
   n_samples: 8
   date: 2018-09-16T00:00
   save_generated_samples: true
   lat_extent:
-    start: 30.393177
-    stop: 46.393177
+    start: 30
+    stop: 46
   lon_extent:
-    start: 152.5
-    stop: 168.5
+    start: 152
+    stop: 168
 - name: tc_321_20180915T18
   n_samples: 8
   date: 2018-09-15T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_322_20180919T00
   n_samples: 8
   date: 2018-09-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 245.5
-    stop: 261.5
+    start: 246
+    stop: 262
 - name: tc_323_20180924T18
   n_samples: 8
   date: 2018-09-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 130.5
-    stop: 146.5
+    start: 130
+    stop: 146
 - name: tc_324_20180926T06
   n_samples: 8
   date: 2018-09-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: -19.4681
-    stop: -3.4680999999999997
+    start: -19
+    stop: -3
   lon_extent:
-    start: 67.5
-    stop: 83.5
+    start: 68
+    stop: 84
 - name: tc_325_20181007T00
   n_samples: 8
   date: 2018-10-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 121.5
-    stop: 137.5
+    start: 122
+    stop: 138
 - name: tc_326_20181008T00
   n_samples: 8
   date: 2018-10-08T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 228.5
-    stop: 244.5
+    start: 228
+    stop: 244
 - name: tc_327_20181007T06
   n_samples: 8
   date: 2018-10-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 137.5
-    stop: 153.5
+    start: 138
+    stop: 154
 - name: tc_328_20181014T12
   n_samples: 8
   date: 2018-10-14T12:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 148.5
-    stop: 164.5
+    start: 148
+    stop: 164
 - name: tc_329_20181017T06
   n_samples: 8
   date: 2018-10-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: -17.473647
-    stop: -1.4736469999999997
+    start: -17
+    stop: -1
   lon_extent:
-    start: 45.5
-    stop: 61.5
+    start: 46
+    stop: 62
 - name: tc_330_20181028T18
   n_samples: 8
   date: 2018-10-28T18:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 132.5
-    stop: 148.5
+    start: 132
+    stop: 148
 - name: tc_331_20181030T12
   n_samples: 8
   date: 2018-10-30T12:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 165.5
-    stop: 181.5
+    start: 166
+    stop: 182
 - name: tc_332_20181105T06
   n_samples: 8
   date: 2018-11-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_333_20181117T06
   n_samples: 8
   date: 2018-11-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 181.5
-    stop: 197.5
+    start: 182
+    stop: 198
 - name: tc_334_20181121T18
   n_samples: 8
   date: 2018-11-21T18:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 53.5
-    stop: 69.5
+    start: 54
+    stop: 70
 - name: tc_335_20181124T12
   n_samples: 8
   date: 2018-11-24T12:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 51.5
-    stop: 67.5
+    start: 52
+    stop: 68
 - name: tc_336_20181125T12
   n_samples: 8
   date: 2018-11-25T12:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_337_20181211T12
   n_samples: 8
   date: 2018-12-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: -37.418159
-    stop: -21.418159
+    start: -37
+    stop: -21
   lon_extent:
-    start: 54.5
-    stop: 70.5
+    start: 54
+    stop: 70
 - name: tc_338_20181215T00
   n_samples: 8
   date: 2018-12-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: -17.473647
-    stop: -1.4736469999999997
+    start: -17
+    stop: -1
   lon_extent:
-    start: 77.5
-    stop: 93.5
+    start: 78
+    stop: 94
 - name: tc_339_20181227T06
   n_samples: 8
   date: 2018-12-27T06:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 93.5
-    stop: 109.5
+    start: 94
+    stop: 110
 - name: tc_340_20190106T18
   n_samples: 8
   date: 2019-01-06T18:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 178.5
-    stop: 194.5
+    start: 178
+    stop: 194
 - name: tc_341_20190111T06
   n_samples: 8
   date: 2019-01-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_342_20190117T12
   n_samples: 8
   date: 2019-01-17T12:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 112.5
-    stop: 128.5
+    start: 112
+    stop: 128
 - name: tc_343_20190120T18
   n_samples: 8
   date: 2019-01-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 48.5
-    stop: 64.5
+    start: 48
+    stop: 64
 - name: tc_344_20190119T12
   n_samples: 8
   date: 2019-01-19T12:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 31.5
-    stop: 47.5
+    start: 32
+    stop: 48
 - name: tc_345_20190125T12
   n_samples: 8
   date: 2019-01-25T12:00
   save_generated_samples: true
   lat_extent:
-    start: -40.409832
-    stop: -24.409832
+    start: -40
+    stop: -24
   lon_extent:
-    start: 197.5
-    stop: 213.5
+    start: 198
+    stop: 214
 - name: tc_346_20190131T12
   n_samples: 8
   date: 2019-01-31T12:00
   save_generated_samples: true
   lat_extent:
-    start: -32.432034
-    stop: -16.432034
+    start: -32
+    stop: -16
   lon_extent:
-    start: 71.5
-    stop: 87.5
+    start: 72
+    stop: 88
 - name: tc_347_20190201T00
   n_samples: 8
   date: 2019-02-01T00:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 59.5
-    stop: 75.5
+    start: 60
+    stop: 76
 - name: tc_348_20190204T00
   n_samples: 8
   date: 2019-02-04T00:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 83.5
-    stop: 99.5
+    start: 84
+    stop: 100
 - name: tc_349_20190214T12
   n_samples: 8
   date: 2019-02-14T12:00
   save_generated_samples: true
   lat_extent:
-    start: -31.434807
-    stop: -15.434807
+    start: -31
+    stop: -15
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_350_20190220T12
   n_samples: 8
   date: 2019-02-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 44.5
-    stop: 60.5
+    start: 44
+    stop: 60
 - name: tc_351_20190304T06
   n_samples: 8
   date: 2019-03-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_352_20190307T00
   n_samples: 8
   date: 2019-03-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 35.5
-    stop: 51.5
+    start: 36
+    stop: 52
 - name: tc_353_20190308T18
   n_samples: 8
   date: 2019-03-08T18:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 90.5
-    stop: 106.5
+    start: 90
+    stop: 106
 - name: tc_354_20190317T00
   n_samples: 8
   date: 2019-03-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 69.5
-    stop: 85.5
+    start: 70
+    stop: 86
 - name: tc_355_20190320T18
   n_samples: 8
   date: 2019-03-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: -31.434807
-    stop: -15.434807
+    start: -31
+    stop: -15
   lon_extent:
-    start: 56.5
-    stop: 72.5
+    start: 56
+    stop: 72
 - name: tc_356_20190316T12
   n_samples: 8
   date: 2019-03-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: -42.404282
-    stop: -26.404282000000002
+    start: -42
+    stop: -26
   lon_extent:
-    start: 174.5
-    stop: 190.5
+    start: 174
+    stop: 190
 - name: tc_357_20190326T12
   n_samples: 8
   date: 2019-03-26T12:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 160.5
-    stop: 176.5
+    start: 160
+    stop: 176
 - name: tc_358_20190331T18
   n_samples: 8
   date: 2019-03-31T18:00
   save_generated_samples: true
   lat_extent:
-    start: -17.473647
-    stop: -1.4736469999999997
+    start: -17
+    stop: -1
   lon_extent:
-    start: 160.5
-    stop: 176.5
+    start: 160
+    stop: 176
 - name: tc_359_20190402T00
   n_samples: 8
   date: 2019-04-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 194.5
-    stop: 210.5
+    start: 194
+    stop: 210
 - name: tc_360_20190407T06
   n_samples: 8
   date: 2019-04-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 76.5
-    stop: 92.5
+    start: 76
+    stop: 92
 - name: tc_361_20190414T00
   n_samples: 8
   date: 2019-04-14T00:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 122.5
-    stop: 138.5
+    start: 122
+    stop: 138
 - name: tc_362_20190415T00
   n_samples: 8
   date: 2019-04-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 59.5
-    stop: 75.5
+    start: 60
+    stop: 76
 - name: tc_363_20190417T00
   n_samples: 8
   date: 2019-04-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: -57.362625
-    stop: -41.362625
+    start: -57
+    stop: -41
   lon_extent:
-    start: 230.5
-    stop: 246.5
+    start: 230
+    stop: 246
 - name: tc_364_20190429T18
   n_samples: 8
   date: 2019-04-29T18:00
   save_generated_samples: true
   lat_extent:
-    start: -18.470874000000002
-    stop: -2.4708740000000002
+    start: -18
+    stop: -2
   lon_extent:
-    start: 58.5
-    stop: 74.5
+    start: 58
+    stop: 74
 - name: tc_365_20190502T00
   n_samples: 8
   date: 2019-05-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 178.5
-    stop: 194.5
+    start: 178
+    stop: 194
 - name: tc_366_20190506T12
   n_samples: 8
   date: 2019-05-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 160.5
-    stop: 176.5
+    start: 160
+    stop: 176
 - name: tc_367_20190511T18
   n_samples: 8
   date: 2019-05-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_368_20190522T18
   n_samples: 8
   date: 2019-05-22T18:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 256.5
-    stop: 272.5
+    start: 256
+    stop: 272
 - name: tc_369_20190519T06
   n_samples: 8
   date: 2019-05-19T06:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 239.5
-    stop: 255.5
+    start: 240
+    stop: 256
 - name: tc_370_20190525T12
   n_samples: 8
   date: 2019-05-25T12:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_371_20190612T06
   n_samples: 8
   date: 2019-06-12T06:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_372_20190626T00
   n_samples: 8
   date: 2019-06-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_373_20190707T18
   n_samples: 8
   date: 2019-07-07T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 215.5
-    stop: 231.5
+    start: 216
+    stop: 232
 - name: tc_374_20190714T00
   n_samples: 8
   date: 2019-07-14T00:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 136.5
-    stop: 152.5
+    start: 136
+    stop: 152
 - name: tc_375_20190720T12
   n_samples: 8
   date: 2019-07-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 122.5
-    stop: 138.5
+    start: 122
+    stop: 138
 - name: tc_376_20190724T00
   n_samples: 8
   date: 2019-07-24T00:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 138.5
-    stop: 154.5
+    start: 138
+    stop: 154
 - name: tc_377_20190730T18
   n_samples: 8
   date: 2019-07-30T18:00
   save_generated_samples: true
   lat_extent:
-    start: 27.401505
-    stop: 43.401505
+    start: 27
+    stop: 43
   lon_extent:
-    start: 146.5
-    stop: 162.5
+    start: 146
+    stop: 162
 - name: tc_378_20190801T00
   n_samples: 8
   date: 2019-08-01T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 215.5
-    stop: 231.5
+    start: 216
+    stop: 232
 - name: tc_379_20190807T00
   n_samples: 8
   date: 2019-08-07T00:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 143.5
-    stop: 159.5
+    start: 144
+    stop: 160
 - name: tc_380_20190806T06
   n_samples: 8
   date: 2019-08-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 138.5
-    stop: 154.5
+    start: 138
+    stop: 154
 - name: tc_381_20190813T18
   n_samples: 8
   date: 2019-08-13T18:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_382_20190813T06
   n_samples: 8
   date: 2019-08-13T06:00
   save_generated_samples: true
   lat_extent:
-    start: 29.395954000000003
-    stop: 45.395954
+    start: 29
+    stop: 45
   lon_extent:
-    start: 302.5
-    stop: 318.5
+    start: 302
+    stop: 318
 - name: tc_383_20190820T06
   n_samples: 8
   date: 2019-08-20T06:00
   save_generated_samples: true
   lat_extent:
-    start: 32.387623
-    stop: 48.387623
+    start: 32
+    stop: 48
   lon_extent:
-    start: 313.5
-    stop: 329.5
+    start: 314
+    stop: 330
 - name: tc_384_20190818T12
   n_samples: 8
   date: 2019-08-18T12:00
   save_generated_samples: true
   lat_extent:
-    start: 35.379295
-    stop: 51.379295
+    start: 35
+    stop: 51
   lon_extent:
-    start: 314.5
-    stop: 330.5
+    start: 314
+    stop: 330
 - name: tc_385_20190823T18
   n_samples: 8
   date: 2019-08-23T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_386_20190826T00
   n_samples: 8
   date: 2019-08-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 213.5
-    stop: 229.5
+    start: 214
+    stop: 230
 - name: tc_387_20190902T18
   n_samples: 8
   date: 2019-09-02T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 243.5
-    stop: 259.5
+    start: 244
+    stop: 260
 - name: tc_388_20190909T00
   n_samples: 8
   date: 2019-09-09T00:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 111.5
-    stop: 127.5
+    start: 112
+    stop: 128
 - name: tc_389_20190911T00
   n_samples: 8
   date: 2019-09-11T00:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_390_20190922T00
   n_samples: 8
   date: 2019-09-22T00:00
   save_generated_samples: true
   lat_extent:
-    start: 33.38485
-    stop: 49.38485
+    start: 33
+    stop: 49
   lon_extent:
-    start: 315.5
-    stop: 331.5
+    start: 316
+    stop: 332
 - name: tc_391_20190915T00
   n_samples: 8
   date: 2019-09-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: 33.38485
-    stop: 49.38485
+    start: 33
+    stop: 49
   lon_extent:
-    start: 138.5
-    stop: 154.5
+    start: 138
+    stop: 154
 - name: tc_392_20190923T00
   n_samples: 8
   date: 2019-09-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_393_20191002T12
   n_samples: 8
   date: 2019-10-02T12:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 136.5
-    stop: 152.5
+    start: 136
+    stop: 152
 - name: tc_394_20191012T12
   n_samples: 8
   date: 2019-10-12T12:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 321.5
-    stop: 337.5
+    start: 322
+    stop: 338
 - name: tc_395_20191018T00
   n_samples: 8
   date: 2019-10-18T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 81.5
-    stop: 97.5
+    start: 82
+    stop: 98
 - name: tc_396_20191017T00
   n_samples: 8
   date: 2019-10-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: -52.376514
-    stop: -36.376514
+    start: -52
+    stop: -36
   lon_extent:
-    start: 322.5
-    stop: 338.5
+    start: 322
+    stop: 338
 - name: tc_397_20191028T00
   n_samples: 8
   date: 2019-10-28T00:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 132.5
-    stop: 148.5
+    start: 132
+    stop: 148
 - name: tc_398_20191022T06
   n_samples: 8
   date: 2019-10-22T06:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_399_20191108T00
   n_samples: 8
   date: 2019-11-08T00:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 134.5
-    stop: 150.5
+    start: 134
+    stop: 150
 - name: tc_400_20191111T00
   n_samples: 8
   date: 2019-11-11T00:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 108.5
-    stop: 124.5
+    start: 108
+    stop: 124
 - name: tc_401_20191111T18
   n_samples: 8
   date: 2019-11-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: -3.5124829999999996
-    stop: 12.487517
+    start: -4
+    stop: 12
   lon_extent:
-    start: 169.5
-    stop: 185.5
+    start: 170
+    stop: 186
 - name: tc_402_20191114T12
   n_samples: 8
   date: 2019-11-14T12:00
   save_generated_samples: true
   lat_extent:
-    start: -16.476421000000002
-    stop: -0.4764210000000002
+    start: -16
+    stop: 0
   lon_extent:
-    start: 146.5
-    stop: 162.5
+    start: 146
+    stop: 162
 - name: tc_403_20191116T18
   n_samples: 8
   date: 2019-11-16T18:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_404_20191129T12
   n_samples: 8
   date: 2019-11-29T12:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 134.5
-    stop: 150.5
+    start: 134
+    stop: 150
 - name: tc_405_20191208T00
   n_samples: 8
   date: 2019-12-08T00:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 34.5
-    stop: 50.5
+    start: 34
+    stop: 50
 - name: tc_406_20191223T06
   n_samples: 8
   date: 2019-12-23T06:00
   save_generated_samples: true
   lat_extent:
-    start: -33.429258000000004
-    stop: -17.429258
+    start: -33
+    stop: -17
   lon_extent:
-    start: 146.5
-    stop: 162.5
+    start: 146
+    stop: 162
 - name: tc_407_20191222T06
   n_samples: 8
   date: 2019-12-22T06:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 108.5
-    stop: 124.5
+    start: 108
+    stop: 124
 - name: tc_408_20191220T18
   n_samples: 8
   date: 2019-12-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: -6.504161
-    stop: 9.495839
+    start: -7
+    stop: 9
   lon_extent:
-    start: 97.5
-    stop: 113.5
+    start: 98
+    stop: 114
 - name: tc_409_20191223T12
   n_samples: 8
   date: 2019-12-23T12:00
   save_generated_samples: true
   lat_extent:
-    start: -3.5124829999999996
-    stop: 12.487517
+    start: -4
+    stop: 12
   lon_extent:
-    start: 84.5
-    stop: 100.5
+    start: 84
+    stop: 100
 - name: tc_410_20200111T18
   n_samples: 8
   date: 2020-01-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 50.5
-    stop: 66.5
+    start: 50
+    stop: 66
 - name: tc_411_20200108T06
   n_samples: 8
   date: 2020-01-08T06:00
   save_generated_samples: true
   lat_extent:
-    start: -3.5124829999999996
-    stop: 12.487517
+    start: -4
+    stop: 12
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_412_20200202T00
   n_samples: 8
   date: 2020-02-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 56.5
-    stop: 72.5
+    start: 56
+    stop: 72
 - name: tc_413_20200201T06
   n_samples: 8
   date: 2020-02-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 106.5
-    stop: 122.5
+    start: 106
+    stop: 122
 - name: tc_414_20200211T06
   n_samples: 8
   date: 2020-02-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 183.5
-    stop: 199.5
+    start: 184
+    stop: 200
 - name: tc_415_20200209T12
   n_samples: 8
   date: 2020-02-09T12:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 76.5
-    stop: 92.5
+    start: 76
+    stop: 92
 - name: tc_416_20200216T00
   n_samples: 8
   date: 2020-02-16T00:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 72.5
-    stop: 88.5
+    start: 72
+    stop: 88
 - name: tc_417_20200220T18
   n_samples: 8
   date: 2020-02-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 46.5
-    stop: 62.5
+    start: 46
+    stop: 62
 - name: tc_418_20200229T00
   n_samples: 8
   date: 2020-02-29T00:00
   save_generated_samples: true
   lat_extent:
-    start: -2.515256
-    stop: 13.484744
+    start: -3
+    stop: 13
   lon_extent:
-    start: 96.5
-    stop: 112.5
+    start: 96
+    stop: 112
 - name: tc_419_20200311T06
   n_samples: 8
   date: 2020-03-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 80.5
-    stop: 96.5
+    start: 80
+    stop: 96
 - name: tc_420_20200320T12
   n_samples: 8
   date: 2020-03-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_421_20200326T00
   n_samples: 8
   date: 2020-03-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: -31.434807
-    stop: -15.434807
+    start: -31
+    stop: -15
   lon_extent:
-    start: 176.5
-    stop: 192.5
+    start: 176
+    stop: 192
 - name: tc_422_20200401T12
   n_samples: 8
   date: 2020-04-01T12:00
   save_generated_samples: true
   lat_extent:
-    start: 2.4708740000000002
-    stop: 18.470874000000002
+    start: 2
+    stop: 18
   lon_extent:
-    start: 156.5
-    stop: 172.5
+    start: 156
+    stop: 172
 - name: tc_423_20200405T00
   n_samples: 8
   date: 2020-04-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 156.5
-    stop: 172.5
+    start: 156
+    stop: 172
 - name: tc_424_20200426T00
   n_samples: 8
   date: 2020-04-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 49.5
-    stop: 65.5
+    start: 50
+    stop: 66
 - name: tc_425_20200503T12
   n_samples: 8
   date: 2020-05-03T12:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_426_20200517T00
   n_samples: 8
   date: 2020-05-17T00:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 122.5
-    stop: 138.5
+    start: 122
+    stop: 138
 - name: tc_427_20200516T06
   n_samples: 8
   date: 2020-05-16T06:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 80.5
-    stop: 96.5
+    start: 80
+    stop: 96
 - name: tc_428_20200521T12
   n_samples: 8
   date: 2020-05-21T12:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_429_20200527T18
   n_samples: 8
   date: 2020-05-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 61.5
-    stop: 77.5
+    start: 62
+    stop: 78
 - name: tc_430_20200601T06
   n_samples: 8
   date: 2020-06-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_431_20200611T06
   n_samples: 8
   date: 2020-06-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 131.5
-    stop: 147.5
+    start: 132
+    stop: 148
 - name: tc_432_20200612T12
   n_samples: 8
   date: 2020-06-12T12:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_433_20200710T06
   n_samples: 8
   date: 2020-07-10T06:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 114.5
-    stop: 130.5
+    start: 114
+    stop: 130
 - name: tc_434_20200709T00
   n_samples: 8
   date: 2020-07-09T00:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 317.5
-    stop: 333.5
+    start: 318
+    stop: 334
 - name: tc_435_20200711T18
   n_samples: 8
   date: 2020-07-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 230.5
-    stop: 246.5
+    start: 230
+    stop: 246
 - name: tc_436_20200715T00
   n_samples: 8
   date: 2020-07-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 294.5
-    stop: 310.5
+    start: 294
+    stop: 310
 - name: tc_437_20200719T12
   n_samples: 8
   date: 2020-07-19T12:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_438_20200722T18
   n_samples: 8
   date: 2020-07-22T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 238.5
-    stop: 254.5
+    start: 238
+    stop: 254
 - name: tc_439_20200726T00
   n_samples: 8
   date: 2020-07-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 120.5
-    stop: 136.5
+    start: 120
+    stop: 136
 - name: tc_440_20200729T06
   n_samples: 8
   date: 2020-07-29T06:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 232.5
-    stop: 248.5
+    start: 232
+    stop: 248
 - name: tc_441_20200802T00
   n_samples: 8
   date: 2020-08-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 235.5
-    stop: 251.5
+    start: 236
+    stop: 252
 - name: tc_442_20200730T06
   n_samples: 8
   date: 2020-07-30T06:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 128.5
-    stop: 144.5
+    start: 128
+    stop: 144
 - name: tc_443_20200805T06
   n_samples: 8
   date: 2020-08-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: -12.487517
-    stop: 3.5124829999999996
+    start: -12
+    stop: 4
   lon_extent:
-    start: 89.5
-    stop: 105.5
+    start: 90
+    stop: 106
 - name: tc_444_20200805T06
   n_samples: 8
   date: 2020-08-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: 27.401505
-    stop: 43.401505
+    start: 27
+    stop: 43
   lon_extent:
-    start: 152.5
-    stop: 168.5
+    start: 152
+    stop: 168
 - name: tc_445_20200807T18
   n_samples: 8
   date: 2020-08-07T18:00
   save_generated_samples: true
   lat_extent:
-    start: 31.3904
-    stop: 47.3904
+    start: 31
+    stop: 47
   lon_extent:
-    start: 145.5
-    stop: 161.5
+    start: 146
+    stop: 162
 - name: tc_446_20200810T12
   n_samples: 8
   date: 2020-08-10T12:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 261.5
-    stop: 277.5
+    start: 262
+    stop: 278
 - name: tc_447_20200810T00
   n_samples: 8
   date: 2020-08-10T00:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 225.5
-    stop: 241.5
+    start: 226
+    stop: 242
 - name: tc_448_20200824T00
   n_samples: 8
   date: 2020-08-24T00:00
   save_generated_samples: true
   lat_extent:
-    start: -11.490291
-    stop: 4.509709
+    start: -11
+    stop: 5
   lon_extent:
-    start: 77.5
-    stop: 93.5
+    start: 78
+    stop: 94
 - name: tc_449_20200827T18
   n_samples: 8
   date: 2020-08-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_450_20200826T06
   n_samples: 8
   date: 2020-08-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 236.5
-    stop: 252.5
+    start: 236
+    stop: 252
 - name: tc_451_20200901T00
   n_samples: 8
   date: 2020-09-01T00:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_452_20200912T00
   n_samples: 8
   date: 2020-09-12T00:00
   save_generated_samples: true
   lat_extent:
-    start: 45.351505
-    stop: 61.351505
+    start: 45
+    stop: 61
   lon_extent:
-    start: 332.5
-    stop: 348.5
+    start: 332
+    stop: 348
 - name: tc_453_20200907T18
   n_samples: 8
   date: 2020-09-07T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 105.5
-    stop: 121.5
+    start: 106
+    stop: 122
 - name: tc_454_20200911T18
   n_samples: 8
   date: 2020-09-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: -14.481969
-    stop: 1.5180309999999997
+    start: -14
+    stop: 2
   lon_extent:
-    start: 73.5
-    stop: 89.5
+    start: 74
+    stop: 90
 - name: tc_455_20200919T00
   n_samples: 8
   date: 2020-09-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 99.5
-    stop: 115.5
+    start: 100
+    stop: 116
 - name: tc_456_20200922T12
   n_samples: 8
   date: 2020-09-22T12:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 236.5
-    stop: 252.5
+    start: 236
+    stop: 252
 - name: tc_457_20200923T18
   n_samples: 8
   date: 2020-09-23T18:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_458_20200921T12
   n_samples: 8
   date: 2020-09-21T12:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 260.5
-    stop: 276.5
+    start: 260
+    stop: 276
 - name: tc_459_20200930T00
   n_samples: 8
   date: 2020-09-30T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 239.5
-    stop: 255.5
+    start: 240
+    stop: 256
 - name: tc_460_20201003T00
   n_samples: 8
   date: 2020-10-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 79.5
-    stop: 95.5
+    start: 80
+    stop: 96
 - name: tc_461_20201005T06
   n_samples: 8
   date: 2020-10-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: -18.470874000000002
-    stop: -2.4708740000000002
+    start: -18
+    stop: -2
   lon_extent:
-    start: 70.5
-    stop: 86.5
+    start: 70
+    stop: 86
 - name: tc_462_20201010T06
   n_samples: 8
   date: 2020-10-10T06:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 136.5
-    stop: 152.5
+    start: 136
+    stop: 152
 - name: tc_463_20201015T06
   n_samples: 8
   date: 2020-10-15T06:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 100.5
-    stop: 116.5
+    start: 100
+    stop: 116
 - name: tc_464_20201018T06
   n_samples: 8
   date: 2020-10-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 132.5
-    stop: 148.5
+    start: 132
+    stop: 148
 - name: tc_465_20201020T12
   n_samples: 8
   date: 2020-10-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_466_20201024T00
   n_samples: 8
   date: 2020-10-24T00:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 137.5
-    stop: 153.5
+    start: 138
+    stop: 154
 - name: tc_467_20201101T00
   n_samples: 8
   date: 2020-11-01T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_468_20201103T12
   n_samples: 8
   date: 2020-11-03T12:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 61.5
-    stop: 77.5
+    start: 62
+    stop: 78
 - name: tc_469_20201109T06
   n_samples: 8
   date: 2020-11-09T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_470_20201113T12
   n_samples: 8
   date: 2020-11-13T12:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 74.5
-    stop: 90.5
+    start: 74
+    stop: 90
 - name: tc_471_20201113T06
   n_samples: 8
   date: 2020-11-13T06:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 123.5
-    stop: 139.5
+    start: 124
+    stop: 140
 - name: tc_472_20201122T00
   n_samples: 8
   date: 2020-11-22T00:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 105.5
-    stop: 121.5
+    start: 106
+    stop: 122
 - name: tc_473_20201121T00
   n_samples: 8
   date: 2020-11-21T00:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 44.5
-    stop: 60.5
+    start: 44
+    stop: 60
 - name: tc_474_20201127T00
   n_samples: 8
   date: 2020-11-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 2.4708740000000002
-    stop: 18.470874000000002
+    start: 2
+    stop: 18
   lon_extent:
-    start: 85.5
-    stop: 101.5
+    start: 86
+    stop: 102
 - name: tc_475_20201129T00
   n_samples: 8
   date: 2020-11-29T00:00
   save_generated_samples: true
   lat_extent:
-    start: 0.4764210000000002
-    stop: 16.476421000000002
+    start: 0
+    stop: 16
   lon_extent:
-    start: 75.5
-    stop: 91.5
+    start: 76
+    stop: 92
 - name: tc_476_20201209T00
   n_samples: 8
   date: 2020-12-09T00:00
   save_generated_samples: true
   lat_extent:
-    start: -2.515256
-    stop: 13.484744
+    start: -3
+    stop: 13
   lon_extent:
-    start: 84.5
-    stop: 100.5
+    start: 84
+    stop: 100
 - name: tc_477_20201213T00
   n_samples: 8
   date: 2020-12-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: -1.5180309999999997
-    stop: 14.481969
+    start: -2
+    stop: 14
   lon_extent:
-    start: 94.5
-    stop: 110.5
+    start: 94
+    stop: 110
 - name: tc_478_20201220T06
   n_samples: 8
   date: 2020-12-20T06:00
   save_generated_samples: true
   lat_extent:
-    start: -0.520804
-    stop: 15.479196
+    start: -1
+    stop: 15
   lon_extent:
-    start: 99.5
-    stop: 115.5
+    start: 100
+    stop: 116
 - name: tc_479_20201228T00
   n_samples: 8
   date: 2020-12-28T00:00
   save_generated_samples: true
   lat_extent:
-    start: 0.4764210000000002
-    stop: 16.476421000000002
+    start: 0
+    stop: 16
   lon_extent:
-    start: 76.5
-    stop: 92.5
+    start: 76
+    stop: 92
 - name: tc_480_20210101T00
   n_samples: 8
   date: 2021-01-01T00:00
   save_generated_samples: true
   lat_extent:
-    start: -0.520804
-    stop: 15.479196
+    start: -1
+    stop: 15
   lon_extent:
-    start: 86.5
-    stop: 102.5
+    start: 86
+    stop: 102
 - name: tc_481_20210103T06
   n_samples: 8
   date: 2021-01-03T06:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 40.5
-    stop: 56.5
+    start: 40
+    stop: 56
 - name: tc_482_20210118T00
   n_samples: 8
   date: 2021-01-18T00:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 42.5
-    stop: 58.5
+    start: 42
+    stop: 58
 - name: tc_483_20210118T00
   n_samples: 8
   date: 2021-01-18T00:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 108.5
-    stop: 124.5
+    start: 108
+    stop: 124
 - name: tc_484_20210123T12
   n_samples: 8
   date: 2021-01-23T12:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 41.5
-    stop: 57.5
+    start: 42
+    stop: 58
 - name: tc_485_20210125T00
   n_samples: 8
   date: 2021-01-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: -0.520804
-    stop: 15.479196
+    start: -1
+    stop: 15
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_486_20210201T18
   n_samples: 8
   date: 2021-02-01T18:00
   save_generated_samples: true
   lat_extent:
-    start: -37.418159
-    stop: -21.418159
+    start: -37
+    stop: -21
   lon_extent:
-    start: 44.5
-    stop: 60.5
+    start: 44
+    stop: 60
 - name: tc_487_20210131T12
   n_samples: 8
   date: 2021-01-31T12:00
   save_generated_samples: true
   lat_extent:
-    start: -37.418159
-    stop: -21.418159
+    start: -37
+    stop: -21
   lon_extent:
-    start: 40.5
-    stop: 56.5
+    start: 40
+    stop: 56
 - name: tc_488_20210202T00
   n_samples: 8
   date: 2021-02-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 99.5
-    stop: 115.5
+    start: 100
+    stop: 116
 - name: tc_489_20210203T18
   n_samples: 8
   date: 2021-02-03T18:00
   save_generated_samples: true
   lat_extent:
-    start: 41.362625
-    stop: 57.362625
+    start: 41
+    stop: 57
   lon_extent:
-    start: 152.5
-    stop: 168.5
+    start: 152
+    stop: 168
 - name: tc_490_20210216T06
   n_samples: 8
   date: 2021-02-16T06:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 42.5
-    stop: 58.5
+    start: 42
+    stop: 58
 - name: tc_491_20210213T00
   n_samples: 8
   date: 2021-02-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 102.5
-    stop: 118.5
+    start: 102
+    stop: 118
 - name: tc_492_20210222T18
   n_samples: 8
   date: 2021-02-22T18:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 60.5
-    stop: 76.5
+    start: 60
+    stop: 76
 - name: tc_493_20210225T00
   n_samples: 8
   date: 2021-02-25T00:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 79.5
-    stop: 95.5
+    start: 80
+    stop: 96
 - name: tc_494_20210320T18
   n_samples: 8
   date: 2021-03-20T18:00
   save_generated_samples: true
   lat_extent:
-    start: -21.462550999999998
-    stop: -5.4625509999999995
+    start: -21
+    stop: -5
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_495_20210322T06
   n_samples: 8
   date: 2021-03-22T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_496_20210330T18
   n_samples: 8
   date: 2021-03-30T18:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_497_20210407T06
   n_samples: 8
   date: 2021-04-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_498_20210407T12
   n_samples: 8
   date: 2021-04-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 45.5
-    stop: 61.5
+    start: 46
+    stop: 62
 - name: tc_499_20210419T18
   n_samples: 8
   date: 2021-04-19T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_500_20210426T06
   n_samples: 8
   date: 2021-04-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: -19.4681
-    stop: -3.4680999999999997
+    start: -19
+    stop: -3
   lon_extent:
-    start: 64.5
-    stop: 80.5
+    start: 64
+    stop: 80
 - name: tc_501_20210516T12
   n_samples: 8
   date: 2021-05-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_502_20210518T18
   n_samples: 8
   date: 2021-05-18T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_503_20210529T00
   n_samples: 8
   date: 2021-05-29T00:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 128.5
-    stop: 144.5
+    start: 128
+    stop: 144
 - name: tc_504_20210526T00
   n_samples: 8
   date: 2021-05-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 139.5
-    stop: 155.5
+    start: 140
+    stop: 156
 - name: tc_505_20210525T06
   n_samples: 8
   date: 2021-05-25T06:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 243.5
-    stop: 259.5
+    start: 244
+    stop: 260
 - name: tc_506_20210603T12
   n_samples: 8
   date: 2021-06-03T12:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 244.5
-    stop: 260.5
+    start: 244
+    stop: 260
 - name: tc_507_20210603T12
   n_samples: 8
   date: 2021-06-03T12:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_508_20210606T12
   n_samples: 8
   date: 2021-06-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 256.5
-    stop: 272.5
+    start: 256
+    stop: 272
 - name: tc_509_20210617T06
   n_samples: 8
   date: 2021-06-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_510_20210620T00
   n_samples: 8
   date: 2021-06-20T00:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 300.5
-    stop: 316.5
+    start: 300
+    stop: 316
 - name: tc_511_20210624T06
   n_samples: 8
   date: 2021-06-24T06:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 120.5
-    stop: 136.5
+    start: 120
+    stop: 136
 - name: tc_512_20210628T06
   n_samples: 8
   date: 2021-06-28T06:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_513_20210704T06
   n_samples: 8
   date: 2021-07-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 140.5
-    stop: 156.5
+    start: 140
+    stop: 156
 - name: tc_514_20210706T18
   n_samples: 8
   date: 2021-07-06T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 245.5
-    stop: 261.5
+    start: 246
+    stop: 262
 - name: tc_515_20210715T18
   n_samples: 8
   date: 2021-07-15T18:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 136.5
-    stop: 152.5
+    start: 136
+    stop: 152
 - name: tc_516_20210712T18
   n_samples: 8
   date: 2021-07-12T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 239.5
-    stop: 255.5
+    start: 240
+    stop: 256
 - name: tc_517_20210718T12
   n_samples: 8
   date: 2021-07-18T12:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 239.5
-    stop: 255.5
+    start: 240
+    stop: 256
 - name: tc_518_20210722T18
   n_samples: 8
   date: 2021-07-22T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 242.5
-    stop: 258.5
+    start: 242
+    stop: 258
 - name: tc_519_20210723T00
   n_samples: 8
   date: 2021-07-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 156.5
-    stop: 172.5
+    start: 156
+    stop: 172
 - name: tc_520_20210727T00
   n_samples: 8
   date: 2021-07-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 255.5
-    stop: 271.5
+    start: 256
+    stop: 272
 - name: tc_521_20210809T06
   n_samples: 8
   date: 2021-08-09T06:00
   save_generated_samples: true
   lat_extent:
-    start: 26.404282000000002
-    stop: 42.404282
+    start: 26
+    stop: 42
   lon_extent:
-    start: 136.5
-    stop: 152.5
+    start: 136
+    stop: 152
 - name: tc_522_20210806T12
   n_samples: 8
   date: 2021-08-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 177.5
-    stop: 193.5
+    start: 178
+    stop: 194
 - name: tc_523_20210824T12
   n_samples: 8
   date: 2021-08-24T12:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 233.5
-    stop: 249.5
+    start: 234
+    stop: 250
 - name: tc_524_20210825T06
   n_samples: 8
   date: 2021-08-25T06:00
   save_generated_samples: true
   lat_extent:
-    start: 25.407058999999997
-    stop: 41.407059
+    start: 25
+    stop: 41
   lon_extent:
-    start: 308.5
-    stop: 324.5
+    start: 308
+    stop: 324
 - name: tc_525_20210831T12
   n_samples: 8
   date: 2021-08-31T12:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_526_20210902T18
   n_samples: 8
   date: 2021-09-02T18:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 264.5
-    stop: 280.5
+    start: 264
+    stop: 280
 - name: tc_527_20210907T06
   n_samples: 8
   date: 2021-09-07T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 228.5
-    stop: 244.5
+    start: 228
+    stop: 244
 - name: tc_528_20210917T12
   n_samples: 8
   date: 2021-09-17T12:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 120.5
-    stop: 136.5
+    start: 120
+    stop: 136
 - name: tc_529_20210929T18
   n_samples: 8
   date: 2021-09-29T18:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 282.5
-    stop: 298.5
+    start: 282
+    stop: 298
 - name: tc_530_20210919T18
   n_samples: 8
   date: 2021-09-19T18:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_531_20210920T12
   n_samples: 8
   date: 2021-09-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 224.5
-    stop: 240.5
+    start: 224
+    stop: 240
 - name: tc_532_20210923T18
   n_samples: 8
   date: 2021-09-23T18:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 219.5
-    stop: 235.5
+    start: 220
+    stop: 236
 - name: tc_533_20210927T06
   n_samples: 8
   date: 2021-09-27T06:00
   save_generated_samples: true
   lat_extent:
-    start: -14.481969
-    stop: 1.5180309999999997
+    start: -14
+    stop: 2
   lon_extent:
-    start: 77.5
-    stop: 93.5
+    start: 78
+    stop: 94
 - name: tc_534_20210928T18
   n_samples: 8
   date: 2021-09-28T18:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 107.5
-    stop: 123.5
+    start: 108
+    stop: 124
 - name: tc_535_20211006T06
   n_samples: 8
   date: 2021-10-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 138.5
-    stop: 154.5
+    start: 138
+    stop: 154
 - name: tc_536_20211012T06
   n_samples: 8
   date: 2021-10-12T06:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 106.5
-    stop: 122.5
+    start: 106
+    stop: 122
 - name: tc_537_20211017T06
   n_samples: 8
   date: 2021-10-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_538_20211015T00
   n_samples: 8
   date: 2021-10-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_539_20211018T06
   n_samples: 8
   date: 2021-10-18T06:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 74.5
-    stop: 90.5
+    start: 74
+    stop: 90
 - name: tc_540_20211019T00
   n_samples: 8
   date: 2021-10-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 237.5
-    stop: 253.5
+    start: 238
+    stop: 254
 - name: tc_541_20211023T12
   n_samples: 8
   date: 2021-10-23T12:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 109.5
-    stop: 125.5
+    start: 110
+    stop: 126
 - name: tc_542_20211030T18
   n_samples: 8
   date: 2021-10-30T18:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_543_20211029T00
   n_samples: 8
   date: 2021-10-29T00:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 107.5
-    stop: 123.5
+    start: 108
+    stop: 124
 - name: tc_544_20211030T00
   n_samples: 8
   date: 2021-10-30T00:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 138.5
-    stop: 154.5
+    start: 138
+    stop: 154
 - name: tc_545_20211108T12
   n_samples: 8
   date: 2021-11-08T12:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 108.5
-    stop: 124.5
+    start: 108
+    stop: 124
 - name: tc_546_20211112T00
   n_samples: 8
   date: 2021-11-12T00:00
   save_generated_samples: true
   lat_extent:
-    start: -18.470874000000002
-    stop: -2.4708740000000002
+    start: -18
+    stop: -2
   lon_extent:
-    start: 61.5
-    stop: 77.5
+    start: 62
+    stop: 78
 - name: tc_547_20211115T00
   n_samples: 8
   date: 2021-11-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 120.5
-    stop: 136.5
+    start: 120
+    stop: 136
 - name: tc_548_20211127T00
   n_samples: 8
   date: 2021-11-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 77.5
-    stop: 93.5
+    start: 78
+    stop: 94
 - name: tc_549_20211206T06
   n_samples: 8
   date: 2021-12-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: -28.44313
-    stop: -12.44313
+    start: -28
+    stop: -12
   lon_extent:
-    start: 142.5
-    stop: 158.5
+    start: 142
+    stop: 158
 - name: tc_550_20211206T18
   n_samples: 8
   date: 2021-12-06T18:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 94.5
-    stop: 110.5
+    start: 94
+    stop: 110
 - name: tc_551_20211212T12
   n_samples: 8
   date: 2021-12-12T12:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_552_20211219T18
   n_samples: 8
   date: 2021-12-19T18:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 114.5
-    stop: 130.5
+    start: 114
+    stop: 130
 - name: tc_553_20211229T06
   n_samples: 8
   date: 2021-12-29T06:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 33.5
-    stop: 49.5
+    start: 34
+    stop: 50
 - name: tc_554_20211231T06
   n_samples: 8
   date: 2021-12-31T06:00
   save_generated_samples: true
   lat_extent:
-    start: 0.4764210000000002
-    stop: 16.476421000000002
+    start: 0
+    stop: 16
   lon_extent:
-    start: 93.5
-    stop: 109.5
+    start: 94
+    stop: 110
 - name: tc_555_20220111T12
   n_samples: 8
   date: 2022-01-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: -35.423708000000005
-    stop: -19.423708
+    start: -35
+    stop: -19
   lon_extent:
-    start: 58.5
-    stop: 74.5
+    start: 58
+    stop: 74
 - name: tc_556_20220108T06
   n_samples: 8
   date: 2022-01-08T06:00
   save_generated_samples: true
   lat_extent:
-    start: -4.509709
-    stop: 11.490291
+    start: -5
+    stop: 11
   lon_extent:
-    start: 100.5
-    stop: 116.5
+    start: 100
+    stop: 116
 - name: tc_557_20220111T00
   n_samples: 8
   date: 2022-01-11T00:00
   save_generated_samples: true
   lat_extent:
-    start: -0.520804
-    stop: 15.479196
+    start: -1
+    stop: 15
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_558_20220119T12
   n_samples: 8
   date: 2022-01-19T12:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 29.5
-    stop: 45.5
+    start: 30
+    stop: 46
 - name: tc_559_20220120T00
   n_samples: 8
   date: 2022-01-20T00:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 78.5
-    stop: 94.5
+    start: 78
+    stop: 94
 - name: tc_560_20220127T00
   n_samples: 8
   date: 2022-01-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 35.5
-    stop: 51.5
+    start: 36
+    stop: 52
 - name: tc_561_20220128T12
   n_samples: 8
   date: 2022-01-28T12:00
   save_generated_samples: true
   lat_extent:
-    start: 35.379295
-    stop: 51.379295
+    start: 35
+    stop: 51
   lon_extent:
-    start: 166.5
-    stop: 182.5
+    start: 166
+    stop: 182
 - name: tc_562_20220215T06
   n_samples: 8
   date: 2022-02-15T06:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 61.5
-    stop: 77.5
+    start: 62
+    stop: 78
 - name: tc_563_20220215T18
   n_samples: 8
   date: 2022-02-15T18:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_564_20220224T00
   n_samples: 8
   date: 2022-02-24T00:00
   save_generated_samples: true
   lat_extent:
-    start: -20.465325
-    stop: -4.465325
+    start: -20
+    stop: -4
   lon_extent:
-    start: 82.5
-    stop: 98.5
+    start: 82
+    stop: 98
 - name: tc_565_20220227T06
   n_samples: 8
   date: 2022-02-27T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 68.5
-    stop: 84.5
+    start: 68
+    stop: 84
 - name: tc_566_20220310T00
   n_samples: 8
   date: 2022-03-10T00:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 36.5
-    stop: 52.5
+    start: 36
+    stop: 52
 - name: tc_567_20220311T12
   n_samples: 8
   date: 2022-03-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 141.5
-    stop: 157.5
+    start: 142
+    stop: 158
 - name: tc_568_20220324T12
   n_samples: 8
   date: 2022-03-24T12:00
   save_generated_samples: true
   lat_extent:
-    start: -21.462550999999998
-    stop: -5.4625509999999995
+    start: -21
+    stop: -5
   lon_extent:
-    start: 128.5
-    stop: 144.5
+    start: 128
+    stop: 144
 - name: tc_569_20220325T06
   n_samples: 8
   date: 2022-03-25T06:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_570_20220404T06
   n_samples: 8
   date: 2022-04-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 101.5
-    stop: 117.5
+    start: 102
+    stop: 118
 - name: tc_571_20220405T00
   n_samples: 8
   date: 2022-04-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: -19.4681
-    stop: -3.4680999999999997
+    start: -19
+    stop: -3
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_572_20220406T12
   n_samples: 8
   date: 2022-04-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_573_20220415T18
   n_samples: 8
   date: 2022-04-15T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 84.5
-    stop: 100.5
+    start: 84
+    stop: 100
 - name: tc_574_20220512T06
   n_samples: 8
   date: 2022-05-12T06:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 76.5
-    stop: 92.5
+    start: 76
+    stop: 92
 - name: tc_575_20220531T06
   n_samples: 8
   date: 2022-05-31T06:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_576_20220527T12
   n_samples: 8
   date: 2022-05-27T12:00
   save_generated_samples: true
   lat_extent:
-    start: -50.382072
-    stop: -34.382072
+    start: -50
+    stop: -34
   lon_extent:
-    start: 332.5
-    stop: 348.5
+    start: 332
+    stop: 348
 - name: tc_577_20220606T12
   n_samples: 8
   date: 2022-06-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 138.5
-    stop: 154.5
+    start: 138
+    stop: 154
 - name: tc_578_20220609T12
   n_samples: 8
   date: 2022-06-09T12:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 255.5
-    stop: 271.5
+    start: 256
+    stop: 272
 - name: tc_579_20220705T06
   n_samples: 8
   date: 2022-07-05T06:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116
+    stop: 132
 - name: tc_580_20220706T18
   n_samples: 8
   date: 2022-07-06T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 233.5
-    stop: 249.5
+    start: 234
+    stop: 250
 - name: tc_581_20220717T12
   n_samples: 8
   date: 2022-07-17T12:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_582_20220715T18
   n_samples: 8
   date: 2022-07-15T18:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 249.5
-    stop: 265.5
+    start: 250
+    stop: 266
 - name: tc_583_20220727T00
   n_samples: 8
   date: 2022-07-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_584_20220726T00
   n_samples: 8
   date: 2022-07-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 20.420933
-    stop: 36.420933000000005
+    start: 20
+    stop: 36
   lon_extent:
-    start: 137.5
-    stop: 153.5
+    start: 138
+    stop: 154
 - name: tc_585_20220727T00
   n_samples: 8
   date: 2022-07-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 26.404282000000002
-    stop: 42.404282
+    start: 26
+    stop: 42
   lon_extent:
-    start: 154.5
-    stop: 170.5
+    start: 154
+    stop: 170
 - name: tc_586_20220724T00
   n_samples: 8
   date: 2022-07-24T00:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 245.5
-    stop: 261.5
+    start: 246
+    stop: 262
 - name: tc_587_20220804T06
   n_samples: 8
   date: 2022-08-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 127.5
-    stop: 143.5
+    start: 128
+    stop: 144
 - name: tc_588_20220805T18
   n_samples: 8
   date: 2022-08-05T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 247.5
-    stop: 263.5
+    start: 248
+    stop: 264
 - name: tc_589_20220827T18
   n_samples: 8
   date: 2022-08-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_590_20220813T00
   n_samples: 8
   date: 2022-08-13T00:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 234.5
-    stop: 250.5
+    start: 234
+    stop: 250
 - name: tc_591_20220822T12
   n_samples: 8
   date: 2022-08-22T12:00
   save_generated_samples: true
   lat_extent:
-    start: 34.382072
-    stop: 50.382072
+    start: 34
+    stop: 50
   lon_extent:
-    start: 293.5
-    stop: 309.5
+    start: 294
+    stop: 310
 - name: tc_592_20220819T00
   n_samples: 8
   date: 2022-08-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 135.5
-    stop: 151.5
+    start: 136
+    stop: 152
 - name: tc_593_20220825T06
   n_samples: 8
   date: 2022-08-25T06:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 238.5
-    stop: 254.5
+    start: 238
+    stop: 254
 - name: tc_594_20220827T12
   n_samples: 8
   date: 2022-08-27T12:00
   save_generated_samples: true
   lat_extent:
-    start: 29.395954000000003
-    stop: 45.395954
+    start: 29
+    stop: 45
   lon_extent:
-    start: 152.5
-    stop: 168.5
+    start: 152
+    stop: 168
 - name: tc_595_20220908T18
   n_samples: 8
   date: 2022-09-08T18:00
   save_generated_samples: true
   lat_extent:
-    start: 30.393177
-    stop: 46.393177
+    start: 30
+    stop: 46
   lon_extent:
-    start: 287.5
-    stop: 303.5
+    start: 288
+    stop: 304
 - name: tc_596_20220908T06
   n_samples: 8
   date: 2022-09-08T06:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 240.5
-    stop: 256.5
+    start: 240
+    stop: 256
 - name: tc_597_20220906T06
   n_samples: 8
   date: 2022-09-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 277.5
-    stop: 293.5
+    start: 278
+    stop: 294
 - name: tc_598_20220907T18
   n_samples: 8
   date: 2022-09-07T18:00
   save_generated_samples: true
   lat_extent:
-    start: 28.398730999999998
-    stop: 44.398731
+    start: 28
+    stop: 44
   lon_extent:
-    start: 154.5
-    stop: 170.5
+    start: 154
+    stop: 170
 - name: tc_599_20220914T12
   n_samples: 8
   date: 2022-09-14T12:00
   save_generated_samples: true
   lat_extent:
-    start: 13.440356999999999
-    stop: 29.440357
+    start: 13
+    stop: 29
   lon_extent:
-    start: 238.5
-    stop: 254.5
+    start: 238
+    stop: 254
 - name: tc_600_20220919T12
   n_samples: 8
   date: 2022-09-19T12:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 304.5
-    stop: 320.5
+    start: 304
+    stop: 320
 - name: tc_601_20220925T06
   n_samples: 8
   date: 2022-09-25T06:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 127.5
-    stop: 143.5
+    start: 128
+    stop: 144
 - name: tc_602_20220925T12
   n_samples: 8
   date: 2022-09-25T12:00
   save_generated_samples: true
   lat_extent:
-    start: 28.398730999999998
-    stop: 44.398731
+    start: 28
+    stop: 44
   lon_extent:
-    start: 152.5
-    stop: 168.5
+    start: 152
+    stop: 168
 - name: tc_603_20220927T18
   n_samples: 8
   date: 2022-09-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: 11.445906
-    stop: 27.445906
+    start: 11
+    stop: 27
   lon_extent:
-    start: 240.5
-    stop: 256.5
+    start: 240
+    stop: 256
 - name: tc_604_20221004T12
   n_samples: 8
   date: 2022-10-04T12:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 55.5
-    stop: 71.5
+    start: 56
+    stop: 72
 - name: tc_605_20220930T18
   n_samples: 8
   date: 2022-09-30T18:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_606_20221009T06
   n_samples: 8
   date: 2022-10-09T06:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 164.5
-    stop: 180.5
+    start: 164
+    stop: 180
 - name: tc_607_20221011T12
   n_samples: 8
   date: 2022-10-11T12:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 110.5
-    stop: 126.5
+    start: 110
+    stop: 126
 - name: tc_608_20221015T00
   n_samples: 8
   date: 2022-10-15T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 134.5
-    stop: 150.5
+    start: 134
+    stop: 150
 - name: tc_609_20221013T18
   n_samples: 8
   date: 2022-10-13T18:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 245.5
-    stop: 261.5
+    start: 246
+    stop: 262
 - name: tc_610_20221017T06
   n_samples: 8
   date: 2022-10-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 234.5
-    stop: 250.5
+    start: 234
+    stop: 250
 - name: tc_611_20221022T06
   n_samples: 8
   date: 2022-10-22T06:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 106.5
-    stop: 122.5
+    start: 106
+    stop: 122
 - name: tc_612_20221025T18
   n_samples: 8
   date: 2022-10-25T18:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 74.5
-    stop: 90.5
+    start: 74
+    stop: 90
 - name: tc_613_20221031T00
   n_samples: 8
   date: 2022-10-31T00:00
   save_generated_samples: true
   lat_extent:
-    start: -18.470874000000002
-    stop: -2.4708740000000002
+    start: -18
+    stop: -2
   lon_extent:
-    start: 65.5
-    stop: 81.5
+    start: 66
+    stop: 82
 - name: tc_614_20221104T06
   n_samples: 8
   date: 2022-11-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: -18.470874000000002
-    stop: -2.4708740000000002
+    start: -18
+    stop: -2
   lon_extent:
-    start: 79.5
-    stop: 95.5
+    start: 80
+    stop: 96
 - name: tc_615_20221103T00
   n_samples: 8
   date: 2022-11-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 111.5
-    stop: 127.5
+    start: 112
+    stop: 128
 - name: tc_616_20221108T12
   n_samples: 8
   date: 2022-11-08T12:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 74.5
-    stop: 90.5
+    start: 74
+    stop: 90
 - name: tc_617_20221112T06
   n_samples: 8
   date: 2022-11-12T06:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 80.5
-    stop: 96.5
+    start: 80
+    stop: 96
 - name: tc_618_20221120T12
   n_samples: 8
   date: 2022-11-20T12:00
   save_generated_samples: true
   lat_extent:
-    start: 2.4708740000000002
-    stop: 18.470874000000002
+    start: 2
+    stop: 18
   lon_extent:
-    start: 105.5
-    stop: 121.5
+    start: 106
+    stop: 122
 - name: tc_619_20221216T12
   n_samples: 8
   date: 2022-12-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 149.5
-    stop: 165.5
+    start: 150
+    stop: 166
 - name: tc_620_20230106T06
   n_samples: 8
   date: 2023-01-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 57.5
-    stop: 73.5
+    start: 58
+    stop: 74
 - name: tc_621_20230101T06
   n_samples: 8
   date: 2023-01-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 99.5
-    stop: 115.5
+    start: 100
+    stop: 116
 - name: tc_622_20230112T18
   n_samples: 8
   date: 2023-01-12T18:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 133.5
-    stop: 149.5
+    start: 134
+    stop: 150
 - name: tc_623_20230119T18
   n_samples: 8
   date: 2023-01-19T18:00
   save_generated_samples: true
   lat_extent:
-    start: -27.445906
-    stop: -11.445906
+    start: -27
+    stop: -11
   lon_extent:
-    start: 64.5
-    stop: 80.5
+    start: 64
+    stop: 80
 - name: tc_624_20230116T12
   n_samples: 8
   date: 2023-01-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: -30.437582
-    stop: -14.437581999999999
+    start: -30
+    stop: -14
   lon_extent:
-    start: 146.5
-    stop: 162.5
+    start: 146
+    stop: 162
 - name: tc_625_20230130T12
   n_samples: 8
   date: 2023-01-30T12:00
   save_generated_samples: true
   lat_extent:
-    start: -39.412607
-    stop: -23.412607
+    start: -39
+    stop: -23
   lon_extent:
-    start: 48.5
-    stop: 64.5
+    start: 48
+    stop: 64
 - name: tc_626_20230202T00
   n_samples: 8
   date: 2023-02-02T00:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 170.5
-    stop: 186.5
+    start: 170
+    stop: 186
 - name: tc_627_20230303T00
   n_samples: 8
   date: 2023-03-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 74.5
-    stop: 90.5
+    start: 74
+    stop: 90
 - name: tc_628_20230303T00
   n_samples: 8
   date: 2023-03-03T00:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 94.5
-    stop: 110.5
+    start: 94
+    stop: 110
 - name: tc_629_20230305T12
   n_samples: 8
   date: 2023-03-05T12:00
   save_generated_samples: true
   lat_extent:
-    start: -1.5180309999999997
-    stop: 14.481969
+    start: -2
+    stop: 14
   lon_extent:
-    start: 123.5
-    stop: 139.5
+    start: 124
+    stop: 140
 - name: tc_630_20230317T18
   n_samples: 8
   date: 2023-03-17T18:00
   save_generated_samples: true
   lat_extent:
-    start: -29.440357
-    stop: -13.440356999999999
+    start: -29
+    stop: -13
   lon_extent:
-    start: 154.5
-    stop: 170.5
+    start: 154
+    stop: 170
 - name: tc_631_20230311T18
   n_samples: 8
   date: 2023-03-11T18:00
   save_generated_samples: true
   lat_extent:
-    start: -23.457003
-    stop: -7.457003
+    start: -23
+    stop: -7
   lon_extent:
-    start: 94.5
-    stop: 110.5
+    start: 94
+    stop: 110
 - name: tc_632_20230312T00
   n_samples: 8
   date: 2023-03-12T00:00
   save_generated_samples: true
   lat_extent:
-    start: 0.4764210000000002
-    stop: 16.476421000000002
+    start: 0
+    stop: 16
   lon_extent:
-    start: 113.5
-    stop: 129.5
+    start: 114
+    stop: 130
 - name: tc_633_20230323T00
   n_samples: 8
   date: 2023-03-23T00:00
   save_generated_samples: true
   lat_extent:
-    start: -26.448681
-    stop: -10.448681
+    start: -26
+    stop: -10
   lon_extent:
-    start: 46.5
-    stop: 62.5
+    start: 46
+    stop: 62
 - name: tc_634_20230331T06
   n_samples: 8
   date: 2023-03-31T06:00
   save_generated_samples: true
   lat_extent:
-    start: -25.451454
-    stop: -9.451453999999998
+    start: -25
+    stop: -9
   lon_extent:
-    start: 86.5
-    stop: 102.5
+    start: 86
+    stop: 102
 - name: tc_635_20230409T12
   n_samples: 8
   date: 2023-04-09T12:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_636_20230327T06
   n_samples: 8
   date: 2023-03-27T06:00
   save_generated_samples: true
   lat_extent:
-    start: 37.373737
-    stop: 53.373737
+    start: 37
+    stop: 53
   lon_extent:
-    start: 302.5
-    stop: 318.5
+    start: 302
+    stop: 318
 - name: tc_637_20230330T06
   n_samples: 8
   date: 2023-03-30T06:00
   save_generated_samples: true
   lat_extent:
-    start: -22.459777000000003
-    stop: -6.459777000000001
+    start: -22
+    stop: -6
   lon_extent:
-    start: 142.5
-    stop: 158.5
+    start: 142
+    stop: 158
 - name: tc_638_20230404T00
   n_samples: 8
   date: 2023-04-04T00:00
   save_generated_samples: true
   lat_extent:
-    start: -22.459777000000003
-    stop: -6.459777000000001
+    start: -22
+    stop: -6
   lon_extent:
-    start: 168.5
-    stop: 184.5
+    start: 168
+    stop: 184
 - name: tc_639_20230414T00
   n_samples: 8
   date: 2023-04-14T00:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 127.5
-    stop: 143.5
+    start: 128
+    stop: 144
 - name: tc_640_20230424T18
   n_samples: 8
   date: 2023-04-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: -17.473647
-    stop: -1.4736469999999997
+    start: -17
+    stop: -1
   lon_extent:
-    start: 158.5
-    stop: 174.5
+    start: 158
+    stop: 174
 - name: tc_641_20230426T00
   n_samples: 8
   date: 2023-04-26T00:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_642_20230502T12
   n_samples: 8
   date: 2023-05-02T12:00
   save_generated_samples: true
   lat_extent:
-    start: 3.4680999999999997
-    stop: 19.4681
+    start: 3
+    stop: 19
   lon_extent:
-    start: 147.5
-    stop: 163.5
+    start: 148
+    stop: 164
 - name: tc_643_20230515T18
   n_samples: 8
   date: 2023-05-15T18:00
   save_generated_samples: true
   lat_extent:
-    start: 5.4625509999999995
-    stop: 21.462550999999998
+    start: 5
+    stop: 21
   lon_extent:
-    start: 119.5
-    stop: 135.5
+    start: 120
+    stop: 136
 - name: tc_644_20230522T06
   n_samples: 8
   date: 2023-05-22T06:00
   save_generated_samples: true
   lat_extent:
-    start: 6.459777000000001
-    stop: 22.459777000000003
+    start: 6
+    stop: 22
   lon_extent:
-    start: 242.5
-    stop: 258.5
+    start: 242
+    stop: 258
 - name: tc_645_20230525T12
   n_samples: 8
   date: 2023-05-25T12:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 113.5
-    stop: 129.5
+    start: 114
+    stop: 130
 - name: tc_646_20230609T00
   n_samples: 8
   date: 2023-06-09T00:00
   save_generated_samples: true
   lat_extent:
-    start: 12.44313
-    stop: 28.44313
+    start: 12
+    stop: 28
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_647_20230616T12
   n_samples: 8
   date: 2023-06-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 244.5
-    stop: 260.5
+    start: 244
+    stop: 260
 - name: tc_648_20230618T00
   n_samples: 8
   date: 2023-06-18T00:00
   save_generated_samples: true
   lat_extent:
-    start: 24.409832
-    stop: 40.409832
+    start: 24
+    stop: 40
   lon_extent:
-    start: 124.5
-    stop: 140.5
+    start: 124
+    stop: 140
 - name: tc_649_20230707T12
   n_samples: 8
   date: 2023-07-07T12:00
   save_generated_samples: true
   lat_extent:
-    start: 22.415384
-    stop: 38.415384
+    start: 22
+    stop: 38
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_650_20230627T00
   n_samples: 8
   date: 2023-06-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 247.5
-    stop: 263.5
+    start: 248
+    stop: 264
 - name: tc_651_20230705T00
   n_samples: 8
   date: 2023-07-05T00:00
   save_generated_samples: true
   lat_extent:
-    start: -13.484744
-    stop: 2.515256
+    start: -13
+    stop: 3
   lon_extent:
-    start: 75.5
-    stop: 91.5
+    start: 76
+    stop: 92
 - name: tc_652_20230719T06
   n_samples: 8
   date: 2023-07-19T06:00
   save_generated_samples: true
   lat_extent:
-    start: 30.393177
-    stop: 46.393177
+    start: 30
+    stop: 46
   lon_extent:
-    start: 142.5
-    stop: 158.5
+    start: 142
+    stop: 158
 - name: tc_653_20230724T18
   n_samples: 8
   date: 2023-07-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_654_20230802T12
   n_samples: 8
   date: 2023-08-02T12:00
   save_generated_samples: true
   lat_extent:
-    start: 18.426483
-    stop: 34.426483000000005
+    start: 18
+    stop: 34
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_655_20230804T06
   n_samples: 8
   date: 2023-08-04T06:00
   save_generated_samples: true
   lat_extent:
-    start: 23.412607
-    stop: 39.412607
+    start: 23
+    stop: 39
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_656_20230810T12
   n_samples: 8
   date: 2023-08-10T12:00
   save_generated_samples: true
   lat_extent:
-    start: 16.432034
-    stop: 32.432034
+    start: 16
+    stop: 32
   lon_extent:
-    start: 125.5
-    stop: 141.5
+    start: 126
+    stop: 142
 - name: tc_657_20230812T18
   n_samples: 8
   date: 2023-08-12T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 108.5
-    stop: 124.5
+    start: 108
+    stop: 124
 - name: tc_658_20230819T00
   n_samples: 8
   date: 2023-08-19T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 133.5
-    stop: 149.5
+    start: 134
+    stop: 150
 - name: tc_659_20230824T18
   n_samples: 8
   date: 2023-08-24T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_660_20230825T06
   n_samples: 8
   date: 2023-08-25T06:00
   save_generated_samples: true
   lat_extent:
-    start: 33.38485
-    stop: 49.38485
+    start: 33
+    stop: 49
   lon_extent:
-    start: 162.5
-    stop: 178.5
+    start: 162
+    stop: 178
 - name: tc_661_20230830T06
   n_samples: 8
   date: 2023-08-30T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_662_20230828T00
   n_samples: 8
   date: 2023-08-28T00:00
   save_generated_samples: true
   lat_extent:
-    start: 26.404282000000002
-    stop: 42.404282
+    start: 26
+    stop: 42
   lon_extent:
-    start: 147.5
-    stop: 163.5
+    start: 148
+    stop: 164
 - name: tc_663_20230906T12
   n_samples: 8
   date: 2023-09-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 35.379295
-    stop: 51.379295
+    start: 35
+    stop: 51
   lon_extent:
-    start: 303.5
-    stop: 319.5
+    start: 304
+    stop: 320
 - name: tc_664_20230831T12
   n_samples: 8
   date: 2023-08-31T12:00
   save_generated_samples: true
   lat_extent:
-    start: 17.429258
-    stop: 33.429258000000004
+    start: 17
+    stop: 33
   lon_extent:
-    start: 126.5
-    stop: 142.5
+    start: 126
+    stop: 142
 - name: tc_665_20230901T18
   n_samples: 8
   date: 2023-09-01T18:00
   save_generated_samples: true
   lat_extent:
-    start: 14.437581999999999
-    stop: 30.437582
+    start: 14
+    stop: 30
   lon_extent:
-    start: 227.5
-    stop: 243.5
+    start: 228
+    stop: 244
 - name: tc_666_20230909T00
   n_samples: 8
   date: 2023-09-09T00:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 114.5
-    stop: 130.5
+    start: 114
+    stop: 130
 - name: tc_667_20230910T18
   n_samples: 8
   date: 2023-09-10T18:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 133.5
-    stop: 149.5
+    start: 134
+    stop: 150
 - name: tc_668_20230913T12
   n_samples: 8
   date: 2023-09-13T12:00
   save_generated_samples: true
   lat_extent:
-    start: 29.395954000000003
-    stop: 45.395954
+    start: 29
+    stop: 45
   lon_extent:
-    start: 289.5
-    stop: 305.5
+    start: 290
+    stop: 306
 - name: tc_669_20230921T12
   n_samples: 8
   date: 2023-09-21T12:00
   save_generated_samples: true
   lat_extent:
-    start: 28.398730999999998
-    stop: 44.398731
+    start: 28
+    stop: 44
   lon_extent:
-    start: 316.5
-    stop: 332.5
+    start: 316
+    stop: 332
 - name: tc_670_20230919T12
   n_samples: 8
   date: 2023-09-19T12:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 78.5
-    stop: 94.5
+    start: 78
+    stop: 94
 - name: tc_671_20230922T12
   n_samples: 8
   date: 2023-09-22T12:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 112.5
-    stop: 128.5
+    start: 112
+    stop: 128
 - name: tc_672_20231005T18
   n_samples: 8
   date: 2023-10-05T18:00
   save_generated_samples: true
   lat_extent:
-    start: 25.407058999999997
-    stop: 41.407059
+    start: 25
+    stop: 41
   lon_extent:
-    start: 302.5
-    stop: 318.5
+    start: 302
+    stop: 318
 - name: tc_673_20231002T06
   n_samples: 8
   date: 2023-10-02T06:00
   save_generated_samples: true
   lat_extent:
-    start: 21.418159
-    stop: 37.418159
+    start: 21
+    stop: 37
   lon_extent:
-    start: 131.5
-    stop: 147.5
+    start: 132
+    stop: 148
 - name: tc_674_20231017T06
   n_samples: 8
   date: 2023-10-17T06:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 104.5
-    stop: 120.5
+    start: 104
+    stop: 120
 - name: tc_675_20231011T06
   n_samples: 8
   date: 2023-10-11T06:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_676_20231016T12
   n_samples: 8
   date: 2023-10-16T12:00
   save_generated_samples: true
   lat_extent:
-    start: 19.423708
-    stop: 35.423708000000005
+    start: 19
+    stop: 35
   lon_extent:
-    start: 141.5
-    stop: 157.5
+    start: 142
+    stop: 158
 - name: tc_677_20231026T06
   n_samples: 8
   date: 2023-10-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: 10.448681
-    stop: 26.448681
+    start: 10
+    stop: 26
   lon_extent:
-    start: 79.5
-    stop: 95.5
+    start: 80
+    stop: 96
 - name: tc_678_20231101T06
   n_samples: 8
   date: 2023-11-01T06:00
   save_generated_samples: true
   lat_extent:
-    start: 7.457003
-    stop: 23.457003
+    start: 7
+    stop: 23
   lon_extent:
-    start: 103.5
-    stop: 119.5
+    start: 104
+    stop: 120
 - name: tc_679_20231106T12
   n_samples: 8
   date: 2023-11-06T12:00
   save_generated_samples: true
   lat_extent:
-    start: 9.451453999999998
-    stop: 25.451454
+    start: 9
+    stop: 25
   lon_extent:
-    start: 118.5
-    stop: 134.5
+    start: 118
+    stop: 134
 - name: tc_680_20231101T00
   n_samples: 8
   date: 2023-11-01T00:00
   save_generated_samples: true
   lat_extent:
-    start: 1.4736469999999997
-    stop: 17.473647
+    start: 1
+    stop: 17
   lon_extent:
-    start: 155.5
-    stop: 171.5
+    start: 156
+    stop: 172
 - name: tc_681_20231114T12
   n_samples: 8
   date: 2023-11-14T12:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8
+    stop: 24
   lon_extent:
-    start: 117.5
-    stop: 133.5
+    start: 118
+    stop: 134
 - name: tc_682_20231106T06
   n_samples: 8
   date: 2023-11-06T06:00
   save_generated_samples: true
   lat_extent:
-    start: -13.484744
-    stop: 2.515256
+    start: -13
+    stop: 3
   lon_extent:
-    start: 156.5
-    stop: 172.5
+    start: 156
+    stop: 172
 - name: tc_683_20231121T18
   n_samples: 8
   date: 2023-11-21T18:00
   save_generated_samples: true
   lat_extent:
-    start: 15.434807
-    stop: 31.434807
+    start: 15
+    stop: 31
   lon_extent:
-    start: 134.5
-    stop: 150.5
+    start: 134
+    stop: 150
 - name: tc_684_20231127T18
   n_samples: 8
   date: 2023-11-27T18:00
   save_generated_samples: true
   lat_extent:
-    start: -24.454229
-    stop: -8.454229000000002
+    start: -24
+    stop: -8
   lon_extent:
-    start: 153.5
-    stop: 169.5
+    start: 154
+    stop: 170
 - name: tc_685_20231203T12
   n_samples: 8
   date: 2023-12-03T12:00
   save_generated_samples: true
   lat_extent:
-    start: 4.465325
-    stop: 20.465325
+    start: 4
+    stop: 20
   lon_extent:
-    start: 116.5
-    stop: 132.5
+    start: 116
+    stop: 132
 - name: tc_686_20231216T18
   n_samples: 8
   date: 2023-12-16T18:00
   save_generated_samples: true
   lat_extent:
-    start: -6.504161
-    stop: 9.495839
+    start: -7
+    stop: 9
   lon_extent:
-    start: 156.5
-    stop: 172.5
+    start: 156
+    stop: 172
 - name: tc_687_20231221T06
   n_samples: 8
   date: 2023-12-21T06:00
   save_generated_samples: true
   lat_extent:
-    start: -32.432034
-    stop: -16.432034
+    start: -32
+    stop: -16
   lon_extent:
-    start: 157.5
-    stop: 173.5
+    start: 158
+    stop: 174
 - name: tc_688_20231226T06
   n_samples: 8
   date: 2023-12-26T06:00
   save_generated_samples: true
   lat_extent:
-    start: -38.415384
-    stop: -22.415384
+    start: -38
+    stop: -22
   lon_extent:
-    start: 59.5
-    stop: 75.5
+    start: 60
+    stop: 76
 - name: tc_689_20231227T06
   n_samples: 8
   date: 2023-12-27T06:00
   save_generated_samples: true
   lat_extent:
-    start: 0.4764210000000002
-    stop: 16.476421000000002
+    start: 0
+    stop: 16
   lon_extent:
-    start: 161.5
-    stop: 177.5
+    start: 162
+    stop: 178
