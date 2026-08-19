@@ -129,10 +129,15 @@ def test_swin_transformer_conditional_with_labels():
     assert net.embed_dim_labels == len(all_labels)
 
 
-def test_swin_transformer_unconditional_builds_label_weights_from_dataset_labels():
+def test_swin_transformer_unconditional_builds_no_label_weights():
+    """An unconditional build allocates no label weights, labeled data or not.
+
+    Labels can be present for reasons unrelated to conditioning, such as
+    selecting per-group normalization constants, and an unconditional module is
+    never given them.
+    """
     n_in, n_out = 5, 3
-    all_labels = {"label_a", "label_b"}
-    dataset_info = _get_dataset_info(all_labels=all_labels)
+    dataset_info = _get_dataset_info(all_labels={"label_a", "label_b"})
     selector = ModuleSelector(
         type="SwinTransformer",
         config=dataclasses.asdict(_builder()),
@@ -144,7 +149,7 @@ def test_swin_transformer_unconditional_builds_label_weights_from_dataset_labels
     out = module(x)
     assert out.shape == (2, n_out, *IMG_SHAPE)
     net = getattr(module.torch_module, "module")
-    assert net.embed_dim_labels == len(all_labels)
+    assert net.embed_dim_labels == 0
 
 
 def test_nc_swin_transformer_is_registered():
@@ -194,10 +199,10 @@ def test_nc_swin_transformer_raises_for_healpix():
         _nc_builder().build(n_in, n_out, dataset_info)
 
 
-def test_nc_swin_transformer_unconditional_builds_label_weights_from_dataset_labels():
+def test_nc_swin_transformer_unconditional_builds_no_label_weights():
+    """See test_swin_transformer_unconditional_builds_no_label_weights."""
     n_in, n_out = 5, 3
-    all_labels = {"label_a", "label_b"}
-    dataset_info = _get_dataset_info(all_labels=all_labels)
+    dataset_info = _get_dataset_info(all_labels={"label_a", "label_b"})
     selector = ModuleSelector(
         type="NoiseConditionedSwinTransformer",
         config=dataclasses.asdict(_nc_builder()),
@@ -206,7 +211,7 @@ def test_nc_swin_transformer_unconditional_builds_label_weights_from_dataset_lab
         n_in_channels=n_in, n_out_channels=n_out, dataset_info=dataset_info
     )
     net = getattr(module.torch_module, "conditional_model")
-    assert net.embed_dim_labels == len(all_labels)
+    assert net.embed_dim_labels == 0
 
 
 def test_swin_transformer_cpb_mlp_exists():
