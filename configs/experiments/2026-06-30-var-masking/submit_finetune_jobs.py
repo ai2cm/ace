@@ -11,8 +11,13 @@ than ``all`` because the ``-mstepft`` (best_ckpt) runs were submitted first and
 are long-lived: a resubmit writes a new /results and restarts fine-tuning at
 epoch 0, discarding their progress. Pass ``--variant all`` deliberately.
 
+Naming configs positionally submits exactly those and ignores ``--variant`` --
+use it to resubmit a single cell (e.g. one that died) without touching the rest
+of its variant set.
+
 Usage:
-    python submit_finetune_jobs.py [--dry-run]
+    python submit_finetune_jobs.py [CONFIG ...]
+                                   [--dry-run]
                                    [--variant {aimip,best,all}]
                                    [--beaker-workspace WORKSPACE]
                                    [--beaker-cluster CLUSTER [CLUSTER ...]]
@@ -83,8 +88,61 @@ def config_to_job_name(config_filename: str) -> str:
     return f"{WANDB_PREFIX}{suffix}"
 
 
+def available_configs() -> list[str]:
+    """Every fine-tune config in run_configs/, whatever the variant."""
+    return sorted(
+        path.name
+        for path in RUN_CONFIGS_DIR.glob("*-mstepft*.yaml")
+        if path.name.startswith(CONFIG_PREFIX)
+    )
+
+
+def select_configs(variant: str, named: list[str]) -> list[str]:
+    """Config filenames to submit, either named explicitly or by variant.
+
+    Explicitly named configs bypass the variant filter -- naming a config is
+    already a deliberate choice, so it should not also have to match --variant.
+    """
+    present = available_configs()
+    if named:
+        wanted = [pathlib.Path(name).name for name in named]
+        missing = [name for name in wanted if name not in present]
+        if missing:
+            raise FileNotFoundError(
+                f"not in {RUN_CONFIGS_DIR}: {', '.join(missing)}\n"
+                f"available:\n" + "\n".join(f"  {name}" for name in present)
+            )
+        return sorted(set(wanted))
+
+    suffixes = VARIANT_SUFFIXES[variant]
+    configs = [name for name in present if pathlib.Path(name).stem.endswith(suffixes)]
+    if not configs:
+        if present:
+            raise FileNotFoundError(
+                f"no {variant} fine-tune configs in {RUN_CONFIGS_DIR}, but "
+                f"{len(present)} config(s) of another variant are present:\n"
+                + "\n".join(f"  {name}" for name in present)
+                + "\nPass --variant for one of those, or name a config "
+                "positionally to submit it regardless of variant."
+            )
+        raise FileNotFoundError(
+            f"no fine-tune configs at all in {RUN_CONFIGS_DIR} — run "
+            "generate_finetune_configs.py first"
+        )
+    return configs
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "configs",
+        nargs="*",
+        metavar="CONFIG",
+        help=(
+            "Specific config filename(s) in run_configs/ to submit. Bypasses"
+            " --variant. Default: every config of the selected variant."
+        ),
+    )
     parser.add_argument(
         "--dry-run", action="store_true", help="Print commands without executing them."
     )
@@ -117,18 +175,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    suffixes = VARIANT_SUFFIXES[args.variant]
-    configs = sorted(
-        path.name
-        for path in RUN_CONFIGS_DIR.glob("*-mstepft*.yaml")
-        if path.name.startswith(CONFIG_PREFIX) and path.stem.endswith(suffixes)
-    )
-    if not configs:
-        raise FileNotFoundError(
-            f"no {args.variant} fine-tune configs in {RUN_CONFIGS_DIR} — run "
-            "generate_finetune_configs.py first"
-        )
-    print(f"Submitting {len(configs)} {args.variant} fine-tune config(s).")
+    configs = select_configs(args.variant, args.configs)
+    described = "named" if args.configs else args.variant
+    print(f"Submitting {len(configs)} {described} fine-tune config(s).")
 
     n_gpus = n_gpus_for_clusters(args.beaker_cluster)
     base_env = {
