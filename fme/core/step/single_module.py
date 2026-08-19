@@ -676,9 +676,16 @@ def step_with_adjustments(
     if ocean is not None:
         ocean_result = ocean(input, corrector_output.corrected, next_step_input_data)
         sst_name = ocean.surface_temperature_name
-        corrector_output = corrector_output.apply_correction(
-            diagnosed={sst_name: ocean_result[sst_name]}, deltas={}
-        )
+        prescribed_sst = ocean_result[sst_name]
+        if ocean.prescription_as_delta:
+            delta = prescribed_sst - corrector_output.corrected[sst_name]
+            corrector_output = corrector_output.apply_correction(
+                diagnosed={}, deltas={sst_name: delta}
+            )
+        else:
+            corrector_output = corrector_output.apply_correction(
+                diagnosed={sst_name: prescribed_sst}, deltas={}
+            )
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
             corrector_output = corrector_output.apply_correction(

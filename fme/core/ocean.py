@@ -99,12 +99,17 @@ class OceanConfig:
             ocean-predicted surface temperature according to ocean_fraction. If False,
             only use ocean-predicted surface temperature where ocean_fraction>=0.5.
         slab: If provided, use a slab ocean model to predict surface temperature.
+        prescription_as_delta: If True, the SST prescription is recorded as a
+            corrector delta (prescribed - network_output) instead of a diagnosis.
+            The network output is treated as the field itself and the
+            prescription is an additive correction to it.
     """
 
     surface_temperature_name: str
     ocean_fraction_name: str
     interpolate: bool = False
     slab: SlabOceanConfig | None = None
+    prescription_as_delta: bool = False
 
     def build(
         self,
@@ -147,6 +152,7 @@ class OceanConfig:
             forcing_names=self.forcing_names,
             surface_temperature_name=self.surface_temperature_name,
             ocean_fraction_name=self.ocean_fraction_name,
+            prescription_as_delta=self.prescription_as_delta,
         )
 
     @property
@@ -174,6 +180,7 @@ class Ocean:
         forcing_names: list[str],
         surface_temperature_name: str,
         ocean_fraction_name: str,
+        prescription_as_delta: bool = False,
     ):
         """
         Args:
@@ -182,12 +189,15 @@ class Ocean:
             forcing_names: Variables required from the forcing data.
             surface_temperature_name: Name of the sea surface temperature field.
             ocean_fraction_name: Name of the ocean fraction field.
+            prescription_as_delta: If True, the SST prescription is recorded as
+                a corrector delta instead of a diagnosis.
         """
         self._surface_temperature = surface_temperature
         self.prescriber = prescriber
         self._forcing_names = forcing_names
         self.surface_temperature_name = surface_temperature_name
         self.ocean_fraction_name = ocean_fraction_name
+        self.prescription_as_delta = prescription_as_delta
 
     def __call__(
         self,
