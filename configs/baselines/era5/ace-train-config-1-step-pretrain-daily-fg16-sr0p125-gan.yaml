@@ -12,8 +12,10 @@
 # 0.1 sizes the adversarial term against a base batch_loss that settles near
 # 0.1 (the non-saturating BCE term is ~0.69 at equilibrium). The
 # discriminator optimizer is explicit at lr 1e-5 (TTUR: 10x slower than the
-# generator's 1e-4) to prevent the discriminator overshoot that collapsed
-# the first attempt (wandb 341rdk59, D won by epoch 20).
+# generator's 1e-4) and an R1 gradient penalty (coefficient 10) regularizes
+# the discriminator's decision boundary, preventing the overshoot that
+# collapsed runs 1 (341rdk59, D won by epoch 20) and 2 (h0wj7m8l, same
+# trajectory but slower).
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -96,6 +98,7 @@ stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
   discriminator_loss_weight: 0.1
+  discriminator_r1_penalty: 10.0
   discriminator_optimization:
     optimizer_type: AdamW
     lr: 0.00001
