@@ -95,7 +95,7 @@ CREATE_OUTPUT=$(beaker session create \
     --cpus "$CPUS" \
     --memory "$MEMORY" \
     --gpus 0 \
-    --timeout 90m \
+    --timeout 3h \
     --name "$SESSION_NAME" \
     --result /results \
     -- bash -c "set -e; echo $B64 | base64 -d > /tmp/crps_eval.py; cd /results; python3 -u /tmp/crps_eval.py $PY_MODEL_ARGS_STR 2>&1 | tee /results/output.log; echo CRPS_EVAL_DONE" 2>&1)
