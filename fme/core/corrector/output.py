@@ -17,9 +17,12 @@ class CorrectorDiagnostics:
             (i.e. replaced with a new value) before the diagnosis was applied.
             Empty when no corrector ran or none diagnosed anything.
         delta: ``corrected[name] - network_output[name]`` for each variable the
-            corrector declares it touched. The network's raw pre-correction
-            value is recoverable as ``corrected[name] - delta[name]``. Empty when
-            no corrector ran or none modified anything.
+            corrector applied an additive correction to. The network's raw
+            pre-correction value is recoverable as
+            ``corrected[name] - delta[name]``. For diagnosed (wholesale-replaced)
+            fields, the pre-correction value is in
+            ``pre_diagnosis_fields[name]``, not ``corrected - delta``. Empty
+            when no corrector ran or none modified anything.
     """
 
     pre_diagnosis_fields: TensorMapping = dataclasses.field(default_factory=dict)
