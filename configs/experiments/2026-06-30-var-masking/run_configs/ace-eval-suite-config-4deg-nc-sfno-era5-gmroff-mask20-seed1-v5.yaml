@@ -1,5 +1,5 @@
-# source_run: ace2-var-mask-nc-sfno-era5-gmron-mask0-seed2-v5
-# source_dataset: 01KYWXQH0XT66EHXVRJ5N9HC4S
+# source_run: ace2-var-mask-nc-sfno-era5-gmroff-mask20-seed1-v5
+# source_dataset: 01KZEFBKGFJ2V38N8V9HNAVZ27
 experiment_dir: /results
 logging:
   log_to_screen: true
