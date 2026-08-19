@@ -798,10 +798,10 @@ def test_atmosphere_corrector_delta_matches_modified_returns():
         "air_temperature_0",
         "air_temperature_1",
         "LHTFLsfc",
+        "PRATEsfc",  # moisture budget rescaling delta
         "total_frozen_precipitation_rate",  # clip delta after fraction diagnosis
     }
     assert set(result.diagnostics.pre_diagnosis_fields) == {
-        "PRATEsfc",
         "tendency_of_total_water_path_due_to_advection",
         "total_frozen_precipitation_rate",  # fraction diagnosis
     }
@@ -858,6 +858,23 @@ def test_atmosphere_corrector_empty_delta_when_nothing_modified():
             id="fp+dry_air+advection_precip+energy",
         ),
         pytest.param(
+            # The ACE2-ERA5 baseline shape: PRATEsfc is force-positive AND
+            # rescaled by the moisture budget correction.  The clamp is a
+            # delta and the rescaling is a delta, so this must build and run
+            # (the rescaling then operates on the clamped, non-negative
+            # precipitation).
+            {
+                "force_positive_names": ["PRATEsfc"],
+                "conserve_dry_air": True,
+                "moisture_budget_correction": "advection_and_precipitation",
+                "clip_frozen_precipitation": True,
+                "total_energy_budget_correction": EnergyBudgetConfig(
+                    "constant_temperature"
+                ),
+            },
+            id="fp_precip+dry_air+advection_precip+clip+energy",
+        ),
+        pytest.param(
             {
                 "force_positive_names": ["LHTFLsfc"],
                 "conserve_dry_air": True,
@@ -889,8 +906,9 @@ def test_atmosphere_corrector_empty_delta_when_nothing_modified():
 def test_correction_ordering_does_not_violate_diagnosis_after_delta(config_kwargs):
     """The correction ordering for representative config combinations must not
     trigger a diagnosis-after-delta ValueError. This validates that deltas
-    (force_positive, conserve_dry_air, energy) precede diagnoses
-    (moisture_budget_correction) in the built correction sequence."""
+    (force_positive, conserve_dry_air, moisture rescaling, energy) precede
+    diagnoses (the moisture budget's advection recompute) in the built
+    correction sequence."""
     torch.manual_seed(0)
     tensor_shape = (2, 5, 5)
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(

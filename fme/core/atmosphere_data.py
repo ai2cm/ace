@@ -206,12 +206,6 @@ class AtmosphereData:
         self._pending_diagnosed[prefix] = value
         self._data[prefix] = value
 
-    def diagnose_precipitation_rate(self, value: torch.Tensor) -> None:
-        self._diagnose("precipitation_rate", value)
-
-    def diagnose_evaporation_rate(self, value: torch.Tensor) -> None:
-        self._diagnose("latent_heat_flux", value * LATENT_HEAT_OF_VAPORIZATION)
-
     def diagnose_tendency_of_total_water_path_due_to_advection(
         self, value: torch.Tensor
     ) -> None:

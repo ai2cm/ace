@@ -120,11 +120,11 @@ class ZeroGlobalMeanMoistureAdvection:
 class MoistureBudgetCorrection:
     """Correction that closes the moisture budget via the configured terms.
 
-    When ``clip_frozen_precipitation`` is True, after closing the moisture budget
-    the frozen precipitation rate (``total_frozen_precipitation_rate``) is clipped
-    to the -- possibly corrected -- total precipitation rate when frozen
-    precipitation is predicted, since frozen precipitation is a component of total
-    precipitation and cannot exceed it.
+    The precipitation/evaporation rescaling is recorded as a delta: it is a
+    multiplicative adjustment (recorded additively) that vanishes for a
+    network whose global moisture budget already closes.  The advection
+    recompute (``advection_and_*`` modes) is a diagnosis: the tendency is
+    replaced wholesale with the budget residual.
     """
 
     area_weighted_mean: AreaWeightedMean
@@ -143,7 +143,9 @@ class MoistureBudgetCorrection:
         forcing_data: TensorMapping,
         accumulated_output: CorrectorOutput,
     ) -> CorrectorOutput:
-        """Apply moisture budget correction as deltas."""
+        """Apply the moisture budget correction: the precipitation/evaporation
+        rescaling as a delta, the advection recompute as a diagnosis.
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Moisture budget correction is turned on, but no vertical "
@@ -388,30 +390,27 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         # Fields that will be diagnosed (replaced wholesale) by later
         # corrections.  A ForcePositive delta on such a field would be
         # erased by the diagnosis, so a collision is rejected at build time.
+        # The moisture budget's precipitation/evaporation rescaling is a
+        # delta (a multiplicative adjustment recorded additively), so those
+        # fields may also be force-positive; only its advection recompute
+        # replaces a field wholesale.
         from fme.core.atmosphere_data import ATMOSPHERE_FIELD_NAME_PREFIXES
 
+        advection_recomputed = (
+            self.moisture_budget_correction is not None
+            and self.moisture_budget_correction.startswith("advection")
+        )
         diagnosed_prefixes: dict[str, str] = {}  # prefix -> source config key
-        if self.moisture_budget_correction is not None:
-            if self.moisture_budget_correction.endswith("precipitation"):
-                for p in ATMOSPHERE_FIELD_NAME_PREFIXES["precipitation_rate"]:
-                    diagnosed_prefixes[p] = "moisture_budget_correction"
-            elif self.moisture_budget_correction.endswith("evaporation"):
-                for p in ATMOSPHERE_FIELD_NAME_PREFIXES["latent_heat_flux"]:
-                    diagnosed_prefixes[p] = "moisture_budget_correction"
-            if self.moisture_budget_correction.startswith("advection"):
-                for p in ATMOSPHERE_FIELD_NAME_PREFIXES[
-                    "tendency_of_total_water_path_due_to_advection"
-                ]:
-                    diagnosed_prefixes[p] = "moisture_budget_correction"
+        if advection_recomputed:
+            for p in ATMOSPHERE_FIELD_NAME_PREFIXES[
+                "tendency_of_total_water_path_due_to_advection"
+            ]:
+                diagnosed_prefixes[p] = "moisture_budget_correction"
         if self.frozen_precipitation_as_fraction:
             for p in ATMOSPHERE_FIELD_NAME_PREFIXES.get(
                 "frozen_precipitation_rate", []
             ):
                 diagnosed_prefixes[p] = "frozen_precipitation_as_fraction"
-        advection_recomputed = (
-            self.moisture_budget_correction is not None
-            and self.moisture_budget_correction.startswith("advection")
-        )
         if self.zero_global_mean_moisture_advection and not advection_recomputed:
             for p in ATMOSPHERE_FIELD_NAME_PREFIXES[
                 "tendency_of_total_water_path_due_to_advection"
@@ -581,8 +580,10 @@ def _force_conserve_moisture(
 ) -> None:
     """Update *gen* to conserve moisture.
 
-    Corrections are recorded through ``gen.correct_*``; the caller is
-    responsible for calling ``gen.result()``.  *input_data* is read-only.
+    The precipitation/evaporation rescaling is recorded as a delta
+    (``gen.correct_*``); the advection recompute is recorded as a diagnosis
+    (``gen.diagnose_*``).  The caller is responsible for calling
+    ``gen.result()``.  *input_data* is read-only.
     """
     input = AtmosphereData(input_data, gen._vertical_coordinate)
 
@@ -597,7 +598,7 @@ def _force_conserve_moisture(
         new_precipitation_global_mean = (
             evaporation_global_mean - twp_tendency_global_mean
         )
-        gen.diagnose_precipitation_rate(
+        gen.correct_precipitation_rate(
             gen.precipitation_rate
             * (new_precipitation_global_mean / precipitation_global_mean)
         )
@@ -605,7 +606,7 @@ def _force_conserve_moisture(
         new_evaporation_global_mean = (
             twp_tendency_global_mean + precipitation_global_mean
         )
-        gen.diagnose_evaporation_rate(
+        gen.correct_evaporation_rate(
             gen.evaporation_rate
             * (new_evaporation_global_mean / evaporation_global_mean)
         )
