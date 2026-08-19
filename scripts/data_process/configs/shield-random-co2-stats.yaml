@@ -1,0 +1,45 @@
+# Normalization statistics for the SHiELD-only training mix used by
+# ace-train-config-4deg-AIMIP-nc-sfno-c96-v3.yaml.
+#
+# Following Table B1 of the ACE2S-SHiELD paper ("With random-CO2" row), the
+# statistics are derived from the random-CO2 runs alone -- the first two
+# ensemble members of each central CO2 concentration, 2020-2024 -- even though
+# training also draws on the AMIP and SOM-coupled streams. The random-CO2
+# ensemble spans the widest range of SST and CO2 states, so its moments bound
+# the other two sources; in particular the spread of per-member means across
+# the 1x/2x/4xCO2 members is what gives `global_mean_co2` a standard deviation
+# covering the perturbation range, rather than the near-zero one an AMIP-only
+# calculation would produce.
+#
+# The six stores are listed individually rather than pointing at the dataset
+# root: get_pooled_stats.py expands a directory to every store beneath it,
+# which would pull in the held-out ic_0003 members.
+#
+# The stores span 2019-10-02 to 2025-01-01; the slice below drops the three
+# month spin-up period and matches the training subset in the v3 config
+# exactly, leaving 1827 daily steps per member.
+#
+# Usage:
+#   python scripts/data_process/get_pooled_stats.py submit \
+#     scripts/data_process/configs/shield-random-co2-stats.yaml \
+#     gs://vcm-ml-intermediate/alexeyy/shield_random_co2_stats_0/
+
+dataset_pairs:
+  - dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-1xCO2-random-perturbation.zarr
+    start_time: '2020-01-01'
+    stop_time: '2025-01-01'
+  - dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-1xCO2-random-perturbation-ic_0002.zarr
+    start_time: '2020-01-01'
+    stop_time: '2025-01-01'
+  - dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-2xCO2-random-perturbation.zarr
+    start_time: '2020-01-01'
+    stop_time: '2025-01-01'
+  - dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-2xCO2-random-perturbation-ic_0002.zarr
+    start_time: '2020-01-01'
+    stop_time: '2025-01-01'
+  - dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-4xCO2-random-perturbation.zarr
+    start_time: '2020-01-01'
+    stop_time: '2025-01-01'
+  - dataset: gs://vcm-ml-intermediate/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-4xCO2-random-perturbation-ic_0002.zarr
+    start_time: '2020-01-01'
+    stop_time: '2025-01-01'
