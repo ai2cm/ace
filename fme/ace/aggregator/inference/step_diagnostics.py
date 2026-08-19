@@ -265,7 +265,7 @@ class CorrectionDeltaTimeMeanAggregator:
     """
 
     _MAGNITUDE_CAPTION = "{name} time-mean |normalized correction|"
-    _MAP_CAPTION = "{name} time-mean normalized correction (corrected - uncorrected)"
+    _MAP_CAPTION = "{name} time-mean normalized correction delta"
 
     def __init__(
         self,
