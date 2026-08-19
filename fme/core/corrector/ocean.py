@@ -198,6 +198,13 @@ class OceanHeatContentCorrection:
     there.  The ``constant_unaccounted_heating`` parameter is an
     area-weighted global mean, so the effective per-area heating scales
     with the area weights.
+
+    The SST prescription (when using threshold mode via ``Prescriber``)
+    uses ``torch.round(mask) == mask_value``, matching
+    ``Prescriber.replace_on_mask`` -- not ``>= 0.5``.  The surface energy
+    flux correction uses ``sea_surface_fraction`` weighting (continuous)
+    while the heat content correction is unweighted (per-area inconsistency
+    between flux and content).
     """
 
     area_weighted_mean: AreaWeightedMean
