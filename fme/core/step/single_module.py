@@ -81,13 +81,15 @@ class SingleModuleStepConfig(StepConfigABC):
         input_dropout_optimized_steps_only: When True, ``input_dropout`` is
             applied only on forward steps that are being optimized, leaving
             non-optimized rollout steps unmasked. Implemented by skipping the
-            dropout draw whenever gradients are disabled (``torch.no_grad``);
-            during a multi-step training rollout the loss loop runs
-            non-optimized steps under ``no_grad`` (e.g. the intermediate steps
-            when ``optimize_last_step_only`` is set), so those steps see full
-            inputs while the optimized step is still masked. No effect without
-            ``input_dropout``, and none on single-step training (the one step
-            is always optimized). Defaults to False (all training steps masked).
+            dropout draw whenever gradients are disabled (``torch.no_grad``),
+            which is the context the training loss loop uses for its
+            non-optimized steps. This only changes behavior when some training
+            step is left unoptimized, i.e. under ``optimize_last_step_only``;
+            otherwise every forward step of a training batch is optimized and
+            the flag is a no-op. Because the gate reads the grad state rather
+            than an explicit per-step flag, any train-mode call made under
+            ``no_grad`` also skips dropout. Requires ``input_dropout``.
+            Defaults to False (all training steps masked).
     """
 
     builder: ModuleSelector
@@ -109,6 +111,11 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        if self.input_dropout_optimized_steps_only and self.input_dropout is None:
+            raise ValueError(
+                "input_dropout_optimized_steps_only requires input_dropout to be "
+                "set, but it is None."
+            )
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -477,7 +484,6 @@ class SingleModuleStep(StepABC):
             self._config.input_dropout_optimized_steps_only
             and not torch.is_grad_enabled()
         ):
-            # Non-optimized rollout steps run under no_grad; leave them unmasked.
             return None
         names = self.in_packer.names
         mask = self._input_masking.sample_mask(get_device())

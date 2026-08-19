@@ -526,20 +526,24 @@ class Trainer:
     def _log_first_batch_metrics(self):
         wandb = WandB.get_instance()
         dist = Distributed.get_instance()
-        with torch.no_grad(), GlobalTimer():
-            batch = next(iter(self.train_data.loader))
-            stepped = self.stepper.train_on_batch(
-                batch,
-                optimization=self._no_optimization,
-            )
+        self.stepper.set_eval()
+        try:
+            with torch.no_grad(), GlobalTimer():
+                batch = next(iter(self.train_data.loader))
+                stepped = self.stepper.train_on_batch(
+                    batch,
+                    optimization=self._no_optimization,
+                )
 
-            if self.params.log_train_every_n_batches > 0:
-                with torch.no_grad():
-                    metrics = {
-                        f"batch_{name}": dist.reduce_mean(metric)
-                        for name, metric in sorted(stepped.get_metrics().items())
-                    }
-                wandb.log(metrics, step=self.num_batches_seen)
+                if self.params.log_train_every_n_batches > 0:
+                    with torch.no_grad():
+                        metrics = {
+                            f"batch_{name}": dist.reduce_mean(metric)
+                            for name, metric in sorted(stepped.get_metrics().items())
+                        }
+                    wandb.log(metrics, step=self.num_batches_seen)
+        finally:
+            self.stepper.set_train()
 
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""

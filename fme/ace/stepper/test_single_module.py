@@ -1400,19 +1400,16 @@ def test_input_dropout_mask_sampled_per_forward_step():
         assert (indicators == 0.0).all(), "dropped channel indicator must be 0"
 
 
-@pytest.mark.parametrize("optimized_steps_only", [True, False])
-def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
+def _rollout_dropout_indicators(
     optimized_steps_only: bool,
-):
-    """input_dropout_optimized_steps_only leaves non-optimized steps unmasked.
+    optimize_last_step_only: bool,
+    n_steps: int = 3,
+) -> list[float]:
+    """Train one rollout batch and return the per-step presence indicator of "a".
 
-    With optimize_last_step_only the training loop runs every step but the last
-    under no_grad. A rate-1.0 Bernoulli group always drops "a", so the
-    per-step presence indicator is deterministic: with the flag set the two
-    non-optimized steps see "a" present (1.0) and only the final optimized step
-    sees it dropped (0.0), while the default masks every step.
+    A rate-1.0 Bernoulli group always drops "a", so each step's indicator is
+    deterministic: 0.0 where input dropout applied, 1.0 where it did not.
     """
-    n_base, n_steps = 3, 3
     config = _input_dropout_stepper_config(
         ["a"],
         ["a"],
@@ -1430,9 +1427,9 @@ def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
         n_ensemble=1,
         loss=StepLossConfig(type="MSE"),
         n_forward_steps=n_steps,
-        optimize_last_step_only=True,
+        optimize_last_step_only=optimize_last_step_only,
     )
-    data = get_data(["a"], n_samples=n_base, n_time=n_steps + 1).data
+    data = get_data(["a"], n_samples=3, n_time=n_steps + 1).data
 
     captured: list[torch.Tensor] = []
 
@@ -1450,12 +1447,47 @@ def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
 
     assert len(captured) == n_steps
     # channel 0 is the input "a", channel 1 its presence indicator
-    expected = [1.0, 1.0, 0.0] if optimized_steps_only else [0.0, 0.0, 0.0]
-    for i, (packed, value) in enumerate(zip(captured, expected)):
+    indicators = []
+    for packed in captured:
         indicator = packed[:, 1, 0, 0]
-        assert (
-            indicator == value
-        ).all(), f"step {i} indicator should be {value}, got {indicator}"
+        assert (indicator == indicator[0]).all()
+        indicators.append(float(indicator[0]))
+    return indicators
+
+
+@pytest.mark.parametrize("optimized_steps_only", [True, False])
+def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
+    optimized_steps_only: bool,
+):
+    """input_dropout_optimized_steps_only leaves non-optimized steps unmasked.
+
+    With optimize_last_step_only the training loop runs every step but the last
+    under no_grad, so with the flag set the two non-optimized steps see "a"
+    present (1.0) and only the final optimized step sees it dropped (0.0),
+    while the default masks every step.
+    """
+    indicators = _rollout_dropout_indicators(
+        optimized_steps_only=optimized_steps_only,
+        optimize_last_step_only=True,
+    )
+    expected = [1.0, 1.0, 0.0] if optimized_steps_only else [0.0, 0.0, 0.0]
+    assert indicators == expected
+
+
+@pytest.mark.parametrize("optimized_steps_only", [True, False])
+def test_input_dropout_optimized_steps_only_noop_without_last_step_only(
+    optimized_steps_only: bool,
+):
+    """Without optimize_last_step_only every training step is optimized.
+
+    The rollout length is the sampled loss length, so no step runs under
+    no_grad and the flag cannot change which steps are masked.
+    """
+    indicators = _rollout_dropout_indicators(
+        optimized_steps_only=optimized_steps_only,
+        optimize_last_step_only=False,
+    )
+    assert indicators == [0.0, 0.0, 0.0]
 
 
 def test_input_dropout_eval_mode_training_batch_applies_no_dropout():

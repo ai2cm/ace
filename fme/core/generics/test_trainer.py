@@ -165,6 +165,8 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         self.train_batches_seen: list[int] = []
         self.validation_batches_seen: list[int] = []
         self.validation_evaluate_all_steps_seen: list[bool] = []
+        self._is_training = True
+        self.train_on_batch_training_modes: list[bool] = []
 
     def get_state(self) -> dict[str, Any]:
         return {**self._state, "modules": self._modules.state_dict()}
@@ -206,6 +208,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         compute_derived_variables: bool = False,
         evaluate_all_steps: bool = False,
     ) -> TrainOutput:
+        self.train_on_batch_training_modes.append(self._is_training)
         optimization.accumulate_loss(torch.tensor(float("inf")))
         optimization.step_weights()
         if isinstance(optimization, NullOptimization):
@@ -216,10 +219,10 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         return TrainOutput()
 
     def set_train(self) -> None:
-        pass
+        self._is_training = True
 
     def set_eval(self) -> None:
-        pass
+        self._is_training = False
 
     def seed_eval(self, seed: int) -> None:
         pass
@@ -537,6 +540,21 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
     assert trainer._end_of_epoch_callback.mock_calls == [  # type: ignore
         unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
+
+
+def test_first_batch_metrics_logged_in_eval_mode(tmp_path: str):
+    """The pre-training metrics batch runs in eval mode, like other eval passes.
+
+    It uses NullOptimization under no_grad, so leaving the stepper in train
+    mode would apply training-only behavior such as input dropout to a batch
+    that is only being measured.
+    """
+    _, trainer = get_trainer(tmp_path, max_epochs=1, n_train_batches=2)
+    stepper = cast(TrainStepper, trainer.stepper)
+    trainer.train()
+    modes = stepper.train_on_batch_training_modes
+    assert modes[0] is False
+    assert True in modes
 
 
 @pytest.mark.parametrize("segment_epochs", [1, 2, 3])

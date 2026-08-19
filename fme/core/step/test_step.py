@@ -1789,26 +1789,64 @@ def _make_single_module_step(
     return step
 
 
-def test_input_dropout_optimized_steps_only_skips_no_grad():
-    """With input_dropout_optimized_steps_only, no_grad steps draw no mask.
+def _capture_packed_step_input(
+    step: SingleModuleStep, grad_enabled: bool
+) -> torch.Tensor:
+    """Run one step and return the packed tensor handed to the network."""
+    n_samples = 2
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+    captured: list[torch.Tensor] = []
 
-    A non-optimized rollout step runs under torch.no_grad(); the flag must
-    suppress the dropout draw there while leaving grad-enabled (optimized)
-    steps masked. With the flag off (default) both draw a mask.
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    grad_context = torch.enable_grad() if grad_enabled else torch.no_grad()
+    try:
+        with grad_context:
+            step.step(
+                args=StepArgs(
+                    input=input_data,
+                    next_step_input_data=next_step,
+                    labels=None,
+                )
+            )
+    finally:
+        handle.remove()
+    return captured[0]
+
+
+@pytest.mark.parametrize("optimized_steps_only", [True, False])
+def test_input_dropout_optimized_steps_only_gates_on_grad(optimized_steps_only: bool):
+    """input_dropout_optimized_steps_only leaves no_grad steps unmasked.
+
+    A non-optimized rollout step runs under torch.no_grad(). A rate-1.0
+    Bernoulli default drops every input channel, so the presence indicators
+    are deterministic: grad-enabled steps always see 0.0, while no_grad steps
+    see 1.0 only when the flag is set.
     """
-    dropout = VariableMaskingConfig(default=UniformMaskingConfig(1))
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0)),
+        include_channel_mask_inputs=True,
+        input_dropout_optimized_steps_only=optimized_steps_only,
+    )
+    step.module.torch_module.train()
+    n_channels = len(step.in_packer.names)
 
-    gated = _make_single_module_step(dropout, input_dropout_optimized_steps_only=True)
-    gated.module.torch_module.train()
-    with torch.enable_grad():
-        assert gated._draw_input_dropout_mask() is not None
-    with torch.no_grad():
-        assert gated._draw_input_dropout_mask() is None
+    grad_packed = _capture_packed_step_input(step, grad_enabled=True)
+    assert (grad_packed[:, n_channels:] == 0.0).all()
 
-    ungated = _make_single_module_step(dropout)
-    ungated.module.torch_module.train()
-    with torch.no_grad():
-        assert ungated._draw_input_dropout_mask() is not None
+    no_grad_packed = _capture_packed_step_input(step, grad_enabled=False)
+    expected = 1.0 if optimized_steps_only else 0.0
+    assert (no_grad_packed[:, n_channels:] == expected).all()
+
+
+def test_input_dropout_optimized_steps_only_without_dropout_raises():
+    with pytest.raises(ValueError, match="requires input_dropout"):
+        _make_single_module_step(None, input_dropout_optimized_steps_only=True)
 
 
 def _make_gmr_input_dropout_step(
