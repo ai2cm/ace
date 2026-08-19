@@ -118,11 +118,8 @@ class LossVsNoiseAggregator:
             )
 
         for i, (name, loss) in enumerate(outputs.per_sample_channel_loss.items()):
-            # Register every channel up front (regardless of whether any sample
-            # falls in the sigma range) so that under DDP all ranks accumulate
-            # the same channel set and issue matching `reduce_sum` collectives in
-            # `_get` -- otherwise an out-of-range channel on one rank only would
-            # desync the collectives and deadlock.
+            # Register every channel up front so all DDP ranks issue matching
+            # collectives in _get, even if this rank has no in-range samples.
             if name not in self._channel_sum:
                 self._channel_sum[name] = torch.zeros(
                     self._n_bins, dtype=torch.float32, device=get_device()
@@ -130,9 +127,6 @@ class LossVsNoiseAggregator:
                 self._channel_count[name] = torch.zeros(
                     self._n_bins, dtype=torch.int64, device=get_device()
                 )
-            # Shared sigma broadcasts to every channel, so each (sample, channel)
-            # pair is always its own independent point, binned at its own noise
-            # level -- with shared sigma that's just the same level per sample.
             channel_sigma = (
                 sigma.flatten() if sigma.dim() == 1 else sigma[:, i].flatten()
             )
