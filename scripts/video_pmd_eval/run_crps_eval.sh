@@ -95,10 +95,10 @@ CREATE_OUTPUT=$(beaker session create \
     --cpus "$CPUS" \
     --memory "$MEMORY" \
     --gpus 0 \
-    --timeout 30m \
+    --timeout 90m \
     --name "$SESSION_NAME" \
     --result /results \
-    -- bash -c "set -e; echo $B64 | base64 -d > /tmp/crps_eval.py; cd /results; python3 /tmp/crps_eval.py $PY_MODEL_ARGS_STR 2>&1 | tee /results/output.log; echo CRPS_EVAL_DONE" 2>&1)
+    -- bash -c "set -e; echo $B64 | base64 -d > /tmp/crps_eval.py; cd /results; python3 -u /tmp/crps_eval.py $PY_MODEL_ARGS_STR 2>&1 | tee /results/output.log; echo CRPS_EVAL_DONE" 2>&1)
 
 echo "$CREATE_OUTPUT"
 SESSION_ID=$(echo "$CREATE_OUTPUT" | grep -oE '01[A-Z0-9]{24}' | head -1)
