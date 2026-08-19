@@ -188,7 +188,17 @@ class SurfaceEnergyFluxCorrection:
 
 @dataclasses.dataclass
 class OceanHeatContentCorrection:
-    """Correction that conserves ocean heat content."""
+    """Correction that conserves ocean heat content.
+
+    Note: the SST correction applies the same multiplicative ratio as the
+    sub-surface thetao levels, referenced to the freezing point.  Because
+    the correction reads SST from ``accumulated_output.corrected``, which
+    may carry the output spatial masking (NaN off-mask), the corrected SST
+    can contain NaN in unmasked regions if the uncorrected SST was NaN
+    there.  The ``constant_unaccounted_heating`` parameter is an
+    area-weighted global mean, so the effective per-area heating scales
+    with the area weights.
+    """
 
     area_weighted_mean: AreaWeightedMean
     vertical_coordinate: HasOceanDepthIntegral | None
@@ -409,6 +419,13 @@ def _force_conserve_ocean_heat_content(
     Corrections are recorded through ``gen.correct_all_levels`` and
     ``gen._correct_prefix``; the caller is responsible for calling
     ``gen.result()``.
+
+    Note: the SST branch applies the same multiplicative correction ratio
+    as the sub-surface thetao levels, referenced to the freezing point.
+    It reads SST from the current corrected state, which may carry output
+    masking (NaN off-mask) — the corrected SST inherits those NaN cells.
+    The ``unaccounted_heating`` is an area-weighted global mean, so its
+    per-grid-cell contribution scales with the area weights.
     """
     if method != "scaled_temperature":
         raise NotImplementedError(
