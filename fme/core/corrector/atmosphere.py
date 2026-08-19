@@ -7,6 +7,7 @@ import torch
 
 import fme
 from fme.core.atmosphere_data import (
+    ATMOSPHERE_FIELD_NAME_PREFIXES,
     AtmosphereData,
     HasAtmosphereVerticalIntegral,
     compute_layer_thickness,
@@ -394,8 +395,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         # delta (a multiplicative adjustment recorded additively), so those
         # fields may also be force-positive; only its advection recompute
         # replaces a field wholesale.
-        from fme.core.atmosphere_data import ATMOSPHERE_FIELD_NAME_PREFIXES
-
         advection_recomputed = (
             self.moisture_budget_correction is not None
             and self.moisture_budget_correction.startswith("advection")
@@ -426,6 +425,8 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                 f"force_positive_names or disable the diagnosing correction"
             )
         if len(self.force_positive_names) > 0:
+            # do this step before imposing other conservation correctors, since
+            # otherwise it could end up creating violations of those constraints.
             corrections.append(
                 ForcePositive(
                     self.force_positive_names,
@@ -457,6 +458,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         if self.frozen_precipitation_as_fraction:
             corrections.append(FrozenPrecipitationAsFraction())
         if self.clip_frozen_precipitation:
+            # Clip frozen precipitation against the (possibly corrected) total
+            # precipitation rate. Done here, after the budget correction and
+            # fraction rescaling, so the ceiling is the final precipitation
+            # rate.
             corrections.append(ClipFrozenPrecipitation())
         if self.total_energy_budget_correction is not None:
             corrections.append(
@@ -595,14 +600,33 @@ def _force_conserve_moisture(
     evaporation_global_mean = area_weighted_mean(gen.evaporation_rate, keepdim=True)
     precipitation_global_mean = area_weighted_mean(gen.precipitation_rate, keepdim=True)
     if terms_to_modify.endswith("precipitation"):
+        # We want to achieve
+        #     global_mean(twp_total_tendency) = (
+        #         global_mean(evaporation_rate)
+        #         - global_mean(precipitation_rate)
+        #     )
+        # so we modify precipitation_rate to achieve this. Note we have
+        # assumed the global mean advection tendency is zero.
+        # First, we find the required global-mean precipitation rate
+        #     new_global_precip_rate = (
+        #         global_mean(evaporation_rate)
+        #         - global_mean(twp_total_tendency)
+        #     )
         new_precipitation_global_mean = (
             evaporation_global_mean - twp_tendency_global_mean
         )
+        # Because scalar multiplication commutes with summation, we can
+        # achieve this by multiplying each gridcell's precipitation rate
+        # by the ratio of the new global mean to the current global mean.
+        #    new_precip_rate = (
+        #        new_global_precip_rate / current_global_precip_rate
+        #    ) * current_precip_rate
         gen.correct_precipitation_rate(
             gen.precipitation_rate
             * (new_precipitation_global_mean / precipitation_global_mean)
         )
     elif terms_to_modify.endswith("evaporation"):
+        # Derived similarly as for "precipitation" case.
         new_evaporation_global_mean = (
             twp_tendency_global_mean + precipitation_global_mean
         )
@@ -611,6 +635,10 @@ def _force_conserve_moisture(
             * (new_evaporation_global_mean / evaporation_global_mean)
         )
     if terms_to_modify.startswith("advection"):
+        # Having already corrected the global-mean budget, we recompute
+        # advection based on assumption that the columnwise
+        # moisture budget closes. Correcting the global mean budget first
+        # is important to ensure the resulting advection has zero global mean.
         new_advection = twp_total_tendency - (
             gen.evaporation_rate - gen.precipitation_rate
         )
@@ -665,9 +693,11 @@ def _force_conserve_total_energy(
 
     energy_correction = desired_energy_path_global_mean - gen_energy_path_global_mean
     energy_to_temperature_factor = _energy_correction_factor(gen, vertical_coordinate)
+    # take global mean to impose a spatially uniform temperature correction
     energy_to_temp_factor_gm = area_weighted_mean(energy_to_temperature_factor, True)
     temperature_correction = energy_correction / energy_to_temp_factor_gm
 
+    # apply same temperature correction to all vertical layers;
     # temperature_correction is (batch, 1, 1); unsqueeze to broadcast
     # against the stacked (batch, lat, lon, n_levels) air temperature.
     gen.correct_all_levels(

@@ -709,6 +709,9 @@ def step_with_adjustments(
             seed=corrector_output,
         )
         if corrector_output.corrector_state is not None:
+            # Preserve the incoming state's other fields (e.g. random_state)
+            # rather than rebuilding from scratch, so StepperState stays
+            # coherent across step calls.
             stepper_state = (
                 StepperState(corrector_state=corrector_output.corrector_state)
                 if stepper_state is None

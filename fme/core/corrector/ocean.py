@@ -475,16 +475,19 @@ def _force_conserve_ocean_heat_content(
         name="ocean_heat_content",
     )
     try:
+        # First priority: pre-weighted heat flux in gen_data
         net_energy_flux_into_ocean = (
             gen.net_downward_surface_heat_flux_total_area
             + forcing.geothermal_heat_flux * forcing.sea_surface_fraction
         )
     except KeyError:
         try:
+            # Second priority: standard heat flux in gen_data
             net_energy_flux_into_ocean = (
                 gen.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
             ) * forcing.sea_surface_fraction
         except KeyError:
+            # Third priority: standard heat flux in input_data
             net_energy_flux_into_ocean = (
                 input.net_downward_surface_heat_flux + forcing.geothermal_heat_flux
             ) * forcing.sea_surface_fraction
@@ -508,7 +511,7 @@ def _force_conserve_ocean_heat_content(
     if "sst" in gen_data:
         gen._correct_prefix(
             "sst",
-            (gen_data["sst"] - FREEZING_TEMPERATURE_KELVIN)
+            (gen_data["sst"] - FREEZING_TEMPERATURE_KELVIN)  # assuming sst in Kelvin
             * heat_content_correction_ratio
             + FREEZING_TEMPERATURE_KELVIN,
         )
