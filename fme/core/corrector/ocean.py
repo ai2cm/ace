@@ -167,7 +167,20 @@ class SeaIceFractionCorrection:
 
 @dataclasses.dataclass
 class SurfaceEnergyFluxCorrection:
-    """Correction that adjusts hfds using atmosphere-derived surface fluxes."""
+    """Correction that adjusts hfds using atmosphere-derived surface fluxes.
+
+    Both methods are classified as diagnoses (not deltas).  For
+    ``residual_prediction`` the atmospheric flux addition is a permanent
+    physical contribution that should not go to zero.  For ``prescribed``
+    the correction is ``ocean_fraction * (net_flux - gen_hfds)``, which
+    looks like an error that should vanish — but only in the open ocean.
+    In partial-ocean cells (under sea ice, coastlines) ``ocean_fraction``
+    intentionally down-weights the correction, and the network's hfds
+    prediction carries sub-ice/land-margin physics.  Regularizing that
+    delta would push the network toward the atmospheric flux everywhere
+    ``ocean_fraction > 0``, corrupting the under-ice prediction that the
+    ``(1 - ocean_fraction)`` blend is designed to retain.
+    """
 
     method: Literal["residual_prediction", "prescribed"]
 
