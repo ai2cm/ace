@@ -724,6 +724,7 @@ def _build_full_atmosphere_corrector(tensor_shape):
         moisture_budget_correction="advection_and_precipitation",
         force_positive_names=["LHTFLsfc"],
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
+        frozen_precipitation_as_fraction=True,
         clip_frozen_precipitation=True,
     )
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
@@ -753,6 +754,7 @@ def test_atmosphere_corrector_config_fields_are_exercised():
         "total_energy_budget_correction",
         "keep_gradient_through_clamps",
         "clip_frozen_precipitation",
+        "frozen_precipitation_as_fraction",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}
@@ -774,26 +776,34 @@ def test_atmosphere_corrector_delta_matches_modified_returns():
     assert set(result.modified_names) == (
         set(result.diagnostics.delta) | set(result.diagnostics.pre_diagnosis_fields)
     )
-    # delta entries: corrected - input gen_data
-    for name, delta in result.diagnostics.delta.items():
-        torch.testing.assert_close(delta, result.corrected[name] - gen_data[name])
+    # For pure-delta fields, delta == corrected - gen_data.
+    # For fields with both a diagnosis and a delta (e.g. frozen precip:
+    # fraction diagnosis then clip delta), the delta is just the additive
+    # part after the diagnosis, so the equality doesn't hold.
+    pure_delta = set(result.diagnostics.delta) - set(
+        result.diagnostics.pre_diagnosis_fields
+    )
+    for name in pure_delta:
+        torch.testing.assert_close(
+            result.diagnostics.delta[name],
+            result.corrected[name] - gen_data[name],
+        )
     # pre_diagnosis_fields entries record the seed (raw network output)
     for name in result.diagnostics.pre_diagnosis_fields:
         torch.testing.assert_close(
             result.diagnostics.pre_diagnosis_fields[name], gen_data[name]
         )
-    # the modified set: surface pressure, air temperatures, and latent heat
-    # flux via delta; precipitation, advection, and frozen precip via diagnosis
     assert set(result.diagnostics.delta) == {
         "PRESsfc",
         "air_temperature_0",
         "air_temperature_1",
         "LHTFLsfc",
+        "total_frozen_precipitation_rate",  # clip delta after fraction diagnosis
     }
     assert set(result.diagnostics.pre_diagnosis_fields) == {
         "PRATEsfc",
         "tendency_of_total_water_path_due_to_advection",
-        "total_frozen_precipitation_rate",
+        "total_frozen_precipitation_rate",  # fraction diagnosis
     }
 
 

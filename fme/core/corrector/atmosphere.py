@@ -136,7 +136,6 @@ class MoistureBudgetCorrection:
         "advection_and_precipitation",
         "advection_and_evaporation",
     ]
-    clip_frozen_precipitation: bool = False
 
     def __call__(
         self,
@@ -160,8 +159,50 @@ class MoistureBudgetCorrection:
             timestep_seconds=self.timestep_seconds,
             terms_to_modify=self.terms_to_modify,
         )
-        if self.clip_frozen_precipitation:
-            _clip_frozen_precipitation(gen)
+        return gen.result()
+
+
+@dataclasses.dataclass
+class FrozenPrecipitationAsFraction:
+    """Diagnose frozen precipitation as a fraction of total precipitation.
+
+    Treats the network's frozen-precipitation output as a unitless fraction
+    and multiplies it by the (possibly corrected) total precipitation rate
+    to obtain the physical frozen-precipitation rate.  This is a diagnosis:
+    the physical meaning of the field changes from "fraction" to "rate".
+    """
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        forcing_data: TensorMapping,
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        if "total_frozen_precipitation_rate" not in accumulated_output.corrected:
+            return accumulated_output
+        gen = AtmosphereData.for_correction(accumulated_output)
+        gen.diagnose_frozen_precipitation_rate(
+            gen.frozen_precipitation_rate * gen.precipitation_rate
+        )
+        return gen.result()
+
+
+@dataclasses.dataclass
+class ClipFrozenPrecipitation:
+    """Clip frozen precipitation to not exceed total precipitation (delta).
+
+    Structurally identical to ForcePositive: a conditional clamp whose
+    correction should vanish for a network that learns the constraint.
+    """
+
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        forcing_data: TensorMapping,
+        accumulated_output: CorrectorOutput,
+    ) -> CorrectorOutput:
+        gen = AtmosphereData.for_correction(accumulated_output)
+        _clip_frozen_precipitation(gen)
         return gen.result()
 
 
@@ -292,16 +333,19 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             clamp with a straight-through estimator: the forward value is still
             clamped to be non-negative, but gradient flows as if the clamp had
             not happened, so clamped-negative cells still get a learning signal.
-        clip_frozen_precipitation: If True, and ``moisture_budget_correction`` is
-            enabled and the frozen precipitation rate
-            (``total_frozen_precipitation_rate``) is predicted, clip it to be less
-            than or equal to the -- possibly corrected -- total precipitation rate
-            (``PRATEsfc``) in each grid cell, since frozen precipitation is a
-            component of total precipitation. The clip runs as part of the
-            moisture budget correction, before any ``total_energy_budget_correction``,
-            since frozen precipitation contributes to the surface energy flux via
-            the latent heat of freezing. Defaults to False so that previously
-            trained checkpoints, which did not apply this clip, are unaffected.
+        clip_frozen_precipitation: If True and the frozen precipitation rate
+            (``total_frozen_precipitation_rate``) is predicted, clip it to be
+            at most the total precipitation rate (``PRATEsfc``) in each grid
+            cell.  Recorded as a delta (same character as
+            ``force_positive_names``).  Runs after
+            ``frozen_precipitation_as_fraction`` when both are enabled, so
+            the clip acts on the already-rescaled rate.
+        frozen_precipitation_as_fraction: If True and the frozen precipitation
+            rate is predicted, treat the network output as a unitless fraction
+            and multiply by the (possibly corrected) total precipitation rate
+            to obtain the physical frozen-precipitation rate.  Recorded as a
+            diagnosis (the field's physical meaning changes from fraction to
+            rate).  Runs before ``clip_frozen_precipitation``.
     """
 
     conserve_dry_air: bool = False
@@ -319,6 +363,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     total_energy_budget_correction: EnergyBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
     clip_frozen_precipitation: bool = False
+    frozen_precipitation_as_fraction: bool = False
 
     def _get_corrector(
         self,
@@ -358,11 +403,11 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     "tendency_of_total_water_path_due_to_advection"
                 ]:
                     diagnosed_prefixes[p] = "moisture_budget_correction"
-        if self.clip_frozen_precipitation:
+        if self.frozen_precipitation_as_fraction:
             for p in ATMOSPHERE_FIELD_NAME_PREFIXES.get(
                 "frozen_precipitation_rate", []
             ):
-                diagnosed_prefixes[p] = "clip_frozen_precipitation"
+                diagnosed_prefixes[p] = "frozen_precipitation_as_fraction"
         advection_recomputed = (
             self.moisture_budget_correction is not None
             and self.moisture_budget_correction.startswith("advection")
@@ -408,9 +453,12 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     vertical_coordinate,
                     timestep_seconds,
                     self.moisture_budget_correction,
-                    clip_frozen_precipitation=self.clip_frozen_precipitation,
                 )
             )
+        if self.frozen_precipitation_as_fraction:
+            corrections.append(FrozenPrecipitationAsFraction())
+        if self.clip_frozen_precipitation:
+            corrections.append(ClipFrozenPrecipitation())
         if self.total_energy_budget_correction is not None:
             corrections.append(
                 TotalEnergyBudgetCorrection(
@@ -509,11 +557,12 @@ def _force_zero_global_mean_moisture_advection(
 def _clip_frozen_precipitation(gen: AtmosphereData) -> None:
     """Clip the frozen precipitation rate to be at most the total precipitation
     rate.  A no-op when the frozen precipitation rate is not among *gen*'s
-    fields.  The correction is recorded through ``gen.correct_*``.
+    fields.  The correction is recorded as a delta (additive clamp, same
+    character as ForcePositive).
     """
     if "total_frozen_precipitation_rate" not in gen.data:
         return
-    gen.diagnose_frozen_precipitation_rate(
+    gen.correct_frozen_precipitation_rate(
         torch.minimum(gen.frozen_precipitation_rate, gen.precipitation_rate)
     )
 
