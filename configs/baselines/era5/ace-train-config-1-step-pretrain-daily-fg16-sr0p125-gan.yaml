@@ -6,13 +6,14 @@
 # change modulo main drift (this arm runs on the experiment branch updated to
 # latest ace main; r95iprjt ran on the pre-update branch).
 #
-# The discriminator mirrors the generator's builder config at half width and
-# half depth (embed_dim 256, num_layers 4) with no noise inputs
+# The discriminator is a quarter-width, quarter-depth copy of the generator
+# (embed_dim 128, num_layers 2, filter_num_groups 4) with no noise inputs
 # (noise_embed_dim 0; noise_type dropped as inert). discriminator_loss_weight
 # 0.1 sizes the adversarial term against a base batch_loss that settles near
 # 0.1 (the non-saturating BCE term is ~0.69 at equilibrium). The
-# discriminator optimizer is not configured, so it mirrors the main
-# optimization block (AdamW 1e-4, fused, weight_decay 0.01, constant lr).
+# discriminator optimizer is explicit at lr 1e-5 (TTUR: 10x slower than the
+# generator's 1e-4) to prevent the discriminator overshoot that collapsed
+# the first attempt (wandb 341rdk59, D won by epoch 20).
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -95,6 +96,12 @@ stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
   discriminator_loss_weight: 0.1
+  discriminator_optimization:
+    optimizer_type: AdamW
+    lr: 0.00001
+    kwargs:
+      fused: true
+      weight_decay: 0.01
   loss:
     type: EnsembleLoss
     weights:
@@ -126,18 +133,18 @@ stepper:
       discriminator:
         type: NoiseConditionedSFNO
         config:
-          embed_dim: 256
+          embed_dim: 128
           noise_embed_dim: 0
           filter_type: linear
           use_mlp: true
-          num_layers: 4
+          num_layers: 2
           operator_type: dhconv
           separable: false
           spectral_layers: 3
           spectral_transform: sht
           affine_norms: true
           normalize_big_skip: true
-          filter_num_groups: 16
+          filter_num_groups: 4
           spectral_ratio: 0.125
       normalization:
         network:
