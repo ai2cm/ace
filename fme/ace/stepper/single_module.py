@@ -1491,10 +1491,12 @@ class TrainStepperConfig:
             drive them.
         discriminator_r1_penalty: R1 gradient penalty coefficient (λ/2 in
             Mescheder et al. 2018). Added to the discriminator's loss as
-            ``coefficient * ||∇_x D(x)||²`` on the real data, penalizing
-            sharp decision boundaries that let the discriminator separate
-            real from generated pairs too easily. 0 disables. Typical values
-            are 1–10.
+            ``coefficient * E[mean_spatial(||∇_x D(x)||²)]`` on the real
+            data, where the squared gradient norm is summed over input
+            channels and area-weighted-averaged over the sphere. Penalizes
+            sharp decision boundaries. 0 disables. Typical values are
+            0.1–10 (scaled by input channel count relative to the image-GAN
+            literature's 3-channel convention).
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
