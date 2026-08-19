@@ -109,7 +109,11 @@ class _LifecycleRecordingCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
+        *,
+        seed: CorrectorOutput | None = None,
     ) -> CorrectorOutput:
+        if seed is not None:
+            return seed
         return CorrectorOutput(
             corrected=dict(gen_data), corrector_state=corrector_state
         )

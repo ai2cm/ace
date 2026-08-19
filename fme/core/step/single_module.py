@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.output import CorrectorDiagnostics
+from fme.core.corrector.output import CorrectorDiagnostics, CorrectorOutput
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
@@ -666,42 +666,63 @@ def step_with_adjustments(
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
+    # Seed a CorrectorOutput unconditionally so prescription diagnostics are
+    # recorded even when no corrector is configured.
+    corrector_output = CorrectorOutput(corrected=dict(output))
+
     # Ocean prescription and prescribed prognostics run before the corrector
     # so the corrector operates on the state with prescribed fields already
     # in place, eliminating overlap guards and post-hoc filtering.
     if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
+        ocean_result = ocean(input, corrector_output.corrected, next_step_input_data)
+        sst_name = ocean.surface_temperature_name
+        corrector_output = corrector_output.apply_correction(
+            diagnosed={sst_name: ocean_result[sst_name]}, deltas={}
+        )
     for name in prescribed_prognostic_names:
         if name in next_step_input_data:
-            output = {**output, name: next_step_input_data[name]}
+            corrector_output = corrector_output.apply_correction(
+                diagnosed={name: next_step_input_data[name]}, deltas={}
+            )
         else:
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
 
-    diagnostics = CorrectorDiagnostics()
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None
         )
-        result = corrector(input, output, next_step_input_data, corrector_state)
-        output = result.corrected
-        # Detach the corrector diagnostic tensors.
-        diagnostics = CorrectorDiagnostics(
-            pre_diagnosis_fields={
-                k: v.detach()
-                for k, v in result.diagnostics.pre_diagnosis_fields.items()
-            },
-            delta={k: v.detach() for k, v in result.diagnostics.delta.items()},
+        corrector_output = corrector_output.with_state(corrector_state)
+        corrector_output = corrector(
+            input,
+            corrector_output.corrected,
+            next_step_input_data,
+            corrector_state,
+            seed=corrector_output,
         )
-        if result.corrector_state is not None:
+        if corrector_output.corrector_state is not None:
             stepper_state = (
-                StepperState(corrector_state=result.corrector_state)
+                StepperState(corrector_state=corrector_output.corrector_state)
                 if stepper_state is None
                 else dataclasses.replace(
-                    stepper_state, corrector_state=result.corrector_state
+                    stepper_state,
+                    corrector_state=corrector_output.corrector_state,
                 )
             )
+
+    output = corrector_output.corrected
+    # Detach the corrector diagnostic tensors.
+    diagnostics = CorrectorDiagnostics(
+        pre_diagnosis_fields={
+            k: v.detach()
+            for k, v in corrector_output.diagnostics.pre_diagnosis_fields.items()
+        },
+        delta={
+            k: v.detach()
+            for k, v in corrector_output.diagnostics.delta.items()
+        },
+    )
 
     return StepOutput(
         output=output,

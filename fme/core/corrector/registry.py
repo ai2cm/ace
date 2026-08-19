@@ -137,6 +137,8 @@ class CorrectorABC(abc.ABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
+        *,
+        seed: CorrectorOutput | None = None,
     ) -> CorrectorOutput:
         """Apply corrections to ``gen_data``.
 
@@ -147,6 +149,11 @@ class CorrectorABC(abc.ABC):
             corrector_state: Per-sample state carried across step calls,
                 or None if no state has been seeded. Implementations that do
                 not maintain state should pass this through unchanged.
+            seed: An optional pre-seeded ``CorrectorOutput`` to continue the
+                correction fold from (e.g. carrying prescription diagnostics
+                recorded before the corrector runs). When provided, the
+                corrector continues from this state instead of creating a
+                fresh ``CorrectorOutput``.
 
         Returns:
             A ``CorrectorOutput`` carrying the corrected generated data, the
@@ -173,11 +180,16 @@ class CorrectionSequence(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
+        *,
+        seed: CorrectorOutput | None = None,
     ) -> CorrectorOutput:
-        accumulated = CorrectorOutput(
-            corrected=dict(gen_data),
-            corrector_state=corrector_state,
-        )
+        if seed is not None:
+            accumulated = seed
+        else:
+            accumulated = CorrectorOutput(
+                corrected=dict(gen_data),
+                corrector_state=corrector_state,
+            )
         for correction in self._corrections:
             accumulated = correction(input_data, forcing_data, accumulated)
         return accumulated
@@ -237,10 +249,18 @@ class EpochScheduledCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
+        *,
+        seed: CorrectorOutput | None = None,
     ) -> CorrectorOutput:
         if self._corrector_disabled and self._training:
-            # Nothing was applied: pass the data through with empty diagnostics.
+            # Nothing was applied: return the seed if provided (it may carry
+            # prescription diagnostics), otherwise pass the data through with
+            # empty diagnostics.
+            if seed is not None:
+                return seed
             return CorrectorOutput(
                 corrected=dict(gen_data), corrector_state=corrector_state
             )
-        return self._wrapped(input_data, gen_data, forcing_data, corrector_state)
+        return self._wrapped(
+            input_data, gen_data, forcing_data, corrector_state, seed=seed
+        )
