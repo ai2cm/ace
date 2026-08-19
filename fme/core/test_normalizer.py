@@ -8,9 +8,12 @@ import torch
 
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.device import move_tensordict_to_device
+from fme.core.labels import BatchLabels
 from fme.core.normalizer import (
+    GroupedNormalizationConfig,
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
+    NormalizationGroupConfig,
     NormalizeFn,
     StandardNormalizer,
     _combine_normalizers,
@@ -397,3 +400,323 @@ def test_can_create_config_without_files():
         global_means_path="/not/a/real/path",
         global_stds_path="/not/a/real/path",
     )
+
+
+def _grouped_config(
+    default_group: str = "era5",
+    pinned_variables: list[str] | None = None,
+) -> GroupedNormalizationConfig:
+    """Two groups whose constants differ, for testing per-sample selection."""
+    return GroupedNormalizationConfig(
+        groups={
+            "c96": NormalizationGroupConfig(
+                labels=["amip", "som"],
+                normalization=NormalizationConfig(
+                    means={"a": 10.0, "pinned": 100.0},
+                    stds={"a": 2.0, "pinned": 200.0},
+                ),
+            ),
+            "era5": NormalizationGroupConfig(
+                labels=["era5"],
+                normalization=NormalizationConfig(
+                    means={"a": 20.0, "pinned": 300.0},
+                    stds={"a": 4.0, "pinned": 400.0},
+                ),
+            ),
+        },
+        default_group=default_group,
+        pinned_variables=pinned_variables if pinned_variables is not None else [],
+    )
+
+
+def _pooled_normalizer() -> StandardNormalizer:
+    return NormalizationConfig(
+        means={"a": 0.0, "pinned": 1.0},
+        stds={"a": 1.0, "pinned": 3.0},
+    ).build(["a", "pinned"])
+
+
+def _labels(names: list[str], rows: list[list[float]]) -> BatchLabels:
+    return BatchLabels(tensor=torch.tensor(rows), names=names)
+
+
+def test_grouped_normalizer_uses_per_sample_constants():
+    """Samples from different groups are normalized by their own constants."""
+    grouped = _grouped_config().build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    # Sample 0 is c96 (mean 10, std 2), sample 1 is era5 (mean 20, std 4).
+    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    normalizer = grouped.bind(labels)
+    tensors = {"a": torch.tensor([[[12.0]], [[24.0]]])}
+    normalized = normalizer.normalize(tensors)
+    torch.testing.assert_close(
+        normalized["a"], torch.tensor([[[1.0]], [[1.0]]]).to(normalized["a"].device)
+    )
+
+
+def test_grouped_normalizer_roundtrips_mixed_group_batch():
+    grouped = _grouped_config().build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    labels = _labels(["amip", "era5", "som"], [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    normalizer = grouped.bind(labels)
+    tensors = {
+        "a": torch.tensor([[[1.0, 2.0]], [[3.0, 4.0]], [[5.0, 6.0]]]),
+        "pinned": torch.tensor([[[7.0, 8.0]], [[9.0, 10.0]], [[11.0, 12.0]]]),
+    }
+    roundtripped = normalizer.denormalize(normalizer.normalize(tensors))
+    for name, value in tensors.items():
+        torch.testing.assert_close(
+            roundtripped[name], value.to(roundtripped[name].device)
+        )
+
+
+def test_grouped_normalizer_pinned_variable_uses_pooled_constants():
+    """A pinned variable is normalized identically regardless of a sample's group."""
+    grouped = _grouped_config(pinned_variables=["pinned"]).build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    normalizer = grouped.bind(labels)
+    # Pooled constants for "pinned" are mean 1, std 3.
+    tensors = {"pinned": torch.tensor([[[4.0]], [[4.0]]])}
+    normalized = normalizer.normalize(tensors)
+    torch.testing.assert_close(
+        normalized["pinned"],
+        torch.tensor([[[1.0]], [[1.0]]]).to(normalized["pinned"].device),
+    )
+    # The non-pinned variable still varies by group, so pinning is selective.
+    assert not torch.equal(normalizer.means["a"][0], normalizer.means["a"][1])
+
+
+def test_grouped_normalizer_single_group_matches_standard_normalizer():
+    """A degenerate one-group config reproduces plain pooled normalization.
+
+    This is what makes it valid to skip the per-group arms of an ablation for
+    regimes containing only one group.
+    """
+    means, stds = {"a": 10.0, "pinned": 100.0}, {"a": 2.0, "pinned": 200.0}
+    standard = NormalizationConfig(means=means, stds=stds).build(["a", "pinned"])
+    grouped = GroupedNormalizationConfig(
+        groups={
+            "only": NormalizationGroupConfig(
+                labels=["era5"],
+                normalization=NormalizationConfig(means=means, stds=stds),
+            )
+        },
+        default_group="only",
+    ).build(pooled=standard, names=["a", "pinned"])
+    labels = _labels(["era5"], [[1.0], [1.0]])
+    tensors = {
+        "a": torch.tensor([[[1.0, 2.0]], [[3.0, 4.0]]]),
+        "pinned": torch.tensor([[[5.0, 6.0]], [[7.0, 8.0]]]),
+    }
+    grouped_out = grouped.bind(labels).normalize(tensors)
+    standard_out = standard.normalize(tensors)
+    for name in tensors:
+        torch.testing.assert_close(grouped_out[name], standard_out[name])
+
+
+@pytest.mark.parametrize("labels", [None, "empty"])
+def test_grouped_normalizer_falls_back_to_default_group_without_labels(labels):
+    """An unlabeled batch uses the default group, not the pooled constants.
+
+    A model trained on this normalizer never saw its network inputs on the
+    pooled scale, so falling back to pooled would silently evaluate it against
+    a distribution it was never trained on.
+    """
+    grouped = _grouped_config(default_group="era5", pinned_variables=["pinned"]).build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    batch_labels = None if labels is None else _labels([], torch.zeros(2, 0).tolist())
+    normalizer = grouped.bind(batch_labels)
+    # era5 group constants for "a" are mean 20, std 4; "pinned" is pinned to
+    # the pooled mean 1, std 3.
+    tensors = {
+        "a": torch.tensor([[[24.0]], [[24.0]]]),
+        "pinned": torch.tensor([[[4.0]], [[4.0]]]),
+    }
+    normalized = normalizer.normalize(tensors)
+    for name in tensors:
+        torch.testing.assert_close(
+            normalized[name],
+            torch.tensor([[[1.0]], [[1.0]]]).to(normalized[name].device),
+        )
+
+
+def test_grouped_normalizer_default_group_choice_changes_unlabeled_constants():
+    """The default group is a real choice, not a formality."""
+    tensors = {"a": torch.tensor([[[24.0]]])}
+    era5 = _grouped_config(default_group="era5").build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    c96 = _grouped_config(default_group="c96").build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    assert not torch.equal(
+        era5.bind(None).normalize(tensors)["a"], c96.bind(None).normalize(tensors)["a"]
+    )
+
+
+def test_grouped_normalizer_caches_bind_per_labels_instance():
+    """Repeated binds of one batch's labels reuse the resolved constants.
+
+    ``bind`` is called once per forward step but the labels are fixed for the
+    whole window, and resolving them costs a device sync.
+    """
+    grouped = _grouped_config().build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    assert grouped.bind(labels) is grouped.bind(labels)
+    # A different batch is resolved afresh rather than served the stale entry.
+    other = _labels(["amip", "era5"], [[0.0, 1.0], [1.0, 0.0]])
+    assert not torch.equal(
+        grouped.bind(labels).means["a"], grouped.bind(other).means["a"]
+    )
+
+
+@pytest.mark.parametrize("n_spatial_dims", [2, 3])
+def test_grouped_normalizer_broadcasts_against_n_spatial_dims(n_spatial_dims):
+    """Per-sample constants broadcast against however many spatial dims exist.
+
+    HEALPix data carries a leading face dimension, so a hard-coded rank would
+    align the sample dimension with the faces.
+    """
+    grouped = _grouped_config().build(
+        pooled=_pooled_normalizer(),
+        names=["a", "pinned"],
+        n_spatial_dims=n_spatial_dims,
+    )
+    labels = _labels(["amip", "era5"], [[1.0, 0.0], [0.0, 1.0]])
+    normalizer = grouped.bind(labels)
+    assert normalizer.means["a"].shape == (2, *(1,) * n_spatial_dims)
+    # Sample 0 is c96 (mean 10, std 2), sample 1 is era5 (mean 20, std 4).
+    spatial = (3,) * n_spatial_dims
+    tensors = {"a": torch.stack([torch.full(spatial, 12.0), torch.full(spatial, 24.0)])}
+    normalized = normalizer.normalize(tensors)
+    torch.testing.assert_close(
+        normalized["a"], torch.ones(2, *spatial).to(normalized["a"].device)
+    )
+
+
+def test_grouped_normalizer_rejects_sample_spanning_two_groups():
+    grouped = _grouped_config().build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    labels = _labels(["amip", "era5"], [[1.0, 1.0]])
+    with pytest.raises(ValueError, match="other than exactly one"):
+        grouped.bind(labels)
+
+
+def test_grouped_normalizer_rejects_sample_with_no_group():
+    grouped = _grouped_config().build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    labels = _labels(["amip", "era5"], [[0.0, 0.0]])
+    with pytest.raises(ValueError, match="other than exactly one"):
+        grouped.bind(labels)
+
+
+def test_grouped_normalizer_rejects_unknown_label():
+    grouped = _grouped_config().build(
+        pooled=_pooled_normalizer(), names=["a", "pinned"]
+    )
+    labels = _labels(["mystery"], [[1.0]])
+    with pytest.raises(ValueError, match="not assigned to any normalization group"):
+        grouped.bind(labels)
+
+
+def test_grouped_normalizer_requires_every_group_to_cover_every_variable():
+    config = GroupedNormalizationConfig(
+        groups={
+            "c96": NormalizationGroupConfig(
+                labels=["amip"],
+                normalization=NormalizationConfig(
+                    means={"a": 1.0, "b": 1.0}, stds={"a": 1.0, "b": 1.0}
+                ),
+            ),
+            "era5": NormalizationGroupConfig(
+                labels=["era5"],
+                normalization=NormalizationConfig(means={"a": 1.0}, stds={"a": 1.0}),
+            ),
+        },
+        default_group="era5",
+    )
+    pooled = NormalizationConfig(
+        means={"a": 0.0, "b": 0.0}, stds={"a": 1.0, "b": 1.0}
+    ).build(["a", "b"])
+    with pytest.raises(KeyError):
+        config.build(pooled=pooled, names=["a", "b"])
+
+
+def test_grouped_config_rejects_unknown_default_group():
+    with pytest.raises(ValueError, match="default_group"):
+        GroupedNormalizationConfig(
+            groups={
+                "c96": NormalizationGroupConfig(
+                    labels=["amip"],
+                    normalization=NormalizationConfig(
+                        means={"a": 1.0}, stds={"a": 1.0}
+                    ),
+                )
+            },
+            default_group="era5",
+        )
+
+
+def test_grouped_config_rejects_label_in_two_groups():
+    with pytest.raises(ValueError, match="must belong to exactly one group"):
+        GroupedNormalizationConfig(
+            groups={
+                "c96": NormalizationGroupConfig(
+                    labels=["shared"],
+                    normalization=NormalizationConfig(
+                        means={"a": 1.0}, stds={"a": 1.0}
+                    ),
+                ),
+                "era5": NormalizationGroupConfig(
+                    labels=["shared"],
+                    normalization=NormalizationConfig(
+                        means={"a": 1.0}, stds={"a": 1.0}
+                    ),
+                ),
+            },
+            default_group="era5",
+        )
+
+
+def test_grouped_normalization_loads_into_explicit_constants():
+    """Group constants are inlined at load, as for the pooled constants."""
+    mean_ds = get_scalar_dataset(["a"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["a"], fill_value=2.0)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        mean_ds.to_netcdf(tmp_path / "mean.nc")
+        std_ds.to_netcdf(tmp_path / "std.nc")
+        config = NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(
+                global_means_path=tmp_path / "mean.nc",
+                global_stds_path=tmp_path / "std.nc",
+            ),
+            grouped=GroupedNormalizationConfig(
+                groups={
+                    "era5": NormalizationGroupConfig(
+                        labels=["era5"],
+                        normalization=NormalizationConfig(
+                            global_means_path=tmp_path / "mean.nc",
+                            global_stds_path=tmp_path / "std.nc",
+                        ),
+                    )
+                },
+                default_group="era5",
+            ),
+        )
+        config.load()
+    assert config.grouped is not None
+    group = config.grouped.groups["era5"].normalization
+    assert group.global_means_path is None
+    assert group.means["a"] == 1.0
+    # The config no longer depends on the netCDF files, which have been removed.
+    config.get_grouped_network_normalizer(["a"])

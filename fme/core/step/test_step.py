@@ -18,7 +18,12 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudge
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.normalizer import (
+    GroupedNormalizationConfig,
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+    NormalizationGroupConfig,
+)
 from fme.core.ocean import OceanConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
@@ -2216,3 +2221,219 @@ def test_multi_call_step_forwards_train_eval():
     wrapped_step.train.reset_mock()
     step.train()
     wrapped_step.train.assert_called_once_with(True)
+
+
+def _grouped_single_module_selector() -> StepSelector:
+    """A single-module step whose network normalizes per label group.
+
+    The two groups' constants differ sharply so that a batch normalized with
+    the wrong group's constants is easy to distinguish.
+    """
+    names = ["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"]
+    normalization = NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in names},
+            stds={name: 1.0 for name in names},
+        ),
+        grouped=GroupedNormalizationConfig(
+            groups={
+                "c96": NormalizationGroupConfig(
+                    labels=["amip"],
+                    normalization=NormalizationConfig(
+                        means={name: 10.0 for name in names},
+                        stds={name: 2.0 for name in names},
+                    ),
+                ),
+                "era5": NormalizationGroupConfig(
+                    labels=["era5"],
+                    normalization=NormalizationConfig(
+                        means={name: -10.0 for name in names},
+                        stds={name: 5.0 for name in names},
+                    ),
+                ),
+            },
+            default_group="era5",
+            pinned_variables=["forcing_rad"],
+        ),
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                # NoiseConditionedSFNO, as used by the real configs: the plain
+                # SFNO builder hard-errors when the dataset carries labels.
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            noise_type="isotropic",
+                            filter_type="linear",
+                            filter_num_groups=2,
+                            context_pos_embed_dim=2,
+                            pos_embed=False,
+                            num_layers=2,
+                            local_blocks=[0],
+                            affine_norms=True,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def test_grouped_normalization_step_runs_and_keeps_pooled_normalizer():
+    """The step normalizes the network per group but exposes pooled constants.
+
+    Consumers outside the network -- the loss, global mean removal, spatial
+    masking, the aggregators -- read ``step.normalizer``, so it must stay
+    pooled for metrics to be comparable across grouping strategies.
+    """
+    step = get_step(
+        _grouped_single_module_selector(),
+        DEFAULT_IMG_SHAPE,
+        all_labels={"amip", "era5"},
+    )
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=2
+    )
+    labels = BatchLabels(
+        tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]).to(fme.get_device()),
+        names=["amip", "era5"],
+    )
+    output = step.step(
+        args=StepArgs(
+            input=input_data,
+            next_step_input_data=next_step_input_data,
+            labels=labels,
+        ),
+    ).output
+    assert output["diagnostic_main"].shape == (2, *DEFAULT_IMG_SHAPE)
+    # The exposed normalizer is the pooled one: scalar constants, not per-sample.
+    assert step.normalizer.means["diagnostic_main"].shape == ()
+    assert float(step.normalizer.means["diagnostic_main"]) == 0.0
+
+
+def test_grouped_normalization_step_denormalizes_per_group():
+    """Two samples in the same normalized state denormalize to different values.
+
+    This is the behavior the whole feature exists for: the network's output
+    space is shared, and each sample is mapped back into its own group's
+    physical distribution.
+    """
+    step = get_step(
+        _grouped_single_module_selector(),
+        DEFAULT_IMG_SHAPE,
+        all_labels={"amip", "era5"},
+    )
+    assert isinstance(step, SingleModuleStep)
+    labels = BatchLabels(
+        tensor=torch.tensor([[1.0, 0.0], [0.0, 1.0]]).to(fme.get_device()),
+        names=["amip", "era5"],
+    )
+    normalizer = step._network_normalizer(labels)
+    normalized = {
+        "diagnostic_main": torch.ones((2, *DEFAULT_IMG_SHAPE)).to(fme.get_device()),
+        "forcing_rad": torch.ones((2, *DEFAULT_IMG_SHAPE)).to(fme.get_device()),
+    }
+    denormalized = normalizer.denormalize(normalized)
+    # c96 group: 1 * 2 + 10 == 12. era5 group: 1 * 5 - 10 == -5.
+    assert float(denormalized["diagnostic_main"][0].flatten()[0]) == 12.0
+    assert float(denormalized["diagnostic_main"][1].flatten()[0]) == -5.0
+    # forcing_rad is pinned, so both samples use the pooled constants (0, 1).
+    assert float(denormalized["forcing_rad"][0].flatten()[0]) == 1.0
+    assert float(denormalized["forcing_rad"][1].flatten()[0]) == 1.0
+
+
+def _grouped_normalization(names: list[str]) -> NetworkAndLossNormalizationConfig:
+    """Network-and-loss normalization carrying a one-group ``grouped`` block."""
+    return NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: 0.0 for name in names},
+            stds={name: 1.0 for name in names},
+        ),
+        grouped=GroupedNormalizationConfig(
+            groups={
+                "only": NormalizationGroupConfig(
+                    labels=["era5"],
+                    normalization=NormalizationConfig(
+                        means={name: 1.0 for name in names},
+                        stds={name: 2.0 for name in names},
+                    ),
+                )
+            },
+            default_group="only",
+        ),
+    )
+
+
+def _fcn3_step_config(normalization: NetworkAndLossNormalizationConfig):
+    return FCN3StepConfig(
+        builder=FCN3Selector(
+            type="FCN3",
+            config=FCN3Config(
+                scale_factor=1,
+                atmo_embed_dim=2,
+                surf_embed_dim=2,
+                aux_embed_dim=2,
+                num_layers=2,
+            ),
+        ),
+        forcing_names=["a"],
+        atmosphere_prognostic_names=["b"],
+        atmosphere_diagnostic_names=[],
+        atmosphere_levels=1,
+        surface_prognostic_names=[],
+        surface_diagnostic_names=[],
+        normalization=normalization,
+    )
+
+
+def _secondary_step_config(normalization: NetworkAndLossNormalizationConfig):
+    return SecondaryModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=["a"],
+        out_names=["b"],
+        normalization=normalization,
+        secondary_builder=ModuleSelector(type="MLP", config={}),
+        secondary_out_names=["c"],
+    )
+
+
+def _radiation_step_config(normalization: NetworkAndLossNormalizationConfig):
+    builder = ModuleSelector(type="MLP", config={})
+    return SeparateRadiationStepConfig(
+        builder=builder,
+        radiation_builder=builder,
+        main_prognostic_names=["a"],
+        shared_forcing_names=["b"],
+        radiation_only_forcing_names=["c"],
+        radiation_diagnostic_names=["d"],
+        main_diagnostic_names=["e"],
+        normalization=normalization,
+    )
+
+
+@pytest.mark.parametrize(
+    "build_config",
+    [_fcn3_step_config, _secondary_step_config, _radiation_step_config],
+    ids=["fcn3", "secondary_module", "separate_radiation"],
+)
+def test_step_config_rejects_grouped_normalization_it_cannot_apply(build_config):
+    """Only the single-module step binds the grouped normalizer.
+
+    The other step types share the same normalization config class, so without
+    an explicit rejection a ``grouped`` block would parse cleanly and then
+    train with pooled constants, silently.
+    """
+    names = ["a", "b", "c", "d", "e"]
+    # The same configs are valid without the grouped block.
+    build_config(trivial_network_and_loss_normalization(names))
+    with pytest.raises(ValueError, match="does not support grouped"):
+        build_config(_grouped_normalization(names))

@@ -178,6 +178,7 @@ class FCN3StepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
+        self.normalization.raise_if_grouped("FCN3StepConfig")
         for name in self.next_step_forcing_names:
             if name not in self.forcing_names:
                 raise ValueError(

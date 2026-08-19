@@ -17,7 +17,12 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
+from fme.core.labels import BatchLabels
+from fme.core.normalizer import (
+    GroupedNormalizer,
+    NetworkAndLossNormalizationConfig,
+    StandardNormalizer,
+)
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
@@ -246,11 +251,15 @@ class SingleModuleStepConfig(StepConfigABC):
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        grouped_normalizer = self.normalization.get_grouped_network_normalizer(
+            self._normalize_names, n_spatial_dims=dataset_info.n_spatial_dims
+        )
         return SingleModuleStep(
             config=self,
             dataset_info=dataset_info,
             corrector=corrector,
             normalizer=normalizer,
+            grouped_normalizer=grouped_normalizer,
             init_weights=init_weights,
         )
 
@@ -273,15 +282,22 @@ class SingleModuleStep(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         init_weights: Callable[[list[nn.Module]], None],
+        grouped_normalizer: GroupedNormalizer | None = None,
     ):
         """
         Args:
             config: The configuration.
             dataset_info: Information about the dataset.
             corrector: The corrector to use at the end of each step.
-            normalizer: The normalizer to use.
+            normalizer: The normalizer to use. This is the pooled normalizer:
+                it is used to normalize the network's inputs and outputs unless
+                ``grouped_normalizer`` is given, and is used regardless by
+                global mean removal, spatial masking and the aggregators.
             timestep: Timestep of the model.
             init_weights: Function to initialize the weights of the module.
+            grouped_normalizer: Optional normalizer which selects constants per
+                sample from the sample's labels. When given, it replaces
+                ``normalizer`` for the network's inputs and outputs only.
         """
         super().__init__()
         if config.global_mean_removal is not None:
@@ -312,6 +328,7 @@ class SingleModuleStep(StepABC):
         self.in_packer = Packer(packed_in_names)
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
+        self._grouped_normalizer = grouped_normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, dataset_info.timestep
@@ -356,7 +373,20 @@ class SingleModuleStep(StepABC):
 
     @property
     def normalizer(self) -> StandardNormalizer:
+        """The pooled normalizer.
+
+        Consumers outside the network's own inputs and outputs -- the loss,
+        global mean removal, spatial masking, and the aggregators' normalized
+        metrics -- read this, so those quantities stay on a fixed scale even
+        when the network itself normalizes per group.
+        """
         return self._normalizer
+
+    def _network_normalizer(self, labels: BatchLabels | None) -> StandardNormalizer:
+        """Normalizer for the network's inputs and outputs for one batch."""
+        if self._grouped_normalizer is None:
+            return self._normalizer
+        return self._grouped_normalizer.bind(labels)
 
     @property
     def surface_temperature_name(self) -> str | None:
@@ -422,9 +452,13 @@ class SingleModuleStep(StepABC):
                 input_tensor = torch.cat(
                     [input_tensor, mask_tensor], dim=self.CHANNEL_DIM
                 )
+            # Labels are only forwarded to a module that conditions on them.
+            # They also select per-group normalization constants, which is a
+            # separate use, so their presence alone does not mean the module
+            # wants them.
             output_tensor = self.module.wrap_module(wrapper)(
                 input_tensor,
-                labels=args.labels,
+                labels=args.labels if self.module.is_conditional else None,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
@@ -437,7 +471,7 @@ class SingleModuleStep(StepABC):
             input=args.input,
             next_step_input_data=args.next_step_input_data,
             network_calls=network_call,
-            normalizer=self.normalizer,
+            normalizer=self._network_normalizer(args.labels),
             corrector=self._corrector,
             ocean=self.ocean,
             residual_prediction=self._config.residual_prediction,

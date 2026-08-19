@@ -163,6 +163,19 @@ class DatasetInfo:
         return result
 
     @property
+    def n_spatial_dims(self) -> int:
+        """
+        Number of trailing spatial dimensions on this dataset's tensors.
+
+        Two for a lat/lon grid, three for HEALPix, which carries a leading
+        face dimension. Unlike ``img_shape``, which is always the trailing two,
+        this is the full rank a per-sample constant must broadcast against.
+        """
+        if self._horizontal_coordinates is None:
+            return len(self.img_shape)
+        return len(self._horizontal_coordinates.shape)
+
+    @property
     def gridded_operations(self) -> GriddedOperations:
         if self._gridded_operations is not None:
             return self._gridded_operations
