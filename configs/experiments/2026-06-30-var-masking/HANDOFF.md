@@ -1,7 +1,7 @@
 # Multi-step FT of paper-final var-masking runs — handoff
 
 Status date: 2026-08-19. Branch: `alexey8-mstepft` (off `exp/alexey8`), pushed,
-HEAD `e5dfbccbc`. This doc is written for whoever (human or Claude agent) picks
+HEAD `3f7074b3e`. This doc is written for whoever (human or Claude agent) picks
 this up next. For the full technical spec of the configs see [FINETUNE.md](FINETUNE.md);
 this doc is the "what we did + current state + what to do next".
 
@@ -220,9 +220,15 @@ see the top-level project notes). Plot `-bestinf`.
    Never reach for `--variant best`/`all` to fix a single cell — it re-submits
    the whole set and restarts the live runs from epoch 0. Name the config
    positionally instead.
-2. **PR `input_dropout_optimized_steps_only` to main.** It's a clean, tested,
-   self-contained fme/core commit (`0ddbbacf1`) that's generally useful; currently
-   only on this branch. Cherry-pick into its own PR.
+2. **PR `input_dropout_optimized_steps_only` to main — open, awaiting review:**
+   [#1450](https://github.com/ai2cm/ace/pull/1450), branch
+   `feature/input-dropout-optimized-steps-only` off main. Two commits:
+   `0ddbbacf1` cherry-picked from here (Troy's authorship preserved), plus a
+   rollout test in `fme/ace/stepper/test_single_module.py` asserting that a
+   three-step `train_on_batch` with `optimize_last_step_only` masks only the
+   final step under the flag and every step without it. Nothing to do unless
+   review asks for changes; this branch keeps its own copy of the commit either
+   way, so a merge needs no action here.
 3. **Evaluate the FT checkpoints** once training completes (eval tooling above).
 4. **main merge was intentionally deferred.** `exp/alexey8` already has its own
    mature distributed-shutdown implementation; main's `#1398`/`#1425` are an
