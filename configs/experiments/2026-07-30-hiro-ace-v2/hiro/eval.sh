@@ -3,9 +3,9 @@
 set -e
 
 #JOB_NAME="eval-tmp2m-prate-events"
-JOB_NAME="eval-2023-tcs-max-snapshot"
+JOB_NAME="eval-bora"
 
-CONFIG_FILENAME="eval-all-2023-tcs-max-snapshot.yaml"
+CONFIG_FILENAME="winds_topography_events.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=4
+NGPU=1
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 #EXISTING_RESULTS_DATASET=01KTCHVDHY0SATWH9E0AW2PDS6

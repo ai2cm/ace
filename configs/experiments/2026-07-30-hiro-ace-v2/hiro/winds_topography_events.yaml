@@ -65,23 +65,33 @@ logging:
   project: multivariate-downscaling
   entity: ai2cm
 events:
-- name: santa_ana_winds_20230212T1800
-  date: 2023-02-12T18:00
+# - name: santa_ana_winds_20230212T1800
+#   date: 2023-02-12T18:00
+#   lat_extent:
+#     start: 25
+#     stop: 41
+#   lon_extent:
+#     start: 235
+#     stop: 251
+#   save_generated_samples: true
+#   n_samples: 16
+# - name: cold_katabatic_20230209T1800
+#   date: 2023-02-09T18:00
+#   lat_extent:
+#     start: 40
+#     stop: 56
+#   lon_extent:
+#     start: 232
+#     stop: 248
+#   save_generated_samples: true
+#   n_samples: 16
+- name: bora_cold_katabatic_20230126T1200
+  date: 2023-01-26T12:00
   lat_extent:
-    start: 25
-    stop: 41
+    start: 37
+    stop: 53
   lon_extent:
-    start: 235
-    stop: 251
-  save_generated_samples: true
-  n_samples: 16
-- name: cold_katabatic_20230209T1800
-  date: 2023-02-09T18:00
-  lat_extent:
-    start: 40
-    stop: 56
-  lon_extent:
-    start: 232
-    stop: 248
+    start: 7
+    stop: 23
   save_generated_samples: true
   n_samples: 16
