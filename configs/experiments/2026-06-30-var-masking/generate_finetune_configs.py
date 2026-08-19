@@ -77,15 +77,11 @@ MULTISTEP_SCHEDULE = {
     ]
 }
 
-# Paper-final source run per (global-mean-removal, masking) cell. gmron-mask0
-# uses seed2 as an interim stand-in because the intended gmron-mask0-seed1 run
-# had not produced a succeeded checkpoint when these configs were generated;
-# swap it once seed1 finishes (update SELECTED_SOURCES, drop its cached config
-# into pretrain_source_configs/, and re-run).
+# Paper-final source run per (global-mean-removal, masking) cell.
 SELECTED_SOURCES = {
     "gmroff-mask0": "ace2-var-mask-nc-sfno-era5-gmroff-mask0-seed1-v5",
     "gmroff-mask20": "ace2-var-mask-nc-sfno-era5-gmroff-mask20-seed1-v5",
-    "gmron-mask0": "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed2-v5",
+    "gmron-mask0": "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed1-v5",
     "gmron-mask20": "ace2-var-mask-nc-sfno-era5-gmron-mask20-seed0-v5",
 }
 
