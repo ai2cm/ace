@@ -1274,7 +1274,10 @@ class _DummyParamModule(torch.nn.Module):
 
 
 def _input_dropout_stepper_config(
-    in_names: list[str], out_names: list[str], input_dropout: VariableMaskingConfig
+    in_names: list[str],
+    out_names: list[str],
+    input_dropout: VariableMaskingConfig,
+    input_dropout_optimized_steps_only: bool = False,
 ) -> StepperConfig:
     return StepperConfig(
         step=StepSelector(
@@ -1289,6 +1292,9 @@ def _input_dropout_stepper_config(
                     normalization=trivial_network_and_loss_normalization(in_names),
                     include_channel_mask_inputs=True,
                     input_dropout=input_dropout,
+                    input_dropout_optimized_steps_only=(
+                        input_dropout_optimized_steps_only
+                    ),
                 )
             ),
         ),
@@ -1392,6 +1398,64 @@ def test_input_dropout_mask_sampled_per_forward_step():
     for packed in captured:
         indicators = packed[:, 1:, 0, 0]  # [batch, 1]
         assert (indicators == 0.0).all(), "dropped channel indicator must be 0"
+
+
+@pytest.mark.parametrize("optimized_steps_only", [True, False])
+def test_input_dropout_optimized_steps_only_masks_only_optimized_step(
+    optimized_steps_only: bool,
+):
+    """input_dropout_optimized_steps_only leaves non-optimized steps unmasked.
+
+    With optimize_last_step_only the training loop runs every step but the last
+    under no_grad. A rate-1.0 Bernoulli group always drops "a", so the
+    per-step presence indicator is deterministic: with the flag set the two
+    non-optimized steps see "a" present (1.0) and only the final optimized step
+    sees it dropped (0.0), while the default masks every step.
+    """
+    n_base, n_steps = 3, 3
+    config = _input_dropout_stepper_config(
+        ["a"],
+        ["a"],
+        VariableMaskingConfig(
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["a"], masking=BernoulliMaskingConfig(rate=1.0)
+                )
+            ]
+        ),
+        input_dropout_optimized_steps_only=optimized_steps_only,
+    )
+    stepper = _get_train_stepper(
+        config,
+        n_ensemble=1,
+        loss=StepLossConfig(type="MSE"),
+        n_forward_steps=n_steps,
+        optimize_last_step_only=True,
+    )
+    data = get_data(["a"], n_samples=n_base, n_time=n_steps + 1).data
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+    optimization = OptimizationConfig().build(
+        modules=list(stepper.modules), max_epochs=1
+    )
+    try:
+        stepper.train_on_batch(data, optimization=optimization)
+    finally:
+        handle.remove()
+
+    assert len(captured) == n_steps
+    # channel 0 is the input "a", channel 1 its presence indicator
+    expected = [1.0, 1.0, 0.0] if optimized_steps_only else [0.0, 0.0, 0.0]
+    for i, (packed, value) in enumerate(zip(captured, expected)):
+        indicator = packed[:, 1, 0, 0]
+        assert (
+            indicator == value
+        ).all(), f"step {i} indicator should be {value}, got {indicator}"
 
 
 def test_input_dropout_eval_mode_training_batch_applies_no_dropout():
