@@ -33,7 +33,15 @@ class MockModule(torch.nn.Module):
 class MockModuleBuilder(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
 
-    def build(self, n_in_channels, n_out_channels, dataset_info):
+    def build(
+        self,
+        n_in_channels,
+        n_out_channels,
+        dataset_info,
+        *,
+        in_names=None,
+        out_names=None,
+    ):
         return MockModule(self.param_shapes)
 
     @classmethod
@@ -52,7 +60,15 @@ class MockModuleBuilderWithDefault(ModuleConfig):
     param_shapes: list[tuple[int, ...]]
     pad: str = "reflect"
 
-    def build(self, n_in_channels, n_out_channels, dataset_info):
+    def build(
+        self,
+        n_in_channels,
+        n_out_channels,
+        dataset_info,
+        *,
+        in_names=None,
+        out_names=None,
+    ):
         return MockModule(self.param_shapes)
 
 

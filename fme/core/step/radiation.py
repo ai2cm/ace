@@ -289,12 +289,16 @@ class SeparateRadiationStep(StepABC):
             n_in_channels=len(config.main_in_names),
             n_out_channels=len(config.main_out_names),
             dataset_info=dataset_info,
+            in_names=list(config.main_in_names),
+            out_names=list(config.main_out_names),
         )
         self.module = module.to(get_device())
         radiation_module = config.radiation_builder.build(
             n_in_channels=len(config.radiation_in_names),
             n_out_channels=len(config.radiation_out_names),
             dataset_info=dataset_info,
+            in_names=list(config.radiation_in_names),
+            out_names=list(config.radiation_out_names),
         )
         self.radiation_module = radiation_module.to(get_device())
         self._img_shape = dataset_info.img_shape

@@ -41,6 +41,9 @@ class HEALPixUNetBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        *,
+        in_names: list[str] | None = None,
+        out_names: list[str] | None = None,
     ) -> nn.Module:
         """
         Build a HEALPixUNet model.
@@ -49,6 +52,8 @@ class HEALPixUNetBuilder(ModuleConfig):
             n_in_channels: Number of input channels.
             n_out_channels: Number of output channels.
             dataset_info: Information about the dataset.
+            in_names: Ordered names of the input channels. Unused.
+            out_names: Ordered names of the output channels. Unused.
 
         Returns:
             HEALPixUNet model.

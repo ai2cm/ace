@@ -33,12 +33,15 @@ class SecondaryDecoderConfig:
         self,
         n_in_channels: int,
         dataset_info: DatasetInfo,
+        *,
+        in_names: list[str] | None = None,
     ) -> "SecondaryDecoder":
         return SecondaryDecoder(
             in_dim=n_in_channels,
             out_names=self.secondary_diagnostic_names,
             network=self.network,
             dataset_info=dataset_info,
+            in_names=in_names,
         )
 
 
@@ -58,6 +61,7 @@ class SecondaryDecoder:
         out_names: list[str],
         network: ModuleSelector,
         dataset_info: DatasetInfo,
+        in_names: list[str] | None = None,
     ):
         """
         Args:
@@ -67,12 +71,16 @@ class SecondaryDecoder:
             dataset_info: Information about the dataset, forwarded to the
                 underlying network builder. Some networks (e.g. MLP) ignore
                 this, while others (e.g. SFNO) require horizontal coordinates.
+            in_names: Ordered names of the input channels, which are the main
+                module's output names. Forwarded to the network builder.
         """
         out_dim = len(out_names)
         self._module: Module = network.build(
             n_in_channels=in_dim,
             n_out_channels=out_dim,
             dataset_info=dataset_info,
+            in_names=in_names,
+            out_names=list(out_names),
         )
         self._packer = Packer(out_names)
 

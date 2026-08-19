@@ -302,6 +302,8 @@ class SecondaryModuleStep(StepABC):
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
+            in_names=list(config.in_names),
+            out_names=list(config.out_names),
         )
         self.module = module.to(get_device())
 
@@ -314,6 +316,8 @@ class SecondaryModuleStep(StepABC):
             n_in_channels=n_in_channels,
             n_out_channels=len(all_secondary_names),
             dataset_info=dataset_info,
+            in_names=list(config.in_names),
+            out_names=list(all_secondary_names),
         )
         self.secondary_module: Module = secondary_module.to(get_device())
         self.secondary_out_packer: Packer = Packer(all_secondary_names)
@@ -323,6 +327,7 @@ class SecondaryModuleStep(StepABC):
                 config.secondary_decoder.build(
                     n_in_channels=n_out_channels,
                     dataset_info=dataset_info,
+                    in_names=list(config.out_names),
                 ).to(get_device())
             )
         else:
