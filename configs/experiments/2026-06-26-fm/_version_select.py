@@ -1,15 +1,15 @@
-"""Shared helpers for selecting FM configs by version tag (-v1 / -v2).
+"""Shared helpers for selecting FM configs by version tag (-v1 / -v2 / -v3).
 
-The FM configs embed a version tag (`-v1`, `-v2`) in their filenames, e.g.
-`ace-train-config-4deg-AIMIP-nc-sfno-fm-0.1-v1.yaml` and its cooldown variant
-`...-nc-sfno-fm-0.1-v1-cooldown.yaml`. The submit/generate scripts take an
-optional `--version`/`-v` argument to restrict processing to a single version's
-configs; when omitted, all versions are processed.
+The FM configs embed a version tag (`-v1`, `-v2`, `-v3`) in their filenames,
+e.g. `ace-train-config-4deg-AIMIP-nc-sfno-fm-0.1-v1.yaml` and its cooldown
+variant `...-nc-sfno-fm-0.1-v1-cooldown.yaml`. The submit/generate scripts take
+an optional `--version`/`-v` argument to restrict processing to a single
+version's configs; when omitted, all versions are processed.
 """
 
 import argparse
 
-VERSION_CHOICES = ("v1", "v2")
+VERSION_CHOICES = ("v1", "v2", "v3")
 
 
 def add_version_arg(parser: argparse.ArgumentParser) -> None:
@@ -20,8 +20,8 @@ def add_version_arg(parser: argparse.ArgumentParser) -> None:
         choices=VERSION_CHOICES,
         default=None,
         help=(
-            "Config version to process: 'v1' selects -v1 configs, "
-            "'v2' selects -v2 configs. If omitted, all versions are processed."
+            "Config version to process: 'v1' selects -v1 configs, 'v2' selects "
+            "-v2 configs, and so on. If omitted, all versions are processed."
         ),
     )
 

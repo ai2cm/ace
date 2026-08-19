@@ -4,7 +4,7 @@ Each nc-sfno config in this directory is submitted via run-ace-train.sh, which
 validates the config and calls gantry.
 
 Usage:
-    python submit_fm_jobs.py [--version {v1,v2}] [--dry-run]
+    python submit_fm_jobs.py [--version {v1,v2,v3}] [--dry-run]
                              [--beaker-workspace WORKSPACE]
                              [--beaker-cluster CLUSTER [CLUSTER ...]]
                              [--beaker-priority PRIORITY]

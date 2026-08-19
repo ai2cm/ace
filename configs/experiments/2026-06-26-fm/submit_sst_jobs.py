@@ -13,7 +13,7 @@ Usage:
     python submit_sst_jobs.py [--dry-run] [--run RUN [RUN ...]]
                               [--perturbation {p2k,p4k} ...]
                               [--forcing-grid {era5,c96} ...]
-                              [--version {v1,v2}]
+                              [--version {v1,v2,v3}]
                               [--beaker-workspace WORKSPACE]
                               [--beaker-cluster CLUSTER [CLUSTER ...]]
                               [--beaker-priority PRIORITY]
