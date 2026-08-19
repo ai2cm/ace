@@ -10,20 +10,17 @@ baseline multi-step fine-tune
 suite, training/validation windows, optimizer, loss, EMA, `max_epochs`, masking,
 global-mean-removal, and architecture are all identical to pre-training.
 
+Two configs are written per cell — **eight in total** — differing only in which
+pre-training checkpoint they start from. See [Variants](#variants).
+
 ## Source checkpoints (one per cell)
 
 | Cell | Paper label | Source pre-training run | Beaker dataset |
 | --- | --- | --- | --- |
 | gmroff-mask0 | No mask | `...-gmroff-mask0-seed1-v5` | `01KZEZNEAASGS4JAJKSQB192GF` |
 | gmroff-mask20 | Mask 20 | `...-gmroff-mask20-seed1-v5` | `01KZEFBKGFJ2V38N8V9HNAVZ27` |
-| gmron-mask0 | No mask, GMR | `...-gmron-mask0-seed2-v5` | `01KYWXQH0XT66EHXVRJ5N9HC4S` |
+| gmron-mask0 | No mask, GMR | `...-gmron-mask0-seed1-v5` | `01KZSAQJD15697SFFCTJ1SRSA0` |
 | gmron-mask20 | Mask 20, GMR | `...-gmron-mask20-seed0-v5` | `01KYT8YZZZGKGJFFK6TNJ64SFN` |
-
-`gmron-mask0` uses **seed2** as an interim stand-in: the paper's intended
-`gmron-mask0-seed1` had no succeeded checkpoint at generation time (still running
-in urgent). Swap it once seed1 finishes — edit `SELECTED_SOURCES` in
-`generate_finetune_configs.py`, cache its `config.yaml` into
-`pretrain_source_configs/`, re-generate, re-submit.
 
 Each run's exact 1-step pre-training config (the `config.yaml` the checkpoint was
 trained with) is cached under `pretrain_source_configs/`; the generator reads it,
@@ -36,8 +33,9 @@ verbatim from pre-training.
 - `stepper_training.n_forward_steps`: `1` -> probability schedule over
   {1: 0.6, 2: 0.2, 4: 0.1, 12: 0.05, 20: 0.05} (the ERA5-baseline multi-step
   schedule — the only borrowed piece)
-- `stepper_training.parameter_init.weights_path`: added, loads
-  `/weights/training_checkpoints/best_ckpt.tar`
+- `stepper_training.parameter_init.weights_path`: added, loads the source
+  checkpoint from the mounted dataset — which one depends on the variant
+  ([below](#variants))
 - `max_epochs`: `150` -> `20` (fine-tuning is short; set by `FT_MAX_EPOCHS`)
 - **inline inference pruned**: the weight-0.0 multi-year diagnostics
   (`10year`, `10year_insample`, `long_46year`) are dropped from inline inference
@@ -56,6 +54,29 @@ EnsembleLoss (crps 0.9 / energy 0.1, no extra weights),
 `optimize_last_step_only: true`, `n_ensemble: 2`, the full v5 inference suite,
 the 1979–2008 training windows, and `logging.project: VarMasking8`.
 
+## Variants
+
+Pre-training writes two candidate checkpoints, selected by different criteria
+(`fme/core/generics/trainer.py`), and it is not obvious which is the better
+starting point for a multi-step fine-tune. Both are generated, one config each,
+listed in `FT_VARIANTS` in `generate_finetune_configs.py`:
+
+| Config/run suffix | Starts from | Selected by |
+| --- | --- | --- |
+| `-mstepft` | `training_checkpoints/best_ckpt.tar` | lowest validation loss; the ERA5 baseline recipe |
+| `-mstepftaimip` | `training_checkpoints/best_inference_ckpt.tar` | lowest inference error, i.e. the weight-1.0 `aimip_checkpoint` entry |
+
+The two configs are byte-identical apart from `parameter_init.weights_path` and
+a header comment naming the checkpoint. In every source dataset
+`best_inference_ckpt.tar` is written at an *earlier* epoch than `best_ckpt.tar`,
+so `-mstepftaimip` also starts from a less-trained model.
+
+`-mstepftaimip` matches the criterion the `-bestinf` evaluations report on,
+which is why it is worth running alongside. The suffix deliberately avoids
+ending in `-bestinf`: `update_beaker_map.py` filters names ending in
+`-bestinf`/`-besttrain`/`-lastepoch` (`SKIP_SUFFIXES`) out of the run -> dataset
+map, since those denote evaluation runs.
+
 ## Run
 
 GPU count is per-cluster to avoid wasting the more powerful accelerators:
@@ -65,24 +86,30 @@ identically and 8 stays divisible by both. Because one beaker job requests a
 fixed GPU count and could land on any allowed cluster, `submit_finetune_jobs.py`
 rejects mixing clusters with different counts -- **submit one cluster at a time**.
 
+`submit_finetune_jobs.py --variant` picks which set to submit and **defaults to
+`aimip`**, not `all`. A submit writes a new `/results` and restarts fine-tuning
+at epoch 0, so re-submitting a variant that is already running discards its
+progress; launching the `-mstepft` set has to be an explicit `--variant best`
+(or `all`).
+
 ```bash
-# regenerate the four run_configs/*-mstepft.yaml (needs current dataset IDs)
+# regenerate all eight run_configs/*-mstepft*.yaml (needs current dataset IDs)
 python generate_finetune_configs.py
 
 # dry run first (one cluster at a time)
 python submit_finetune_jobs.py --dry-run \
   --beaker-cluster ai2/titan --beaker-priority high
 
-# submit to titan (4 B200 GPUs / 400GiB each, via run-ace-train.sh)
-python submit_finetune_jobs.py \
+# submit the -mstepftaimip set to titan (4 B200 GPUs / 400GiB each)
+python submit_finetune_jobs.py --variant aimip \
   --beaker-cluster ai2/titan --beaker-priority high --beaker-workspace ai2/ace
 
 # ...or submit to jupiter (8 H100 GPUs)
-python submit_finetune_jobs.py \
+python submit_finetune_jobs.py --variant aimip \
   --beaker-cluster ai2/jupiter --beaker-priority high --beaker-workspace ai2/ace
 ```
 
-Fine-tune run names are the source run name + `-mstepft`, wandb group
+Fine-tune run names are the source run name + the variant suffix, wandb group
 `ace2-var-masking-mstepft-2026-06-30`. Evaluate them with the existing eval
 tooling (`generate_eval_configs.py` / `submit_eval_jobs.py`) once trained.
 

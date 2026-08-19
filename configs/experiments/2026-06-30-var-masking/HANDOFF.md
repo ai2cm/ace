@@ -1,7 +1,7 @@
 # Multi-step FT of paper-final var-masking runs — handoff
 
-Status date: 2026-08-17. Branch: `alexey8-mstepft` (off `exp/alexey8`), pushed,
-HEAD `f47edc364`. This doc is written for whoever (human or Claude agent) picks
+Status date: 2026-08-19. Branch: `alexey8-mstepft` (off `exp/alexey8`),
+HEAD `3f007ba03`. This doc is written for whoever (human or Claude agent) picks
 this up next. For the full technical spec of the configs see [FINETUNE.md](FINETUNE.md);
 this doc is the "what we did + current state + what to do next".
 
@@ -10,9 +10,17 @@ this doc is the "what we did + current state + what to do next".
 Multi-step fine-tuning of the four paper-final v5 (1°, 6-hourly) var-masking
 checkpoints — one per (global-mean-removal × masking) cell. Each FT config **is
 that run's exact 1-step pre-training config** with only five deliberate changes
-(below). All four run on **ai2/titan (4× B200)** — they must (H100 OOMs). Two are
-running; two were just resubmitted to fresh nodes after node-level I/O stalls
-(see Known issue). Nothing is blocked on you; the open items are follow-ups.
+(below). All run on **ai2/titan (4× B200)** — they must (H100 OOMs).
+
+Since the 2026-08-17 handoff, three things changed
+
+1. The `gmron-mask0` cell moved off its seed2 interim onto the intended
+   **seed1** (its checkpoint finished on 08-15).
+2. A second FT variant, **`-mstepftaimip`**, now exists per cell — same config
+   but starting from `best_inference_ckpt.tar` instead of `best_ckpt.tar`.
+   Eight configs total. See [FINETUNE.md](FINETUNE.md#variants).
+3. `submit_finetune_jobs.py` gained `--variant {aimip,best,all}`, defaulting to
+   `aimip` so a bare submit cannot restart the in-flight `-mstepft` runs.
 
 ## The four runs
 
@@ -20,27 +28,37 @@ running; two were just resubmitted to fresh nodes after node-level I/O stalls
 | --- | --- | --- | --- |
 | gmroff-mask0 · *No mask* | `...-gmroff-mask0-seed1-v5` | `01KZEZNEAASGS4JAJKSQB192GF` | [01M094PKN5RV7FB7ZWF2J0YW88](https://beaker.org/ex/01M094PKN5RV7FB7ZWF2J0YW88) |
 | gmroff-mask20 · *Mask 20* | `...-gmroff-mask20-seed1-v5` | `01KZEFBKGFJ2V38N8V9HNAVZ27` | [01M094PV2AN054F6TNJTQ0CWJK](https://beaker.org/ex/01M094PV2AN054F6TNJTQ0CWJK) |
-| gmron-mask0 · *No mask, GMR* | `...-gmron-mask0-seed2-v5` **(interim)** | `01KYWXQH0XT66EHXVRJ5N9HC4S` | [01M05WN2KPK0S8E012CE2115ZM](https://beaker.org/ex/01M05WN2KPK0S8E012CE2115ZM) |
+| gmron-mask0 · *No mask, GMR* | `...-gmron-mask0-seed1-v5` | `01KZSAQJD15697SFFCTJ1SRSA0` | not yet submitted (was seed2: [01M05WN2KPK0S8E012CE2115ZM](https://beaker.org/ex/01M05WN2KPK0S8E012CE2115ZM)) |
 | gmron-mask20 · *Mask 20, GMR* | `...-gmron-mask20-seed0-v5` | `01KYT8YZZZGKGJFFK6TNJ64SFN` | [01M05WN8N9JC4NGYS3H7XNRN7S](https://beaker.org/ex/01M05WN8N9JC4NGYS3H7XNRN7S) |
 
 wandb project **VarMasking8**, group `ace2-var-masking-mstepft-2026-06-30`. FT
-run names = source run name + `-mstepft`.
+run names = source run name + the variant suffix (`-mstepft` or
+`-mstepftaimip`). The experiment column above is the `-mstepft` variant; no
+`-mstepftaimip` job has been submitted yet.
 
-## Job status (2026-08-17)
+## Job status (2026-08-19)
 
-- **gmroff-mask0-seed1** — freshly resubmitted (queued), pruned-inference config,
-  new experiment `01M094PK…`. See node-stall note below for why.
-- **gmroff-mask20-seed1** — freshly resubmitted (queued), pruned-inference config,
-  new experiment `01M094PV…`.
-- **gmron-mask20-seed0** — RUNNING, healthy (good node, no stalls). Left on its
-  older commit (heavier inline inference; harmless, eval-only) to avoid rerolling
-  a healthy node.
-- **gmron-mask0-seed2** — RUNNING (auto-retry resumed from checkpoint). Trains
-  ~7–14h per attempt then dies to preemption / transient NCCL timeout (different
-  each time → not a deterministic bug). **Do not manually resubmit** — a fresh
-  submit writes a new `/results` and restarts FT at epoch 0; the auto-retry
-  resumes from checkpoint. Only intervene if it stops retrying or the *same* NCCL
-  timeout recurs at a *consistent* step.
+All of these are the **`-mstepft`** (best_ckpt) variant; the `-mstepftaimip`
+set has not been submitted.
+
+- **gmroff-mask0-seed1** — RUNNING since 08-18 02:02, attempt 1, pruned-inference
+  config, experiment `01M094PK…`.
+- **gmroff-mask20-seed1** — exit=1, finalized 08-19 11:57 after ~34h on attempt 1
+  (experiment `01M094PV…`). Not yet triaged. Long runtime before exit means
+  preemption or a transient NCCL timeout is more likely than a code bug — check
+  the logs before concluding otherwise.
+- **gmron-mask20-seed0** — RUNNING since 08-17 16:50, attempt 2, healthy node.
+  Left on its older commit (heavier inline inference; harmless, eval-only) to
+  avoid rerolling a healthy node.
+- **gmron-mask0-seed2** — exit=1, finalized 08-18 20:23 on attempt 4. **Now
+  superseded**: this cell moved to seed1, so this experiment is dead by design —
+  do not restart it. The seed1 `-mstepft` config exists but has not been
+  submitted.
+
+On the two live runs: **do not manually resubmit** — a fresh submit writes a new
+`/results` and restarts FT at epoch 0, while Beaker's auto-retry resumes from
+checkpoint. Only intervene if a job stops retrying or the *same* NCCL timeout
+recurs at a *consistent* step.
 
 ### Known issue: node-level I/O stalls on titan
 Some titan nodes freeze for **hours** mid-run — multi-hour gaps between
@@ -69,7 +87,8 @@ Design decisions (each is a commit; see history below):
    - `stepper_training.n_forward_steps`: `1` → probability schedule
      `{1:.6, 2:.2, 4:.1, 12:.05, 20:.05}` (the **only** thing borrowed from the
      ERA5 baseline multi-step FT config).
-   - `stepper_training.parameter_init.weights_path` — load the pre-trained weights.
+   - `stepper_training.parameter_init.weights_path` — load the pre-trained
+     weights; *which* checkpoint depends on the variant (see #5).
    - `max_epochs`: `150` → `20` (FT is short).
    - `stepper.step.config.input_dropout_optimized_steps_only: true` (see #2).
    - **Inline inference pruned** (`INLINE_INFERENCE_DROP`): the weight-0.0
@@ -109,6 +128,25 @@ Design decisions (each is a commit; see history below):
    `stepper.step.config.builder.config.checkpointing` (1=encoder/decoder …
    3=per-block; reproducibility-safe, ~20–30% slower).
 
+5. **Two variants per cell, differing only in the source checkpoint.**
+   Pre-training writes `best_ckpt.tar` (lowest validation loss) and
+   `best_inference_ckpt.tar` (lowest inference error — for these runs the
+   weight-1.0 `aimip_checkpoint` entry). The original FT started from
+   `best_ckpt.tar` because that is the ERA5 baseline recipe, but the rest of this
+   directory reports on `-bestinf`, so that choice was never tested here. Both
+   are now generated — `-mstepft` and `-mstepftaimip`, byte-identical apart from
+   `weights_path` — as `FT_VARIANTS` in `generate_finetune_configs.py`. Note
+   `best_inference_ckpt.tar` is an *earlier* epoch than `best_ckpt.tar` in all
+   four source datasets, so `-mstepftaimip` also starts less-trained. The suffix
+   avoids ending in `-bestinf` because `update_beaker_map.py`'s `SKIP_SUFFIXES`
+   filters such names out of the run → dataset map.
+
+6. **`gmron-mask0` is on seed1, not the seed2 interim.** seed1's checkpoint
+   succeeded on 08-15 (dataset `01KZSAQJD15697SFFCTJ1SRSA0`). The seed2 FT config
+   and cached pre-training config were deleted; its `wandb_to_beaker_map.json`
+   entry stays, because the seed2 *pre-training* eval suite still resolves
+   through it and `update_beaker_map.py` would re-add it anyway.
+
 ## How to operate (commands)
 
 ```bash
@@ -116,15 +154,22 @@ git checkout alexey8-mstepft
 cd configs/experiments/2026-06-30-var-masking
 conda activate fme   # gantry + validate_config live here
 
-# Regenerate the four run_configs/*-mstepft.yaml (idempotent):
+# Regenerate all eight run_configs/*-mstepft*.yaml (idempotent):
 python generate_finetune_configs.py
 
-# Validate one:
+# Validate one. NOTE: the `fme` env installs fme editable from a *different*
+# checkout (~/Git/ace, branch exp/alexey8) which lacks this branch's
+# input_dropout_optimized_steps_only, so validation fails there with
+# `can not match "input_dropout_optimized_steps_only" to any data class field`.
+# Point PYTHONPATH at this worktree — that error is the env, not the config:
+PYTHONPATH=$(git rev-parse --show-toplevel) \
 python -m fme.ace.validate_config --config_type train \
-  run_configs/ace-train-config-4deg-nc-sfno-era5-gmroff-mask0-seed1-v5-mstepft.yaml
+  run_configs/ace-train-config-4deg-nc-sfno-era5-gmroff-mask0-seed1-v5-mstepftaimip.yaml
 
-# Submit — MUST be titan (H100 OOMs). One cluster at a time:
-python submit_finetune_jobs.py --beaker-cluster ai2/titan \
+# Submit — MUST be titan (H100 OOMs). One cluster at a time.
+# --variant defaults to aimip; `--variant best` or `all` RESTARTS the in-flight
+# -mstepft runs from epoch 0, so pass it only on purpose.
+python submit_finetune_jobs.py --variant aimip --beaker-cluster ai2/titan \
   --beaker-priority high --beaker-workspace ai2/ace
 # NOTE: gantry is slow (~20s/job); a 4-job submit can exceed a 2-min shell
 # timeout. If it does, only some land — check which, then submit the rest via
@@ -134,9 +179,8 @@ python submit_finetune_jobs.py --beaker-cluster ai2/titan \
 python - <<'PY'
 import subprocess, json
 for name, ex in {
- "gmroff-mask0-seed1":"01M05WHT63Y6GH23C0BS9QTWF2",
- "gmroff-mask20-seed1":"01M05WMWQ0JYXPQY5B1KVQA0FQ",
- "gmron-mask0-seed2":"01M05WN2KPK0S8E012CE2115ZM",
+ "gmroff-mask0-seed1":"01M094PKN5RV7FB7ZWF2J0YW88",
+ "gmroff-mask20-seed1":"01M094PV2AN054F6TNJTQ0CWJK",
  "gmron-mask20-seed0":"01M05WN8N9JC4NGYS3H7XNRN7S",
 }.items():
     d=json.loads(subprocess.run(["beaker","experiment","get",ex,"--format","json"],
@@ -152,14 +196,17 @@ Evaluate after training with the existing eval tooling in this dir
 (`update_beaker_map.py` → `generate_eval_configs.py -v v5` → `submit_eval_jobs.py`;
 see the top-level project notes). Plot `-bestinf`.
 
-## Open follow-ups (next actions, none blocking)
+## Open follow-ups
 
-1. **Swap gmron-mask0 to seed1.** It currently uses **seed2** as an interim — the
-   paper's intended run is `gmron-mask0-seed1`, which had no succeeded checkpoint
-   when these were generated. When it finishes: update `SELECTED_SOURCES` in
-   `generate_finetune_configs.py`, add its run→dataset entry to
-   `wandb_to_beaker_map.json` (via `update_beaker_map.py`), drop its `config.yaml`
-   into `pretrain_source_configs/`, regenerate, resubmit that one.
+1. **Submit the pending configs** — the one active item. Nothing generated in the
+   last three commits has been launched:
+   - the four `-mstepftaimip` configs (`--variant aimip`, the default);
+   - the `gmron-mask0-seed1` `-mstepft` config, whose cell has no live run since
+     the seed2 experiment was superseded. Submitting it means `--variant best`,
+     which also re-submits the other three `-mstepft` cells and **restarts the
+     two live ones from epoch 0** — so submit that one via `run-ace-train.sh`
+     directly rather than through `submit_finetune_jobs.py`.
+   - `gmroff-mask20-seed1` `-mstepft` exited 1 on 08-19 and needs triage.
 2. **PR `input_dropout_optimized_steps_only` to main.** It's a clean, tested,
    self-contained fme/core commit (`0ddbbacf1`) that's generally useful; currently
    only on this branch. Cherry-pick into its own PR.
@@ -175,18 +222,24 @@ see the top-level project notes). Plot `-bestinf`.
 ## File map (this dir)
 
 - `FINETUNE.md` — technical spec of the FT configs (read first for details).
-- `generate_finetune_configs.py` — builds the 4 FT run configs from the cached
-  pre-training configs + the checkpoint map.
+- `generate_finetune_configs.py` — builds the 8 FT run configs (4 cells x
+  `FT_VARIANTS`) from the cached pre-training configs + the checkpoint map.
 - `submit_finetune_jobs.py` — submits them via `run-ace-train.sh` (per-cluster GPU
-  count, refuses mixed clusters).
+  count, refuses mixed clusters, `--variant` selects the checkpoint set).
 - `run-ace-train.sh` — shared train launcher; sets `PYTORCH_CUDA_ALLOC_CONF`.
 - `pretrain_source_configs/*.yaml` — the 4 exact pre-training configs (source of truth).
-- `run_configs/*-mstepft.yaml` — the 4 generated FT configs.
+- `run_configs/*-mstepft.yaml` — FT configs starting from `best_ckpt.tar`.
+- `run_configs/*-mstepftaimip.yaml` — FT configs starting from
+  `best_inference_ckpt.tar`.
 - `wandb_to_beaker_map.json` — run name → checkpoint dataset ID.
 
 ## Commit history (branch, newest first)
 
 ```
+3f007ba03 Select fine-tune variant when submitting var-masking multi-step FT jobs
+bb04f0b82 Add best-inference-checkpoint variant of var-masking multi-step FT
+2c0cdc0b5 Use gmron-mask0-seed1 for var-masking multi-step FT
+0e05776c4 Add HANDOFF.md for var-masking multi-step FT
 001a58702 Prune heavy inline inference from var-masking multi-step FT
 f47edc364 Set expandable_segments to avoid var-masking multi-step FT OOM
 5251e5f1b Enable input_dropout_optimized_steps_only in var-masking multi-step FT
