@@ -35,6 +35,15 @@ COARSE_TRUTH_ZARR = (
     "2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr"
 )
 PATCHED_MODELS = {
+    # No-temporal-attention ablation of st-singlestage-coarse-endpoints-flat
+    # (see crps_eval.py's PATCHED_MODELS comment for the full provenance
+    # note). Global patch-tiled inference, ONE contiguous global zarr on
+    # weka -- plain str path.
+    "st-singlestage-coarse-endpoints-flat-no-temporal-attn": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-flat-no-temporal-attn/"
+        "test-2023-2024-ens4-global.zarr"
+    ),
     # Single-stage coarse-endpoints (v2 of the single-stage architecture),
     # global patch-tiled inference -- ONE contiguous global zarr, so a
     # plain str path (see crps_eval.py's PATCHED_MODELS comment for the
