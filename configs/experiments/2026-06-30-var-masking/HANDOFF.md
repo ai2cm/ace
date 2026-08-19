@@ -1,7 +1,7 @@
 # Multi-step FT of paper-final var-masking runs — handoff
 
-Status date: 2026-08-19. Branch: `alexey8-mstepft` (off `exp/alexey8`),
-HEAD `3f007ba03`. This doc is written for whoever (human or Claude agent) picks
+Status date: 2026-08-19. Branch: `alexey8-mstepft` (off `exp/alexey8`), pushed,
+HEAD `e5dfbccbc`. This doc is written for whoever (human or Claude agent) picks
 this up next. For the full technical spec of the configs see [FINETUNE.md](FINETUNE.md);
 this doc is the "what we did + current state + what to do next".
 
@@ -20,7 +20,11 @@ Since the 2026-08-17 handoff, three things changed
    but starting from `best_inference_ckpt.tar` instead of `best_ckpt.tar`.
    Eight configs total. See [FINETUNE.md](FINETUNE.md#variants).
 3. `submit_finetune_jobs.py` gained `--variant {aimip,best,all}`, defaulting to
-   `aimip` so a bare submit cannot restart the in-flight `-mstepft` runs.
+   `aimip` so a bare submit cannot restart the in-flight `-mstepft` runs, plus
+   positional config names for submitting a single cell.
+
+The `gmron-mask0-seed1` `-mstepft` run has since been submitted. The four
+`-mstepftaimip` configs are still unsubmitted — that is the open action.
 
 ## The four runs
 
@@ -28,7 +32,7 @@ Since the 2026-08-17 handoff, three things changed
 | --- | --- | --- | --- |
 | gmroff-mask0 · *No mask* | `...-gmroff-mask0-seed1-v5` | `01KZEZNEAASGS4JAJKSQB192GF` | [01M094PKN5RV7FB7ZWF2J0YW88](https://beaker.org/ex/01M094PKN5RV7FB7ZWF2J0YW88) |
 | gmroff-mask20 · *Mask 20* | `...-gmroff-mask20-seed1-v5` | `01KZEFBKGFJ2V38N8V9HNAVZ27` | [01M094PV2AN054F6TNJTQ0CWJK](https://beaker.org/ex/01M094PV2AN054F6TNJTQ0CWJK) |
-| gmron-mask0 · *No mask, GMR* | `...-gmron-mask0-seed1-v5` | `01KZSAQJD15697SFFCTJ1SRSA0` | not yet submitted (was seed2: [01M05WN2KPK0S8E012CE2115ZM](https://beaker.org/ex/01M05WN2KPK0S8E012CE2115ZM)) |
+| gmron-mask0 · *No mask, GMR* | `...-gmron-mask0-seed1-v5` | `01KZSAQJD15697SFFCTJ1SRSA0` | [01M0DG7R49A2F4E13H3DJZ7YM2](https://beaker.org/ex/01M0DG7R49A2F4E13H3DJZ7YM2) (was seed2: [01M05WN2…](https://beaker.org/ex/01M05WN2KPK0S8E012CE2115ZM)) |
 | gmron-mask20 · *Mask 20, GMR* | `...-gmron-mask20-seed0-v5` | `01KYT8YZZZGKGJFFK6TNJ64SFN` | [01M05WN8N9JC4NGYS3H7XNRN7S](https://beaker.org/ex/01M05WN8N9JC4NGYS3H7XNRN7S) |
 
 wandb project **VarMasking8**, group `ace2-var-masking-mstepft-2026-06-30`. FT
@@ -43,19 +47,23 @@ set has not been submitted.
 
 - **gmroff-mask0-seed1** — RUNNING since 08-18 02:02, attempt 1, pruned-inference
   config, experiment `01M094PK…`.
-- **gmroff-mask20-seed1** — exit=1, finalized 08-19 11:57 after ~34h on attempt 1
-  (experiment `01M094PV…`). Not yet triaged. Long runtime before exit means
-  preemption or a transient NCCL timeout is more likely than a code bug — check
-  the logs before concluding otherwise.
+- **gmroff-mask20-seed1** — QUEUED on attempt 2 (experiment `01M094PV…`) after
+  attempt 1 exited 1 on 08-19 11:57, ~34h in. Beaker retried it on its own; the
+  long runtime before exit points at preemption or a transient NCCL timeout
+  rather than a code bug. Leave it — no manual action unless attempt 2 also dies.
 - **gmron-mask20-seed0** — RUNNING since 08-17 16:50, attempt 2, healthy node.
   Left on its older commit (heavier inline inference; harmless, eval-only) to
   avoid rerolling a healthy node.
-- **gmron-mask0-seed2** — exit=1, finalized 08-18 20:23 on attempt 4. **Now
-  superseded**: this cell moved to seed1, so this experiment is dead by design —
-  do not restart it. The seed1 `-mstepft` config exists but has not been
-  submitted.
+- **gmron-mask0-seed1** — QUEUED, attempt 1, submitted 08-19 10:13 as experiment
+  [01M0DG7R49A2F4E13H3DJZ7YM2](https://beaker.org/ex/01M0DG7R49A2F4E13H3DJZ7YM2).
+  Note this one went to workspace **ai2/climate-titan** at priority **urgent**,
+  not ai2/ace/high like the others. Submitted by naming the config positionally,
+  so the other `-mstepft` cells were untouched. Supersedes the seed2 experiment
+  ([01M05WN2…](https://beaker.org/ex/01M05WN2KPK0S8E012CE2115ZM), exit=1 on
+  attempt 4, finalized 08-18 20:23) — that one is dead by design, do not restart
+  it.
 
-On the two live runs: **do not manually resubmit** — a fresh submit writes a new
+On any live or queued run: **do not manually resubmit** — a fresh submit writes a new
 `/results` and restarts FT at epoch 0, while Beaker's auto-retry resumes from
 checkpoint. Only intervene if a job stops retrying or the *same* NCCL timeout
 recurs at a *consistent* step.
@@ -202,14 +210,16 @@ see the top-level project notes). Plot `-bestinf`.
 
 ## Open follow-ups
 
-1. **Submit the pending configs** — the one active item. Nothing generated in the
-   last three commits has been launched:
-   - the four `-mstepftaimip` configs (`--variant aimip`, the default);
-   - the `gmron-mask0-seed1` `-mstepft` config, whose cell has no live run since
-     the seed2 experiment was superseded. Do **not** use `--variant best` for it
-     — that also re-submits the other three `-mstepft` cells and restarts the
-     two live ones from epoch 0. Name the config positionally instead.
-   - `gmroff-mask20-seed1` `-mstepft` exited 1 on 08-19 and needs triage.
+1. **Submit the four `-mstepftaimip` configs** — the one active item, and all
+   that is left unlaunched:
+   ```bash
+   python submit_finetune_jobs.py --variant aimip --beaker-cluster ai2/titan \
+     --beaker-priority high --beaker-workspace ai2/ace
+   ```
+   All four `-mstepft` cells are now submitted, so nothing else is pending.
+   Never reach for `--variant best`/`all` to fix a single cell — it re-submits
+   the whole set and restarts the live runs from epoch 0. Name the config
+   positionally instead.
 2. **PR `input_dropout_optimized_steps_only` to main.** It's a clean, tested,
    self-contained fme/core commit (`0ddbbacf1`) that's generally useful; currently
    only on this branch. Cherry-pick into its own PR.
@@ -239,6 +249,9 @@ see the top-level project notes). Plot `-bestinf`.
 ## Commit history (branch, newest first)
 
 ```
+e5dfbccbc Document submitting named var-masking fine-tune configs
+6d09475af Allow submitting named var-masking fine-tune configs
+6e8464851 Document var-masking multi-step FT variants and seed1 swap
 3f007ba03 Select fine-tune variant when submitting var-masking multi-step FT jobs
 bb04f0b82 Add best-inference-checkpoint variant of var-masking multi-step FT
 2c0cdc0b5 Use gmron-mask0-seed1 for var-masking multi-step FT
