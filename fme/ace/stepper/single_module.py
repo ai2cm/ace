@@ -1489,6 +1489,12 @@ class TrainStepperConfig:
             stays constant: schedulers are not supported, since the training
             stepper never sees the epoch and validation-loss signals that
             drive them.
+        discriminator_r1_penalty: R1 gradient penalty coefficient (λ/2 in
+            Mescheder et al. 2018). Added to the discriminator's loss as
+            ``coefficient * ||∇_x D(x)||²`` on the real data, penalizing
+            sharp decision boundaries that let the discriminator separate
+            real from generated pairs too easily. 0 disables. Typical values
+            are 1–10.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1500,6 +1506,7 @@ class TrainStepperConfig:
     )
     discriminator_loss_weight: float = 0.0
     discriminator_optimization: OptimizationConfig | None = None
+    discriminator_r1_penalty: float = 0.0
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1526,6 +1533,11 @@ class TrainStepperConfig:
                     "accumulated across forward steps and backpropagated once "
                     "per batch."
                 )
+        if self.discriminator_r1_penalty < 0:
+            raise ValueError(
+                "discriminator_r1_penalty must be non-negative, got "
+                f"{self.discriminator_r1_penalty}"
+            )
 
     @property
     def n_forward_steps_schedule(self) -> TimeLengthSchedule | None:
@@ -1992,7 +2004,10 @@ class TrainStepper(
             self._discriminator_optimization.zero_gradients()
             with self._discriminator_optimization.autocast():
                 losses = compute_discriminator_losses(
-                    self._discriminator, gridded_operations, gan_pairs
+                    self._discriminator,
+                    gridded_operations,
+                    gan_pairs,
+                    r1_penalty_coefficient=self._config.discriminator_r1_penalty,
                 )
             self._discriminator_optimization.accumulate_loss(losses.loss)
             self._discriminator_optimization.step_weights()
@@ -2003,6 +2018,7 @@ class TrainStepper(
                 )
         metrics["discriminator_loss_real"] = losses.loss_real
         metrics["discriminator_loss_fake"] = losses.loss_fake
+        metrics["discriminator_r1_penalty"] = losses.r1_penalty
         metrics["discriminator_score_real"] = losses.score_real
         metrics["discriminator_score_fake"] = losses.score_fake
 

@@ -244,10 +244,13 @@ class DiscriminatorLosses:
     over the batch's optimized steps.
 
     Parameters:
-        loss: The discriminator's training loss (real + fake sides, summed
-            over steps), with gradients flowing only into the discriminator.
+        loss: The discriminator's training loss (real + fake sides + R1 if
+            enabled, summed over steps), with gradients flowing only into the
+            discriminator.
         loss_real: Detached real-side component, averaged over steps.
         loss_fake: Detached fake-side component, averaged over steps.
+        r1_penalty: Detached R1 gradient penalty, averaged over steps
+            (0 when R1 is not enabled).
         score_real: Detached mean sigmoid score on real pairs, averaged over
             steps (1 = confidently real; 0.5 at equilibrium).
         score_fake: Detached mean sigmoid score on generated pairs, averaged
@@ -257,14 +260,37 @@ class DiscriminatorLosses:
     loss: torch.Tensor
     loss_real: torch.Tensor
     loss_fake: torch.Tensor
+    r1_penalty: torch.Tensor
     score_real: torch.Tensor
     score_fake: torch.Tensor
+
+
+def _r1_gradient_penalty(
+    real_logits: torch.Tensor,
+    real_inputs: list[torch.Tensor],
+    gridded_operations: GriddedOperations,
+) -> torch.Tensor:
+    """R1 gradient penalty (Mescheder et al. 2018) on real data.
+
+    Returns the area-weighted mean of ``||∇_x D(x)||²`` over the real
+    inputs — the unweighted penalty; the caller multiplies by ``λ/2``.
+    ``create_graph=True`` so the penalty's own gradients flow into the
+    discriminator's optimizer step.
+    """
+    (grads,) = torch.autograd.grad(
+        outputs=real_logits.sum(),
+        inputs=real_inputs,
+        create_graph=True,
+    )
+    grad_sq = grads.square()
+    return gridded_operations.area_weighted_mean(grad_sq).mean()
 
 
 def compute_discriminator_losses(
     discriminator: StepDiscriminator,
     gridded_operations: GriddedOperations,
     pairs: list[GanStepPair],
+    r1_penalty_coefficient: float = 0.0,
 ) -> DiscriminatorLosses:
     """
     Compute the discriminator's training loss over a batch's optimized steps.
@@ -281,6 +307,9 @@ def compute_discriminator_losses(
         gridded_operations: Provides the area-weighted spherical mean reducing
             per-pixel binary cross-entropy to a scalar.
         pairs: One real/fake pair per optimized step.
+        r1_penalty_coefficient: R1 gradient penalty coefficient (λ/2 in
+            Mescheder et al. 2018). 0 disables the penalty. Applied to
+            the real-side forward, per step.
 
     Returns:
         The discriminator's loss and detached diagnostics.
@@ -289,26 +318,57 @@ def compute_discriminator_losses(
         raise ValueError("pairs must be non-empty")
     losses_real = []
     losses_fake = []
+    r1_penalties = []
     scores_real = []
     scores_fake = []
+    use_r1 = r1_penalty_coefficient > 0
     for pair in pairs:
         fake_logits = discriminator.forward(
             pair.fake_input, pair.fake_output, labels=pair.fake_labels
         )
-        real_logits = discriminator.forward(
-            pair.real_input, pair.real_output, labels=pair.real_labels
-        )
+        if use_r1:
+            real_packed = torch.cat(
+                [
+                    torch.stack(list(pair.real_input.values()), dim=-3),
+                    torch.stack(list(pair.real_output.values()), dim=-3),
+                ],
+                dim=-3,
+            )
+            real_packed.requires_grad_(True)
+            n_in = len(pair.real_input)
+            real_input_r1 = dict(
+                zip(pair.real_input.keys(), real_packed[:, :n_in].unbind(dim=1))
+            )
+            real_output_r1 = dict(
+                zip(pair.real_output.keys(), real_packed[:, n_in:].unbind(dim=1))
+            )
+            real_logits = discriminator.forward(
+                real_input_r1, real_output_r1, labels=pair.real_labels
+            )
+            r1 = _r1_gradient_penalty(real_logits, [real_packed], gridded_operations)
+            r1_penalties.append(r1)
+        else:
+            real_logits = discriminator.forward(
+                pair.real_input, pair.real_output, labels=pair.real_labels
+            )
         losses_real.append(_area_weighted_bce(real_logits, 1.0, gridded_operations))
         losses_fake.append(_area_weighted_bce(fake_logits, 0.0, gridded_operations))
         scores_real.append(_area_weighted_score(real_logits, gridded_operations))
         scores_fake.append(_area_weighted_score(fake_logits, gridded_operations))
     loss_real = torch.stack(losses_real).sum()
     loss_fake = torch.stack(losses_fake).sum()
+    if use_r1:
+        r1_total = torch.stack(r1_penalties).sum()
+        total_loss = loss_real + loss_fake + r1_penalty_coefficient * r1_total
+    else:
+        r1_total = torch.tensor(0.0, device=loss_real.device)
+        total_loss = loss_real + loss_fake
     n_steps = len(pairs)
     return DiscriminatorLosses(
-        loss=loss_real + loss_fake,
+        loss=total_loss,
         loss_real=loss_real.detach() / n_steps,
         loss_fake=loss_fake.detach() / n_steps,
+        r1_penalty=r1_total.detach() / n_steps,
         score_real=torch.stack(scores_real).mean(),
         score_fake=torch.stack(scores_fake).mean(),
     )

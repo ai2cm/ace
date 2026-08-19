@@ -3598,6 +3598,33 @@ def test_gan_fake_side_folds_ensemble_members():
     assert "discriminator_loss_fake" in output.metrics
 
 
+def test_gan_training_with_r1_penalty():
+    """R1 gradient penalty is logged and the discriminator still trains."""
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(
+        discriminator_module, discriminator_r1_penalty=5.0
+    )
+    data = get_data(["a", "b"], n_samples=3, n_time=3).data
+    optimization = OptimizationConfig(optimizer_type="Adam", lr=1e-3).build(
+        train_stepper.modules, max_epochs=1
+    )
+    assert train_stepper._discriminator is not None
+    discriminator_params_before = [
+        p.detach().clone() for p in train_stepper._discriminator.modules.parameters()
+    ]
+    output = train_stepper.train_on_batch(data, optimization)
+    metrics = output.metrics
+    assert "discriminator_r1_penalty" in metrics
+    assert metrics["discriminator_r1_penalty"] > 0
+    assert torch.isfinite(metrics["loss"])
+    for before, after in zip(
+        discriminator_params_before,
+        train_stepper._discriminator.modules.parameters(),
+    ):
+        assert not torch.equal(before, after)
+
+
 def test_gan_training_with_gradient_accumulation():
     """The adversarial term is part of the same accumulated per-step loss, so
     gradient-accumulation mode (backward inside the step loop) must train both
