@@ -1,5 +1,9 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0
-cm4_1pct_46to125_piC_156to235-ocean_precorr|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1
-cm4_1pct_46to125_piC_156to235-ocean_precorr|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs1|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs2|training|high|jupiter|4|500GiB|3|ai2/ace|seed=2
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 optimization.max_grad_norm=1.0
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 optimization.max_grad_norm=1.0
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 optimization.max_grad_norm=1.0
