@@ -188,12 +188,28 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml" \
 
 # Deterministic analog of the paper recipe (added 2026-08-17): same pipeline
 # with noise and the ensemble loss removed (MSE + ACE2-paper variable weights).
-# Its 3-step BPTT fine-tune config (…-ft3-bptt-daily-fg16-sr0p125-det.yaml) is
-# NOT wired here yet — it waits on this pretrain's checkpoint dataset.
+# Its 3-step BPTT fine-tune is wired below (donor: this pretrain's checkpoint).
 # The arms above are done or live -- launch this alone:
 #   ./run-train.sh det
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-det.yaml" \
   "ace2-era5-daily-fg16-sr0p125-deterministic-1-step-pre-training-rs0" 4
+
+# 3-step BPTT fine-tune of the deterministic pretrain (added 2026-08-20), donor
+# xskvz4nx via dataset 01M0DA7TWW34ET5HHCTGJEQHHS. The arms above are done or
+# live -- launch this alone:
+#   ./run-train.sh ft3-bptt-daily-fg16-sr0p125-det
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-det.yaml" \
+  "ace2-era5-daily-fg16-sr0p125-deterministic-ft3-bptt-multi-step-fine-tuning-rs0" 8
+
+# Deterministic 2-step BPTT from-scratch pretrain (added 2026-08-20): trains
+# over 2 forward steps with the graph kept across both (no gradient
+# accumulation / no detaching), matching the ACE2 paper's training behavior.
+# 4 GPUs: the stochastic 2-step OOMed at 4 with n_ensemble 2; deterministic
+# n_ensemble 1 halves activation memory, matching the 1-step stochastic
+# footprint that fits. Launch alone:
+#   ./run-train.sh 2-step-bptt-pretrain-daily-fg16-sr0p125-det
+run_training "ace-train-config-2-step-bptt-pretrain-daily-fg16-sr0p125-det.yaml" \
+  "ace2-era5-daily-fg16-sr0p125-deterministic-2-step-bptt-pre-training-rs0" 4
 
 # CRPS/ES 50/50 split ablation (added 2026-08-17): paper-recipe gating ablation
 # comparing 50/50 vs 90/10 CRPS/energy-score weights. Pretrain launches first;

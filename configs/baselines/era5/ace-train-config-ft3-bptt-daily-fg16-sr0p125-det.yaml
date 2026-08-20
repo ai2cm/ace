@@ -1,9 +1,9 @@
 # arg: --dataset troya/2026-07-24-era5-1deg-8layer-daily-stats-1990-2019:/statsdata
-# arg: --dataset FILL-DET-PRETRAIN-RESULT-DATASET:/weights
+# arg: --dataset 01M0DA7TWW34ET5HHCTGJEQHHS:/weights
 #
-# NOT LAUNCHABLE YET: replace the /weights placeholder above with the
-# deterministic pretrain's final result dataset (and add a run_training call to
-# run-train.sh) once that pretrain finishes.
+# /weights is the final result dataset of the deterministic pretrain (wandb
+# xskvz4nx, beaker 01M084E9ETJCEA79WQ8TJM0JH5, job 01M0DA7V0YXH2KN1HD2B9TASC5);
+# its best_ckpt.tar (best validation) coincides with the final epoch.
 #
 # Deterministic analog of ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml for
 # the stochastic ACE2 paper: same 3-step BPTT fine-tune (fixed 3-step rollout,

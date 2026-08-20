@@ -1,12 +1,13 @@
 # arg: --dataset troya/2026-07-24-era5-1deg-8layer-daily-stats-1990-2019:/statsdata
-# arg: --dataset TBD_50_50_PRETRAIN_CKPT:/weights
+# arg: --dataset 01M0AJCSA3XPDTZZ8M5EBC6590:/weights
 #
 # 50/50 CRPS/energy-score split variant of
 # ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml for the paper-recipe
 # gating ablation. The ONLY changes from the 90/10 fine-tune are:
 #   - crps_weight 0.9 → 0.5, energy_score_weight 0.1 → 0.5
-#   - donor checkpoint dataset (TBD: replace with the finalized checkpoint
-#     dataset ID from the 50/50 pretrain once it completes)
+#   - donor checkpoint dataset: the 50/50 pretrain's final result dataset
+#     (wandb ocnwcfiv, beaker 01M0AJCS9TTG0QKT112F6AW2TW); its best_ckpt.tar
+#     (best validation) coincides with the final epoch
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
