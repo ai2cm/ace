@@ -65,7 +65,6 @@ from fme.core.coordinates import (
 from fme.core.corrector.loss_config import (
     CorrectorLossConfig,
     CorrectorRegularizationConfig,
-    PreCorrectorOptimizationConfig,
 )
 from fme.core.corrector.output import CorrectorOutput
 from fme.core.corrector.registry import (
@@ -3254,20 +3253,17 @@ def _corrector_loss_stepper(
     disabled_epochs: int = 0,
     dataset_info: DatasetInfo | None = None,
     input_masking: StaticSpatialMaskingConfig | None = None,
-    names: list[str] | None = None,
 ) -> Stepper:
-    """Build a ``names`` -> ``names`` stepper, optionally installing a
-    correction. ``names`` defaults to ``["a"]``."""
-    names = ["a"] if names is None else names
+    """Build an ["a"] -> ["a"] stepper, optionally installing a correction."""
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
                 SingleModuleStepConfig(
                     builder=ModuleSelector(type="prebuilt", config={"module": module}),
-                    in_names=list(names),
-                    out_names=list(names),
-                    normalization=trivial_network_and_loss_normalization(names),
+                    in_names=["a"],
+                    out_names=["a"],
+                    normalization=trivial_network_and_loss_normalization(["a"]),
                 )
             ),
         ),
@@ -3303,11 +3299,7 @@ def test_train_on_batch_pre_corrector_equivalence():
             _AddOne(), ConstantOffsetCorrection("a", offset)
         ),
         loss=StepLossConfig(type="MSE"),
-        corrector_loss=CorrectorLossConfig(
-            precorrector_optimization=PreCorrectorOptimizationConfig(
-                names_and_prefixes=["a"]
-            )
-        ),
+        corrector_loss=CorrectorLossConfig(precorrector_optimization=True),
     )
     baseline_out = baseline.train_on_batch(data, optimization=NullOptimization())
     corrected_out = corrected.train_on_batch(data, optimization=NullOptimization())
@@ -3326,9 +3318,7 @@ def test_gradient_flows_through_correction_when_configured():
         names=["a"], n_samples=2, n_timesteps=2, epoch=0
     ).to_device()
     corrector_loss = CorrectorLossConfig(
-        regularization=CorrectorRegularizationConfig(
-            names_and_prefixes=["a"], norm="L2"
-        )
+        regularization=CorrectorRegularizationConfig(norm="L2")
     )
     grads = {}
     for label, config in (("baseline", None), ("regularized", corrector_loss)):
@@ -3360,9 +3350,7 @@ def test_corrector_penalty_gradient_accumulation():
         stepper=_corrector_loss_stepper(_ScaleModule(), _ScaleCorrection("a", 2.0)),
         loss=StepLossConfig(type="MSE"),
         corrector_loss=CorrectorLossConfig(
-            regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], norm="L2"
-            )
+            regularization=CorrectorRegularizationConfig(norm="L2")
         ),
     )
     optimization = OptimizationConfig(use_gradient_accumulation=True).build(
@@ -3404,12 +3392,8 @@ def test_masked_output_with_corrector_loss_finite():
         stepper=stepper,
         loss=StepLossConfig(type="MSE"),
         corrector_loss=CorrectorLossConfig(
-            precorrector_optimization=PreCorrectorOptimizationConfig(
-                names_and_prefixes=["a"]
-            ),
-            regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], norm="L2"
-            ),
+            precorrector_optimization=True,
+            regularization=CorrectorRegularizationConfig(norm="L2"),
         ),
     )
     data = BatchData.new_for_testing(
@@ -3444,9 +3428,7 @@ def test_epoch_scheduled_corrector():
 
     train_stepper = make(
         CorrectorLossConfig(
-            regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], norm="L2", weight=weight
-            )
+            regularization=CorrectorRegularizationConfig(norm="L2", weight=weight)
         )
     )
     baseline = make(None)
@@ -3467,7 +3449,7 @@ def test_epoch_scheduled_corrector():
     )
 
     # the corrector is always applied in eval mode, so the validation pass of
-    # the still-disabled epoch resolves the selection and applies the penalty
+    # the still-disabled epoch applies the penalty
     for stepper in (train_stepper, baseline):
         stepper.set_eval()
     eval_pass = train_stepper.train_on_batch(data, optimization=NullOptimization())
@@ -3509,9 +3491,7 @@ def test_penalty_rides_the_existing_metrics():
 
     with_reg = make(
         CorrectorLossConfig(
-            regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], norm="L2", weight=weight
-            )
+            regularization=CorrectorRegularizationConfig(norm="L2", weight=weight)
         )
     )
     baseline = make(None)
@@ -3553,12 +3533,8 @@ def test_both_features_together():
         ),
         loss=StepLossConfig(type="MSE"),
         corrector_loss=CorrectorLossConfig(
-            precorrector_optimization=PreCorrectorOptimizationConfig(
-                names_and_prefixes=["a"]
-            ),
-            regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], norm="L2", weight=weight
-            ),
+            precorrector_optimization=True,
+            regularization=CorrectorRegularizationConfig(norm="L2", weight=weight),
         ),
     )
     no_corrector = _init_train_stepper(
@@ -3579,31 +3555,3 @@ def test_both_features_together():
     # the returned predictions stay fully corrected
     ic = data.data["a"][:, 0]
     torch.testing.assert_close(both_out.gen_data["a"][:, 0, 1], ic + 1.0 + offset)
-
-
-@pytest.mark.parametrize("selected,trains", [("b", False), ("a", True)])
-def test_corrector_loss_errors_at_the_first_active_step(selected, trains):
-    # the build-time check covers the loss names, so a name the loss covers but
-    # the installed correction does not touch survives it and raises on the
-    # first step whose delta is non-empty.
-    torch.manual_seed(0)
-    data = BatchData.new_for_testing(
-        names=["a", "b"], n_samples=2, n_timesteps=2, epoch=0
-    ).to_device()
-    train_stepper = _init_train_stepper(
-        stepper=_corrector_loss_stepper(
-            _AddOne(), ConstantOffsetCorrection("a", 2.0), names=["a", "b"]
-        ),
-        loss=StepLossConfig(type="MSE"),
-        corrector_loss=CorrectorLossConfig(
-            regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=[selected], norm="L2"
-            )
-        ),
-    )
-    if trains:
-        output = train_stepper.train_on_batch(data, optimization=NullOptimization())
-        assert torch.isfinite(output.metrics["loss"])
-    else:
-        with pytest.raises(ValueError, match="match none of the correction deltas"):
-            train_stepper.train_on_batch(data, optimization=NullOptimization())

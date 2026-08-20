@@ -107,7 +107,6 @@ from fme.core.corrector.ice import IceCorrectorConfig
 from fme.core.corrector.loss_config import (
     CorrectorLossConfig,
     CorrectorRegularizationConfig,
-    PreCorrectorOptimizationConfig,
 )
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
