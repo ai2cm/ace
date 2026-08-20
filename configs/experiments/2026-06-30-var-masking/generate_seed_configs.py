@@ -72,6 +72,24 @@ entry: ``co2in`` restores ``global_mean_co2`` as a network input
 sweep becomes 2 x 2 x 5 = 20 configs, each targeted arm becomes 2 x 5 = 10
 configs, for a v4 grand total of 20 + 10 * len(TARGETED_ARMS).
 
+v3 also gets a ``bern10`` arm (``BERN_EXPECTED_MASKED_VARS``), crossed with
+the gmr axis: instead of the uniform 0-20 pool, every named input channel gets
+its own ``override_groups`` entry with the same Bernoulli rate, so channels are
+dropped independently rather than as a correlated count. The rate is chosen so
+the expected number of masked channels matches uniform 0-20 masking (mean 10),
+i.e. ``10 / len(in_names)``; only the mean is matched, the spread is much
+tighter (independent draws give std ~2.9 against uniform's ~6.1).
+
+The arm is written as one single-variable group per channel because
+``BernoulliMaskingConfig`` masks a whole pool all-or-nothing (one draw per
+pool, see ace PR #1329), so a single pool-wide Bernoulli would drop every
+channel at once. A one-channel pool makes that draw per-channel. ``default``
+is left at ``max_masked_vars: 0``, which means the GMR sentinel channel
+(``__gmr_extra__surface_temperature``, ungrouped and present only when gmron)
+is never masked in this arm — unlike ``mask20``, where it sits in the uniform
+pool. That is deliberate: the arm masks named variables only. This adds
+2 (gmr) x 5 (seeds) = 10 configs to v3.
+
 v5 is the mask0/mask20 sweep only (no sst axis, no ``TARGETED_ARMS``), crossed
 with the gmr axis (gmron/gmroff) instead of the co2-input axis: every v5 config
 trains without ``global_mean_co2`` as an input, with no co2 token in the config
@@ -198,6 +216,32 @@ TARGETED_ARMS = [
 ]
 
 
+# The bern10 arm: per-channel independent Bernoulli masking whose expected
+# masked-channel count matches uniform 0-20 masking (see module docstring).
+BERN_LABEL = "bern10"
+BERN_EXPECTED_MASKED_VARS = 10
+# Digits kept in the generated rate. 4 is enough to hold the expected count
+# within 0.01 channels of the target for pools of this size.
+BERN_RATE_DECIMALS = 4
+
+
+def bern_override_groups(in_names: list[str]) -> list[dict]:
+    """One single-variable Bernoulli group per named input channel.
+
+    Every group shares the rate ``BERN_EXPECTED_MASKED_VARS / len(in_names)``,
+    so the expected number of masked channels equals the uniform-0-20 mean.
+    Single-variable pools are what make ``BernoulliMaskingConfig`` behave
+    per-channel (see module docstring).
+    """
+    if len(in_names) < BERN_EXPECTED_MASKED_VARS:
+        raise ValueError(
+            f"cannot mask {BERN_EXPECTED_MASKED_VARS} channels on average from "
+            f"{len(in_names)} input channels"
+        )
+    rate = round(BERN_EXPECTED_MASKED_VARS / len(in_names), BERN_RATE_DECIMALS)
+    return [{"variables": [name], "masking": {"rate": rate}} for name in in_names]
+
+
 def iter_train_configs(
     version: str, n_seeds: int = DEFAULT_N_SEEDS
 ) -> list[tuple[str, dict]]:
@@ -318,6 +362,34 @@ def iter_train_configs(
             )
             cfg["seed"] = seed
             configs.append((name, cfg))
+
+    if version == "v3":
+        # v3 bern10 arm: replace the uniform pool with one single-variable
+        # Bernoulli group per named input channel, rate tuned so the expected
+        # masked-channel count matches uniform 0-20 (see module docstring).
+        # Swept over both gmr options; default stays max_masked_vars: 0, so
+        # the GMR sentinel (gmron only) is never masked here.
+        co2_token = f"-{next(iter(co2_options))}"
+        override_groups = bern_override_groups(
+            base["stepper"]["step"]["config"]["in_names"]
+        )
+        for gmr_name, keep_gmr in GMR_OPTIONS.items():
+            for seed in range(n_seeds):
+                name = (
+                    f"{BASE_CONFIG_STEM}-{gmr_name}-{BERN_LABEL}{co2_token}"
+                    f"-seed{seed}-{version}"
+                )
+                cfg = copy.deepcopy(base)
+                _apply_co2_input(cfg, include_co2=False)
+                _apply_settings(
+                    cfg,
+                    mask_level=0,
+                    co2_rate=None,
+                    keep_gmr=keep_gmr,
+                    extra_override_groups=copy.deepcopy(override_groups),
+                )
+                cfg["seed"] = seed
+                configs.append((name, cfg))
     return configs
 
 
