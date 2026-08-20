@@ -13,11 +13,32 @@
 # "maskall" = mask every input except the two that are supposed to carry the
 # mask location, i.e. exclude_names_and_prefixes drops the ten atmosphere
 # forcings and adds sea_surface_fraction.
+#
+# SEEDING. rs0 launches; rs1/rs2 are staged at `skip`. One seed is a screen,
+# not a measurement: across-seed CV in this protocol is 0.2-0.9% on
+# val_1pct_late and 3-5% on the inference nrmse, but 14-29% on so_0. So a
+# single seed can only read a so_0 effect of roughly 40-60%+ (the 1deg maskall
+# arm's was ~60%, hence the screen), and a so_0 NULL at one seed means nothing.
+# Read the arms at ~epoch 33, where the existing arms already separate, against
+# the 3-seed ocean_precorr_clip range. The fillmean_maskall-vs-maskall
+# comparison in particular is a difference-of-differences and cannot be settled
+# at one seed each.
+#
+# To promote an arm to 3 seeds: first flip its rs0 `train` -> `training`, THEN
+# flip its rs1/rs2 `skip` -> `train`. The runner only reads this file and never
+# writes it back, so an rs0 row left at `train` relaunches rs0 alongside the new
+# seeds.
 
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
