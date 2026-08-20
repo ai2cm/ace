@@ -11,6 +11,12 @@ corresponding training result dataset:
 already exists in wandb, so a config whose evaluation was only partly
 completed (e.g. one checkpoint preempted) resubmits just the missing
 checkpoints rather than all three.
+
+``--checkpoint`` restricts submission to a subset of the three variants (e.g.
+``--checkpoint bestinf``), for sweeps where only the best-inference checkpoint
+is of interest. Pass the same flag to generate_eval_configs.py's
+``--delete-if-in-wandb`` so config cleanup does not wait on variants that were
+never submitted.
 """
 
 import argparse
@@ -21,6 +27,7 @@ import subprocess
 from generate_eval_configs import (
     EVAL_SUITE_CONFIG_PREFIX,
     TRAINING_RESULT_DATASETS,
+    add_checkpoint_argument,
     eval_suite_config_to_run_name,
     fetch_wandb_run_states,
 )
@@ -57,20 +64,35 @@ def validate_configs(config_filenames: list[str]) -> None:
             run_eval_suite(str(RUN_CONFIGS_DIR / config_filename), validate_only=True)
 
 
+def checkpoints_for_names(
+    checkpoint_names: list[str],
+) -> list[tuple[str, str]]:
+    """``CHECKPOINTS`` restricted to the given ``--checkpoint`` labels."""
+    wanted = {f"-{name}" for name in checkpoint_names}
+    return [
+        (path, name_suffix)
+        for path, name_suffix in CHECKPOINTS
+        if name_suffix in wanted
+    ]
+
+
 def config_to_jobs(
     config_filename: str,
     evaluated_states: dict[str, str] | None = None,
+    checkpoints_to_run: list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, str, str]]:
     """Jobs to submit for one eval suite config, one per checkpoint.
 
     ``evaluated_states`` maps wandb run name -> state; checkpoints whose run is
     in an in-flight state are dropped. Filtering happens before the beaker map
     lookup so that a config with no work left never raises for a missing map
-    entry.
+    entry. ``checkpoints_to_run`` defaults to every entry in ``CHECKPOINTS``.
     """
     run_name = eval_suite_config_to_run_name(config_filename)
     checkpoints = []
-    for checkpoint_path, name_suffix in CHECKPOINTS:
+    for checkpoint_path, name_suffix in (
+        CHECKPOINTS if checkpoints_to_run is None else checkpoints_to_run
+    ):
         job_name = f"{run_name}{name_suffix}"
         state = (evaluated_states or {}).get(job_name)
         if state in IN_FLIGHT_STATES:
@@ -128,7 +150,9 @@ def main() -> None:
             "regardless."
         ),
     )
+    add_checkpoint_argument(parser)
     args = parser.parse_args()
+    checkpoints_to_run = checkpoints_for_names(args.checkpoint)
 
     configs = sorted(
         path.name
@@ -155,7 +179,9 @@ def main() -> None:
     # Resolve jobs up front so configs with nothing left to submit are dropped
     # before the (comparatively slow) validation pass.
     jobs_by_config = {
-        config_filename: config_to_jobs(config_filename, evaluated_states)
+        config_filename: config_to_jobs(
+            config_filename, evaluated_states, checkpoints_to_run
+        )
         for config_filename in configs
     }
     jobs_by_config = {

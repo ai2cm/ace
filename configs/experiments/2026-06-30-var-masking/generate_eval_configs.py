@@ -18,8 +18,10 @@ An eval config is written for every training run that has finished in wandb
 deleted instead, leaving only the eval runs not yet finished.
 
 Deletion here requires all of a config's evaluator runs to have reached
-``finished``; submit_eval_jobs.py's ``--skip-evaluated`` instead treats
-still-running (and queued) evaluator runs as already handled.  The two
+``finished``, where "all" means the checkpoint variants selected by
+``--checkpoint`` (default: all three); submit_eval_jobs.py's
+``--skip-evaluated`` instead treats still-running (and queued) evaluator runs
+as already handled.  The two
 predicates differ on purpose: skipping a job is cheap and reversible, so it
 errs towards never double-submitting, whereas deleting a config throws away
 the file you would need to resubmit from if an in-flight job later crashed.
@@ -53,6 +55,10 @@ EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-"
 # Each eval suite config produces one wandb run per checkpoint variant; the run
 # name is the base name plus one of these suffixes (see submit_eval_jobs.py).
 CHECKPOINT_RUN_SUFFIXES = ("-besttrain", "-bestinf", "-lastepoch")
+# The same variants as bare labels, used as the ``--checkpoint`` choices here
+# and in submit_eval_jobs.py so both scripts can be restricted to the same
+# subset (e.g. bestinf only).
+CHECKPOINT_NAMES = tuple(suffix.removeprefix("-") for suffix in CHECKPOINT_RUN_SUFFIXES)
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 
@@ -66,6 +72,30 @@ if pathlib.Path(DEFAULT_SOURCE_MAP).exists():
         TRAINING_RESULT_DATASETS: dict[str, str] = json.load(_f)
 else:
     TRAINING_RESULT_DATASETS = {}
+
+
+def add_checkpoint_argument(parser: argparse.ArgumentParser) -> None:
+    """Add the shared ``--checkpoint`` flag (see ``CHECKPOINT_NAMES``).
+
+    Defined here rather than in each script so this module and
+    submit_eval_jobs.py cannot drift on the choices or the default.
+    """
+    parser.add_argument(
+        "--checkpoint",
+        nargs="+",
+        choices=CHECKPOINT_NAMES,
+        default=list(CHECKPOINT_NAMES),
+        metavar="NAME",
+        help=(
+            "Checkpoint variant(s) to consider, from "
+            f"{list(CHECKPOINT_NAMES)} (default: all)."
+        ),
+    )
+
+
+def run_suffixes(checkpoint_names: list[str]) -> tuple[str, ...]:
+    """Wandb run-name suffixes for ``--checkpoint`` labels."""
+    return tuple(f"-{name}" for name in checkpoint_names)
 
 
 def eval_suite_config_to_run_name(config_filename: str) -> str:
@@ -198,13 +228,12 @@ def _write_config(
     existing_only: bool,
     project: str,
     delete_if_in_wandb: bool = False,
+    checkpoint_suffixes: tuple[str, ...] = CHECKPOINT_RUN_SUFFIXES,
 ) -> None:
     if delete_if_in_wandb:
         wandb_run_names = _finished_run_names(project)
         base_run_name = eval_suite_config_to_run_name(out_path.name)
-        expected_runs = {
-            f"{base_run_name}{suffix}" for suffix in CHECKPOINT_RUN_SUFFIXES
-        }
+        expected_runs = {f"{base_run_name}{suffix}" for suffix in checkpoint_suffixes}
         missing_runs = expected_runs - wandb_run_names
         if not missing_runs:
             if out_path.exists():
@@ -225,8 +254,15 @@ def _write_config(
     print(f"Wrote {out_path.name}")
 
 
-def delete_eval_configs_in_wandb(project: str) -> None:
+def delete_eval_configs_in_wandb(
+    project: str,
+    checkpoint_suffixes: tuple[str, ...] = CHECKPOINT_RUN_SUFFIXES,
+) -> None:
     """Delete on-disk eval suite configs whose checkpoint runs all exist in wandb.
+
+    Only the ``checkpoint_suffixes`` variants are required to exist, so a
+    run restricted to a subset of checkpoints (e.g. ``--checkpoint bestinf``)
+    is not blocked forever by variants that were never submitted.
 
     Driven off the eval suite config files present in ``RUN_CONFIGS_DIR`` rather
     than the source training configs, so it covers every version's eval configs
@@ -237,9 +273,7 @@ def delete_eval_configs_in_wandb(project: str) -> None:
     eval_configs = sorted(RUN_CONFIGS_DIR.glob(f"{EVAL_SUITE_CONFIG_PREFIX}*.yaml"))
     for out_path in eval_configs:
         base_run_name = eval_suite_config_to_run_name(out_path.name)
-        expected_runs = {
-            f"{base_run_name}{suffix}" for suffix in CHECKPOINT_RUN_SUFFIXES
-        }
+        expected_runs = {f"{base_run_name}{suffix}" for suffix in checkpoint_suffixes}
         if expected_runs - wandb_run_names:
             continue
         out_path.unlink()
@@ -254,6 +288,7 @@ def generate_eval_config(
     checkpoint_path: str,
     existing_only: bool,
     delete_if_in_wandb: bool = False,
+    checkpoint_suffixes: tuple[str, ...] = CHECKPOINT_RUN_SUFFIXES,
 ) -> None:
     source_run_name = config_name_to_run_name(config_name)
     source_dataset_id = source_map.get(source_run_name)
@@ -287,6 +322,7 @@ def generate_eval_config(
         existing_only,
         WANDB_PROJECT,
         delete_if_in_wandb,
+        checkpoint_suffixes,
     )
 
 
@@ -338,7 +374,9 @@ def main() -> None:
             f"the run's wandb project (entity {WANDB_ENTITY})."
         ),
     )
+    add_checkpoint_argument(parser)
     args = parser.parse_args()
+    checkpoint_suffixes = run_suffixes(args.checkpoint)
 
     with open(args.source_map) as f:
         source_map: dict[str, str] = json.load(f)
@@ -348,7 +386,7 @@ def main() -> None:
         # version present (-v1, -v2, -v3, -v4), not just the version whose
         # training configs currently sit in run_configs. Generation below
         # still (re)writes eval configs for runs not yet finished in wandb.
-        delete_eval_configs_in_wandb(WANDB_PROJECT)
+        delete_eval_configs_in_wandb(WANDB_PROJECT, checkpoint_suffixes)
 
     # Enumerate every training run in memory (masking + seed families) for the
     # requested version(s), so eval configs are produced for all of them without
@@ -368,6 +406,7 @@ def main() -> None:
                 checkpoint_path=args.checkpoint_path,
                 existing_only=args.existing_only,
                 delete_if_in_wandb=args.delete_if_in_wandb,
+                checkpoint_suffixes=checkpoint_suffixes,
             )
 
 
