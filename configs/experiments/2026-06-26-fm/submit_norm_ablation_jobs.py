@@ -11,6 +11,7 @@ Usage:
     python submit_norm_ablation_jobs.py [--arch ARCH] [--regime REGIME]
                                         [--arm ARM]
                                         [--conditional | --no-conditional]
+                                        [--include-degenerate]
                                         [--dry-run]
                                         [--beaker-workspace WORKSPACE]
                                         [--beaker-cluster CLUSTER [CLUSTER ...]]
@@ -57,7 +58,10 @@ def selected_configs(args: argparse.Namespace) -> list[str]:
             continue
         if args.conditional is not None and conditional != args.conditional:
             continue
-        if degenerate_reason(regime, arm, conditional) is not None:
+        if (
+            not args.include_degenerate
+            and degenerate_reason(regime, arm, conditional) is not None
+        ):
             continue
         names.append(config_name(arch, regime, arm, conditional))
     return names
@@ -70,6 +74,15 @@ def main() -> None:
         "--regime", choices=sorted(REGIME_SOURCES), help="Only this data regime."
     )
     parser.add_argument("--arm", choices=sorted(ARMS), help="Only this grouping arm.")
+    parser.add_argument(
+        "--include-degenerate",
+        action="store_true",
+        help=(
+            "Also submit the cells which reduce to their regime's A1 control. "
+            "Requires generate_norm_ablation_configs.py --include-degenerate, "
+            "and is only meaningful once their seeds have been changed."
+        ),
+    )
     conditioning = parser.add_mutually_exclusive_group()
     conditioning.add_argument(
         "--conditional",
@@ -95,9 +108,11 @@ def main() -> None:
     for config_filename in selected_configs(args):
         config_path = RUN_CONFIGS_DIR / config_filename
         if not config_path.exists():
+            generate = "generate_norm_ablation_configs.py"
+            if args.include_degenerate:
+                generate += " --include-degenerate"
             raise FileNotFoundError(
-                f"{config_filename} not found"
-                " — run generate_norm_ablation_configs.py first"
+                f"{config_filename} not found — run {generate} first"
             )
         submit_job(
             RUN_SCRIPT,

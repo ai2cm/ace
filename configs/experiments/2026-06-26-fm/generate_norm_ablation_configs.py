@@ -35,8 +35,8 @@ datasets, validation and inference entries, and the architecture source
 supplies the module builder and the input ordering it was trained with. For
 the two cells whose regime and architecture come from the same base config,
 that composition is a no-op. A handful of top-level logging and checkpointing
-settings which the swin base omits are then applied uniformly, so all twelve
-runs report the same metrics.
+settings which the swin base omits are then applied uniformly, so all 22 runs
+report the same metrics.
 
 Every config carries dataset labels, including the A1 controls, so that the
 cells differ only in the two axes under test.
@@ -146,7 +146,7 @@ ARCH_SOURCES = {
 ARCH_STEP_CONFIG_KEYS = ["builder", "residual_prediction", "in_names"]
 
 # Top-level settings the swin base config omits but the sfno ones set. Applied
-# to every generated config so all twelve log and checkpoint identically.
+# to every generated config so all 22 log and checkpoint identically.
 SHARED_TOP_LEVEL = {
     "train_aggregator": {"ensemble_metrics": True},
     "ema_checkpoint_save_epochs": {"start": 5, "step": 5},
@@ -230,12 +230,7 @@ def build_normalization(
         "groups": {
             group_name: {
                 "labels": labels,
-                "normalization": {
-                    "global_means_path": f"{pooled}/groups/{group_name}/centering.nc",
-                    "global_stds_path": (
-                        f"{pooled}/groups/{group_name}/scaling-full-field.nc"
-                    ),
-                },
+                "normalization": _group_stats_paths(pooled, regime, group_name, labels),
             }
             for group_name, labels in groups.items()
         },
@@ -247,6 +242,28 @@ def build_normalization(
         "pinned_variables": list(PINNED_VARIABLES),
     }
     return normalization
+
+
+def _group_stats_paths(
+    pooled: str, regime: str, group_name: str, labels: list[str]
+) -> dict[str, str]:
+    """Stats paths for one normalization group.
+
+    A group covering every label in the regime is pooled over exactly the stores
+    the root pooled stats cover, so it reads those directly. The stats configs
+    write no `groups/{name}/` directory in that case — there would be nothing to
+    distinguish it from the root — and pointing at one would fail on a missing
+    netCDF. Only the degenerate single-group arms reach this branch; every arm
+    the generator writes by default splits the regime into at least two groups.
+    """
+    if set(labels) == set(REGIME_LABELS[regime]):
+        root = pooled
+    else:
+        root = f"{pooled}/groups/{group_name}"
+    return {
+        "global_means_path": f"{root}/centering.nc",
+        "global_stds_path": f"{root}/scaling-full-field.nc",
+    }
 
 
 def _default_group(regime: str, groups: dict[str, list[str]]) -> str:

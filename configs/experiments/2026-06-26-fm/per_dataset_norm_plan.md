@@ -77,8 +77,12 @@ vary anything:
 | fm | A1, A2, A3, each off/on | **6** |
 
 11 per architecture, **22 total**. The generator logs the 14 it skips with the
-reason. `--include-degenerate` writes them anyway (only useful as a
-seed-variance estimate, and only if the seeds are then changed).
+reason. `--include-degenerate` writes them anyway, and the same flag on
+`submit_norm_ablation_jobs.py` submits them (only useful as a seed-variance
+estimate, and only if the seeds are then changed). A degenerate arm has one
+group covering the regime's whole label set, so that group reads the regime's
+root pooled stats rather than a `groups/{name}/` directory the stats run never
+writes — the two are pooled over the same stores.
 
 ## Pinned variables
 
