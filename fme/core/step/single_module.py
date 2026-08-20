@@ -103,6 +103,7 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
+        self.normalization.validate_pinned_variables(self._normalize_names)
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:

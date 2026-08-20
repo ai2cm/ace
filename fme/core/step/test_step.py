@@ -2437,3 +2437,22 @@ def test_step_config_rejects_grouped_normalization_it_cannot_apply(build_config)
     build_config(trivial_network_and_loss_normalization(names))
     with pytest.raises(ValueError, match="does not support grouped"):
         build_config(_grouped_normalization(names))
+
+
+def test_single_module_step_config_rejects_unknown_pinned_variable():
+    """A typo in pinned_variables fails at config parse, not silently at runtime.
+
+    An un-pinned near-constant variable has a per-group std of ~0, so the
+    failure mode this prevents is an exploding network input rather than a
+    slightly different normalization.
+    """
+    normalization = _grouped_normalization(["a", "b"])
+    assert normalization.grouped is not None
+    normalization.grouped.pinned_variables = ["nonexistent"]
+    with pytest.raises(ValueError, match="are not normalized variables"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=["a"],
+            out_names=["b"],
+            normalization=normalization,
+        )

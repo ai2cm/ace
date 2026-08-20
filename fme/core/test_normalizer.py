@@ -687,6 +687,34 @@ def test_grouped_config_rejects_label_in_two_groups():
         )
 
 
+def test_grouped_config_rejects_pinned_variable_that_is_not_normalized():
+    """A typo'd pinned name is rejected rather than silently un-pinning.
+
+    Pinning is load-bearing: a near-constant variable has a per-group std of
+    ~0, so silently normalizing it per group would blow up the input.
+    """
+    config = _grouped_config(pinned_variables=["pinnd"])
+    with pytest.raises(ValueError, match="are not normalized variables"):
+        config.validate_pinned_variables(["a", "pinned"])
+
+
+def test_grouped_config_accepts_pinned_variable_that_is_normalized():
+    _grouped_config(pinned_variables=["pinned"]).validate_pinned_variables(
+        ["a", "pinned"]
+    )
+
+
+def test_network_and_loss_normalization_validates_pinned_variables():
+    """The check reaches through the enclosing config, and is a no-op without groups."""
+    pooled = NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0})
+    NetworkAndLossNormalizationConfig(network=pooled).validate_pinned_variables(["a"])
+    config = NetworkAndLossNormalizationConfig(
+        network=pooled, grouped=_grouped_config(pinned_variables=["typo"])
+    )
+    with pytest.raises(ValueError, match="are not normalized variables"):
+        config.validate_pinned_variables(["a", "pinned"])
+
+
 def test_grouped_normalization_loads_into_explicit_constants():
     """Group constants are inlined at load, as for the pooled constants."""
     mean_ds = get_scalar_dataset(["a"], fill_value=1.0)

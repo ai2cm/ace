@@ -585,6 +585,23 @@ class GroupedNormalizationConfig:
             for label in group.labels
         }
 
+    def validate_pinned_variables(self, names: Iterable[str]) -> None:
+        """Reject a pinned name which is not a variable being normalized.
+
+        Cannot live in ``__post_init__``: the variable list belongs to the
+        enclosing step config, not to this one. Pinning is load-bearing rather
+        than cosmetic -- a near-constant variable like ``global_mean_co2`` has a
+        per-group standard deviation of ~0, so a typo here would silently
+        normalize it per group and blow up the network's input.
+        """
+        unknown = sorted(set(self.pinned_variables) - set(names))
+        if unknown:
+            raise ValueError(
+                f"pinned_variables {unknown} are not normalized variables, so "
+                "pinning them has no effect. Check for a typo; the normalized "
+                f"variables are {sorted(names)}."
+            )
+
     def build(
         self, pooled: StandardNormalizer, names: list[str], n_spatial_dims: int = 2
     ) -> "GroupedNormalizer":
@@ -635,6 +652,11 @@ class NetworkAndLossNormalizationConfig:
     def __post_init__(self):
         if self.loss is not None and self.residual is not None:
             raise ValueError("Cannot provide both loss and residual normalization.")
+
+    def validate_pinned_variables(self, names: Iterable[str]) -> None:
+        """Check pinned variable names against the variables being normalized."""
+        if self.grouped is not None:
+            self.grouped.validate_pinned_variables(names)
 
     def raise_if_grouped(self, step_type: str) -> None:
         """Reject ``grouped`` for a step which does not apply it.
