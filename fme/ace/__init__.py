@@ -39,6 +39,7 @@ from fme.ace.aggregator.one_step.snapshot import OneStepSnapshotMetricConfig
 from fme.ace.aggregator.one_step.spectrum import OneStepSpectrumMetricConfig
 from fme.ace.aggregator.train import TrainAggregatorConfig
 from fme.ace.data_loading.augmentation import AugmentationConfig
+from fme.ace.data_loading.config import GroupWeightsConfig
 from fme.ace.data_loading.getters import get_forcing_data
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
@@ -107,6 +108,7 @@ from fme.core.corrector.ice import IceCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.concat import ConcatDatasetConfig
 from fme.core.dataset.merged import MergeDatasetConfig, MergeNoConcatDatasetConfig
+from fme.core.dataset.schedule import WeightMilestone
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
 from fme.core.dataset.xarray import (
