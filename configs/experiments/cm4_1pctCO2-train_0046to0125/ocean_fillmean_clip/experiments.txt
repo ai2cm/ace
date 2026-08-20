@@ -12,6 +12,14 @@ cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs2|01M01RJ96JVSM0BB7T38V2VXDZ|
 # rule as the ocean_baseline rows, so the two arms are evaluated identically;
 # the stepper (including fill_value=mean and max_grad_norm) comes from the
 # checkpoint.
-cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs0|01M015F7GXN1S5JB9XXX58T2C6|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
-cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs1|01M01RJ12Z967KEDBVN68RQH86|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
-cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs2|01M01RJ96JVSM0BB7T38V2VXDZ|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
+# rs0 and rs1 launched 2026-08-17 (01M08G5Q95WBR1X2GXGFS2KW6B,
+# 01M08G5YB9QWP32VVRNXKZRHVV); their status is flipped to ran_ICx1 so
+# evaluate.sh (which processes status ^run_) does not resubmit them.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs0|01M015F7GXN1S5JB9XXX58T2C6|ran_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs1|01M01RJ12Z967KEDBVN68RQH86|ran_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
+# rs2 was refused on 2026-08-17 because its training job was still running and
+# the result dataset uncommitted; training finished 2026-08-18 (result dataset
+# 01M08W36DKGEG5DX6ZNQ9AJ2TN committed), so it is launchable now. jupiter alone
+# at urgent priority, at elynn's request: the h100 alias adds ceres, where
+# urgent jobs cannot run.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip|rs2|01M01RJ96JVSM0BB7T38V2VXDZ|run_ICx1|best_inference_ckpt|urgent|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
