@@ -3344,7 +3344,9 @@ def test_gradient_flows_through_correction_when_configured():
         names=["a"], n_samples=2, n_timesteps=2, epoch=0
     ).to_device()
     corrector_loss = CorrectorLossConfig(
-        regularization=CorrectorRegularizationConfig(names_and_prefixes=["a"])
+        regularization=CorrectorRegularizationConfig(
+            names_and_prefixes=["a"], norm="L2"
+        )
     )
     grads = {}
     for label, config in (("baseline", None), ("regularized", corrector_loss)):
@@ -3376,7 +3378,9 @@ def test_corrector_penalty_gradient_accumulation():
         stepper=_corrector_loss_stepper(_ScaleModule(), _ScaleCorrection("a", 2.0)),
         loss=StepLossConfig(type="MSE"),
         corrector_loss=CorrectorLossConfig(
-            regularization=CorrectorRegularizationConfig(names_and_prefixes=["a"])
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=["a"], norm="L2"
+            )
         ),
     )
     optimization = OptimizationConfig(use_gradient_accumulation=True).build(
@@ -3421,7 +3425,9 @@ def test_masked_output_with_corrector_loss_finite():
             precorrector_optimization=PreCorrectorOptimizationConfig(
                 names_and_prefixes=["a"]
             ),
-            regularization=CorrectorRegularizationConfig(names_and_prefixes=["a"]),
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=["a"], norm="L2"
+            ),
         ),
     )
     data = BatchData.new_for_testing(
@@ -3459,7 +3465,7 @@ def test_epoch_scheduled_corrector():
     train_stepper = make(
         CorrectorLossConfig(
             regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], weight=weight
+                names_and_prefixes=["a"], norm="L2", weight=weight
             )
         )
     )
@@ -3512,7 +3518,7 @@ def test_penalty_rides_the_existing_metrics():
     with_reg = make(
         CorrectorLossConfig(
             regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], weight=weight
+                names_and_prefixes=["a"], norm="L2", weight=weight
             )
         )
     )
@@ -3559,7 +3565,7 @@ def test_both_features_together():
                 names_and_prefixes=["a"]
             ),
             regularization=CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], weight=weight
+                names_and_prefixes=["a"], norm="L2", weight=weight
             ),
         ),
     )

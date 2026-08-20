@@ -812,51 +812,6 @@ class LossConfig:
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
             raise NotImplementedError(self.global_mean_type)
 
-    def validate(
-        self,
-        *,
-        pointwise_against_target: bool = False,
-        absolute_scale: bool = False,
-    ) -> None:
-        """Raise if this configuration does not satisfy the named invariants.
-
-        Args:
-            pointwise_against_target: Require a loss which compares one
-                deterministic prediction against target values pointwise.
-                ``EnsembleLoss`` compares distributions, ``NaN`` ignores the
-                prediction, and a global-mean term is not pointwise, so all
-                three are rejected.
-            absolute_scale: Require a loss whose value does not depend on the
-                magnitude of the target. ``LpLoss`` divides by the target norm,
-                so a caller whose target is a constant field gets a value
-                rescaled by that constant, and ``0/0`` where it is zero.
-        """
-        if pointwise_against_target:
-            if self.type in ("EnsembleLoss", "NaN"):
-                raise ValueError(
-                    f"loss type {self.type!r} does not compare one prediction "
-                    "against target values pointwise."
-                )
-            if self.global_mean_type is not None:
-                raise ValueError(
-                    "global_mean_type is not a pointwise comparison against "
-                    "target values."
-                )
-        if absolute_scale:
-            if self.type == "LpLoss":
-                raise ValueError(
-                    "loss type 'LpLoss' is relative: it divides by the norm of "
-                    "the target, so its value depends on the target magnitude. "
-                    "Use an absolute loss such as 'MSE', 'L1', or "
-                    "'AreaWeightedMSE' here."
-                )
-            if self.global_mean_type == "LpLoss":
-                raise ValueError(
-                    "global_mean_type 'LpLoss' is relative: it divides by the "
-                    "norm of the target global mean, so its value depends on "
-                    "the target magnitude."
-                )
-
     def build(
         self,
         gridded_operations: GriddedOperations | None,

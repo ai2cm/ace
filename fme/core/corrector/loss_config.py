@@ -1,12 +1,14 @@
 import dataclasses
 import logging
+from typing import Literal
 
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import (
     CorrectorLoss,
     CorrectorRegularizer,
-    LossConfig,
     WeightedMappingLoss,
+    _L1Loss,
+    _MSELoss,
 )
 from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
@@ -85,15 +87,15 @@ class CorrectorRegularizationConfig:
     Parameters:
         names_and_prefixes: ``NameAndPrefixMatcher`` entries selecting the
             corrector-modified variables whose deltas are penalized.
-        loss: The loss applied to the normalized deltas against zeros. The
-            ``EnsembleLoss`` and ``NaN`` types and ``global_mean_type`` are not
-            supported, and neither is the relative ``LpLoss``: the target here
-            is a constant field, whose norm ``LpLoss`` divides by.
+        norm: Which norm of the normalized deltas is penalized. ``"L1"`` is the
+            mean absolute delta. ``"L2"`` is the mean squared delta, the
+            squared L2 norm: the square root is not taken, which keeps the
+            gradient defined at a zero delta.
         weight: The positive weight applied to the penalty in the total loss.
     """
 
     names_and_prefixes: list[str]
-    loss: LossConfig = dataclasses.field(default_factory=LossConfig)
+    norm: Literal["L1", "L2"]
     weight: float = 1.0
 
     def __post_init__(self):
@@ -103,7 +105,6 @@ class CorrectorRegularizationConfig:
                 "the feature while selecting nothing is a contradiction, "
                 "not a no-op."
             )
-        self.loss.validate(pointwise_against_target=True, absolute_scale=True)
         if self.weight <= 0:
             raise ValueError(
                 f"regularization weight must be positive, got {self.weight}"
@@ -129,9 +130,10 @@ class CorrectorRegularizationConfig:
         names = _matched_names(
             self.names_and_prefixes, corrector_modified_names, "regularization"
         )
+        norm_loss = _L1Loss() if self.norm == "L1" else _MSELoss()
         return CorrectorRegularizer(
             loss=WeightedMappingLoss(
-                loss=self.loss.build(gridded_operations),
+                loss=norm_loss,
                 weights={},
                 out_names=names,
                 normalizer=normalizer,

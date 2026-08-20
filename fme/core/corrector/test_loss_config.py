@@ -10,7 +10,7 @@ from fme.core.corrector.loss_config import (
     PreCorrectorOptimizationConfig,
 )
 from fme.core.device import get_device
-from fme.core.loss import CorrectorLoss, LossConfig
+from fme.core.loss import CorrectorLoss
 from fme.core.normalizer import StandardNormalizer
 from fme.core.typing_ import TensorDict
 
@@ -56,34 +56,19 @@ def _build(
 
 
 def test_config_post_init_errors():
-    # both features None; a present feature selecting nothing; weight <= 0;
-    # EnsembleLoss / NaN / global_mean_type / LpLoss — each raises in
-    # __post_init__.
+    # both features None; a present feature selecting nothing; weight <= 0 —
+    # each raises in __post_init__.
     with pytest.raises(ValueError, match="at least one"):
         CorrectorLossConfig()
     with pytest.raises(ValueError, match="names_and_prefixes"):
         PreCorrectorOptimizationConfig(names_and_prefixes=[])
     with pytest.raises(ValueError, match="names_and_prefixes"):
-        CorrectorRegularizationConfig(names_and_prefixes=[])
+        CorrectorRegularizationConfig(names_and_prefixes=[], norm="L2")
     for weight in (0.0, -1.0):
         with pytest.raises(ValueError, match="weight"):
-            CorrectorRegularizationConfig(names_and_prefixes=["a"], weight=weight)
-    for loss_type in ("EnsembleLoss", "NaN"):
-        with pytest.raises(ValueError, match=loss_type):
             CorrectorRegularizationConfig(
-                names_and_prefixes=["a"], loss=LossConfig(type=loss_type)
+                names_and_prefixes=["a"], norm="L2", weight=weight
             )
-    with pytest.raises(ValueError, match="global_mean_type"):
-        CorrectorRegularizationConfig(
-            names_and_prefixes=["a"], loss=LossConfig(global_mean_type="LpLoss")
-        )
-    # LpLoss divides by the norm of the target. The penalty's target is the
-    # constant field -mean/std, so the value would be rescaled by 1/|mean|
-    # per channel, and 0/0 where the loss normalizer's mean is zero.
-    with pytest.raises(ValueError, match="relative"):
-        CorrectorRegularizationConfig(
-            names_and_prefixes=["a"], loss=LossConfig(type="LpLoss")
-        )
 
 
 @pytest.mark.parametrize(
@@ -110,7 +95,9 @@ def test_build_errors_on_entry_matching_no_modified_name(entry, feature):
         )
     else:
         config = CorrectorLossConfig(
-            regularization=CorrectorRegularizationConfig(names_and_prefixes=[entry])
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=[entry], norm="L2"
+            )
         )
     with pytest.raises(ValueError, match="selects no variable the corrector modifies"):
         _build(config)
@@ -133,7 +120,7 @@ def test_build_regularizer_packs_matched_names():
     # level names.
     config = CorrectorLossConfig(
         regularization=CorrectorRegularizationConfig(
-            names_and_prefixes=["b_"], weight=2.0
+            names_and_prefixes=["b_"], norm="L2", weight=2.0
         )
     )
     corrector_loss = _build(config)
@@ -141,3 +128,26 @@ def test_build_regularizer_packs_matched_names():
     penalty = corrector_loss.penalty(_delta_dict())
     assert penalty is not None
     assert list(penalty.get_channel_losses()) == ["b_0", "b_1"]
+
+
+@pytest.mark.parametrize(
+    "norm,reduce",
+    [
+        ("L1", lambda x: x.abs().mean()),
+        ("L2", lambda x: (x**2).mean()),
+    ],
+)
+def test_penalty_matches_the_configured_norm(norm, reduce):
+    # the penalty is the mean of the normalized delta under the configured
+    # norm; "L2" is the mean square, not its root.
+    config = CorrectorLossConfig(
+        regularization=CorrectorRegularizationConfig(
+            names_and_prefixes=["a"], norm=norm
+        )
+    )
+    penalty = _build(config).penalty(_delta_dict())
+    assert penalty is not None
+    normalized = _delta_dict()["a"] / _STDS["a"]
+    torch.testing.assert_close(
+        penalty.get_channel_losses()["a"].loss, reduce(normalized)
+    )
