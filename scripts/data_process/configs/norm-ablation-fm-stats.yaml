@@ -1,0 +1,90 @@
+# Normalization statistics for the per-dataset normalization ablation,
+# joint C96 + ERA5 (fm) regime.
+#
+# The stores and time slices here mirror the train_loader of
+# configs/experiments/2026-06-26-fm/base_configs/ace-train-config-4deg-AIMIP-nc-swin-v2-fm-random-v1.yaml
+# exactly, so the pooled stats are computed over precisely the data the model
+# trains on. Stores are listed individually rather than by directory so that
+# held-out ensemble members (ic_0003 and beyond) are not swept in.
+#
+# Groups:
+#   A1 (shared)     -> the root pooled stats
+#   A2 (per-source) -> groups/c96, groups/era5
+#   A3 (per-config) -> groups/amip, groups/ramped, groups/som, groups/era5
+#
+# Each C96 store is tagged with both its fine-grained A3 group and the coarse
+# A2 `c96` group, so both strategies are pooled from the same per-store moments
+# in a single pass over the data.
+#
+# Usage:
+#   python get_pooled_stats.py submit configs/norm-ablation-fm-stats.yaml \
+#     /climate-default/alexeyy/norm_ablation_0/fm \
+#     --name norm-ablation-fm
+#
+# The output directory must match the STATS_ROOT of
+# configs/experiments/2026-06-26-fm/generate_norm_ablation_configs.py, which is
+# what the generated training configs read.
+
+groups:
+  - c96
+  - era5
+  - amip
+  - ramped
+  - som
+
+dataset_pairs:
+  # SHiELD AMIP ensemble, ic_0001
+  - dataset: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+    start_time: "1979-01-01"
+    stop_time: "2008-12-31"
+    groups: [amip, c96]
+
+  # SHiELD ramped-climSST random-CO2 ensemble
+  - dataset: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-1xCO2-random-perturbation.zarr
+    start_time: "2020-01-01"
+    stop_time: "2025-01-01"
+    groups: [ramped, c96]
+  - dataset: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-1xCO2-random-perturbation-ic_0002.zarr
+    start_time: "2020-01-01"
+    stop_time: "2025-01-01"
+    groups: [ramped, c96]
+  - dataset: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-2xCO2-random-perturbation.zarr
+    start_time: "2020-01-01"
+    stop_time: "2025-01-01"
+    groups: [ramped, c96]
+  - dataset: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-2xCO2-random-perturbation-ic_0002.zarr
+    start_time: "2020-01-01"
+    stop_time: "2025-01-01"
+    groups: [ramped, c96]
+  - dataset: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-4xCO2-random-perturbation.zarr
+    start_time: "2020-01-01"
+    stop_time: "2025-01-01"
+    groups: [ramped, c96]
+  - dataset: /climate-default/2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-4deg-daily/ramped-sst-4xCO2-random-perturbation-ic_0002.zarr
+    start_time: "2020-01-01"
+    stop_time: "2025-01-01"
+    groups: [ramped, c96]
+
+  # SHiELD slab-ocean-model (SOM) ensemble
+  - dataset: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset/1xCO2-ic_0001.zarr
+    start_time: "2031-01-02"
+    stop_time: "2041-01-01"
+    groups: [som, c96]
+  - dataset: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset/2xCO2-ic_0001.zarr
+    start_time: "2031-01-02"
+    stop_time: "2041-01-01"
+    groups: [som, c96]
+  - dataset: /climate-default/2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-fme-dataset/4xCO2-ic_0001.zarr
+    start_time: "2031-01-02"
+    stop_time: "2041-01-01"
+    groups: [som, c96]
+
+  # ERA5 (1994 + 2014 held out for validation)
+  - dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+    start_time: "1940-01-03"
+    stop_time: "1993-12-31"
+    group: era5
+  - dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+    start_time: "1995-01-01"
+    stop_time: "2013-12-31"
+    group: era5
