@@ -1,0 +1,23 @@
+# Masked-input ablation on the ocean_precorr_clip substrate: a 2x2 of
+# stepper.input_masking fill_value x masking scope. train-config.yaml here IS
+# ocean_precorr_clip (ocean_precorr + max_grad_norm 1.0), so the already-running
+# cm4_1pct_46to125_piC_156to235-ocean_precorr_clip rs0/1/2 are the fourth cell
+# and need no row here.
+#
+#                  | current exclude      | maskall
+# -----------------+----------------------+-----------------------------------
+# fill_value: 0.0  | ocean_precorr_clip   | ocean_precorr_clip_maskall
+#                  | (running, rs0/1/2)   |
+# fill_value: mean | ..._clip_fillmean    | ..._clip_fillmean_maskall
+#
+# "maskall" = mask every input except the two that are supposed to carry the
+# mask location, i.e. exclude_names_and_prefixes drops the ten atmosphere
+# forcings and adds sea_surface_fraction.
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
