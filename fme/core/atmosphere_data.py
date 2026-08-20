@@ -211,9 +211,6 @@ class AtmosphereData:
     ) -> None:
         self._diagnose("tendency_of_total_water_path_due_to_advection", value)
 
-    def diagnose_frozen_precipitation_rate(self, value: torch.Tensor) -> None:
-        self._diagnose("frozen_precipitation_rate", value)
-
     def diagnose_all_levels(self, standard_name: str, value: torch.Tensor) -> None:
         """Record a diagnosis for a multi-level (Stacker) variable."""
         names = self.get_all_vertical_level_names(standard_name)

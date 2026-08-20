@@ -724,7 +724,6 @@ def _build_full_atmosphere_corrector(tensor_shape):
         moisture_budget_correction="advection_and_precipitation",
         force_positive_names=["LHTFLsfc"],
         total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
-        frozen_precipitation_as_fraction=True,
         clip_frozen_precipitation=True,
     )
     input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
@@ -754,7 +753,6 @@ def test_atmosphere_corrector_config_fields_are_exercised():
         "total_energy_budget_correction",
         "keep_gradient_through_clamps",
         "clip_frozen_precipitation",
-        "frozen_precipitation_as_fraction",
         "corrector_disabled_epochs",  # inherited epoch-scheduling field
     }
     actual = {f.name for f in dataclasses.fields(AtmosphereCorrectorConfig)}
@@ -776,14 +774,8 @@ def test_atmosphere_corrector_delta_matches_modified_returns():
     assert set(result.modified_names) == (
         set(result.diagnostics.delta) | set(result.diagnostics.pre_diagnosis_fields)
     )
-    # For pure-delta fields, delta == corrected - gen_data.
-    # For fields with both a diagnosis and a delta (e.g. frozen precip:
-    # fraction diagnosis then clip delta), the delta is just the additive
-    # part after the diagnosis, so the equality doesn't hold.
-    pure_delta = set(result.diagnostics.delta) - set(
-        result.diagnostics.pre_diagnosis_fields
-    )
-    for name in pure_delta:
+    # For delta-only fields, delta == corrected - gen_data.
+    for name in result.diagnostics.delta:
         torch.testing.assert_close(
             result.diagnostics.delta[name],
             result.corrected[name] - gen_data[name],
@@ -799,11 +791,10 @@ def test_atmosphere_corrector_delta_matches_modified_returns():
         "air_temperature_1",
         "LHTFLsfc",
         "PRATEsfc",  # moisture budget rescaling delta
-        "total_frozen_precipitation_rate",  # clip delta after fraction diagnosis
+        "total_frozen_precipitation_rate",  # clip delta
     }
     assert set(result.diagnostics.pre_diagnosis_fields) == {
         "tendency_of_total_water_path_due_to_advection",
-        "total_frozen_precipitation_rate",  # fraction diagnosis
     }
 
 

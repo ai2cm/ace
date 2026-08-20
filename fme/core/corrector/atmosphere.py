@@ -166,31 +166,6 @@ class MoistureBudgetCorrection:
 
 
 @dataclasses.dataclass
-class FrozenPrecipitationAsFraction:
-    """Diagnose frozen precipitation as a fraction of total precipitation.
-
-    Treats the network's frozen-precipitation output as a unitless fraction
-    and multiplies it by the (possibly corrected) total precipitation rate
-    to obtain the physical frozen-precipitation rate.  This is a diagnosis:
-    the physical meaning of the field changes from "fraction" to "rate".
-    """
-
-    def __call__(
-        self,
-        input_data: TensorMapping,
-        forcing_data: TensorMapping,
-        accumulated_output: CorrectorOutput,
-    ) -> CorrectorOutput:
-        if "total_frozen_precipitation_rate" not in accumulated_output.corrected:
-            return accumulated_output
-        gen = AtmosphereData.for_correction(accumulated_output)
-        gen.diagnose_frozen_precipitation_rate(
-            gen.frozen_precipitation_rate * gen.precipitation_rate
-        )
-        return gen.result()
-
-
-@dataclasses.dataclass
 class ClipFrozenPrecipitation:
     """Clip frozen precipitation to not exceed total precipitation (delta).
 
@@ -340,15 +315,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             (``total_frozen_precipitation_rate``) is predicted, clip it to be
             at most the total precipitation rate (``PRATEsfc``) in each grid
             cell.  Recorded as a delta (same character as
-            ``force_positive_names``).  Runs after
-            ``frozen_precipitation_as_fraction`` when both are enabled, so
-            the clip acts on the already-rescaled rate.
-        frozen_precipitation_as_fraction: If True and the frozen precipitation
-            rate is predicted, treat the network output as a unitless fraction
-            and multiply by the (possibly corrected) total precipitation rate
-            to obtain the physical frozen-precipitation rate.  Recorded as a
-            diagnosis (the field's physical meaning changes from fraction to
-            rate).  Runs before ``clip_frozen_precipitation``.
+            ``force_positive_names``).
     """
 
     conserve_dry_air: bool = False
@@ -366,7 +333,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     total_energy_budget_correction: EnergyBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
     clip_frozen_precipitation: bool = False
-    frozen_precipitation_as_fraction: bool = False
 
     def _get_corrector(
         self,
@@ -405,11 +371,6 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                 "tendency_of_total_water_path_due_to_advection"
             ]:
                 diagnosed_prefixes[p] = "moisture_budget_correction"
-        if self.frozen_precipitation_as_fraction:
-            for p in ATMOSPHERE_FIELD_NAME_PREFIXES.get(
-                "frozen_precipitation_rate", []
-            ):
-                diagnosed_prefixes[p] = "frozen_precipitation_as_fraction"
         if self.zero_global_mean_moisture_advection and not advection_recomputed:
             for p in ATMOSPHERE_FIELD_NAME_PREFIXES[
                 "tendency_of_total_water_path_due_to_advection"
@@ -455,13 +416,10 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     self.moisture_budget_correction,
                 )
             )
-        if self.frozen_precipitation_as_fraction:
-            corrections.append(FrozenPrecipitationAsFraction())
         if self.clip_frozen_precipitation:
             # Clip frozen precipitation against the (possibly corrected) total
-            # precipitation rate. Done here, after the budget correction and
-            # fraction rescaling, so the ceiling is the final precipitation
-            # rate.
+            # precipitation rate. Done here, after the budget correction, so
+            # the ceiling is the final precipitation rate.
             corrections.append(ClipFrozenPrecipitation())
         if self.total_energy_budget_correction is not None:
             corrections.append(
