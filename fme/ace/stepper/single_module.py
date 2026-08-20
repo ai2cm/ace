@@ -898,7 +898,8 @@ class Stepper:
     def build_corrector_loss(
         self, corrector_loss: CorrectorLossConfig | None
     ) -> CorrectorLoss | None:
-        """Build the corrector-delta half of the training loss, if configured.
+        """Validate and build the corrector-delta half of the training loss,
+        if configured.
 
         Args:
             corrector_loss: Optional. With the null default, this method builds
@@ -910,6 +911,7 @@ class Stepper:
         if corrector_loss is None:
             return None
         return corrector_loss.build(
+            self.loss_names,
             normalizer=self._step_obj.get_loss_normalizer(),
             channel_dim=self.CHANNEL_DIM,
         )
