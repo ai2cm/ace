@@ -77,6 +77,10 @@ FT_VARIANTS = (
 # Fine-tuning is short; cap it well below pre-training's max_epochs (150).
 FT_MAX_EPOCHS = 20
 
+# Fine-tunes exist only for the paper-final v5 cells (SELECTED_SOURCES), so
+# iter_train_configs yields nothing for the other baseline versions.
+FT_VERSION = "v5"
+
 # Heavy multi-year diagnostic inferences dropped from *inline* inference for the
 # short FT. Each is weight 0.0 (they do not drive checkpoint selection -- only
 # aimip_checkpoint, weight 1.0, does) but costs hundreds-to-thousands of windows
@@ -117,6 +121,47 @@ def source_run_to_config_stem(source_run_name: str, ft_suffix: str) -> str:
     return f"{CONFIG_PREFIX}{suffix}{ft_suffix}"
 
 
+def _load_pretrain_config(
+    source_run_name: str, beaker_dataset_id: str | None = None
+) -> dict:
+    """The cached 1-step pre-training config a fine-tune is derived from."""
+    pretrain_path = PRETRAIN_CONFIGS_DIR / f"{source_run_name}.yaml"
+    if not pretrain_path.exists():
+        dataset = beaker_dataset_id if beaker_dataset_id is not None else "<dataset>"
+        raise FileNotFoundError(
+            f"missing cached pre-training config {pretrain_path.name} in "
+            f"{PRETRAIN_CONFIGS_DIR} — fetch it with "
+            f"`beaker dataset stream-file {dataset} config.yaml`."
+        )
+    return yaml.safe_load(pretrain_path.read_text())
+
+
+def iter_train_configs(version: str) -> list[tuple[str, dict]]:
+    """``(name, config)`` for every fine-tune run of ``version``.
+
+    ``name`` is the *fine-tune* config stem, so the eval tooling derives the
+    ``-mstepft``/``-mstepftaimip`` run name from it and resolves the
+    fine-tune's own checkpoint dataset. ``config`` is the *pre-training*
+    config, whose inference suite still holds the multi-year diagnostics that
+    INLINE_INFERENCE_DROP prunes from inline fine-tune inference. Those
+    diagnostics are the reason the fine-tunes need an eval pass at all, so the
+    eval suite is deliberately built from the unpruned suite; see
+    generate_eval_configs.py.
+
+    Signature mirrors iter_train_configs in generate_masking_configs.py and
+    generate_seed_configs.py so all three families enumerate the same way.
+    """
+    if version != FT_VERSION:
+        return []
+    configs: list[tuple[str, dict]] = []
+    for source_run_name in SELECTED_SOURCES.values():
+        pretrain_cfg = _load_pretrain_config(source_run_name)
+        for ft_suffix, _ in FT_VARIANTS:
+            stem = source_run_to_config_stem(source_run_name, ft_suffix)
+            configs.append((stem, copy.deepcopy(pretrain_cfg)))
+    return configs
+
+
 def _to_finetune(pretrain_cfg: dict, checkpoint_name: str) -> dict:
     """Return a fine-tune config: pre-training config with only the multi-step
     schedule, checkpoint weight-loading, and shorter max_epochs changed.
@@ -154,14 +199,7 @@ def generate_finetune_config(
         print(f"Skipped {out_path.name}")
         return
 
-    pretrain_path = PRETRAIN_CONFIGS_DIR / f"{source_run_name}.yaml"
-    if not pretrain_path.exists():
-        raise FileNotFoundError(
-            f"missing cached pre-training config {pretrain_path.name} in "
-            f"{PRETRAIN_CONFIGS_DIR} — fetch it with "
-            f"`beaker dataset stream-file {beaker_dataset_id} config.yaml`."
-        )
-    pretrain_cfg = yaml.safe_load(pretrain_path.read_text())
+    pretrain_cfg = _load_pretrain_config(source_run_name, beaker_dataset_id)
     cfg = _to_finetune(pretrain_cfg, checkpoint_name)
 
     header = (

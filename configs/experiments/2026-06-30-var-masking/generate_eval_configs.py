@@ -4,11 +4,20 @@ Each suite config contains all inline inference entries from the corresponding
 training config.  submit_eval_jobs.py submits one job per checkpoint, and that
 job runs all entries in the suite under one WandB run.
 
+The multi-step fine-tune family is the one exception: its training configs
+prune the heavy multi-year diagnostics (10year, 10year_insample, long_46year)
+from *inline* inference to keep fine-tune wall-clock down, so its eval suites
+are built from the unpruned pre-training config each fine-tune was derived
+from (generate_finetune_configs.iter_train_configs).  The eval pass is exactly
+where those diagnostics were meant to run, so inheriting the prune here would
+mean they never run at all.
+
 Training runs are enumerated in memory for every baseline version (default:
-all discovered, e.g. -v1, -v2, -v3 and -v4) across both the masking family
-(generate_masking_configs.py) and the seed-replicate family
-(generate_seed_configs.py), so eval configs are produced for all of them in one
-pass.  This does not depend on the source training configs
+all discovered, e.g. -v1, -v2, -v3 and -v4) across the masking family
+(generate_masking_configs.py), the seed-replicate family
+(generate_seed_configs.py) and the multi-step fine-tune family
+(generate_finetune_configs.py, v5 only), so eval configs are produced for all
+of them in one pass.  This does not depend on the source training configs
 sitting in ``run_configs/``: each training-config generator wipes its own
 family's configs on each run, so the different versions and mask/seed never
 coexist on disk.
@@ -36,6 +45,7 @@ import json
 import pathlib
 
 import yaml
+from generate_finetune_configs import iter_train_configs as iter_finetune_train_configs
 from generate_masking_configs import (
     BASE_CONFIG_FILENAMES,
     CONFIG_PREFIX,
@@ -351,15 +361,18 @@ def main() -> None:
         # still (re)writes eval configs for runs not yet finished in wandb.
         delete_eval_configs_in_wandb(WANDB_PROJECT)
 
-    # Enumerate every training run in memory (masking + seed families) for the
-    # requested version(s), so eval configs are produced for all of them without
-    # the source training configs needing to sit in run_configs at once (each
-    # generator wipes its own family's configs, so versions and mask/seed never
-    # coexist on disk).
+    # Enumerate every training run in memory (masking + seed + fine-tune
+    # families) for the requested version(s), so eval configs are produced for
+    # all of them without the source training configs needing to sit in
+    # run_configs at once (the generators wipe their own configs, so versions
+    # and mask/seed never coexist on disk). The fine-tune family yields nothing
+    # for versions other than v5.
     versions = [args.version] if args.version else sorted(BASE_CONFIG_FILENAMES)
     for version in versions:
-        train_configs = iter_masking_train_configs(version) + iter_seed_train_configs(
-            version, args.n_seeds
+        train_configs = (
+            iter_masking_train_configs(version)
+            + iter_seed_train_configs(version, args.n_seeds)
+            + iter_finetune_train_configs(version)
         )
         for config_name, train_cfg in train_configs:
             generate_eval_config(
