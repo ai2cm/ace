@@ -13,6 +13,10 @@ BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=${N_GPUS:-2}
 BEAKER_SHARED_MEMORY=${BEAKER_SHARED_MEMORY:-100GiB}
+# Opt the job into scripts/beaker_balancer (low|normal|high|urgent). Only read
+# in the balancer's managed workspace (ai2/ace by default), so setting it for a
+# job submitted elsewhere does nothing. Unset: the job is left unmanaged.
+CM_PRIORITY=${CM_PRIORITY:-}
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
@@ -32,6 +36,11 @@ run_training() {
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
 
+  local cm_priority_args=()
+  if [[ -n "$CM_PRIORITY" ]]; then
+    cm_priority_args+=(--env CM_PRIORITY="$CM_PRIORITY")
+  fi
+
   local cluster_args=()
   for cluster in $BEAKER_CLUSTER; do
     cluster_args+=(--cluster "$cluster")
@@ -50,6 +59,7 @@ run_training() {
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP="$job_group" \
     --env WANDB_PROJECT="$WANDB_PROJECT" \
+    "${cm_priority_args[@]}" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
