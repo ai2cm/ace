@@ -84,7 +84,9 @@ class DatasetProperties:
         if self.all_labels is not None:
             if other.all_labels is None:
                 raise RuntimeError("Checks above should prevent this case.")
-            self.all_labels.update(other.all_labels)
+            # rebind rather than update in place: the set may be shared with the
+            # dataset which returns it with each sample.
+            self.all_labels = self.all_labels | other.all_labels
 
     def update_merged_dataset(self, other: "DatasetProperties"):
         if isinstance(self.variable_metadata, dict):

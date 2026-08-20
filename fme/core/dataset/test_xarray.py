@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+import itertools
 import os
 from collections import namedtuple
 from collections.abc import Iterable, Sequence
@@ -1044,6 +1045,35 @@ def test_xarray_concat_has_correct_sample(mock_monthly_netcdfs):
     )
     expected = xr.CFTimeIndex(expected_times)
     assert concat.sample_start_times.equals(expected)
+
+
+def test_xarray_concat_keeps_each_member_labels(mock_monthly_netcdfs):
+    """Accumulating properties must not mutate a member's own label set.
+
+    Each concatenated member must keep returning only its own labels, so a
+    grouped normalizer can resolve each sample to exactly one group.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    n_timesteps = 2
+    names = mock_data.var_names.all_names
+    labels = ["amip", "ramped", "som"]
+    configs = [
+        XarrayDataConfig(
+            data_path=mock_data.tmpdir,
+            subset=TimeSlice(f"2003-0{i + 3}-01", f"2003-0{i + 3}-28"),
+            labels=[label],
+        )
+        for i, label in enumerate(labels)
+    ]
+    concat, properties = get_dataset(
+        configs, names, IntSchedule(start_value=n_timesteps, milestones=[])
+    )
+    assert properties.all_labels == set(labels)
+    sample_labels = [concat[i][2] for i in range(len(concat))]
+    # members are concatenated in config order, each sample carrying only the
+    # label of the member it came from
+    member_labels = [key for key, _ in itertools.groupby(sample_labels)]
+    assert member_labels == [{label} for label in labels]
 
 
 def test__get_vertical_coordinate_raises():
