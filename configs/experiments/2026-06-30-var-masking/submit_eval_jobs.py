@@ -11,6 +11,20 @@ corresponding training result dataset:
 already exists in wandb, so a config whose evaluation was only partly
 completed (e.g. one checkpoint preempted) resubmits just the missing
 checkpoints rather than all three.
+
+Naming configs positionally submits exactly those and ignores ``--version`` --
+use it to evaluate one run (or the multi-step fine-tune family, whose eval
+suites a bare ``-v v5`` would sweep in alongside the pre-training runs)
+without submitting a whole version's worth of jobs.
+
+Usage:
+    python submit_eval_jobs.py [CONFIG ...]
+                               [--dry-run]
+                               [--version {v1,...}]
+                               [--skip-evaluated]
+                               [--beaker-workspace WORKSPACE]
+                               [--beaker-cluster CLUSTER [CLUSTER ...]]
+                               [--beaker-priority PRIORITY]
 """
 
 import argparse
@@ -51,6 +65,37 @@ CHECKPOINTS = [
 IN_FLIGHT_STATES = frozenset({"finished", "running", "pending", "preempting"})
 
 
+def available_configs() -> list[str]:
+    """Every evaluator suite config in run_configs/, whatever the version."""
+    return sorted(
+        path.name for path in RUN_CONFIGS_DIR.glob(f"{EVAL_SUITE_CONFIG_PREFIX}*.yaml")
+    )
+
+
+def select_configs(named: list[str], version: str | None) -> list[str]:
+    """Eval suite configs to submit, either named explicitly or by version.
+
+    Explicitly named configs bypass the version filter -- naming a config is
+    already a deliberate choice, so it should not also have to match
+    ``--version``.
+    """
+    present = available_configs()
+    if named:
+        wanted = [pathlib.Path(name).name for name in named]
+        missing = [name for name in wanted if name not in present]
+        if missing:
+            raise FileNotFoundError(
+                f"not in {RUN_CONFIGS_DIR}: {', '.join(missing)}\n"
+                "available:\n" + "\n".join(f"  {name}" for name in present)
+            )
+        return sorted(set(wanted))
+    return [
+        name
+        for name in present
+        if version is None or stem_has_version(pathlib.Path(name).stem, version)
+    ]
+
+
 def validate_configs(config_filenames: list[str]) -> None:
     with Distributed.context():
         for config_filename in config_filenames:
@@ -88,6 +133,16 @@ def config_to_jobs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "configs",
+        nargs="*",
+        metavar="CONFIG",
+        help=(
+            "Evaluator suite config filename(s) in run_configs/ to submit. "
+            "Bypasses --version; default is every config of the selected "
+            "version(s)."
+        ),
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -130,24 +185,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    configs = sorted(
-        path.name
-        for path in RUN_CONFIGS_DIR.glob("*.yaml")
-        if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
-        and (args.version is None or stem_has_version(path.stem, args.version))
-    )
+    configs = select_configs(args.configs, args.version)
     if not configs:
         raise FileNotFoundError(
             f"no eval suite configs in {RUN_CONFIGS_DIR}"
             " — run generate_eval_configs.py first"
         )
-
-    for config_filename in configs:
-        config_path = RUN_CONFIGS_DIR / config_filename
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"{config_filename} not found - run generate_eval_configs.py first"
-            )
 
     evaluated_states = (
         fetch_wandb_run_states(WANDB_PROJECT) if args.skip_evaluated else None
