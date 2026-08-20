@@ -234,3 +234,11 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-crps50.yaml" \
 #   ./run-train.sh gan
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-1-step-pre-training-rs0" 8 ai2/jupiter urgent
+
+# Diurnal-mean decoder stage (added 2026-08-20): a small secondary decoder
+# (embed 128, filter groups 4, deterministic) trained on the FROZEN paper
+# backbone (c8hp09jm best_inference_ckpt) to predict the daily-mean *_mean
+# surface fields, on the 2026-08-13 store. Launch alone:
+#   ./run-train.sh decoder-daily-mean
+run_training "ace-train-config-decoder-daily-mean-fg16-sr0p125.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-mean-decoder-training-rs0" 4
