@@ -1,0 +1,14 @@
+# 2 GPUs rather than the 1deg protocol's 4: the 4deg data is ~16x smaller per
+# sample, and the earlier 4deg atmosphere runs trained on 2 H100s. batch_size
+# stays 8 -- ace's batch_size is the GLOBAL batch, split across ranks by
+# dist.local_batch_size, so both resolutions train at the same effective batch
+# and the same 29,200 iterations/epoch.
+#
+# jupiter rather than the h100 alias (= ceres + jupiter): high/urgent priority
+# is not available on ceres, so an h100 request queues instead of starting.
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235_4deg-atmos_ace2s|rs0|train|high|jupiter|2|600GiB|3|ai2/ace|seed=0
+cm4_1pct_46to125_piC_156to235_4deg-atmos_ace2s|rs1|train|high|jupiter|2|600GiB|3|ai2/ace|seed=1
+cm4_1pct_46to125_piC_156to235_4deg-atmos_ace2s|rs2|train|high|jupiter|2|600GiB|3|ai2/ace|seed=2

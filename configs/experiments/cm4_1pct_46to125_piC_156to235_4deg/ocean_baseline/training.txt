@@ -1,0 +1,10 @@
+# 2 GPUs rather than the 1deg protocol's 4, and jupiter rather than the h100
+# alias -- see atmos_ace2s/training.txt for both reasons. batch_size stays 16
+# (global), so the epoch budget matches the 1deg protocol iteration for
+# iteration.
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_baseline|rs0|train|high|jupiter|2|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pct_46to125_piC_156to235_4deg-ocean_baseline|rs1|train|high|jupiter|2|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+cm4_1pct_46to125_piC_156to235_4deg-ocean_baseline|rs2|train|high|jupiter|2|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
