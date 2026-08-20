@@ -777,69 +777,6 @@ def test_corrector_deltas_stay_attached():
         torch.testing.assert_close(result.output[name], value)
 
 
-def test_step_exposes_corrector_modified_names():
-    # corrector_modified_names is populated for a step with a corrector, empty
-    # for a step without one, and forwarded through MultiCallStep.
-    step = get_step(
-        get_single_module_with_atmosphere_corrector_selector(), DEFAULT_IMG_SHAPE
-    )
-    modified_names = step.corrector_modified_names
-    assert len(modified_names) > 0
-    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2)
-    next_step_input_data = get_tensor_dict(
-        step.next_step_input_names, DEFAULT_IMG_SHAPE, 2
-    )
-    result = step.step(
-        args=StepArgs(
-            input=input_data,
-            next_step_input_data=next_step_input_data,
-            labels=None,
-        ),
-    )
-    assert set(result.corrector_diagnostics.delta) == set(modified_names)
-
-    assert (
-        get_step(
-            get_single_module_selector(), DEFAULT_IMG_SHAPE
-        ).corrector_modified_names
-        == frozenset()
-    )
-
-    multi_call_step = get_step(
-        _multi_call_with_corrector_selector(force_positive_names=["prog_a"]),
-        DEFAULT_IMG_SHAPE,
-    )
-    assert isinstance(multi_call_step, MultiCallStep)
-    assert multi_call_step.corrector_modified_names == frozenset({"prog_a"})
-
-
-def _multi_call_with_corrector_selector(
-    force_positive_names: list[str],
-) -> StepSelector:
-    wrapped_config = dataclasses.replace(
-        get_separate_radiation_config(),
-        corrector=AtmosphereCorrectorConfig(
-            force_positive_names=force_positive_names,
-        ),
-    )
-    return StepSelector(
-        type="multi_call",
-        config=dataclasses.asdict(
-            MultiCallStepConfig(
-                wrapped_step=StepSelector(
-                    type="separate_radiation",
-                    config=dataclasses.asdict(wrapped_config),
-                ),
-                config=MultiCallConfig(
-                    forcing_name="forcing_rad",
-                    forcing_multipliers={"double": 2.0},
-                    output_names=["diagnostic_rad"],
-                ),
-            ),
-        ),
-    )
-
-
 def test_step_empty_delta_when_no_corrector():
     selector = get_single_module_selector()
     img_shape = DEFAULT_IMG_SHAPE

@@ -911,9 +911,8 @@ class Stepper:
         if corrector_loss is None:
             return None
         return corrector_loss.build(
-            self._step_obj.corrector_modified_names,
+            self.loss_names,
             normalizer=self._step_obj.get_loss_normalizer(),
-            gridded_operations=self._dataset_info.gridded_operations,
             channel_dim=self.CHANNEL_DIM,
         )
 

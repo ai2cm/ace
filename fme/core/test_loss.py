@@ -27,6 +27,7 @@ from fme.core.loss import (
     WeightedMappingLoss,
     _construct_weight_tensor,
 )
+from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 
@@ -1061,28 +1062,50 @@ def _corrector_step_loss() -> StepLoss:
     )
 
 
+def _corrector_regularizer(
+    entries: list[str], weight: float = 1.0
+) -> CorrectorRegularizer:
+    def build_loss(names: list[str]) -> WeightedMappingLoss:
+        return WeightedMappingLoss(
+            loss=LossConfig(type="MSE").build(gridded_operations=None),
+            weights={},
+            out_names=names,
+            normalizer=_corrector_normalizer(),
+            channel_dim=-3,
+        )
+
+    return CorrectorRegularizer(
+        selection=NameAndPrefixSelection(tuple(entries)),
+        build_loss=build_loss,
+        weight=weight,
+    )
+
+
 def _corrector_loss(
     precorrector_names: list[str] | None = None,
     regularizer_names: list[str] | None = None,
     penalty_weight: float = 1.0,
 ) -> CorrectorLoss:
-    regularizer = None
-    if regularizer_names is not None:
-        regularizer = CorrectorRegularizer(
-            loss=WeightedMappingLoss(
-                loss=LossConfig(type="MSE").build(gridded_operations=None),
-                weights={},
-                out_names=regularizer_names,
-                normalizer=_corrector_normalizer(),
-                channel_dim=-3,
-            ),
-            names=regularizer_names,
-            weight=penalty_weight,
-        )
+    """A corrector loss selecting the given entries, with names unresolved."""
     return CorrectorLoss(
-        precorrector_names=precorrector_names,
-        regularizer=regularizer,
+        precorrector_selection=(
+            None
+            if precorrector_names is None
+            else NameAndPrefixSelection(tuple(precorrector_names))
+        ),
+        regularizer=(
+            None
+            if regularizer_names is None
+            else _corrector_regularizer(regularizer_names, penalty_weight)
+        ),
     )
+
+
+def _resolved_corrector_loss(**kwargs) -> CorrectorLoss:
+    """As ``_corrector_loss``, resolved against the keys of ``_delta_dict``."""
+    corrector_loss = _corrector_loss(**kwargs)
+    corrector_loss.resolve_names(_delta_dict().keys())
+    return corrector_loss
 
 
 def _expected_penalty(deltas, names) -> torch.Tensor:
@@ -1114,7 +1137,7 @@ def test_pre_corrector_outputs_selected_only():
     # the main loss sees output − delta for the configured names only;
     # other keys use the network output as-is; targets untouched.
     predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
-    corrector_loss = _corrector_loss(precorrector_names=["a"])
+    corrector_loss = _resolved_corrector_loss(precorrector_names=["a"])
     net_output = corrector_loss.pre_corrector_outputs(predict, deltas)
     torch.testing.assert_close(net_output["a"], predict["a"] - deltas["a"])
     for name in ("b_0", "b_1"):
@@ -1134,7 +1157,9 @@ def test_penalty_analytic_value():
     # penalty equals the hand-computed mean of (delta/std)^2 — normalizer
     # means cancel against the zeros target.
     deltas = _delta_dict()
-    penalty = _corrector_loss(regularizer_names=_CORRECTOR_NAMES).penalty(deltas)
+    penalty = _resolved_corrector_loss(regularizer_names=_CORRECTOR_NAMES).penalty(
+        deltas
+    )
     assert penalty is not None
     torch.testing.assert_close(
         penalty.total(), _expected_penalty(deltas, _CORRECTOR_NAMES)
@@ -1199,7 +1224,9 @@ def test_penalty_masked_points_dilute():
     masked[0] = torch.nan
     masked.requires_grad_(True)
     deltas["a"] = masked
-    penalty = _corrector_loss(regularizer_names=_CORRECTOR_NAMES).penalty(deltas)
+    penalty = _resolved_corrector_loss(regularizer_names=_CORRECTOR_NAMES).penalty(
+        deltas
+    )
     assert penalty is not None
     total = penalty.total()
     assert torch.isfinite(total)
@@ -1263,17 +1290,18 @@ def test_penalty_uses_the_data_mask():
 
 
 @pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
-def test_missing_selected_delta_raises(feature):
-    # a non-empty delta dict lacking a selected name raises.
+def test_shrinking_delta_keys_raise(feature):
+    # a resolved name absent from a later step's deltas raises through
+    # _require_delta rather than silently dropping out of the loss.
     predict, target = _predict_dict(), _target_dict()
-    deltas = {k: v for k, v in _delta_dict().items() if k != "a"}
     if feature == "precorrector_optimization":
-        corrector_loss = _corrector_loss(precorrector_names=["a"])
+        corrector_loss = _resolved_corrector_loss(precorrector_names=["a"])
     else:
-        corrector_loss = _corrector_loss(regularizer_names=["a"])
+        corrector_loss = _resolved_corrector_loss(regularizer_names=["a"])
     loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    shrunk = {k: v for k, v in _delta_dict().items() if k != "a"}
     with pytest.raises(ValueError, match="produced no delta"):
-        loss(predict, target, 0, deltas=deltas)
+        loss(predict, target, 0, deltas=shrunk)
 
 
 @pytest.mark.parametrize("deltas", [None, {}])
@@ -1290,3 +1318,62 @@ def test_empty_deltas_inert(deltas):
     unconfigured = StepOutputLoss(_corrector_step_loss(), None)(predict, target, 0)
     assert result.corrector_penalty is None
     torch.testing.assert_close(result.total(), unconfigured.total())
+
+
+@pytest.mark.parametrize("entry", ["missing_var", "missing_"])
+@pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
+def test_resolve_names_errors_on_unmatched_delta_key(feature, entry):
+    # the first non-empty-delta call raises, naming the feature, the unmatched
+    # entries and the delta keys the corrector produced.
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    if feature == "precorrector_optimization":
+        corrector_loss = _corrector_loss(precorrector_names=[entry])
+    else:
+        corrector_loss = _corrector_loss(regularizer_names=[entry])
+    loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    with pytest.raises(ValueError) as excinfo:
+        loss(predict, target, 0, deltas=deltas)
+    message = str(excinfo.value)
+    assert feature in message
+    assert repr(entry) in message
+    assert str(sorted(deltas)) in message
+
+
+def test_resolve_names_runs_once():
+    # after a first successful non-empty-delta call, a later call whose deltas
+    # would not satisfy the entries neither re-resolves nor raises; the penalty
+    # channels stay the ones first resolved.
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    corrector_loss = _corrector_loss(regularizer_names=["b_"])
+    loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    loss(predict, target, 0, deltas=deltas)
+    corrector_loss.resolve_names({"a"})
+    result = loss(predict, target, 0, deltas=deltas)
+    assert result.corrector_penalty is not None
+    assert list(result.corrector_penalty.get_channel_losses()) == ["b_0", "b_1"]
+
+
+def test_empty_deltas_do_not_consume_the_check():
+    # repeated empty-delta calls are inert, and an unmatched entry still raises
+    # on the first non-empty call afterwards.
+    predict, target = _predict_dict(), _target_dict()
+    corrector_loss = _corrector_loss(regularizer_names=["missing_var"])
+    loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    for _ in range(3):
+        result = loss(predict, target, 0, deltas={})
+        assert result.corrector_penalty is None
+    with pytest.raises(ValueError, match="match none of the correction deltas"):
+        loss(predict, target, 0, deltas=_delta_dict())
+
+
+def test_regularizer_channels_come_from_the_deltas():
+    # a prefix entry resolves to exactly the matching delta keys, not to every
+    # name the loss covers that it would match.
+    deltas = {name: value for name, value in _delta_dict().items() if name != "b_1"}
+    regularizer = _corrector_regularizer(["b_"])
+    assert regularizer.names == []
+    regularizer.resolve(deltas.keys())
+    assert regularizer.names == ["b_0"]
+    torch.testing.assert_close(
+        regularizer(deltas).total(), _expected_penalty(deltas, ["b_0"])
+    )
