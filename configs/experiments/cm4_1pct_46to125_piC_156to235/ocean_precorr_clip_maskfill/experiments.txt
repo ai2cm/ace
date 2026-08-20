@@ -1,2 +1,4 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|01M0GM0B4PB9TND5S3B0NQZ9CR|training|best_inference_ckpt|normal|--min-runtime 8h
