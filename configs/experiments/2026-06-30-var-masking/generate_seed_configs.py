@@ -99,6 +99,7 @@ from generate_masking_configs import (
     _fetch_wandb_run_names,
     co2_options_for_version,
     config_name_to_run_name,
+    is_foreign_config,
 )
 
 DEFAULT_N_SEEDS = 5
@@ -345,6 +346,8 @@ def generate_configs(
 ) -> None:
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
     for yaml_path in RUN_CONFIGS_DIR.glob("*-seed*.yaml"):
+        if is_foreign_config(yaml_path.name):
+            continue
         yaml_path.unlink()
         print(f"Removed {yaml_path.name}")
 

@@ -8,9 +8,10 @@ Training runs are enumerated in memory for every baseline version (default:
 all discovered, e.g. -v1, -v2, -v3 and -v4) across both the masking family
 (generate_masking_configs.py) and the seed-replicate family
 (generate_seed_configs.py), so eval configs are produced for all of them in one
-pass.  This does not depend on the source training configs sitting in
-``run_configs/``: the generators wipe ``*.yaml`` on each run, so the different
-versions and mask/seed never coexist on disk.
+pass.  This does not depend on the source training configs
+sitting in ``run_configs/``: each training-config generator wipes its own
+family's configs on each run, so the different versions and mask/seed never
+coexist on disk.
 
 An eval config is written for every training run that has finished in wandb
 (i.e. has a Beaker result dataset in the source map).  With ``--delete-if-in
@@ -38,6 +39,7 @@ import yaml
 from generate_masking_configs import (
     BASE_CONFIG_FILENAMES,
     CONFIG_PREFIX,
+    EVAL_SUITE_CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
     WANDB_ENTITY,
     WANDB_PREFIX,
@@ -49,7 +51,6 @@ from generate_seed_configs import DEFAULT_N_SEEDS
 from generate_seed_configs import iter_train_configs as iter_seed_train_configs
 
 HERE = pathlib.Path(__file__).parent
-EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-"
 # Each eval suite config produces one wandb run per checkpoint variant; the run
 # name is the base name plus one of these suffixes (see submit_eval_jobs.py).
 CHECKPOINT_RUN_SUFFIXES = ("-besttrain", "-bestinf", "-lastepoch")
@@ -352,8 +353,9 @@ def main() -> None:
 
     # Enumerate every training run in memory (masking + seed families) for the
     # requested version(s), so eval configs are produced for all of them without
-    # the source training configs needing to sit in run_configs at once (the
-    # generators wipe *.yaml, so versions and mask/seed never coexist on disk).
+    # the source training configs needing to sit in run_configs at once (each
+    # generator wipes its own family's configs, so versions and mask/seed never
+    # coexist on disk).
     versions = [args.version] if args.version else sorted(BASE_CONFIG_FILENAMES)
     for version in versions:
         train_configs = iter_masking_train_configs(version) + iter_seed_train_configs(

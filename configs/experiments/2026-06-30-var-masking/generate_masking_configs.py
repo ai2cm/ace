@@ -26,6 +26,7 @@ option: 5 x 2 x 1 = 10 configs.
 
 import argparse
 import copy
+import fnmatch
 import pathlib
 import re
 
@@ -35,6 +36,20 @@ WANDB_ENTITY = "ai2cm"
 WANDB_PROJECT = "VarMasking8"
 WANDB_PREFIX = "ace2-var-mask-"  # stripped from wandb run names before comparison
 CONFIG_PREFIX = "ace-train-config-4deg-"  # stripped from config stems
+# Generated evaluator-suite filename prefix, owned by generate_eval_configs.py.
+# It lives here so the wipe guard below can name it without importing that
+# module (which imports this one).
+EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-"
+
+# run_configs/ also holds configs generated from other sources: evaluator
+# suites (generate_eval_configs.py) and multi-step fine-tune training configs
+# (generate_finetune_configs.py). The training-config generators own neither
+# and cannot regenerate them, yet their wipes would delete them -- this module
+# clears ``*.yaml`` and generate_seed_configs.py clears ``*-seed*.yaml``, which
+# matches ``...-seed1-v5-mstepft.yaml``. Files matching these patterns are
+# skipped by both. A new generator family in this directory needs its pattern
+# listed here as well.
+FOREIGN_CONFIG_PATTERNS = (f"{EVAL_SUITE_CONFIG_PREFIX}*.yaml", "*-mstepft*.yaml")
 
 # Generated config filename prefix (independent of the source baseline filename
 # below).
@@ -81,6 +96,16 @@ def _discover_base_config_filenames() -> dict[str, str]:
 # {"v1": "ace2-var-mask-nc-sfno-era5-v1.yaml", "v2": "...-v2.yaml"}.
 BASE_CONFIG_FILENAMES = _discover_base_config_filenames()
 DEFAULT_VERSION = "v1"
+
+
+def is_foreign_config(filename: str) -> bool:
+    """True if ``filename`` is owned by a generator outside this family.
+
+    Training-config wipes must skip these; see FOREIGN_CONFIG_PATTERNS.
+    """
+    return any(
+        fnmatch.fnmatch(filename, pattern) for pattern in FOREIGN_CONFIG_PATTERNS
+    )
 
 
 def stem_has_version(stem: str, version: str) -> bool:
@@ -210,6 +235,8 @@ def _write_config(
 def generate_configs(fetch_wandb: bool = False, version: str = DEFAULT_VERSION) -> None:
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
     for yaml_path in RUN_CONFIGS_DIR.glob("*.yaml"):
+        if is_foreign_config(yaml_path.name):
+            continue
         yaml_path.unlink()
         print(f"Removed {yaml_path.name}")
 
