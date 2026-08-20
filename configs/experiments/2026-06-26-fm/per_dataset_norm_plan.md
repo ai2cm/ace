@@ -183,6 +183,22 @@ an implicit choice would silently normalize against the wrong distribution.
 never saw its network inputs on the pooled scale, so pooled is not a safe
 default — it is simply a fourth, untrained distribution.
 
+**Post-hoc eval and inference configs must set labels.** The 22 training
+configs label every loader, so `default_group` is unreachable during the runs
+themselves. It only becomes reachable later, when a checkpoint is evaluated
+against a config whose datasets carry no `labels:`. There, the two grouped arms
+behave differently:
+
+- **A2/A3 `-cond`** fails loudly — `TypeError: Labels are required for
+  conditional models`.
+- **A2/A3 without conditioning** is **silent**: every sample is normalized
+  against `default_group` with no warning. For the c96 regime that group is
+  `amip`, picked alphabetically rather than for any physical reason.
+
+So label the eval datasets, or set `labels:` on `InferenceEvaluatorConfig` /
+`InferenceConfig`, which override whatever the dataset carries. A1 is exempt —
+it has no `grouped` block and normalizes with the pooled constants either way.
+
 ### Unconditional builds no longer see labels
 
 Adding labels surfaced a latent bug: `NoiseConditionedSFNO` with
