@@ -1047,6 +1047,34 @@ def test_xarray_concat_has_correct_sample(mock_monthly_netcdfs):
     assert concat.sample_start_times.equals(expected)
 
 
+def test_xarray_concat_keeps_each_member_labels(mock_monthly_netcdfs):
+    """Accumulating properties must not mutate a member's own label set.
+
+    Each concatenated member must keep returning only its own labels, so a
+    grouped normalizer can resolve each sample to exactly one group.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    n_timesteps = 2
+    names = mock_data.var_names.all_names
+    labels = ["amip", "ramped", "som"]
+    configs = [
+        XarrayDataConfig(
+            data_path=mock_data.tmpdir,
+            subset=TimeSlice(f"2003-0{i + 3}-01", f"2003-0{i + 3}-28"),
+            labels=[label],
+        )
+        for i, label in enumerate(labels)
+    ]
+    concat, properties = get_dataset(
+        configs, names, IntSchedule(start_value=n_timesteps, milestones=[])
+    )
+    assert properties.all_labels == set(labels)
+    offset = 0
+    for member_length, label in zip(concat.member_lengths, labels):
+        assert concat[offset][2] == {label}
+        offset += member_length
+
+
 def test__get_vertical_coordinate_raises():
     data = xr.Dataset({"ak_0": 1.0, "bk_0": 0.5, "idepth_0": 1.0})
     with pytest.raises(ValueError, match="Dataset contains both hybrid"):

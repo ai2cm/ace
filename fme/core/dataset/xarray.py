@@ -878,7 +878,7 @@ class XarrayDataset(DatasetABC):
             self._spatial_mask_provider,
             self.timestep,
             self._is_remote,
-            self._labels,
+            set(self._labels) if self._labels is not None else None,
         )
 
     @property
@@ -1321,7 +1321,7 @@ def get_xarray_datasets(
         )
         datasets.append(dataset)
         if properties is None:
-            properties = new_properties
+            properties = new_properties.copy()
         else:
             properties.update(new_properties, strict=strict)
     if properties is None:
