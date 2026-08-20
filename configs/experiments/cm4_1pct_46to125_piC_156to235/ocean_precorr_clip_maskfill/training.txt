@@ -31,14 +31,14 @@
 
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
