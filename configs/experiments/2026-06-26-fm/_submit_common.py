@@ -10,6 +10,12 @@ import os
 import pathlib
 import subprocess
 
+#: Accepted values of the CM_PRIORITY label read by
+#: scripts/beaker_balancer/balance.py. `immediate` is deliberately absent: Beaker
+#: requires a human-supplied reason for it, so it is not something the balancer
+#: may hand out.
+CM_PRIORITIES = ("low", "normal", "high", "urgent")
+
 
 def add_beaker_args(
     parser: argparse.ArgumentParser,
@@ -43,6 +49,18 @@ def add_beaker_args(
         default=default_priority,
         help=f"Beaker job priority (default: {default_priority}).",
     )
+    parser.add_argument(
+        "--cm-priority",
+        choices=CM_PRIORITIES,
+        default=None,
+        help=(
+            "Opt the job in to scripts/beaker_balancer/balance.py at this rank. "
+            "The balancer only modifies jobs which set it, and never raises the "
+            "priority of a job that has already started, so submit at the "
+            "--beaker-priority you want and let the balancer take it away "
+            "(default: unset, leaving the job unmanaged)."
+        ),
+    )
 
 
 def submit_job(
@@ -69,6 +87,9 @@ def submit_job(
         "BEAKER_WORKSPACE": args.beaker_workspace,
         "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
         "BEAKER_PRIORITY": args.beaker_priority,
+        # Empty rather than absent, so an exported CM_PRIORITY cannot opt a job
+        # in behind the flag's back.
+        "CM_PRIORITY": args.cm_priority or "",
         **(extra_env or {}),
     }
     subprocess.run(cmd, check=True, cwd=cwd, env=env)

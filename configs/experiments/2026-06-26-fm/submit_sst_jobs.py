@@ -17,6 +17,7 @@ Usage:
                               [--beaker-workspace WORKSPACE]
                               [--beaker-cluster CLUSTER [CLUSTER ...]]
                               [--beaker-priority PRIORITY]
+                              [--cm-priority PRIORITY]
 """
 
 import argparse

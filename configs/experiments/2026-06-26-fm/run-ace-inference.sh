@@ -16,6 +16,10 @@ WANDB_PROJECT=${WANDB_PROJECT:-FM}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
+# Opt the job in to scripts/beaker_balancer/balance.py, which may lower its
+# priority to keep the team inside its urgent allocation. Unset means the
+# balancer leaves the job alone entirely.
+CM_PRIORITY=${CM_PRIORITY:-}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -28,6 +32,11 @@ cluster_args=()
 for cluster in $BEAKER_CLUSTER; do
     cluster_args+=(--cluster "$cluster")
 done
+
+cm_priority_args=()
+if [[ -n "$CM_PRIORITY" ]]; then
+    cm_priority_args+=(--env "CM_PRIORITY=$CM_PRIORITY")
+fi
 
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
@@ -43,6 +52,7 @@ cd $REPO_ROOT && gantry run \
     --env WANDB_RUN_GROUP="$JOB_GROUP" \
     --env WANDB_PROJECT="$WANDB_PROJECT" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    "${cm_priority_args[@]}" \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset $EXISTING_RESULTS_DATASET:$CHECKPOINT_PATH:/ckpt.tar \
