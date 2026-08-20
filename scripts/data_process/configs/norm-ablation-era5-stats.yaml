@@ -13,12 +13,18 @@
 #
 # Usage:
 #   python get_pooled_stats.py submit configs/norm-ablation-era5-stats.yaml \
-#     /climate-default/alexeyy/norm_ablation_0/era5 \
+#     gs://vcm-ml-intermediate/alexeyy/norm_ablation_0/era5 \
 #     --name norm-ablation-era5
 #
-# The output directory must match the STATS_ROOT of
+# The stats are written to GCS first, so the per-member subdirectories are
+# reachable from the analysis notebooks, and then copied to weka:
+#
+#   ./gcs_to_weka.sh gs://vcm-ml-intermediate/alexeyy/norm_ablation_0/era5 \
+#     /climate-default/alexeyy/norm_ablation_0/era5
+#
+# The weka destination must match the STATS_ROOT of
 # configs/experiments/2026-06-26-fm/generate_norm_ablation_configs.py, which is
-# what the generated training configs read.
+# what the generated training configs read. Copy before submitting training.
 
 dataset_pairs:
   - dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr

@@ -246,27 +246,65 @@ Stores are listed explicitly rather than by directory, so held-out ensemble
 members (`ic_0003`+) are not swept in — unlike `pooled_stats_0`, which globs
 directory roots and therefore includes data no model trains on.
 
-Output goes to a new `/climate-default/alexeyy/norm_ablation_0/{regime}/`.
-`pooled_stats_0` is left frozen as the historical artifact.
+Output goes to a new `norm_ablation_0/{regime}/`, written first to
+`gs://vcm-ml-intermediate/alexeyy/` and then copied to
+`/climate-default/alexeyy/` on weka. Two hops rather than one because the
+training jobs read weka while the analysis notebooks read GCS over `gsutil`,
+and the per-member subdirectories `compute` writes are what those notebooks
+resolve back to `(store, window)` pairs. This is the same path
+`pooled_stats_0` and `shield_random_co2_stats_0` took; both are left frozen as
+historical artifacts.
 
 ## Running it
 
+The three stats jobs are independent and run in parallel. Everything after
+them is gated on the hand verification in step 3.
+
 ```bash
-# 1. Statistics (three CPU jobs, must finish before training)
+# 1. Statistics to GCS (three CPU jobs, run in parallel)
 cd scripts/data_process
 for regime in c96 era5 fm; do
   python get_pooled_stats.py submit configs/norm-ablation-$regime-stats.yaml \
-    /climate-default/alexeyy/norm_ablation_0/$regime --name norm-ablation-$regime
+    gs://vcm-ml-intermediate/alexeyy/norm_ablation_0/$regime \
+    --name norm-ablation-$regime
 done
 
-# 2. Configs
-cd configs/experiments/2026-06-26-fm
+# 2. Copy to weka, where the training jobs read from
+for regime in c96 era5 fm; do
+  ./gcs_to_weka.sh gs://vcm-ml-intermediate/alexeyy/norm_ablation_0/$regime \
+    /climate-default/alexeyy/norm_ablation_0/$regime
+done
+
+# 3. Verify the statistics by hand -- see below. Blocking.
+
+# 4. Configs (already generated; regenerate only after editing the generator)
+cd ../../configs/experiments/2026-06-26-fm
 python generate_norm_ablation_configs.py
 
-# 3. Training
+# 5. Training
 python submit_norm_ablation_jobs.py --dry-run   # inspect first
 python submit_norm_ablation_jobs.py
 ```
+
+### Verifying the statistics
+
+Nothing in the repo checks the written stats, and a bad constant does not
+necessarily crash training -- it trains to completion on the wrong scale. So
+step 3 is a manual gate: the stats are inspected in the notebooks under
+`~/Git/explore2/alexeyy/foundation-model/` before any training is submitted.
+`build_member_pool.py` there reads the per-member subdirectories from GCS,
+which is why step 1 writes there rather than straight to weka.
+
+Two failure modes are worth looking for specifically, since neither shows up
+in the job logs:
+
+- a near-zero group std on a variable outside the pinned list -- the same
+  σ→0 blowup `global_mean_co2` is pinned to avoid, but on a variable nothing
+  pins, which would poison only the arms that use that group and read as
+  "A3 is worse";
+- group `n_samples` attrs that do not sum to the root's over a partition
+  (`amip + ramped + som + era5` for fm/A3, `c96 + era5` for fm/A2), which
+  means a store was dropped from a group or double-tagged.
 
 `submit_norm_ablation_jobs.py` filters with `--arch`, `--regime`, `--arm`, and
 `--conditional` / `--no-conditional`. `submit_fm_jobs.py` is untouched.

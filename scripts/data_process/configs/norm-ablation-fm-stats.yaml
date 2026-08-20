@@ -18,12 +18,18 @@
 #
 # Usage:
 #   python get_pooled_stats.py submit configs/norm-ablation-fm-stats.yaml \
-#     /climate-default/alexeyy/norm_ablation_0/fm \
+#     gs://vcm-ml-intermediate/alexeyy/norm_ablation_0/fm \
 #     --name norm-ablation-fm
 #
-# The output directory must match the STATS_ROOT of
+# The stats are written to GCS first, so the per-member subdirectories are
+# reachable from the analysis notebooks, and then copied to weka:
+#
+#   ./gcs_to_weka.sh gs://vcm-ml-intermediate/alexeyy/norm_ablation_0/fm \
+#     /climate-default/alexeyy/norm_ablation_0/fm
+#
+# The weka destination must match the STATS_ROOT of
 # configs/experiments/2026-06-26-fm/generate_norm_ablation_configs.py, which is
-# what the generated training configs read.
+# what the generated training configs read. Copy before submitting training.
 
 groups:
   - c96

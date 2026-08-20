@@ -63,6 +63,12 @@ CONFIG_PREFIX = "ace-train-config-4deg-AIMIP-"
 # configs. Each regime has its own subdirectory because the regimes' store
 # lists do not nest: the `era5` group of the fm regime covers different time
 # windows than the era5 regime's own data.
+#
+# The stats jobs write to gs://vcm-ml-intermediate/alexeyy/norm_ablation_0/
+# first, so the per-member subdirectories are reachable from the analysis
+# notebooks, and are then copied to weka with scripts/data_process/gcs_to_weka.sh
+# before training. This is the weka side of that copy, which is what the
+# generated training configs read.
 STATS_ROOT = "/climate-default/alexeyy/norm_ablation_0"
 
 # Variables which always use the pooled constants, even in the per-group arms.
