@@ -23,3 +23,11 @@ cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs0|01M01WGHA2BM2PF6FT3QA21Y5Q|trainin
 cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs1|01M01WGY7QY16SNYX3QKKZMD03|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-atmos_ace2s|rs2|01M01WHC4V0B4VSRN3RZRXKZNG|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0DK1HQJCGW2D83ZNN9TPQM4|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DK2298DFR9JAR6DJXQ1QE5|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs0|01M0DKADFAWRQYVR7HGYRETK2H|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-atmos_ace2s-ft|rs2|01M0DKAZ255RJZYJP18S920FZP|training|best_inference_ckpt|normal|--min-runtime 8h
