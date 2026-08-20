@@ -355,9 +355,12 @@ class SingleModuleStep(StepABC):
         dist = Distributed.get_instance()
 
         if config.secondary_decoder is not None:
+            secondary_decoder_n_in = n_out_channels
+            if config.secondary_decoder.include_input_step:
+                secondary_decoder_n_in += n_in_channels
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
-                    n_in_channels=n_out_channels,
+                    n_in_channels=secondary_decoder_n_in,
                     dataset_info=dataset_info,
                 ).to(get_device())
             )
@@ -460,8 +463,16 @@ class SingleModuleStep(StepABC):
                 labels=args.labels,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            secondary_input = output_tensor.detach()
+            if (
+                self._config.secondary_decoder is not None
+                and self._config.secondary_decoder.include_input_step
+            ):
+                secondary_input = torch.cat(
+                    [secondary_input, input_tensor.detach()], dim=self.CHANNEL_DIM
+                )
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+                secondary_input
             )
             output_dict.update(secondary_output_dict)
             return output_dict
