@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from typing import Protocol
 
+from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
 from fme.core.generics.inference import get_record_to_wandb
 from fme.core.generics.writer import NullDataWriter
@@ -64,7 +65,9 @@ def run_coupled_dataset_comparison(
     timer.start("data_loading")
     i_time = 0
     n_windows = min(len(prediction_data.loader), len(target_data.loader))
+    dist = Distributed.get_instance()
     for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
+        dist.park_if_terminating()
         timer.stop("data_loading")
         if i_time == 0:
             with timer.context("aggregator"):

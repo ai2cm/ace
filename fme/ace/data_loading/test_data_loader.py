@@ -1509,7 +1509,7 @@ def test_gridded_data_dataset_info_not_localized(_global_properties):
 
     # Sanity-check: under spatial parallelism the *local* shape differs
     dist = Distributed.get_instance()
-    if dist.world_size != dist.total_data_parallel_ranks:
+    if dist.has_spatial_parallelism:
         local_shape = gridded.horizontal_coordinates.shape[-2:]
         assert local_shape != (N_LAT, N_LON)
         assert gridded.dataset_info.img_shape == (N_LAT, N_LON)
@@ -1546,7 +1546,7 @@ def test_inference_gridded_data_dataset_info_not_localized(_global_properties):
 
     # Sanity-check: under spatial parallelism the *local* shape differs
     dist = Distributed.get_instance()
-    if dist.world_size != dist.total_data_parallel_ranks:
+    if dist.has_spatial_parallelism:
         local_shape = inference.horizontal_coordinates.shape[-2:]
         assert local_shape != (N_LAT, N_LON)
         assert inference.dataset_info.img_shape == (N_LAT, N_LON)

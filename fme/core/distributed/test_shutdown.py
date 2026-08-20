@@ -1,5 +1,3 @@
-import os
-import select
 import signal
 import subprocess
 import sys
@@ -10,18 +8,19 @@ import time
 import pytest
 import torch.utils.data
 
+from fme.core.distributed import shutdown
 from fme.core.distributed.shutdown import (
-    add_post_shutdown_callback,
-    handle_termination_signals,
+    TERMINATION_SIGNALS,
+    abort_and_exit_on_termination,
+    park_if_terminating,
 )
 
 
-def _run_handler_program(program: str) -> "subprocess.CompletedProcess[str]":
-    """Exercise the handler in a subprocess.
+def _run_listener_program(program: str) -> "subprocess.CompletedProcess[str]":
+    """Exercise the listener in a subprocess.
 
-    Cases that turn on whether the process survives cannot run in-process:
-    pytest catches the graceful `SystemExit`, and an `os._exit` would take the
-    whole session down without a summary.
+    Every acted-on signal ends in `os._exit`, which would take the whole pytest
+    session down if raised in-process.
     """
     return subprocess.run(
         [sys.executable, "-c", textwrap.dedent(program)],
@@ -31,306 +30,511 @@ def _run_handler_program(program: str) -> "subprocess.CompletedProcess[str]":
     )
 
 
-def test_process_group_is_torn_down_before_callbacks_run():
-    """Slow work must not delay the collective teardown.
-
-    `destroy_process_group` is collective, so a rank that writes a checkpoint
-    first leaves its peers blocked in the collective until the scheduler kills
-    them mid-NCCL, which is what faults the GPUs.
-    """
-    events = []
-    add_post_shutdown_callback(lambda: events.append("first callback"))
-    add_post_shutdown_callback(lambda: events.append("second callback"))
-
-    with handle_termination_signals(shutdown=lambda: events.append("shutdown")):
-        with pytest.raises(SystemExit):
-            signal.raise_signal(signal.SIGTERM)
-
-    assert events == ["shutdown", "first callback", "second callback"]
-
-
+@pytest.mark.medium_duration
 @pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
-def test_exits_with_conventional_code_for_signal(sig):
-    with handle_termination_signals(shutdown=lambda: None):
-        with pytest.raises(SystemExit) as excinfo:
-            signal.raise_signal(sig)
+def test_aborts_then_exits_with_conventional_code_for_signal(sig):
+    result = _run_listener_program(
+        f"""
+        import signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
-    assert excinfo.value.code == 128 + sig
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
+        ):
+            signal.raise_signal(signal.Signals({int(sig)}))
+            threading.Event().wait()  # the listener must end the process
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + sig
 
 
-def test_callbacks_run_even_if_shutdown_fails():
-    """A backend that cannot be torn down must not cost us the checkpoint."""
-    events = []
-    add_post_shutdown_callback(lambda: events.append("callback"))
+@pytest.mark.medium_duration
+def test_acts_while_the_main_thread_is_wedged_holding_the_logging_lock():
+    """The case the old handler-based design could not cover.
 
-    def shutdown():
-        raise RuntimeError("no process group")
+    A rank blocked in a collective's stream sync never returns to the
+    interpreter, so a Python signal handler never runs; and it passes through
+    `Handler.handle`'s locked emit constantly, so a signal arriving there
+    leaves the main thread holding the logging lock as it wedges. The listener
+    must act anyway, without needing that lock.
+    """
+    result = _run_listener_program(
+        """
+        import logging, os, signal, sys, threading, time
+        logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
-    with handle_termination_signals(shutdown=shutdown):
-        with pytest.raises(SystemExit):
+        def signal_later():
+            time.sleep(0.5)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        threading.Thread(target=signal_later, daemon=True).start()
+        lock = threading.Lock()
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
+        ):
+            # stands in for being interrupted mid-emit, inside `Handler.handle`
+            with logging.getLogger().handlers[0].lock:
+                lock.acquire()
+                lock.acquire()  # blocks in C, never returning to the interpreter
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_exits_even_if_abort_raises():
+    """A backend that cannot be aborted must not leave the rank running.
+
+    Riding to the scheduler's SIGKILL is the outcome this module exists to
+    avoid, so a failed abort still exits after the grace period.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        def abort():
+            raise RuntimeError("no process group")
+
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=0.1, park_deadline=0.1
+        ):
             signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()
+        """
+    )
 
-    assert events == ["callback"]
+    assert result.returncode == 128 + signal.SIGTERM
+    assert "RuntimeError: no process group" in result.stderr
 
 
-def test_later_callbacks_run_even_if_an_earlier_one_fails():
-    events = []
+@pytest.mark.medium_duration
+def test_exit_waits_out_the_grace_period():
+    """No rank may exit before its peers' aborts have finished.
 
-    def failing():
-        raise RuntimeError("boom")
+    The exit floor -- park deadline + settle period + grace period after the
+    signal -- is the only thing standing between a fast rank's exit and a
+    slow peer's still-running kernels, so the exit must not come early.
+    """
+    park_deadline = 0.1
+    settle_period = 0.1
+    grace_period = 1.0
+    program = textwrap.dedent(
+        f"""
+        import signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
 
-    add_post_shutdown_callback(failing)
-    add_post_shutdown_callback(lambda: events.append("callback"))
+        with abort_and_exit_on_termination(
+            abort=lambda: None,
+            grace_period={grace_period},
+            park_deadline={park_deadline},
+            settle_period={settle_period},
+        ):
+            print("ready", flush=True)
+            threading.Event().wait()
+        """
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "ready"
+        start = time.monotonic()
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=30)
+        elapsed = time.monotonic() - start
+    finally:
+        proc.kill()
+        proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
 
-    with handle_termination_signals(shutdown=lambda: None):
-        with pytest.raises(SystemExit):
+    assert proc.returncode == 128 + signal.SIGTERM
+    assert elapsed >= (park_deadline + settle_period + grace_period) * 0.9
+
+
+@pytest.mark.medium_duration
+def test_post_abort_callbacks_run_after_the_abort_and_cannot_stop_the_exit():
+    """Callbacks (the Trainer's restart checkpoint) run once the abort has
+    released the rank's own kernels, and a raising one must not block the
+    exit or its successors."""
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            add_post_abort_callback,
+            abort_and_exit_on_termination,
+        )
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        def broken():
+            raise RuntimeError("no checkpoint for you")
+
+        add_post_abort_callback(lambda: print("first", flush=True))
+        add_post_abort_callback(broken)
+        add_post_abort_callback(lambda: print("second", flush=True))
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=0.1, park_deadline=0.1
+        ):
             signal.raise_signal(signal.SIGTERM)
+            released.wait()  # blocked "in the collective" until the abort
+            raise RuntimeError("rank unwinding after its collective died")
+        """
+    )
 
-    assert events == ["callback"]
+    assert result.stdout.split() == ["abort", "first", "second"]
+    assert "no checkpoint for you" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
 
 
-def test_previous_handlers_and_callbacks_are_restored_on_exit():
-    original = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
-    ran = []
+@pytest.mark.medium_duration
+def test_callbacks_wait_for_the_main_thread_to_stop_running():
+    """The abort releases only a main thread blocked in a collective; one
+    between collectives keeps computing until the next collective raises. A
+    callback that reads training state (the restart checkpoint) must not run
+    until the main thread has blocked in the context's exit, or it would
+    snapshot state mid-mutation.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading, time
+        from fme.core.distributed.shutdown import (
+            add_post_abort_callback,
+            abort_and_exit_on_termination,
+        )
 
-    with handle_termination_signals(shutdown=lambda: None):
-        add_post_shutdown_callback(lambda: ran.append("callback"))
-        assert signal.getsignal(signal.SIGTERM) is not original[signal.SIGTERM]
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=0.1, park_deadline=0.1
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            released.wait()
+            time.sleep(1.0)  # compute continuing between collectives
+            print("still training", flush=True)
+            raise RuntimeError("the next collective died")
+        """
+    )
+
+    assert result.stdout.splitlines() == ["abort", "still training", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_callbacks_are_skipped_when_the_main_thread_never_stops():
+    """A main thread that never unwinds (stuck outside any collective) keeps
+    mutating whatever it is stuck in; a snapshot taken alongside it could be
+    torn, so no snapshot is taken -- but the grace period and exit still
+    happen."""
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            add_post_abort_callback,
+            abort_and_exit_on_termination,
+        )
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            state_freeze_timeout=0.2,
+            park_deadline=0.1,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()  # never unwinds
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert "skipping post-abort callbacks" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_dead_stderr_cannot_stop_the_abort_or_the_exit():
+    """``os.write`` to a pipe whose reader is gone raises EPIPE (Python
+    ignores SIGPIPE), and mid-preemption the log collector may die before the
+    ranks do. Losing the listener's messages must not lose the abort, the
+    grace period, or the exit code."""
+    result = _run_listener_program(
+        """
+        import os, signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        r, w = os.pipe()
+        os.close(r)
+        os.dup2(w, 2)  # every stderr write now raises BrokenPipeError
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_main_thread_released_by_the_abort_cannot_exit_first():
+    """Leaving the context must block until the listener has exited.
+
+    Aborting the communicators *releases* a main thread that was blocked in a
+    collective, which then raises out of the training loop and unwinds. If
+    that unwind escaped the context, the process would exit with the
+    exception's code, before the grace period -- losing both the fabric
+    guarantee and the preemption exit code.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        with abort_and_exit_on_termination(
+            abort=abort, grace_period=1.0, park_deadline=0.1
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            released.wait()  # blocked "in the collective" until the abort
+            raise RuntimeError("rank unwinding after its collective died")
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT])
+def test_a_repeated_signal_cannot_cut_the_grace_period_short(sig):
+    """A second signal is routine whenever a human is involved: Ctrl-C hits
+    every rank via the tty and again via torchrun's forwarding, and an
+    impatient operator repeats it. If the context's exit restored the previous
+    dispositions (typically ``SIG_DFL``) while the listener was still waiting
+    out the grace period, that second signal would kill the rank instantly --
+    before its peers' aborts had finished.
+    """
+    grace_period = 2.0
+    program = textwrap.dedent(
+        f"""
+        import threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        try:
+            with abort_and_exit_on_termination(
+                abort=abort, grace_period={grace_period}, park_deadline=0.1
+            ):
+                print("ready", flush=True)
+                released.wait()  # blocked "in the collective" until the abort
+                raise RuntimeError("rank unwinding after its collective died")
+        except BaseException as exc:  # noqa: B036
+            print(f"escaped the context: {{type(exc).__name__}}", flush=True)
+        """
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "ready"
+        start = time.monotonic()
+        proc.send_signal(sig)
+        # once the abort has run, the released main thread is unwinding into
+        # the context's exit; give it time to get there before the repeat
+        assert proc.stdout.readline().strip() == "abort"
+        time.sleep(0.5)
+        proc.send_signal(sig)
+        proc.wait(timeout=30)
+        elapsed = time.monotonic() - start
+        remaining_stdout = proc.stdout.read()
+    finally:
+        proc.kill()
+        proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+    assert "escaped the context" not in remaining_stdout
+    assert proc.returncode == 128 + sig
+    assert elapsed >= grace_period * 0.9
+
+
+@pytest.mark.medium_duration
+def test_forked_child_does_not_trigger_the_parent_abort():
+    """A signal delivered to a fork-started worker must stay the worker's.
+
+    The default DataLoader start method is fork, so each worker inherits the
+    wakeup fd, which feeds the parent's pipe: without the at-fork disarm, a
+    SIGTERM that the DataLoader sends a worker would read as the parent's own
+    preemption and abort the whole rank. The disarmed child dies from the
+    signal as it would have without the inheritance.
+    """
+    result = _run_listener_program(
+        """
+        import os, signal, time
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
+        ):
+            pid = os.fork()
+            if pid == 0:
+                time.sleep(30)
+                os._exit(0)
+            time.sleep(0.5)  # let the child's at-fork disarm run
+            os.kill(pid, signal.SIGTERM)
+            _, status = os.waitpid(pid, 0)
+            child_killed = (
+                os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGTERM
+            )
+            print(f"child killed by signal: {child_killed}", flush=True)
+            time.sleep(0.5)  # a poisoned listener would abort and exit here
+            print("parent alive", flush=True)
+        """
+    )
+
+    assert result.stdout.splitlines() == [
+        "child killed by signal: True",
+        "parent alive",
+    ]
+    assert result.returncode == 0
+
+
+@pytest.mark.medium_duration
+def test_second_generation_fork_does_not_close_recycled_fds():
+    """A fork-started worker's own fork (dataset code using multiprocessing)
+    runs the at-fork disarm a second time. The first disarm closed the
+    inherited pipe fds, so it must also clear the module state -- or the
+    second run closes fd numbers the worker has since reused for something
+    else.
+    """
+    result = _run_listener_program(
+        """
+        import os
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        with abort_and_exit_on_termination(abort=lambda: None, grace_period=0.1):
+            pid = os.fork()
+            if pid == 0:  # worker: its at-fork disarm closed the pipe fds
+                a, b = os.pipe()  # recycle those fd numbers
+                gpid = os.fork()  # grandchild: the at-fork hook runs again
+                if gpid == 0:
+                    try:
+                        os.fstat(a)
+                        os.fstat(b)
+                    except OSError:
+                        os._exit(1)
+                    os._exit(0)
+                _, status = os.waitpid(gpid, 0)
+                os._exit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 2)
+            _, status = os.waitpid(pid, 0)
+            intact = os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+            print(f"recycled fds intact: {intact}", flush=True)
+        """
+    )
+
+    assert result.stdout.splitlines() == ["recycled fds intact: True"]
+    assert result.returncode == 0
+
+
+@pytest.mark.medium_duration
+def test_other_handled_signals_do_not_trigger_the_abort():
+    """The wakeup fd sees every signal CPython delivers, not just termination.
+
+    torch's DataLoader installs a SIGCHLD handler in the main process, so
+    routine worker exits write to the same pipe the listener reads; acting on
+    those bytes would abort a healthy rank whenever a worker pool shut down.
+    """
+    result = _run_listener_program(
+        """
+        import os, signal, time
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        signal.signal(signal.SIGCHLD, lambda signum, frame: None)
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.1,
+        ):
+            pid = os.fork()
+            if pid == 0:
+                os._exit(0)
+            os.waitpid(pid, 0)
+            time.sleep(0.5)
+            print("alive", flush=True)
+        """
+    )
+
+    assert result.stdout.splitlines() == ["alive"]
+    assert result.returncode == 0
+
+
+def test_previous_dispositions_are_restored_on_exit():
+    original = {sig: signal.getsignal(sig) for sig in TERMINATION_SIGNALS}
+
+    with abort_and_exit_on_termination(abort=lambda: None):
+        for sig in TERMINATION_SIGNALS:
+            assert signal.getsignal(sig) is not original[sig]
+        assert any(
+            thread.name == "termination-listener" for thread in threading.enumerate()
+        )
 
     for sig, handler in original.items():
         assert signal.getsignal(sig) is handler
-
-    # the callback belonged to the job that just ended, so a later job must not
-    # inherit it
-    with handle_termination_signals(shutdown=lambda: None):
-        with pytest.raises(SystemExit):
-            signal.raise_signal(signal.SIGTERM)
-    assert ran == []
-
-
-def test_a_second_signal_does_not_restart_the_teardown():
-    """A repeated Ctrl-C must not cost us the restart checkpoint.
-
-    Re-entering would abandon the in-progress teardown and start it over, so
-    the callbacks would run twice and the checkpoint write would restart.
-    """
-    events = []
-
-    def shutdown():
-        events.append("shutdown")
-        signal.raise_signal(signal.SIGINT)  # arrives while we are tearing down
-
-    add_post_shutdown_callback(lambda: events.append("callback"))
-
-    with handle_termination_signals(shutdown=shutdown):
-        with pytest.raises(SystemExit) as excinfo:
-            signal.raise_signal(signal.SIGTERM)
-
-    assert events == ["shutdown", "callback"]
-    assert excinfo.value.code == 128 + signal.SIGTERM
-
-
-def test_a_signal_after_a_swallowed_exit_kills_the_process(monkeypatch):
-    """A process that swallowed the teardown's SystemExit must stay killable.
-
-    pytest turns a SystemExit raised inside a test into a test failure and
-    keeps running (as does any bare except), and the ignore-repeats guard
-    would otherwise latch every later signal into a no-op: the first Ctrl-C
-    of a test session would make the rest of it un-interruptible.
-    """
-    exited = []
-    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
-
-    with handle_termination_signals(shutdown=lambda: None):
-        with pytest.raises(SystemExit):
-            signal.raise_signal(signal.SIGTERM)
-        # the SystemExit was swallowed just above; the job is still running
-        signal.raise_signal(signal.SIGINT)
-
-    assert exited == [128 + signal.SIGINT]
-
-
-def test_callback_raising_system_exit_does_not_hijack_the_exit_code():
-    """sys.exit() in a callback must not skip the rest or rewrite the code."""
-    events = []
-    add_post_shutdown_callback(lambda: sys.exit(0))
-    add_post_shutdown_callback(lambda: events.append("callback"))
-
-    with handle_termination_signals(shutdown=lambda: None):
-        with pytest.raises(SystemExit) as excinfo:
-            signal.raise_signal(signal.SIGTERM)
-
-    assert events == ["callback"]
-    assert excinfo.value.code == 128 + signal.SIGTERM
-
-
-def test_deadline_does_not_outlive_a_successful_teardown(monkeypatch):
-    """An expired deadline must not kill a process that shut down cleanly.
-
-    The timer runs on its own thread, so leaving it armed takes the process
-    down some seconds after the graceful path already finished.
-
-    This covers the common case, not an absolute guarantee: `Timer.cancel` is a
-    no-op once the timer has begun running, so a clean teardown that finishes in
-    the same instant the deadline expires still exits 143. Cancelling as soon as
-    the collective returns keeps that window down to the collective's own
-    duration -- it used to span the checkpoint write as well -- but it cannot
-    close it.
-    """
-    exited = []
-    monkeypatch.setattr(os, "_exit", lambda code: exited.append(code))
-
-    with handle_termination_signals(shutdown=lambda: None, teardown_timeout=0.05):
-        with pytest.raises(SystemExit):
-            signal.raise_signal(signal.SIGTERM)
-
-    time.sleep(0.2)  # long enough that an uncancelled deadline would have fired
-    assert exited == []
-
-
-@pytest.mark.medium_duration
-def test_hard_exits_when_teardown_hangs():
-    """A wedged rank must not hold the process until the scheduler SIGKILLs it."""
-    result = _run_handler_program(
-        """
-        import signal, threading
-        from fme.core.distributed.shutdown import handle_termination_signals
-
-        def hang():
-            threading.Event().wait()
-
-        with handle_termination_signals(shutdown=hang, teardown_timeout=1.0):
-            signal.raise_signal(signal.SIGTERM)
-        """
+    # the sentinel write on exit stops the listener rather than leaking one
+    # thread per context entry
+    assert not any(
+        thread.name == "termination-listener" for thread in threading.enumerate()
     )
 
-    assert result.returncode == 128 + signal.SIGTERM
-    assert "did not complete" in result.stderr
 
-
-@pytest.mark.medium_duration
-def test_hard_exits_when_the_teardown_hangs_holding_the_logging_lock():
-    """The watchdog must not need a lock the wedged main thread is holding.
-
-    A rank passes through `Handler.handle`'s locked emit constantly, so a signal
-    arriving there leaves the main thread holding that lock as it wedges in the
-    collective. Anything the watchdog logs would then block for good.
-    """
-    result = _run_handler_program(
-        """
-        import logging, signal, sys, threading
-        logging.basicConfig(level=logging.INFO, stream=sys.stderr)
-        from fme.core.distributed.shutdown import handle_termination_signals
-
-        def hang():
-            threading.Event().wait()
-
-        # holding the lock stands in for being interrupted mid-emit, inside
-        # `Handler.handle`'s `with self.lock`
-        with handle_termination_signals(shutdown=hang, teardown_timeout=1.0):
-            with logging.getLogger().handlers[0].lock:
-                signal.raise_signal(signal.SIGTERM)
-        """
-    )
-
-    assert result.returncode == 128 + signal.SIGTERM
-    assert "did not complete" in result.stderr
-
-
-@pytest.mark.medium_duration
-@pytest.mark.parametrize(
-    "shutdown_body",
-    [
-        pytest.param("pass", id="collective_succeeded"),
-        pytest.param(
-            'raise RuntimeError("NCCL communicator was aborted")',
-            id="collective_failed",
-        ),
-    ],
-)
-def test_the_deadline_does_not_bound_the_checkpoint_write(tmp_path, shutdown_body):
-    """Rank 0 must finish its work whatever became of its peers.
-
-    Once `shutdown` has returned the peers are out of the collective either way
-    -- cleanly, or because the communicator was already aborted -- so both
-    parameters expect the same outcome: the write completes even though it
-    outlasts `teardown_timeout` several times over.
-
-    The exit code cannot be the evidence, the graceful `sys.exit(143)` and the
-    watchdog's `os._exit(143)` being identical, so it is the file plus stderr.
-    """
-    checkpoint = tmp_path / "checkpoint"
-    result = _run_handler_program(
-        f"""
-        import signal, time
-        from fme.core.distributed.shutdown import (
-            add_post_shutdown_callback,
-            handle_termination_signals,
-        )
-
-        def shutdown():
-            {shutdown_body}
-
-        def write_checkpoint():
-            # stands in for the Trainer's multi-GB torch.save
-            with open({str(checkpoint)!r}, "w") as f:
-                f.write("partial")
-            time.sleep(2.0)
-            with open({str(checkpoint)!r}, "a") as f:
-                f.write(" complete")
-
-        add_post_shutdown_callback(write_checkpoint)
-        with handle_termination_signals(shutdown=shutdown, teardown_timeout=0.5):
-            signal.raise_signal(signal.SIGTERM)
-        """
-    )
-
-    assert "did not complete" not in result.stderr
-    assert checkpoint.read_text() == "partial complete"
-
-
-@pytest.mark.medium_duration
-def test_a_signal_during_the_callbacks_kills_the_process():
-    """Once the peers are safe, an escalating signal must be obeyed.
-
-    The callbacks are deliberately unbounded, so ignoring repeats here -- as we
-    do during the collective -- would leave a rank wedged in a stalled
-    checkpoint write deaf to every signal until SIGKILL. By this point the
-    process group is gone, so honoring the signal costs at most the checkpoint.
-    """
-    result = _run_handler_program(
-        """
-        import os, signal
-        from fme.core.distributed.shutdown import (
-            add_post_shutdown_callback,
-            handle_termination_signals,
-        )
-
-        def stalled_write():
-            print("first callback", flush=True)  # os._exit will not flush for us
-            signal.raise_signal(signal.SIGINT)  # the operator, losing patience
-            print("first callback returned", flush=True)
-
-        add_post_shutdown_callback(stalled_write)
-        add_post_shutdown_callback(lambda: print("second callback", flush=True))
-        with handle_termination_signals(shutdown=lambda: None):
-            signal.raise_signal(signal.SIGTERM)
-        """
-    )
-
-    # died inside the first callback: the second never ran, and the exit code is
-    # the escalating signal's rather than the original SIGTERM's
-    assert result.stdout.splitlines() == ["first callback"]
-    assert result.returncode == 128 + signal.SIGINT
-
-
-def test_no_handler_installed_off_the_main_thread():
+def test_no_listener_installed_off_the_main_thread():
     """Only the main thread can own the process's signal disposition."""
     original = signal.getsignal(signal.SIGTERM)
     observed = []
 
     def run():
-        with handle_termination_signals(shutdown=lambda: None):
+        with abort_and_exit_on_termination(abort=lambda: None):
             observed.append(signal.getsignal(signal.SIGTERM))
 
     thread = threading.Thread(target=run)
@@ -340,63 +544,497 @@ def test_no_handler_installed_off_the_main_thread():
     assert observed == [original]
 
 
-def test_no_teardown_in_a_process_forked_inside_the_context():
-    """A forked child must not tear the parent's backend down.
-
-    The default DataLoader start method is fork, so each worker inherits this
-    handler, and torchrun signals the whole process group. Every worker would
-    then destroy a fork-inherited NCCL context and re-run the parent's
-    callbacks -- including the multi-GB restart checkpoint write.
-
-    The `get_worker_info` guard cannot catch this: it is only set in workers,
-    which under fork have already inherited the handler by the time it runs,
-    and spawn/forkserver workers never inherited it at all.
-    """
-    read_fd, write_fd = os.pipe()
-
-    def report(event: bytes) -> None:
-        # the child cannot report back through the parent's objects
-        os.write(write_fd, event)
-
-    add_post_shutdown_callback(lambda: report(b"callback"))
-
-    with handle_termination_signals(shutdown=lambda: report(b"shutdown")):
-        pid = os.fork()
-        if pid == 0:
-            # never let a forked copy of the test session escape back into
-            # pytest, whatever the handler does
-            try:
-                os.close(read_fd)
-                signal.raise_signal(signal.SIGTERM)
-            except BaseException:
-                pass
-            finally:
-                os._exit(0)
-
-        os.close(write_fd)
-        ready: list[int] = []
-        try:
-            # EOF (the child exiting) or its first write, whichever comes first
-            ready, _, _ = select.select([read_fd], [], [], 30.0)
-            observed = os.read(read_fd, 4096) if ready else b"child hung"
-        finally:
-            os.close(read_fd)
-            if not ready:
-                os.kill(pid, signal.SIGKILL)
-            _, status = os.waitpid(pid, 0)
-
-    assert observed == b""
-    # and the other half of the guard's contract: the child dies from the signal
-    # as it would have without inheriting the handler. Without this the child's
-    # `os._exit(0)` backstop would let a `raise_signal` that quietly failed to
-    # kill anything pass as success.
-    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGTERM
-
-
-def test_no_handler_installed_in_a_dataloader_worker(monkeypatch):
+def test_no_listener_installed_in_a_dataloader_worker(monkeypatch):
     """The DataLoader owns its workers' lifecycle, so leave their signals alone."""
     monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
     original = signal.getsignal(signal.SIGTERM)
 
-    with handle_termination_signals(shutdown=lambda: None):
+    with abort_and_exit_on_termination(abort=lambda: None):
         assert signal.getsignal(signal.SIGTERM) is original
+
+
+@pytest.mark.medium_duration
+def test_a_parked_main_thread_is_aborted_at_the_uniform_time_with_callbacks():
+    """Parking at a loop boundary freezes state, but the abort must not come
+    early: an idle rank's abort frees buffers a peer wedged in a later
+    collective is still waiting on, so a parked rank aborts at the uniform
+    time -- a settle period past the park deadline, after every wedged peer's
+    deadline abort -- and the post-abort callbacks run against the
+    boundary-frozen state rather than being skipped.
+    """
+    park_deadline = 0.5
+    settle_period = 0.2
+    result = _run_listener_program(
+        f"""
+        import signal, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+            park_if_terminating,
+        )
+
+        signaled = {{"at": 0.0}}
+
+        def abort():
+            print(f"elapsed {{time.monotonic() - signaled['at']:.3f}}", flush=True)
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with abort_and_exit_on_termination(
+            abort=abort,
+            grace_period=0.1,
+            park_deadline={park_deadline},
+            settle_period={settle_period},
+        ):
+            signaled["at"] = time.monotonic()
+            signal.raise_signal(signal.SIGTERM)
+            while True:  # the training loop: a boundary between batches
+                park_if_terminating()
+        """
+    )
+
+    assert "parked at a loop boundary" in result.stderr
+    assert "has not parked" not in result.stderr
+    label, elapsed, callback = result.stdout.split()
+    assert (label, callback) == ("elapsed", "callback")
+    assert float(elapsed) >= (park_deadline + settle_period) * 0.9
+    assert float(elapsed) < 5.0  # parked, not hung: the abort still comes
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_settle_period_holds_a_parked_abort_past_the_deadline():
+    """A wedged peer aborts at the park deadline on its own clock, which may
+    lag this rank's by the signal skew. The settle period is what puts a
+    parked rank's abort strictly after every such peer's, so it must land on
+    top of the deadline, not replace it.
+    """
+    park_deadline = 0.3
+    settle_period = 0.6
+    result = _run_listener_program(
+        f"""
+        import signal, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        signaled = {{"at": 0.0}}
+
+        def abort():
+            print(f"settle {{time.monotonic() - signaled['at']:.3f}}", flush=True)
+
+        with abort_and_exit_on_termination(
+            abort=abort,
+            grace_period=0.1,
+            park_deadline={park_deadline},
+            settle_period={settle_period},
+        ):
+            signaled["at"] = time.monotonic()
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                park_if_terminating()
+        """
+    )
+
+    assert "parked at a loop boundary" in result.stderr
+    label, observed = result.stdout.split()
+    assert label == "settle"
+    assert float(observed) >= (park_deadline + settle_period) * 0.9
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_deadline_bounds_the_wait_for_a_main_thread_that_never_parks():
+    """A main thread wedged in a collective a peer will never complete cannot
+    park; its kernels are waiting rather than transferring, so after the
+    deadline the abort proceeds without it.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.2,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()  # wedged "in a collective"
+        """
+    )
+
+    assert "has not parked" in result.stderr
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_park_wedge_split_keeps_aborts_ordered_and_exits_last():
+    """Signal skew around one park check sends two ranks down different
+    paths: one parks, one wedges in a collective the parked rank never joins.
+    Two invariants protect the wedged rank: the parked rank must not abort
+    first (freeing buffers the wedged rank's waiting kernels still poll --
+    its abort comes a settle period after the wedged rank's deadline abort),
+    and no rank may exit -- unmapping its memory -- before every rank has
+    aborted.
+    """
+    park_deadline = 1.0
+    settle_period = 0.2
+    grace_period = 0.5
+    child = textwrap.dedent(
+        f"""
+        import sys, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        def abort():
+            print(f"abort {{time.monotonic():.3f}}", flush=True)
+
+        with abort_and_exit_on_termination(
+            abort,
+            grace_period={grace_period},
+            park_deadline={park_deadline},
+            settle_period={settle_period},
+        ):
+            print("READY", flush=True)
+            while True:
+                if sys.argv[1] == "park":
+                    park_if_terminating()  # a batch loop offering a boundary
+                time.sleep(0.01)  # "wedge": in a collective, no park point
+        """
+    )
+    procs = {}
+    for role in ("park", "wedge"):
+        proc = subprocess.Popen(
+            [sys.executable, "-c", child, role],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "READY"  # startup paid
+        procs[role] = proc
+
+    aborted_at: dict[str, float] = {}
+    exited_at: dict[str, float] = {}
+    stderr_of: dict[str, str] = {}
+
+    def observe(role: str) -> None:
+        proc = procs[role]
+        assert proc.stdout is not None
+        label, at = proc.stdout.readline().split()
+        assert label == "abort"
+        aborted_at[role] = float(at)
+        assert proc.stderr is not None
+        stderr_of[role] = proc.stderr.read()  # EOF at exit
+        proc.wait(timeout=30)
+        exited_at[role] = time.monotonic()
+
+    observers = [threading.Thread(target=observe, args=(role,)) for role in procs]
+    try:
+        for proc in procs.values():
+            proc.send_signal(signal.SIGTERM)  # one each, as torchrun's agent does
+        for thread in observers:
+            thread.start()
+        for thread in observers:
+            thread.join(timeout=30)
+    finally:
+        for proc in procs.values():
+            proc.kill()
+            proc.wait()
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
+
+    assert set(exited_at) == {"park", "wedge"}
+    assert "parked at a loop boundary" in stderr_of["park"]
+    assert "has not parked" in stderr_of["wedge"]
+    # time.monotonic() is CLOCK_MONOTONIC, shared across processes on Linux,
+    # so the children's abort stamps and the parent's exit stamps compare
+    assert aborted_at["wedge"] < aborted_at["park"]
+    assert min(exited_at.values()) > max(aborted_at.values())
+
+
+@pytest.mark.medium_duration
+def test_only_the_main_thread_parks():
+    """Any thread may call the park check, but only the main thread's arrival
+    at a loop boundary says anything about the rank's collectives -- a side
+    thread (a DataLoader pin-memory thread, a metrics thread) must return
+    immediately rather than freeze training state the main thread is still
+    mutating.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        def side_thread():
+            park_if_terminating()
+            print("side thread returned", flush=True)
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=2.0,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            time.sleep(0.1)  # let the listener take ownership of the exit
+            threading.Thread(target=side_thread).start()
+            threading.Event().wait()  # the main thread itself never parks
+        """
+    )
+
+    assert "side thread returned" in result.stdout
+    assert "has not parked" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+def test_park_is_a_noop_without_a_pending_termination():
+    park_if_terminating()  # no listener context armed at all
+    with abort_and_exit_on_termination(abort=lambda: None):
+        park_if_terminating()  # armed, but no signal has arrived
+
+
+@pytest.mark.medium_duration
+def test_the_drain_runs_before_the_park_and_the_abort():
+    """The loop reaching a boundary is a host-side fact; the batch's last
+    collectives may still be running on the device. The park must drain them
+    before freezing state, and the abort must come after the drain.
+    """
+    result = _run_listener_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.5,
+            settle_period=0.05,
+            drain=lambda: print("drain", flush=True),
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                park_if_terminating()
+        """
+    )
+
+    assert result.stdout.split() == ["drain", "abort"]
+    assert "parked at a loop boundary" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_drain_that_hangs_leaves_the_deadline_path_in_charge():
+    """A drain wedged on a collective a peer will never complete must not
+    freeze training state -- the listener's deadline abort assumes nothing
+    about this rank's kernels, and is what releases the situation.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.3,
+            drain=lambda: threading.Event().wait(),
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                park_if_terminating()
+        """
+    )
+
+    assert "draining local device work" in result.stderr
+    assert "parked at a loop boundary" not in result.stderr
+    assert "has not parked" in result.stderr
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_drain_that_raises_forfeits_the_callbacks_but_not_the_exit():
+    """A drain that raises (a sticky device error) means the kernel state is
+    unknown: training state must not be frozen -- so the callbacks are
+    skipped rather than snapshot beside it -- and the deadline abort and exit
+    must still happen.
+    """
+    result = _run_listener_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+            park_if_terminating,
+        )
+
+        def drain():
+            raise RuntimeError("device poisoned")
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.3,
+            state_freeze_timeout=0.2,
+            drain=drain,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            while True:
+                park_if_terminating()
+        """
+    )
+
+    assert "Draining local device work failed" in result.stderr
+    assert "device poisoned" in result.stderr
+    assert "skipping post-abort callbacks" in result.stderr
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_child_forked_after_the_signal_does_not_park():
+    """``os.fork`` copies a set ``listener_owns_exit`` into the child, whose
+    surviving thread is re-designated the main thread: without the at-fork
+    clear of the armed context, the child's next park check would block it
+    forever on the parent's pending termination.
+    """
+    result = _run_listener_program(
+        """
+        import os, signal, time
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            park_if_terminating,
+        )
+
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=1.0,
+            settle_period=0.05,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            time.sleep(0.2)  # let the listener take ownership of the exit
+            pid = os.fork()
+            if pid == 0:
+                park_if_terminating()  # must return, not park
+                os._exit(7)
+            _, status = os.waitpid(pid, 0)
+            print(f"child exit: {os.WEXITSTATUS(status)}", flush=True)
+            park_if_terminating()  # the parent itself parks here
+        """
+    )
+
+    assert "child exit: 7" in result.stdout
+    assert "parked at a loop boundary" in result.stderr
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+def test_park_returns_immediately_in_a_dataloader_worker(monkeypatch):
+    """A worker's loop position says nothing about the parent's collectives,
+    and a parked worker would hang the DataLoader that owns it, so the guard
+    must return even with a termination pending.
+    """
+    coordination = shutdown._ExitCoordination()
+    coordination.mark_listener_owns_exit()
+    monkeypatch.setattr(
+        shutdown,
+        "_armed_context",
+        shutdown._ArmedContext(coordination, lambda: None),
+    )
+    monkeypatch.setattr(torch.utils.data, "get_worker_info", lambda: object())
+
+    park_if_terminating()  # returning at all is the assertion
+
+
+@pytest.mark.medium_duration
+def test_the_context_exit_drains_when_the_abort_has_not_started():
+    """An exception racing the signal unwinds into the context's exit while
+    the listener may not have read the signal yet: the exit must drain
+    whenever the abort has not fired, or the settle-path abort meets an
+    undrained rank."""
+    result = _run_listener_program(
+        """
+        import signal
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+        )
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        try:
+            with abort_and_exit_on_termination(
+                abort=lambda: print("abort", flush=True),
+                grace_period=0.1,
+                park_deadline=0.5,
+                settle_period=0.05,
+                drain=lambda: print("drain", flush=True),
+            ):
+                signal.raise_signal(signal.SIGTERM)
+                raise RuntimeError("rank raising alongside the signal")
+        except RuntimeError:
+            pass
+        """
+    )
+
+    assert result.stdout.split() == ["drain", "abort", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_wedged_path_keeps_its_callbacks_despite_a_failing_drain():
+    """A main thread released by the deadline abort unwinds into the context's
+    exit with its device already torn down: draining there would raise and
+    forfeit the restart checkpoint, so the exit must skip the drain once the
+    abort has started."""
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+        )
+
+        released = threading.Event()
+
+        def abort():
+            print("abort", flush=True)
+            released.set()
+
+        def drain():
+            raise RuntimeError("device torn down by the abort")
+
+        add_post_abort_callback(lambda: print("callback", flush=True))
+        try:
+            with abort_and_exit_on_termination(
+                abort=abort,
+                grace_period=0.1,
+                park_deadline=0.2,
+                state_freeze_timeout=1.0,
+                drain=drain,
+            ):
+                signal.raise_signal(signal.SIGTERM)
+                released.wait()  # wedged "in a collective" until the abort
+                raise RuntimeError("rank unwinding after its collective died")
+        except RuntimeError:
+            pass
+        """
+    )
+
+    assert "Draining local device work failed" not in result.stderr
+    assert result.stdout.split() == ["abort", "callback"]
+    assert result.returncode == 128 + signal.SIGTERM

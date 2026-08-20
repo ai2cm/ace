@@ -199,6 +199,43 @@ def get_single_module_noise_conditioned_selector(
     )
 
 
+def get_single_module_include_input_step_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+            "diagnostic_rad",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
+                secondary_decoder=SecondaryDecoderConfig(
+                    secondary_diagnostic_names=["diagnostic_rad"],
+                    network=ModuleSelector(type="MLP", config={}),
+                    include_input_step=True,
+                ),
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
 def get_label_conditioned_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -456,6 +493,7 @@ SELECTOR_GETTERS = [
     get_separate_radiation_selector,
     get_single_module_selector,
     get_single_module_noise_conditioned_selector,
+    get_single_module_include_input_step_selector,
     get_secondary_module_selector,
     get_multi_call_selector,
 ]

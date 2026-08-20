@@ -1,6 +1,8 @@
 import dataclasses
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import dacite
 import pytest
 
 from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
@@ -34,12 +36,13 @@ from fme.core.typing_ import Slice
 
 
 def _make_validation_config(
-    name: str | None = None, weight: float = 1.0
+    name: str | None = None, weight: float = 1.0, evaluate_all_steps: bool = True
 ) -> InlineValidationConfig:
     return InlineValidationConfig(
         loader=DataLoaderConfig(dataset=XarrayDataConfig(data_path=""), batch_size=1),
         name=name,
         weight=weight,
+        evaluate_all_steps=evaluate_all_steps,
     )
 
 
@@ -91,9 +94,15 @@ def _make_train_config(
     inference: InlineInferenceConfig | list[InlineInferenceConfig],
     max_epochs: int = 5,
     validation: InlineValidationConfig | list[InlineValidationConfig] | None = None,
+    evaluate_before_training: bool | None = None,
 ) -> TrainConfig:
     if validation is None:
         validation = _make_validation_config()
+    # Only forward evaluate_before_training when explicitly requested, so that
+    # tests which do not care about it keep seeing the class default.
+    extra_kwargs: dict[str, Any] = {}
+    if evaluate_before_training is not None:
+        extra_kwargs["evaluate_before_training"] = evaluate_before_training
     return TrainConfig(
         experiment_dir=str(tmp_path),
         stepper=_make_stepper_config(),
@@ -107,6 +116,7 @@ def _make_train_config(
         max_epochs=max_epochs,
         save_checkpoint=False,
         inference=inference,
+        **extra_kwargs,
     )
 
 
@@ -249,6 +259,87 @@ def test_get_inference_epoch_sets_different_weighted_epochs_raises(tmp_path):
         )
 
 
+def test_epoch_zero_evaluated_regardless_of_max_epochs_parity(tmp_path):
+    # An end-anchored "every other epoch, counting back from the last" request
+    # must still evaluate before training, whether max_epochs is odd or even.
+    odd = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=15,
+        evaluate_before_training=True,
+    )
+    even = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=20,
+        evaluate_before_training=True,
+    )
+    odd_epochs = odd.get_inference_epoch_sets()[0]
+    even_epochs = even.get_inference_epoch_sets()[0]
+    assert 0 in odd_epochs
+    assert 0 in even_epochs
+    assert odd_epochs == {0, 1, 3, 5, 7, 9, 11, 13, 15}
+    assert even_epochs == {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20}
+
+
+def test_evaluate_before_training_does_not_shift_selected_training_epochs(tmp_path):
+    # Asking for a pre-training evaluation adds epoch 0; it must not change
+    # which training epochs the slice picks out.
+    with_epoch_zero = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(step=2))],
+        max_epochs=6,
+        evaluate_before_training=True,
+    )
+    without_epoch_zero = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(step=2))],
+        max_epochs=6,
+        evaluate_before_training=False,
+    )
+    with_zero_epochs = with_epoch_zero.get_inference_epoch_sets()[0]
+    without_zero_epochs = without_epoch_zero.get_inference_epoch_sets()[0]
+    assert with_zero_epochs - {0} == without_zero_epochs
+    assert with_zero_epochs == without_zero_epochs | {0}
+    assert with_zero_epochs == {0, 1, 3, 5}
+    assert without_zero_epochs == {1, 3, 5}
+
+
+def test_epoch_zero_evaluated_even_when_slice_selects_no_training_epochs(tmp_path):
+    # There is no per-entry opt-out of the pre-training evaluation: an entry
+    # whose slice matches no training epoch still runs at epoch 0.
+    config = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=100))],
+        max_epochs=6,
+        evaluate_before_training=True,
+    )
+    assert config.get_inference_epoch_sets() == [{0}]
+
+
+def test_epoch_zero_not_evaluated_without_evaluate_before_training(tmp_path):
+    # Guard on the opposite case: with no pre-training evaluation requested,
+    # epoch 0 must never appear, at either parity of max_epochs.
+    odd = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=15,
+        evaluate_before_training=False,
+    )
+    even = _make_train_config(
+        tmp_path,
+        [_make_inference_config(epochs=Slice(start=-1, step=-2))],
+        max_epochs=20,
+        evaluate_before_training=False,
+    )
+    odd_epochs = odd.get_inference_epoch_sets()[0]
+    even_epochs = even.get_inference_epoch_sets()[0]
+    assert 0 not in odd_epochs
+    assert 0 not in even_epochs
+    assert odd_epochs == {1, 3, 5, 7, 9, 11, 13, 15}
+    assert even_epochs == {2, 4, 6, 8, 10, 12, 14, 16, 18, 20}
+
+
 def test_validation_negative_weight_raises():
     with pytest.raises(ValueError, match="non-negative"):
         _make_validation_config(weight=-1.0)
@@ -324,6 +415,21 @@ def test_empty_validation_raises(tmp_path):
         _make_train_config(tmp_path, [], validation=[])
 
 
+def test_inline_validation_config_evaluate_all_steps_default():
+    base = {"loader": {"dataset": {"data_path": ""}, "batch_size": 1}}
+    config = dacite.from_dict(
+        InlineValidationConfig, base, config=dacite.Config(strict=True)
+    )
+    assert config.evaluate_all_steps is True
+    for value in (True, False):
+        config = dacite.from_dict(
+            InlineValidationConfig,
+            {**base, "evaluate_all_steps": value},
+            config=dacite.Config(strict=True),
+        )
+        assert config.evaluate_all_steps is value
+
+
 class TestGetValidationCallback:
     """Smoke test for `_get_validation_callback` wiring.
 
@@ -356,6 +462,38 @@ class TestGetValidationCallback:
             )
             _, loss = callback(epoch=1)
         assert loss == pytest.approx(2.0 * 0.1 + 3.0 * 0.2)
+
+    def test_per_entry_evaluate_all_steps_wired_to_tasks(self):
+        entries = [
+            (_make_validation_config(name="a"), MagicMock(), "a"),
+            (
+                _make_validation_config(name="b", evaluate_all_steps=False),
+                MagicMock(),
+                "b",
+            ),
+        ]
+        stepper = MagicMock()
+        with patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[
+                AggregatorSummary(logs={}, loss=0.1),
+                AggregatorSummary(logs={}, loss=0.2),
+            ],
+        ) as mock_run_validation:
+            callback = _get_validation_callback(
+                validation_entries=entries,
+                stepper=stepper,
+                dataset_info=MagicMock(),
+                loss_names=None,
+                save_per_epoch_diagnostics=False,
+                output_dir="/tmp/out",
+            )
+            callback(epoch=1)
+        flags = [
+            call.kwargs["evaluate_all_steps"]
+            for call in mock_run_validation.call_args_list
+        ]
+        assert flags == [True, False]
 
 
 class TestGetInferenceCallback:

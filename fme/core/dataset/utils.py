@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import datetime
+import functools
 from collections.abc import Hashable, MutableMapping, Sequence
 from typing import Literal
 
@@ -16,6 +17,8 @@ from fme.core.coordinates import (
 )
 
 SLICE_NONE = slice(None)
+
+ZARRS_CODEC_PIPELINE = "zarrs.ZarrsCodecPipeline"
 
 
 def accumulate_labels(labels: list[set[str] | None]) -> set[str] | None:
@@ -59,16 +62,28 @@ def _get_indexers(
     return tuple(indexers)
 
 
+def as_alignable_tensor(
+    variable: xr.Variable,
+    dims: Sequence[Hashable],
+) -> torch.tensor:
+    """Load data from variable as a tensor with a singleton axis for each of the
+    given dims that the variable does not have.
+
+    The result is not yet broadcast to a particular shape, so it does not depend
+    on the length of the time dimension and can be reused across samples.
+    """
+    arr = variable.values
+    indexers = _get_indexers(variable, dims)
+    return torch.as_tensor(arr[indexers])
+
+
 def as_broadcasted_tensor(
     variable: xr.Variable,
     dims: Sequence[Hashable],
     shape: Sequence[int],
 ) -> torch.tensor:
     """Load data from variable and broadcast to tensor with the given shape."""
-    arr = variable.values
-    indexers = _get_indexers(variable, dims)
-    tensor = torch.as_tensor(arr[indexers])
-    return torch.broadcast_to(tensor, shape)
+    return torch.broadcast_to(as_alignable_tensor(variable, dims), shape)
 
 
 def _broadcast_array_to_tensor(
@@ -94,28 +109,41 @@ def _broadcast_array_to_tensor(
     return torch.broadcast_to(tensor, shape)
 
 
-async def _get_item(group, name, selection):
-    async_array = await group.getitem(name)
-    if len(async_array.shape) != len(selection):
-        if len(async_array.shape) != 1:
+def _get_array_selection(
+    name: str, shape: tuple[int, ...], selection: tuple[slice | int, ...]
+) -> tuple[slice | int, ...] | slice | int:
+    """Resolve the selection to apply to an array with the given shape."""
+    if len(shape) != len(selection):
+        if len(shape) != 1:
             raise ValueError(
                 f"Index selection slices/indices were provided as {selection} "
-                f"but array {name} has {len(async_array.shape)} dimensions. "
+                f"but array {name} has {len(shape)} dimensions. "
             )
-        else:
-            # 1d scalar arrays are sliced along time dim
-            array_selection = selection[0]
-    else:
-        array_selection = selection
-    return await async_array.getitem(array_selection)
+        # 1d scalar arrays are sliced along time dim
+        return selection[0]
+    return selection
 
 
-async def _get_items(url, names, selection):
-    async_group = await zarr.api.asynchronous.open(store=url)
-    coroutines = []
-    for name in names:
-        coroutines.append(_get_item(async_group, name, selection))
-    return await asyncio.gather(*coroutines)
+# Cache the opened zarr group and arrays to avoid repeated metadata reads when
+# loading multiple time slices from the same zarr store. Assumes that the zarr store is
+# not modified between calls.
+@functools.cache
+def _open_async_group(path: str):
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(zarr.api.asynchronous.open(store=path))
+
+
+@functools.cache
+def _get_async_array(path: str, name: str):
+    loop = asyncio.get_event_loop()
+    with zarr.config.set({"codec_pipeline.path": ZARRS_CODEC_PIPELINE}):
+        return loop.run_until_complete(_open_async_group(path).getitem(name))
+
+
+async def _get_items(arrays_and_selections):
+    return await asyncio.gather(
+        *(array.getitem(selection) for array, selection in arrays_and_selections)
+    )
 
 
 def _load_all_variables_zarr_async(
@@ -127,8 +155,16 @@ def _load_all_variables_zarr_async(
 
     Assumes that the time dimension is the first dimension in the dataset.
     """
+    # arrays are resolved before gathering so that the metadata reads hit the
+    # cache instead of being repeated on every call
+    arrays_and_selections = []
+    for name in variables:
+        async_array = _get_async_array(path, name)
+        arrays_and_selections.append(
+            (async_array, _get_array_selection(name, async_array.shape, selection))
+        )
     loop = asyncio.get_event_loop()
-    arrays = loop.run_until_complete(_get_items(path, variables, selection))
+    arrays = loop.run_until_complete(_get_items(arrays_and_selections))
     return {k: v for k, v in zip(variables, arrays)}
 
 

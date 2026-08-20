@@ -38,7 +38,7 @@ from fme.core.typing_ import Slice, TensorDict
 from .data_typing import VariableMetadata
 from .dataset import DatasetABC, DatasetItem
 from .utils import (
-    as_broadcasted_tensor,
+    as_alignable_tensor,
     get_horizontal_coordinates,
     get_nonspacetime_dimensions,
     load_series_data,
@@ -722,6 +722,7 @@ class XarrayDataset(DatasetABC):
         )
         self._check_isel_dimensions(first_dataset.sizes)
         first_dataset.close()
+        self._time_invariant_tensors = self._load_time_invariant_tensors()
         self._apply_sample_n_times(self._n_timesteps_schedule.get_value(0))
         self._labels = set(config.labels) if config.labels is not None else None
         self._infer_timestep = config.infer_timestep
@@ -729,7 +730,10 @@ class XarrayDataset(DatasetABC):
         self._global_epoch = torch.tensor(-1)
 
         self._orography_override_tensor: torch.Tensor | None = None
-        if config.orography_override is not None and "HGTsfc" in self._names:
+        if (
+            config.orography_override is not None
+            and "HGTsfc" in self._time_invariant_names
+        ):
             override_dataset = XarrayDataset(
                 config.orography_override, ["HGTsfc"], n_timesteps
             )
@@ -772,6 +776,29 @@ class XarrayDataset(DatasetABC):
                 )
             expanded[name] = field.expand(expected_shape)
         return expanded
+
+    def _load_time_invariant_tensors(self) -> dict[str, torch.Tensor]:
+        """Load the time-invariant variables into memory.
+
+        These do not vary in time, so they are read once here and broadcast over
+        the time dimension of each sample rather than being re-read per sample.
+        Values are taken from the first file, consistent with how coordinates,
+        vertical coordinate and variable metadata are read in __init__.
+        """
+        if len(self._time_invariant_names) == 0:
+            return {}
+        # opened directly rather than via _open_file so that closing this
+        # handle cannot close one shared through the file handle cache
+        ds = _open_xr_dataset(self.full_paths[0], engine=self.engine)
+        ds = ds.isel(**self.isel)
+        tensors = {}
+        for name in self._time_invariant_names:
+            variable = ds[name].variable
+            if self.fill_nans is not None:
+                variable = variable.fillna(self.fill_nans.value)
+            tensors[name] = as_alignable_tensor(variable, self.dims)
+        ds.close()
+        return tensors
 
     def _ensure_epoch_synchronized(self):
         """Ensure that the local epoch is synchronized with the global epoch.
@@ -1085,25 +1112,19 @@ class XarrayDataset(DatasetABC):
             tensors[n] = torch.cat(tensor_list)
         del arrays
 
-        # load time-invariant variables from first dataset
-        if len(self._time_invariant_names) > 0:
-            ds = self._open_file(idxs[0])
-            ds = ds.isel(**self.isel)
-            shape = [total_steps] + self._shape_excluding_time_after_selection
-            for name in self._time_invariant_names:
-                if name == "HGTsfc" and self._orography_override_tensor is not None:
-                    tensors[name] = (
-                        self._orography_override_tensor.unsqueeze(0)
-                        .expand(total_steps, *self._orography_override_tensor.shape)
-                        .clone()
-                    )
-                    continue
-                variable = ds[name].variable
-                if self.fill_nans is not None:
-                    variable = variable.fillna(self.fill_nans.value)
-                tensors[name] = as_broadcasted_tensor(variable, self.dims, shape)
-            ds.close()
-            del ds
+        # broadcast the time-invariant variables loaded at construction
+        shape = [total_steps] + self._shape_excluding_time_after_selection
+        for name, tensor in self._time_invariant_tensors.items():
+            tensors[name] = torch.broadcast_to(tensor, shape)
+
+        # HGTsfc sourced from orography_override keeps the override dataset's
+        # own horizontal shape, so it is expanded separately from the fields
+        # broadcast to this dataset's shape above
+        if self._orography_override_tensor is not None:
+            override = self._orography_override_tensor
+            tensors["HGTsfc"] = (
+                override.unsqueeze(0).expand(total_steps, *override.shape).clone()
+            )
 
         # load static derived variables
         for name in self._static_derived_names:
