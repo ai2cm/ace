@@ -42,7 +42,9 @@ verbatim from pre-training.
   (`INLINE_INFERENCE_DROP`) — they cost hundreds-to-thousands of windows per
   inference-epoch and dominated FT wall-clock. Only `aimip_checkpoint`
   (weight 1.0, drives checkpoint selection) + the cheap `weather` entries stay.
-  Run the dropped climate diagnostics post-FT via the eval tooling.
+  The dropped diagnostics run post-FT instead: the eval suite is built from the
+  **unpruned** pre-training config, so they are not lost — see
+  [Evaluating the fine-tunes](#evaluating-the-fine-tunes).
 - `stepper.step.config.input_dropout_optimized_steps_only`: `true` — input
   masking applies only on the optimized (last) rollout step, not the
   intermediate `no_grad` steps (no-op for the mask0 cells; matters for mask20).
@@ -119,8 +121,32 @@ python submit_finetune_jobs.py --variant aimip \
 ```
 
 Fine-tune run names are the source run name + the variant suffix, wandb group
-`ace2-var-masking-mstepft-2026-06-30`. Evaluate them with the existing eval
-tooling (`generate_eval_configs.py` / `submit_eval_jobs.py`) once trained.
+`ace2-var-masking-mstepft-2026-06-30`.
+
+## Evaluating the fine-tunes
+
+`generate_eval_configs.py` covers the fine-tune family automatically (v5 only,
+via `generate_finetune_configs.iter_train_configs`), writing one suite config
+per fine-tune that has finished in wandb and has a result dataset in
+`wandb_to_beaker_map.json`:
+
+```bash
+python update_beaker_map.py -v v5      # pick up finished FT result datasets
+python generate_eval_configs.py -v v5  # writes ace-eval-suite-config-...-mstepft.yaml
+# submit only the FT suites — naming configs positionally bypasses --version,
+# so a v5 eval sweep of the pre-training runs is not dragged along
+python submit_eval_jobs.py --dry-run \
+  ace-eval-suite-config-4deg-nc-sfno-era5-gmron-mask20-seed0-v5-mstepft.yaml
+```
+
+Crucially the suite is built from the **pre-training** config, not the
+fine-tune config: the fine-tune config has `INLINE_INFERENCE_DROP` applied, so
+inheriting it would mean the multi-year diagnostics never run anywhere. Each
+suite therefore holds all six inference entries — `aimip_checkpoint` and the
+two `weather` entries kept inline, plus `10year`, `10year_insample` and
+`long_46year`. `long_46year/annual/*` (51 variables) lands on the eval runs
+`…-mstepft-{besttrain,bestinf,lastepoch}`, not on the fine-tune run's own
+charts. Plot `-bestinf`.
 
 ## Memory
 
