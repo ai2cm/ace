@@ -3,3 +3,10 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # rows are appended here by the job runner at submission
 
 cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip_ohc|rs0|01M094XEK1F72BXT5B1FEKPV3H|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ICx1 140-yr out-of-sample evaluation, 2026-08-20, after rs0 finished 150
+# epochs. evaluator-config-ICx1.yaml is byte-identical to the ocean_baseline
+# and ocean_fillmean_clip copies, so all three arms are evaluated identically;
+# the stepper (fill_value=mean, max_grad_norm, and the OHC corrector) comes
+# from the checkpoint.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip_ohc|rs0|01M094XEK1F72BXT5B1FEKPV3H|run_ICx1|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|h100|||30GiB
