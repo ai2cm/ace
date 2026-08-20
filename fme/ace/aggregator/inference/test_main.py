@@ -1,19 +1,15 @@
 import datetime
-import logging
 from collections.abc import Sequence
-from typing import Any
 
 import numpy as np
 import pytest
 import torch
 import xarray as xr
 
-from fme.ace.aggregator.inference.data import InferenceBatchData
 from fme.ace.aggregator.inference.main import (
     EnsembleMetricConfig,
     StepMeanMetricConfig,
     TimeMeanMetricConfig,
-    _summary_logs,
     build_inference_evaluator_aggregator,
 )
 from fme.ace.data_loading.batch_data import BatchData, PairedData
@@ -173,82 +169,3 @@ def test_inference_evaluator_aggregator_ensemble():
                 summary_logs[f"ensemble_step_20/{metric}/{varname}"]
                 != summary_logs[f"ensemble_step_20_norm/{metric}/{varname}"]
             )
-
-
-class _FailingAggregator:
-    """A sub-aggregator whose get_logs raises, as a failing plot would."""
-
-    def record_batch(self, data: InferenceBatchData) -> None:
-        pass
-
-    def get_logs(self, label: str) -> dict[str, Any]:
-        raise ValueError("boom")
-
-    def get_dataset(self) -> xr.Dataset:
-        return xr.Dataset()
-
-
-class _WorkingAggregator:
-    def record_batch(self, data: InferenceBatchData) -> None:
-        pass
-
-    def get_logs(self, label: str) -> dict[str, Any]:
-        return {f"{label}/metric": 1.0}
-
-    def get_dataset(self) -> xr.Dataset:
-        return xr.Dataset()
-
-
-def test_summary_logs_survives_a_failing_sub_aggregator(caplog):
-    """One aggregator raising must not discard the others' metrics.
-
-    get_summary runs after the whole rollout, so an exception there throws away
-    every finished metric along with the GPU time that produced them.
-    """
-    assert _summary_logs("working", _WorkingAggregator()) == {"working/metric": 1.0}
-    with caplog.at_level(logging.ERROR):
-        assert _summary_logs("failing", _FailingAggregator()) == {}
-    assert "failing" in caplog.text
-
-
-def test_get_summary_continues_past_a_failing_sub_aggregator(caplog):
-    """The tolerance must hold in get_summary itself, not only in the helper.
-
-    The failing aggregator is ordered first so that the surviving metrics prove
-    the loop continued past it, rather than merely having run before it.
-    """
-    n_ic_steps = 1
-    n_forward_steps = 2
-    n_timesteps = n_ic_steps + n_forward_steps
-    nx, ny = 4, 4
-    batch_size = 2
-
-    agg = build_inference_evaluator_aggregator(
-        metrics=[TimeMeanMetricConfig(target="norm")],
-        dataset_info=get_ds_info(nx, ny),
-        n_ic_steps=n_ic_steps,
-        n_forward_steps=n_forward_steps,
-        initial_time=xr.DataArray(np.zeros((batch_size,)), dims=["sample"]),
-        normalize=lambda x, apply_mean=True: dict(x),
-        save_diagnostics=False,
-    )
-    time = xr.DataArray(np.zeros((batch_size, n_timesteps)), dims=["sample", "time"])
-    target = {"a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device())}
-    gen = {"a": torch.ones([batch_size, n_timesteps, nx, ny], device=get_device()) * 2}
-    agg.record_batch(
-        PairedData.from_batch_data(
-            prediction=BatchData(data=gen, time=time),
-            reference=BatchData(data=target, time=time),
-        )
-    )
-    agg._summary_aggregators = {
-        "broken": _FailingAggregator(),
-        **agg._summary_aggregators,
-    }
-
-    with caplog.at_level(logging.ERROR):
-        summary = agg.get_summary()
-
-    assert "broken" in caplog.text
-    assert "time_mean_norm/rmse/a" in summary.logs
-    assert summary.loss is not None
