@@ -6,7 +6,7 @@ import pathlib
 import unittest
 import unittest.mock
 from collections import namedtuple
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from typing import Literal
 from unittest.mock import patch
 
@@ -1606,19 +1606,6 @@ class _RecordingCorrector(CorrectorABC):
     def __init__(self):
         self.call_count = 0
         self.seen_states: list[CorrectorState | None] = []
-
-    @property
-    def modified_names(self) -> frozenset[str]:
-        return frozenset()
-
-    def discover_modified_names(
-        self,
-        input_names: Collection[str],
-        gen_names: Collection[str],
-        forcing_names: Collection[str],
-        img_shape: tuple[int, int],
-    ) -> None:
-        pass
 
     def __call__(
         self,
@@ -3267,19 +3254,20 @@ def _corrector_loss_stepper(
     disabled_epochs: int = 0,
     dataset_info: DatasetInfo | None = None,
     input_masking: StaticSpatialMaskingConfig | None = None,
+    names: list[str] | None = None,
 ) -> Stepper:
-    """Build an ["a"] -> ["a"] stepper, optionally installing a correction
-    (with modified-name discovery run, as ``get_step`` does for config-built
-    correctors)."""
+    """Build a ``names`` -> ``names`` stepper, optionally installing a
+    correction. ``names`` defaults to ``["a"]``."""
+    names = ["a"] if names is None else names
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
             config=dataclasses.asdict(
                 SingleModuleStepConfig(
                     builder=ModuleSelector(type="prebuilt", config={"module": module}),
-                    in_names=["a"],
-                    out_names=["a"],
-                    normalization=trivial_network_and_loss_normalization(["a"]),
+                    in_names=list(names),
+                    out_names=list(names),
+                    normalization=trivial_network_and_loss_normalization(names),
                 )
             ),
         ),
@@ -3296,12 +3284,6 @@ def _corrector_loss_stepper(
             corrector = EpochScheduledCorrector(
                 wrapped=corrector, disabled_epochs=disabled_epochs
             )
-        corrector.discover_modified_names(
-            input_names=step.input_names,
-            gen_names=step.output_names,
-            forcing_names=[],
-            img_shape=(5, 5),
-        )
         step._corrector = corrector
     return stepper
 
@@ -3460,8 +3442,6 @@ def test_epoch_scheduled_corrector():
             corrector_loss=corrector_loss,
         )
 
-    # build-time validation passes via discovery even though the corrector is
-    # epoch-disabled at build
     train_stepper = make(
         CorrectorLossConfig(
             regularization=CorrectorRegularizationConfig(
@@ -3486,7 +3466,19 @@ def test_epoch_scheduled_corrector():
         disabled.metrics["loss_step_0"], disabled_base.metrics["loss_step_0"]
     )
 
+    # the corrector is always applied in eval mode, so the validation pass of
+    # the still-disabled epoch resolves the selection and applies the penalty
     for stepper in (train_stepper, baseline):
+        stepper.set_eval()
+    eval_pass = train_stepper.train_on_batch(data, optimization=NullOptimization())
+    eval_base = baseline.train_on_batch(data, optimization=NullOptimization())
+    torch.testing.assert_close(
+        eval_pass.metrics["loss_step_0"],
+        eval_base.metrics["loss_step_0"] + weight * offset**2,
+    )
+
+    for stepper in (train_stepper, baseline):
+        stepper.set_train()
         stepper.set_epoch(2)  # first enabled epoch
     enabled = train_stepper.train_on_batch(data, optimization=NullOptimization())
     enabled_base = baseline.train_on_batch(data, optimization=NullOptimization())
@@ -3587,3 +3579,31 @@ def test_both_features_together():
     # the returned predictions stay fully corrected
     ic = data.data["a"][:, 0]
     torch.testing.assert_close(both_out.gen_data["a"][:, 0, 1], ic + 1.0 + offset)
+
+
+@pytest.mark.parametrize("selected,trains", [("b", False), ("a", True)])
+def test_corrector_loss_errors_at_the_first_active_step(selected, trains):
+    # the build-time check covers the loss names, so a name the loss covers but
+    # the installed correction does not touch survives it and raises on the
+    # first step whose delta is non-empty.
+    torch.manual_seed(0)
+    data = BatchData.new_for_testing(
+        names=["a", "b"], n_samples=2, n_timesteps=2, epoch=0
+    ).to_device()
+    train_stepper = _init_train_stepper(
+        stepper=_corrector_loss_stepper(
+            _AddOne(), ConstantOffsetCorrection("a", 2.0), names=["a", "b"]
+        ),
+        loss=StepLossConfig(type="MSE"),
+        corrector_loss=CorrectorLossConfig(
+            regularization=CorrectorRegularizationConfig(
+                names_and_prefixes=[selected], norm="L2"
+            )
+        ),
+    )
+    if trains:
+        output = train_stepper.train_on_batch(data, optimization=NullOptimization())
+        assert torch.isfinite(output.metrics["loss"])
+    else:
+        with pytest.raises(ValueError, match="match none of the correction deltas"):
+            train_stepper.train_on_batch(data, optimization=NullOptimization())

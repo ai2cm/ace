@@ -1,16 +1,13 @@
 import abc
 import dataclasses
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from typing import Any, Protocol, Self, final
 
 import dacite
-import torch
 
 from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnostics
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset_info import DatasetInfo
-from fme.core.device import get_device
-from fme.core.distributed.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -20,8 +17,7 @@ class CorrectorConfigABC(abc.ABC):
 
     Subclasses implement ``_get_corrector``. The ``corrector_disabled_epochs``
     option is handled here: ``get_corrector`` wraps the built corrector in an
-    ``EpochScheduledCorrector`` when it is greater than zero, and runs
-    modified-name discovery on the result.
+    ``EpochScheduledCorrector`` when it is greater than zero.
 
     Parameters:
         corrector_disabled_epochs: Number of initial training epochs during
@@ -55,45 +51,11 @@ class CorrectorConfigABC(abc.ABC):
         return dict(state)
 
     @final
-    def get_corrector(
-        self,
-        dataset_info: DatasetInfo,
-        input_names: Collection[str],
-        gen_names: Collection[str],
-        forcing_names: Collection[str],
-    ) -> "CorrectorABC":
-        """Build the corrector and discover the delta keys it produces.
-
-        Discovery runs here, as part of construction, so ``modified_names`` is
-        populated for every corrector type and no caller has to update it
-        statefully. ``img_shape`` comes from ``dataset_info``.
+    def get_corrector(self, dataset_info: DatasetInfo) -> "CorrectorABC":
+        """Build the corrector, applying ``corrector_disabled_epochs``.
 
         Args:
             dataset_info: Information about the dataset the corrector runs on.
-            input_names: Names present in the corrector's ``input_data``.
-            gen_names: Names present in the corrector's ``gen_data``.
-            forcing_names: Names present in the corrector's ``forcing_data``.
-        """
-        corrector = self.build_without_discovery(dataset_info)
-        corrector.discover_modified_names(
-            input_names=input_names,
-            gen_names=gen_names,
-            forcing_names=forcing_names,
-            img_shape=dataset_info.img_shape,
-        )
-        return corrector
-
-    @final
-    def build_without_discovery(self, dataset_info: DatasetInfo) -> "CorrectorABC":
-        """Build the corrector, applying ``corrector_disabled_epochs``, without
-        running discovery.
-
-        The first phase of the two-phase build, public so that a config which
-        delegates to another config (see ``CorrectorSelector``) can compose the
-        build without triggering a second discovery pass. Callers other than
-        such a delegating config want ``get_corrector``, which runs both
-        phases; a corrector returned from here reports no ``modified_names``
-        until discovery has run on it.
         """
         corrector = self._get_corrector(dataset_info)
         if self.corrector_disabled_epochs == 0:
@@ -129,8 +91,7 @@ class Correction(Protocol):
     truth for what changed and cannot drift from the write.
 
     The key set a correction returns may depend on its config and on which keys
-    are present in its inputs, never on tensor values; modified-name discovery
-    at corrector construction relies on this.
+    are present in its inputs, never on tensor values.
     """
 
     def __call__(
@@ -179,32 +140,6 @@ class CorrectorABC(abc.ABC):
     def load_state(self, state: dict[str, Any]) -> None:
         """Load corrector checkpoint state. Default implementation is a no-op."""
 
-    @property
-    @abc.abstractmethod
-    def modified_names(self) -> frozenset[str]:
-        """The delta keys this corrector produces when active.
-
-        Raises if ``discover_modified_names`` has not run, so that "discovery
-        never happened" is never reported as "this corrector modifies nothing".
-        """
-        ...
-
-    @abc.abstractmethod
-    def discover_modified_names(
-        self,
-        input_names: Collection[str],
-        gen_names: Collection[str],
-        forcing_names: Collection[str],
-        img_shape: tuple[int, int],
-    ) -> None:
-        """Discover the delta keys this corrector produces when active, making
-        them available as ``modified_names``.
-
-        Called by ``CorrectorConfigABC.get_corrector`` during construction, not
-        by corrector users; this is the second phase of that two-phase build.
-        """
-        ...
-
     @abc.abstractmethod
     def __call__(
         self,
@@ -241,52 +176,6 @@ class CorrectionSequence(CorrectorABC):
 
     def __init__(self, corrections: list[Correction]):
         self._corrections = corrections
-        self._modified_names: frozenset[str] | None = None
-
-    @property
-    def modified_names(self) -> frozenset[str]:
-        if self._modified_names is None:
-            raise RuntimeError(
-                "modified_names is unavailable because discovery has not run; "
-                "build correctors through CorrectorConfigABC.get_corrector, "
-                "which runs it as part of construction."
-            )
-        return self._modified_names
-
-    def discover_modified_names(
-        self,
-        input_names: Collection[str],
-        gen_names: Collection[str],
-        forcing_names: Collection[str],
-        img_shape: tuple[int, int],
-    ) -> None:
-        """Run one ``__call__`` on zero tensors keyed by the given names and
-        record the resulting delta keys as ``modified_names``.
-
-        The fake-data values may go NaN/inf inside budget corrections (they
-        divide by global means); that is harmless for key discovery because the
-        key set a correction returns depends only on its config and on which
-        keys are present in its inputs, never on tensor values (the
-        ``Correction`` contract).
-        """
-        dist = Distributed.get_instance()
-
-        def _zeros(names: Collection[str]) -> TensorDict:
-            # corrections operate on this rank's spatial shard, so the fake
-            # data must be sharded like real data (img_shape is global)
-            return dist.scatter_spatial(
-                {
-                    name: torch.zeros((1, *img_shape), device=get_device())
-                    for name in names
-                },
-                img_shape,
-            )
-
-        with torch.no_grad():
-            result = self(
-                _zeros(input_names), _zeros(gen_names), _zeros(forcing_names), None
-            )
-        self._modified_names = frozenset(result.diagnostics.delta.keys())
 
     def __call__(
         self,
@@ -343,23 +232,6 @@ class EpochScheduledCorrector(CorrectorABC):
     def set_epoch(self, epoch: int) -> None:
         self._corrector_disabled = epoch <= self._disabled_epochs
         self._wrapped.set_epoch(epoch)
-
-    @property
-    def modified_names(self) -> frozenset[str]:
-        # Forwarded to the wrapped corrector independent of the epoch-disabled
-        # state: these describe what the corrector produces when active.
-        return self._wrapped.modified_names
-
-    def discover_modified_names(
-        self,
-        input_names: Collection[str],
-        gen_names: Collection[str],
-        forcing_names: Collection[str],
-        img_shape: tuple[int, int],
-    ) -> None:
-        self._wrapped.discover_modified_names(
-            input_names, gen_names, forcing_names, img_shape
-        )
 
     def get_state(self) -> dict[str, Any]:
         state: dict[str, Any] = {}

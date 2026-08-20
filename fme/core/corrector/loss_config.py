@@ -1,39 +1,19 @@
 import dataclasses
-import logging
+from collections.abc import Collection
 from typing import Literal
 
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import (
     CorrectorLoss,
     CorrectorRegularizer,
     WeightedMappingLoss,
     _L1Loss,
     _MSELoss,
+    require_matched_entries,
 )
 from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 
-
-def _matched_names(
-    names_and_prefixes: list[str],
-    corrector_modified_names: frozenset[str],
-    feature: str,
-) -> list[str]:
-    """The corrector-modified names the entries select; raises if any entry
-    selects none of them.
-    """
-    selection = NameAndPrefixSelection(tuple(names_and_prefixes))
-    unmatched = selection.unmatched_entries(corrector_modified_names)
-    if unmatched:
-        raise ValueError(
-            f"{feature} has entries that select nothing usable: "
-            + "; ".join(
-                f"{entry!r} selects no variable the corrector modifies"
-                for entry in unmatched
-            )
-            + f". The corrector modifies {sorted(corrector_modified_names)}."
-        )
-    return selection.matched(corrector_modified_names)
+_LOSS_NAMES_SUBJECT = "variables the loss covers"
 
 
 @dataclasses.dataclass
@@ -58,19 +38,6 @@ class PreCorrectorOptimizationConfig:
                 "configuring the feature while selecting nothing is a "
                 "contradiction, not a no-op."
             )
-
-    def matched_names(self, corrector_modified_names: frozenset[str]) -> list[str]:
-        """The corrector-modified names this selection covers.
-
-        Args:
-            corrector_modified_names: The delta keys the step's corrector
-                produces when active.
-        """
-        return _matched_names(
-            self.names_and_prefixes,
-            corrector_modified_names,
-            "precorrector_optimization",
-        )
 
 
 @dataclasses.dataclass
@@ -112,34 +79,28 @@ class CorrectorRegularizationConfig:
 
     def build(
         self,
-        corrector_modified_names: frozenset[str],
         normalizer: StandardNormalizer,
-        gridded_operations: GriddedOperations | None,
         channel_dim: int,
     ) -> CorrectorRegularizer:
-        """Validate the configured selection and build the penalty.
+        """Build the penalty, deferring its channels to the first delta.
 
         Args:
-            corrector_modified_names: The delta keys the step's corrector
-                produces when active.
             normalizer: The loss normalizer, used to normalize the deltas.
-            gridded_operations: Gridded operations for losses that need the
-                horizontal dimensions.
             channel_dim: The channel dimension of the loss inputs.
         """
-        names = _matched_names(
-            self.names_and_prefixes, corrector_modified_names, "regularization"
-        )
-        norm_loss = _L1Loss() if self.norm == "L1" else _MSELoss()
-        return CorrectorRegularizer(
-            loss=WeightedMappingLoss(
-                loss=norm_loss,
+
+        def build_loss(names: list[str]) -> WeightedMappingLoss:
+            return WeightedMappingLoss(
+                loss=_L1Loss() if self.norm == "L1" else _MSELoss(),
                 weights={},
                 out_names=names,
                 normalizer=normalizer,
                 channel_dim=channel_dim,
-            ),
-            names=names,
+            )
+
+        return CorrectorRegularizer(
+            selection=NameAndPrefixSelection(tuple(self.names_and_prefixes)),
+            build_loss=build_loss,
             weight=self.weight,
         )
 
@@ -168,54 +129,47 @@ class CorrectorLossConfig:
 
     def build(
         self,
-        corrector_modified_names: frozenset[str],
+        loss_names: Collection[str],
         normalizer: StandardNormalizer,
-        gridded_operations: GriddedOperations | None,
         channel_dim: int,
     ) -> CorrectorLoss:
-        """Validate the configured selections and build the corrector loss.
+        """Check the configured entries against the names the loss covers, then
+        build.
 
-        All name validation happens here, when the run starts: entries are
-        checked against the names the corrector modifies. A selected name whose
-        delta does not reach the loss at runtime raises there instead.
+        ``loss_names`` is exactly the set the loss can pack and the loss
+        normalizer covers, so an entry matching nothing in it can never be
+        penalized under any corrector. What it cannot catch -- that the
+        corrector modifies a name, and that the step does not then drop that
+        name from the delta -- is why the entries are checked again, against
+        the corrector's actual delta keys, the first time the corrector loss
+        runs on a non-empty delta.
 
         Args:
-            corrector_modified_names: The delta keys the step's corrector
-                produces when active.
+            loss_names: The names the step loss covers.
             normalizer: The loss normalizer, used to normalize the deltas.
-            gridded_operations: Gridded operations for losses that need the
-                horizontal dimensions.
             channel_dim: The channel dimension of the loss inputs.
         """
-        if len(corrector_modified_names) == 0:
-            raise ValueError(
-                "corrector_loss is configured but the corrector modifies no "
-                "variables, so there are no correction deltas to consume."
-            )
-        precorrector_names = None
+        precorrector_selection = None
         if self.precorrector_optimization is not None:
-            precorrector_names = self.precorrector_optimization.matched_names(
-                corrector_modified_names
+            precorrector_selection = NameAndPrefixSelection(
+                tuple(self.precorrector_optimization.names_and_prefixes)
+            )
+            require_matched_entries(
+                precorrector_selection,
+                loss_names,
+                "precorrector_optimization",
+                _LOSS_NAMES_SUBJECT,
             )
         regularizer = None
         if self.regularization is not None:
-            regularizer = self.regularization.build(
-                corrector_modified_names,
-                normalizer,
-                gridded_operations,
-                channel_dim,
+            require_matched_entries(
+                NameAndPrefixSelection(tuple(self.regularization.names_and_prefixes)),
+                loss_names,
+                "regularization",
+                _LOSS_NAMES_SUBJECT,
             )
-        if precorrector_names is not None:
-            logging.info(
-                "corrector_loss: optimizing pre-corrector outputs for "
-                f"{precorrector_names}"
-            )
-        if regularizer is not None:
-            logging.info(
-                f"corrector_loss: penalizing deltas for {regularizer.names} "
-                f"with weight {regularizer.weight}"
-            )
+            regularizer = self.regularization.build(normalizer, channel_dim)
         return CorrectorLoss(
-            precorrector_names=precorrector_names,
+            precorrector_selection=precorrector_selection,
             regularizer=regularizer,
         )

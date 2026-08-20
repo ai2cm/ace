@@ -19,7 +19,7 @@ _SHAPE = (2, 2, 2)  # (batch, lat, lon)
 _NAMES = ["a", "b_0", "b_1"]
 _MEANS = {"a": 1.0, "b_0": -2.0, "b_1": 0.5}
 _STDS = {"a": 2.0, "b_0": 0.5, "b_1": 4.0}
-_MODIFIED = frozenset(_NAMES)
+_LOSS_NAMES = list(_NAMES)
 
 
 def _fixed(offset: float, scale: float) -> torch.Tensor:
@@ -45,14 +45,20 @@ def _normalizer(names: Iterable[str] = _NAMES) -> StandardNormalizer:
 
 def _build(
     config: CorrectorLossConfig,
-    corrector_modified_names: frozenset[str] = _MODIFIED,
+    loss_names: Iterable[str] = _LOSS_NAMES,
 ) -> CorrectorLoss:
     return config.build(
-        corrector_modified_names,
-        normalizer=_normalizer(sorted(corrector_modified_names | frozenset(_NAMES))),
-        gridded_operations=None,
+        list(loss_names),
+        normalizer=_normalizer(),
         channel_dim=-3,
     )
+
+
+def _resolved(config: CorrectorLossConfig) -> CorrectorLoss:
+    """A built corrector loss whose names are resolved against ``_delta_dict``."""
+    corrector_loss = _build(config)
+    corrector_loss.resolve_names(_delta_dict().keys())
+    return corrector_loss
 
 
 def test_config_post_init_errors():
@@ -84,8 +90,8 @@ def test_names_and_prefixes_is_required_by_dacite(feature_config):
 
 @pytest.mark.parametrize("entry", ["missing_var", "missing_"])
 @pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
-def test_build_errors_on_entry_matching_no_modified_name(entry, feature):
-    # an entry matching no corrector-modified name raises at build.
+def test_build_errors_on_entry_matching_no_loss_name(entry, feature):
+    # an entry matching nothing the loss covers raises at build.
     # PARAMETERIZE: entry in {exact name, trailing-underscore prefix}.
     if feature == "precorrector_optimization":
         config = CorrectorLossConfig(
@@ -99,25 +105,13 @@ def test_build_errors_on_entry_matching_no_modified_name(entry, feature):
                 names_and_prefixes=[entry], norm="L2"
             )
         )
-    with pytest.raises(ValueError, match="selects no variable the corrector modifies"):
+    with pytest.raises(ValueError, match="match none of the variables the loss"):
         _build(config)
 
 
-def test_build_errors_without_modified_names():
-    # empty corrector_modified_names raises.
-    config = CorrectorLossConfig(
-        precorrector_optimization=PreCorrectorOptimizationConfig(
-            names_and_prefixes=["a"]
-        )
-    )
-    with pytest.raises(ValueError, match="modifies no variables"):
-        _build(config, corrector_modified_names=frozenset())
-
-
-def test_build_regularizer_packs_matched_names():
-    # the built WeightedMappingLoss packs exactly
-    # selection.matched(corrector_modified_names); a prefix entry matches all its
-    # level names.
+def test_build_defers_regularizer_channels():
+    # a config whose entries all match loss_names builds, and the regularizer
+    # reports no names until the corrector loss has seen a delta.
     config = CorrectorLossConfig(
         regularization=CorrectorRegularizationConfig(
             names_and_prefixes=["b_"], norm="L2", weight=2.0
@@ -125,6 +119,9 @@ def test_build_regularizer_packs_matched_names():
     )
     corrector_loss = _build(config)
     assert corrector_loss.penalty_weight == 2.0
+    with pytest.raises(RuntimeError, match="channels were resolved"):
+        corrector_loss.penalty(_delta_dict())
+    corrector_loss.resolve_names(_delta_dict().keys())
     penalty = corrector_loss.penalty(_delta_dict())
     assert penalty is not None
     assert list(penalty.get_channel_losses()) == ["b_0", "b_1"]
@@ -145,7 +142,7 @@ def test_penalty_matches_the_configured_norm(norm, reduce):
             names_and_prefixes=["a"], norm=norm
         )
     )
-    penalty = _build(config).penalty(_delta_dict())
+    penalty = _resolved(config).penalty(_delta_dict())
     assert penalty is not None
     normalized = _delta_dict()["a"] / _STDS["a"]
     torch.testing.assert_close(
