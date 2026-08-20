@@ -61,6 +61,8 @@ When making PRs, use the template that exists in the repo under .github/pull_req
 
 The PR description becomes the squash-and-merge commit message, so keep it self-contained and describe the final state of the change from main. PR-process information belongs in PR comments, not the description.
 
+Write or amend PR descriptions only via the `write-pr-description` skill (`.claude/skills/write-pr-description/`), never inline: its frontmatter pins description authoring to the required model.
+
 ### Commit/PR process
 
 Changes that will go to main should be made in branches so that PRs can be made for review.
