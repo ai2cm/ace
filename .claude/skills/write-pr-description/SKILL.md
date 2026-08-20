@@ -10,5 +10,5 @@ You are writing the description for a PR: the one for the current checked-out br
 Begin your report by stating which model you are actually running, so a silent fallback to the session model (e.g. if the pinned model is ever retired) stays visible.
 
 1. Run `git fetch origin main`, then read the full diff from main (`git diff origin/main...HEAD`, or `gh pr diff <number>`), not just the recent commits, so the description reflects the change from main per the guidance in AGENTS.md.
-2. Write the title and description following AGENTS.md's "PR description template" section and `.github/pull_request_template.md`. Keep the template's checklist lines, annotating them in place (e.g. `- [x] Tests added (no new functionality; ...)`) rather than deleting them.
+2. Write the title and description following AGENTS.md's "PR description template" section and `.github/pull_request_template.md`. Keep the template's checklist lines rather than deleting them: tick only items actually done, and leave inapplicable items unchecked with a brief in-place reason.
 3. Apply with `gh pr create` or `gh pr edit <number>`.
