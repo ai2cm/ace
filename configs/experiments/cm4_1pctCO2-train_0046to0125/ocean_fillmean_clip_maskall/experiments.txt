@@ -3,3 +3,11 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # rows are appended here by the job runner at submission
 
 cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip_maskall|rs0|01M0AVXFKZPFRGXMYPFYT3Q9SP|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ICx1 140-yr out-of-sample evaluation. evaluator-config-ICx1.yaml is
+# byte-identical to the ocean_baseline, ocean_fillmean_clip and
+# ocean_fillmean_clip_ohc copies, so every arm is scored under one setup; the
+# stepper (fill_value=mean, max_grad_norm, and this arm's input_masking scope)
+# is restored from the checkpoint. jupiter alone at urgent priority, per elynn:
+# the h100 alias adds ceres, where urgent jobs cannot run.
+cm4_1pctCO2-train_0046to0125-ocean_fillmean_clip_maskall|rs0|01M0AVXFKZPFRGXMYPFYT3Q9SP|run_ICx1|best_inference_ckpt|urgent|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
