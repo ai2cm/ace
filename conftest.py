@@ -147,7 +147,7 @@ def distributed_context():
     # no signal handler: this context spans the whole session, so installing one
     # would make Ctrl-C tear the backend down and register as a test failure,
     # leaving the rest of the run without a process group. The tests that want
-    # the handler open their own `handle_termination_signals`.
+    # the listener open their own `abort_and_exit_on_termination`.
     with Distributed.context(handle_signals=False):
         yield
 
@@ -189,16 +189,15 @@ def reset_global_timer():
 
 
 @pytest.fixture(autouse=True)
-def reset_post_shutdown_callbacks():
-    # the registry is process-global and nothing clears it between tests -- the
-    # session-scoped context above installs no handler, so its usual
-    # clear-on-exit never runs either. Without this, every Trainer built by an
-    # earlier test would still be called on a signal raised by a later one
-    from fme.core.distributed.shutdown import clear_post_shutdown_callbacks
+def reset_post_abort_callbacks():
+    # the registry is process-global and nothing clears it between tests:
+    # without this, every Trainer built by an earlier test would still have
+    # its callback run on a signal raised in a later one
+    from fme.core.distributed.shutdown import clear_post_abort_callbacks
 
-    clear_post_shutdown_callbacks()
+    clear_post_abort_callbacks()
     yield
-    clear_post_shutdown_callbacks()
+    clear_post_abort_callbacks()
 
 
 @pytest.fixture(autouse=True)
