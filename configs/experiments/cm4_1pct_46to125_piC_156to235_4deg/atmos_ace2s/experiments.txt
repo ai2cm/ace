@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 cm4_1pct_46to125_piC_156to235_4deg-atmos_ace2s|rs0|01M0GTFDHBAWFDD8K2SYW35EHX|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-atmos_ace2s|rs1|01M0GTFPGBF53FJMPTF9EKE0T8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-atmos_ace2s|rs2|01M0GTFZCFFMD4VJ80JABEM290|training|best_inference_ckpt|normal|--min-runtime 8h
