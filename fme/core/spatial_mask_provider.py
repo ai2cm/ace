@@ -38,6 +38,11 @@ class SpatialMaskProviderABC(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def copy(self: SelfType) -> SelfType:
+        """Return a copy which ``update`` cannot reach through to this one."""
+        ...
+
+    @abc.abstractmethod
     def get_state(self) -> dict[str, Any]: ...
 
 
@@ -49,6 +54,10 @@ class _NullSpatialMaskProvider(SpatialMaskProviderABC):
         return self
 
     def localize(self) -> "_NullSpatialMaskProvider":
+        return self
+
+    def copy(self) -> "_NullSpatialMaskProvider":
+        # holds no masks, so nothing can be written through it
         return self
 
     def update(self, other: SpatialMaskProviderABC) -> None:
@@ -149,6 +158,15 @@ class SpatialMaskProvider(SpatialMaskProviderABC):
                 for k, v in self._masks.items()
             },
         )
+
+    def copy(self) -> "SpatialMaskProvider":
+        """Return a copy holding the same mask tensors in its own dict.
+
+        ``update`` mutates the dict in place, so a provider shared between a
+        dataset and properties accumulated from it would pick up masks that are
+        not its own.
+        """
+        return SpatialMaskProvider(self._masks)
 
     def update(self, other: "SpatialMaskProvider") -> None:
         """Update masks with masks from another SpatialMaskProvider.

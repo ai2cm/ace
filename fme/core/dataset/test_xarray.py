@@ -1346,6 +1346,27 @@ def test_dataset_properties_update_masks(mock_monthly_netcdfs):
     assert "mask_0" in dataset.properties.spatial_mask_provider.masks
 
 
+def test_dataset_properties_copy_masks_are_independent(mock_monthly_netcdfs):
+    """A copy's masks can be updated without reaching the original's.
+
+    Callers which inject masks into properties they were handed - the coupled
+    inference dataset takes the ocean masks from the checkpoint this way - must
+    still see their own update, and must not change anyone else's masks.
+    """
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
+    data_properties = dataset.properties
+    copied = data_properties.copy()
+
+    copied.update_spatial_mask_provider(
+        SpatialMaskProvider(masks={"mask_0": torch.ones(4, 8)})
+    )
+
+    assert "mask_0" in copied.spatial_mask_provider.masks
+    assert not data_properties.spatial_mask_provider.masks
+
+
 def test_variable_metadata_includes_all_names(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)

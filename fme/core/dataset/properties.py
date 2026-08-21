@@ -107,7 +107,7 @@ class DatasetProperties:
             dict(self.variable_metadata),
             self.vertical_coordinate,
             self.horizontal_coordinates,
-            self.spatial_mask_provider,
+            self.spatial_mask_provider.copy(),
             self.timestep,
             self.is_remote,
             set(self.all_labels) if self.all_labels is not None else None,
