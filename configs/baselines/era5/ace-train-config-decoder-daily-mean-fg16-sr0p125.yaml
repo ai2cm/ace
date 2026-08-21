@@ -23,11 +23,16 @@
 # The frozen backbone contributes no gradient anyway; zeroing keeps the
 # val-loss checkpoint selection tracking only the *_mean fields.
 #
-# Data: the 2026-08-13 regenerated daily store + stats (adds the *_mean
-# channels; all 84 pre-existing channels and stats verified bit-identical
-# to the 2026-07-24 versions the backbone was trained on, so the frozen
-# backbone sees unchanged normalization). Stats are read from weka directly
-# rather than a beaker /statsdata mount.
+# Data: every loader merges two stores with identical 00Z daily time axes
+# (both 31410 steps from 1940-01-03): the 2026-08-13 regenerated store
+# supplies everything it has (including the *_mean channels), and the
+# 2026-07-24 store supplies only PRMSL and the surface stresses, which the
+# 2026-08-13 regeneration is missing (main's pipeline never carried them;
+# run 01M0GF89PP6QFJHQJR7BCM3VB4 crashed on exactly this). The 84 common
+# channels and their stats are bit-identical between the stores, so the
+# frozen backbone sees unchanged normalization. Stats are the merged
+# 2026-08-21 files (2026-08-13 stats + the 3 channels from the 2026-07-24
+# stats), read from weka directly rather than a beaker /statsdata mount.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -50,14 +55,18 @@ inference:
           - '1996-10-01T00:00:00'
           - '1996-11-15T00:00:00'
       dataset:
-        data_path: /climate-default/
-        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
-        engine: zarr
+        merge:
+        - data_path: /climate-default/
+          file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+          engine: zarr
+        - data_path: /climate-default/
+          file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+          engine: zarr
       num_data_workers: 4
     aggregator:
       histogram:
         enabled: true
-      time_mean_reference_data: /climate-default/2026-08-13-era5-1deg-8layer-daily-stats-1990-2019/time-mean.nc
+      time_mean_reference_data: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -69,35 +78,60 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 2
   dataset:
-    concat:
-    - data_path: /climate-default/
-      file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
-      engine: zarr
-      subset:
-        stop_time: '1995-12-31'
-    - data_path: /climate-default/
-      file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
-      engine: zarr
-      subset:
-        start_time: '2011-01-01'
-        stop_time: '2019-12-31'
-    - data_path: /climate-default/
-      file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
-      engine: zarr
-      subset:
-        start_time: '2021-01-01'
+    merge:
+    - concat:
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          stop_time: '1995-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2011-01-01'
+          stop_time: '2019-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2021-01-01'
+    - concat:
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          stop_time: '1995-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2011-01-01'
+          stop_time: '2019-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2021-01-01'
 validation:
   loader:
     batch_size: 64
     num_data_workers: 4
     prefetch_factor: 2
     dataset:
-      data_path: /climate-default/
-      file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
-      engine: zarr
-      subset:
-        start_time: '1996-01-01'
-        stop_time: '1997-12-31'
+      merge:
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '1996-01-01'
+          stop_time: '1997-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '1996-01-01'
+          stop_time: '1997-12-31'
 optimization:
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
@@ -223,11 +257,11 @@ stepper:
             spectral_ratio: 0.125
       normalization:
         network:
-          global_means_path: /climate-default/2026-08-13-era5-1deg-8layer-daily-stats-1990-2019/centering.nc
-          global_stds_path: /climate-default/2026-08-13-era5-1deg-8layer-daily-stats-1990-2019/scaling-full-field.nc
+          global_means_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/centering.nc
+          global_stds_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/2026-08-13-era5-1deg-8layer-daily-stats-1990-2019/centering.nc
-          global_stds_path: /climate-default/2026-08-13-era5-1deg-8layer-daily-stats-1990-2019/scaling-residual.nc
+          global_means_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/centering.nc
+          global_stds_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction

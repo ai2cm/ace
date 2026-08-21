@@ -241,4 +241,4 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan.yaml" \
 # surface fields, on the 2026-08-13 store. Launch alone:
 #   ./run-train.sh decoder-daily-mean
 run_training "ace-train-config-decoder-daily-mean-fg16-sr0p125.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-mean-decoder-training-rs0" 4
+  "ace2s-era5-daily-fg16-sr0p125-mean-decoder-training-rs0-v2" 4
