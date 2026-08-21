@@ -30,6 +30,7 @@ CO2_CONCENTRATIONS=( \
 )
 
 declare -A MODELS=( \
+    [no-random-co2-energy-conserving-rs0]="01KHGDA8TVGP9JKWVJ1N0SMHCN" \
     [full-energy-conserving-rs0]="01KHJ5F1M6YKVZESPZAAVVD6G8" \
 )
 
@@ -41,8 +42,13 @@ CASES=( \
     # "full-energy-conserving-rs0,3xCO2,4,266500,01KY2Y1K2YZP8JHXP09Y63F5T1,ai2/jupiter,example-0005" \
     # "full-energy-conserving-rs0,4xCO2,4,537191,01KY02N8ZMGTVRP5EWVGTEZJZ5,ai2/jupiter,example-0006" \
     # "full-energy-conserving-rs0,4xCO2,1,402639,01KYAXJJR5201C4935274E1B40,ai2/titan,example-0007" \
-    "full-energy-conserving-rs0,3xCO2,0,142667,01KYCH3N3V8F4YFQ2C1QA3JFY1,ai2/titan,example-0008" \
-    "full-energy-conserving-rs0,4xCO2,0,1036857,01KYCH2XPEV24YNTXPTVNZAJJJ,ai2/titan,example-0009" \
+    # "full-energy-conserving-rs0,3xCO2,0,142667,01KYCH3N3V8F4YFQ2C1QA3JFY1,ai2/titan,example-0008" \
+    # "full-energy-conserving-rs0,4xCO2,0,1036857,01KYCH2XPEV24YNTXPTVNZAJJJ,ai2/titan,example-0009" \
+    "no-random-co2-energy-conserving-rs0,4xCO2,1,359153,01M0AJ6WD6JX44F9EGB66E16JD,ai2/titan/example-no-random-co2-0001" \
+    "no-random-co2-energy-conserving-rs0,4xCO2,2,616231,01M0AJ747KFK0AGKE6CB179QHY,ai2/titan/example-no-random-co2-0002" \
+    "no-random-co2-energy-conserving-rs0,4xCO2,3,131252,01M0AJ7BS9306W6JY45EMMN3D6,ai2/titan/example-no-random-co2-0003" \
+    "no-random-co2-energy-conserving-rs0,4xCO2,4,381826,01M0AJ7KGYZ089A8V0S88H2JNE,ai2/titan/example-no-random-co2-0004" \
+    "no-random-co2-energy-conserving-rs0,4xCO2,5,334269,01M0AJ7V2FE7AM7YW9V5XB5Y04,ai2/titan/example-no-random-co2-0005" \
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
