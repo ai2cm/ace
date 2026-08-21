@@ -224,6 +224,8 @@ stepper:
       corrector:
         type: ocean_corrector
         config:
+          surface_energy_flux_correction:
+            method: prescribed
           force_positive_names:
           - so_0
           - so_1

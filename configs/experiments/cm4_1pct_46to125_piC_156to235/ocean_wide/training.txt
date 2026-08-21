@@ -1,5 +1,25 @@
 group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args
 
-cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
-cm4_1pct_46to125_piC_156to235-ocean_wide|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
-cm4_1pct_46to125_piC_156to235-ocean_wide|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.surface_energy_flux_correction.method='prescribed'
+# ocean_wide
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs1|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=1
+
+cm4_1pct_46to125_piC_156to235-ocean_wide|rs2|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=2
+
+# ocean_wide_ohc_cde1
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' stepper.step.config.corrector.config.corrector_disabled_epochs=1
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs1|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' stepper.step.config.corrector.config.corrector_disabled_epochs=1
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs2|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' stepper.step.config.corrector.config.corrector_disabled_epochs=1
+
+# ocean_wide_ohc_clip
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs0|trained|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs1|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|training|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
