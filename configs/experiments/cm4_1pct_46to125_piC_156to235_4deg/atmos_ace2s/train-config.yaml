@@ -9,11 +9,12 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 20 # 160 yr x 1460/yr / bs 8 = 29,200 iter/epoch -> ~584,000 iterations
-# 20 rather than the 1deg protocol's 13. The 1deg budget was cut to 13 because
-# its inline inference stops improving after ~10 epochs
-# (ai2cm/ace2-cm4-atmos-noLSM/xr7e62v8); whether the 4deg run turns over at the
-# same point is untested, so it gets room to run past it. Checkpoint selection
-# keeps the best epoch either way, so the extra epochs cost compute, not skill.
+# 20 rather than the 1deg protocol's 13. This is the 1-step pretraining stage
+# and the checkpoint carried into finetuning is best_ckpt (best validation
+# loss), which on the 1deg run ai2cm/ace2-cm4-atmos-noLSM/xr7e62v8 still
+# improves monotonically at epoch 13 (0.2101 -> 0.0955); only its inline
+# 20-yr inference turns over (epoch 6 on 1pct, 10 on piC). Whether 4deg
+# behaves the same is untested, so give it room past that point.
 ema:
   decay: 0.999
 inference:
