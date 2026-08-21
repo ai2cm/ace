@@ -135,18 +135,43 @@ python update_beaker_map.py -v v5      # pick up finished FT result datasets
 python generate_eval_configs.py -v v5  # writes ace-eval-suite-config-...-mstepft.yaml
 # submit only the FT suites — naming configs positionally bypasses --version,
 # so a v5 eval sweep of the pre-training runs is not dragged along
-python submit_eval_jobs.py --dry-run \
+python submit_eval_jobs.py --dry-run --checkpoint lastepoch \
   ace-eval-suite-config-4deg-nc-sfno-era5-gmron-mask20-seed0-v5-mstepft.yaml
 ```
+
+**Evaluate the fine-tunes at `--checkpoint lastepoch` only.** The default runs
+each suite against all three checkpoints of the result dataset, which is right
+for the pre-training runs (reported on `-bestinf`), but a fine-tune is a fixed
+`max_epochs: 20` continuation of an already-converged checkpoint: the
+fine-tuned model *is* the final epoch, and `best_ckpt.tar` /
+`best_inference_ckpt.tar` can only select a partially fine-tuned one. Passing
+one checkpoint also cuts the pass from 3 jobs per cell to 1, each carrying the
+67176-step `long_46year`. Before submitting, confirm the run actually reached
+epoch 20 — a wandb state of `finished` is not proof, since `ckpt.tar` is
+whatever the last epoch written was:
+
+```python
+import wandb
+runs = {r.name: r for r in wandb.Api().runs("ai2cm/VarMasking8")}
+r = runs["ace2-var-mask-nc-sfno-era5-gmron-mask0-seed1-v5-mstepft"]
+print(r.state, r.summary["epoch"])  # want: finished 20
+```
+
+`summary["epoch"]` counts from 1, so a completed run reports exactly its
+`max_epochs` (calibrated against the finished `max_epochs: 150` pre-training
+runs). Skip any cell that comes up short rather than filing a partial
+fine-tune alongside the others. Note `--checkpoint` takes one value per flag
+and is repeated for several; it deliberately does not take `nargs="+"`, which
+would swallow the positional config names.
 
 Crucially the suite is built from the **pre-training** config, not the
 fine-tune config: the fine-tune config has `INLINE_INFERENCE_DROP` applied, so
 inheriting it would mean the multi-year diagnostics never run anywhere. Each
 suite therefore holds all six inference entries — `aimip_checkpoint` and the
 two `weather` entries kept inline, plus `10year`, `10year_insample` and
-`long_46year`. `long_46year/annual/*` (51 variables) lands on the eval runs
-`…-mstepft-{besttrain,bestinf,lastepoch}`, not on the fine-tune run's own
-charts. Plot `-bestinf`.
+`long_46year`. `long_46year/annual/*` (51 variables) lands on the eval run
+`…-mstepft-lastepoch`, not on the fine-tune run's own charts. Plot
+`-lastepoch` for the fine-tunes; the pre-training runs stay on `-bestinf`.
 
 ## Memory
 

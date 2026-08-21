@@ -1,7 +1,7 @@
 # Multi-step FT of paper-final var-masking runs — handoff
 
-Status date: 2026-08-20. Branch: `alexey8-mstepft` (off `exp/alexey8`),
-HEAD `c6139ccb4` (docs commit on top). This doc is written for whoever (human or Claude agent) picks
+Status date: 2026-08-21. Branch: `alexey8-mstepft` (off `exp/alexey8`),
+HEAD is this docs commit. This doc is written for whoever (human or Claude agent) picks
 this up next. For the full technical spec of the configs see [FINETUNE.md](FINETUNE.md);
 this doc is the "what we did + current state + what to do next".
 
@@ -28,9 +28,11 @@ Since the 2026-08-17 handoff, four things changed
    in the eval pass as intended. See
    [Evaluating the fine-tunes](FINETUNE.md#evaluating-the-fine-tunes).
 
-Three `-mstepft` runs have finished and their eval suite configs are written
-(unsubmitted). The four `-mstepftaimip` configs are still unsubmitted — that
-remains the open action.
+**All four `-mstepft` runs have now finished**, all four reached epoch 20, and
+all four eval suite configs are written (unsubmitted). Those evals run at
+`--checkpoint lastepoch` only — see
+[Evaluating the fine-tunes](FINETUNE.md#evaluating-the-fine-tunes). The four
+`-mstepftaimip` configs are still unsubmitted — that remains the open action.
 
 ## The four runs
 
@@ -46,11 +48,12 @@ run names = source run name + the variant suffix (`-mstepft` or
 `-mstepftaimip`). The experiment column above is the `-mstepft` variant; no
 `-mstepftaimip` job has been submitted yet.
 
-## Job status (2026-08-20)
+## Job status (2026-08-21)
 
 All of these are the **`-mstepft`** (best_ckpt) variant; the `-mstepftaimip`
-set has not been submitted. States below are wandb states as of 08-20; result
-datasets for the three finished runs are in `wandb_to_beaker_map.json`.
+set has not been submitted. States below are wandb states as of 08-21; all four
+result datasets are in `wandb_to_beaker_map.json`, and all four runs report
+`epoch = 20` in their wandb summary (i.e. they completed `max_epochs`).
 
 - **gmroff-mask0-seed1** — FINISHED (result dataset
   `01M094PKNEAZ5P7ZBAFHPGQ443`), pruned-inference config, experiment
@@ -63,10 +66,11 @@ datasets for the three finished runs are in `wandb_to_beaker_map.json`.
   `01M088VNVD2VBEAYGTSD0MAG62`). Ran on its older commit, so this is the one
   run whose *training* charts carry `long_46year/annual/*` inline; the others
   get it from the eval pass. Eval suite config written.
-- **gmron-mask0-seed1** — RUNNING, attempt 1, submitted 08-19 10:13 as experiment
+- **gmron-mask0-seed1** — FINISHED (result dataset
+  `01M0DG7R4JGKB0KJDZ9AVWZMXM`), attempt 1, submitted 08-19 10:13 as experiment
   [01M0DG7R49A2F4E13H3DJZ7YM2](https://beaker.org/ex/01M0DG7R49A2F4E13H3DJZ7YM2).
-  Note this one went to workspace **ai2/climate-titan** at priority **urgent**,
-  not ai2/ace/high like the others. Submitted by naming the config positionally,
+  Eval suite config written. Note this one went to workspace
+  **ai2/climate-titan** at priority **urgent**, not ai2/ace/high like the others. Submitted by naming the config positionally,
   so the other `-mstepft` cells were untouched. Supersedes the seed2 experiment
   ([01M05WN2…](https://beaker.org/ex/01M05WN2KPK0S8E012CE2115ZM), exit=1 on
   attempt 4, finalized 08-18 20:23) — that one is dead by design, do not restart
@@ -235,7 +239,11 @@ PY
 
 Evaluate after training with the existing eval tooling in this dir
 (`update_beaker_map.py` → `generate_eval_configs.py -v v5` → `submit_eval_jobs.py`;
-see the top-level project notes). Plot `-bestinf`.
+see the top-level project notes). For the fine-tunes pass
+`--checkpoint lastepoch` and plot `-lastepoch`; the pre-training runs keep the
+default three checkpoints and are plotted on `-bestinf`. Rationale and the
+epoch-20 verification snippet are in
+[Evaluating the fine-tunes](FINETUNE.md#evaluating-the-fine-tunes).
 
 ## Open follow-ups
 
@@ -258,18 +266,24 @@ see the top-level project notes). Plot `-bestinf`.
    final step under the flag and every step without it. Nothing to do unless
    review asks for changes; this branch keeps its own copy of the commit either
    way, so a merge needs no action here.
-3. **Evaluate the FT checkpoints.** Suite configs for the three finished
-   `-mstepft` runs are written and validated but **not submitted** (24 jobs if
-   all three fan out over all three checkpoints, each carrying the 67176-step
-   `long_46year`). Regenerate/extend as runs finish, then submit by name:
+3. **Evaluate the FT checkpoints.** Suite configs for all four `-mstepft` runs
+   are written and validated but **not submitted**. At `--checkpoint lastepoch`
+   that is 4 jobs (not 12), each running the full unpruned suite including the
+   67176-step `long_46year`:
    ```bash
    python update_beaker_map.py -v v5
    python generate_eval_configs.py -v v5
-   python submit_eval_jobs.py --dry-run \
+   python submit_eval_jobs.py --dry-run --checkpoint lastepoch \
+     ace-eval-suite-config-4deg-nc-sfno-era5-gmroff-mask0-seed1-v5-mstepft.yaml \
+     ace-eval-suite-config-4deg-nc-sfno-era5-gmroff-mask20-seed1-v5-mstepft.yaml \
+     ace-eval-suite-config-4deg-nc-sfno-era5-gmron-mask0-seed1-v5-mstepft.yaml \
      ace-eval-suite-config-4deg-nc-sfno-era5-gmron-mask20-seed0-v5-mstepft.yaml
    ```
-   Drop `--dry-run` to submit. `--inference-name` on the generator narrows the
-   suite if the multi-year entries are too costly to run for every checkpoint.
+   Drop `--dry-run` to submit; defaults are workspace ai2/climate-titan, cluster
+   ai2/titan, priority urgent, and these are 1-GPU inference jobs. Omit
+   `--skip-evaluated` on a first submit — with one checkpoint per config there
+   is no partial-completion case for it to fix. `--inference-name` on the
+   generator narrows the suite if the multi-year entries prove too costly.
 4. **main merge was intentionally deferred.** `exp/alexey8` already has its own
    mature distributed-shutdown implementation; main's `#1398`/`#1425` are an
    independent (newer, NCCL-abort-on-listener-thread) implementation of the same
@@ -298,6 +312,8 @@ see the top-level project notes). Plot `-bestinf`.
 ## Commit history (branch, newest first)
 
 ```
+9d3c719f0 Add eval suite for the fourth var-masking multi-step fine-tune
+74372895f Select checkpoints when submitting var-masking eval jobs
 c6139ccb4 Allow submitting named var-masking eval suite configs
 c95eb24ad Generate eval suites for the var-masking multi-step fine-tunes
 37ed33f7f Stop training-config generators deleting other families' configs
