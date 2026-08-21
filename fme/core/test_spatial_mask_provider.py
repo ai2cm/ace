@@ -109,6 +109,21 @@ def test_mask_provider_update_success():
         assert torch.equal(mask, expected_masks[name])
 
 
+def test_mask_provider_copy_is_independent():
+    provider = SpatialMaskProvider(masks={"mask_temp": torch.tensor([1, 0])})
+    copied = provider.copy()
+
+    copied.update(SpatialMaskProvider(masks={"mask_humidity": torch.tensor([0, 1])}))
+
+    assert set(provider.masks) == {"mask_temp"}
+    assert set(copied.masks) == {"mask_temp", "mask_humidity"}
+    assert copied.masks["mask_temp"] is provider.masks["mask_temp"]
+
+
+def test_null_mask_provider_copy():
+    assert NullSpatialMaskProvider.copy() is NullSpatialMaskProvider
+
+
 def test_mask_provider_update_uses_first_overlapped_keys():
     # test updating masks fails when keys overlap
     masks1 = {"mask_temp": torch.tensor([1, 0]), "mask_common": torch.tensor([0, 0])}
