@@ -1,13 +1,19 @@
 # 4deg port of ../../cm4_1pct_46to125_piC_156to235/atmos_ace2s. Identical to
-# that config except the four zarr paths (1deg -> 4deg stores) and the stats
-# dataset; the recipe, batch size, epoch budget, and LR schedule are unchanged,
-# so the two resolutions train at the same effective batch and iteration count.
+# that config except the four zarr paths (1deg -> 4deg stores), the stats
+# dataset, and max_epochs (see the comment there); the recipe, batch size, and
+# LR schedule are unchanged, so the two resolutions train at the same effective
+# batch and the same 29,200 iterations per epoch.
 # job_runner/uncoupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235_4deg/atmos_ace2s . \
 #   --coupled_stats elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 13 # 160 yr x 1460/yr / bs 8 = 29,200 iter/epoch -> ~379,600 iterations
+max_epochs: 20 # 160 yr x 1460/yr / bs 8 = 29,200 iter/epoch -> ~584,000 iterations
+# 20 rather than the 1deg protocol's 13. The 1deg budget was cut to 13 because
+# its inline inference stops improving after ~10 epochs
+# (ai2cm/ace2-cm4-atmos-noLSM/xr7e62v8); whether the 4deg run turns over at the
+# same point is untested, so it gets room to run past it. Checkpoint selection
+# keeps the best epoch either way, so the extra epochs cost compute, not skill.
 ema:
   decay: 0.999
 inference:
