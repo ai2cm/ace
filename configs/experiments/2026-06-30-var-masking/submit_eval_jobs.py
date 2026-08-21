@@ -1,11 +1,18 @@
 """Submit evaluator-suite jobs for the var-masking checkpoints.
 
-Each generated evaluator suite is run against three checkpoints from the
-corresponding training result dataset:
+Each generated evaluator suite is run against one or more checkpoints from the
+corresponding training result dataset, selected with ``--checkpoint`` (default:
+all three):
 
-  - training_checkpoints/best_ckpt.tar -> -besttrain
-  - training_checkpoints/best_inference_ckpt.tar -> -bestinf
-  - training_checkpoints/ckpt.tar -> -lastepoch
+  - besttrain -> training_checkpoints/best_ckpt.tar
+  - bestinf   -> training_checkpoints/best_inference_ckpt.tar
+  - lastepoch -> training_checkpoints/ckpt.tar
+
+The pre-training runs are reported on ``-bestinf``, so they want the default.
+The multi-step fine-tunes want ``--checkpoint lastepoch`` alone: they run a
+fixed ``max_epochs: 20`` continuation of an already-converged checkpoint, so
+the fine-tuned model *is* the final epoch and the two selection-based
+checkpoints only re-evaluate a partially fine-tuned one.
 
 ``--skip-evaluated`` drops the individual checkpoint jobs whose evaluator run
 already exists in wandb, so a config whose evaluation was only partly
@@ -21,6 +28,7 @@ Usage:
     python submit_eval_jobs.py [CONFIG ...]
                                [--dry-run]
                                [--version {v1,...}]
+                               [--checkpoint NAME]
                                [--skip-evaluated]
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
@@ -52,11 +60,17 @@ HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-eval.sh"
 WANDB_GROUP = "ace2-var-masking-eval-2026-06-30"
 
-CHECKPOINTS = [
-    ("training_checkpoints/best_ckpt.tar", "-besttrain"),
-    ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
-    ("training_checkpoints/ckpt.tar", "-lastepoch"),
-]
+# Checkpoints an eval suite can be run against: ``--checkpoint`` name ->
+# (path within the training result dataset, evaluator run name suffix). The key
+# is the CLI choice, so adding an entry here is the only change needed to make
+# another checkpoint selectable. The suffix is spelled out rather than derived
+# from the key because it is part of the wandb run name that --skip-evaluated
+# matches on; renaming a key must not silently rename existing runs.
+CHECKPOINTS = {
+    "besttrain": ("training_checkpoints/best_ckpt.tar", "-besttrain"),
+    "bestinf": ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
+    "lastepoch": ("training_checkpoints/ckpt.tar", "-lastepoch"),
+}
 
 # Wandb states meaning "this evaluator job is done or on its way", i.e. no
 # resubmission needed. Anything else (crashed, failed, killed, ...) is a dead
@@ -104,9 +118,13 @@ def validate_configs(config_filenames: list[str]) -> None:
 
 def config_to_jobs(
     config_filename: str,
+    selected_checkpoints: list[tuple[str, str]],
     evaluated_states: dict[str, str] | None = None,
 ) -> list[tuple[str, str, str]]:
-    """Jobs to submit for one eval suite config, one per checkpoint.
+    """Jobs to submit for one eval suite config, one per selected checkpoint.
+
+    ``selected_checkpoints`` is (path, run name suffix) pairs, i.e. the
+    ``CHECKPOINTS`` values the caller asked for.
 
     ``evaluated_states`` maps wandb run name -> state; checkpoints whose run is
     in an in-flight state are dropped. Filtering happens before the beaker map
@@ -115,7 +133,7 @@ def config_to_jobs(
     """
     run_name = eval_suite_config_to_run_name(config_filename)
     checkpoints = []
-    for checkpoint_path, name_suffix in CHECKPOINTS:
+    for checkpoint_path, name_suffix in selected_checkpoints:
         job_name = f"{run_name}{name_suffix}"
         state = (evaluated_states or {}).get(job_name)
         if state in IN_FLIGHT_STATES:
@@ -173,6 +191,22 @@ def main() -> None:
         help="Restrict to configs of this baseline version (default: all).",
     )
     parser.add_argument(
+        # One value per flag, repeated, rather than nargs="+": a variadic option
+        # swallows the positional CONFIG names that follow it, and naming
+        # configs positionally is this script's main path.
+        "--checkpoint",
+        action="append",
+        choices=list(CHECKPOINTS),
+        default=None,
+        metavar="NAME",
+        help=(
+            "Checkpoint from each training result dataset to evaluate; repeat "
+            f"to select several (default: all of {', '.join(CHECKPOINTS)}). "
+            "Pass --checkpoint lastepoch for the multi-step fine-tunes, whose "
+            "final epoch is the fine-tuned model (see module docstring)."
+        ),
+    )
+    parser.add_argument(
         "--skip-evaluated",
         action="store_true",
         help=(
@@ -197,8 +231,15 @@ def main() -> None:
     )
     # Resolve jobs up front so configs with nothing left to submit are dropped
     # before the (comparatively slow) validation pass.
+    # Iterate CHECKPOINTS rather than args.checkpoint so the canonical order is
+    # kept and a repeated --checkpoint name does not submit the job twice.
+    wanted = set(args.checkpoint or CHECKPOINTS)
+    selected_checkpoints = [CHECKPOINTS[name] for name in CHECKPOINTS if name in wanted]
+
     jobs_by_config = {
-        config_filename: config_to_jobs(config_filename, evaluated_states)
+        config_filename: config_to_jobs(
+            config_filename, selected_checkpoints, evaluated_states
+        )
         for config_filename in configs
     }
     jobs_by_config = {
