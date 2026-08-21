@@ -42,3 +42,35 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|skip|high|
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+
+# ARM B -- decomposing the maskall change over the fillmean side, added
+# 2026-08-21. The maskall cell above moves two things at once: the ten
+# atmosphere forcings become masked AND sea_surface_fraction becomes unmasked.
+# These two rows split that, and split the forcings by what they carry:
+#
+#   cell                    exclude list                       masked
+#   ..._fillmean            land_fraction + 10 forcings         86/97
+#   ..._fillmean_maskfw     ^ minus LHTFLsfc, PRATEsfc,          89/97
+#                            total_frozen_precipitation_rate
+#   ..._fillmean_maskatm    [land_fraction]                     96/97
+#   ..._fillmean_maskall    [land_fraction, sea_surface_fraction] 95/97
+#
+# so (maskfw - fillmean) = the freshwater channels, (maskatm - maskfw) =
+# radiation + wind stress, (maskall - maskatm) = the sea_surface_fraction flip.
+# The hypothesis under test is that the freshwater trio carries most of the
+# so_0 effect: surface salinity is the one field whose forcing the network must
+# infer from the atmosphere channels and whose budget no corrector pins, so
+# land-side evaporation and precipitation are the values it should not be able
+# to read across the mask edge.
+#
+# Same seeding caveat as above: one seed reads only a ~40-60% so_0 effect, and
+# a decomposition splits the effect, so only "the freshwater trio reproduces
+# most of maskall" is readable at rs0. rs1/rs2 staged at skip.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction]'
