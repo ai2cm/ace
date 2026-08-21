@@ -47,6 +47,33 @@ def test_merged_propagates_metadata():
     assert missing_names == frozenset({"missing_0", "missing_1"})
 
 
+@pytest.mark.parametrize("cls", [MergedXarrayDataset, TimePaddedMergedDataset])
+def test_merged_properties_leave_member_properties_alone(cls):
+    """Accumulating properties must not mutate a member's own properties.
+
+    The property is read more than once over a run, so a member picking up
+    the other members' metadata would compound on each read.
+    """
+    datasets = [
+        MockDataset.new(
+            n_times=10,
+            varnames=[f"var_{i}"],
+            sample_n_times=3,
+            labels={f"label_{i}"},
+        )
+        for i in range(2)
+    ]
+    merged_dataset = cls(datasets)
+    merged_properties = merged_dataset.properties
+    assert set(merged_properties.variable_metadata) == {"var_0", "var_1"}
+    assert merged_properties.all_labels == {"label_0", "label_1"}
+    for i, dataset in enumerate(datasets):
+        assert set(dataset.properties.variable_metadata) == {f"var_{i}"}
+        assert dataset.properties.all_labels == {f"label_{i}"}
+    # reading the property again must give the same result as the first read
+    assert set(merged_dataset.properties.variable_metadata) == {"var_0", "var_1"}
+
+
 def test_merged_set_epoch():
     datasets = [
         MockDataset.new(
