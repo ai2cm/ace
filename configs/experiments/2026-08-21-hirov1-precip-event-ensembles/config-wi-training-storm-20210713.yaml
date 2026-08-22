@@ -1,0 +1,79 @@
+# HiROv1 1000-member ensemble: Wisconsin thunderstorm training, 2021-07-13.
+#
+# Event selection: 24h rolling-mean accumulated PRATEsfc over the coarse (25km)
+# data flagged exceedingly high values at labels 2021-07-13T12:00 and T18:00
+# (lat 40-45, lon 269-273). Rolling labels are right-edged on 6-hourly data, so
+# the times contributing to the flagged accumulations span 24h before the first
+# label through 6h after the last: 2021-07-12T12:00 to 2021-07-14T00:00 (7 steps).
+#
+# Patch: the extents select exactly 16x16 coarse cells centered on the analysis
+# box, matching the model's trained coarse patch (coarse_patch_extent_lat/lon: 16
+# in configs/baselines/downscaling-hiro-global/train.yaml), so the model generates
+# the domain in one pass and the output is exactly 512x512 at 3km.
+#
+# The bounds are not arbitrary. On the 100km grid, longitude cells are centered on
+# half-integers with 1 degree spacing, but latitude is a Gaussian grid with
+# non-uniform spacing, so integer-degree bounds do not line up predictably with
+# cell centers. Because ClosedInterval includes both endpoints, each bound below
+# was placed in the gap between the last included cell and the first excluded one,
+# leaving at least 0.36 degrees of clearance on every side.
+experiment_dir: /climate-default/2026-08-21-hirov1-precip-event-ensembles/wi-training-storm-20210713
+patch:
+  # Off deliberately. The extents resolve to exactly the model's coarse shape, so
+  # there is nothing to divide. Leaving patching off also makes any future extent
+  # that resolves to a different shape fail loudly in check_input_shape_supported
+  # rather than silently falling back to compositing, which would cost roughly 2x
+  # the diffusion work for one extra cell in a single dimension and 4x for both.
+  divide_generation: false
+  composite_prediction: false
+model:
+  # HiROv1 teacher (full 18-step diffusion sampler), the same checkpoint evaluated
+  # in experiment/fastgen-distill's 2026-07-28-hirov1-vs-spectral-conus-1gpu.
+  checkpoint_path: /checkpoints/best_histogram_tail.ckpt
+  fine_coordinates_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling/3km.zarr
+data:
+  coarse:
+  - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+    engine: zarr
+    file_pattern: 100km.zarr
+  # Inference batches by work item (one time x ensemble slice per item), so
+  # batch_size is unused here; max_samples_per_gpu below is the real control.
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+outputs:
+- name: wi_training_storm_20210713
+  save_vars: [PRATEsfc]
+  n_ens: 1000
+  # 1000 = 40 x 25, so the ensemble splits evenly and no work item is a small
+  # remainder. With the ensemble dim consuming the whole per-GPU budget, each work
+  # item is (1 time, 25 ensemble); 7 times x 40 slices = 280 items, divisible by
+  # the 4 ranks, so no padding items are generated.
+  max_samples_per_gpu: 25
+  # lat/lon are omitted from both, so they default to the full 512x512 extent of
+  # the store: one shard per work item (26MB, written by exactly one rank) holding
+  # five 5.2MB chunks. Shards are set explicitly rather than left to the default,
+  # which derives lat/lon from the model's patch shape; that agrees with the store
+  # here only because the extent is exactly one patch.
+  zarr_chunks:
+    time: 1
+    ensemble: 5
+  zarr_shards:
+    time: 1
+    ensemble: 25
+  time_range:
+    # TimeSlice stop_time is inclusive.
+    start_time: "2021-07-12T12:00:00"
+    stop_time: "2021-07-14T00:00:00"
+  lat_extent:
+    start: 35.0
+    stop: 51.0
+  lon_extent:
+    start: 263.0
+    stop: 279.0
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
