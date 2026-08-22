@@ -97,20 +97,20 @@ train_loader:
               stop_time: '0236-01-01T00:00:00'
           - &random_co2_coupled_training_data
             data_path: /climate-default/2026-08-18-CM4-like-AM4-random-CO2-coupled
-            file_pattern: random-CO2-1xCO2-ic_0001-sea-ice.zarr
+            file_pattern: random-CO2-1xCO2-ic_0001-sea_ice.zarr
             engine: zarr
             subset:
               start_time: '0153-01-01T06:00:00'
           - <<: *random_co2_coupled_training_data
             file_pattern: random-CO2-1xCO2-ic_0002-sea_ice.zarr
           - <<: *random_co2_coupled_training_data
-            file_pattern: random-CO2-2xCO2-ic_0001-sea-ice.zarr
+            file_pattern: random-CO2-2xCO2-ic_0001-sea_ice.zarr
           - <<: *random_co2_coupled_training_data
-            file_pattern: random-CO2-2xCO2-ic_0002-sea-ice.zarr
+            file_pattern: random-CO2-2xCO2-ic_0002-sea_ice.zarr
           - <<: *random_co2_coupled_training_data
-            file_pattern: random-CO2-4xCO2-ic_0001-sea-ice.zarr
+            file_pattern: random-CO2-4xCO2-ic_0001-sea_ice.zarr
           - <<: *random_co2_coupled_training_data
-            file_pattern: random-CO2-4xCO2-ic_0002-sea-ice.zarr
+            file_pattern: random-CO2-4xCO2-ic_0002-sea_ice.zarr
       - concat:
           - data_path: /climate-default
             file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
