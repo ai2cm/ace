@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 
 import cftime
@@ -151,3 +152,19 @@ def test_build_video_default_is_per_day_non_overlapping(tmp_path):
         train=False, requirements=requirements
     )
     assert len(sliding_data.loader) == 10
+
+
+def test_build_video_drop_last_override(tmp_path):
+    # 27 timesteps, clip length 9, default stride 8 -> 3 clip starts (0, 8, 16).
+    # batch_size 2 -> one full batch + one trailing partial batch of size 1.
+    paths = data_paths_helper(tmp_path, num_timesteps=27)
+    requirements = _requirements()
+    config = dataclasses.replace(_video_config(paths), batch_size=2)
+
+    default_data = config.build_video(train=False, requirements=requirements)
+    assert sum(len(b) for b in default_data.loader) == 2  # trailing batch dropped
+
+    kept_data = config.build_video(
+        train=False, requirements=requirements, drop_last=False
+    )
+    assert sum(len(b) for b in kept_data.loader) == 3  # nothing dropped

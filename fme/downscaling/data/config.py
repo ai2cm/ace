@@ -687,11 +687,24 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
         train: bool,
         requirements: DataRequirements,
         dist: Distributed | None = None,
+        drop_last: bool | None = None,
     ) -> PairedVideoGriddedData:
         """Build a paired fine/coarse loader of video clips.
 
         Each sample is a clip of ``self.n_timesteps`` consecutive frames with an
         explicit leading time axis, spaced ``self.clip_start_stride`` apart.
+
+        Args:
+            train: Whether this is the training split (enables shuffling).
+            requirements: Which fine/coarse variables to load.
+            dist: Distributed instance; defaults to the global singleton.
+            drop_last: Override for whether trailing partial batches are
+                dropped, both across ranks (sampler) and within a rank's
+                final batch (dataloader). Defaults to ``self.drop_last`` for
+                the sampler and ``True`` for the dataloader, matching
+                training's tolerance for slightly uneven batches. Pass
+                ``False`` (e.g. for test-set inference) to guarantee no
+                samples are silently dropped.
         """
         if dist is None:
             dist = Distributed.get_instance()
@@ -765,7 +778,10 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
             dataset = paired_dataset
 
         sampler = self._get_sampler(
-            dataset=dataset, dist=dist, train=train, drop_last=self.drop_last
+            dataset=dataset,
+            dist=dist,
+            train=train,
+            drop_last=self.drop_last if drop_last is None else drop_last,
         )
         dataloader = DataLoader(
             dataset,
@@ -773,7 +789,7 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
             num_workers=self.num_data_workers,
             shuffle=(sampler is None) and train,
             sampler=sampler,
-            drop_last=True,
+            drop_last=True if drop_last is None else drop_last,
             pin_memory=using_gpu(),
             collate_fn=PairedVideoBatchData.from_sequence,
             multiprocessing_context=self._mp_context(),
