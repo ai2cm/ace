@@ -19,6 +19,7 @@ import dataclasses
 import itertools
 import logging
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import dacite
@@ -49,54 +50,18 @@ LON_NAME = "longitude"
 DIMS = (TIME_NAME, ENSEMBLE_NAME, LAT_NAME, LON_NAME)
 
 
-def load_video_model(
-    model_config: VideoDiffusionModelConfig,
-    checkpoint_path: str,
-    device: torch.device,
-    use_ema: bool = True,
-) -> VideoDiffusionModel:
-    """Build the model from config and load trained weights.
-
-    The training config used ``validate_using_ema: true``, so the checkpoint
-    that was selected as "best" was evaluated with EMA-swapped weights. To
-    reproduce that quality at inference time, load the raw state dict first
-    (establishes buffers) and then overwrite the trainable params with the
-    EMA shadow, exactly mirroring ``VideoTrainer._ema_context()``.
-
-    ``model.module`` is always wrapped (``DummyWrapper`` outside torchrun,
-    ``DistributedDataParallel`` under it), both under the attribute name
-    ``module``. DDP's own ``state_dict()``/``load_state_dict()`` transparently
-    forward to that inner module (no prefix), which is what training's saved
-    checkpoint contains -- but ``DummyWrapper`` does *not* override those
-    methods, so loading directly into ``model.module`` only works under DDP.
-    Loading into ``getattr(model.module, "module", model.module)`` instead
-    reaches the raw net directly in both cases.
+def _bare_module(wrapped: torch.nn.Module) -> torch.nn.Module:
+    """Unwrap a ``DummyWrapper``/``DistributedDataParallel`` down to the raw
+    net it wraps under ``.module``.
     """
-    model = model_config.build()
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    state_dict = {
-        (key[len("module.") :] if key.startswith("module.") else key): value
-        for key, value in ckpt["module"].items()
-    }
-    bare = getattr(model.module, "module", model.module)
-    bare.load_state_dict(state_dict)
-    if use_ema:
-        if "ema" not in ckpt:
-            raise ValueError(
-                f"use_ema=True but checkpoint {checkpoint_path} has no 'ema' state."
-            )
-        ema = EMATracker.from_state(ckpt["ema"], model.modules)
-        ema.copy_to(model.modules)
-        logger.info("Loaded EMA weights for inference.")
-    else:
-        logger.info("Loaded raw (non-EMA) weights for inference.")
-    model.module.eval()
-    logger.info(
-        f"Loaded checkpoint {checkpoint_path} "
-        f"(epoch {ckpt.get('startEpoch')}, "
-        f"best_valid_loss {ckpt.get('best_valid_loss')})"
-    )
-    return model
+    bare = getattr(wrapped, "module", None)
+    if bare is None:
+        raise RuntimeError(
+            f"Expected {type(wrapped).__name__} to wrap a raw module under "
+            "`.module` (DummyWrapper or DistributedDataParallel); checkpoint "
+            "loading assumptions not met."
+        )
+    return bare
 
 
 def _reference_time_and_attrs(
@@ -124,12 +89,73 @@ def _reference_time_and_attrs(
     return time, attrs
 
 
+def _post_crop_latlon(batch) -> tuple[np.ndarray, np.ndarray]:
+    """Lat/lon actually fed to the model, i.e. post lat_extent/lon_extent crop
+    (unlike ``griddata.fine_coords``, which reflects the pre-crop domain).
+    """
+    lat = batch.fine.latlon_coordinates.lat[0].cpu().numpy()
+    lon = batch.fine.latlon_coordinates.lon[0].cpu().numpy()
+    return lat, lon
+
+
+def _splice_observed_endpoints(
+    generated: dict[str, torch.Tensor],
+    truth: Mapping[str, torch.Tensor],
+    n_ensemble: int,
+) -> dict[str, torch.Tensor]:
+    """Overwrite each clip's first/last frame with the observed ground truth,
+    broadcast across the ensemble dimension.
+
+    ``generated``/``truth`` are keyed by variable name, shaped
+    (B, n_ensemble, T, H, W) / (B, T, H, W) respectively. Mutates and returns
+    ``generated``.
+    """
+    for name, clip in generated.items():
+        gt = truth[name]
+        clip[:, :, 0] = gt[:, None, 0].expand(-1, n_ensemble, -1, -1)
+        clip[:, :, -1] = gt[:, None, -1].expand(-1, n_ensemble, -1, -1)
+    return generated
+
+
+def _clip_write_slice(clip_start_time, time: np.ndarray, n_timesteps: int) -> slice:
+    """Time-axis slice a clip should write to, given its start time.
+
+    Tumbling clips share their boundary frame with the next clip, so every
+    clip but the last writes only its first ``n_timesteps - 1`` frames; the
+    last clip also writes its own trailing endpoint.
+    """
+    n_time = len(time)
+    start_idx = int(np.searchsorted(time, clip_start_time))
+    if start_idx >= n_time or time[start_idx] != clip_start_time:
+        raise ValueError(
+            f"Clip start time {clip_start_time} not found in the reference "
+            "test time axis; data/config mismatch."
+        )
+    is_last_clip = start_idx + (n_timesteps - 1) == n_time - 1
+    n_frames = n_timesteps if is_last_clip else n_timesteps - 1
+    return slice(start_idx, start_idx + n_frames)
+
+
 @dataclass
 class VideoInferenceConfig:
     """Config for running test-set inference with a trained video PMD model.
 
     ``model`` and ``data`` are pasted verbatim from the training config's
     ``model:`` and ``test_data:`` blocks -- no new schema for those.
+
+    Args:
+        checkpoint_path: Path to the trained checkpoint to load.
+        model: Model config, pasted verbatim from training's ``model:`` block.
+        data: Data config, pasted verbatim from training's ``test_data:`` block.
+        output_path: Path to write the output zarr store to.
+        experiment_dir: Directory for logs.
+        n_ensemble: Number of ensemble members to generate per clip.
+        ensemble_chunk_size: Number of ensemble members to generate at once.
+        use_ema: Whether to load the EMA (vs. raw) weights.
+        max_batches: Cap on batches processed per rank; for smoke tests.
+        overwrite: If True, overwrite an existing store at output_path
+            instead of failing. Use while iterating on a run that keeps
+            failing/retrying; leave False once a run is expected to succeed.
     """
 
     checkpoint_path: str
@@ -141,13 +167,7 @@ class VideoInferenceConfig:
     n_ensemble: int = 32
     ensemble_chunk_size: int = 8
     use_ema: bool = True
-    # Cap the number of batches processed per rank; for smoke tests.
     max_batches: int | None = None
-    # If True, overwrite an existing store at output_path (mode="w") instead
-    # of the safe default (mode="w-", fail if it already exists). Use this
-    # while iterating on a run that keeps failing/retrying; leave False once
-    # a run is expected to succeed, so a completed store can't be clobbered
-    # by accident.
     overwrite: bool = False
 
     def configure_logging(self, log_filename: str) -> None:
@@ -156,18 +176,51 @@ class VideoInferenceConfig:
             self.experiment_dir, log_filename, config=config, resumable=True
         )
 
+    def build_model(self, device: torch.device) -> VideoDiffusionModel:
+        """Build the model from config and load trained weights.
+
+        The training config used ``validate_using_ema: true``, so the checkpoint
+        that was selected as "best" was evaluated with EMA-swapped weights. To
+        reproduce that quality at inference time, load the raw state dict first
+        (establishes buffers) and then overwrite the trainable params with the
+        EMA shadow, exactly mirroring ``VideoTrainer._ema_context()``.
+        """
+        model = self.model.build()
+        ckpt = torch.load(self.checkpoint_path, map_location=device, weights_only=False)
+        state_dict = {
+            (key[len("module.") :] if key.startswith("module.") else key): value
+            for key, value in ckpt["module"].items()
+        }
+        _bare_module(model.module).load_state_dict(state_dict)
+        if self.use_ema:
+            if "ema" not in ckpt:
+                raise ValueError(
+                    f"use_ema=True but checkpoint {self.checkpoint_path} has no "
+                    "'ema' state."
+                )
+            ema = EMATracker.from_state(ckpt["ema"], model.modules)
+            ema.copy_to(model.modules)
+            logger.info("Loaded EMA weights for inference.")
+        else:
+            logger.info("Loaded raw (non-EMA) weights for inference.")
+        model.module.eval()
+        logger.info(
+            f"Loaded checkpoint {self.checkpoint_path} "
+            f"(epoch {ckpt.get('startEpoch')}, "
+            f"best_valid_loss {ckpt.get('best_valid_loss')})"
+        )
+        return model
+
 
 def run_inference(config: VideoInferenceConfig) -> None:
     dist = Distributed.get_instance()
     device = get_device()
 
-    model = load_video_model(
-        config.model, config.checkpoint_path, device, use_ema=config.use_ema
-    )
+    model = config.build_model(device)
     logger.info(f"Number of parameters: {count_parameters(model.modules)}")
 
     griddata = config.data.build_video(
-        train=False, requirements=config.model.data_requirements
+        train=False, requirements=config.model.data_requirements, drop_last=False
     )
 
     time, var_attrs = _reference_time_and_attrs(config.data, model.out_names)
@@ -176,23 +229,13 @@ def run_inference(config: VideoInferenceConfig) -> None:
     clip_stride = n_timesteps - 1  # tumbling clips share only their boundary frame
 
     # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),
-    # generated everywhere else. If the dataloader's drop_last truncates the
-    # final partial batch, the tail of this array is simply never written and
-    # will show up as a gap (fill value) in the output.
+    # generated everywhere else.
     frame_source = np.ones(n_time, dtype=np.int8)
     frame_source[0::clip_stride] = 0
 
-    # griddata.fine_coords reflects the *pre*-lat_extent/lon_extent-crop
-    # domain (it's built from build_from_config_sequence's properties, before
-    # _build_aligned_subset_pair applies the crop) -- e.g. with
-    # lat_extent: {-88, 88} the raw store has 180 latitude points but the
-    # data actually fed to the model, and hence generate()'s output, is
-    # cropped to 176. Get the true post-crop lat/lon from the first real
-    # batch's own coordinates instead, which is what the model actually used.
     batch_iterator = griddata.get_generator()
     first_batch = next(batch_iterator)
-    lat = first_batch.fine.latlon_coordinates.lat[0].cpu().numpy()
-    lon = first_batch.fine.latlon_coordinates.lon[0].cpu().numpy()
+    lat, lon = _post_crop_latlon(first_batch)
     n_lat, n_lon = len(lat), len(lon)
 
     coords = {
@@ -246,27 +289,16 @@ def run_inference(config: VideoInferenceConfig) -> None:
             for name in model.out_names:
                 ensemble_chunks[name].append(generated[name])
             remaining -= n
-        # (B, n_ensemble, T, H, W); splice in exact observed endpoints.
+        # (B, n_ensemble, T, H, W)
         full = {
             name: torch.cat(chunks_, dim=1) for name, chunks_ in ensemble_chunks.items()
         }
-        for name in model.out_names:
-            gt = batch.fine.data[name]  # (B, T, H, W)
-            full[name][:, :, 0] = gt[:, None, 0].expand(-1, config.n_ensemble, -1, -1)
-            full[name][:, :, -1] = gt[:, None, -1].expand(-1, config.n_ensemble, -1, -1)
+        full = _splice_observed_endpoints(full, batch.fine.data, config.n_ensemble)
 
         clip_times = batch.fine.time.values  # (B, T) cftime
-        batch_size = clip_times.shape[0]
-        for b in range(batch_size):
-            start_idx = int(np.searchsorted(time, clip_times[b, 0]))
-            if time[start_idx] != clip_times[b, 0]:
-                raise ValueError(
-                    f"Clip start time {clip_times[b, 0]} not found in the "
-                    "reference test time axis; data/config mismatch."
-                )
-            is_last_clip = start_idx + (n_timesteps - 1) == n_time - 1
-            n_frames_to_write = n_timesteps if is_last_clip else n_timesteps - 1
-            time_slice = slice(start_idx, start_idx + n_frames_to_write)
+        for b in range(clip_times.shape[0]):
+            time_slice = _clip_write_slice(clip_times[b, 0], time, n_timesteps)
+            n_frames_to_write = time_slice.stop - time_slice.start
 
             write_data = {
                 name: full[name][b, :, :n_frames_to_write]
