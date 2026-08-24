@@ -250,4 +250,4 @@ run_training "ace-train-config-decoder-daily-mean-fg16-sr0p125.yaml" \
 # the pretrain GAN arm. Jupiter/urgent/8 GPUs. Launch alone:
 #   ./run-train.sh ft3-bptt-daily-fg16-sr0p125-gan
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-gan-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter urgent
+  "ace2s-era5-daily-fg16-sr0p125-gan-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
