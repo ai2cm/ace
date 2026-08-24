@@ -11,6 +11,10 @@ LOCAL_OUTPUT_ZARR := $(LOCAL_DATA_DIR)/$(OUTPUT_ZARR_NAME)
 GCS_PATH_PROCESSED_FORCING ?= gs://vcm-ml-intermediate/$(OUTPUT_ZARR_NAME)
 ENVIRONMENT_NAME=regrid-aimip-forcing
 IC_OUTPUT_DIR := $(LOCAL_DATA_DIR)/aimip_ics
+# Extra flags for create_aimip_ic_datasets.py. Set to --include-near-surface to add
+# TMP2m/Q2m/UGRD10m/VGRD10m for models that carry them as prognostic inputs; the
+# source zarr given by ERA5_GCS_DATA must provide them.
+IC_EXTRA_ARGS ?=
 GCS_IC_PATH ?= gs://vcm-ml-intermediate/2025-09-12-AIMIP-evaluation-ICs/
 ERA5_GCS_DATA ?= gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-1940-2022.zarr
 MODIFIED_FORCING_NAME = 2025-09-12-aimip-era5-1deg-forcing-1978-2024-repeat-first.zarr
@@ -56,7 +60,7 @@ process_aimip_forcing: upload_processed_aimip_forcing
 $(IC_OUTPUT_DIR)/.done: data_dir
 	mkdir -p $(IC_OUTPUT_DIR)
 	python create_aimip_ic_datasets.py $(IC_OUTPUT_DIR) \
-	  --era5-gcs-data $(ERA5_GCS_DATA)
+	  --era5-gcs-data $(ERA5_GCS_DATA) $(IC_EXTRA_ARGS)
 	touch $(IC_OUTPUT_DIR)/.done
 
 upload_aimip_ics: $(IC_OUTPUT_DIR)/.done
