@@ -77,3 +77,5 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [CHORE] Automate porting of experiment-branch-to-job_runner-branch updates
 - [ISSUE] `make jr_changelog` doesn't properly handle insertion after multi-line
   items
+- [FEAT] Add `--config-dir` arg to `{evaluate,inference}.sh` for shared eval
+  configs
