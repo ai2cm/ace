@@ -37,7 +37,7 @@ from fme.core.ema import EMATracker
 from fme.core.generics.trainer import count_parameters
 from fme.core.logging_utils import LoggingConfig
 from fme.core.writer import ZarrWriter
-from fme.downscaling.data import PairedVideoLoaderConfig
+from fme.downscaling.data import PairedVideoGriddedData, PairedVideoLoaderConfig
 from fme.downscaling.inference.zarr_utils import determine_zarr_chunks
 from fme.downscaling.video_models import VideoDiffusionModel, VideoDiffusionModelConfig
 
@@ -211,116 +211,135 @@ class VideoInferenceConfig:
         )
         return model
 
+    def build(self) -> "VideoInferenceRunner":
+        """Build the model, load its checkpoint, and set up the test-set loader."""
+        model = self.build_model(get_device())
+        griddata = self.data.build_video(
+            train=False, requirements=self.model.data_requirements, drop_last=False
+        )
+        return VideoInferenceRunner(model, griddata, self)
 
-def run_inference(config: VideoInferenceConfig) -> None:
-    dist = Distributed.get_instance()
-    device = get_device()
 
-    model = config.build_model(device)
-    logger.info(f"Number of parameters: {count_parameters(model.modules)}")
+class VideoInferenceRunner:
+    def __init__(
+        self,
+        model: VideoDiffusionModel,
+        griddata: PairedVideoGriddedData,
+        config: VideoInferenceConfig,
+    ):
+        self.model = model
+        self.griddata = griddata
+        self.config = config
 
-    griddata = config.data.build_video(
-        train=False, requirements=config.model.data_requirements, drop_last=False
-    )
+    def run(self) -> None:
+        dist = Distributed.get_instance()
+        model, griddata, config = self.model, self.griddata, self.config
+        logger.info(f"Number of parameters: {count_parameters(model.modules)}")
 
-    time, var_attrs = _reference_time_and_attrs(config.data, model.out_names)
-    n_time = len(time)
-    n_timesteps = config.model.n_timesteps
-    clip_stride = n_timesteps - 1  # tumbling clips share only their boundary frame
+        time, var_attrs = _reference_time_and_attrs(config.data, model.out_names)
+        n_time = len(time)
+        n_timesteps = config.model.n_timesteps
+        clip_stride = n_timesteps - 1  # tumbling clips share only their boundary frame
 
-    # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),
-    # generated everywhere else.
-    frame_source = np.ones(n_time, dtype=np.int8)
-    frame_source[0::clip_stride] = 0
+        # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),
+        # generated everywhere else.
+        frame_source = np.ones(n_time, dtype=np.int8)
+        frame_source[0::clip_stride] = 0
 
-    batch_iterator = griddata.get_generator()
-    first_batch = next(batch_iterator)
-    lat, lon = _post_crop_latlon(first_batch)
-    n_lat, n_lon = len(lat), len(lon)
+        batch_iterator = griddata.get_generator()
+        first_batch = next(batch_iterator)
+        lat, lon = _post_crop_latlon(first_batch)
+        n_lat, n_lon = len(lat), len(lon)
 
-    coords = {
-        TIME_NAME: time,
-        ENSEMBLE_NAME: np.arange(config.n_ensemble),
-        LAT_NAME: lat,
-        LON_NAME: lon,
-    }
-    chunks = determine_zarr_chunks(
-        dims=DIMS,
-        data_shape=(n_time, config.n_ensemble, n_lat, n_lon),
-        bytes_per_element=4,
-    )
-
-    writer = ZarrWriter(
-        path=config.output_path,
-        dims=DIMS,
-        coords=coords,
-        data_vars=model.out_names,
-        chunks=chunks,
-        array_attributes=var_attrs,
-        group_attributes={
-            "description": (
-                "Test-set inference: endpoint-conditioned video diffusion "
-                "infilling, ensemble of independent noise draws."
-            ),
-            "checkpoint_path": config.checkpoint_path,
-            "n_ensemble": str(config.n_ensemble),
-            "use_ema": str(config.use_ema),
-        },
-        nondim_coords={
-            "frame_source": xr.DataArray(frame_source, dims=[TIME_NAME]),
-        },
-        mode="w" if config.overwrite else "w-",
-        time_calendar="julian",
-    )
-    writer.initialize_store(data_dtype=np.float32)
-
-    n_batches = len(griddata.loader)
-    for i, batch in enumerate(itertools.chain([first_batch], batch_iterator)):
-        if config.max_batches is not None and i >= config.max_batches:
-            break
-
-        remaining = config.n_ensemble
-        ensemble_chunks: dict[str, list[torch.Tensor]] = {
-            name: [] for name in model.out_names
+        coords = {
+            TIME_NAME: time,
+            ENSEMBLE_NAME: np.arange(config.n_ensemble),
+            LAT_NAME: lat,
+            LON_NAME: lon,
         }
-        while remaining > 0:
-            n = min(config.ensemble_chunk_size, remaining)
-            generated = model.generate(batch, n_samples=n)
-            for name in model.out_names:
-                ensemble_chunks[name].append(generated[name])
-            remaining -= n
-        # (B, n_ensemble, T, H, W)
-        full = {
-            name: torch.cat(chunks_, dim=1) for name, chunks_ in ensemble_chunks.items()
-        }
-        full = _splice_observed_endpoints(full, batch.fine.data, config.n_ensemble)
+        chunks = determine_zarr_chunks(
+            dims=DIMS,
+            data_shape=(n_time, config.n_ensemble, n_lat, n_lon),
+            bytes_per_element=4,
+        )
 
-        clip_times = batch.fine.time.values  # (B, T) cftime
-        for b in range(clip_times.shape[0]):
-            time_slice = _clip_write_slice(clip_times[b, 0], time, n_timesteps)
-            n_frames_to_write = time_slice.stop - time_slice.start
+        writer = ZarrWriter(
+            path=config.output_path,
+            dims=DIMS,
+            coords=coords,
+            data_vars=model.out_names,
+            chunks=chunks,
+            array_attributes=var_attrs,
+            group_attributes={
+                "description": (
+                    "Test-set inference: endpoint-conditioned video diffusion "
+                    "infilling, ensemble of independent noise draws."
+                ),
+                "checkpoint_path": config.checkpoint_path,
+                "n_ensemble": str(config.n_ensemble),
+                "use_ema": str(config.use_ema),
+            },
+            nondim_coords={
+                "frame_source": xr.DataArray(frame_source, dims=[TIME_NAME]),
+            },
+            mode="w" if config.overwrite else "w-",
+            time_calendar="julian",
+            # Unwritten cells (e.g. a killed/retried run) stay NaN rather than
+            # a silently-plausible-looking 0.
+            fill_value=np.nan,
+        )
+        writer.initialize_store(data_dtype=np.float32)
 
-            write_data = {
-                name: full[name][b, :, :n_frames_to_write]
-                .permute(1, 0, 2, 3)  # (n_ensemble, T', H, W) -> (T', n_ensemble, H, W)
-                .to(torch.float32)
-                .cpu()
-                .numpy()
-                for name in model.out_names
+        n_batches = len(griddata.loader)
+        for i, batch in enumerate(itertools.chain([first_batch], batch_iterator)):
+            if config.max_batches is not None and i >= config.max_batches:
+                break
+
+            remaining = config.n_ensemble
+            ensemble_chunks: dict[str, list[torch.Tensor]] = {
+                name: [] for name in model.out_names
             }
-            writer.record_batch(
-                write_data,
-                position_slices={
-                    TIME_NAME: time_slice,
-                    ENSEMBLE_NAME: slice(0, config.n_ensemble),
-                },
-            )
+            while remaining > 0:
+                n = min(config.ensemble_chunk_size, remaining)
+                generated = model.generate(batch, n_samples=n)
+                for name in model.out_names:
+                    ensemble_chunks[name].append(generated[name])
+                remaining -= n
+            # (B, n_ensemble, T, H, W)
+            full = {
+                name: torch.cat(chunks_, dim=1)
+                for name, chunks_ in ensemble_chunks.items()
+            }
+            full = _splice_observed_endpoints(full, batch.fine.data, config.n_ensemble)
 
-        logger.info(f"Rank {dist.rank}: batch {i + 1}/{n_batches} written")
+            clip_times = batch.fine.time.values  # (B, T) cftime
+            for b in range(clip_times.shape[0]):
+                time_slice = _clip_write_slice(clip_times[b, 0], time, n_timesteps)
+                n_frames_to_write = time_slice.stop - time_slice.start
 
-    if dist.is_distributed():
-        dist.barrier()
-    logger.info(f"Completed inference. Output: {config.output_path}")
+                write_data = {
+                    name: full[name][b, :, :n_frames_to_write]
+                    .permute(
+                        1, 0, 2, 3
+                    )  # (n_ensemble, T', H, W) -> (T', n_ensemble, H, W)
+                    .to(torch.float32)
+                    .cpu()
+                    .numpy()
+                    for name in model.out_names
+                }
+                writer.record_batch(
+                    write_data,
+                    position_slices={
+                        TIME_NAME: time_slice,
+                        ENSEMBLE_NAME: slice(0, config.n_ensemble),
+                    },
+                )
+
+            logger.info(f"Rank {dist.rank}: batch {i + 1}/{n_batches} written")
+
+        if dist.is_distributed():
+            dist.barrier()
+        logger.info(f"Completed inference. Output: {config.output_path}")
 
 
 def main(config_path: str) -> None:
@@ -335,7 +354,7 @@ def main(config_path: str) -> None:
     prepare_directory(inference_config.experiment_dir, config)
     inference_config.configure_logging(log_filename="out.log")
     logging.info("Starting video diffusion test-set inference")
-    run_inference(inference_config)
+    inference_config.build().run()
 
 
 def parse_args():
