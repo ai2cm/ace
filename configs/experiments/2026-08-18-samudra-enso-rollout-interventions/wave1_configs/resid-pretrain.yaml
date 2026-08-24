@@ -123,6 +123,9 @@ stepper:
         network:
           global_means_path: /ocean_stats/ocean/centering.nc
           global_stds_path: /ocean_stats/ocean/scaling-full-field.nc
+        residual:
+          global_means_path: /ocean_stats/ocean/centering.nc
+          global_stds_path: /ocean_stats/ocean/scaling-residual.nc
       corrector:
         type: ocean_corrector
         config:

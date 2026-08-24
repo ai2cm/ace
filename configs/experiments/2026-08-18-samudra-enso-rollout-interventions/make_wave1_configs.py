@@ -255,6 +255,19 @@ def make_resid_pretrain(seed: int) -> dict:
     assert not any(n.startswith("nino34_lead") for n in step["out_names"])
     assert not step.get("residual_prediction")
     step["residual_prediction"] = True
+    # residual_prediction MUST pair with tendency-scaled loss normalization
+    # (the shield-som and 2025-03-17 residual configs both do this). Without
+    # it the loss normalizes tendencies by full-field stds; slow interior
+    # fields' tendencies are ~1% of field std, the dynamics contribute almost
+    # nothing to the loss, and the model learns "predict no change" -- great
+    # one-step validation, NaN rollouts. The first resid launch demonstrated
+    # exactly that: val loss 0.33 with 'Inference error: nan' at every epoch.
+    norm = step["normalization"]
+    assert "network" in norm and "residual" not in norm
+    norm["residual"] = {
+        "global_means_path": "/ocean_stats/ocean/centering.nc",
+        "global_stds_path": "/ocean_stats/ocean/scaling-residual.nc",
+    }
     c["seed"] = seed
     c["experiment_dir"] = "/results"
     return c
