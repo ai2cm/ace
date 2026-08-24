@@ -54,7 +54,7 @@ logging:
   entity: ai2cm
   metrics_log_dir: /results/metrics
 train_loader:
-  batch_size: 8
+  batch_size: 4
   num_data_workers: 4
   prefetch_factor: 2
   dataset:

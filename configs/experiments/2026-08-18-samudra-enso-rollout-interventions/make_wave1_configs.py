@@ -183,6 +183,11 @@ def arm_hzn12(c: dict) -> dict:
             {"steps": 12, "probability": 0.20},
         ]
     }
+    # The 12-step window OOMs at batch 8 on 180 GB GPUs (177 GB used at the
+    # first optimizer step of the pilot launch), so this arm runs batch 4.
+    # That halves the effective batch relative to the other arms -- a known
+    # part of this arm's bundle, acceptable for a horizon pilot.
+    c["train_loader"]["batch_size"] = 4
     return c
 
 
