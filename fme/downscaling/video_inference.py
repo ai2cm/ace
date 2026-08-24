@@ -217,28 +217,65 @@ class VideoInferenceConfig:
         griddata = self.data.build_video(
             train=False, requirements=self.model.data_requirements, drop_last=False
         )
-        return VideoInferenceRunner(model, griddata, self)
+        time, var_attrs = _reference_time_and_attrs(self.data, model.out_names)
+        return VideoInferenceRunner(
+            model=model,
+            griddata=griddata,
+            time=time,
+            var_attrs=var_attrs,
+            n_timesteps=self.model.n_timesteps,
+            output_path=self.output_path,
+            n_ensemble=self.n_ensemble,
+            ensemble_chunk_size=self.ensemble_chunk_size,
+            checkpoint_path=self.checkpoint_path,
+            use_ema=self.use_ema,
+            overwrite=self.overwrite,
+            max_batches=self.max_batches,
+        )
 
 
 class VideoInferenceRunner:
+    """Runs test-set inference and writes the output zarr store.
+
+    Takes only built collaborators and plain values -- never a config -- so
+    it has no knowledge of ``VideoInferenceConfig``'s structure.
+    """
+
     def __init__(
         self,
         model: VideoDiffusionModel,
         griddata: PairedVideoGriddedData,
-        config: VideoInferenceConfig,
+        time: np.ndarray,
+        var_attrs: dict[str, dict[str, str]],
+        n_timesteps: int,
+        output_path: str,
+        n_ensemble: int,
+        ensemble_chunk_size: int,
+        checkpoint_path: str,
+        use_ema: bool,
+        overwrite: bool,
+        max_batches: int | None,
     ):
         self.model = model
         self.griddata = griddata
-        self.config = config
+        self.time = time
+        self.var_attrs = var_attrs
+        self.n_timesteps = n_timesteps
+        self.output_path = output_path
+        self.n_ensemble = n_ensemble
+        self.ensemble_chunk_size = ensemble_chunk_size
+        self.checkpoint_path = checkpoint_path
+        self.use_ema = use_ema
+        self.overwrite = overwrite
+        self.max_batches = max_batches
 
     def run(self) -> None:
         dist = Distributed.get_instance()
-        model, griddata, config = self.model, self.griddata, self.config
+        model, griddata, time = self.model, self.griddata, self.time
         logger.info(f"Number of parameters: {count_parameters(model.modules)}")
 
-        time, var_attrs = _reference_time_and_attrs(config.data, model.out_names)
         n_time = len(time)
-        n_timesteps = config.model.n_timesteps
+        n_timesteps = self.n_timesteps
         clip_stride = n_timesteps - 1  # tumbling clips share only their boundary frame
 
         # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),
@@ -253,36 +290,36 @@ class VideoInferenceRunner:
 
         coords = {
             TIME_NAME: time,
-            ENSEMBLE_NAME: np.arange(config.n_ensemble),
+            ENSEMBLE_NAME: np.arange(self.n_ensemble),
             LAT_NAME: lat,
             LON_NAME: lon,
         }
         chunks = determine_zarr_chunks(
             dims=DIMS,
-            data_shape=(n_time, config.n_ensemble, n_lat, n_lon),
+            data_shape=(n_time, self.n_ensemble, n_lat, n_lon),
             bytes_per_element=4,
         )
 
         writer = ZarrWriter(
-            path=config.output_path,
+            path=self.output_path,
             dims=DIMS,
             coords=coords,
             data_vars=model.out_names,
             chunks=chunks,
-            array_attributes=var_attrs,
+            array_attributes=self.var_attrs,
             group_attributes={
                 "description": (
                     "Test-set inference: endpoint-conditioned video diffusion "
                     "infilling, ensemble of independent noise draws."
                 ),
-                "checkpoint_path": config.checkpoint_path,
-                "n_ensemble": str(config.n_ensemble),
-                "use_ema": str(config.use_ema),
+                "checkpoint_path": self.checkpoint_path,
+                "n_ensemble": str(self.n_ensemble),
+                "use_ema": str(self.use_ema),
             },
             nondim_coords={
                 "frame_source": xr.DataArray(frame_source, dims=[TIME_NAME]),
             },
-            mode="w" if config.overwrite else "w-",
+            mode="w" if self.overwrite else "w-",
             time_calendar="julian",
             # Unwritten cells (e.g. a killed/retried run) stay NaN rather than
             # a silently-plausible-looking 0.
@@ -292,15 +329,15 @@ class VideoInferenceRunner:
 
         n_batches = len(griddata.loader)
         for i, batch in enumerate(itertools.chain([first_batch], batch_iterator)):
-            if config.max_batches is not None and i >= config.max_batches:
+            if self.max_batches is not None and i >= self.max_batches:
                 break
 
-            remaining = config.n_ensemble
+            remaining = self.n_ensemble
             ensemble_chunks: dict[str, list[torch.Tensor]] = {
                 name: [] for name in model.out_names
             }
             while remaining > 0:
-                n = min(config.ensemble_chunk_size, remaining)
+                n = min(self.ensemble_chunk_size, remaining)
                 generated = model.generate(batch, n_samples=n)
                 for name in model.out_names:
                     ensemble_chunks[name].append(generated[name])
@@ -310,7 +347,7 @@ class VideoInferenceRunner:
                 name: torch.cat(chunks_, dim=1)
                 for name, chunks_ in ensemble_chunks.items()
             }
-            full = _splice_observed_endpoints(full, batch.fine.data, config.n_ensemble)
+            full = _splice_observed_endpoints(full, batch.fine.data, self.n_ensemble)
 
             clip_times = batch.fine.time.values  # (B, T) cftime
             for b in range(clip_times.shape[0]):
@@ -331,7 +368,7 @@ class VideoInferenceRunner:
                     write_data,
                     position_slices={
                         TIME_NAME: time_slice,
-                        ENSEMBLE_NAME: slice(0, config.n_ensemble),
+                        ENSEMBLE_NAME: slice(0, self.n_ensemble),
                     },
                 )
 
@@ -339,7 +376,7 @@ class VideoInferenceRunner:
 
         if dist.is_distributed():
             dist.barrier()
-        logger.info(f"Completed inference. Output: {config.output_path}")
+        logger.info(f"Completed inference. Output: {self.output_path}")
 
 
 def main(config_path: str) -> None:
