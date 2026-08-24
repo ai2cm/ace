@@ -36,8 +36,8 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs1|skip|high|jupiter|
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
@@ -113,6 +113,18 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs2|skip|high|
 # result, while the onset year (which does not even reproduce across scenarios)
 # does not.
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+
+# SEEDS PROMOTED 2026-08-24: ..._fillmean_maskall rs1/rs2 -> train.
+#
+# This is the arm the verdict rests on and it was a single seed. Across the
+# 130-yr 1pctCO2 and 200-yr piControl standalone rollouts it is the only
+# mean-fill arm that never loses surface salinity, and it beats every control
+# seed on it -- but "never collapses" at n=1 is exactly the claim a second and
+# third seed are needed for, since three sibling arms DO collapse (rollout yr
+# 29/57, 47/166, 97/75). Promote, then run both standalone rollouts against each
+# new seed; the readout is collapse/no-collapse, not a so_0 number.
+#
+# rs0 stays at `training` so the runner does not relaunch it.
