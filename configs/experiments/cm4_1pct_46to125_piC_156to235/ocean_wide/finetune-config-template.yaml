@@ -1,0 +1,184 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+evaluate_before_training: true # epoch-0 reference for the pretrained checkpoint
+ema:
+  decay: 0.999
+max_epochs: 10 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~7,300 iterations
+inference:
+  - name: inference_1pct
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+        # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+        # (validation + training), never entering the 131-140 holdout
+        - '0041-01-01T00:00:00'
+        - '0051-01-01T00:00:00'
+        - '0061-01-01T00:00:00'
+        - '0071-01-01T00:00:00'
+        - '0081-01-01T00:00:00'
+        - '0091-01-01T00:00:00'
+        - '0101-01-01T00:00:00'
+        - '0111-01-01T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+  - name: inference_piC
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+        # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+        # 1-90, never entering the relative-year-91+ holdout. The first IC
+        # is the store's first 5-daily snapshot.
+        - '0151-01-06T00:00:00'
+        - '0161-01-01T00:00:00'
+        - '0171-01-01T00:00:00'
+        - '0181-01-01T00:00:00'
+        - '0191-01-01T00:00:00'
+        - '0201-01-01T00:00:00'
+        - '0211-01-01T00:00:00'
+        - '0221-01-01T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235: 80
+    # years each, 160 total. Neither window enters its run's validation years
+    # (1pctCO2 0041-0045 and 0126-0130, piControl 0236-0240) or holdout (1pctCO2
+    # 0131-0140, piControl 0241-0350). One concat list per store, both in the
+    # same simulation order so the merged members share sample start times.
+    merge:
+    - concat:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-06T00:00:00'
+          stop_time: '0126-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0156-01-06T00:00:00'
+          stop_time: '0236-01-01T00:00:00'
+    - concat:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-06T00:00:00'
+          stop_time: '0126-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+        engine: zarr
+        subset:
+          start_time: '0156-01-06T00:00:00'
+          stop_time: '0236-01-01T00:00:00'
+validation:
+  - name: val_1pct_early
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0041-01-06T00:00:00'
+            stop_time: '0046-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0041-01-06T00:00:00'
+            stop_time: '0046-01-01T00:00:00'
+  - name: val_1pct_late
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0126-01-06T00:00:00'
+            stop_time: '0131-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0126-01-06T00:00:00'
+            stop_time: '0131-01-01T00:00:00'
+  - name: val_piC
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0236-01-06T00:00:00'
+            stop_time: '0241-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0236-01-06T00:00:00'
+            stop_time: '0241-01-01T00:00:00'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  # 4 -> 8: the one recipe change relative to the ohc_clip pretraining.
+  n_forward_steps: 8
+  loss:
+    type: MSE
+  parameter_init:
+    weights_path: /ckpt.tar
