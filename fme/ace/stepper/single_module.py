@@ -1497,6 +1497,14 @@ class TrainStepperConfig:
             sharp decision boundaries. 0 disables. Typical values are
             0.1–10 (scaled by input channel count relative to the image-GAN
             literature's 3-channel convention).
+        discriminator_r1_warmup_epochs: Number of epochs at the start of
+            training during which the R1 gradient penalty coefficient is
+            forced to 0. The full ``discriminator_r1_penalty`` value is
+            applied from this epoch onward (i.e. epochs 0 through
+            ``discriminator_r1_warmup_epochs - 1`` see no R1 penalty).
+            This prevents the penalty — which can be ~10^6 larger at random
+            initialization than at convergence — from freezing the
+            discriminator before it has learned useful gradients.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1509,6 +1517,7 @@ class TrainStepperConfig:
     discriminator_loss_weight: float = 0.0
     discriminator_optimization: OptimizationConfig | None = None
     discriminator_r1_penalty: float = 0.0
+    discriminator_r1_warmup_epochs: int = 0
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1539,6 +1548,11 @@ class TrainStepperConfig:
             raise ValueError(
                 "discriminator_r1_penalty must be non-negative, got "
                 f"{self.discriminator_r1_penalty}"
+            )
+        if self.discriminator_r1_warmup_epochs < 0:
+            raise ValueError(
+                "discriminator_r1_warmup_epochs must be non-negative, got "
+                f"{self.discriminator_r1_warmup_epochs}"
             )
 
     @property
@@ -1799,7 +1813,7 @@ class TrainStepper(
         optimization.step_weights()
 
         if self._discriminator is not None and gan_pairs:
-            self._update_and_monitor_discriminator(gan_pairs, metrics)
+            self._update_and_monitor_discriminator(gan_pairs, metrics, epoch=data.epoch)
 
         gen_data = process_ensemble_prediction_generator_list(output_list)
 
@@ -1985,6 +1999,7 @@ class TrainStepper(
         self,
         gan_pairs: list[GanStepPair],
         metrics: dict[str, float],
+        epoch: int | None = None,
     ) -> None:
         """Train the discriminator on the batch's cached pairs, or — when it
         is not being trained — only compute its monitor metrics.
@@ -1996,6 +2011,11 @@ class TrainStepper(
         """
         assert self._discriminator is not None
         gridded_operations = self._stepper.training_dataset_info.gridded_operations
+        warmup = self._config.discriminator_r1_warmup_epochs
+        if warmup > 0 and (epoch is None or epoch < warmup):
+            effective_r1_coefficient = 0.0
+        else:
+            effective_r1_coefficient = self._config.discriminator_r1_penalty
         if (
             self._discriminator.training
             and self._discriminator_optimization is not None
@@ -2009,7 +2029,7 @@ class TrainStepper(
                     self._discriminator,
                     gridded_operations,
                     gan_pairs,
-                    r1_penalty_coefficient=self._config.discriminator_r1_penalty,
+                    r1_penalty_coefficient=effective_r1_coefficient,
                 )
             self._discriminator_optimization.accumulate_loss(losses.loss)
             self._discriminator_optimization.step_weights()
