@@ -3625,6 +3625,40 @@ def test_gan_training_with_r1_penalty():
         assert not torch.equal(before, after)
 
 
+def test_gan_r1_warmup_disables_penalty_during_warmup_epochs():
+    """R1 penalty is 0 during warmup epochs, then the configured value after."""
+    torch.manual_seed(0)
+    discriminator_module, _ = _make_channel_mean_discriminator()
+    train_stepper = _get_gan_train_stepper(
+        discriminator_module,
+        discriminator_r1_penalty=5.0,
+        discriminator_r1_warmup_epochs=2,
+    )
+    optimization = OptimizationConfig(optimizer_type="Adam", lr=1e-3).build(
+        train_stepper.modules, max_epochs=3
+    )
+
+    # Epoch 0: within warmup, R1 penalty should be 0.
+    data_epoch0 = get_data(["a", "b"], n_samples=3, n_time=3, epoch=0).data
+    output0 = train_stepper.train_on_batch(data_epoch0, optimization)
+    assert output0.metrics["discriminator_r1_penalty"] == 0.0
+
+    # Epoch 1: still within warmup, R1 penalty should be 0.
+    data_epoch1 = get_data(["a", "b"], n_samples=3, n_time=3, epoch=1).data
+    output1 = train_stepper.train_on_batch(data_epoch1, optimization)
+    assert output1.metrics["discriminator_r1_penalty"] == 0.0
+
+    # Epoch 2: warmup over, R1 penalty should be active (> 0).
+    data_epoch2 = get_data(["a", "b"], n_samples=3, n_time=3, epoch=2).data
+    output2 = train_stepper.train_on_batch(data_epoch2, optimization)
+    assert output2.metrics["discriminator_r1_penalty"] > 0.0
+
+
+def test_gan_r1_warmup_config_rejects_negative():
+    with pytest.raises(ValueError, match="discriminator_r1_warmup_epochs"):
+        TrainStepperConfig(discriminator_r1_warmup_epochs=-1)
+
+
 def test_gan_training_with_gradient_accumulation():
     """The adversarial term is part of the same accumulated per-step loss, so
     gradient-accumulation mode (backward inside the step loop) must train both
