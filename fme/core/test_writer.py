@@ -71,6 +71,38 @@ def test_initialize_zarr(tmp_path):
     assert ds.attrs["description"] == "Test Zarr store"
 
 
+def test_initialize_zarr_fill_value(tmp_path):
+    n_times, n_sample = 4, 3
+    shape = (n_times, n_sample, NLAT, NLON)
+    chunks = {"time": n_times, "sample": n_sample, "lat": NLAT, "lon": NLON}
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
+            for i in range(n_times)
+        ]
+    )
+
+    default_path = os.path.join(tmp_path, "default.zarr")
+    create_zarr_store(default_path, shape, chunks, times)
+    default_group = zarr.open_group(default_path, mode="r")
+    assert default_group["var1"].fill_value == 0.0
+
+    nan_path = os.path.join(tmp_path, "nan.zarr")
+    _initialize_zarr(
+        path=nan_path,
+        vars=["var1", "var2"],
+        dim_sizes=shape,
+        chunks=chunks,
+        shards=None,
+        dim_names=("time", "sample", "lat", "lon"),
+        coords={"time": times},
+        dtype="f4",
+        fill_value=np.nan,
+    )
+    nan_group = zarr.open_group(nan_path, mode="r")
+    assert np.isnan(nan_group["var1"].fill_value)
+
+
 @pytest.mark.parametrize(
     "time_batch_size",
     [
