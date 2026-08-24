@@ -251,3 +251,9 @@ run_training "ace-train-config-decoder-daily-mean-fg16-sr0p125.yaml" \
 #   ./run-train.sh ft3-bptt-daily-fg16-sr0p125-gan
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
+
+# No-R1 variant of the GAN fine-tune: tests whether D overshoot is avoided
+# by the pretrained generator alone, without R1 regularization.
+#   ./run-train.sh gan-no-r1
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-no-r1.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-gan-no-r1-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
