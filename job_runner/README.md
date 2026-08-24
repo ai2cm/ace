@@ -70,6 +70,9 @@ cd job_runner
 # Evaluation (coupled or uncoupled)
 ./evaluate.sh configs/experiments/my-exper/ocean config-v1
 
+# Evaluation / inference reading configs from a shared directory
+./evaluate.sh configs/experiments/my-exper/ocean config-v1 --config-dir configs/baselines/cm4-piControl
+
 # All scripts support stats overrides and dry-run:
 ./uncoupled_train.sh configs/experiments/my-exper/ocean config-v1 --atmos_stats path/to/stats --dry-run
 ./coupled_train.sh configs/experiments/my-exper/coupled config-v1 --coupled_stats path/to/stats --dry-run
@@ -102,6 +105,37 @@ If none are specified, defaults to:
 - Atmosphere: `jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-atmosphere`
 - Ocean: `jamesd/2025-08-22-cm4-piControl-200yr-coupled-stats-ocean`
 
+## Shared Config Directory (`--config-dir`)
+
+`evaluate.sh` and `inference.sh` accept an optional `--config-dir <path>` that
+redirects where the config yaml is read from, so several experiment directories
+can evaluate against one maintained set of `evaluator-config-*.yaml` /
+`inference-config-*.yaml` files instead of each keeping a copy.
+
+```bash
+# default: configs are read from <experiment_dir>/<config_subdirectory>/
+./job_runner/evaluate.sh configs/experiments/my-exper/coupled v1 --dry-run
+
+# shared: configs are read from the given directory instead
+./job_runner/evaluate.sh configs/experiments/my-exper/coupled v1 \
+    --config-dir configs/baselines/cm4-piControl --dry-run
+```
+
+- The config filename is unchanged: `<config-dir>/evaluator-config-<tag>.yaml`,
+  with `<tag>` still the `experiments.txt` row's `status` field minus its `run_`
+  prefix (`run_inf_` for `inference.sh`).
+- `experiments.txt` is **always** read from
+  `<experiment_dir>/<config_subdirectory>/`. The shared directory supplies
+  configs, not the job list.
+- Module selection (`fme.coupled.*` vs `fme.ace.*`) stays keyed off
+  `<experiment_dir>`.
+- An absolute path is taken as given; a relative path is resolved against the
+  repository root, matching how `<experiment_dir>` is already interpreted.
+- The resolved path must lie inside the repository root — `gantry` uploads the
+  repository and runs the job from its root, so a config outside it is invisible
+  to the job. The script exits non-zero naming the offending path.
+- `--config-dir` is hyphenated, unlike the underscored `--atmos_stats` family.
+
 ## Dry-Run Mode
 
 All wrapper scripts support a `--dry-run` flag that allows you to preview actions without launching jobs or committing changes:
@@ -118,6 +152,7 @@ In dry-run mode:
 - No gantry jobs are launched
 - No git commits or pushes are made
 - No files are modified
+- The environment header names the directory configs are read from
 - Detailed output shows what would be executed:
   - First job: Full detailed configuration
   - Subsequent jobs: Condensed summary
@@ -162,6 +197,8 @@ This is useful for:
 **Script Initialization:**
 - `init_script_environment()`: Initialize REPO_ROOT, GIT_BRANCH, and BEAKER_USERNAME variables
 - `parse_dry_run_flag()`: Parse `--dry-run` flag from arguments
+- `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
+- `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root
 
 **Output and Logging:**
 - `print_dry_run_header()`: Print dry-run mode header
@@ -178,8 +215,8 @@ Each job type reads from a pipe-delimited text file:
 - **Coupled fine-tuning**: `finetuning.txt` (15 fields)
 - **Uncoupled fine-tuning**: `finetuning.txt` (15 fields)
 - **Resume**: `resuming.txt` (16 fields)
-- **Evaluate / Inference**: `experiments.txt` (14 fields; `inference.sh` reads the
-  first 13 and ignores `shared_mem`)
+- **Evaluate / Inference**: `experiments.txt` (14 fields), always read from
+  `<experiment_dir>/<config_subdirectory>/`, never from `--config-dir`
 
 ### `min_runtime` Field (Optional, Training Inputs)
 

@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable, Iterator
 from typing import Any, Generic, Protocol, TypeVar
 
+from fme.core.distributed import Distributed
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
 from fme.core.generics.data import InferenceDataABC
 from fme.core.generics.writer import NullDataWriter, WriterABC
@@ -147,7 +148,9 @@ def run_inference(
     with timer.context("data_writer"):
         writer.write(data.initial_condition, "initial_condition.nc")
     n_windows = len(looper)
+    dist = Distributed.get_instance()
     for i, batch in enumerate(looper):
+        dist.park_if_terminating()
         logging.info(
             f"Inference: processing output from window {i + 1} of {n_windows}."
         )
