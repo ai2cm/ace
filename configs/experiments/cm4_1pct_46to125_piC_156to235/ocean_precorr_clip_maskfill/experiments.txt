@@ -17,8 +17,8 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|01M0JR1R32
 # dataset and runs evaluator-config-ICx1-130yr.yaml against it. 130 years, not
 # 140: years 0131-0140 are kept as true held-out data (see the config header).
 # All five arms finished their 75 epochs on 2026-08-23/24.
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|01M0GM0B4PB9TND5S3B0NQZ9CR|run_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|01M0JR1EQ3PVNZ8JTEZ2SFKPWG|run_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|01M0JR1R32PZBQE7WSE9NQNH18|run_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|01M0GM0KSZGNGGWRG0J26NPC8Y|run_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|01M0GM0WD83F2R6THEEHBF2T9Y|run_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|01M0GM0B4PB9TND5S3B0NQZ9CR|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|01M0JR1EQ3PVNZ8JTEZ2SFKPWG|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|01M0JR1R32PZBQE7WSE9NQNH18|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|01M0GM0KSZGNGGWRG0J26NPC8Y|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|01M0GM0WD83F2R6THEEHBF2T9Y|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
