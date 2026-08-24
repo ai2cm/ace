@@ -31,6 +31,6 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|
 # piControl 200-yr rollout, 2026-08-24 -- the fill-0.0 / current-exclude cell of
 # the 2x2, these three ocean_precorr_clip seeds. Same evaluator-config-piC-200yr.yaml
 # as the five arms in ocean_precorr_clip_maskfill/ (kept byte-identical).
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|run_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|run_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|run_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
