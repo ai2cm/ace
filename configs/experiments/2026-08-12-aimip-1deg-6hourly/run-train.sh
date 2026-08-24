@@ -73,18 +73,19 @@ run_training() {
 # the monthly-/daily-AVERAGED AIMIP ERA5 data; a 6h step resolves the diurnal cycle so its
 # output averages into comparable means. See README.md for the full change list.
 #
-# Trained in two stages, following the ACE2S recipe: 1-step pretraining, then a multi-step
-# fine-tune initialized from its checkpoint.
+# Trained in three stages: 1-step pretraining, a multi-step fine-tune initialized from its
+# checkpoint, then a pressure-level fine-tune adding the AIMIP plev diagnostics. Each stage's
+# config already carries our run's donor dataset id; to reproduce from scratch, substitute the
+# id your own preceding stage produced.
 
 base_name="train-1deg-6hourly-v2-era5-only-no-residual-no-co2"
 
 # --- Stage 1: 1-step pretraining ---
 run_training "$base_name.yaml" "$base_name-rs0"
 
-# --- Stage 2: multi-step fine-tuning ---
-# Take the beaker result dataset id from the stage 1 job above, put it in the `# arg:`
-# header of $base_name-multi-step-ft.yaml (it mounts at /weights, supplying both the
-# stepper config and the initial weights), then uncomment the line below.
+# --- Stage 2: multi-step fine-tuning ---   [completed; see the record under stage 3]
+# The `# arg:` header of $base_name-multi-step-ft.yaml mounts the stage 1 result dataset at
+# /weights, supplying both the stepper config and the initial weights. Uncomment below to run.
 #
 # The stage 1 run this experiment's fine-tune config currently points at:
 #   beaker experiment 01KZYJ4HT4ZMZH296KBNWMPCQF   launched 2026-08-13 at commit b4a688d85
@@ -92,3 +93,18 @@ run_training "$base_name.yaml" "$base_name-rs0"
 #   result dataset   01KZYJ4HTBWED5VG3VFTRYKDRC   <- the donor checkpoint
 #
 # run_training "$base_name-multi-step-ft.yaml" "$base_name-multi-step-ft-rs0"
+
+# --- Stage 3: pressure-level fine-tuning ---
+# Adds the AIMIP evaluation pressure-level diagnostics (1000/850/700/500/250/100/50 hPa for
+# ta/hus/ua/va/zg) via a secondary decoder head, with the trunk frozen. The config's `# arg:`
+# header already mounts the stage 2 donor; uncomment below to run. NOTE: the donor dataset must
+# be committed (i.e. its job fully finalized) before beaker will mount it.
+#
+# The stage 2 run the donor came from (completed 2026-08-24, 40 epochs, 81h wall across 35
+# preempted attempts; best_val_loss 0.16528, best_inference_error 0.026124 -- unchanged from
+# epoch 8, so best_inference_ckpt.tar is the epoch-8 checkpoint):
+#   beaker experiment 01M06W0WN4WY1HJBWFXJNJEXC7   workspace ai2/ace, priority high
+#   wandb            78crdqjr
+#   result dataset   01M0RFP2DKAGABV89KRPMXX5C3   <- the donor, already in the config header
+#
+# run_training "$base_name-plev-ft.yaml" "$base_name-plev-ft-rs0"

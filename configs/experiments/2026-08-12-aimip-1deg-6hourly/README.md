@@ -59,18 +59,34 @@ genuine daily/monthly means directly comparable to the evaluation target.
 Initial-condition timestamps stay at `T06:00:00`: 06Z exists in the 6-hourly store
 (00/06/12/18Z), and keeping it makes lead times directly comparable with the daily runs.
 
-## Two-stage training
+## Three-stage training
 
-Trained in the standard ACE2S two stages, mirroring the pair in `configs/baselines/era5/`:
+Stages 1-2 mirror the ACE2S pair in `configs/baselines/era5/`; stage 3 follows the
+pressure-level fine-tune in `configs/experiments/2026-05-19-era5-aimip-ace2s/`.
 
 | stage | config | `n_forward_steps` | status |
 |---|---|---|---|
-| 1. pretraining | `train-1deg-6hourly-v2-era5-only-no-residual-no-co2.yaml` | `1` | done — wandb `g94277n6`, beaker `01KZYJ4HT4ZMZH296KBNWMPCQF`, result dataset `01KZYJ4HTBWED5VG3VFTRYKDRC` |
-| 2. fine-tuning | `…-no-co2-multi-step-ft.yaml` | stochastic 1/2/4/12/20 @ 0.6/0.2/0.1/0.05/0.05 | not launched |
+| 1. pretraining | `…-no-co2.yaml` | `1` | done — wandb `g94277n6`, beaker `01KZYJ4HT4ZMZH296KBNWMPCQF`, result dataset `01KZYJ4HTBWED5VG3VFTRYKDRC` |
+| 2. multi-step FT | `…-no-co2-multi-step-ft.yaml` | stochastic 1/2/4/12/20 @ 0.6/0.2/0.1/0.05/0.05 | done — wandb `78crdqjr`, beaker `01M06W0WN4WY1HJBWFXJNJEXC7`, result dataset `01M0RFP2DKAGABV89KRPMXX5C3` |
+| 3. pressure-level FT | `…-no-co2-plev-ft.yaml` | `1` (frozen trunk, plev head only) | not launched |
 
 Stage 1 ran at commit `b4a688d85` and finished 40 epochs in 44.5 h on 4 GPUs, with
 `best_val_loss` 0.1271 still falling at the final epoch — so the fine-tune's donor is a
 still-improving checkpoint rather than a converged one.
+
+## Stage 2: multi-step fine-tune
+
+Completed 2026-08-24: 40 epochs, 248,400 batches, 81 h wall across 35 preempted attempts
+(Ai2's scheduler toggles high/urgent, so preemption is routine and training resumed cleanly
+each time — beaker repopulates the results dir on retry). Final `best_val_loss` 0.16528;
+`best_inference_error` 0.026124, **unchanged since epoch 8**.
+
+Against stage 1 the gains were large and mostly immediate: rollout error 0.04533 -> 0.02706
+by the fine-tune's 4th epoch (−40%), and the precipitation small-scale power deficit
+0.44 -> 0.33 over the same span. Roughly 78-80% of the total spectral gain is in place by
+epoch 8, with ~20% accruing over epochs 8-36; the rollout-error gain is fully in place by
+epoch 8.
+
 
 The fine-tune config is the pretrain config with six changes and nothing else:
 
@@ -101,6 +117,54 @@ The fine-tune config is the pretrain config with six changes and nothing else:
 - Everything else — `max_epochs: 40`, `seed`, `lr`, `ema.decay`, the training loader, and
   all inference horizons and initial conditions — is unchanged, as in every other
   fine-tune/pretrain pair in the repo.
+
+## Stage 3: pressure-level fine-tune
+
+Adds the AIMIP evaluation pressure-level diagnostics — `ta`/`hus`/`ua`/`va`/`zg` at
+1000/850/700/500/250/100/50 hPa — as a `secondary_decoder` MLP head, with the donor trunk
+frozen. Derived from the **stage 1** config (not stage 2), because `stepper:` must be
+restated in full: `CheckpointStepperConfig` takes only `checkpoint_path` and strict parsing
+forbids adding `secondary_decoder` beside it. Stage 2 inherited stage 1's stepper config
+verbatim, so restating it reproduces the stage-2 architecture.
+
+**No plev dataset is needed.** The daily workflow had to build one
+(`origin/plev-daily-coarsen-and-window-fix`) because the *daily* store keeps only a few
+pressure levels. The 6-hourly store carries all of them — `TMP`/`Q`/`UGRD`/`VGRD` at
+10/50/100/200/250/500/700/850/1000 hPa and `h` additionally at 300 — and
+`2026-03-19-era5-1deg-8layer-stats-1990-2019` already covers every plev channel (134
+variables, verified). The stale `2025-11-10-era5-1deg-pressure-level-1940-2022.zarr` from the
+ACE2.1 workflow is not used, and the ACE2.1 13-level set (150/300/400/600/925) is not
+reproduced.
+
+**33 names, not 35.** `secondary_diagnostic_names` may not overlap `in_names` or `out_names`
+(`fme/core/step/single_module.py`), and `out_names` already contains `TMP850` and `h500`, so
+those two are excluded from the 7x5 set.
+
+**Donor is stage 2's `best_inference_ckpt.tar`, not `best_ckpt.tar`.** The inference-error
+criterion is the one prior checkpoint selection used, and on stage 2 it peaked at **epoch 8**
+(0.026124) and never improved through epoch 40 — the composite is dominated by time-mean
+terms, which drifted while short-lead skill and precipitation spectra kept improving. Taking
+epoch 8 keeps selection consistent with the earlier AIMIP checkpoints rather than optimising
+a different metric mid-experiment. It is EMA-wrapped, since stage 2 ran
+`validate_using_ema: true`.
+
+Note the donor dataset is the result dataset of stage 2's **final** job. Beaker repopulates
+the results directory on every preemption retry, so each job's dataset carries the full
+checkpoint set — the epoch-8 `best_inference_ckpt.tar` is present in the last one, with a
+timestamp reflecting the copy-forward rather than when it was computed.
+
+**`max_epochs: 50` is an upper bound, not a target.** The prior plev fine-tunes were all
+early-stopped on convergence rather than run to their epoch limit, and how long that takes
+varies a lot — one converged by epoch 41, another was still worth running at 73. Watch
+`best_val_loss` and stop when it goes flat; the prior runs all fell below ~0.5% improvement
+over their final quarter. Stopping early costs nothing, since `best_ckpt.tar` plus
+`ema_ckpt_XXXX` every 5 epochs are already saved.
+
+Other changes from stage 1: `max_epochs` 40 -> 50; `stepper_training` becomes single-step
+`MSE` with `parameter_init.parameters: [{frozen: {include: ["*"]}}]`; and the inference set
+collapses to `10year_insample` alone at epochs 10/20/30/40/50. A frozen trunk means the
+prognostic rollout is unchanged from stage 2, so the `weather_*` and `long_46year`
+diagnostics would re-measure a model that cannot have moved.
 
 ## Held fixed deliberately
 
