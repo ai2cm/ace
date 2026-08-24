@@ -367,6 +367,75 @@ parse_dry_run_flag() {
     export DRY_RUN
 }
 
+# Parse --config-dir argument from arguments
+# Sets global CONFIG_DIR_OVERRIDE variable (empty when the flag is absent)
+# Usage: parse_config_dir_arg "$@"
+parse_config_dir_arg() {
+    CONFIG_DIR_OVERRIDE=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --config-dir)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --config-dir requires a path argument" >&2
+                    exit 1
+                fi
+                CONFIG_DIR_OVERRIDE="$2"
+                shift 2
+                ;;
+            *)
+                # Unknown option - let the caller handle it
+                shift
+                ;;
+        esac
+    done
+    export CONFIG_DIR_OVERRIDE
+}
+
+# Resolve the repo-root-relative directory the config yaml is read from
+# Args: $1 = EXPERIMENT_DIR, $2 = CONFIG_SUBDIR, $3 = CONFIG_DIR_OVERRIDE (may be empty)
+# Requires REPO_ROOT, so call after init_script_environment
+# Outputs: repo-root-relative directory to stdout
+#
+# An absolute override is taken as given, a relative one is resolved against
+# REPO_ROOT, matching how <experiment_dir> is already interpreted. gantry uploads
+# the repository and runs the job from its root, so a config directory outside
+# REPO_ROOT is invisible to the job and is rejected here instead of failing on
+# the cluster.
+resolve_config_dir() {
+    local EXPERIMENT_DIR="$1"
+    local CONFIG_SUBDIR="$2"
+    local OVERRIDE="${3:-}"
+
+    if [[ -z "$OVERRIDE" ]]; then
+        echo "${EXPERIMENT_DIR}/${CONFIG_SUBDIR}"
+        return
+    fi
+
+    local CANDIDATE="$OVERRIDE"
+    if [[ "$CANDIDATE" != /* ]]; then
+        CANDIDATE="$REPO_ROOT/$CANDIDATE"
+    fi
+
+    if [[ ! -d "$CANDIDATE" ]]; then
+        echo "Error: --config-dir is not a directory: $OVERRIDE" >&2
+        exit 1
+    fi
+
+    # `cd ... && pwd -P` rather than `realpath`, which is absent on stock macOS.
+    # It also collapses ../ segments, so an override climbing out of the
+    # repository is caught by the containment check below.
+    local RESOLVED ROOT_RESOLVED
+    RESOLVED=$(cd "$CANDIDATE" && pwd -P)
+    ROOT_RESOLVED=$(cd "$REPO_ROOT" && pwd -P)
+
+    if [[ "$RESOLVED" != "$ROOT_RESOLVED"/* ]]; then
+        echo "Error: --config-dir must be inside the repository root ${ROOT_RESOLVED}; ${OVERRIDE} resolves to ${RESOLVED}" >&2
+        exit 1
+    fi
+
+    echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
+}
+
 # Print dry-run header
 print_dry_run_header() {
     if [[ "$DRY_RUN" == "true" ]]; then
