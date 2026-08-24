@@ -11,7 +11,7 @@ logging:
 loader:
   start_indices:
     times:
-      - '1940-01-01T00:00:00'
+      - '1940-01-03T00:00:00'
   dataset:
     data_path: /climate-default/
     file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
