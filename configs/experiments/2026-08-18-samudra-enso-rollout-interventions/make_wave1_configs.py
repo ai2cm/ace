@@ -201,6 +201,12 @@ def arm_noohc(c: dict) -> dict:
     corr = c["stepper"]["ocean"]["stepper"]["step"]["config"]["corrector"]["config"]
     assert corr.pop("ocean_heat_content_correction", None) is not None
     assert corr.pop("surface_energy_flux_correction", None) is not None
+    # Ops workaround, not science: this arm twice wedged in the cold
+    # pre-training inference pass (once a silent hang at window 148/720, once
+    # an NCCL watchdog kill during inference-dataloader worker setup). The
+    # pre-training evaluation is metrics-only, so skipping it does not affect
+    # training; epoch-end evaluations still run.
+    c["evaluate_before_training"] = False
     return c
 
 

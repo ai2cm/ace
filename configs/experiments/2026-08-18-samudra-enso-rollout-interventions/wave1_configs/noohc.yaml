@@ -7,7 +7,7 @@ checkpoint_save_epochs: null
 log_train_every_n_batches: 10
 train_evaluation_samples: 32
 validate_using_ema: true
-evaluate_before_training: true
+evaluate_before_training: false
 ema:
   decay: 0.999
 max_epochs: 25
