@@ -242,3 +242,12 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan.yaml" \
 #   ./run-train.sh decoder-daily-mean
 run_training "ace-train-config-decoder-daily-mean-fg16-sr0p125.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-mean-decoder-training-rs0-v2" 4
+
+# GAN discriminator 3-step BPTT fine-tune (added 2026-08-24): introduces
+# the discriminator at fine-tune time from the r95iprjt pretrain checkpoint
+# (no GAN during pretrain). The pretrained generator narrows the real/fake
+# gap so the R1 penalty starts manageable. Same discriminator config as
+# the pretrain GAN arm. Jupiter/urgent/8 GPUs. Launch alone:
+#   ./run-train.sh ft3-bptt-daily-fg16-sr0p125-gan
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-gan-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter urgent
