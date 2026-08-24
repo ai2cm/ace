@@ -11,7 +11,7 @@ For example, this could mean:
  - Re-structuring the PR, either by splitting it into multiple smaller PRs or by re-ordering commits, to make it easier to review.
  - Catching and fixing any issues you can find before the PR is seen by the reviewer.
  - Making comments on the PR to point out potential issues or areas of concern for the reviewer to focus on.
- - Improving the PR title and description (title and description edits go through the `write-pr-prose` skill).
+ - Improving the PR title and description (title and description edits should use the `write-pr-prose` skill).
 
 Focus specifically on making the reviewer's job easier, not on making the PR perfect.
 Issues involving readability might be particularly important, especially if the changes are hard to understand or the reason for them is not immediately clear.
