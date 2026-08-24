@@ -31,6 +31,11 @@ N_GPUS="${N_GPUS:-4}"
 ATMOS_CKPT_DATASET="${ATMOS_CKPT_DATASET:-01KJ70WK2NH4T2T4AVAAPYFSHA}"
 # troya/cm4-samudra-1pct-ocean-train-using-ufs-var-subset-ohc-hdfs-correctors
 OCEAN_CKPT_DATASET="${OCEAN_CKPT_DATASET:-01KW2BQ83EGZ90WZ74CZ4TJATN}"
+# Normalization/centering stats the configs reference at /atmos_stats and
+# /ocean_stats -- mounted exactly as the original runs mounted them (missing
+# these was the first launch's failure: /ocean_stats/ocean/centering.nc).
+STATS_BUNDLE_DATASET="${STATS_BUNDLE_DATASET:-01KHGYVHSX504ZBHJC223S63F0}"
+FT_OCEAN_STATS_DATASET="${FT_OCEAN_STATS_DATASET:-01KXH6AFMYSRYSV6PA230Q3JG7}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -46,12 +51,14 @@ launch() {
   local config="${CONFIG_DIR}/${arm}.yaml"
   local module="fme.coupled.train"
   local mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
-                --dataset "${OCEAN_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar")
+                --dataset "${OCEAN_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar"
+                --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
+                --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
 
   if [[ "$arm" == "resid" ]]; then
     config="${CONFIG_DIR}/resid-pretrain.yaml"
     module="fme.ace.train"
-    mounts=()
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
 
   python "${SCRIPT_PATH}/make_wave1_configs.py" >/dev/null
