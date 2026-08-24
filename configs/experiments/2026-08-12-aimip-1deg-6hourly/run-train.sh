@@ -96,7 +96,7 @@ run_training "$base_name.yaml" "$base_name-rs0"
 
 # --- Stage 3: pressure-level fine-tuning ---
 # Adds the AIMIP evaluation pressure-level diagnostics (1000/850/700/500/250/100/50 hPa for
-# ta/hus/ua/va/zg) via a secondary decoder head, with the trunk frozen. The config's `# arg:`
+# ta/hus/ua/va) via a secondary decoder head, with the trunk frozen. The config's `# arg:`
 # header already mounts the stage 2 donor; uncomment below to run. NOTE: the donor dataset must
 # be committed (i.e. its job fully finalized) before beaker will mount it.
 #

@@ -2,7 +2,7 @@
 #
 # Pressure-level fine-tune of the 1deg/6-hourly AIMIP-like experiment: stage 3, adding the
 # AIMIP evaluation pressure-level diagnostics (1000/850/700/500/250/100/50 hPa for
-# ta/hus/ua/va/zg) via a secondary decoder head, with the trunk frozen. Donor is the stage-2
+# ta/hus/ua/va) via a secondary decoder head, with the trunk frozen. Donor is the stage-2
 # multi-step fine-tune (...-multi-step-ft.yaml, wandb 78crdqjr): the dataset mounted above is
 # that run's final-job result dataset. Beaker repopulates the results dir on each preemption
 # retry, so the last job's dataset carries the whole checkpoint set. The plev fields already exist in
@@ -22,8 +22,8 @@ inference:
   - name: 10year_insample
     weight: 1.0
     epochs:
-      start: 9
-      step: 10
+      start: 1
+      step: 2
     n_forward_steps: 14608
     forward_steps_in_memory: 40
     n_ensemble_per_ic: 1
@@ -228,12 +228,6 @@ stepper:
           global_stds_path: /climate-default/2026-03-19-era5-1deg-8layer-stats-1990-2019/2026-03-19-era5-1deg-8layer-1940-2025/scaling-residual.nc
       secondary_decoder:
         secondary_diagnostic_names:
-        - h50
-        - h100
-        - h250
-        - h700
-        - h850
-        - h1000
         - TMP50
         - TMP100
         - TMP250

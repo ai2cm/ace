@@ -120,7 +120,7 @@ The fine-tune config is the pretrain config with six changes and nothing else:
 
 ## Stage 3: pressure-level fine-tune
 
-Adds the AIMIP evaluation pressure-level diagnostics — `ta`/`hus`/`ua`/`va`/`zg` at
+Adds the AIMIP evaluation pressure-level diagnostics — `ta`/`hus`/`ua`/`va` at
 1000/850/700/500/250/100/50 hPa — as a `secondary_decoder` MLP head, with the donor trunk
 frozen. Derived from the **stage 1** config (not stage 2), because `stepper:` must be
 restated in full: `CheckpointStepperConfig` takes only `checkpoint_path` and strict parsing
@@ -136,9 +136,12 @@ variables, verified). The stale `2025-11-10-era5-1deg-pressure-level-1940-2022.z
 ACE2.1 workflow is not used, and the ACE2.1 13-level set (150/300/400/600/925) is not
 reproduced.
 
-**33 names, not 35.** `secondary_diagnostic_names` may not overlap `in_names` or `out_names`
-(`fme/core/step/single_module.py`), and `out_names` already contains `TMP850` and `h500`, so
-those two are excluded from the 7x5 set.
+**27 names.** Four variables (`ta`/`hus`/`ua`/`va` -> `TMP`/`Q`/`UGRD`/`VGRD`) at the 7 AIMIP
+levels is 28, less `TMP850` which is already in `out_names` —
+`secondary_diagnostic_names` may not overlap `in_names`/`out_names`
+(`fme/core/step/single_module.py`). This matches the ACE2.2 daily plev fine-tune's set
+exactly. Geopotential height (`zg`/`h`) is deliberately excluded: the AIMIP levels are
+specified for ta/hus/ua/va, and the trunk already emits `h500` natively.
 
 **Donor is stage 2's `best_inference_ckpt.tar`, not `best_ckpt.tar`.** The inference-error
 criterion is the one prior checkpoint selection used, and on stage 2 it peaked at **epoch 8**
@@ -153,6 +156,27 @@ the results directory on every preemption retry, so each job's dataset carries t
 checkpoint set — the epoch-8 `best_inference_ckpt.tar` is present in the last one, with a
 timestamp reflecting the copy-forward rather than when it was computed.
 
+**Train/validation split: unchanged across all three stages.** Train 1979-1993 + 1995-2013
+(stitch-aligned blocks), validate 1994 + 2014 — inherited verbatim from the ACE2.2 daily
+training config that stage 1 ports.
+
+This differs from the ACE2.2 *pressure-level* fine-tune (wandb `gvoj4hf7`), which used the
+plev-FT template's split: train 1979-2008, validate 2009-2014 with `step: 3`. That template
+traces back to the ACE2.1-era aimip configs and carries its own split regardless of donor, so
+the ACE2.2 lineage changed protocol between its training run and its plev fine-tune. Ours does
+not. Both splits are AIMIP-compliant.
+
+Consequence: this head's loss is **not** directly comparable to `gvoj4hf7`'s, because the
+validation years differ. Retraining stages 1-2 on the plev-template split was considered and
+deferred — it would buy cross-run comparability and remove a protocol change that is awkward
+to explain in an AIMIP publication, but costs a full re-run of both stages.
+
+**The inference cadence is deliberately dense** (`{start: 1, step: 2}`, every 2nd epoch). The
+first attempt used every 10th epoch and its first evaluation landed at epoch 10, by which
+point the head had already converged — at 6210 batches/epoch, one epoch here is ~9x the
+optimizer steps of the daily ACE2.2 plev FT's, so the whole interesting phase happens in the
+first few epochs.
+
 **`max_epochs: 50` is an upper bound, not a target.** The prior plev fine-tunes were all
 early-stopped on convergence rather than run to their epoch limit, and how long that takes
 varies a lot — one converged by epoch 41, another was still worth running at 73. Watch
@@ -162,7 +186,25 @@ over their final quarter. Stopping early costs nothing, since `best_ckpt.tar` pl
 
 Other changes from stage 1: `max_epochs` 40 -> 50; `stepper_training` becomes single-step
 `MSE` with `parameter_init.parameters: [{frozen: {include: ["*"]}}]`; and the inference set
-collapses to `10year_insample` alone at epochs 10/20/30/40/50. A frozen trunk means the
+collapses to `10year_insample` alone, at every 2nd epoch — the same weighted rollout stages
+1-2 select on, so `best_inference_ckpt` means the same thing at every stage.
+
+### Do not select on 2015-2024
+
+**2015-2024 is the AIMIP holdout period.** It must not be used for training, validation, or
+checkpoint selection. The `10year` inference in stages 1-2 runs on 2015 ICs and carries
+`weight: 0.0` *for this reason* — it is a look-only diagnostic, not a selection signal. Giving
+it a non-zero weight would violate the protocol. Stage 3 omits it entirely.
+
+Consequence: the weighted rollout (`10year_insample`, 1995-2004) lies **inside** the training
+window, so the inference-based criterion is not held-out. That is forced by the split — with
+training through 2013, validation on 1994/2014, and 2015+ embargoed, no non-holdout
+out-of-sample decade remains. ACE2.1 could select out-of-sample only because its split
+reserved 2009-2014 for validation, which our stages 1-2 train on.
+
+Mitigating factor: a decade-long free rollout decorrelates from its initial condition within
+weeks, so what is scored is the model climate rather than a fit to specific years. Note also
+that `best_ckpt.tar` selects on held-out validation years (1994/2014) regardless. A frozen trunk means the
 prognostic rollout is unchanged from stage 2, so the `weather_*` and `long_46year`
 diagnostics would re-measure a model that cannot have moved.
 
