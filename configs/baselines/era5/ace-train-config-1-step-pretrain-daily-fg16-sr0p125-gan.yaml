@@ -12,12 +12,12 @@
 # 0.1 sizes the adversarial term against a base batch_loss that settles near
 # 0.1 (the non-saturating BCE term is ~0.69 at equilibrium). The
 # discriminator optimizer is explicit at lr 1e-5 (TTUR: 10x slower than the
-# generator's 1e-4) and an R1 gradient penalty (coefficient 1e-4; channel-
-# summed per-pixel norm, area-weighted spatial mean) regularizes the
-# discriminator's decision boundary. Runs 1-2 collapsed from D overshoot;
-# run 3 had R1 with per-element-mean bug; run 4 had correct channel-summed
-# R1 but coefficient 1.0 was 3 OOM too large (raw penalty ~5000 vs BCE ~1.4,
-# D paralysed). Run 5 uses coefficient 1e-4 (R1_term ~0.5).
+# generator's 1e-4) and an R1 gradient penalty (coefficient 1e-6 with
+# 1-epoch warmup) regularizes the discriminator's decision boundary.
+# Runs 1-2 collapsed from D overshoot; runs 3-5 had D frozen by R1 at
+# init scale (raw penalty ~10⁹ at init → ~10³ at convergence). Run 8 uses
+# coefficient 1e-6 (2 OOM below run 5) with discriminator_r1_warmup_epochs 1
+# so D trains freely for epoch 0 before R1 kicks in.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -100,7 +100,8 @@ stepper_training:
   n_ensemble: 2
   n_forward_steps: 1
   discriminator_loss_weight: 0.1
-  discriminator_r1_penalty: 0.0001
+  discriminator_r1_penalty: 0.000001
+  discriminator_r1_warmup_epochs: 1
   discriminator_optimization:
     optimizer_type: AdamW
     lr: 0.00001
