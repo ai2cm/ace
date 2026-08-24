@@ -7,11 +7,12 @@ from typing import TypeVar
 import torch
 
 from fme.core import metrics
+from fme.core.device import using_gpu
 
 from .base import DistributedBackend
 from .model_torch_distributed import ModelTorchDistributed
 from .non_distributed import NonDistributed
-from .shutdown import handle_termination_signals
+from .shutdown import abort_and_exit_on_termination, park_if_terminating
 from .torch_distributed import TorchDistributed
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,11 @@ class Distributed:
         try:
             with contextlib.ExitStack() as stack:
                 if handle_signals and instance.is_distributed():
-                    stack.enter_context(handle_termination_signals(instance.abort))
+                    stack.enter_context(
+                        abort_and_exit_on_termination(
+                            instance.abort, drain=instance._drain_local_work
+                        )
+                    )
                 try:
                     yield
                 except BaseException:
@@ -211,13 +216,21 @@ class Distributed:
         """
         return self._distributed.total_ranks
 
+    @property
+    def has_spatial_parallelism(self) -> bool:
+        """Whether spatial co-ranks exist (world_size !=
+        total_data_parallel_ranks), meaning each rank holds only a shard of
+        the model's spatial state rather than a full copy.
+        """
+        return self.world_size != self.total_data_parallel_ranks
+
     def require_no_spatial_parallelism(self, msg: str) -> None:
         """Raise if spatial parallelism is active.
 
         Use this to guard code paths that are known to be incorrect
-        when spatial co-ranks exist (world_size > total_data_parallel_ranks).
+        when spatial co-ranks exist.
         """
-        if self.world_size != self.total_data_parallel_ranks:
+        if self.has_spatial_parallelism:
             raise SpatialParallelismNotImplemented(msg)
 
     def get_sampler(
@@ -526,6 +539,26 @@ class Distributed:
         to call from a non-main thread.
         """
         return self._distributed.abort()
+
+    def park_if_terminating(self):
+        """
+        If we've received a termination signal, stop work and wait for termination.
+
+        The batch loops should call this once per batch or window. It returns
+        immediately unless a termination signal has arrived; if one has, it
+        drains this rank's device work, blocks, and the process exits from
+        the termination listener's thread. See
+        `fme.core.distributed.shutdown.park_if_terminating`.
+        """
+        park_if_terminating()
+
+    def _drain_local_work(self):
+        """Block until every kernel this rank has enqueued -- collectives
+        included -- has completed. On CPU there is nothing asynchronous to
+        drain.
+        """
+        if using_gpu():
+            torch.cuda.synchronize()
 
 
 singleton: Distributed | None = None
