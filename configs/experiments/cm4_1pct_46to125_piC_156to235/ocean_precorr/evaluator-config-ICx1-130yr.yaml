@@ -1,0 +1,75 @@
+# Single-IC 130-year 1pctCO2 rollout at 1deg, for out-of-sample skill with the
+# years 0131-0140 holdout left untouched.
+#
+# One IC at the store's first snapshot, run to the last snapshot of year 0130,
+# so the rollout crosses every split of the 1pctCO2 record EXCEPT the holdout:
+#   years 0001-0040  never seen (out of sample, CO2 below the training range)
+#   years 0041-0045  val_1pct_early
+#   years 0046-0125  training window
+#   years 0126-0130  val_1pct_late
+#   years 0131-0140  holdout -- DELIBERATELY NOT EVALUATED
+# Nothing here restricts scoring to a segment; the per-segment split is done
+# offline from the monthly output and the annual aggregator series.
+#
+# This is the deliberate difference from the 140-yr ICx1 evaluation, which runs
+# to 0140-12-27 and therefore spends the holdout. Years 0131-0140 are kept as
+# true held-out data: never scored, never plotted, never used to pick anything,
+# so a later run can be judged on data no arm in this protocol has been read
+# against.
+#
+# 9488 steps x 5 days = 0001-01-06 -> 0130-12-27 (73 steps/noleap year), the
+# last snapshot of year 0130. Step 9489 would land on 0131-01-01 and enter the
+# holdout, so the step count is the ONLY thing keeping this rollout out of the
+# holdout -- `fme.ace.data_loading.inference` rejects a `subset` on an inference
+# loader ("Inference data may not be subset"), so the bound cannot also be
+# expressed on the store. Do not raise n_forward_steps here; a longer rollout
+# belongs in the 140-yr config, which already spends the holdout by design.
+#
+# The stepper -- including input_masking.fill_value and
+# exclude_names_and_prefixes -- is restored from the checkpoint, so this one
+# config serves every cell of the fill-value x masking-scope 2x2 and the Arm B
+# ladder unchanged. Keep it identical between the arm directories that use it
+# (ocean_precorr/ for the ocean_precorr_clip control seeds,
+# ocean_precorr_clip_maskfill/ for the five masking arms).
+#
+# forward_steps_in_memory (40) comes from this protocol's own train-config
+# inference blocks, not from the 4deg configs.
+experiment_dir: /results
+n_forward_steps: 9488
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0001-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  # Kept on, unlike the usual default: the whole point of this rollout is the
+  # per-segment read (below-range / early-val / training / late-val), which is
+  # done offline from these files and the annual series.
+  save_monthly_files: true
+aggregator:
+  log_histograms: true
+  # Both of these plot a matplotlib *date* axis. Autoscale pads ~5% below the
+  # data range, which on a series starting in year 0001 lands before year 0001,
+  # and matplotlib rejects those dates -- it kills the job at the very end,
+  # after the rollout and the reduced-metric netcdf are already written. The fix
+  # is ace #1439 (88605da2c), which is NOT an ancestor of this branch, so they
+  # stay off; nothing here needs the ENSO or IPO index.
+  log_nino34_index: false
+  log_ipo_index: false

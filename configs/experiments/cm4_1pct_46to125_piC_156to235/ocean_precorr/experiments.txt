@@ -17,3 +17,20 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|
 cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs1|01M0DCTFB5TE15VNF02VRC858P|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs2|01M0DCTWTK1M2515F9WBR4SQAC|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ICx1 130-yr out-of-sample evaluation, 2026-08-24 -- the fill-0.0 /
+# current-exclude cell of the fill-value x masking-scope 2x2, which is these
+# three ocean_precorr_clip seeds. Same evaluator-config-ICx1-130yr.yaml as the
+# five arms in ocean_precorr_clip_maskfill/ (kept byte-identical), so the 2x2 is
+# evaluated under one setup and the control's seed spread is available to read
+# the single-seed arms against.
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+
+# piControl 200-yr rollout, 2026-08-24 -- the fill-0.0 / current-exclude cell of
+# the 2x2, these three ocean_precorr_clip seeds. Same evaluator-config-piC-200yr.yaml
+# as the five arms in ocean_precorr_clip_maskfill/ (kept byte-identical).
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
