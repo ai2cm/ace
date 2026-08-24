@@ -1,0 +1,94 @@
+# Cascade pipeline test: 100km temporal infill -> 25km spatial SR, both
+# already-trained models, no retraining. Tests a realistic sparse-observation
+# deployment scenario -- unlike every prior run of this SR model (which
+# conditioned on REAL dense 3-hourly 100km truth, unrealistic if only sparse
+# ~24h-cadence LR observations exist), this run conditions on the OUTPUT of
+# a temporal-infill model that itself only saw sparse 24h anchors.
+#
+# Stage 1 (temporal infill, already run, no new job needed): the 5-channel
+# per-channel-noise-kernel (OU/RBF per variable) video-PMD model trained at
+# native 1-degree/100km resolution, 24h sparse -> 3h dense infilling
+# (configs/experiments/2026-07-20-video-pmd-5ch-per-channel-kernel/video_train.yaml,
+# training experiment 01KY0SRVASWEECEGZHXF67E141). Test-set inference
+# (configs/experiments/2026-07-22-video-pmd-5ch-per-channel-kernel-test-inference/,
+# experiment 01KY49ZJ5SPD1G61C299CR64T8) already completed (exitCode 0),
+# n_ensemble=32, output:
+#   video-pmd-5ch-per-channel-kernel-global-1degree-24to3-v1/test-2023-2024-ens32.zarr
+#
+# This 5-channel model was picked over the originally-linked 4-channel
+# video-pmd-bb-pcn-global-1degree-24to3-v1 (Brownian-bridge + per-channel
+# noise, same 24h->3h/1deg design) specifically because the SR model below
+# requires air_temperature_at_two_meters as one of its 5 input channels,
+# which the bb-pcn model's out_names never included (see its own
+# video_train.yaml) -- this per-channel-kernel sibling has all 5 required
+# channels, the same per-channel noise design as the original pick, and an
+# already-completed ens32 test run, so no retraining was needed either way.
+# (A "flat"/independent-noise sibling with the same 5 channels also exists
+# -- video-pmd-5ch-flat-global-1degree-24to3-v1 -- picked against in favor
+# of staying closer to the originally-intended per-channel noise design.)
+#
+# Ensemble handling: this run uses only ensemble member 0 of the infill
+# output (isel below) as the coarse conditioning input, then draws the SR
+# model's own n_ens=4 samples on top of that single infill realization --
+# matching this SR model's normal ens4 convention exactly (see
+# ../2026-08-20-hiro-downscaling-25km-100km-5ch-test-inference-ens4-weka/),
+# so results are directly comparable to every other model in the
+# comparison. This does NOT propagate the infill stage's own 32-member
+# uncertainty into the final ensemble -- a genuine simplification, not
+# fixed here because XarrayEnsembleDataConfig (the mechanism that would
+# concatenate multiple infill members) has no existing usage precedent
+# anywhere in this repo and its interaction with per-timestep ensemble
+# alignment during inference is untested; extending to full 32-member
+# uncertainty propagation is a follow-up, not required to get a first
+# real answer on whether the cascade works at all.
+#
+# Stage 2 (spatial SR, this job): SAME checkpoint/patch/output settings as
+# ../2026-08-20-hiro-downscaling-25km-100km-5ch-test-inference-ens4-weka/
+# (checkpoint dataset 01KZ1WGMM2SQR6WSV0R3F3EM47, training job v6,
+# 01KZ1WGMKRX6AKWWQXB8JJWRZP) -- only the data.coarse source changed.
+model:
+  checkpoint_path: /checkpoint/checkpoints/ema_ckpt.tar
+experiment_dir: /climate-default/2026-06-25-temporal-diffusion/inference/hiro-downscaling-25km-100km-global-5ch-v6-cascade-infill-then-sr
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-temporal-interp
+  name: hiro-downscaling-25km-100km-global-5ch-v6-cascade-infill-then-sr
+  entity: ai2cm
+data:
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion/inference
+      file_pattern: video-pmd-5ch-per-channel-kernel-global-1degree-24to3-v1/test-2023-2024-ens32.zarr
+      engine: zarr
+      isel:
+        ensemble: 0
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 4
+  num_data_workers: 4
+  strict_ensemble: false
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+outputs:
+  - name: test-2023-2024-ens4
+    n_ens: 4
+    max_samples_per_gpu: 8
+    save_vars:
+      - PRATEsfc
+      - air_temperature_at_two_meters
+      - PRMSL
+      - eastward_wind_at_ten_meters
+      - northward_wind_at_ten_meters
+    time_range:
+      start_time: "2023-01-01"
+      stop_time: "2024-01-04"
+    lat_extent:
+      start: -88
+      stop: 88
+    lon_extent:
+      start: 0
+      stop: 360
