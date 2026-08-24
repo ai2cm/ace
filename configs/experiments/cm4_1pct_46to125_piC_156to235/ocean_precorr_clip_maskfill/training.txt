@@ -67,10 +67,52 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs2|skip|high|jupiter|4
 # a decomposition splits the effect, so only "the freshwater trio reproduces
 # most of maskall" is readable at rs0. rs1/rs2 staged at skip.
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction]'
+
+# ARM C -- the freshwater test, run without the confound, added 2026-08-24.
+#
+# The 130-yr and 200-yr standalone rollouts said the maskall win was never about
+# completing the mask: every arm that collapses is one that MEAN-FILLS
+# sea_surface_fraction, and the only mean-fill arm that survives both scenarios
+# is the one that excludes it. maskall vs maskatm differ in exactly that channel
+# and differ in whether they collapse; masked count does not order the collapses
+# at all (86 -> yr 97, 89 -> yr 29, 96 -> yr 47, 95 -> never).
+#
+# Why that channel specifically: sea_surface_fraction is geometry, not state --
+# its value IS the land/ocean distinction. Mean-fill puts its land cells at the
+# normalized value 0, indistinguishable from a real half-ocean coastal cell,
+# where fill_value 0.0 puts them far outside the field's range. Which is also
+# why both fill_value 0.0 arms are immune regardless of masking scope.
+#
+# So maskfw inherited a broken sea_surface_fraction from the base exclude list,
+# and the freshwater hypothesis has never actually been tested. maskfw had the
+# best short-horizon so_0 of any arm (0.111 at its selected epoch) and was the
+# FIRST to collapse (rollout yr 29 / 57). This row is maskfw with
+# sea_surface_fraction added back to the exclude list -- ONE channel different
+# from a known collapse, 88/97 masked against maskfw's 89/97:
+#
+#   cell                        exclude list                          masked
+#   ..._fillmean_maskfw         land_fraction + radiation + wind       89/97
+#   ..._fillmean_maskfw_keepssf ^ plus sea_surface_fraction            88/97
+#
+# Read it as: if this does not collapse, sea_surface_fraction is the driver and
+# the freshwater masking is recovered along with it -- which would make this the
+# best arm in the protocol on surface salinity. If it still collapses, the
+# freshwater masking itself is implicated and the sea_surface_fraction story is
+# incomplete.
+#
+# Same seeding caveat as above: rs0 is a screen. But the readout here is a
+# collapse/no-collapse over a 130-200 yr rollout, not a so_0 number, and no seed
+# of any arm has ever half-collapsed -- so one seed does carry the qualitative
+# result, while the onset year (which does not even reproduce across scenarios)
+# does not.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction,DLWRFsfc,DSWRFsfc,ULWRFsfc,USWRFsfc,SHTFLsfc,eastward_surface_wind_stress,northward_surface_wind_stress]'
