@@ -27,7 +27,6 @@ from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
     get_initial_condition,
-    get_segment_label,
     main,
     run_segmented_inference,
 )
@@ -44,6 +43,7 @@ from fme.core.coordinates import (
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
+from fme.core.generics.inference import get_segment_label
 from fme.core.labels import BatchLabels
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
