@@ -27,25 +27,33 @@ Note that the workflow is memory-intensive and was run on a high-memory (128GB) 
 
 ### Generating AIMIP evaluation initial conditions
 
-`create_aimip_ic_datasets.py` builds the initial-condition files an ACE model is
-initialized from for AIMIP inference. Each IC member is a single timestamp selected from
-the 1-degree 8-layer ERA5 zarr and restamped to a common target time, so the members are
-an ensemble over initial state rather than over start date.
+`create_aimip_ic_datasets.py` builds the ICs a model is initialized from for AIMIP inference.
+Each member is one timestamp from the ERA5 zarr, restamped to a common target time.
 
 ```make create_aimip_ics```
 
-Relevant variables:
+- `ERA5_GCS_DATA` — source zarr; use the build the model was trained on.
+- `GCS_IC_PATH` — upload destination.
+- `IC_EXTRA_ARGS` — e.g. `--include-near-surface` for models carrying
+  `TMP2m`/`Q2m`/`UGRD10m`/`VGRD10m`. `--target-timestamp` and `--ic-timestamp` set the
+  restamped and source times.
 
-- `ERA5_GCS_DATA` — source zarr. Must be the same ERA5 version the model was trained on.
-- `GCS_IC_PATH` — where the resulting `.nc` files are uploaded.
-- `IC_EXTRA_ARGS` — extra flags. Use `--include-near-surface` for models that carry
-  `TMP2m`/`Q2m`/`UGRD10m`/`VGRD10m` as prognostic inputs; the source zarr must have them.
-  `--target-timestamp` and `--ic-timestamp` set the restamped time and the source times,
-  and must exist in the source zarr.
+ICs carry only prognostic variables; forcings come from the forcing zarr at inference time.
 
-Note the ICs supply only *prognostic* variables. Forcings (`DSWRFtoa`, `HGTsfc`,
-`land_fraction`, `ocean_fraction`, `sea_ice_fraction`, `surface_temperature`) come from the
-forcing zarr at inference time, so they are deliberately absent here.
+### Regenerating the forcing for a different ERA5 build
+
+`HGTsfc`, `DSWRFtoa` and `land_fraction` are read from an ACE ERA5 zarr, and differ between
+builds (the March 2026 pipeline rewrite moves `HGTsfc` by tens of metres in mountains), so
+that zarr should match the model's training build:
+
+```
+FORCING_EXTRA_ARGS="--ace2-era5-gcs-data gs://vcm-ml-intermediate/<era5>.zarr" \
+  make process_aimip_forcing
+```
+
+The source must span the whole window or the run errors; `--extension-start` opts into
+synthesizing the remainder, needed only for short sources like the 2022-ending
+`2024-06-20-…` store.
 
 ### Generating the public AIMIP forcing dataset
 
