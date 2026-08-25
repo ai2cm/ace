@@ -152,16 +152,17 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs2|ski
 # sea_surface_fraction) plus fill_value_overrides sending the four depth-resolved
 # families and deptho to 0.0. Resolved and checked against TrainConfig:
 #   excluded, never masked   2  land_fraction, sea_surface_fraction
-#   fill 0.0                77  deptho + so_/thetao_/uo_/vo_ (4 x 19)
-#   fill mean               18  sst, zos, hfgeou, sfdsi, UI, VI, sea ice, forcings
+#   fill 0.0                78  deptho, hfgeou + so_/thetao_/uo_/vo_ (4 x 19)
+#   fill mean               17  sst, zos, sfdsi, UI, VI, sea ice, forcings
 #
 # Two judgement calls worth revisiting before launch:
 #   - so_0 and thetao_0 are level-0 (surface) but ride the family prefix into
 #     zero-fill. mask_0 is bit-identical to mask_2d, so their masked cells are
 #     exactly the land cells that sst's are -- the alternative is to add
 #     so_0/thetao_0 exact-name entries at "mean". Family uniformity was chosen.
-#   - hfgeou stays mean-filled. It is NaN on land like deptho, so it is arguably
-#     in the same group, but it is a 2D field and was left with the surface set.
+#   - hfgeou is zero-filled, at elynn's call. It is NaN on land like deptho and is
+#     a sea-floor boundary field, so it belongs with the depth group rather than
+#     the surface set despite being 2D.
 #
 # READ IT AS: against ..._fillmean_maskall (rs0/1/2), which is identical except
 # for the overrides. If the interior profiles improve toward the zero-fill arms
@@ -169,6 +170,6 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs2|ski
 # moves, the surface/interior split is not about the fill value and the feature
 # should not merge on this evidence.
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0}'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0}'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
