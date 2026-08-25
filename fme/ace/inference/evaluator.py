@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 
 import cftime
 import dacite
@@ -57,7 +57,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 def resolve_variable_metadata(
     dataset_metadata: Mapping[str, VariableMetadata],
     stepper_metadata: Mapping[str, VariableMetadata],
-    stepper_all_names: Sequence[str],
+    stepper_all_names: Collection[str],
 ) -> dict[str, VariableMetadata]:
     """
     Resolve variable metadata by merging from the following sources: derived variables,
@@ -412,7 +412,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
             val_aggregator = config.validation.aggregator.build(
                 dataset_info=dataset_info,
-                loss_scaling=train_stepper.effective_loss_scaling,
                 save_diagnostics=True,
                 output_dir=os.path.join(config.experiment_dir, "validation"),
                 channel_mean_names=stepper.loss_names,

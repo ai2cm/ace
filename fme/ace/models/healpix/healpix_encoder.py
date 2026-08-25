@@ -63,62 +63,36 @@ class UNetEncoderConfig:
         Returns:
             UNet Encoder model.
         """
-        return UNetEncoder(
-            conv_block=self.conv_block,
-            down_sampling_block=self.down_sampling_block,
-            input_channels=input_channels,
-            n_channels=self.n_channels,
-            n_layers=self.n_layers,
-            dilations=self.dilations,
-            ctx=ctx,
-        )
-
-
-class UNetEncoder(nn.Module):
-    """Generic UNetEncoder that can be applied to arbitrary meshes."""
-
-    def __init__(
-        self,
-        conv_block: ConvBlockConfig,
-        down_sampling_block: DownsamplingBlockConfig,
-        input_channels: int = 3,
-        n_channels: Sequence = (16, 32, 64),
-        n_layers: Sequence = (2, 2, 1),
-        dilations: Optional[list] = None,
-        ctx: HEALPixBuildContext | None = None,
-    ):
-        """
-        Args:
-            conv_block: config for the convolutional block
-            down_sampling_block: DownsamplingBlockConfig for the downsample block
-            input_channels: # of input channels
-            n_channels: # of channels in each encoder layer
-            n_layers:, # of layers to use for the convolutional blocks
-            dilations: list of dilations to use for the the convolutional blocks
-            ctx: Shared HEALPix runtime settings for all child modules.
-        """
-        super().__init__()
-        build_ctx = ctx or HEALPixBuildContext()
-        self.n_channels = n_channels
-        self.hpx_padding_mode = build_ctx.hpx_padding_mode
-
-        if dilations is None:
-            dilations = [1 for _ in range(len(n_channels))]
-
-        nside_levels = build_ctx.nside_levels
-        if nside_levels is not None and len(nside_levels) != len(n_channels):
+        nside_levels = ctx.nside_levels
+        if nside_levels is not None and len(nside_levels) != len(self.n_channels):
             raise ValueError(
                 f"nside length must match encoder levels; got {len(nside_levels)} "
-                f"vs {len(n_channels)}"
+                f"vs {len(self.n_channels)}"
             )
+        return self._build(input_channels, ctx=ctx)
 
-        conv_tpl = conv_block
-        down_tpl = down_sampling_block
-        down_factor = down_tpl.downsample_spatial_factor()
+    def _build(
+        self,
+        input_channels: int,
+        *,
+        ctx: HEALPixBuildContext,
+    ) -> "UNetEncoder":
+        """Construct the ordered per-level encoder modules and the impl.
+
+        Builds one ``nn.Sequential(down?, conv)`` per level, threading channel
+        counts and validating the nside downsample ratios, then passes the built
+        module list to :class:`UNetEncoder`.
+        """
+        dilations = self.dilations
+        if dilations is None:
+            dilations = [1 for _ in range(len(self.n_channels))]
+
+        nside_levels = ctx.nside_levels
+        down_factor = self.down_sampling_block.downsample_spatial_factor()
 
         old_channels = input_channels
-        self.encoder = []
-        for n, curr_channel in enumerate(n_channels):
+        encoder: list[nn.Sequential] = []
+        for n, curr_channel in enumerate(self.n_channels):
             modules: List[nn.Module] = []
             if n > 0:
                 if nside_levels is not None:
@@ -130,27 +104,50 @@ class UNetEncoder(nn.Module):
                             f"but nside[{n}]={fine}"
                         )
                 modules.append(
-                    down_tpl.build(
+                    self.down_sampling_block.build(
                         in_channels=old_channels,
-                        ctx=build_ctx.layer(n - 1),
+                        ctx=ctx.layer(n - 1),
                     )
                 )
 
             modules.append(
-                conv_tpl.build(
+                self.conv_block.build(
                     in_channels=old_channels,
                     out_channels=curr_channel,
                     latent_channels=curr_channel,
                     dilation=dilations[n],
-                    n_layers=n_layers[n],
-                    ctx=build_ctx.layer(n),
+                    n_layers=self.n_layers[n],
+                    ctx=ctx.layer(n),
                 )
             )
             old_channels = curr_channel
 
-            self.encoder.append(nn.Sequential(*modules))
+            encoder.append(nn.Sequential(*modules))
 
-        self.encoder = nn.ModuleList(self.encoder)
+        return UNetEncoder(encoder=encoder)
+
+
+class UNetEncoder(nn.Module):
+    """Runs the encoder levels in sequence, returning each level's activation.
+
+    Receives the ordered per-level modules already built by
+    :meth:`UNetEncoderConfig._build` (each a downsample-then-conv
+    ``nn.Sequential``, or just a conv at the shallowest level) and applies them
+    in order, feeding each level's output into the next. It builds nothing
+    itself and holds no config. The returned per-level activations are the skip
+    connections the decoder consumes; the module is agnostic to the mesh, the
+    padding backend, and the channel schedule, which live in the config.
+    """
+
+    def __init__(self, encoder: list[nn.Sequential]):
+        """
+        Args:
+            encoder: Ordered per-level encoder modules built by
+                :meth:`UNetEncoderConfig._build`; wrapped in an
+                ``nn.ModuleList`` here for submodule registration.
+        """
+        super().__init__()
+        self.encoder = nn.ModuleList(encoder)
 
     def forward(self, inputs: torch.Tensor) -> Sequence[torch.Tensor]:
         """

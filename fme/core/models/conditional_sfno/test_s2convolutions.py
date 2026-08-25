@@ -213,8 +213,29 @@ def test_spectral_ratio_validation():
     # 8 * 0.25 -> 2 spectral channels, not divisible by num_groups=4
     with pytest.raises(ValueError, match="num_groups"):
         _make_conv(embed_dim, spectral_ratio=0.25, num_groups=4)
-    with pytest.raises(NotImplementedError, match="preserve_global_mean"):
-        _make_conv(embed_dim, spectral_ratio=0.5, preserve_global_mean=True)
+
+
+def test_preserve_global_mean_with_spectral_ratio_bypasses_l0_weight():
+    # spectral_ratio < 1 with preserve_global_mean is supported and keeps the
+    # defining behavior: the l=0 per-mode weight is bypassed, so changing it
+    # does not affect the output and it receives no gradient.
+    embed_dim = 8
+    n_lat, n_lon = 16, 32
+    torch.manual_seed(0)
+    conv = _make_conv(
+        embed_dim, n_lat, n_lon, spectral_ratio=0.5, preserve_global_mean=True
+    )
+    assert conv.spectral_channels == embed_dim // 2
+    x = torch.randn(2, embed_dim, n_lat, n_lon)
+    with torch.no_grad():
+        baseline, _ = conv(x)
+        conv.weight[:, 0] += 10.0  # l=0 row of the per-mode weight
+        perturbed, _ = conv(x)
+    torch.testing.assert_close(perturbed, baseline, atol=1e-5, rtol=1e-5)
+
+    conv(x)[0].sum().backward()
+    assert torch.all(conv.weight.grad[:, 0] == 0)
+    assert not torch.all(conv.weight.grad[:, 1:] == 0)
 
 
 def test_spectral_conv_s2_lora():

@@ -1,8 +1,12 @@
+import copy
 import dataclasses
+import datetime
 import logging
+import os
 from collections.abc import Sequence
 from typing import Literal
 
+import cftime
 import dacite
 import torch
 import xarray as xr
@@ -15,10 +19,11 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.inference import InitialConditionConfig, get_initial_condition
 from fme.ace.requirements import InitialConditionRequirements
+from fme.ace.stepper import StepperOverrideConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.cloud import makedirs
 from fme.core.derived_variables import get_derived_variable_metadata
-from fme.core.generics.inference import get_record_to_wandb, run_inference
+from fme.core.generics.inference import get_record_to_wandb, run_inference, run_segments
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 from fme.coupled.aggregator import InferenceAggregatorConfig
@@ -27,6 +32,8 @@ from fme.coupled.data_loading.getters import get_forcing_data
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.inference.data_writer import (
+    ATMOSPHERE_OUTPUT_DIR_NAME,
+    OCEAN_OUTPUT_DIR_NAME,
     CoupledDataWriterConfig,
     CoupledPairedDataWriter,
     DatasetMetadata,
@@ -36,6 +43,7 @@ from fme.coupled.stepper import CoupledStepper, CoupledStepperConfig
 from .evaluator import (
     StandaloneComponentCheckpointsConfig,
     _validate_coupled_steps_config,
+    _validate_stepper_overrides,
     load_stepper,
     load_stepper_config,
 )
@@ -88,9 +96,34 @@ class CoupledInitialConditionConfig:
         ocean = self.ocean.get_dataset(self.start_indices)
         # time is a required variable but not necessarily a dimension
         sample_dim_name = ocean.time.dims[0]
-        atmos = self.atmosphere.get_dataset().sel(
-            {sample_dim_name: ocean[sample_dim_name]}
-        )
+        atmos = self.atmosphere.get_dataset()
+        if sample_dim_name in ocean.indexes:
+            atmos = atmos.sel({sample_dim_name: ocean[sample_dim_name]})
+        else:
+            # Datasets without a sample coordinate (e.g. paired restart files
+            # written from a single CoupledPrognosticState) are positionally
+            # aligned, so validate the alignment instead of selecting.
+            if self.start_indices is not None:
+                raise ValueError(
+                    "start_indices cannot be used with an ocean initial "
+                    f"condition dataset that has no '{sample_dim_name}' "
+                    "coordinate to select by."
+                )
+            if atmos.sizes[sample_dim_name] != ocean.sizes[sample_dim_name]:
+                raise ValueError(
+                    "Ocean and atmosphere initial condition datasets have no "
+                    f"'{sample_dim_name}' coordinate and different numbers of "
+                    f"samples: {ocean.sizes[sample_dim_name]} and "
+                    f"{atmos.sizes[sample_dim_name]}."
+                )
+            if not (atmos["time"].values == ocean["time"].values).all():
+                raise ValueError(
+                    "Ocean and atmosphere initial condition datasets have no "
+                    f"'{sample_dim_name}' coordinate and different times; both "
+                    "must be at the same coupled step boundary. Got ocean "
+                    f"times {ocean['time'].values} and atmosphere times "
+                    f"{atmos['time'].values}."
+                )
         return CoupledPrognosticState(
             ocean_data=get_initial_condition(
                 ds=ocean,
@@ -127,6 +160,18 @@ class InferenceConfig:
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
         n_ensemble_per_ic: Number of ensemble members per initial condition
+        ocean_stepper_override: Optional overrides when loading a **single** coupled
+            checkpoint (not ``StandaloneComponentCheckpointsConfig``), applied to the
+            ocean ``Stepper`` and to ``CoupledStepperConfig`` used for forcing windows
+            (e.g. ``StepperOverrideConfig(prescribed_prognostic_names=[...])``).
+        atmosphere_stepper_override: Optional overrides for the atmosphere Stepper
+            when loading a single coupled checkpoint.
+        seed: If set, seeds the random state threaded through the rollout so that
+            stochastic modules (e.g. NoiseConditionedSFNO) produce a
+            reproducible noise sequence, independent of
+            ``coupled_steps_in_memory``. The atmosphere takes this value and the
+            ocean ``seed + 1``. Leave unset (None) for the default
+            non-reproducible behavior.
     """
 
     experiment_dir: str
@@ -143,10 +188,18 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     n_ensemble_per_ic: int = 1
+    ocean_stepper_override: StepperOverrideConfig | None = None
+    atmosphere_stepper_override: StepperOverrideConfig | None = None
+    seed: int | None = None
 
     def __post_init__(self):
         _validate_coupled_steps_config(
             self.n_coupled_steps, self.coupled_steps_in_memory
+        )
+        _validate_stepper_overrides(
+            self.checkpoint_path,
+            self.ocean_stepper_override,
+            self.atmosphere_stepper_override,
         )
 
     def configure_logging(self, log_filename: str):
@@ -156,10 +209,18 @@ class InferenceConfig:
         )
 
     def load_stepper(self) -> CoupledStepper:
-        return load_stepper(self.checkpoint_path)
+        return load_stepper(
+            self.checkpoint_path,
+            ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
+        )
 
     def load_stepper_config(self) -> CoupledStepperConfig:
-        return load_stepper_config(self.checkpoint_path)
+        return load_stepper_config(
+            self.checkpoint_path,
+            ocean_stepper_override=self.ocean_stepper_override,
+            atmosphere_stepper_override=self.atmosphere_stepper_override,
+        )
 
     def get_data_writer(
         self,
@@ -207,6 +268,7 @@ class InferenceConfig:
 
 def main(
     yaml_config: str,
+    segments: int | None = None,
     override_dotlist: Sequence[str] | None = None,
 ):
     config_data = prepare_config(yaml_config, override=override_dotlist)
@@ -217,8 +279,81 @@ def main(
     )
     prepare_directory(config.experiment_dir, config_data)
     with torch.no_grad():
-        with GlobalTimer():
-            return run_inference_from_config(config)
+        if segments is None:
+            with GlobalTimer():
+                return run_inference_from_config(config)
+        else:
+            run_segmented_inference(config, segments)
+
+
+def _get_initialization_time_and_timestep(
+    config: InferenceConfig,
+) -> tuple[cftime.datetime, datetime.timedelta]:
+    # Loading the stepper is expensive, so this is called once per run; it gives
+    # the coupled timestep and the prognostic names.
+    stepper = config.load_stepper()
+    initial_condition = config.initial_condition.get_initial_condition(
+        ocean_prognostic_names=stepper.config.ocean.stepper.prognostic_names,
+        atmosphere_prognostic_names=stepper.config.atmosphere.stepper.prognostic_names,
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
+    )
+    # Coupled steps are anchored to the ocean, so label segments by the ocean
+    # initial condition's start time.
+    initialization_time = (
+        initial_condition.ocean_data.as_batch_data().time.isel(sample=0).item()
+    )
+    # The coupled ("outer") timestep is the ocean timestep.
+    return initialization_time, stepper.config.timestep
+
+
+def run_segmented_inference(config: InferenceConfig, segments: int):
+    """Run coupled inference in multiple segments, each resumable after preemption.
+
+    Each segment after the first starts from the previous segment's ocean and
+    atmosphere restart files, which sit at a coupled step boundary and so
+    satisfy the ocean-anchored initial condition timing.
+
+    Args:
+        config: Configuration for each segment. Its initial condition is used
+            only for the first segment.
+        segments: Total number of segments; only missing ones are run.
+    """
+    config_copy = copy.deepcopy(config)
+
+    def _get_restart_paths(segment_dir: str) -> Sequence[str]:
+        return [
+            os.path.join(segment_dir, OCEAN_OUTPUT_DIR_NAME, "restart.nc"),
+            os.path.join(segment_dir, ATMOSPHERE_OUTPUT_DIR_NAME, "restart.nc"),
+        ]
+
+    def _run_segment(segment_dir: str) -> None:
+        config_copy.experiment_dir = segment_dir
+        run_inference_from_config(config_copy)
+
+    def _set_initial_condition(restart_paths: Sequence[str]) -> None:
+        ocean_restart_path, atmosphere_restart_path = restart_paths
+        config_copy.initial_condition = CoupledInitialConditionConfig(
+            ocean=ComponentInitialConditionConfig(
+                path=ocean_restart_path, engine="netcdf4"
+            ),
+            atmosphere=ComponentInitialConditionConfig(
+                path=atmosphere_restart_path, engine="netcdf4"
+            ),
+        )
+
+    run_segments(
+        segments=segments,
+        experiment_dir=config.experiment_dir,
+        logging_config=config.logging,
+        logging_config_dict=dataclasses.asdict(config),
+        n_ensemble_per_ic=config.n_ensemble_per_ic,
+        n_steps_per_segment=config.n_coupled_steps,
+        get_initialization=lambda: _get_initialization_time_and_timestep(config),
+        get_restart_paths=_get_restart_paths,
+        run_segment=_run_segment,
+        set_initial_condition=_set_initial_condition,
+        description="segmented coupled inference",
+    )
 
 
 def run_inference_from_config(config: InferenceConfig):
@@ -252,6 +387,7 @@ def run_inference_from_config(config: InferenceConfig):
         initial_condition=initial_condition,
         dataset_info=stepper.training_dataset_info,
     )
+    data.apply_config_seed(config.seed)
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata

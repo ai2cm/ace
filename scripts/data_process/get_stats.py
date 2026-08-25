@@ -47,9 +47,10 @@ DIMS = {
     "E3SMV2": ["time", "lat", "lon"],
     "ERA5": ["time", "latitude", "longitude"],
     "CM4": ["time", "lat", "lon"],
+    "UFS_REPLAY": ["time", "lat", "lon"],
 }
 
-ClimateDataType = Literal["FV3GFS", "E3SMV2", "ERA5", "CM4"]
+ClimateDataType = Literal["FV3GFS", "E3SMV2", "ERA5", "CM4", "UFS_REPLAY"]
 
 
 def add_history_attrs(ds, input_zarr, start_date, end_date, n_samples):
@@ -90,10 +91,16 @@ class TimeCoarsenConfig:
     Attributes:
         data_output_directory: Directory to save the coarsened datasets as zarr stores.
         stats_output_directory: Directory to save the stats of the coarsened datasets.
+        factor: Factor by which the time dimension is coarsened.
+        beaker_dataset: Name of the Beaker dataset to create from the coarsened stats.
+            If None, the coarsened stats are not uploaded to Beaker.
     """
 
     data_output_directory: str
     stats_output_directory: str
+    factor: int
+    output_names: dict[str, str] = dataclasses.field(default_factory=dict)
+    beaker_dataset: str | None = None
 
 
 @dataclasses.dataclass
@@ -268,11 +275,25 @@ def main(config_yaml: str, run: int, debug: bool):
         debug=debug,
     )
     if config.time_coarsen is not None:
+        unknown_keys = set(config.time_coarsen.output_names) - set(config.runs)
+        if unknown_keys:
+            raise ValueError(
+                f"time_coarsen.output_names keys not found in runs: {unknown_keys}"
+            )
+        if config.time_coarsen.data_output_directory.endswith("/"):
+            config.time_coarsen.data_output_directory = (
+                config.time_coarsen.data_output_directory[:-1]
+            )
+        if config.time_coarsen.stats_output_directory.endswith("/"):
+            config.time_coarsen.stats_output_directory = (
+                config.time_coarsen.stats_output_directory[:-1]
+            )
+        output_name = config.time_coarsen.output_names.get(run_name, run_name)
         time_coarsened_zarr = (
-            config.time_coarsen.data_output_directory + "/" + run_name + ".zarr"
+            config.time_coarsen.data_output_directory + "/" + output_name + ".zarr"
         )
         time_coarsened_out_dir = (
-            config.time_coarsen.stats_output_directory + "/" + run_name
+            config.time_coarsen.stats_output_directory + "/" + output_name
         )
         get_stats(
             config=config.stats,
