@@ -27,6 +27,9 @@ JOB_GROUP="${JOB_GROUP:-samudra-enso-rollout-interventions-w1}"
 ARMS="${ARMS:-wint5 wint20 hzn12 noohc}"
 DRY_RUN="${DRY_RUN:-0}"
 N_GPUS="${N_GPUS:-4}"
+# urgent matches the original FT run; at high the first attempts were
+# preempted mid-training.
+PRIORITY="${PRIORITY:-urgent}"
 
 ATMOS_CKPT_DATASET="${ATMOS_CKPT_DATASET:-01KJ70WK2NH4T2T4AVAAPYFSHA}"
 # troya/cm4-samudra-1pct-ocean-train-using-ufs-var-subset-ohc-hdfs-correctors
@@ -74,7 +77,7 @@ launch() {
     --description "ENSO rollout intervention wave 1, arm ${arm}" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/climate-titan \
-    --priority high \
+    --priority "$PRIORITY" \
     --preemptible \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \

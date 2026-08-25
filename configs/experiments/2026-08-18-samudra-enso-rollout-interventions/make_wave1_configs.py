@@ -183,11 +183,15 @@ def arm_hzn12(c: dict) -> dict:
             {"steps": 12, "probability": 0.20},
         ]
     }
-    # The 12-step window OOMs at batch 8 on 180 GB GPUs (177 GB used at the
-    # first optimizer step of the pilot launch), so this arm runs batch 4.
-    # That halves the effective batch relative to the other arms -- a known
-    # part of this arm's bundle, acceptable for a horizon pilot.
-    c["train_loader"]["batch_size"] = 4
+    # Both OOMs of this arm hit the same allocation site inside the
+    # VALIDATION loop (the virtual-temperature computation), not a training
+    # step: validation ran at batch 16 with windows that scale with
+    # n_coupled_steps, so the 12-step window tripled validation memory while
+    # the training batch was never the problem. Validation batch drops to 4
+    # (12-step x 4 is ~75% of the baseline's 4-step x 16 validation memory);
+    # the training batch stays at the baseline 8, keeping the effective batch
+    # matched with the other arms.
+    c["validation"]["loader"]["batch_size"] = 4
     return c
 
 
