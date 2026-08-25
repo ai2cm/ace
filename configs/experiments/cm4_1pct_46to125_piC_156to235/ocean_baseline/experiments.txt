@@ -19,14 +19,14 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # word is inert to both, which is how a row is parked (see the reference
 # directory's "invalid" rows).
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline|rs0|01M01AXAZFFPD5AVKF4BD1MB9P|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_baseline|rs0|01M01AXAZFFPD5AVKF4BD1MB9P|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline|rs1|01M01AXQP8Q3MKMVEBKH6MFSKX|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_baseline|rs1|01M01AXQP8Q3MKMVEBKH6MFSKX|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline|rs2|01M01AY4W5WVQ6XX3VZJQBVT9E|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_baseline|rs2|01M01AY4W5WVQ6XX3VZJQBVT9E|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|01M06TXEMBTJNS6085BE9BW89H|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|01M06TXEMBTJNS6085BE9BW89H|trained|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|01M08JR4AQE9MGJM3H55KK67W4|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|01M08JR4AQE9MGJM3H55KK67W4|trained|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs2|01M08JRM77J2RHQZT125JGB4Z4|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs2|01M08JRM77J2RHQZT125JGB4Z4|trained|best_inference_ckpt|high|--min-runtime 1h

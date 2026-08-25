@@ -1,18 +1,15 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-evaluate_before_training: true
+evaluate_before_training: true # epoch-0 reference for the pretrained checkpoint
 ema:
   decay: 0.999
-max_epochs: 25 # 80 yr x 73/yr / bs 16 = 365 iter/epoch -> ~9,125 iterations
+max_epochs: 10 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~7,300 iterations
 inference:
   - name: inference_1pct
     weight: 1.0
     n_forward_steps: 1460 # exactly 20 noleap years
     forward_steps_in_memory: 40
-    epochs:
-      start: -1
-      step: -2
     loader:
       start_indices:
         times:
@@ -41,9 +38,6 @@ inference:
     weight: 1.0
     n_forward_steps: 1460 # exactly 20 noleap years
     forward_steps_in_memory: 40
-    epochs:
-      start: -1
-      step: -2
     loader:
       start_indices:
         times:
@@ -80,19 +74,38 @@ train_loader:
   batch_size: 16
   num_data_workers: 8
   dataset:
+    # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235: 80
+    # years each, 160 total. Neither window enters its run's validation years
+    # (1pctCO2 0041-0045 and 0126-0130, piControl 0236-0240) or holdout (1pctCO2
+    # 0131-0140, piControl 0241-0350). One concat list per store, both in the
+    # same simulation order so the merged members share sample start times.
     merge:
-      - data_path: /climate-default
-        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
-        engine: zarr
-        subset:
-          start_time: '0046-01-06T00:00:00'
-          stop_time: '0126-01-01T00:00:00'
-      - data_path: /climate-default
-        file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
-        engine: zarr
-        subset:
-          start_time: '0046-01-06T00:00:00'
-          stop_time: '0126-01-01T00:00:00'
+      - concat:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0046-01-06T00:00:00'
+              stop_time: '0126-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+            engine: zarr
+            subset:
+              start_time: '0156-01-06T00:00:00'
+              stop_time: '0236-01-01T00:00:00'
+      - concat:
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+            engine: zarr
+            subset:
+              start_time: '0046-01-06T00:00:00'
+              stop_time: '0126-01-01T00:00:00'
+          - data_path: /climate-default
+            file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+            engine: zarr
+            subset:
+              start_time: '0156-01-06T00:00:00'
+              stop_time: '0236-01-01T00:00:00'
 validation:
   - name: val_1pct_early
     evaluate_all_steps: false
@@ -162,23 +175,13 @@ optimization:
   kwargs:
     fused: true
     weight_decay: 0.01
-  scheduler:
-    schedulers:
-      - type: LinearLR
-        step_each_iteration: true
-        kwargs:
-          start_factor: 0.01
-          end_factor: 1
-          total_iters: 2000
-      - type: ConstantLR
-        step_each_iteration: true
-    milestones: [2000]
 stepper_training:
-  n_forward_steps: 4
-  parameter_init:
-    weights_path: /ckpt.tar
+  # 4 -> 8: the one recipe change relative to the ohc_clip pretraining.
+  n_forward_steps: 8
   loss:
     type: MSE
+  parameter_init:
+    weights_path: /ckpt.tar
 stepper:
   input_masking:
     mask_value: 0
@@ -202,10 +205,10 @@ stepper:
         type: Samudra
         config:
           ch_width:
-            - 200
-            - 250
-            - 300
-            - 400
+            - 280
+            - 380
+            - 480
+            - 520
           dilation:
             - 1
             - 2
@@ -225,6 +228,8 @@ stepper:
       corrector:
         type: ocean_corrector
         config:
+          surface_energy_flux_correction:
+            method: prescribed
           force_positive_names:
             - so_0
             - so_1
@@ -255,8 +260,8 @@ stepper:
               - sfdsi
               - UI
               - VI
-          surface_energy_flux_correction:
-            method: prescribed
+          ocean_heat_content_correction:
+            method: scaled_temperature
       next_step_forcing_names:
         - DLWRFsfc
         - DSWRFsfc

@@ -6,6 +6,6 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 #   rs1 y98mqy0b  Beaker 01KYX3HCB6BPMDXJRNECXTB2MP  150/150 epochs, exit 0
 #   rs2 rzehx59b  Beaker 01KYX3HSXFMBPA6QMXRPKWQ5ZQ  still pretraining
 # status "pretraining" = pretraining still running; flip the selected seed(s) to "train" after checkpoint selection
-cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|ace-samudra-cm4|85ar96wz|best_ckpt|training|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=0
-cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|ace-samudra-cm4|y98mqy0b|best_ckpt|training|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=1
-cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs2|ace-samudra-cm4|rzehx59b|best_ckpt|pretraining|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=2
+cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|ace-samudra-cm4|85ar96wz|best_ckpt|trained|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=0
+cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|ace-samudra-cm4|y98mqy0b|best_ckpt|trained|high|h100|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=1
+cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs2|ace-samudra-cm4|rzehx59b|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' seed=2
