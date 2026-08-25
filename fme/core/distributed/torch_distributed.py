@@ -6,13 +6,14 @@ from typing import Any, TypeVar
 
 import torch.distributed
 import torch.nn as nn
+import torch.utils.data
 import torch_harmonics as th
 from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core import metrics
-from fme.core.device import get_device, using_gpu, using_srun
+from fme.core.device import get_device, in_dataloader_worker, using_gpu, using_srun
 from fme.core.disco import DiscreteContinuousConvS2
 
 from .base import DistributedBackend
@@ -23,10 +24,35 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def _rank_metadata_from_env() -> tuple[int, int]:
+    """Return ``(rank, world_size)`` from the launcher's environment variables."""
+    if using_srun():
+        return int(os.environ["SLURM_PROCID"]), int(os.environ["SLURM_NTASKS"])
+    if "RANK" not in os.environ:
+        raise ValueError("Distributed backend initialized without torchrun or srun.")
+    return int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"])
+
+
 class TorchDistributed(DistributedBackend):
     """A non-distributed backend implementation."""
 
     def __init__(self):
+        if in_dataloader_worker():
+            # a worker only needs the sharding metadata that tells it which
+            # samples are its rank's. Joining the process group and setting the
+            # device would buy it nothing and leave an idle ~520 MiB CUDA context
+            # behind, GiB of it across several persistent worker pools per rank.
+            self._rank, self.world_size = _rank_metadata_from_env()
+            return
+        # The NCCL watchdog polls each collective's CUDA events on its own
+        # thread and by default rethrows any CUDA error it meets there; an
+        # exception on a thread with no handler is a std::terminate, killing
+        # the rank instantly and bypassing the shutdown path's settle and
+        # grace periods (five ranks died this way, mid-shutdown, in the
+        # 2026-08-13 preemption fabric fault). The same error still surfaces
+        # on the main thread at its next sync of that work, so the watchdog
+        # is downgraded to logging. Read once, at process group construction.
+        os.environ.setdefault("TORCH_NCCL_RETHROW_CUDA_ERRORS", "0")
         if "RANK" in os.environ and not using_srun():  # we were executed with torchrun
             if not torch.distributed.is_initialized():
                 if using_gpu():
@@ -233,8 +259,23 @@ class TorchDistributed(DistributedBackend):
         return data.nanmean(dim=-1)
 
     def shutdown(self):
-        logger.debug(f"Shutting down rank {self.rank}")
+        if not torch.distributed.is_initialized():
+            # already shut down; a termination signal can arrive during the
+            # normal end-of-run teardown
+            return
+        logger.info(f"Shutting down rank {self.rank}")
         torch.distributed.destroy_process_group()
+
+    def abort(self):
+        if not torch.distributed.is_initialized():
+            return
+        # Aborts every process group's communicators; NCCL's abort is designed
+        # to be called from a second thread while collectives are in flight.
+        # torch suggests turning TORCH_NCCL_ASYNC_ERROR_HANDLING off around
+        # this call so its watchdog cannot abort concurrently; we leave the
+        # default because ace's 30-minute collective timeout cannot expire
+        # inside the seconds-long window between this abort and the exit.
+        torch.distributed.distributed_c10d._abort_process_group()
 
 
 def _gather_irregular(
