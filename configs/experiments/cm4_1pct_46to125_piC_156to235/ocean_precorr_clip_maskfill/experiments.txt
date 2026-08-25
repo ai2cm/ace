@@ -38,3 +38,5 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|01M
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|01M0TXA8XRXAGJ2B3X3HHXGZPG|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|01M0TXAH2TN3X37F43F45EMM1Y|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|training|best_inference_ckpt|normal|--min-runtime 8h
