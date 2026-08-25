@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from fme.core.dataset.time import TimeSlice
@@ -143,6 +144,52 @@ def test_region_config_build_creates_output_target_with_time_range(
     assert tuple(output_target.chunks.values())[:2] == (1, 1)
     assert output_target.shards is not None
     assert tuple(output_target.shards.values()) == output_target.data.max_output_shape
+
+
+def test_downscaling_output_config_overwrite_defaults_false():
+    config = TimeRangeConfig(
+        name="test",
+        n_ens=4,
+        time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
+    )
+    assert config.overwrite is False
+
+
+@pytest.mark.parametrize("loader_config", [True], indirect=True)
+def test_region_config_build_propagates_overwrite_to_output_target(
+    loader_config, requirements, patch_config
+):
+    config = TimeRangeConfig(
+        name="test_region",
+        time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
+        n_ens=4,
+        save_vars=["var0", "var1"],
+        overwrite=True,
+    )
+    output_target = config.build(loader_config, requirements, patch_config)
+    assert output_target.overwrite is True
+
+
+@pytest.mark.parametrize("overwrite,expected_mode", [(False, "w-"), (True, "w")])
+def test_downscaling_output_get_writer_mode_matches_overwrite(overwrite, expected_mode):
+    output_target = DownscalingOutput(
+        name="test",
+        save_vars=["var0"],
+        n_ens=1,
+        max_samples_per_gpu=1,
+        data=MagicMock(),
+        patch=PatchPredictionConfig(),
+        chunks={"time": 1, "ensemble": 1, "latitude": 1, "longitude": 1},
+        shards={"time": 1, "ensemble": 1, "latitude": 1, "longitude": 1},
+        overwrite=overwrite,
+    )
+    latlon_coords = MagicMock()
+    latlon_coords.lat.cpu().numpy.return_value = np.array([0.0])
+    latlon_coords.lon.cpu().numpy.return_value = np.array([0.0])
+    output_target.data.all_times.to_numpy.return_value = np.array([0])
+
+    writer = output_target.get_writer(latlon_coords=latlon_coords, output_dir="/tmp")
+    assert writer._mode == expected_mode
 
 
 def test_time_range_config_raise_error_invalid_lat_extent():

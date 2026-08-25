@@ -56,6 +56,11 @@ class DownscalingOutput:
         chunks: Zarr chunk sizes for each dimension.
         shards: Zarr shard sizes for each dimension.
         dims: Dimension names including ensemble (time, ensemble, lat, lon).
+        overwrite: If True, overwrite an existing zarr store at this output's
+            path instead of failing. Useful when a prior attempt was killed
+            (preemption, OOM, etc.) partway through and left a partial store
+            behind -- there's no partial-resume support, so a restart must
+            either overwrite or the store must be deleted manually first.
     """
 
     def __init__(
@@ -69,6 +74,7 @@ class DownscalingOutput:
         chunks: dict[str, int],
         shards: dict[str, int],
         dims: tuple[str, ...] = DIMS,
+        overwrite: bool = False,
     ) -> None:
         self.name = name
         self.save_vars = save_vars
@@ -79,6 +85,7 @@ class DownscalingOutput:
         self.chunks = chunks
         self.shards = shards
         self.dims = dims
+        self.overwrite = overwrite
 
     def get_writer(
         self,
@@ -113,6 +120,7 @@ class DownscalingOutput:
             data_vars=self.save_vars,
             chunks=self.chunks,
             shards=self.shards,
+            mode="w" if self.overwrite else "w-",
         )
 
 
@@ -137,6 +145,12 @@ class DownscalingOutputConfig(ABC):
             that parallel generation tasks write to separate shards.
         max_samples_per_gpu: Number of time and/or ensemble samples to include in a
             single GPU generation. Controls memory usage and time to generate.
+        overwrite: If True, overwrite an existing zarr store at this output's
+            path instead of failing with a "store already exists" error.
+            False (default) matches prior behavior. There's no partial-resume
+            support -- set this when restarting a run that was killed
+            partway through (preemption, OOM, etc.) and left a partial store
+            behind.
     """
 
     name: str
@@ -144,6 +158,7 @@ class DownscalingOutputConfig(ABC):
     save_vars: list[str] | None = None
     zarr_chunks: dict[str, int] | None = None
     zarr_shards: dict[str, int] | None = None
+    overwrite: bool = False
     max_samples_per_gpu: int = 4
 
     @abstractmethod
@@ -321,6 +336,7 @@ class DownscalingOutputConfig(ABC):
             chunks=chunks,
             shards=shards,
             dims=DIMS,
+            overwrite=self.overwrite,
         )
 
 
