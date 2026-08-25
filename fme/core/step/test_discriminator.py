@@ -292,3 +292,60 @@ def test_missing_variable_raises():
     del input["a"]
     with pytest.raises(KeyError):
         discriminator.forward(input, output)
+
+
+def test_empty_in_names_forward():
+    """A discriminator with no input conditioning (empty in_names) should
+    forward successfully, producing logits from only the output fields."""
+    module = _ChannelMeanLogits(weight=1.0)
+    discriminator = StepDiscriminator(
+        builder=ModuleSelector(type="prebuilt", config={"module": module}),
+        in_names=[],
+        out_names=OUT_NAMES,
+        normalizer=_get_normalizer(OUT_NAMES),
+        dataset_info=get_dataset_info(img_shape=IMG_SHAPE),
+    )
+    input, output = _get_pair()
+    logits = discriminator.forward(input, output)
+    assert logits.shape == (3, 1, *IMG_SHAPE)
+
+
+def test_empty_in_names_gan_losses():
+    """The full GAN loss pipeline (generator + discriminator losses) should
+    work with empty in_names, and the area_weighted_bce should not raise a
+    shape mismatch."""
+    module = _ChannelMeanLogits(weight=0.5)
+    discriminator = StepDiscriminator(
+        builder=ModuleSelector(type="prebuilt", config={"module": module}),
+        in_names=[],
+        out_names=OUT_NAMES,
+        normalizer=_get_normalizer(OUT_NAMES),
+        dataset_info=get_dataset_info(img_shape=IMG_SHAPE),
+    )
+    gridded_ops = _get_gridded_operations()
+    _, fake_output = _get_pair()
+    fake_input: dict = {}
+    gen_loss = compute_generator_adversarial_loss(
+        discriminator=discriminator,
+        gridded_operations=gridded_ops,
+        fake_input=fake_input,
+        fake_output=fake_output,
+    )
+    assert gen_loss.shape == ()
+
+    real_input: dict = {}
+    _, real_output = _get_pair()
+    pair = GanStepPair.from_step_data(
+        real_input=real_input,
+        real_output=real_output,
+        fake_input=fake_input,
+        fake_output=fake_output,
+        real_labels=None,
+        fake_labels=None,
+    )
+    losses = compute_discriminator_losses(
+        discriminator=discriminator,
+        gridded_operations=gridded_ops,
+        pairs=[pair],
+    )
+    assert losses.loss.shape == ()

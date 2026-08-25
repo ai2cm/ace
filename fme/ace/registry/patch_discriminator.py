@@ -8,9 +8,11 @@ from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.core.dataset_info import DatasetInfo
 
 
-def _circular_pad_lon(x: torch.Tensor, pad: int) -> torch.Tensor:
-    """Pad the longitude (last) dimension circularly; leave latitude alone."""
-    return F.pad(x, (pad, pad, 0, 0), mode="circular")
+def _pad_sphere(x: torch.Tensor, pad: int) -> torch.Tensor:
+    """Circular padding in longitude, zero padding in latitude."""
+    x = F.pad(x, (pad, pad, 0, 0), mode="circular")
+    x = F.pad(x, (0, 0, pad, pad), mode="constant", value=0)
+    return x
 
 
 @ModuleSelector.register("PatchDiscriminator")
@@ -19,10 +21,10 @@ class PatchDiscriminatorConfig(ModuleConfig):
     """
     Configuration for a small convolutional patch discriminator.
 
-    Applies two 3x3 convolutions with circular longitude padding and valid
-    latitude padding, followed by a 1x1 projection. All convolutions use
-    spectral normalization. Two positional channels (sin(lat), cos(lat)) are
-    concatenated to the input.
+    Applies two 3x3 convolutions with circular longitude padding and zero
+    latitude padding (barrier condition at the poles), followed by a 1x1
+    projection. All convolutions use spectral normalization. Two positional
+    channels (sin(lat), cos(lat)) are concatenated to the input.
 
     Parameters:
         hidden_dim: First hidden layer width; the second layer doubles it.
@@ -51,12 +53,12 @@ class PatchDiscriminator(nn.Module):
     The forward pass prepends sin(lat) and cos(lat) as two extra input
     channels, then runs::
 
-        CircularPadLon(1) -> Conv3x3 -> LeakyReLU(0.2)
-        CircularPadLon(1) -> Conv3x3 -> LeakyReLU(0.2)
+        PadSphere(1) -> Conv3x3 -> LeakyReLU(0.2)
+        PadSphere(1) -> Conv3x3 -> LeakyReLU(0.2)
         Conv1x1
 
-    Latitude shrinks by 2 per 3x3 layer (valid padding), longitude stays
-    constant (circular padding).
+    Output has the same spatial shape as the input: longitude is circular-
+    padded, latitude is zero-padded (barrier condition at the poles).
     """
 
     def __init__(
@@ -93,10 +95,10 @@ class PatchDiscriminator(nn.Module):
         pos = self.pos_encoding.expand(x.shape[0], -1, -1, -1)
         x = torch.cat([x, pos], dim=1)
 
-        x = _circular_pad_lon(x, 1)
+        x = _pad_sphere(x, 1)
         x = self.act(self.conv1(x))
 
-        x = _circular_pad_lon(x, 1)
+        x = _pad_sphere(x, 1)
         x = self.act(self.conv2(x))
 
         x = self.conv3(x)

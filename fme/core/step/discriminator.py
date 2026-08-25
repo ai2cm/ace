@@ -124,15 +124,17 @@ class StepDiscriminator:
             Per-pixel logits of shape [n_batch, 1, n_lat, n_lon]; positive
             means "judged real".
         """
-        input_norm = self._normalizer.normalize(
-            {name: input[name] for name in self._in_names}
-        )
+        tensors: list[torch.Tensor] = []
+        if self._in_names:
+            input_norm = self._normalizer.normalize(
+                {name: input[name] for name in self._in_names}
+            )
+            tensors.append(self._in_packer.pack(input_norm, axis=self.CHANNEL_DIM))
         output_norm = self._normalizer.normalize(
             {name: output[name] for name in self._out_names}
         )
-        input_tensor = self._in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-        output_tensor = self._out_packer.pack(output_norm, axis=self.CHANNEL_DIM)
-        pair_tensor = torch.cat([input_tensor, output_tensor], dim=self.CHANNEL_DIM)
+        tensors.append(self._out_packer.pack(output_norm, axis=self.CHANNEL_DIM))
+        pair_tensor = torch.cat(tensors, dim=self.CHANNEL_DIM)
         return self._module(pair_tensor, labels=labels)
 
     def get_state(self) -> dict[str, Any]:
@@ -330,13 +332,15 @@ def compute_discriminator_losses(
             pair.fake_input, pair.fake_output, labels=pair.fake_labels
         )
         if use_r1:
-            real_packed = torch.cat(
-                [
-                    torch.stack(list(pair.real_input.values()), dim=-3),
-                    torch.stack(list(pair.real_output.values()), dim=-3),
-                ],
-                dim=-3,
+            pack_parts = []
+            if pair.real_input:
+                pack_parts.append(
+                    torch.stack(list(pair.real_input.values()), dim=-3)
+                )
+            pack_parts.append(
+                torch.stack(list(pair.real_output.values()), dim=-3)
             )
+            real_packed = torch.cat(pack_parts, dim=-3)
             real_packed.requires_grad_(True)
             n_in = len(pair.real_input)
             real_input_r1 = dict(
