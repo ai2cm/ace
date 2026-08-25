@@ -264,3 +264,20 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-no-r1.yaml" \
 #   ./run-train.sh gan-patch
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-patch.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-patch-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
+
+# Patch energy score arm (added 2026-08-25): the stochastic pretrain with the
+# 0.1-weight spectral energy score replaced by a 0.1-weight patch energy score
+# (3x3 patches; research repo investigation
+# 2026-08-25-patch-vs-spectral-energy-score; ace PR #1459). Target per Jeremy
+# 2026-08-25: jupiter, 4 GPUs. The arms above are done or live -- launch the
+# pretrain alone:
+#   ./run-train.sh patch-es-1-step
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-patch-es.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-patch-es-1-step-pre-training-rs0" 4 ai2/jupiter
+
+# Fine-tune — launch separately after the pretrain is done and its final
+# job's result dataset is filled into the config's "# arg: --dataset" header
+# (jupiter per Jeremy 2026-08-25):
+#   ./run-train.sh patch-es-ft3
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-patch-es.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-patch-es-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
