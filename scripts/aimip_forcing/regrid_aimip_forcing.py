@@ -4,7 +4,7 @@ import click
 import numpy as np
 import xarray as xr
 import xesmf as xe
-from progress import ProgressBar
+from dask.diagnostics import ProgressBar
 
 # this script is based on the notebook at
 # https://github.com/ai2cm/explore2/blob/main/brianh/2025-06-18-ERA5-SHiELD-AMIP-forcing/regrid/2025-08-20-regrid-AIMIP-forcing.ipynb

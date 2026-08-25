@@ -3,8 +3,8 @@ import logging
 import click
 import numpy as np
 import xarray as xr
+from dask.diagnostics import ProgressBar
 from encoding import clear_encoding, set_shards_chunks
-from progress import ProgressBar
 
 # this script is based on the notebook at
 # https://github.com/ai2cm/explore2/blob/main/brianh/2025-06-18-ERA5-SHiELD-AMIP-forcing/2025-11-24-repeat-first-timestep-AIMIP-forcing.ipynb

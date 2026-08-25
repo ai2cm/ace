@@ -4,8 +4,8 @@ from datetime import datetime
 import cftime
 import click
 import xarray as xr
+from dask.diagnostics import ProgressBar
 from encoding import clear_encoding
-from progress import ProgressBar
 
 # this script is based on the notebook at
 # https://github.com/ai2cm/explore2/blob/main/troya/2025-08-06-AIMP-ERA5/2025-08-05-ARCO-ERA5-monthly-average-forcing-AIMIP.ipynb
