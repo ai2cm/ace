@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="hiro-ace2s-inference-2023-global-ic0000"
+JOB_NAME="hiro-v1-precip-only-ace2s-inference-2023-global-ic0000"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="downscale-ace2s-global-2023.yaml"
+CONFIG_FILENAME="downscale-hiro-v1-ace2s-global-2023.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -25,16 +25,22 @@ IMAGE="$(cat latest_deps_only_image.txt)"
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRGZT4X2QCW2RFH7WN7X8BYA
 EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRBYGNYJ6FD7PGNF3VVHQ5V1
 
+# v1 precip-only
+EXISTING_RESULTS_DATASET=01KET96PB1RJMVJDADX04NDQJH
+
 wandb_group=""
 
 #--not-preemptible \
 #     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
 #    --dataset $EXISTING_RESULTS_DATASET:bundled_moe_multivariate.ckpt:/ckpt.tar  \
 
+#    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+#    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
+
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority urgent \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
@@ -42,11 +48,11 @@ gantry run \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
     --env WANDB_RUN_GROUP=$wandb_group \
+    --env CM_PRIORITY=high \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
-    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET:/checkpoints/best.ckpt \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \
