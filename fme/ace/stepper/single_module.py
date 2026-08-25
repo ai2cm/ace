@@ -546,7 +546,7 @@ class StepperConfig:
         self, n_forward_steps: int | IntSchedule
     ) -> DataRequirements:
         requirements = DataRequirements(
-            names=self.all_names,
+            names=list(self.all_names),
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
         )
@@ -559,16 +559,14 @@ class StepperConfig:
         )
 
     @property
-    def input_only_names(self) -> list[str]:
-        return list(set(self.input_names) - set(self.output_names))
+    def input_only_names(self) -> set[str]:
+        return set(self.input_names) - set(self.output_names)
 
     def get_forcing_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
         requirements = DataRequirements(
-            names=list(
-                set(self.input_only_names).union(self.step.next_step_input_names)
-            ),
+            names=list(self.input_only_names.union(self.step.next_step_input_names)),
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
         )
@@ -691,9 +689,9 @@ class StepperConfig:
         return self.step.input_names
 
     @property
-    def all_names(self) -> list[str]:
+    def all_names(self) -> set[str]:
         """Names of all variables."""
-        return list(set(self.input_names + self.output_names))
+        return set(self.input_names).union(self.output_names)
 
     @property
     def next_step_forcing_names(self) -> list[str]:
@@ -1120,10 +1118,8 @@ class Stepper:
         )
 
     @property
-    def _input_only_names(self) -> list[str]:
-        return list(
-            set(self._step_obj.input_names).difference(set(self._step_obj.output_names))
-        )
+    def _input_only_names(self) -> set[str]:
+        return set(self._step_obj.input_names).difference(self._step_obj.output_names)
 
     def predict_generator(
         self,
@@ -1199,7 +1195,7 @@ class Stepper:
             which can be used as a new initial condition.
         """
         timer = GlobalTimer.get_instance()
-        forcing_names = set(self._input_only_names).union(
+        forcing_names = self._input_only_names.union(
             self._step_obj.next_step_input_names
         )
 
