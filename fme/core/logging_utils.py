@@ -35,6 +35,8 @@ class LoggingConfig:
     Parameters:
         project: Name of the project in Weights & Biases.
         entity: Name of the entity in Weights & Biases.
+        name: Optional display name for the Weights & Biases run. If None, the
+            run name is auto-generated (or taken from the WANDB_NAME env var).
         log_to_screen: Whether to log to the screen.
         log_to_file: Whether to log to a file.
         log_to_wandb: Whether to log to Weights & Biases.
@@ -48,6 +50,7 @@ class LoggingConfig:
 
     project: str = "ace"
     entity: str = "ai2cm"
+    name: str | None = None
     log_to_screen: bool = True
     log_to_file: bool = True
     log_to_wandb: bool = True
@@ -153,6 +156,9 @@ class LoggingConfig:
         notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(
             config=config_copy,
+            # wandb reads WANDB_NAME only on the first init in a process, so pass
+            # it explicitly for later runs (e.g. segments) to be named correctly.
+            name=self.name or os.environ.get("WANDB_NAME"),
             project=self.project,
             entity=self.entity,
             experiment_dir=experiment_dir,

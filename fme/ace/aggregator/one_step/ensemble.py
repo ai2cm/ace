@@ -219,6 +219,10 @@ class _EnsembleAggregator:
         self._report_variables = (
             frozenset(report_variables) if report_variables is not None else None
         )
+        # Variables whose target is entirely NaN (e.g. filled by
+        # allow_missing_variables); detected once on the first batch since
+        # missingness is constant, then excluded from the channel mean.
+        self._all_nan_target_names: set[str] | None = None
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
@@ -269,6 +273,10 @@ class _EnsembleAggregator:
                     target=target_data[name],
                     gen=gen_data[name],
                 )
+        if self._all_nan_target_names is None:
+            self._all_nan_target_names = {
+                name for name in gen_data if torch.isnan(target_data[name]).all()
+            }
         self._n_batches += 1
 
     def _get_caption(self, name: str) -> str:
@@ -315,15 +323,19 @@ class _EnsembleAggregator:
                             f"{sorted(all_keys)}."
                         )
                     names = list(self._channel_mean_names)
+                # Exclude variables whose target was entirely NaN (e.g. filled
+                # by allow_missing_variables) from the channel mean.
+                nan_targets = self._all_nan_target_names or set()
+                names = [name for name in names if name not in nan_targets]
                 if names:
                     scalars = [data[f"{metric}/{key}"] for key in names]
                     data[f"{metric}/channel_mean"] = sum(scalars) / len(scalars)
         if self._report_variables is not None:
-            excluded = all_variable_names - self._report_variables
+            nan_targets = all_variable_names - self._report_variables
             data = {
                 k: v
                 for k, v in data.items()
-                if not any(seg in excluded for seg in k.split("/"))
+                if not any(seg in nan_targets for seg in k.split("/"))
             }
         return data
 
