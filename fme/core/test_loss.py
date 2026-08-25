@@ -1007,7 +1007,9 @@ def test_patch_energy_score_loss_in_ensemble_loss():
         kwargs={
             "crps_weight": 0.9,
             "patch_energy_score_weight": 0.1,
-            "patch_energy_score_size": 3,
+            # non-default size: the test must fail if EnsembleLoss drops the
+            # size forward to PatchEnergyScoreLoss
+            "patch_energy_score_size": 5,
         },
     )
     loss = config.build(

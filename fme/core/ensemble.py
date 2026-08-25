@@ -139,19 +139,34 @@ def get_patch_energy_score(
         E[||X - y||] - 1/2 E[||X - X'||]
 
     The east-west boundary is periodic and the north-south boundary is
-    zero-padded; since generated and target fields receive identical padding,
-    out-of-domain entries contribute zero to every patch distance, so polar
-    patches are effectively truncated to their valid entries.
+    zero-padded. Both fields receive identical padding (implemented as
+    padding of their pointwise squared difference, which is equivalent), so
+    out-of-domain entries contribute zero to every patch distance and polar
+    patches are effectively truncated to their valid entries. Because the
+    score is divided by the fixed factor patch_size regardless of that
+    truncation, rows within halo distance of a pole contribute
+    proportionally less loss than interior rows (roughly by
+    sqrt(n_valid) / patch_size); this mild polar down-weighting is accepted
+    behavior.
 
-    The result is divided by patch_size (the square root of the patch
-    dimensionality) so its magnitude is comparable to CRPS; for
-    patch_size=1 it equals fair CRPS exactly.
+    The division by patch_size (the square root of the patch
+    dimensionality) makes the magnitude comparable to CRPS; at patch_size=1
+    it equals fair CRPS up to the numerical floor below. The squared patch
+    distance is floored at 1e-12 before the square root (a 1e-6 floor on
+    each distance), giving collapsed ensembles a zero subgradient instead
+    of the unbounded gradient of sqrt at zero.
+
+    The horizontal layout is assumed to be [..., n_lat, n_lon] with a
+    periodic last dimension (a lat-lon grid). Other layouts -- e.g. the
+    HEALPix [..., face, ny, nx] -- would be silently mis-padded, as with
+    the finite-difference CRPS loss.
 
     Args:
         gen: The generated ensemble members, of shape
             [n_batch, n_ensemble, ..., n_lat, n_lon].
         target: The target, of shape [n_batch, 1, ..., n_lat, n_lon].
-        patch_size: Odd width of the square patch in grid points.
+        patch_size: Odd width of the square patch in grid points; at most
+            n_lon.
 
     Returns:
         The patch energy score, of shape [n_batch, ..., n_lat, n_lon].
@@ -164,6 +179,11 @@ def get_patch_energy_score(
         )
     if patch_size < 1 or patch_size % 2 == 0:
         raise ValueError(f"patch_size must be a positive odd integer, got {patch_size}")
+    if patch_size > gen.shape[-1]:
+        raise ValueError(
+            f"patch_size ({patch_size}) must not exceed the longitude "
+            f"dimension ({gen.shape[-1]})"
+        )
     n_batch = gen.shape[0]
     # One pad + pool pass over all three difference fields, stacked on batch.
     diffs = torch.cat(
