@@ -6,7 +6,7 @@ import torch
 from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.step.step_diagnostics import StepDiagnostics
 from fme.core.stepper_state import StepperState
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -19,6 +19,10 @@ class StepOutput:
             None if no state is carried.
         corrector_diagnostics: The corrector's per-variable correction ``delta``
             for this step. Empty when no corrector ran or none modified anything.
+        input: The denormalized input the step consumed, populated by
+            prediction generators for consumers that need the step's
+            conditioning (e.g. adversarial losses). Reflects the generator's
+            between-step detach behavior. None when not populated.
     """
 
     output: TensorDict
@@ -26,6 +30,7 @@ class StepOutput:
     corrector_diagnostics: CorrectorDiagnostics = dataclasses.field(
         default_factory=CorrectorDiagnostics
     )
+    input: TensorMapping | None = None
 
     @classmethod
     def stack_diagnostics(

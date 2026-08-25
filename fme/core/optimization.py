@@ -207,6 +207,16 @@ class Optimization(OptimizationABC):
             self.gscaler.update()
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
 
+    def zero_gradients(self):
+        """Zero all parameter gradients without stepping.
+
+        Used to discard gradients another loss's backward deposited on these
+        parameters (e.g. a generator's adversarial term backpropagating
+        through a discriminator) before accumulating this optimizer's own
+        loss.
+        """
+        self.optimizer.zero_grad()
+
     def set_learning_rate(self, lr: float):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr
@@ -347,6 +357,24 @@ class OptimizationConfig:
         if isinstance(self.scheduler, SequentialSchedulerConfig):
             return True
         return self.scheduler.type is not None
+
+    def copy_without_schedule(self) -> "OptimizationConfig":
+        """A copy of the per-step optimizer settings (optimizer type, learning
+        rate, kwargs, mixed precision, gradient clipping) with no scheduler,
+        gradient accumulation, activation checkpointing, or checkpoint resume.
+
+        Used to derive the config for a dependent optimizer (e.g. a GAN
+        discriminator's) that mirrors this one's optimizer settings but runs
+        its own simple accumulate-once-per-batch loop at a constant learning
+        rate.
+        """
+        return OptimizationConfig(
+            optimizer_type=self.optimizer_type,
+            lr=self.lr,
+            kwargs=self.kwargs,
+            enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
+            max_grad_norm=self.max_grad_norm,
+        )
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])

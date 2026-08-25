@@ -12,6 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step._multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.step.args import StepArgs
+from fme.core.step.discriminator import StepDiscriminator
 from fme.core.step.output import StepOutput
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -275,6 +276,10 @@ class MultiCallStep(StepABC):
     @property
     def modules(self) -> torch.nn.ModuleList:
         return self._wrapped_step.modules
+
+    @property
+    def discriminator(self) -> StepDiscriminator | None:
+        return self._wrapped_step.discriminator
 
     @property
     def normalizer(self) -> StandardNormalizer:
