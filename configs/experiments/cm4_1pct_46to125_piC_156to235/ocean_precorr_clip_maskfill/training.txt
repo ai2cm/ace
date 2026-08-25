@@ -36,8 +36,8 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs1|skip|high|jupiter|
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|training|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|training|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]'
@@ -128,3 +128,47 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs2|ski
 # new seed; the readout is collapse/no-collapse, not a so_0 number.
 #
 # rs0 stays at `training` so the runner does not relaunch it.
+
+# ARM D -- per-channel fill value. STAGED AT `skip`, NOT LAUNCHED.
+#
+# Requires ace PR #1458 (feature/per-channel-mask-fill-value), which is on this
+# branch as a cherry-pick and is NOT on main. If that PR does not merge, this arm
+# cannot run on mainline code. Nothing here touches
+# exper/2026-08-18-precorr-optim, which this branch was cut from.
+#
+# WHY. The standalone rollouts split cleanly by field: mean-fill wins every 2D
+# surface field, zero-fill wins the 19-level velocity and temperature profiles by
+# 1.2-1.4x. Both directions are real and a single global fill_value cannot express
+# them at once. The mechanism is that a masked cell means two different things --
+# for sst or salinity it means "no data here", where the channel mean is a neutral
+# filler and 0.0 injects a large out-of-range value near coastlines; for a
+# depth-resolved channel below the sea floor it means "genuinely dry", which is
+# usable information that only an out-of-range marker conveys. Nothing else in the
+# inputs states dryness per level: land_fraction is a single 2D field, while the
+# wet fraction falls from 0.693 at level 0 to 0.073 at level 18, with 89.4% of
+# surface-ocean columns dry by the deepest level.
+#
+# WHAT. The surviving recipe (fill_value: mean, excluding land_fraction and
+# sea_surface_fraction) plus fill_value_overrides sending the four depth-resolved
+# families and deptho to 0.0. Resolved and checked against TrainConfig:
+#   excluded, never masked   2  land_fraction, sea_surface_fraction
+#   fill 0.0                77  deptho + so_/thetao_/uo_/vo_ (4 x 19)
+#   fill mean               18  sst, zos, hfgeou, sfdsi, UI, VI, sea ice, forcings
+#
+# Two judgement calls worth revisiting before launch:
+#   - so_0 and thetao_0 are level-0 (surface) but ride the family prefix into
+#     zero-fill. mask_0 is bit-identical to mask_2d, so their masked cells are
+#     exactly the land cells that sst's are -- the alternative is to add
+#     so_0/thetao_0 exact-name entries at "mean". Family uniformity was chosen.
+#   - hfgeou stays mean-filled. It is NaN on land like deptho, so it is arguably
+#     in the same group, but it is a 2D field and was left with the surface set.
+#
+# READ IT AS: against ..._fillmean_maskall (rs0/1/2), which is identical except
+# for the overrides. If the interior profiles improve toward the zero-fill arms
+# while the surface fields hold, per-channel fill is worth keeping. If nothing
+# moves, the surface/interior split is not about the fill value and the feature
+# should not merge on this evidence.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0}'
