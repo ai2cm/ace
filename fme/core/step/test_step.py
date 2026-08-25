@@ -2216,3 +2216,47 @@ def test_multi_call_step_forwards_train_eval():
     wrapped_step.train.reset_mock()
     step.train()
     wrapped_step.train.assert_called_once_with(True)
+
+
+def test_discriminator_in_names_rejects_unknown():
+    names = ["a", "b", "c"]
+    with pytest.raises(ValueError, match="discriminator_in_names entry 'z'"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=names,
+            out_names=names,
+            normalization=trivial_network_and_loss_normalization(names),
+            discriminator_in_names=["a", "z"],
+        )
+
+
+def test_discriminator_out_names_rejects_unknown():
+    names = ["a", "b", "c"]
+    with pytest.raises(ValueError, match="discriminator_out_names entry 'z'"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="MLP", config={}),
+            in_names=names,
+            out_names=names,
+            normalization=trivial_network_and_loss_normalization(names),
+            discriminator_out_names=["a", "z"],
+        )
+
+
+def test_discriminator_subset_names_accepted():
+    names = ["a", "b", "c"]
+    config = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=names,
+        out_names=names,
+        normalization=trivial_network_and_loss_normalization(names),
+        discriminator=ModuleSelector(type="MLP", config={}),
+        discriminator_in_names=["a"],
+        discriminator_out_names=["b", "c"],
+    )
+    step = config.get_step(
+        dataset_info=get_dataset_info(img_shape=DEFAULT_IMG_SHAPE),
+        init_weights=lambda modules: None,
+    )
+    assert step.discriminator is not None
+    assert step.discriminator.in_names == ["a"]
+    assert step.discriminator.out_names == ["b", "c"]
