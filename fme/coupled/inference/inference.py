@@ -19,8 +19,8 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.inference import (
     InitialConditionConfig,
-    _get_segment_label,
     get_initial_condition,
+    get_segment_label,
 )
 from fme.ace.requirements import InitialConditionRequirements
 from fme.ace.stepper import StepperOverrideConfig
@@ -318,12 +318,15 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
     Each segment runs ``config.n_coupled_steps`` coupled steps, writing its
     outputs to a subdirectory of the experiment directory labeled by the start
     time of its first (or only) ensemble member. A segment is complete when both
-    its ocean and atmosphere restart files exist; they are written last, after
-    all other segment outputs. Completed segments are skipped, so an interrupted
-    run resumes at the first incomplete segment when invoked again with the same
-    configuration. Each segment after the first initializes from the previous
-    segment's restart files, which sit at a coupled step boundary and therefore
-    satisfy the ocean-anchored initial condition timing.
+    its ocean and atmosphere restart files exist; these are written once the
+    rollout finishes, but before the data writer's final flush, so a segment
+    interrupted in that window counts as complete despite having incomplete
+    diagnostic output (the same caveat applies to ``fme.ace`` segmented runs).
+    Completed segments are skipped, so an interrupted run resumes at the first
+    incomplete segment when invoked again with the same configuration. Each
+    segment after the first initializes from the previous segment's restart
+    files, which sit at a coupled step boundary and therefore satisfy the
+    ocean-anchored initial condition timing.
 
     Args:
         config: inference configuration to be used for each individual segment.
@@ -351,7 +354,7 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
     n_coupled_steps = config.n_coupled_steps
 
     for segment in range(segments):
-        segment_label = _get_segment_label(
+        segment_label = get_segment_label(
             initialization_time,
             timestep,
             segment,

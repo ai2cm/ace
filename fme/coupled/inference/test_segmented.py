@@ -15,6 +15,7 @@ import xarray as xr
 import yaml
 
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.data_loading.inference import ExplicitIndices
 from fme.ace.inference.data_writer import PairedDataWriter
 from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.inference import ForcingDataLoaderConfig
@@ -255,8 +256,6 @@ def test_restart_files_as_initial_condition(tmp_path):
 
 
 def test_restart_files_as_initial_condition_rejects_start_indices(tmp_path):
-    from fme.ace.data_loading.inference import ExplicitIndices
-
     ocean_restart_path, atmosphere_restart_path = _write_coupled_restart(
         tmp_path, _coupled_prognostic_state()
     )
@@ -266,6 +265,29 @@ def test_restart_files_as_initial_condition_rejects_start_indices(tmp_path):
         start_indices=ExplicitIndices([0]),
     )
     with pytest.raises(ValueError, match="start_indices"):
+        config.get_initial_condition(
+            ocean_prognostic_names=["o_prog"],
+            atmosphere_prognostic_names=["a_prog"],
+            n_ensemble_per_ic=1,
+        )
+
+
+def test_restart_files_as_initial_condition_rejects_mismatched_sample_counts(
+    tmp_path,
+):
+    """Positionally-aligned restarts must have matching sample counts, since
+    there is no coordinate to align them by."""
+    ocean_restart_path, _ = _write_coupled_restart(
+        tmp_path / "two_samples", _coupled_prognostic_state(n_samples=2)
+    )
+    _, atmosphere_restart_path = _write_coupled_restart(
+        tmp_path / "three_samples", _coupled_prognostic_state(n_samples=3)
+    )
+    config = CoupledInitialConditionConfig(
+        ocean=ComponentInitialConditionConfig(path=ocean_restart_path),
+        atmosphere=ComponentInitialConditionConfig(path=atmosphere_restart_path),
+    )
+    with pytest.raises(ValueError, match="different numbers of"):
         config.get_initial_condition(
             ocean_prognostic_names=["o_prog"],
             atmosphere_prognostic_names=["a_prog"],

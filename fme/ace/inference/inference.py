@@ -486,7 +486,7 @@ def _get_initialization_time_and_timestep(
     return initialization_time, stepper.training_dataset_info.timestep
 
 
-def _get_segment_label(
+def get_segment_label(
     initialization_time: cftime.datetime,
     timestep: datetime.timedelta,
     segment: int,
@@ -553,7 +553,7 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
     n_forward_steps = config.n_forward_steps
 
     for segment in range(segments):
-        segment_label = _get_segment_label(
+        segment_label = get_segment_label(
             initialization_time,
             timestep,
             segment,

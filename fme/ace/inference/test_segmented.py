@@ -26,8 +26,8 @@ from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.file_writer import FileWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
-    _get_segment_label,
     get_initial_condition,
+    get_segment_label,
     main,
     run_segmented_inference,
 )
@@ -302,7 +302,7 @@ def test_get_segment_label_raises_on_collision():
 
     # hour-precision format is too coarse to distinguish 45min-apart segments
     with pytest.raises(ValueError, match="same label"):
-        _get_segment_label(initialization_time, timestep, 1, n_forward_steps)
+        get_segment_label(initialization_time, timestep, 1, n_forward_steps)
 
 
 def save_noise_conditioned_stepper(
