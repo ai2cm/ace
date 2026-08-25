@@ -278,14 +278,14 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-patch-es.yaml"
 # Fine-tune — launch separately after the pretrain is done and its final
 # job's result dataset is filled into the config's "# arg: --dataset" header
 # (jupiter per Jeremy 2026-08-25):
-#   ./run-train.sh patch-es-ft3
-run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-patch-es.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-patch-es-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
+#   ./run-train.sh patch-es-ft2
+run_training "ace-train-config-ft2-bptt-daily-fg16-sr0p125-patch-es.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-patch-es-ft2-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
 
 # Cross-donor patch-ES fine-tune (added 2026-08-25): the 0.9/0.1 CRPS/patch-ES
 # loss fine-tuning the spectral-ES 90/10 pretrain (donor r95iprjt) -- a fast
 # viability read on the patch ES that doesn't wait for its own pretrain.
 # Target per Jeremy 2026-08-25: jupiter, 8 GPUs. Launch alone:
 #   ./run-train.sh patch-es-from-es
-run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-patch-es-from-es.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-patch-es-from-es-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
+run_training "ace-train-config-ft2-bptt-daily-fg16-sr0p125-patch-es-from-es.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-patch-es-from-es-ft2-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter

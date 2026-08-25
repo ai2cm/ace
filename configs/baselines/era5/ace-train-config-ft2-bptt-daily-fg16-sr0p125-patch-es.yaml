@@ -1,13 +1,16 @@
 # arg: --dataset troya/2026-07-24-era5-1deg-8layer-daily-stats-1990-2019:/statsdata
-# arg: --dataset 01KZTA4P87A6AGDQQNNDAXKD4V:/weights
+# TODO after the patch-es pretrain completes: add its final job's result
+# dataset (holding best_ckpt.tar) as a header line here:
+#   # arg: --dataset <dataset-id>:/weights
 #
-# Cross-donor patch energy score fine-tune: the 0.9 CRPS / 0.1 patch-ES (3x3)
-# loss fine-tuning the SPECTRAL-ES 90/10 pretrain checkpoint (donor r95iprjt,
-# best_ckpt.tar in dataset 01KZTA4P87A6AGDQQNNDAXKD4V -- the same donor as the
-# c8hp09jm fine-tune). Identical to
-# ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml except the energy-score
-# term of the loss; identical to ...-patch-es.yaml except the donor. Gives a
-# fast viability read on the patch ES before its own pretrain finishes.
+# Patch energy score variant of
+# ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml (wandb c8hp09jm) for the
+# patch-vs-spectral energy score investigation. The ONLY changes from that
+# config are:
+#   - the EnsembleLoss energy-score term: 0.1-weight spectral energy score
+#     replaced by a 0.1-weight patch energy score (3x3), crps_weight 0.9
+#   - donor checkpoint dataset: the patch-es pretrain's final result dataset
+#     (its best_ckpt.tar), instead of r95iprjt's
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -79,7 +82,7 @@ validation:
         start_time: '1996-01-01'
         stop_time: '1997-12-31'
 optimization:
-  use_gradient_accumulation: false   # BPTT: keep the graph across the 3-step rollout
+  use_gradient_accumulation: false   # BPTT: keep the graph across the 2-step rollout
   enable_automatic_mixed_precision: false
   lr: 0.0001
   optimizer_type: AdamW
@@ -88,8 +91,8 @@ optimization:
     weight_decay: 0.01
 stepper_training:
   n_ensemble: 2
-  n_forward_steps: 3
-  optimize_last_step_only: false   # take the loss on all 3 steps
+  n_forward_steps: 2
+  optimize_last_step_only: false   # take the loss on both steps
   parameter_init:
     weights_path: /weights/training_checkpoints/best_ckpt.tar
   loss:
