@@ -54,19 +54,18 @@ import dataclasses
 import gc
 import logging
 import os
-import signal
-import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, ClassVar, Generic, Protocol, TypeVar
+from typing import Any, Generic, Protocol, TypeVar
 
 import torch
 
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
-from fme.core.ema import EMAConfig, EMATracker
+from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
+from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
     InferenceAggregatorABC,
@@ -126,56 +125,56 @@ def _null_inference_callback(epoch: int) -> tuple[dict[str, Any], float | None]:
     return {}, None
 
 
-class TrainConfigProtocol(Protocol):
-    __dataclass_fields__: ClassVar[dict[str, Any]]
+@dataclasses.dataclass
+class TrainerParams:
+    """
+    Plain leaf parameters consumed by the :class:`Trainer`.
 
-    @property
-    def experiment_dir(self) -> str: ...
+    A build-then-execute entrypoint constructs this from its own (richer)
+    training configuration and passes it in, so the ``Trainer`` never reads
+    a configuration object's fields directly. Every field here is a scalar
+    that the ``Trainer`` reads; sub-objects (stepper, EMA, aggregators) are
+    built by the entrypoint and passed to the ``Trainer`` as arguments.
 
-    @property
-    def output_dir(self) -> str: ...
+    Parameters:
+        experiment_dir: Directory where checkpoints and logs are saved.
+        checkpoint_dir: Directory where checkpoints are saved.
+        max_epochs: Total number of epochs to train for.
+        save_checkpoint: Whether to save checkpoints at all.
+        validate_using_ema: Whether to validate/infer using the EMA model.
+        log_train_every_n_batches: How often to log batch loss during training.
+        train_evaluation_batches: Number of batches to evaluate on after
+            training each epoch.
+        checkpoint_every_n_batches: How often to save the latest checkpoint
+            during training. If 0, checkpoints are not saved based on batch
+            progress.
+        segment_epochs: Exit after training for at most this many epochs in
+            the current job, without exceeding ``max_epochs``.
+        checkpoint_save_epochs: How often to save epoch-based checkpoints.
+        ema_checkpoint_save_epochs: How often to save epoch-based EMA
+            checkpoints.
+        evaluate_before_training: Whether to run validation and inline
+            inference before any training is done.
+        save_best_inference_epoch_checkpoints: Whether to save a separate
+            checkpoint for each epoch where best_inference_error achieves a
+            new minimum.
+        lr_tuning: Optional learning-rate tuning configuration.
+    """
 
-    @property
-    def checkpoint_dir(self) -> str: ...
-
-    @property
-    def max_epochs(self) -> int: ...
-
-    @property
-    def save_checkpoint(self) -> bool: ...
-
-    @property
-    def validate_using_ema(self) -> bool: ...
-
-    @property
-    def log_train_every_n_batches(self) -> int: ...
-
-    @property
-    def train_evaluation_batches(self) -> int: ...
-
-    @property
-    def checkpoint_every_n_batches(self) -> int: ...
-
-    @property
-    def segment_epochs(self) -> int | None: ...
-
-    @property
-    def checkpoint_save_epochs(self) -> Slice | None: ...
-
-    @property
-    def ema_checkpoint_save_epochs(self) -> Slice | None: ...
-
-    @property
-    def evaluate_before_training(self) -> bool: ...
-
-    @property
-    def save_best_inference_epoch_checkpoints(self) -> bool: ...
-
-    @property
-    def ema(self) -> EMAConfig: ...
-
-    @property
-    def lr_tuning(self) -> LRTuningConfig | None: ...
+    experiment_dir: str
+    checkpoint_dir: str
+    max_epochs: int
+    save_checkpoint: bool
+    validate_using_ema: bool
+    log_train_every_n_batches: int
+    train_evaluation_batches: int
+    checkpoint_every_n_batches: int
+    segment_epochs: int | None
+    checkpoint_save_epochs: Slice | None
+    ema_checkpoint_save_epochs: Slice | None
+    evaluate_before_training: bool
+    save_best_inference_epoch_checkpoints: bool
+    lr_tuning: LRTuningConfig | None
 
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
@@ -217,18 +216,6 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
 
 
-def chain_signal_handler(sig, handler):
-    prev_handler = signal.getsignal(sig)
-
-    def on_sig(signum, frame):
-        handler(signum, frame)
-        if callable(prev_handler):
-            prev_handler(signum, frame)
-        sys.exit(1)
-
-    signal.signal(sig, on_sig)
-
-
 class Trainer:
     def __init__(
         self,
@@ -236,7 +223,7 @@ class Trainer:
         stepper: TrainStepperABC[PS, BD, FD, SD, TO],
         build_optimization: Callable[[torch.nn.ModuleList], Optimization],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
-        config: TrainConfigProtocol,
+        params: TrainerParams,
         aggregator_builder: AggregatorBuilderABC[TO],
         validation_callback: ValidationCallback,
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
@@ -253,7 +240,7 @@ class Trainer:
                 stepper's modules.
             build_ema: Factory that builds the EMATracker from the stepper's
                 modules.
-            config: Training configuration.
+            params: Plain leaf training parameters read by the Trainer.
             aggregator_builder: Builder for per-epoch aggregators.
             validation_callback: Called once per epoch to run epoch-end
                 validation against ``self.stepper``. The Trainer wraps the
@@ -272,22 +259,22 @@ class Trainer:
                 from ``self.stepper`` / ``self._ema``) and is responsible for
                 managing EMA state on those trial instances itself, since the
                 Trainer's ``validation_context`` only applies EMA to the main
-                stepper. Required when ``config.lr_tuning`` is configured.
+                stepper. Required when ``params.lr_tuning`` is configured.
             do_gc_collect: Whether to run a Python GC pass between epochs.
         """
         logging.info(f"Current device is {fme.get_device()}")
         dist = Distributed.get_instance()
         if dist.is_root():
-            if not os.path.isdir(config.experiment_dir):
-                os.makedirs(config.experiment_dir)
-            if not os.path.isdir(config.checkpoint_dir):
-                os.makedirs(config.checkpoint_dir)
-        self.config = config
-        self.paths = CheckpointPaths(config.checkpoint_dir)
+            if not os.path.isdir(params.experiment_dir):
+                os.makedirs(params.experiment_dir)
+            if not os.path.isdir(params.checkpoint_dir):
+                os.makedirs(params.checkpoint_dir)
+        self.params = params
+        self.paths = CheckpointPaths(params.checkpoint_dir)
         if dist.is_root():
             remove_stale_tmp_checkpoints(self.paths.checkpoint_dir)
 
-        if dist.is_root() and not self.config.save_checkpoint:
+        if dist.is_root() and not self.params.save_checkpoint:
             logging.warning(
                 "Configured value of save_checkpoint is false, no "
                 "checkpoints whatsoever will be saved!"
@@ -332,27 +319,47 @@ class Trainer:
         self._inference_callback: InferenceCallback = inference_callback
         self._validate_stepper_callback: ValidateStepper | None = validate_stepper
 
-        def on_terminate(signum, frame):
-            dist = Distributed.get_instance()
+        def save_restart_checkpoints_on_terminate():
+            """Preserve mid-epoch progress when the job is preempted.
+
+            Runs on the termination listener's thread, after the communicators
+            are aborted and once the main thread has parked at a loop boundary
+            or blocked in the shutdown context's exit, so it must stay free of
+            collectives and of the logging module (see
+            `add_post_abort_callback` and `write_stderr`). `save_checkpoint`
+            is root-only and reads local state, which satisfies that.
+            """
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
             ):
                 if self._in_ema_context:
-                    logging.info(
+                    write_stderr(
                         "In EMA context during interrupt, not saving "
-                        "restart checkpoints as it is unsafe to do so"
+                        "restart checkpoints as it is unsafe to do so\n"
                     )
                 elif not self._started_training:
-                    logging.info(
-                        "Not saving restart checkpoints as training has not started"
+                    write_stderr(
+                        "Not saving restart checkpoints as training has "
+                        "not started\n"
                     )
                 else:
-                    self._save_restart_checkpoints()
-            dist.shutdown()
+                    write_stderr(
+                        "Saving restart checkpoint to "
+                        f"{self.paths.latest_checkpoint_path} after "
+                        f"{self.num_batches_seen} batches\n"
+                    )
+                    self.save_checkpoint(
+                        self.paths.latest_checkpoint_path,
+                        include_optimization=True,
+                    )
 
-        chain_signal_handler(signal.SIGTERM, on_terminate)
-        chain_signal_handler(signal.SIGINT, on_terminate)
+        dist = Distributed.get_instance()
+        if not dist.has_spatial_parallelism:
+            # rank 0 holds the full model state, so the save needs no other
+            # rank's cooperation; a spatially-parallel stepper's state is
+            # sharded, and assembling it would need the aborted communicators
+            add_post_abort_callback(save_restart_checkpoints_on_terminate)
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -360,7 +367,7 @@ class Trainer:
 
     def _should_save_checkpoints(self) -> bool:
         dist = Distributed.get_instance()
-        return self.config.save_checkpoint and dist.is_root()
+        return self.params.save_checkpoint and dist.is_root()
 
     def _copy_stepper(self) -> TrainStepperABC:
         """Create a copy of the stepper via its state serialization API."""
@@ -384,7 +391,7 @@ class Trainer:
         return self._validate_stepper_callback(stepper, ema, epoch)
 
     def _maybe_tune_lr(self):
-        cfg = self.config.lr_tuning
+        cfg = self.params.lr_tuning
         if cfg is None:
             return
         if self._current_epoch_num_batches_seen > 0:
@@ -415,15 +422,15 @@ class Trainer:
         validation_callback = self._validation_callback
         inference_callback = self._inference_callback
 
-        if self.config.segment_epochs is None:
-            segment_max_epochs = self.config.max_epochs
+        if self.params.segment_epochs is None:
+            segment_max_epochs = self.params.max_epochs
         else:
             segment_max_epochs = min(
-                self._start_epoch + self.config.segment_epochs, self.config.max_epochs
+                self._start_epoch + self.params.segment_epochs, self.params.max_epochs
             )
 
         if (
-            self.config.evaluate_before_training
+            self.params.evaluate_before_training
             and self._epochs_trained == 0
             and self._current_epoch_num_batches_seen == 0
         ):
@@ -483,6 +490,11 @@ class Trainer:
             if inference_error is not None:
                 logging.info(f"Inference error: {inference_error}")
 
+            # must happen before logging, so the logged bests are read from the
+            # updated state rather than recomputed (min(nan, x) is nan, which
+            # let a diverged epoch report itself as the best)
+            self._update_best_metrics(valid_loss, inference_error)
+
             with self.validation_context():
                 additional_logs = self._end_of_epoch_callback(self._epochs_trained)
 
@@ -498,10 +510,8 @@ class Trainer:
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
-                    "best_val_loss": min(valid_loss, self._best_validation_loss),
-                    "best_inference_error": min(
-                        inference_error or torch.inf, self._best_inference_error
-                    ),
+                    "best_val_loss": self._best_validation_loss,
+                    "best_inference_error": self._best_inference_error,
                 },
             }
             if inference_end is not None:
@@ -523,7 +533,7 @@ class Trainer:
                 optimization=self._no_optimization,
             )
 
-            if self.config.log_train_every_n_batches > 0:
+            if self.params.log_train_every_n_batches > 0:
                 with torch.no_grad():
                     metrics = {
                         f"batch_{name}": dist.reduce_mean(metric)
@@ -568,7 +578,9 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
+        dist = Distributed.get_instance()
         for batch in epoch_data:
+            dist.park_if_terminating()
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
             self._end_of_batch_callback()
@@ -580,8 +592,8 @@ class Trainer:
             n_samples_seen_since_logging += self.train_data.batch_size
             metrics_aggregator.record(stepped.get_metrics())
             if (
-                self.config.log_train_every_n_batches > 0
-                and self.num_batches_seen % self.config.log_train_every_n_batches == 0
+                self.params.log_train_every_n_batches > 0
+                and self.num_batches_seen % self.params.log_train_every_n_batches == 0
             ):
                 metrics = {
                     f"batch_{name}": value
@@ -599,8 +611,8 @@ class Trainer:
                 n_samples_seen_since_logging = 0
             if (
                 self._should_save_checkpoints()
-                and self.config.checkpoint_every_n_batches > 0
-                and self.num_batches_seen % self.config.checkpoint_every_n_batches == 0
+                and self.params.checkpoint_every_n_batches > 0
+                and self.num_batches_seen % self.params.checkpoint_every_n_batches == 0
             ):
                 self._save_restart_checkpoints()
                 self._last_saved_num_batches_seen = self.num_batches_seen
@@ -611,8 +623,9 @@ class Trainer:
         self.stepper.seed_eval(seed=0)
         with torch.no_grad(), self.validation_context():
             for batch in self.train_data.subset_loader(
-                stop_batch=self.config.train_evaluation_batches
+                stop_batch=self.params.train_evaluation_batches
             ):
+                dist.park_if_terminating()
                 with GlobalTimer():
                     stepped = self.stepper.train_on_batch(
                         batch, self._no_optimization, evaluate_all_steps=True
@@ -649,9 +662,9 @@ class Trainer:
         The context for running validation.
 
         In this context, the stepper uses the EMA model if
-        `self.config.validate_using_ema` is True.
+        `self.params.validate_using_ema` is True.
         """
-        if self.config.validate_using_ema:
+        if self.params.validate_using_ema:
             with self._ema_context():
                 yield
         else:
@@ -717,44 +730,62 @@ class Trainer:
 
     def _epoch_checkpoint_enabled(self, epoch: int) -> bool:
         return epoch_checkpoint_enabled(
-            epoch, self.config.max_epochs, self.config.checkpoint_save_epochs
+            epoch, self.params.max_epochs, self.params.checkpoint_save_epochs
         )
 
     def _ema_epoch_checkpoint_enabled(self, epoch: int) -> bool:
         return epoch_checkpoint_enabled(
-            epoch, self.config.max_epochs, self.config.ema_checkpoint_save_epochs
+            epoch, self.params.max_epochs, self.params.ema_checkpoint_save_epochs
         )
 
+    def _update_best_metrics(
+        self, valid_loss: float, inference_error: float | None
+    ) -> tuple[bool, bool]:
+        """Record this epoch's metrics as the best so far if they improve on it.
+
+        Returns whether the validation loss and the inference error were each
+        (re-)attained this epoch, i.e. whether their best checkpoints are due to
+        be written.
+
+        A diverged epoch's NaN never becomes the best, since every comparison
+        with NaN is False. The comparisons are non-strict, so calling this twice
+        with the same values gives the same answer both times and the caller can
+        re-run it without changing what gets saved.
+        """
+        is_best_validation = valid_loss <= self._best_validation_loss
+        if is_best_validation:
+            self._best_validation_loss = valid_loss
+        is_best_inference = False
+        if inference_error is not None and (
+            inference_error <= self._best_inference_error
+        ):
+            self._best_inference_error = inference_error
+            is_best_inference = True
+        return is_best_validation, is_best_inference
+
     def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
-        if self.config.validate_using_ema:
+        if self.params.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
             best_checkpoint_context = contextlib.nullcontext  # type: ignore
+        prev_best_inference_error = self._best_inference_error
+        save_best_checkpoint, save_best_inference_checkpoint = (
+            self._update_best_metrics(valid_loss, inference_error)
+        )
         with best_checkpoint_context():
-            save_best_checkpoint = False
-            if valid_loss <= self._best_validation_loss:
-                logging.info(
-                    "Saving lowest validation loss checkpoint to "
-                    f"{self.paths.best_checkpoint_path}"
-                )
-                self._best_validation_loss = valid_loss
-                save_best_checkpoint = True  # wait until inference error is updated
-            if inference_error is not None and (
-                inference_error <= self._best_inference_error
-            ):
+            if save_best_inference_checkpoint:
                 logging.info(
                     f"Epoch inference error ({inference_error}) is lower than "
-                    f"previous best inference error ({self._best_inference_error})."
+                    f"previous best inference error ({prev_best_inference_error})."
                 )
                 logging.info(
                     "Saving lowest inference error checkpoint to "
                     f"{self.paths.best_inference_checkpoint_path}"
                 )
-                self._best_inference_error = inference_error
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
 
                 # Save epoch-specific best inference checkpoint if configured
-                if self.config.save_best_inference_epoch_checkpoints:
+                if self.params.save_best_inference_epoch_checkpoints:
                     best_inference_epoch_path = (
                         self.paths.best_inference_epoch_checkpoint_path(
                             self._epochs_trained
@@ -766,6 +797,10 @@ class Trainer:
                     )
                     self.save_checkpoint(best_inference_epoch_path)
             if save_best_checkpoint:
+                logging.info(
+                    "Saving lowest validation loss checkpoint to "
+                    f"{self.paths.best_checkpoint_path}"
+                )
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
         self._save_restart_checkpoints()
@@ -796,12 +831,16 @@ class ValidationTask(Generic[BD, TO]):
             preserving the existing per-epoch construction semantics.
         weight: Contribution weight for the combined validation loss. Zero means
             the task runs but does not contribute to the metric.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
     """
 
     name: str
     data: GriddedDataABC[BD]
     aggregator_factory: Callable[[], AggregatorABC[TO]]
     weight: float = 0.0
+    evaluate_all_steps: bool = True
 
 
 def build_validation_callback(
@@ -823,6 +862,7 @@ def build_validation_callback(
                 label=task.name,
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
+                evaluate_all_steps=task.evaluate_all_steps,
             )
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:

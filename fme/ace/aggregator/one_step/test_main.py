@@ -20,6 +20,7 @@ from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.loss import ChannelLossInfo
 from fme.core.typing_ import EnsembleTensorDict
 
 
@@ -77,6 +78,83 @@ def test_labels_exist():
     ]
     assert set(summary.logs.keys()) == set(expected_keys)
     assert summary.loss == summary.logs["test/mean/loss"]
+
+
+def test_aggregator_logs_per_channel_loss():
+    """Per-channel loss from batch.per_channel_losses is reported during validation.
+
+    Mirrors the training aggregator so validation logs are directly comparable
+    to train/mean/loss/<var>.
+    """
+    batch_size = 4
+    n_ensemble = 1
+    n_time = 2
+    nx, ny = 2, 2
+    device = get_device()
+    ds_info = get_ds_info(nx, ny)
+    agg = OneStepAggregatorConfig().build(ds_info, save_diagnostics=False)
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=device)},
+    )
+    time = xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"])
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": torch.tensor(1.0, device=device)},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=time,
+            normalize=lambda x: x,
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(0.5, device=device), count=4)
+            },
+        ),
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": torch.tensor(2.0, device=device)},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=time,
+            normalize=lambda x: x,
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(1.0, device=device), count=4)
+            },
+        ),
+    )
+    logs = agg.get_logs(label="val")
+    assert logs["val/mean/loss/a"] == 0.75
+
+
+def test_aggregator_omits_per_channel_loss_when_disabled():
+    nx, ny = 2, 2
+    device = get_device()
+    ds_info = get_ds_info(nx, ny)
+    agg = OneStepAggregatorConfig(per_channel_loss=False).build(
+        ds_info, save_diagnostics=False
+    )
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(4, 1, 2, nx, ny, device=device)},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(4, 1, 2, nx, ny, device=device)},
+    )
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": torch.tensor(1.0, device=device)},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=xr.DataArray(np.zeros((4, 2)), dims=["sample", "time"]),
+            normalize=lambda x: x,
+            per_channel_losses={
+                "a": ChannelLossInfo(loss=torch.tensor(0.5, device=device), count=4)
+            },
+        ),
+    )
+    logs = agg.get_logs(label="val")
+    assert "val/mean/loss/a" not in logs
 
 
 def test_aggregator_raises_on_no_data():

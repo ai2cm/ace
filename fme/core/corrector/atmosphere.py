@@ -69,6 +69,11 @@ class ConserveDryAir:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the surface pressure adjusted to conserve dry air).
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "conserve_dry_air is set to True, but no vertical coordinate is "
@@ -82,14 +87,14 @@ class ConserveDryAir:
             precision=self.precision,
         )
         assert corrector_state.global_dry_air_mass is not None
-        gen_data = _adjust_gen_dry_air_to_target(
+        corrected = _adjust_gen_dry_air_to_target(
             gen_data,
             target_global_dry_air=corrector_state.global_dry_air_mass,
             area_weighted_mean=self.area_weighted_mean,
             vertical_coordinate=self.vertical_coordinate,
             precision=self.precision,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
@@ -105,16 +110,28 @@ class ZeroGlobalMeanMoistureAdvection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        gen_data = _force_zero_global_mean_moisture_advection(
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the field modified by this
+            correction (the moisture advection tendency).
+        """
+        corrected = _force_zero_global_mean_moisture_advection(
             gen_data=gen_data,
             area_weighted_mean=self.area_weighted_mean,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
 class MoistureBudgetCorrection:
-    """Correction that closes the moisture budget via the configured terms."""
+    """Correction that closes the moisture budget via the configured terms.
+
+    When ``clip_frozen_precipitation`` is True, after closing the moisture budget
+    the frozen precipitation rate (``total_frozen_precipitation_rate``) is clipped
+    to the -- possibly corrected -- total precipitation rate when frozen
+    precipitation is predicted, since frozen precipitation is a component of total
+    precipitation and cannot exceed it.
+    """
 
     area_weighted_mean: AreaWeightedMean
     vertical_coordinate: HasAtmosphereVerticalIntegral | None
@@ -125,6 +142,7 @@ class MoistureBudgetCorrection:
         "advection_and_precipitation",
         "advection_and_evaporation",
     ]
+    clip_frozen_precipitation: bool = False
 
     def __call__(
         self,
@@ -133,12 +151,17 @@ class MoistureBudgetCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction.
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Moisture budget correction is turned on, but no vertical "
                 "coordinate is available."
             )
-        gen_data = _force_conserve_moisture(
+        corrected = _force_conserve_moisture(
             input_data=input_data,
             gen_data=gen_data,
             area_weighted_mean=self.area_weighted_mean,
@@ -146,7 +169,13 @@ class MoistureBudgetCorrection:
             timestep_seconds=self.timestep_seconds,
             terms_to_modify=self.terms_to_modify,
         )
-        return gen_data, corrector_state
+        if self.clip_frozen_precipitation:
+            # Clip frozen precipitation against the (possibly corrected) total
+            # precipitation rate. Done here, after the budget correction, so the
+            # ceiling is the final precipitation rate.
+            frozen_clip = _clip_frozen_precipitation({**gen_data, **corrected})
+            corrected = {**corrected, **frozen_clip}
+        return corrected, corrector_state
 
 
 @dataclasses.dataclass
@@ -166,12 +195,17 @@ class TotalEnergyBudgetCorrection:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the fields modified by
+            this correction (the air temperature at every vertical level).
+        """
         if self.vertical_coordinate is None:
             raise ValueError(
                 "Energy budget correction is turned on, but no vertical coordinate"
                 " is available."
             )
-        gen_data = _force_conserve_total_energy(
+        corrected = _force_conserve_total_energy(
             input_data=input_data,
             gen_data=gen_data,
             forcing_data=forcing_data,
@@ -181,7 +215,7 @@ class TotalEnergyBudgetCorrection:
             method=self.method,
             unaccounted_heating=self.unaccounted_heating,
         )
-        return gen_data, corrector_state
+        return corrected, corrector_state
 
 
 @CorrectorSelector.register("atmosphere_corrector")
@@ -274,6 +308,16 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
             clamp with a straight-through estimator: the forward value is still
             clamped to be non-negative, but gradient flows as if the clamp had
             not happened, so clamped-negative cells still get a learning signal.
+        clip_frozen_precipitation: If True, and ``moisture_budget_correction`` is
+            enabled and the frozen precipitation rate
+            (``total_frozen_precipitation_rate``) is predicted, clip it to be less
+            than or equal to the -- possibly corrected -- total precipitation rate
+            (``PRATEsfc``) in each grid cell, since frozen precipitation is a
+            component of total precipitation. The clip runs as part of the
+            moisture budget correction, before any ``total_energy_budget_correction``,
+            since frozen precipitation contributes to the surface energy flux via
+            the latent heat of freezing. Defaults to False so that previously
+            trained checkpoints, which did not apply this clip, are unaffected.
     """
 
     conserve_dry_air: bool = False
@@ -290,6 +334,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: EnergyBudgetConfig | None = None
     keep_gradient_through_clamps: bool = False
+    clip_frozen_precipitation: bool = False
 
     def _get_corrector(
         self,
@@ -336,6 +381,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
                     vertical_coordinate,
                     timestep_seconds,
                     self.moisture_budget_correction,
+                    clip_frozen_precipitation=self.clip_frozen_precipitation,
                 )
             )
         if self.total_energy_budget_correction is not None:
@@ -415,7 +461,7 @@ def _adjust_gen_dry_air_to_target(
         1 - (bk_diff * wat).sum(-1)
     )
     gen.set_surface_pressure(new_pressure.to(dtype=gen.surface_pressure.dtype))
-    return gen.data
+    return gen.modified_data
 
 
 def _force_zero_global_mean_moisture_advection(
@@ -441,7 +487,32 @@ def _force_zero_global_mean_moisture_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
     )
-    return gen.data
+    return gen.modified_data
+
+
+def _clip_frozen_precipitation(gen_data: TensorMapping) -> TensorDict:
+    """
+    Clip the frozen precipitation rate to be at most the total precipitation rate.
+
+    Frozen precipitation is a component of total precipitation, so its rate cannot
+    physically exceed the total precipitation rate. This clips
+    ``total_frozen_precipitation_rate`` to ``min(total_frozen_precipitation_rate,
+    PRATEsfc)`` in each grid cell.
+
+    If the frozen precipitation rate is not among the generated fields (i.e. it is
+    not predicted), this is a no-op and returns an empty mapping.
+
+    Args:
+        gen_data: The generated data, which must contain the total precipitation
+            rate when the frozen precipitation rate is predicted.
+    """
+    if "total_frozen_precipitation_rate" not in gen_data:
+        return {}
+    gen = AtmosphereData(gen_data)
+    gen.set_frozen_precipitation_rate(
+        torch.minimum(gen.frozen_precipitation_rate, gen.precipitation_rate)
+    )
+    return gen.modified_data
 
 
 def _force_conserve_moisture(
@@ -534,7 +605,7 @@ def _force_conserve_moisture(
             gen.evaporation_rate - gen.precipitation_rate
         )
         gen.set_tendency_of_total_water_path_due_to_advection(new_advection)
-    return gen.data
+    return gen.modified_data
 
 
 def _force_conserve_total_energy(
@@ -589,10 +660,9 @@ def _force_conserve_total_energy(
 
     # apply same temperature correction to all vertical layers
     air_temperature_names = gen.get_all_vertical_level_names("air_temperature")
-    for name in air_temperature_names:
-        gen.data[name] = gen.data[name] + temperature_correction
-    # filter required here because we merged forcing data into gen above
-    return {k: v for k, v in gen.data.items() if k in gen_data}
+    return {
+        name: gen.data[name] + temperature_correction for name in air_temperature_names
+    }
 
 
 def _energy_correction_factor(

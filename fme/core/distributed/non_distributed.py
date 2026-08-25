@@ -121,6 +121,9 @@ class NonDistributed(DistributedBackend):
     def spatial_reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         return tensor
 
+    def broadcast_spatial(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor
+
     def weighted_mean(
         self,
         data: torch.Tensor,
@@ -134,4 +137,7 @@ class NonDistributed(DistributedBackend):
         return data.nanmean(dim=-1)
 
     def shutdown(self):
+        return
+
+    def abort(self):
         return

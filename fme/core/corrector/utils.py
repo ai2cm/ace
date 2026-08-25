@@ -28,11 +28,13 @@ def _force_positive(
 ) -> TensorDict:
     """Clamp all tensors defined by `names` to be greater than or equal to zero.
 
-    If ``keep_gradient`` is True, the clamp is applied with
+    Returns only the clamped fields (``names``) -- the act of clamping a field is
+    what places it in the output, so the returned keys are exactly the modified
+    ones. If ``keep_gradient`` is True, the clamp is applied with
     :func:`replace_value_keep_gradient` so the forward value is still clamped to
     zero but the gradient flows as if the clamp had not happened.
     """
-    out = {**data}
+    out: TensorDict = {}
     for name in names:
         clamped = torch.clamp(data[name], min=0.0)
         if keep_gradient:
@@ -64,7 +66,12 @@ class ForcePositive:
         forcing_data: TensorMapping,
         corrector_state: CorrectorState | None,
     ) -> tuple[TensorDict, CorrectorState | None]:
-        return (
-            _force_positive(gen_data, self.names, keep_gradient=self.keep_gradient),
-            corrector_state,
+        """
+        Returns:
+            A tuple whose ``TensorDict`` contains only the clamped fields
+            (``self.names``) modified by this correction.
+        """
+        clamped = _force_positive(
+            gen_data, self.names, keep_gradient=self.keep_gradient
         )
+        return clamped, corrector_state

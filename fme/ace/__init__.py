@@ -16,6 +16,7 @@ from fme.ace.aggregator.inference.near_zero_fraction import NearZeroFractionMetr
 from fme.ace.aggregator.inference.reduced import MeanMetricConfig
 from fme.ace.aggregator.inference.seasonal import SeasonalMetricConfig
 from fme.ace.aggregator.inference.spectrum import PowerSpectrumMetricConfig
+from fme.ace.aggregator.inference.step_diagnostics import StepDiagnosticsMetricConfig
 from fme.ace.aggregator.inference.time_mean import TimeMeanMetricConfig
 from fme.ace.aggregator.inference.trend import TrendMetricConfig
 from fme.ace.aggregator.inference.video import VideoMetricConfig
@@ -126,9 +127,16 @@ from fme.core.step import (
 )
 from fme.core.step.multi_call import MultiCallConfig
 from fme.core.typing_ import Slice
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 from . import step
 from .inference.inference import get_initial_condition
+from .requirements import InitialConditionRequirements
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,

@@ -19,6 +19,7 @@ from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.registry.module import Module
 from fme.core.step.args import StepArgs
+from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -26,7 +27,6 @@ from fme.core.step.secondary_decoder import (
 )
 from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
-from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -235,6 +235,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
     def get_step(
         self,
         dataset_info: DatasetInfo,
@@ -316,9 +319,12 @@ class SecondaryModuleStep(StepABC):
         self.secondary_out_packer: Packer = Packer(all_secondary_names)
 
         if config.secondary_decoder is not None:
+            secondary_decoder_n_in = n_out_channels
+            if config.secondary_decoder.include_input_step:
+                secondary_decoder_n_in += n_in_channels
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
-                    n_in_channels=n_out_channels,
+                    n_in_channels=secondary_decoder_n_in,
                     dataset_info=dataset_info,
                 ).to(get_device())
             )
@@ -387,7 +393,7 @@ class SecondaryModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         def network_call(input_norm: TensorDict) -> TensorDict:
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             output_tensor = self.module.wrap_module(wrapper)(
@@ -409,8 +415,16 @@ class SecondaryModuleStep(StepABC):
                     output_dict[name] = output_dict[name] + secondary_dict[name]
                 else:
                     output_dict[name] = input_norm[name] + secondary_dict[name]
+            secondary_input = output_tensor.detach()
+            if (
+                self._config.secondary_decoder is not None
+                and self._config.secondary_decoder.include_input_step
+            ):
+                secondary_input = torch.cat(
+                    [secondary_input, input_tensor.detach()], dim=self.CHANNEL_DIM
+                )
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+                secondary_input
             )
             output_dict.update(secondary_output_dict)
             return output_dict
