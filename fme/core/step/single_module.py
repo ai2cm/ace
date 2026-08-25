@@ -282,8 +282,16 @@ class SingleModuleStepConfig(StepConfigABC):
             # loads donor generators, which carry no discriminator).
             discriminator: StepDiscriminator | None = StepDiscriminator(
                 builder=self.discriminator,
-                in_names=self.discriminator_in_names or self.in_names,
-                out_names=self.discriminator_out_names or self.out_names,
+                in_names=(
+                    self.discriminator_in_names
+                    if self.discriminator_in_names is not None
+                    else self.in_names
+                ),
+                out_names=(
+                    self.discriminator_out_names
+                    if self.discriminator_out_names is not None
+                    else self.out_names
+                ),
                 normalizer=normalizer,
                 dataset_info=dataset_info,
             )
