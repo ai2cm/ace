@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install NVIDIA Apex GroupNorm
-# Tested on: Python 3.11, PyTorch 2.8.0, CUDA 12.8, Ubuntu 22.04
+# Tested on: Python 3.12, PyTorch 2.10.0, CUDA 12.8, Ubuntu 24.04
 #
 # This script includes a fix for the missing <tuple> include in the Apex v2 code
 # which causes compilation errors with CUDA 12.8 + GCC 11.
@@ -31,7 +31,7 @@ sed -i '1a #include <tuple>' apex/contrib/csrc/group_norm_v2/gn_cuda_host_templa
 # Step 2: Build and install
 echo ""
 echo "[2/2] Building Apex with GroupNorm extension only..."
-CPLUS_INCLUDE_PATH=/opt/conda/targets/x86_64-linux/include:$CPLUS_INCLUDE_PATH \
+CPLUS_INCLUDE_PATH=${CUDA_HOME:-/usr/local/cuda}/targets/x86_64-linux/include:$CPLUS_INCLUDE_PATH \
     APEX_GROUP_NORM=1 \
     pip install -v --no-build-isolation --no-cache-dir ./
 
