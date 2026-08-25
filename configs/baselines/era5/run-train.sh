@@ -257,3 +257,10 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan.yaml" \
 #   ./run-train.sh gan-no-r1
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-no-r1.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-no-r1-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
+
+# PatchDiscriminator variant: CNN D with spectral normalization focused on 8
+# surface fields (no R1, no input conditioning). Spectral norm constrains D's
+# Lipschitz constant directly — avoids the R1 freeze/overshoot problem.
+#   ./run-train.sh gan-patch
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-patch.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-gan-patch-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
