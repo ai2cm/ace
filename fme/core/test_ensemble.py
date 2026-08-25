@@ -157,3 +157,5 @@ def test_patch_energy_score_rejects_bad_inputs():
         get_patch_energy_score(gen, target)
     with pytest.raises(ValueError):
         get_patch_energy_score(torch.randn(2, 2, 3, 8, 16), target, patch_size=2)
+    with pytest.raises(ValueError):
+        get_patch_energy_score(torch.randn(2, 2, 3, 8, 16), target, patch_size=17)

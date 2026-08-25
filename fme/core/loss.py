@@ -660,6 +660,9 @@ class PatchEnergyScoreLoss(torch.nn.Module):
 
     A grid-space alternative to the spectral :class:`EnergyScoreLoss` that
     scores joint local structure per channel instead of per-mode calibration.
+    Assumes a ``[..., n_lat, n_lon]`` layout with periodic longitude (a
+    lat-lon grid); see :func:`fme.core.ensemble.get_patch_energy_score` for
+    the boundary and normalization details.
 
     Returns a pre-weighted ``(B, C, H, W)`` tensor whose mean over trailing
     dims gives the per-``(B, C)`` loss, like :class:`CRPSLoss`.
