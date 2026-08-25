@@ -15,6 +15,7 @@ from fme.core.loss import (
     LossConfig,
     LossOutput,
     LpLoss,
+    PatchEnergyScoreLoss,
     SpectralWhitening,
     SpectralWhiteningConfig,
     StandardLoss,
@@ -997,3 +998,52 @@ def test_ensemble_loss_with_whitening_builds_and_runs(whitening):
     out = loss(x, y)
     assert all(isinstance(c, LossComponent) for c in out)
     assert torch.isfinite(_components_total(out))
+
+
+def test_patch_energy_score_loss_in_ensemble_loss():
+    torch.manual_seed(0)
+    config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            "crps_weight": 0.9,
+            "patch_energy_score_weight": 0.1,
+            "patch_energy_score_size": 3,
+        },
+    )
+    loss = config.build(
+        gridded_operations=LatLonOperations(torch.ones(8, 16, device=get_device())),
+    )
+    gen = torch.randn(2, 2, 3, 8, 16, device=get_device())
+    target = torch.randn(2, 1, 3, 8, 16, device=get_device())
+    components = loss(gen, target)
+    assert isinstance(components, list)
+    assert len(components) == 2
+    total = _components_total(components)
+    assert torch.isfinite(total)
+
+    crps_only = LossConfig(type="EnsembleLoss", kwargs={"crps_weight": 0.9}).build(
+        gridded_operations=LatLonOperations(torch.ones(8, 16, device=get_device())),
+    )
+    crps_total = _components_total(crps_only(gen, target))
+    assert not torch.equal(total, crps_total)
+
+
+def test_patch_energy_score_only_ensemble_loss_is_allowed():
+    config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={"crps_weight": 0.0, "patch_energy_score_weight": 1.0},
+    )
+    loss = config.build(
+        gridded_operations=LatLonOperations(torch.ones(8, 16, device=get_device())),
+    )
+    gen = torch.randn(2, 2, 3, 8, 16, device=get_device())
+    target = torch.randn(2, 1, 3, 8, 16, device=get_device())
+    total = _components_total(loss(gen, target))
+    assert torch.isfinite(total)
+
+
+def test_patch_energy_score_loss_rejects_even_patch_size():
+    with pytest.raises(ValueError):
+        PatchEnergyScoreLoss(patch_size=4)
+    with pytest.raises(ValueError):
+        PatchEnergyScoreLoss(patch_size=0)
