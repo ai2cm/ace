@@ -23,6 +23,7 @@ from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.random_state import RandomState
 from fme.core.stepper_state import StepperState
+from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.batch_data import CoupledPrognosticState
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.inference.data_writer import (
@@ -311,6 +312,51 @@ def test_restart_files_as_initial_condition_rejects_mismatched_times(tmp_path):
         )
 
 
+def _segmented_config_factory(
+    tmp_path: pathlib.Path,
+    total_coupled_steps: int,
+    *,
+    log_to_wandb: bool = False,
+):
+    """Write coupled forcing data and a checkpoint under ``tmp_path``, with enough
+    forcing for ``total_coupled_steps`` coupled steps so that a run of that length
+    can be split into segments.
+
+    Returns ``(make_config, atmos_steps_per_ocean_step)``, where
+    ``make_config(experiment_dir, n_coupled_steps)`` writes a config yaml and
+    returns its path.
+    """
+    config, _, atmos_steps_per_ocean_step = _setup(
+        ocean_in_names=["o_prog", "sst", "mask_0", "a_diag"],
+        ocean_out_names=["o_prog", "sst", "o_diag"],
+        atmos_in_names=[
+            "a_prog",
+            "surface_temperature",
+            "forcing_var",
+            "ocean_fraction",
+        ],
+        atmos_out_names=["a_prog", "surface_temperature", "a_diag"],
+        tmp_path=tmp_path,
+        n_coupled_steps=total_coupled_steps,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=1,
+    )
+    config.logging = LoggingConfig(
+        log_to_screen=True, log_to_file=False, log_to_wandb=log_to_wandb
+    )
+
+    def make_config(experiment_dir: pathlib.Path, n_coupled_steps: int) -> str:
+        config.n_coupled_steps = n_coupled_steps
+        config.experiment_dir = str(experiment_dir)
+        # one yaml per experiment dir, so a previously written config stays valid
+        config_filename = str(tmp_path / f"config-{experiment_dir.name}.yaml")
+        with open(config_filename, "w") as f:
+            yaml.dump(dataclasses.asdict(config), f)
+        return config_filename
+
+    return make_config, atmos_steps_per_ocean_step
+
+
 @pytest.mark.medium_duration
 def test_inference_segmented_entrypoint():
     """Two segments of N coupled steps reproduce a single 2N-step run exactly,
@@ -320,39 +366,14 @@ def test_inference_segmented_entrypoint():
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = pathlib.Path(tmp_dir)
         n_coupled_steps = 2
-        ocean_in_names = ["o_prog", "sst", "mask_0", "a_diag"]
-        ocean_out_names = ["o_prog", "sst", "o_diag"]
-        atmos_in_names = [
-            "a_prog",
-            "surface_temperature",
-            "forcing_var",
-            "ocean_fraction",
-        ]
-        atmos_out_names = ["a_prog", "surface_temperature", "a_diag"]
-
-        # provide enough forcing data for both segments
-        config, mock_data, atmos_steps_per_ocean_step = _setup(
-            ocean_in_names=ocean_in_names,
-            ocean_out_names=ocean_out_names,
-            atmos_in_names=atmos_in_names,
-            atmos_out_names=atmos_out_names,
-            tmp_path=tmp_path,
-            n_coupled_steps=2 * n_coupled_steps,
-            coupled_steps_in_memory=1,
-            n_initial_conditions=1,
+        make_config, atmos_steps_per_ocean_step = _segmented_config_factory(
+            tmp_path, total_coupled_steps=2 * n_coupled_steps
         )
         segmented_dir = tmp_path / "segmented_run"
-        config.n_coupled_steps = n_coupled_steps
-        config.experiment_dir = str(segmented_dir)
-        config.logging = LoggingConfig(
-            log_to_screen=True, log_to_file=False, log_to_wandb=False
-        )
-        config_filename = tmp_path / "config.yaml"
-        with open(config_filename, "w") as f:
-            yaml.dump(dataclasses.asdict(config), f)
+        config_filename = make_config(segmented_dir, n_coupled_steps)
 
         # both segments run in a single invocation
-        main(yaml_config=str(config_filename), segments=2)
+        main(yaml_config=config_filename, segments=2)
 
         # re-invoke and ensure completed segments are not re-run. Ocean data
         # starts at 1970-01-01 with a 2-day ocean timestep, so with
@@ -368,17 +389,13 @@ def test_inference_segmented_entrypoint():
             for label in segment_labels
         ]
         mtimes = [os.path.getmtime(filename) for filename in prediction_filenames]
-        main(yaml_config=str(config_filename), segments=2)
+        main(yaml_config=config_filename, segments=2)
         for filename, mtime in zip(prediction_filenames, mtimes):
             assert os.path.getmtime(filename) == pytest.approx(mtime)
 
         # a non-segmented run over the same total duration
         single_dir = tmp_path / "single_run"
-        config.n_coupled_steps = 2 * n_coupled_steps
-        config.experiment_dir = str(single_dir)
-        with open(config_filename, "w") as f:
-            yaml.dump(dataclasses.asdict(config), f)
-        main(yaml_config=str(config_filename))
+        main(yaml_config=make_config(single_dir, 2 * n_coupled_steps))
 
         # the second segment must match the second half of the single run
         for component_dir, n_component_steps in [
@@ -404,3 +421,27 @@ def test_inference_segmented_entrypoint():
             xr.testing.assert_equal(
                 ds_segment_1, ds_single.isel(time=slice(n_component_steps, None))
             )
+
+
+@pytest.mark.medium_duration
+def test_segmented_inference_wandb_run_per_segment(monkeypatch):
+    """Each segment gets its own wandb run named ``<base>-<start time>``, matching
+    the fme.ace segmented driver (issue #471). Sharing one run across segments
+    would collide their step counters and silently ignore the per-segment names,
+    since wandb reads WANDB_NAME only when the first run starts.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        make_config, _ = _segmented_config_factory(
+            tmp_path, total_coupled_steps=4, log_to_wandb=True
+        )
+        config_filename = make_config(tmp_path / "segmented_run", 2)
+        monkeypatch.setenv("WANDB_NAME", "myrun")
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            main(yaml_config=config_filename, segments=2)
+            assert [run["name"] for run in wandb.runs] == [
+                "myrun-segment_19700101T00",
+                "myrun-segment_19700105T00",
+            ]
+            assert len({run["id"] for run in wandb.runs}) == 2  # distinct runs
