@@ -8,7 +8,7 @@ import torch.linalg
 import torch.nn.functional as F
 
 from fme.core.device import get_device
-from fme.core.ensemble import get_crps, get_energy_score
+from fme.core.ensemble import get_crps, get_energy_score, get_patch_energy_score
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
@@ -652,6 +652,34 @@ class CRPSLoss(torch.nn.Module):
         return [StandardLoss(get_crps(x, y, alpha=self.alpha))]
 
 
+class PatchEnergyScoreLoss(torch.nn.Module):
+    """
+    Compute the patch energy score: for each channel and grid point, the
+    energy score of the ``patch_size x patch_size`` patch of that channel
+    centered on the point (periodic east-west, zero-padded north-south).
+
+    A grid-space alternative to the spectral :class:`EnergyScoreLoss` that
+    scores joint local structure per channel instead of per-mode calibration.
+    Assumes a ``[..., n_lat, n_lon]`` layout with periodic longitude (a
+    lat-lon grid); see :func:`fme.core.ensemble.get_patch_energy_score` for
+    the boundary and normalization details.
+
+    Returns a pre-weighted ``(B, C, H, W)`` tensor whose mean over trailing
+    dims gives the per-``(B, C)`` loss, like :class:`CRPSLoss`.
+    """
+
+    def __init__(self, patch_size: int = 3):
+        super().__init__()
+        if patch_size < 1 or patch_size % 2 == 0:
+            raise ValueError(
+                f"patch_size must be a positive odd integer, got {patch_size}"
+            )
+        self.patch_size = patch_size
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> list[LossComponent]:
+        return [StandardLoss(get_patch_energy_score(x, y, patch_size=self.patch_size))]
+
+
 class FiniteDifferenceCRPSLoss(torch.nn.Module):
     """
     Computes the CRPS of the x and y finite differences of the input tensors,
@@ -718,6 +746,8 @@ class EnsembleLoss(torch.nn.Module):
         finite_difference_crps_levels: int = 1,
         almost_fair_crps_alpha: float = 1.0,
         energy_score_whitening: SpectralWhitening | None = None,
+        patch_energy_score_weight: float = 0.0,
+        patch_energy_score_size: int = 3,
     ):
         super().__init__()
         if crps_weight < 0 or energy_score_weight < 0:
@@ -730,10 +760,17 @@ class EnsembleLoss(torch.nn.Module):
                 "finite_difference_crps_weight must be non-negative, "
                 f"got {finite_difference_crps_weight}"
             )
-        if crps_weight + energy_score_weight == 0:
+        if patch_energy_score_weight < 0:
             raise ValueError(
-                "crps_weight and energy_score_weight must sum to a positive value, "
-                f"got {crps_weight} and {energy_score_weight}"
+                "patch_energy_score_weight must be non-negative, "
+                f"got {patch_energy_score_weight}"
+            )
+        if crps_weight + energy_score_weight + patch_energy_score_weight == 0:
+            raise ValueError(
+                "crps_weight, energy_score_weight and patch_energy_score_weight "
+                "must sum to a positive value, "
+                f"got {crps_weight}, {energy_score_weight} "
+                f"and {patch_energy_score_weight}"
             )
         self.crps_loss = CRPSLoss(alpha=almost_fair_crps_alpha)
         if finite_difference_crps_weight > 0:
@@ -749,10 +786,14 @@ class EnsembleLoss(torch.nn.Module):
             sht=sht,
             whitening=energy_score_whitening,
         )
+        self.patch_energy_score_loss = PatchEnergyScoreLoss(
+            patch_size=patch_energy_score_size
+        )
 
         self.crps_weight = crps_weight
         self.diff_crps_weight = finite_difference_crps_weight
         self.energy_score_weight = energy_score_weight
+        self.patch_energy_score_weight = patch_energy_score_weight
 
     def forward(
         self,
@@ -766,6 +807,9 @@ class EnsembleLoss(torch.nn.Module):
         if self.energy_score_weight > 0:
             for c in self.energy_score_loss(gen_norm, target_norm):
                 components.append(type(c)(c.loss * self.energy_score_weight))
+        if self.patch_energy_score_weight > 0:
+            for c in self.patch_energy_score_loss(gen_norm, target_norm):
+                components.append(type(c)(c.loss * self.patch_energy_score_weight))
         if self.diff_crps_loss is not None:
             for c in self.diff_crps_loss(gen_norm, target_norm):
                 components.append(type(c)(c.loss * self.diff_crps_weight))

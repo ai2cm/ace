@@ -3,6 +3,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.device import get_device
+from fme.core.ensemble import get_crps, get_patch_energy_score
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
@@ -15,6 +16,7 @@ from fme.core.loss import (
     LossConfig,
     LossOutput,
     LpLoss,
+    PatchEnergyScoreLoss,
     SpectralWhitening,
     SpectralWhiteningConfig,
     StandardLoss,
@@ -997,3 +999,53 @@ def test_ensemble_loss_with_whitening_builds_and_runs(whitening):
     out = loss(x, y)
     assert all(isinstance(c, LossComponent) for c in out)
     assert torch.isfinite(_components_total(out))
+
+
+def test_patch_energy_score_loss_in_ensemble_loss():
+    torch.manual_seed(0)
+    config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            "crps_weight": 0.9,
+            "patch_energy_score_weight": 0.1,
+            # non-default size, checked against the reference functions below:
+            # the pinned expected value fails if EnsembleLoss drops the size
+            # forward to PatchEnergyScoreLoss
+            "patch_energy_score_size": 5,
+        },
+    )
+    loss = config.build(
+        gridded_operations=LatLonOperations(torch.ones(8, 16, device=get_device())),
+    )
+    gen = torch.randn(2, 2, 3, 8, 16, device=get_device())
+    target = torch.randn(2, 1, 3, 8, 16, device=get_device())
+    components = loss(gen, target)
+    assert isinstance(components, list)
+    assert len(components) == 2
+    total = _components_total(components)
+    expected = (
+        0.9 * get_crps(gen, target, alpha=1.0).mean()
+        + 0.1 * get_patch_energy_score(gen, target, patch_size=5).mean()
+    )
+    torch.testing.assert_close(total, expected)
+
+
+def test_patch_energy_score_only_ensemble_loss_is_allowed():
+    config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={"crps_weight": 0.0, "patch_energy_score_weight": 1.0},
+    )
+    loss = config.build(
+        gridded_operations=LatLonOperations(torch.ones(8, 16, device=get_device())),
+    )
+    gen = torch.randn(2, 2, 3, 8, 16, device=get_device())
+    target = torch.randn(2, 1, 3, 8, 16, device=get_device())
+    total = _components_total(loss(gen, target))
+    assert torch.isfinite(total)
+
+
+def test_patch_energy_score_loss_rejects_even_patch_size():
+    with pytest.raises(ValueError):
+        PatchEnergyScoreLoss(patch_size=4)
+    with pytest.raises(ValueError):
+        PatchEnergyScoreLoss(patch_size=0)
