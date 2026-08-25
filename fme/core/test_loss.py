@@ -3,6 +3,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.device import get_device
+from fme.core.ensemble import get_crps, get_patch_energy_score
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
@@ -1007,8 +1008,9 @@ def test_patch_energy_score_loss_in_ensemble_loss():
         kwargs={
             "crps_weight": 0.9,
             "patch_energy_score_weight": 0.1,
-            # non-default size: the test must fail if EnsembleLoss drops the
-            # size forward to PatchEnergyScoreLoss
+            # non-default size, checked against the reference functions below:
+            # the pinned expected value fails if EnsembleLoss drops the size
+            # forward to PatchEnergyScoreLoss
             "patch_energy_score_size": 5,
         },
     )
@@ -1021,13 +1023,11 @@ def test_patch_energy_score_loss_in_ensemble_loss():
     assert isinstance(components, list)
     assert len(components) == 2
     total = _components_total(components)
-    assert torch.isfinite(total)
-
-    crps_only = LossConfig(type="EnsembleLoss", kwargs={"crps_weight": 0.9}).build(
-        gridded_operations=LatLonOperations(torch.ones(8, 16, device=get_device())),
+    expected = (
+        0.9 * get_crps(gen, target, alpha=1.0).mean()
+        + 0.1 * get_patch_energy_score(gen, target, patch_size=5).mean()
     )
-    crps_total = _components_total(crps_only(gen, target))
-    assert not torch.equal(total, crps_total)
+    torch.testing.assert_close(total, expected)
 
 
 def test_patch_energy_score_only_ensemble_loss_is_allowed():
