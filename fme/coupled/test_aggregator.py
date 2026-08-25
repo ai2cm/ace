@@ -27,7 +27,6 @@ from fme.coupled.aggregator import (
 from fme.coupled.data_loading.batch_data import CoupledPairedData
 from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.stepper import CoupledTrainOutput
-from fme.coupled.typing_ import CoupledTensorMapping
 
 TIMESTEP = datetime.timedelta(days=5)
 
@@ -362,10 +361,8 @@ def _make_one_step_train_output(nx: int, ny: int) -> CoupledTrainOutput:
 
 def _one_step_summary_logs(config: OneStepAggregatorConfig | None) -> dict:
     info = _coupled_ds_info(2, 2)
-    loss_scaling = CoupledTensorMapping(ocean={}, atmosphere={})
     agg = OneStepAggregator(
         dataset_info=info,
-        loss_scaling=loss_scaling,
         save_diagnostics=False,
         config=config,
     )

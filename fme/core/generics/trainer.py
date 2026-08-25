@@ -54,8 +54,6 @@ import dataclasses
 import gc
 import logging
 import os
-import signal
-import sys
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -66,6 +64,7 @@ import torch
 import fme
 from fme.core.cli import remove_stale_tmp_checkpoints
 from fme.core.distributed import Distributed
+from fme.core.distributed.shutdown import add_post_abort_callback, write_stderr
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -217,18 +216,6 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"best_inference_ckpt_{epoch:04d}.tar")
 
 
-def chain_signal_handler(sig, handler):
-    prev_handler = signal.getsignal(sig)
-
-    def on_sig(signum, frame):
-        handler(signum, frame)
-        if callable(prev_handler):
-            prev_handler(signum, frame)
-        sys.exit(1)
-
-    signal.signal(sig, on_sig)
-
-
 class Trainer:
     def __init__(
         self,
@@ -332,27 +319,47 @@ class Trainer:
         self._inference_callback: InferenceCallback = inference_callback
         self._validate_stepper_callback: ValidateStepper | None = validate_stepper
 
-        def on_terminate(signum, frame):
-            dist = Distributed.get_instance()
+        def save_restart_checkpoints_on_terminate():
+            """Preserve mid-epoch progress when the job is preempted.
+
+            Runs on the termination listener's thread, after the communicators
+            are aborted and once the main thread has parked at a loop boundary
+            or blocked in the shutdown context's exit, so it must stay free of
+            collectives and of the logging module (see
+            `add_post_abort_callback` and `write_stderr`). `save_checkpoint`
+            is root-only and reads local state, which satisfies that.
+            """
             if (
                 self._current_epoch_num_batches_seen > 0
                 and self._should_save_checkpoints()
             ):
                 if self._in_ema_context:
-                    logging.info(
+                    write_stderr(
                         "In EMA context during interrupt, not saving "
-                        "restart checkpoints as it is unsafe to do so"
+                        "restart checkpoints as it is unsafe to do so\n"
                     )
                 elif not self._started_training:
-                    logging.info(
-                        "Not saving restart checkpoints as training has not started"
+                    write_stderr(
+                        "Not saving restart checkpoints as training has "
+                        "not started\n"
                     )
                 else:
-                    self._save_restart_checkpoints()
-            dist.shutdown()
+                    write_stderr(
+                        "Saving restart checkpoint to "
+                        f"{self.paths.latest_checkpoint_path} after "
+                        f"{self.num_batches_seen} batches\n"
+                    )
+                    self.save_checkpoint(
+                        self.paths.latest_checkpoint_path,
+                        include_optimization=True,
+                    )
 
-        chain_signal_handler(signal.SIGTERM, on_terminate)
-        chain_signal_handler(signal.SIGINT, on_terminate)
+        dist = Distributed.get_instance()
+        if not dist.has_spatial_parallelism:
+            # rank 0 holds the full model state, so the save needs no other
+            # rank's cooperation; a spatially-parallel stepper's state is
+            # sharded, and assembling it would need the aborted communicators
+            add_post_abort_callback(save_restart_checkpoints_on_terminate)
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -483,6 +490,11 @@ class Trainer:
             if inference_error is not None:
                 logging.info(f"Inference error: {inference_error}")
 
+            # must happen before logging, so the logged bests are read from the
+            # updated state rather than recomputed (min(nan, x) is nan, which
+            # let a diverged epoch report itself as the best)
+            self._update_best_metrics(valid_loss, inference_error)
+
             with self.validation_context():
                 additional_logs = self._end_of_epoch_callback(self._epochs_trained)
 
@@ -498,10 +510,8 @@ class Trainer:
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
-                    "best_val_loss": min(valid_loss, self._best_validation_loss),
-                    "best_inference_error": min(
-                        inference_error or torch.inf, self._best_inference_error
-                    ),
+                    "best_val_loss": self._best_validation_loss,
+                    "best_inference_error": self._best_inference_error,
                 },
             }
             if inference_end is not None:
@@ -568,7 +578,9 @@ class Trainer:
         self._started_training = True
         current_time = time.time()
         metrics_aggregator = MetricsAggregator()
+        dist = Distributed.get_instance()
         for batch in epoch_data:
+            dist.park_if_terminating()
             with GlobalTimer():
                 stepped = self.stepper.train_on_batch(batch, self.optimization)
             self._end_of_batch_callback()
@@ -613,6 +625,7 @@ class Trainer:
             for batch in self.train_data.subset_loader(
                 stop_batch=self.params.train_evaluation_batches
             ):
+                dist.park_if_terminating()
                 with GlobalTimer():
                     stepped = self.stepper.train_on_batch(
                         batch, self._no_optimization, evaluate_all_steps=True
@@ -725,32 +738,50 @@ class Trainer:
             epoch, self.params.max_epochs, self.params.ema_checkpoint_save_epochs
         )
 
+    def _update_best_metrics(
+        self, valid_loss: float, inference_error: float | None
+    ) -> tuple[bool, bool]:
+        """Record this epoch's metrics as the best so far if they improve on it.
+
+        Returns whether the validation loss and the inference error were each
+        (re-)attained this epoch, i.e. whether their best checkpoints are due to
+        be written.
+
+        A diverged epoch's NaN never becomes the best, since every comparison
+        with NaN is False. The comparisons are non-strict, so calling this twice
+        with the same values gives the same answer both times and the caller can
+        re-run it without changing what gets saved.
+        """
+        is_best_validation = valid_loss <= self._best_validation_loss
+        if is_best_validation:
+            self._best_validation_loss = valid_loss
+        is_best_inference = False
+        if inference_error is not None and (
+            inference_error <= self._best_inference_error
+        ):
+            self._best_inference_error = inference_error
+            is_best_inference = True
+        return is_best_validation, is_best_inference
+
     def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
         if self.params.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
             best_checkpoint_context = contextlib.nullcontext  # type: ignore
+        prev_best_inference_error = self._best_inference_error
+        save_best_checkpoint, save_best_inference_checkpoint = (
+            self._update_best_metrics(valid_loss, inference_error)
+        )
         with best_checkpoint_context():
-            save_best_checkpoint = False
-            if valid_loss <= self._best_validation_loss:
-                logging.info(
-                    "Saving lowest validation loss checkpoint to "
-                    f"{self.paths.best_checkpoint_path}"
-                )
-                self._best_validation_loss = valid_loss
-                save_best_checkpoint = True  # wait until inference error is updated
-            if inference_error is not None and (
-                inference_error <= self._best_inference_error
-            ):
+            if save_best_inference_checkpoint:
                 logging.info(
                     f"Epoch inference error ({inference_error}) is lower than "
-                    f"previous best inference error ({self._best_inference_error})."
+                    f"previous best inference error ({prev_best_inference_error})."
                 )
                 logging.info(
                     "Saving lowest inference error checkpoint to "
                     f"{self.paths.best_inference_checkpoint_path}"
                 )
-                self._best_inference_error = inference_error
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
 
                 # Save epoch-specific best inference checkpoint if configured
@@ -766,6 +797,10 @@ class Trainer:
                     )
                     self.save_checkpoint(best_inference_epoch_path)
             if save_best_checkpoint:
+                logging.info(
+                    "Saving lowest validation loss checkpoint to "
+                    f"{self.paths.best_checkpoint_path}"
+                )
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
         self._save_restart_checkpoints()
@@ -796,12 +831,16 @@ class ValidationTask(Generic[BD, TO]):
             preserving the existing per-epoch construction semantics.
         weight: Contribution weight for the combined validation loss. Zero means
             the task runs but does not contribute to the metric.
+        evaluate_all_steps: Whether to evaluate every forward step in the data
+            window, rather than only the steps the stepper would evaluate for
+            the batch during training.
     """
 
     name: str
     data: GriddedDataABC[BD]
     aggregator_factory: Callable[[], AggregatorABC[TO]]
     weight: float = 0.0
+    evaluate_all_steps: bool = True
 
 
 def build_validation_callback(
@@ -823,6 +862,7 @@ def build_validation_callback(
                 label=task.name,
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
+                evaluate_all_steps=task.evaluate_all_steps,
             )
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:

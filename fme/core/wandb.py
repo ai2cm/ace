@@ -160,6 +160,14 @@ class WandB:
                 logging.info(f"New non-resuming wandb run with id: {id_}.")
             self._id = id_
 
+    def finish(self):
+        """End the active run so the next `init` starts a new run rather than
+        reusing it (wandb returns the active run by default in scripts).
+        """
+        if self._enabled:
+            wandb.finish()
+        self._id = None
+
     def watch(self, modules):
         if self._enabled:
             wandb.watch(modules)
