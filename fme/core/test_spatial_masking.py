@@ -1,5 +1,6 @@
 import re
 
+import dacite
 import pytest
 import torch
 
@@ -242,22 +243,26 @@ def test_static_masking_mask_ignored_name():
 
 
 def _overrides_setup():
-    """A 2x2 grid with one masked cell, and means far from any fill value."""
+    """A 2x2 grid with one masked cell, and means far from any fill value.
+
+    ``so_0`` and ``sos`` share a leading substring but are distinct channels
+    under the name-and-prefix convention, so they pin down which channels an
+    override key selects.
+    """
     mask_2d = torch.tensor([[1.0, 0.0], [1.0, 1.0]], device=DEVICE)
     mask_3d = mask_2d[..., None].expand(2, 2, 2)
-    data = {
-        "sst": torch.full((1, 2, 2), 7.0, device=DEVICE),
-        "thetao_0": torch.full((1, 2, 2), 7.0, device=DEVICE),
-        "thetao_1": torch.full((1, 2, 2), 7.0, device=DEVICE),
-        "deptho": torch.full((1, 2, 2), 7.0, device=DEVICE),
-    }
+    names = ["sst", "sos", "so_0", "thetao_0", "thetao_1", "deptho"]
+    data = {name: torch.full((1, 2, 2), 7.0, device=DEVICE) for name in names}
     means = {
-        "sst": torch.tensor(100.0, device=DEVICE),
-        "thetao_0": torch.tensor(200.0, device=DEVICE),
-        "thetao_1": torch.tensor(300.0, device=DEVICE),
-        "deptho": torch.tensor(400.0, device=DEVICE),
+        name: torch.tensor(100.0 * (i + 1), device=DEVICE)
+        for i, name in enumerate(names)
     }
     return _Mask(mask_2d=mask_2d, mask_3d=mask_3d), data, means
+
+
+# the one masked cell of every channel in _overrides_setup
+_MASKED_CELL = (0, 0, 1)
+_UNMASKED_CELL = (0, 0, 0)
 
 
 def test_fill_value_overrides_apply_per_channel():
@@ -269,14 +274,37 @@ def test_fill_value_overrides_apply_per_channel():
         fill_value_overrides={"thetao_": 0.0, "deptho": 0.0},
     )
     out = config.build(mask=mask, means=means)(data)
-    # the masked cell is [0, 0, 1]
-    assert out["sst"][0, 0, 1].item() == pytest.approx(100.0)  # default "mean"
-    assert out["thetao_0"][0, 0, 1].item() == pytest.approx(0.0)  # prefix override
-    assert out["thetao_1"][0, 0, 1].item() == pytest.approx(0.0)  # prefix override
-    assert out["deptho"][0, 0, 1].item() == pytest.approx(0.0)  # exact-name override
+    expected = {
+        "sst": means["sst"].item(),  # default "mean"
+        "sos": means["sos"].item(),  # default "mean"
+        "so_0": means["so_0"].item(),  # default "mean"
+        "thetao_0": 0.0,  # prefix override
+        "thetao_1": 0.0,  # prefix override
+        "deptho": 0.0,  # exact-name override
+    }
+    for name, value in expected.items():
+        assert out[name][_MASKED_CELL].item() == pytest.approx(value), name
     # unmasked cells are untouched in every channel
     for name in data:
-        assert out[name][0, 0, 0].item() == pytest.approx(7.0)
+        assert out[name][_UNMASKED_CELL].item() == pytest.approx(7.0), name
+
+
+@pytest.mark.parametrize("key", ["so", "so_"])
+def test_fill_value_overrides_key_does_not_select_similar_name(key):
+    """``so``/``so_`` select the so_<level> channels, never the distinct ``sos``.
+
+    Selection follows NameAndPrefixMatcher, not a raw string prefix, so a key
+    cannot silently capture an unrelated channel that happens to start with it.
+    """
+    mask, data, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value="mean",
+        fill_value_overrides={key: 0.0},
+    )
+    out = config.build(mask=mask, means=means)(data)
+    assert out["so_0"][_MASKED_CELL].item() == pytest.approx(0.0)
+    assert out["sos"][_MASKED_CELL].item() == pytest.approx(means["sos"].item())
 
 
 def test_fill_value_overrides_exact_name_beats_prefix():
@@ -287,28 +315,38 @@ def test_fill_value_overrides_exact_name_beats_prefix():
         fill_value_overrides={"thetao_": 1.0, "thetao_1": "mean"},
     )
     out = config.build(mask=mask, means=means)(data)
-    assert out["sst"][0, 0, 1].item() == pytest.approx(0.0)  # default float
-    assert out["thetao_0"][0, 0, 1].item() == pytest.approx(1.0)  # prefix
-    assert out["thetao_1"][0, 0, 1].item() == pytest.approx(300.0)  # exact name wins
+    assert out["sst"][_MASKED_CELL].item() == pytest.approx(0.0)  # default float
+    assert out["thetao_0"][_MASKED_CELL].item() == pytest.approx(1.0)  # prefix
+    assert out["thetao_1"][_MASKED_CELL].item() == pytest.approx(
+        means["thetao_1"].item()
+    )  # exact name wins
 
 
-def test_fill_value_overrides_longest_prefix_wins():
+def test_fill_value_overrides_longest_key_wins():
+    """The bare name selects the same channels as the prefix, so the prefix wins."""
     mask, data, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value=0.0,
-        fill_value_overrides={"the": 1.0, "thetao_": 2.0},
+        fill_value_overrides={"thetao": 1.0, "thetao_": 2.0},
     )
     out = config.build(mask=mask, means=means)(data)
-    assert out["thetao_0"][0, 0, 1].item() == pytest.approx(2.0)
+    assert out["thetao_0"][_MASKED_CELL].item() == pytest.approx(2.0)
 
 
-def test_fill_value_overrides_unmatched_key_raises():
+@pytest.mark.parametrize(
+    "key",
+    [
+        "thetoa_",  # transposed letters
+        "dept",  # a truncation that is a raw string prefix of "deptho"
+    ],
+)
+def test_fill_value_overrides_unmatched_key_raises(key):
     mask, _, means = _overrides_setup()
     config = StaticSpatialMaskingConfig(
         mask_value=0,
         fill_value="mean",
-        fill_value_overrides={"thetoa_": 0.0},  # typo
+        fill_value_overrides={key: 0.0},
     )
     with pytest.raises(ValueError, match="match no channel"):
         config.build(mask=mask, means=means)
@@ -325,27 +363,36 @@ def test_fill_value_overrides_requires_means():
         config.build(mask=mask, means=None)
 
 
-def test_fill_value_overrides_rejects_bad_value():
-    with pytest.raises(ValueError, match="must be a float or 'mean'"):
-        StaticSpatialMaskingConfig(
-            mask_value=0,
-            fill_value="mean",
-            # The guard exists for configs built from YAML by dacite, where the
-            # static type is not enforced; the ignore is what lets the test reach
-            # the runtime check.
-            fill_value_overrides={"thetao_": "zero"},  # type: ignore[dict-item]
+def test_fill_value_overrides_bad_value_rejected_on_load():
+    """dacite rejects a non-float, non-"mean" value, so build never sees one."""
+    with pytest.raises(dacite.UnionMatchError):
+        dacite.from_dict(
+            data_class=StaticSpatialMaskingConfig,
+            data={
+                "mask_value": 0,
+                "fill_value": "mean",
+                "fill_value_overrides": {"thetao_": "zero"},
+            },
+            config=dacite.Config(strict=True),
         )
 
 
-def test_no_overrides_is_unchanged():
-    """The default path must be byte-for-byte the old behaviour."""
+@pytest.mark.parametrize("fill_value", [0.0, 0, 3.5, "mean"])
+@pytest.mark.parametrize("overrides", [None, {"deptho": 1.0}])
+def test_fill_value_applies_to_channels_no_override_selects(fill_value, overrides):
+    """``fill_value`` fills every channel an override does not select.
+
+    Parametrized over both branches of ``build`` so the two agree, including for
+    an integer ``fill_value``, which YAML yields for an unsuffixed ``0``.
+    """
     mask, data, means = _overrides_setup()
-    for fill in (0.0, "mean"):
-        base = StaticSpatialMaskingConfig(mask_value=0, fill_value=fill)
-        explicit = StaticSpatialMaskingConfig(
-            mask_value=0, fill_value=fill, fill_value_overrides=None
-        )
-        a = base.build(mask=mask, means=means)(data)
-        b = explicit.build(mask=mask, means=means)(data)
-        for name in data:
-            assert torch.equal(a[name], b[name])
+    config = StaticSpatialMaskingConfig(
+        mask_value=0, fill_value=fill_value, fill_value_overrides=overrides
+    )
+    out = config.build(mask=mask, means=means)(data)
+    for name in data:
+        if overrides is not None and name in overrides:
+            continue
+        expected = means[name].item() if fill_value == "mean" else float(fill_value)
+        assert out[name][_MASKED_CELL].item() == pytest.approx(expected), name
+        assert out[name][_UNMASKED_CELL].item() == pytest.approx(7.0), name
