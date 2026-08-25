@@ -129,6 +129,13 @@ class Downscaler:
                 )
                 writer.initialize_store(np.float32)
 
+            if output.resume and writer.is_slice_written(loaded_item.dim_insert_slices):
+                logging.info(
+                    f"[{output.name}] Batch {i+1}/{total_batches}, work slice "
+                    f"{loaded_item.dim_insert_slices} already written, skipping"
+                )
+                continue
+
             logging.info(
                 f"[{output.name}] Batch {i+1}/{total_batches}, "
                 f"generating work slice {loaded_item.dim_insert_slices} "

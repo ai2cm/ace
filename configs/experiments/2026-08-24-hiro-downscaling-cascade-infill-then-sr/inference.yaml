@@ -79,11 +79,10 @@ outputs:
     max_samples_per_gpu: 8
     # This job's first attempt (01M0V375XZBG0R0XSKJJV8XCNN) ran for ~7h,
     # made it to batch 58/369, then stalled and was killed (exitCode 137,
-    # signal 15 from the node) -- no partial-resume support in the
-    # zarr-writer pipeline (see DownscalingOutputConfig.overwrite's
-    # docstring), so a restart must overwrite the partial store from that
-    # attempt rather than fail trying to recreate it.
-    overwrite: true
+    # signal 15 from the node). Using resume (not overwrite) so the restart
+    # skips the 58 already-completed batches instead of redoing them --
+    # see DownscalingOutputConfig.resume's docstring.
+    resume: true
     save_vars:
       - PRATEsfc
       - air_temperature_at_two_meters

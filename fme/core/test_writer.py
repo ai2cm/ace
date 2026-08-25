@@ -321,6 +321,74 @@ def test_ZarrWriter_allow_existing(tmp_path):
     writer1.record_batch(data=batch_data, position_slices={"time": slice(2, 4)})
 
 
+def test_ZarrWriter_is_slice_written_false_before_store_exists(tmp_path):
+    writer = _create_writer(
+        os.path.join(tmp_path, "test.zarr"), n_times=4, chunks={"time": 2}
+    )
+    assert writer.is_slice_written({"time": slice(0, 2)}) is False
+
+
+def test_ZarrWriter_is_slice_written_true_after_write(tmp_path):
+    path = os.path.join(tmp_path, "test.zarr")
+    writer = _create_writer(path, n_times=4, chunks={"time": 2})
+    batch_data = {"var": np.random.rand(2, NLAT, NLON)}
+    writer.record_batch(data=batch_data, position_slices={"time": slice(0, 2)})
+
+    # A fresh reader-side writer (mode="a", same store) sees the written
+    # slice as done and the not-yet-written slice as not done.
+    reader = _create_writer(path, n_times=4, chunks={"time": 2}, mode="a")
+    assert reader.is_slice_written({"time": slice(0, 2)}) is True
+    assert reader.is_slice_written({"time": slice(2, 4)}) is False
+
+
+def test_ZarrWriter_is_slice_written_false_when_any_var_incomplete(tmp_path):
+    # The multi-variable boundary case: if a prior run was killed mid-write,
+    # one variable's slice may be fully written while a later one in the
+    # same batch is still at fill_value -- is_slice_written must treat the
+    # whole slice as NOT written so it gets regenerated, not silently
+    # skipped with missing data.
+    path = os.path.join(tmp_path, "test.zarr")
+    n_times = 4
+    times = np.array(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0) + datetime.timedelta(hours=i)
+            for i in range(n_times)
+        ]
+    )
+    lat = np.linspace(-90, 90, NLAT)
+    lon = np.linspace(-180, 180, NLON)
+    coords = {"time": times, "lat": lat, "lon": lon}
+
+    writer = ZarrWriter(
+        path=path,
+        coords=coords,
+        dims=("time", "lat", "lon"),
+        chunks={"time": 2},
+        data_vars=["var1", "var2"],
+    )
+    writer.initialize_store(np.float32)
+    # Only var1 gets written for this slice -- simulates a kill partway
+    # through _insert_into_zarr's per-variable write loop, before var2's
+    # assignment ran. Calling _insert_into_zarr directly (bypassing
+    # record_batch) since record_batch would KeyError looking up the
+    # missing "var2" key against this writer's declared data_vars.
+    _insert_into_zarr(
+        path,
+        {"var1": np.random.rand(2, NLAT, NLON)},
+        {0: slice(0, 2)},
+    )
+
+    reader = ZarrWriter(
+        path=path,
+        coords=coords,
+        dims=("time", "lat", "lon"),
+        chunks={"time": 2},
+        data_vars=["var1", "var2"],
+        mode="a",
+    )
+    assert reader.is_slice_written({"time": slice(0, 2)}) is False
+
+
 @pytest.mark.parametrize(
     "time_chunk_size, time_shard_size",
     [(1, 1), (1, 4), (1, 9), (2, 8)],

@@ -153,6 +153,26 @@ def test_downscaling_output_config_overwrite_defaults_false():
         time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
     )
     assert config.overwrite is False
+    assert config.resume is False
+
+
+def test_downscaling_output_config_rejects_overwrite_and_resume_together():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        TimeRangeConfig(
+            name="test",
+            n_ens=4,
+            time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
+            overwrite=True,
+            resume=True,
+        )
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        EventConfig(
+            name="test",
+            n_ens=4,
+            event_time="2000-01-01T00:00:00",
+            overwrite=True,
+            resume=True,
+        )
 
 
 @pytest.mark.parametrize("loader_config", [True], indirect=True)
@@ -168,10 +188,36 @@ def test_region_config_build_propagates_overwrite_to_output_target(
     )
     output_target = config.build(loader_config, requirements, patch_config)
     assert output_target.overwrite is True
+    assert output_target.resume is False
 
 
-@pytest.mark.parametrize("overwrite,expected_mode", [(False, "w-"), (True, "w")])
-def test_downscaling_output_get_writer_mode_matches_overwrite(overwrite, expected_mode):
+@pytest.mark.parametrize("loader_config", [True], indirect=True)
+def test_region_config_build_propagates_resume_to_output_target(
+    loader_config, requirements, patch_config
+):
+    config = TimeRangeConfig(
+        name="test_region",
+        time_range=TimeSlice("2000-01-01T00:00:00", "2000-01-02T00:00:00"),
+        n_ens=4,
+        save_vars=["var0", "var1"],
+        resume=True,
+    )
+    output_target = config.build(loader_config, requirements, patch_config)
+    assert output_target.resume is True
+    assert output_target.overwrite is False
+
+
+@pytest.mark.parametrize(
+    "overwrite,resume,expected_mode,expected_overwrite_check",
+    [
+        (False, False, "w-", True),
+        (True, False, "w", True),
+        (False, True, "a", False),
+    ],
+)
+def test_downscaling_output_get_writer_mode_matches_overwrite(
+    overwrite, resume, expected_mode, expected_overwrite_check
+):
     output_target = DownscalingOutput(
         name="test",
         save_vars=["var0"],
@@ -182,6 +228,7 @@ def test_downscaling_output_get_writer_mode_matches_overwrite(overwrite, expecte
         chunks={"time": 1, "ensemble": 1, "latitude": 1, "longitude": 1},
         shards={"time": 1, "ensemble": 1, "latitude": 1, "longitude": 1},
         overwrite=overwrite,
+        resume=resume,
     )
     latlon_coords = MagicMock()
     latlon_coords.lat.cpu().numpy.return_value = np.array([0.0])
@@ -190,6 +237,7 @@ def test_downscaling_output_get_writer_mode_matches_overwrite(overwrite, expecte
 
     writer = output_target.get_writer(latlon_coords=latlon_coords, output_dir="/tmp")
     assert writer._mode == expected_mode
+    assert writer._overwrite_check == expected_overwrite_check
 
 
 def test_time_range_config_raise_error_invalid_lat_extent():

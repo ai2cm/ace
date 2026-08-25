@@ -56,6 +56,8 @@ def mock_output_target():
     target.save_vars = ["var1", "var2"]
     target.n_ens = 4
     target.patch = PatchPredictionConfig()
+    target.overwrite = False
+    target.resume = False
     gridded_data = MagicMock()
     gridded_data.loader = []
     target.data = gridded_data
@@ -223,6 +225,100 @@ def test_run_target_generation_skips_padding_items(
 
     mock_model.generate_on_batch_no_target.assert_called_once()
     mock_writer.record_batch.assert_not_called()
+
+
+def _make_work_item(lat_start=1, lon_start=1):
+    work_item = MagicMock()
+    work_item.is_padding = False
+    work_item.batch.horizontal_shape = (16, 16)
+    work_item.batch.latlon_coordinates.lat = (
+        torch.arange(lat_start, lat_start + 8).float().unsqueeze(0)
+    )
+    work_item.batch.latlon_coordinates.lon = (
+        torch.arange(lon_start, lon_start + 8).float().unsqueeze(0)
+    )
+    work_item.batch.lat_interval = ClosedInterval(
+        float(lat_start), float(lat_start + 7)
+    )
+    work_item.batch.lon_interval = ClosedInterval(
+        float(lon_start), float(lon_start + 7)
+    )
+    work_item.dim_insert_slices = {"time": slice(0, 1)}
+    return work_item
+
+
+def test_run_target_generation_skips_already_written_items_when_resuming(
+    mock_model,
+    mock_output_target,
+):
+    """When resume=True, a work item whose slice is_slice_written() reports
+    as already written is skipped -- no generation, no write -- while a
+    not-yet-written item in the same run is generated and written normally.
+    """
+    written_item = _make_work_item()
+    unwritten_item = _make_work_item()
+    mock_output_target.data.get_generator.return_value = iter(
+        [written_item, unwritten_item]
+    )
+    mock_output_target.resume = True
+
+    mock_model.downscale_factor = 2
+    mock_model.static_inputs.coords.lat = torch.arange(0, 18).float()
+    mock_model.static_inputs.coords.lon = torch.arange(0, 18).float()
+    mock_model.static_inputs.subset.return_value.fields[0].data = torch.zeros(1)
+    mock_model.generate_on_batch_no_target.return_value = {
+        "var1": torch.zeros(1, 4, 16, 16),
+    }
+
+    mock_writer = MagicMock()
+    mock_writer.is_slice_written.side_effect = [True, False]
+    mock_output_target.get_writer.return_value = mock_writer
+
+    downscaler = Downscaler(
+        model=mock_model,
+        outputs=[mock_output_target],
+    )
+
+    downscaler.run_output_generation(output=mock_output_target)
+
+    mock_model.generate_on_batch_no_target.assert_called_once()
+    mock_writer.record_batch.assert_called_once()
+
+
+def test_run_target_generation_does_not_skip_when_not_resuming(
+    mock_model,
+    mock_output_target,
+):
+    """Without resume=True, is_slice_written is never consulted -- every
+    item is generated, matching prior (pre-resume-feature) behavior."""
+    work_item = _make_work_item()
+    mock_output_target.data.get_generator.return_value = iter([work_item])
+    mock_output_target.resume = False
+
+    mock_model.downscale_factor = 2
+    mock_model.static_inputs.coords.lat = torch.arange(0, 18).float()
+    mock_model.static_inputs.coords.lon = torch.arange(0, 18).float()
+    mock_model.static_inputs.subset.return_value.fields[0].data = torch.zeros(1)
+    mock_model.generate_on_batch_no_target.return_value = {
+        "var1": torch.zeros(1, 4, 16, 16),
+    }
+
+    mock_writer = MagicMock()
+    # Would report "already written" if consulted -- it must not be, since
+    # resume=False.
+    mock_writer.is_slice_written.return_value = True
+    mock_output_target.get_writer.return_value = mock_writer
+
+    downscaler = Downscaler(
+        model=mock_model,
+        outputs=[mock_output_target],
+    )
+
+    downscaler.run_output_generation(output=mock_output_target)
+
+    mock_writer.is_slice_written.assert_not_called()
+    mock_model.generate_on_batch_no_target.assert_called_once()
+    mock_writer.record_batch.assert_called_once()
 
 
 # Tests for end-to-end generation process

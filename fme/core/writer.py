@@ -50,6 +50,29 @@ def _check_for_overwrite(arr, insert_slices_tuple):
             )
 
 
+def _slice_fully_written(arr, insert_slices_tuple) -> bool:
+    """True if every element in the given slice of ``arr`` is not the
+    array's not-yet-written fill_value (i.e. the slice is fully written).
+
+    Mirrors ``_check_for_overwrite``'s fill_value handling (None / NaN /
+    concrete value) but aggregates with ``all`` instead of ``any``, since
+    this answers a different question: not "is there any conflict" but "is
+    this slice completely done."
+    """
+    existing = arr[insert_slices_tuple]
+    fill_value = arr.fill_value
+    if fill_value is None:
+        # No fill_value defined: matches _check_for_overwrite's stance that
+        # any pre-existing values are already meaningful data written by a
+        # prior call, since there's no baseline "unwritten" value to compare
+        # against.
+        return True
+    elif np.isnan(fill_value):
+        return bool(np.all(~np.isnan(existing)))
+    else:
+        return bool(np.all(existing != fill_value))
+
+
 def _check_data_size_fits_slice(data: np.ndarray, insert_slices: Mapping[int, slice]):
     for dim_index, slice in insert_slices.items():
         if data.shape[dim_index] != slice.stop - slice.start:
@@ -391,3 +414,38 @@ class ZarrWriter:
             )
             self._dist.barrier()
             self._store_initialized = True
+
+    def is_slice_written(self, position_slices: Mapping[str, slice]) -> bool:
+        """Whether every one of this writer's ``data_vars`` already has
+        fully written (non-fill-value) data in the given slice.
+
+        Used to decide whether a work item can be skipped when resuming a
+        killed run: a slice where even one variable still has unwritten
+        elements (e.g. the work item that was mid-write across multiple
+        variables when a prior run was killed) is treated as incomplete, so
+        it will be regenerated -- and its partial data overwritten -- rather
+        than silently left incomplete forever.
+
+        Returns False if the store doesn't exist yet (nothing can be
+        "already written" against a store that was never created).
+        """
+        if not self._path_exists():
+            return False
+        root = zarr.open_group(self._path, mode="r")
+        data_vars = self._data_vars
+        if not data_vars:
+            return False
+        indexed_position_slices = {
+            self._dims.index(dim): position_slices[dim] for dim in position_slices
+        }
+        for var in data_vars:
+            if var not in root:
+                return False
+            zarr_array = root[var]
+            insert_slices_tuple = tuple(
+                indexed_position_slices.get(dim_index, slice(None, None))
+                for dim_index in range(zarr_array.ndim)
+            )
+            if not _slice_fully_written(zarr_array, insert_slices_tuple):
+                return False
+        return True

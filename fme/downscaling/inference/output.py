@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from typing import Literal
 
 import numpy as np
 import torch
@@ -59,8 +60,16 @@ class DownscalingOutput:
         overwrite: If True, overwrite an existing zarr store at this output's
             path instead of failing. Useful when a prior attempt was killed
             (preemption, OOM, etc.) partway through and left a partial store
-            behind -- there's no partial-resume support, so a restart must
-            either overwrite or the store must be deleted manually first.
+            behind and a from-scratch restart is acceptable. Mutually
+            exclusive with resume.
+        resume: If True, open an existing zarr store at this output's path
+            (creating it if it doesn't exist yet) and skip regenerating any
+            work item whose target slice is already fully written -- see
+            ZarrWriter.is_slice_written. Requires save_vars to be set
+            explicitly (skip-detection needs a concrete variable list to
+            check; with save_vars=None nothing will ever be skipped, which
+            is safe but makes resume a no-op). Mutually exclusive with
+            overwrite.
     """
 
     def __init__(
@@ -75,6 +84,7 @@ class DownscalingOutput:
         shards: dict[str, int],
         dims: tuple[str, ...] = DIMS,
         overwrite: bool = False,
+        resume: bool = False,
     ) -> None:
         self.name = name
         self.save_vars = save_vars
@@ -86,6 +96,7 @@ class DownscalingOutput:
         self.shards = shards
         self.dims = dims
         self.overwrite = overwrite
+        self.resume = resume
 
     def get_writer(
         self,
@@ -113,6 +124,14 @@ class DownscalingOutput:
         )
         dims = tuple(coords.keys())
 
+        mode: Literal["r+", "a", "w", "w-"]
+        if self.resume:
+            mode = "a"
+        elif self.overwrite:
+            mode = "w"
+        else:
+            mode = "w-"
+
         return ZarrWriter(
             path=f"{output_dir}/{self.name}.zarr",
             dims=dims,
@@ -120,7 +139,14 @@ class DownscalingOutput:
             data_vars=self.save_vars,
             chunks=self.chunks,
             shards=self.shards,
-            mode="w" if self.overwrite else "w-",
+            mode=mode,
+            # Resume's own is_slice_written check is the safety net during a
+            # resumed run (it only lets a genuinely-incomplete slice reach
+            # record_batch at all) -- ZarrWriter's own overwrite_check would
+            # otherwise block legitimately re-writing a boundary work item
+            # that has some but not all of its variables already written
+            # from the prior (killed) attempt.
+            overwrite_check=not self.resume,
         )
 
 
@@ -147,10 +173,16 @@ class DownscalingOutputConfig(ABC):
             single GPU generation. Controls memory usage and time to generate.
         overwrite: If True, overwrite an existing zarr store at this output's
             path instead of failing with a "store already exists" error.
-            False (default) matches prior behavior. There's no partial-resume
-            support -- set this when restarting a run that was killed
-            partway through (preemption, OOM, etc.) and left a partial store
-            behind.
+            False (default) matches prior behavior. Redoes all work from
+            scratch -- use this for a from-scratch restart. Mutually
+            exclusive with resume.
+        resume: If True, skip regenerating work items whose target slice is
+            already fully written in an existing store at this output's
+            path, instead of always generating fresh (and instead of
+            failing if the store already exists). False (default) matches
+            prior behavior. Requires save_vars to be set explicitly (see
+            DownscalingOutput's docstring). Mutually exclusive with
+            overwrite.
     """
 
     name: str
@@ -159,7 +191,16 @@ class DownscalingOutputConfig(ABC):
     zarr_chunks: dict[str, int] | None = None
     zarr_shards: dict[str, int] | None = None
     overwrite: bool = False
+    resume: bool = False
     max_samples_per_gpu: int = 4
+
+    def __post_init__(self):
+        if self.overwrite and self.resume:
+            raise ValueError(
+                "overwrite and resume are mutually exclusive: overwrite "
+                "always redoes all work from scratch, resume skips work "
+                "already done."
+            )
 
     @abstractmethod
     def build(
@@ -337,6 +378,7 @@ class DownscalingOutputConfig(ABC):
             shards=shards,
             dims=DIMS,
             overwrite=self.overwrite,
+            resume=self.resume,
         )
 
 
@@ -386,6 +428,7 @@ class EventConfig(DownscalingOutputConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         if not self.event_time:
             raise ValueError("event_time must be specified for EventConfig.")
         enforce_lat_bounds(self.lat_extent)
@@ -469,6 +512,7 @@ class TimeRangeConfig(DownscalingOutputConfig):
     )
 
     def __post_init__(self):
+        super().__post_init__()
         if self.time_range == Slice(-1, 1):
             raise ValueError("time_range must be specified for RegionConfig.")
         enforce_lat_bounds(self.lat_extent)
