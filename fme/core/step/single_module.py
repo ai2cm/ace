@@ -85,6 +85,12 @@ class SingleModuleStepConfig(StepConfigABC):
             channels and emits one per-pixel logit channel. Trained by the
             training stepper's separate discriminator optimizer, never by the
             main optimizer.
+        discriminator_in_names: When set, the discriminator sees only these
+            input variables instead of all ``in_names``. Every name must
+            appear in ``in_names``.
+        discriminator_out_names: When set, the discriminator sees only these
+            output variables instead of all ``out_names``. Every name must
+            appear in ``out_names``.
     """
 
     builder: ModuleSelector
@@ -103,6 +109,8 @@ class SingleModuleStepConfig(StepConfigABC):
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
     discriminator: ModuleSelector | None = None
+    discriminator_in_names: list[str] | None = None
+    discriminator_out_names: list[str] | None = None
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
@@ -123,6 +131,20 @@ class SingleModuleStepConfig(StepConfigABC):
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
+        if self.discriminator_in_names is not None:
+            for name in self.discriminator_in_names:
+                if name not in self.in_names:
+                    raise ValueError(
+                        f"discriminator_in_names entry '{name}' "
+                        f"not in in_names: {self.in_names}"
+                    )
+        if self.discriminator_out_names is not None:
+            for name in self.discriminator_out_names:
+                if name not in self.out_names:
+                    raise ValueError(
+                        f"discriminator_out_names entry '{name}' "
+                        f"not in out_names: {self.out_names}"
+                    )
         if self.secondary_decoder is not None:
             for name in self.secondary_decoder.secondary_diagnostic_names:
                 if name in self.in_names:
@@ -260,8 +282,8 @@ class SingleModuleStepConfig(StepConfigABC):
             # loads donor generators, which carry no discriminator).
             discriminator: StepDiscriminator | None = StepDiscriminator(
                 builder=self.discriminator,
-                in_names=self.in_names,
-                out_names=self.out_names,
+                in_names=self.discriminator_in_names or self.in_names,
+                out_names=self.discriminator_out_names or self.out_names,
                 normalizer=normalizer,
                 dataset_info=dataset_info,
             )
