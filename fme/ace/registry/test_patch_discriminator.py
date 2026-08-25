@@ -32,10 +32,7 @@ def test_output_shape():
     module = config.build(n_in, n_out, dataset_info)
     x = torch.randn(2, n_in, *IMG_SHAPE, device=fme.get_device())
     out = module(x)
-    # Two 3x3 convs with valid lat padding each shrink lat by 2
-    expected_h = IMG_SHAPE[0] - 4
-    expected_w = IMG_SHAPE[1]
-    assert out.shape == (2, n_out, expected_h, expected_w)
+    assert out.shape == (2, n_out, *IMG_SHAPE)
 
 
 def test_circular_lon_padding():
@@ -128,5 +125,4 @@ def test_via_module_selector():
     module = module.to(fme.get_device())
     x = torch.randn(2, 4, *IMG_SHAPE, device=fme.get_device())
     out = module(x)
-    expected_h = IMG_SHAPE[0] - 4
-    assert out.shape == (2, 1, expected_h, IMG_SHAPE[1])
+    assert out.shape == (2, 1, *IMG_SHAPE)
