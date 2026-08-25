@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+from collections.abc import Iterable
 from typing import Literal, Protocol, runtime_checkable
 
 import torch
@@ -55,19 +56,19 @@ class StaticSpatialMaskingConfig:
         exclude_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
             to exclude when applying the mask.
         fill_value_overrides: Per-channel fill values overriding ``fill_value``,
-            keyed by name (2D variables) or prefix (3D variables), following the
-            same convention as ``exclude_names_and_prefixes``. Values take the same
-            form as ``fill_value``. A channel selected by an exact name uses that
-            entry; otherwise the longest matching prefix wins; otherwise
-            ``fill_value`` applies. Every key must select at least one channel, so
-            a typo raises at build time rather than silently doing nothing.
+            keyed by name (2D variables) or prefix (3D variables), selecting
+            channels by the same convention as ``exclude_names_and_prefixes``.
+            Values take the same form as ``fill_value``. Where more than one key
+            selects a channel the longest key wins, so an exact ``name_<level>``
+            beats the ``name_`` prefix, which beats the bare ``name``; a channel
+            no key selects takes ``fill_value``. Every key must select at least
+            one channel, so a key that selects nothing raises at build time
+            rather than silently doing nothing.
 
-            The motivating case is that the right fill differs by channel. A field
-            whose masked cells hold no data (temperature, salinity) has no true
-            value to restore, so the channel mean is a neutral filler. A field
-            whose masked cells are genuinely dry -- the depth-resolved channels
-            below the sea floor -- carries usable information in being marked out
-            of range, which the mean erases.
+            Use this where the right fill differs by channel: the channel mean is
+            a neutral filler where masked cells hold no data, whereas ``0.0``
+            marks them as out of range, which is usable information where the
+            masked cells are genuinely dry.
 
     """
 
@@ -81,25 +82,43 @@ class StaticSpatialMaskingConfig:
             raise ValueError(
                 f"mask_value must be either 0 or 1, but got {self.mask_value}"
             )
-        for key, value in (self.fill_value_overrides or {}).items():
-            if value != "mean" and not isinstance(value, int | float):
-                raise ValueError(
-                    "fill_value_overrides values must be a float or 'mean', but "
-                    f"got {value!r} for {key!r}"
-                )
 
-    def _resolve_fill_value(self, name: str) -> Literal["mean"] | float:
-        """The fill value for one channel.
+    def _resolve_fill_values(
+        self, names: Iterable[str]
+    ) -> dict[str, Literal["mean"] | float]:
+        """The fill value to use for each of ``names``.
 
-        Exact name wins, then the longest matching prefix, then ``fill_value``.
+        Override keys select channels by the same name-or-prefix convention as
+        ``exclude_names_and_prefixes``. Where more than one key selects a
+        channel the longest key wins, so an exact ``name_<level>`` beats the
+        ``name_`` prefix, which beats the bare ``name``. A channel no key
+        selects takes ``fill_value``.
+
+        Raises:
+            ValueError: If an override key selects none of ``names``.
         """
         overrides = self.fill_value_overrides or {}
-        if name in overrides:
-            return overrides[name]
-        prefixes = [k for k in overrides if name.startswith(k)]
-        if prefixes:
-            return overrides[max(prefixes, key=len)]
-        return self.fill_value
+        matchers = {key: NameAndPrefixMatcher([key]) for key in overrides}
+        channels = list(names)
+        unselected = sorted(
+            key
+            for key, matcher in matchers.items()
+            if not any(matcher.match(channel) for channel in channels)
+        )
+        if unselected:
+            raise ValueError(
+                f"fill_value_overrides keys match no channel: {unselected}. "
+                "Keys are names or prefixes, as in exclude_names_and_prefixes."
+            )
+        resolved: dict[str, Literal["mean"] | float] = {}
+        for channel in channels:
+            selecting = [
+                key for key, matcher in matchers.items() if matcher.match(channel)
+            ]
+            resolved[channel] = (
+                overrides[max(selecting, key=len)] if selecting else self.fill_value
+            )
+        return resolved
 
     def build(self, mask: HasGetSpatialMask, means: TensorMapping | None = None):
         """
@@ -108,13 +127,11 @@ class StaticSpatialMaskingConfig:
         """
         exclude = NameAndPrefixMatcher(self.exclude_names_and_prefixes)
         if not self.fill_value_overrides:
-            # Unchanged from before per-channel overrides existed.
-            if isinstance(self.fill_value, float):
+            if self.fill_value != "mean":
+                fill = torch.as_tensor(float(self.fill_value))
                 return StaticSpatialMasking(
                     mask_value=self.mask_value,
-                    fill_value=collections.defaultdict(
-                        lambda: torch.as_tensor(self.fill_value)
-                    ),
+                    fill_value=collections.defaultdict(lambda: fill),
                     mask=mask,
                     exclude=exclude,
                 )
@@ -129,31 +146,17 @@ class StaticSpatialMaskingConfig:
                 mask=mask,
                 exclude=exclude,
             )
-        # With overrides the mapping is resolved per channel, so it has to be
-        # built eagerly over the known channel names rather than deferred to a
-        # defaultdict or to `means` itself.
+        # A per-channel mapping cannot be deferred to a defaultdict or to `means`
+        # itself, so it is resolved eagerly over the channels `means` names.
         if means is None:
             raise ValueError(
                 "fill_values mapping required by build when fill_value_overrides "
                 "is set, to enumerate the channels and to supply any 'mean' fills."
             )
-        unmatched = [
-            key
-            for key in self.fill_value_overrides
-            if not any(name == key or name.startswith(key) for name in means)
-        ]
-        if unmatched:
-            raise ValueError(
-                "fill_value_overrides keys match no channel: "
-                f"{sorted(unmatched)}. Keys are names or prefixes, as in "
-                "exclude_names_and_prefixes."
-            )
-        fill_mapping = {}
-        for name in means:
-            resolved = self._resolve_fill_value(name)
-            fill_mapping[name] = (
-                means[name] if resolved == "mean" else torch.as_tensor(float(resolved))
-            )
+        fill_mapping = {
+            name: means[name] if value == "mean" else torch.as_tensor(float(value))
+            for name, value in self._resolve_fill_values(means).items()
+        }
         return StaticSpatialMasking(
             mask_value=self.mask_value,
             fill_value=fill_mapping,
