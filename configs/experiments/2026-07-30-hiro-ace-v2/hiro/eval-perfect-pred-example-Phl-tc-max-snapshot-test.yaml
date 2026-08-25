@@ -75,8 +75,8 @@ events:
   date: 2023-10-27T00:00
   save_generated_samples: true
   lat_extent:
-    start: 8.454229000000002
-    stop: 24.454229
+    start: 8.
+    stop: 24.
   lon_extent:
-    start: 115.5
-    stop: 131.5
+    start: 116.
+    stop: 132.
