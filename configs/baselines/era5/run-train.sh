@@ -268,12 +268,13 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-patch.yaml" \
 # Patch energy score arm (added 2026-08-25): the stochastic pretrain with the
 # 0.1-weight spectral energy score replaced by a 0.1-weight patch energy score
 # (3x3 patches; research repo investigation
-# 2026-08-25-patch-vs-spectral-energy-score; ace PR #1459). Target per Jeremy
-# 2026-08-25: jupiter, 4 GPUs. The arms above are done or live -- launch the
-# pretrain alone:
+# 2026-08-25-patch-vs-spectral-energy-score; ace PR #1459). Titan, 4 GPUs,
+# matching donor r95iprjt -- the jupiter attempt (01M0WRSNKTF7GF6PCSEBMES315)
+# died with an NCCL unhandled cuda error at every epoch-boundary validation
+# (80 GB H100s; the donor only ever completed on titan). Launch alone:
 #   ./run-train.sh patch-es-1-step
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-patch-es.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-patch-es-1-step-pre-training-rs0" 4 ai2/jupiter
+  "ace2s-era5-daily-fg16-sr0p125-patch-es-1-step-pre-training-rs0" 4 ai2/titan
 
 # Fine-tune — launch separately after the pretrain is done and its final
 # job's result dataset is filled into the config's "# arg: --dataset" header
