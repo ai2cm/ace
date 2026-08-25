@@ -239,3 +239,113 @@ def test_static_masking_mask_ignored_name():
     assert masked["masked"][1, 1].isnan()
     # no change to "mask_ignored" because _Mask gives it special treatment
     torch.testing.assert_close(masked["mask_ignored"], data["mask_ignored"])
+
+
+def _overrides_setup():
+    """A 2x2 grid with one masked cell, and means far from any fill value."""
+    mask_2d = torch.tensor([[1.0, 0.0], [1.0, 1.0]], device=DEVICE)
+    mask_3d = mask_2d[..., None].expand(2, 2, 2)
+    data = {
+        "sst": torch.full((1, 2, 2), 7.0, device=DEVICE),
+        "thetao_0": torch.full((1, 2, 2), 7.0, device=DEVICE),
+        "thetao_1": torch.full((1, 2, 2), 7.0, device=DEVICE),
+        "deptho": torch.full((1, 2, 2), 7.0, device=DEVICE),
+    }
+    means = {
+        "sst": torch.tensor(100.0, device=DEVICE),
+        "thetao_0": torch.tensor(200.0, device=DEVICE),
+        "thetao_1": torch.tensor(300.0, device=DEVICE),
+        "deptho": torch.tensor(400.0, device=DEVICE),
+    }
+    return _Mask(mask_2d=mask_2d, mask_3d=mask_3d), data, means
+
+
+def test_fill_value_overrides_apply_per_channel():
+    """mean everywhere except the prefixed and named overrides, which take 0.0."""
+    mask, data, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value="mean",
+        fill_value_overrides={"thetao_": 0.0, "deptho": 0.0},
+    )
+    out = config.build(mask=mask, means=means)(data)
+    # the masked cell is [0, 0, 1]
+    assert out["sst"][0, 0, 1].item() == pytest.approx(100.0)  # default "mean"
+    assert out["thetao_0"][0, 0, 1].item() == pytest.approx(0.0)  # prefix override
+    assert out["thetao_1"][0, 0, 1].item() == pytest.approx(0.0)  # prefix override
+    assert out["deptho"][0, 0, 1].item() == pytest.approx(0.0)  # exact-name override
+    # unmasked cells are untouched in every channel
+    for name in data:
+        assert out[name][0, 0, 0].item() == pytest.approx(7.0)
+
+
+def test_fill_value_overrides_exact_name_beats_prefix():
+    mask, data, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=0.0,
+        fill_value_overrides={"thetao_": 1.0, "thetao_1": "mean"},
+    )
+    out = config.build(mask=mask, means=means)(data)
+    assert out["sst"][0, 0, 1].item() == pytest.approx(0.0)  # default float
+    assert out["thetao_0"][0, 0, 1].item() == pytest.approx(1.0)  # prefix
+    assert out["thetao_1"][0, 0, 1].item() == pytest.approx(300.0)  # exact name wins
+
+
+def test_fill_value_overrides_longest_prefix_wins():
+    mask, data, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=0.0,
+        fill_value_overrides={"the": 1.0, "thetao_": 2.0},
+    )
+    out = config.build(mask=mask, means=means)(data)
+    assert out["thetao_0"][0, 0, 1].item() == pytest.approx(2.0)
+
+
+def test_fill_value_overrides_unmatched_key_raises():
+    mask, _, means = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value="mean",
+        fill_value_overrides={"thetoa_": 0.0},  # typo
+    )
+    with pytest.raises(ValueError, match="match no channel"):
+        config.build(mask=mask, means=means)
+
+
+def test_fill_value_overrides_requires_means():
+    mask, _, _ = _overrides_setup()
+    config = StaticSpatialMaskingConfig(
+        mask_value=0,
+        fill_value=0.0,
+        fill_value_overrides={"thetao_": 0.0},
+    )
+    with pytest.raises(ValueError, match="fill_values mapping required"):
+        config.build(mask=mask, means=None)
+
+
+def test_fill_value_overrides_rejects_bad_value():
+    with pytest.raises(ValueError, match="must be a float or 'mean'"):
+        StaticSpatialMaskingConfig(
+            mask_value=0,
+            fill_value="mean",
+            # The guard exists for configs built from YAML by dacite, where the
+            # static type is not enforced; the ignore is what lets the test reach
+            # the runtime check.
+            fill_value_overrides={"thetao_": "zero"},  # type: ignore[dict-item]
+        )
+
+
+def test_no_overrides_is_unchanged():
+    """The default path must be byte-for-byte the old behaviour."""
+    mask, data, means = _overrides_setup()
+    for fill in (0.0, "mean"):
+        base = StaticSpatialMaskingConfig(mask_value=0, fill_value=fill)
+        explicit = StaticSpatialMaskingConfig(
+            mask_value=0, fill_value=fill, fill_value_overrides=None
+        )
+        a = base.build(mask=mask, means=means)(data)
+        b = explicit.build(mask=mask, means=means)(data)
+        for name in data:
+            assert torch.equal(a[name], b[name])
