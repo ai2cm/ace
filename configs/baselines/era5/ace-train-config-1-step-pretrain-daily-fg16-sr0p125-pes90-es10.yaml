@@ -2,10 +2,11 @@
 # Patch energy score variant of
 # ace-train-config-1-step-pretrain-daily-fg16-sr0p125.yaml (wandb r95iprjt)
 # for the patch-vs-spectral energy score investigation. The ONLY change from
-# that config is the EnsembleLoss energy-score term: the 0.1-weight spectral
-# energy score is replaced by a 0.1-weight patch energy score (3x3 patches,
-# periodic east-west, zero-padded north-south; feature branch
-# feature/patch-energy-score-loss). crps_weight stays 0.9.
+# that config is the EnsembleLoss: 0.9 CRPS / 0.1 spectral energy score is
+# replaced by 0.9 patch energy score (3x3 patches, periodic east-west,
+# zero-padded north-south) / 0.1 spectral energy score, i.e. the patch ES
+# takes CRPS's place as the workhorse term (per Jeremy 2026-08-26; the first
+# 0.9 CRPS / 0.1 patch-ES cut was canceled at epoch 21).
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -92,8 +93,9 @@ stepper_training:
     weights:
       h500: 5.0
     kwargs:
-      crps_weight: 0.9
-      patch_energy_score_weight: 0.1
+      crps_weight: 0.0
+      energy_score_weight: 0.1
+      patch_energy_score_weight: 0.9
       patch_energy_score_size: 3
 stepper:
   step:

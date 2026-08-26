@@ -265,16 +265,17 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-no-r1.yaml" \
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-patch.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-patch-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
 
-# Patch energy score arm (added 2026-08-25): the stochastic pretrain with the
-# 0.1-weight spectral energy score replaced by a 0.1-weight patch energy score
-# (3x3 patches; research repo investigation
-# 2026-08-25-patch-vs-spectral-energy-score; ace PR #1459). Titan, 4 GPUs,
-# matching donor r95iprjt -- the jupiter attempt (01M0WRSNKTF7GF6PCSEBMES315)
-# died with an NCCL unhandled cuda error at every epoch-boundary validation
-# (80 GB H100s; the donor only ever completed on titan). Launch alone:
-#   ./run-train.sh patch-es-1-step
-run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-patch-es.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-patch-es-1-step-pre-training-rs0" 4 ai2/titan
+# Patch energy score arm (reworked 2026-08-26): the stochastic pretrain with
+# EnsembleLoss 0.9 patch-ES (3x3) / 0.1 spectral-ES, no CRPS -- the patch ES
+# takes CRPS's place (research repo investigation
+# 2026-08-25-patch-vs-spectral-energy-score; ace PR #1459). The first cut
+# (0.9 CRPS / 0.1 patch-ES, wandb v0d7iiz4) was canceled at epoch 21 per
+# Jeremy. Titan, 4 GPUs, matching donor r95iprjt -- jupiter kills this family
+# with NCCL unhandled cuda errors at every epoch-boundary validation
+# (80 GB H100s). Launch alone:
+#   ./run-train.sh pes90-es10-1-step
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-pes90-es10.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-1-step-pre-training-rs0" 4 ai2/titan
 
 # Fine-tune — launch separately after the pretrain is done and its final
 # job's result dataset is filled into the config's "# arg: --dataset" header
