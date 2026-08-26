@@ -51,7 +51,9 @@ class StagedFile:
     files are multi-GB: gcsfs's ``put_file`` uploads in 50 MiB chunks and can
     verify the uploaded object's checksum, where a stream through
     ``fsspec.open`` uses a ~5 MiB write block and checks nothing, so silent
-    corruption would go undetected.
+    corruption would go undetected. The checksum request is gcsfs-specific;
+    other fsspec backends ignore it (s3fs drops unrecognized kwargs) and
+    upload with whatever integrity check they do by default.
 
     When ``destination`` is already local there is no staging at all:
     ``path`` is ``destination`` and ``upload`` does nothing, so local
@@ -78,7 +80,10 @@ class StagedFile:
         """Copy the staged file to its destination and discard the staging copy.
 
         A no-op for a local destination, or if already called. Errors from
-        the upload propagate; the staging copy is kept if it fails.
+        the upload propagate, and a failed upload leaves the staged file in
+        place, so a caller that catches the error can call ``upload`` again to
+        retry. The staging directory is still a temporary directory: it is
+        removed when the process exits, so an uncaught failure loses the file.
         """
         if self._tmpdir is not None:
             fs, _ = fsspec.url_to_fs(self._destination)

@@ -1,9 +1,13 @@
 import os
+from base64 import b64encode
+from hashlib import md5
 from pathlib import Path
 
 import fsspec
 import pytest
 import xarray as xr
+from gcsfs.checkers import get_consistency_checker
+from gcsfs.retry import ChecksumError
 
 from fme.core.cloud import (
     StagedFile,
@@ -138,7 +142,7 @@ def test_staged_file_remote_uploads_on_upload(tmp_path: Path):
     fs.rm("memory://staged-test", recursive=True)
 
 
-def test_staged_file_upload_uses_destination_put_file(tmp_path: Path, monkeypatch):
+def test_staged_file_upload_uses_destination_put_file(monkeypatch):
     # the upload must go through the destination filesystem's put_file, which
     # is what gets gcsfs's chunked, checksum-verified upload for multi-GB
     # files, and it must request the checksum: gcsfs defaults to
@@ -168,18 +172,25 @@ def test_staged_file_upload_uses_destination_put_file(tmp_path: Path, monkeypatc
 
 
 def test_md5_is_a_supported_gcsfs_consistency_checker():
-    # StagedFile.upload hardcodes consistency="md5"; if gcsfs stopped
-    # accepting it (or its md5 checker grew an uninstalled dependency, as
-    # crc32c has with crcmod) every remote upload would fail at runtime,
-    # which the memory-filesystem tests above cannot catch.
-    gcsfs_checkers = pytest.importorskip("gcsfs.checkers")
-    checker = gcsfs_checkers.get_consistency_checker("md5")
-    assert checker is not None
-    # and the default really is the no-op checker this kwarg exists to avoid
-    assert type(gcsfs_checkers.get_consistency_checker("none")) is not type(checker)
+    # StagedFile.upload hardcodes consistency="md5". gcsfs answers an
+    # unrecognized consistency with the silent no-op checker rather than an
+    # error, so if it stopped accepting "md5" (or its md5 checker grew an
+    # uninstalled dependency, as crc32c has with crcmod) remote uploads would
+    # keep "working" with no integrity check. The memory-filesystem tests
+    # above cannot catch that, so check the checker really hashes.
+    contents = b"staged netcdf bytes"
+    checker = get_consistency_checker("md5")
+    checker.update(contents)
+    checker.validate_json_response(
+        {"md5Hash": b64encode(md5(contents).digest()).decode()}
+    )
+    with pytest.raises(ChecksumError):
+        checker.validate_json_response(
+            {"md5Hash": b64encode(md5(b"other bytes").digest()).decode()}
+        )
 
 
-def test_staged_file_upload_error_propagates(tmp_path: Path, monkeypatch):
+def test_staged_file_upload_error_propagates(monkeypatch):
     destination = "memory://staged-error-test/remote.nc"
     fs, _ = fsspec.url_to_fs(destination)
 
@@ -193,6 +204,13 @@ def test_staged_file_upload_error_propagates(tmp_path: Path, monkeypatch):
         f.write(b"test")
     with pytest.raises(OSError, match="upload failed"):
         staged.upload()
-    # the staging copy survives a failed upload, so nothing is silently lost
+    # the staged file survives a failed upload, so nothing is silently lost
+    # and the upload can be retried
     assert Path(staged.path).read_bytes() == b"test"
     assert not fs.exists(destination)
+
+    monkeypatch.undo()
+    staged.upload()
+    assert fs.cat_file(destination) == b"test"
+
+    fs.rm("memory://staged-error-test", recursive=True)
