@@ -48,8 +48,8 @@ class StagedFile:
     lands remotely.
 
     ``put_file`` rather than ``inter_filesystem_copy`` because staged netCDF
-    files are multi-GB: gcsfs's ``put_file`` uploads in 50 MiB chunks and
-    verifies the object's checksum on completion, where a stream through
+    files are multi-GB: gcsfs's ``put_file`` uploads in 50 MiB chunks and can
+    verify the uploaded object's checksum, where a stream through
     ``fsspec.open`` uses a ~5 MiB write block and checks nothing, so silent
     corruption would go undetected.
 
@@ -82,7 +82,14 @@ class StagedFile:
         """
         if self._tmpdir is not None:
             fs, _ = fsspec.url_to_fs(self._destination)
-            fs.put_file(self._path, self._destination)
+            # The integrity check is the main reason to use put_file over a
+            # plain stream, and gcsfs leaves it off by default
+            # (consistency="none" is a no-op checker), so ask for it
+            # explicitly. md5 rather than crc32c because crc32c needs the
+            # crcmod package, which is not a dependency. Hashing a multi-GB
+            # file costs CPU, which is cheap next to the transfer itself and
+            # is the point for output we cannot re-derive.
+            fs.put_file(self._path, self._destination, consistency="md5")
             self._tmpdir.cleanup()
             self._tmpdir = None
 

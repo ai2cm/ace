@@ -140,14 +140,17 @@ def test_staged_file_remote_uploads_on_upload(tmp_path: Path):
 
 def test_staged_file_upload_uses_destination_put_file(tmp_path: Path, monkeypatch):
     # the upload must go through the destination filesystem's put_file, which
-    # is what gets gcsfs's chunked, checksum-verified upload for multi-GB files.
+    # is what gets gcsfs's chunked, checksum-verified upload for multi-GB
+    # files, and it must request the checksum: gcsfs defaults to
+    # consistency="none", a no-op checker, so a silent revert to the default
+    # would lose the integrity check while still "working".
     destination = "memory://staged-put-file-test/remote.nc"
     fs, _ = fsspec.url_to_fs(destination)
     calls = []
     original = type(fs).put_file
 
     def spy(self, lpath, rpath, *args, **kwargs):
-        calls.append((lpath, rpath))
+        calls.append((lpath, rpath, kwargs))
         return original(self, lpath, rpath, *args, **kwargs)
 
     monkeypatch.setattr(type(fs), "put_file", spy)
@@ -158,10 +161,22 @@ def test_staged_file_upload_uses_destination_put_file(tmp_path: Path, monkeypatc
     staged_path = staged.path
     staged.upload()
 
-    assert calls == [(staged_path, destination)]
+    assert calls == [(staged_path, destination, {"consistency": "md5"})]
     assert fs.cat_file(destination) == b"test"
 
     fs.rm("memory://staged-put-file-test", recursive=True)
+
+
+def test_md5_is_a_supported_gcsfs_consistency_checker():
+    # StagedFile.upload hardcodes consistency="md5"; if gcsfs stopped
+    # accepting it (or its md5 checker grew an uninstalled dependency, as
+    # crc32c has with crcmod) every remote upload would fail at runtime,
+    # which the memory-filesystem tests above cannot catch.
+    gcsfs_checkers = pytest.importorskip("gcsfs.checkers")
+    checker = gcsfs_checkers.get_consistency_checker("md5")
+    assert checker is not None
+    # and the default really is the no-op checker this kwarg exists to avoid
+    assert type(gcsfs_checkers.get_consistency_checker("none")) is not type(checker)
 
 
 def test_staged_file_upload_error_propagates(tmp_path: Path, monkeypatch):
