@@ -33,14 +33,28 @@
 # log-sigma feature map are now 2C wide, r-block + d-block stacked), so
 # this is a from-scratch run, not resumed from the single-block checkpoint.
 #
-# r_sigma_data_by_channel / d_sigma_data_by_channel are left UNSET below
-# (default 1.0) -- unlike sigma_data_by_channel in the single-block flat
-# config (toy/compute_residual_std.py), there is no existing script that
-# computes the r/d-specific residual std. Before scaling this past a smoke
-# test, write the two-block analog (r's std over the *coarse*-resolution
-# temporal residual, d's std over Pi(fine - upsample(coarse)) -- see
-# twoblock.r_target/d_target) and fill these in, the same way
-# sigma_data_by_channel was calibrated for the single-block configs.
+# r_sigma_data_by_channel/d_sigma_data_by_channel are calibrated below
+# (see the model block's own comment for the script/methodology) -- FIXED
+# from this run's predecessor, which left them at the 1.0 default.
+#
+# KNOWN CAVEAT (quantified, not yet designed around): coarse_clip and
+# fine_clip are independently-sourced stores, not a literal D-downsample
+# pair (see twoblock.d_target's docstring) -- ||x_c - D(x_f)|| is
+# 9-28% of r_std and 26-56% of d_std per channel (winds/PRMSL grow toward
+# the poles, consistent with D being an unweighted box mean vs. a
+# plausibly area-weighted native regrid; PRATEsfc peaks at the equator,
+# more likely genuine subgrid convective heterogeneity). This is an
+# IRREDUCIBLE bias in the assembled output relative to fine truth, not
+# attributable to model error -- eval scripts comparing D(generated)
+# against fine truth (rather than against the coarse input) need to
+# account for this floor. Kept as-is (r pinned to the real coarse
+# store, matching actual inference-time input) rather than switching r's
+# target to D(x_f)-I (which would make assembly exact against fine truth
+# but pinning only approximate against the real coarse input this model
+# will actually be given at inference) -- see
+# scripts/video_pmd_eval/residual_calibration_diagnostic.py's docstring
+# and idea/spatiotemoral/twoblock_theory.md's implementation-status
+# section for the full reasoning.
 #
 # Data: 2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr on weka
 # (/climate-default/2026-06-25-temporal-diffusion), same store/split as
@@ -167,6 +181,26 @@ model:
   # temporal_noise_correlation must stay at its "independent" default (not
   # set here) -- two_block uses r_kernel/d_kernel instead (validated in
   # __post_init__).
+  # Calibrated from scripts/video_pmd_eval/residual_calibration_diagnostic.py
+  # (run via run_residual_calibration_diagnostic.sh on real weka data,
+  # 2026-08-26): std of r_target/d_target in the model's own normalized
+  # units, pooled over 8 seasonal windows, global grid. Previously left at
+  # the 1.0 default -- per the single-block configs' own experience
+  # (toy/compute_residual_std.py), this calibration is a make-or-break item
+  # for EDM preconditioning/loss weighting, not a "fix later if training
+  # behaves unexpectedly" afterthought.
+  r_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.3201
+    northward_wind_at_ten_meters: 0.4415
+    PRMSL: 0.1783
+    PRATEsfc: 0.6825
+    air_temperature_at_two_meters: 0.1229
+  d_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.1617
+    northward_wind_at_ten_meters: 0.1892
+    PRMSL: 0.0586
+    PRATEsfc: 0.4254
+    air_temperature_at_two_meters: 0.0529
   log_transform_channels:
     PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
   out_names:

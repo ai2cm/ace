@@ -27,9 +27,14 @@
 #
 # r_kernel/d_kernel/d_kernel_length_scale are omitted below (must stay at
 # their defaults, validated in __post_init__ -- the fixed basis supersedes
-# them). r_sigma_data_by_channel/d_sigma_data_by_channel are left UNSET
-# (default 1.0), same caveat as the fixed-kernel config: no two-block
-# residual-std calibration script exists yet.
+# them). r_sigma_data_by_channel/d_sigma_data_by_channel ARE calibrated
+# below (same numbers/methodology as the fixed-kernel config -- see its own
+# comment: scripts/video_pmd_eval/residual_calibration_diagnostic.py, run
+# on real weka data 2026-08-26). Same known caveat applies here too:
+# ||x_c - D(x_f)|| is 9-28% of r_std / 26-56% of d_std, an irreducible
+# store-consistency bias, not model error -- see the fixed-kernel config's
+# comment for the full reasoning and why r stays pinned to the real
+# coarse store rather than to D(x_f).
 #
 # What to check in this run beyond the fixed-kernel comparison (CRPS,
 # endpoint-time error, D(x_hat)=I+r_hat exactness): whether conditioning
@@ -164,6 +169,20 @@ model:
   two_block_conditional_kernel: true
   weight_fit_loss_weight: 1.0
   condition_encoder_hidden: 16
+  # Calibrated from scripts/video_pmd_eval/residual_calibration_diagnostic.py
+  # (2026-08-26) -- same numbers as the fixed-kernel config, see its comment.
+  r_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.3201
+    northward_wind_at_ten_meters: 0.4415
+    PRMSL: 0.1783
+    PRATEsfc: 0.6825
+    air_temperature_at_two_meters: 0.1229
+  d_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.1617
+    northward_wind_at_ten_meters: 0.1892
+    PRMSL: 0.0586
+    PRATEsfc: 0.4254
+    air_temperature_at_two_meters: 0.0529
   log_transform_channels:
     PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
   out_names:
