@@ -1,0 +1,60 @@
+# Stochastic vs deterministic Samudra at 4deg -- the screening arms of
+# tasks/2026-08-26-stochastic-samudra-4deg-screen.
+#
+# All four arms share train-config.yaml (the 4deg port of the 1deg
+# ocean_wide_ohc_clip recipe) and differ only in the override_args below, so
+# the re-measured deterministic control is comparable to the stochastic arms
+# arm for arm. n_forward_steps stays at the config's 4 and batch_size at 16
+# (global) throughout, per the task's 2026-08-26 decision-log entry.
+#
+# 4 GPUs rather than the rest of the 4deg protocol's 2, as requested: the
+# stochastic arms' n_ensemble=2 doubles the effective per-GPU batch, and 4 GPUs
+# keeps the deterministic control on the same footprint as the arms it is the
+# control for. batch_size is global, so all four arms train at the same 730
+# iterations/epoch as the 1deg protocol.
+#
+# The stochastic arms take DLESyM-Ocean's settings rather than sweeping:
+# n_ensemble 2, noise_embed_dim 32 (the NoiseConditionedSamudra default),
+# noise_injection bottleneck, patch size 3x3. The spectral energy score stays
+# off (energy_score_weight 0) -- an SHT over a land-masked field puts spurious
+# power at high degree exactly where the whitening reweight amplifies it.
+#
+# uncoupled_train.sh acts only on rows whose status is exactly "train". Every
+# row below is staged at "skip" pending review.
+#
+# Launch with:
+#   job_runner/uncoupled_train.sh \
+#     configs/experiments/cm4_1pct_46to125_piC_156to235_4deg/ocean_wide_stochastic . \
+#     --coupled_stats elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+# Arm 1 -- deterministic control, the config as it stands. Re-measured on this
+# protocol because the pre-registered numbers in the task are 1deg.
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ohc_clip|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ohc_clip|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ohc_clip|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2
+
+# Arm 2 -- CRPS only, no patch energy score.
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=1.0 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.0
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=1.0 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.0
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=1.0 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.0
+
+# Arm 3 -- CRPS + 3x3 patch energy score. The 0.9/0.1 split mirrors the
+# CRPS/energy-score split the atmos_ace2s arms of this protocol use; the task
+# fixes the patch size but not this weight.
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps_pes3|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps_pes3|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps_pes3|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3
+
+# Arm 4 -- the every-block noise injection, run only after arms 2 and 3 are
+# read out and on whichever of them wins. The rows below carry arm 3's loss;
+# if arm 2 wins, swap the three loss weights to arm 2's before arming. Do not
+# launch these with arms 1-3.
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_allblocks|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_allblocks|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_allblocks|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.builder.type=NoiseConditionedSamudra stepper.step.config.builder.config.noise_injection=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3
