@@ -85,6 +85,9 @@ def _save_checkpoint(trainer: "VideoTrainer", path: str) -> None:
         }
         if trainer.model.endpoint_sr_module is not None:
             state["endpoint_sr_module"] = trainer.model.endpoint_sr_module.state_dict()
+        if trainer.model._r_encoder is not None:
+            state["r_encoder"] = trainer.model._r_encoder.state_dict()
+            state["d_encoder"] = trainer.model._d_encoder.state_dict()
         torch.save(state, temporary_location)
         os.replace(temporary_location, path)
     finally:
@@ -108,6 +111,17 @@ def restore_checkpoint(trainer: "VideoTrainer") -> None:
         trainer.model.endpoint_sr_module.load_state_dict(
             checkpoint["endpoint_sr_module"]
         )
+    if trainer.model._r_encoder is not None:
+        if "r_encoder" not in checkpoint:
+            raise ValueError(
+                "Model config has two_block_conditional_kernel set, but the "
+                "checkpoint being resumed from has no 'r_encoder'/'d_encoder' "
+                "state -- it was trained without conditional kernels. "
+                "Refusing to resume silently with freshly-initialized "
+                "condition encoders."
+            )
+        trainer.model._r_encoder.load_state_dict(checkpoint["r_encoder"])
+        trainer.model._d_encoder.load_state_dict(checkpoint["d_encoder"])
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
@@ -369,6 +383,10 @@ class VideoTrainer:
             if outputs.marginal_consistency_loss is not None:
                 batch_logs["train/marginal_consistency_loss"] = (
                     outputs.marginal_consistency_loss.cpu().item()
+                )
+            if outputs.weight_fit_loss is not None:
+                batch_logs["train/weight_fit_loss"] = (
+                    outputs.weight_fit_loss.cpu().item()
                 )
             wandb.log(batch_logs, step=self.num_batches_seen)
         if n_batches == 0:

@@ -81,6 +81,10 @@ def load_video_model(
     }
     bare = getattr(model.module, "module", model.module)
     bare.load_state_dict(state_dict)
+    if model._r_encoder is not None:
+        assert model._d_encoder is not None
+        model._r_encoder.load_state_dict(ckpt["r_encoder"])
+        model._d_encoder.load_state_dict(ckpt["d_encoder"])
     if use_ema:
         if "ema" not in ckpt:
             raise ValueError(

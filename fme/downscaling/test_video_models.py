@@ -23,6 +23,7 @@ from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
 )
+from fme.downscaling.twoblock import coarse_temporal_interp, conservative_downsample
 from fme.downscaling.video_models import (
     CHANNEL_AXIS,
     EndpointSuperResolutionConfig,
@@ -1182,3 +1183,347 @@ def test_firblur_survives_inplace_kernel_mutation():
         blur.kernel.copy_(blur.kernel)  # what DDP's buffer broadcast does
     y.sum().backward()  # must not raise "modified by an inplace operation"
     assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+def _two_block_model(n_times, **config_kwargs):
+    return _coarse_endpoints_only_model(n_times, two_block=True, **config_kwargs)
+
+
+def test_two_block_requires_coarse_endpoints_only_mode():
+    with pytest.raises(ValueError, match="two_block requires"):
+        _spatial_model(5, endpoints_observed=True, two_block=True)
+    with pytest.raises(ValueError, match="two_block requires"):
+        _spatial_model(
+            5,
+            endpoints_observed=False,
+            coarse_endpoints_only=False,
+            two_block=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_kwargs,match",
+    [
+        ({"subset_augmentation_prob": 0.5}, "subset_augmentation_prob"),
+        ({"marginal_consistency_weight": 1.0}, "marginal_consistency_weight"),
+        (
+            {
+                "temporal_noise_correlation": "per_channel",
+                "per_channel_noise_kernel": {
+                    "var0": "independent",
+                    "var1": "independent",
+                },
+            },
+            "temporal_noise_correlation",
+        ),
+        (
+            {"sigma_data_by_channel": {"var0": 1.0}},
+            "r_\\*/d_\\*-prefixed sigma/noise fields",
+        ),
+        ({"r_kernel": "ou"}, "r_kernel must be"),
+        ({"d_kernel": "brownian_bridge"}, "d_kernel must be"),
+        ({"d_kernel": "ou"}, "d_kernel_length_scale"),
+        ({"d_kernel_length_scale": -1.0}, "d_kernel_length_scale must be"),
+        ({"r_sigma_min_by_channel": {"var0": 0.1}}, "must be specified together"),
+    ],
+)
+def test_two_block_config_validation_rejects_bad_configs(bad_kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        _two_block_model(5, **bad_kwargs)
+
+
+def test_two_block_prefixed_fields_require_two_block():
+    with pytest.raises(ValueError, match="require two_block=True"):
+        _coarse_endpoints_only_model(5, r_sigma_data_by_channel={"var0": 1.0})
+
+
+def test_two_block_widens_channels():
+    n_times = 5
+    model = _two_block_model(n_times)
+    n_channels = len(OUT_NAMES)
+    net = model.module.module.model
+    in_conv = net.in_conv.conv
+    # noisy latent (2C: r+d) + log-sigma (2C) + endpoint-masked coarse (C) + mask (1)
+    expected_in_channels = 4 * n_channels + n_channels + 1
+    assert in_conv.in_channels == expected_in_channels + net.calendar.out_channels
+    assert net.out_conv.conv.out_channels == 2 * n_channels
+
+
+def test_two_block_train_on_batch_runs_and_backprops():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_block_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.loss.requires_grad
+    outputs.loss.backward()
+    grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(grads) > 0
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert outputs.prediction["var0"].shape == (2, n_times, fine_height, fine_width)
+    for name in OUT_NAMES:
+        assert torch.isfinite(outputs.channel_losses[name])
+        assert outputs.per_sample_channel_loss[name].shape == (2,)
+
+
+def test_two_block_generate_runs_and_is_stochastic():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_block_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    generated = model.generate(batch, n_samples=3)
+    out = generated["var0"]
+    assert out.shape == (2, 3, n_times, fine_height, fine_width)
+    assert torch.isfinite(out).all()
+    # nothing is pinned in this mode -- independent ensemble members disagree
+    # everywhere, endpoints included (same expectation as the non-two_block
+    # coarse_endpoints_only mode it extends).
+    assert not torch.allclose(out[:, 0, 0], out[:, 1, 0], atol=1e-4)
+
+
+def test_two_block_generate_rejects_frame_subsetting():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_block_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+    with pytest.raises(NotImplementedError, match="frame subsetting"):
+        model.generate(batch, frames=[0, 2, n_times - 1])
+
+
+def test_two_block_exact_coarse_recovery():
+    """Prop 4 of idea/spatiotemoral/twoblock_theory.md: D(x_hat_f(tau)) ==
+    I(tau) + r_hat(tau) exactly at every tau, including (trivially, since
+    r_hat is pinned to 0 there) the true endpoints D(x_hat(0)) == x_0_c and
+    D(x_hat(T)) == x_T_c -- verified here through the FULL generate() reverse
+    -diffusion sampler, in physical (denormalized) units, not just on the
+    twoblock.py primitives in isolation (test_twoblock.py already covers
+    those algebraically)."""
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _two_block_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+    generated = model.generate(batch, n_samples=2)
+
+    coarse_norm = model._pack_normalized(batch.coarse.data, model.coarse_normalizer)
+    interp_phys = model._denormalize_invert(coarse_temporal_interp(coarse_norm))
+
+    for name in OUT_NAMES:
+        gen = generated[name]  # (B, n_samples, T, H, W)
+        gen_downsampled = conservative_downsample(gen, factor)
+        interp_b = interp_phys[name].unsqueeze(1).expand_as(gen_downsampled)
+        # At the true endpoints specifically (r_hat == 0 there by construction):
+        # D(x_hat(0)) == x_0_c and D(x_hat(T)) == x_T_c exactly.
+        assert torch.allclose(gen_downsampled[:, :, 0], interp_b[:, :, 0], atol=1e-4)
+        assert torch.allclose(gen_downsampled[:, :, -1], interp_b[:, :, -1], atol=1e-4)
+
+
+def _conditional_kernel_model(n_times, **config_kwargs):
+    return _two_block_model(n_times, two_block_conditional_kernel=True, **config_kwargs)
+
+
+def test_conditional_kernel_requires_two_block():
+    with pytest.raises(ValueError, match="requires two_block=True"):
+        _spatial_model(
+            5,
+            endpoints_observed=False,
+            coarse_endpoints_only=True,
+            two_block=False,
+            two_block_conditional_kernel=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_kwargs",
+    [
+        {"r_kernel": "independent"},
+        {"d_kernel": "ou", "d_kernel_length_scale": 0.5},
+        {"d_kernel_length_scale": 0.3},
+    ],
+)
+def test_conditional_kernel_rejects_customized_fixed_kernel_fields(bad_kwargs):
+    with pytest.raises(ValueError, match="supersedes r_kernel"):
+        _conditional_kernel_model(5, **bad_kwargs)
+
+
+def test_conditional_kernel_rejects_bad_weight_fit_loss_weight():
+    with pytest.raises(ValueError, match="weight_fit_loss_weight"):
+        _conditional_kernel_model(5, weight_fit_loss_weight=-1.0)
+
+
+def test_conditional_kernel_encoders_are_registered_modules():
+    model = _conditional_kernel_model(5)
+    assert model._r_encoder is not None
+    assert model._d_encoder is not None
+    assert model._r_encoder in model.modules
+    assert model._d_encoder in model.modules
+
+
+def test_conditional_kernel_train_on_batch_runs_and_backprops():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.weight_fit_loss is not None
+    assert torch.isfinite(outputs.weight_fit_loss)
+    outputs.loss.backward()
+    main_grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(main_grads) > 0
+    assert all(torch.isfinite(g).all() for g in main_grads)
+    r_enc_grads = [p.grad for p in model._r_encoder.parameters()]
+    d_enc_grads = [p.grad for p in model._d_encoder.parameters()]
+    # weight_fit_loss_weight defaults to 1.0 -- g_phi SHOULD receive gradient.
+    assert any(g is not None for g in r_enc_grads)
+    assert any(g is not None for g in d_enc_grads)
+    assert all(torch.isfinite(g).all() for g in r_enc_grads if g is not None)
+
+
+def test_conditional_kernel_dsm_loss_does_not_backprop_into_encoders():
+    """The doc's central caveat: plain DSM must not train g_phi. With
+    weight_fit_loss_weight=0, the only remaining loss term is DSM -- the
+    encoders must receive exactly zero gradient."""
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times, weight_fit_loss_weight=0.0)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    outputs.loss.backward()
+    r_enc_grads = [p.grad for p in model._r_encoder.parameters()]
+    d_enc_grads = [p.grad for p in model._d_encoder.parameters()]
+    assert not any(g is not None and g.abs().sum() > 0 for g in r_enc_grads)
+    assert not any(g is not None and g.abs().sum() > 0 for g in d_enc_grads)
+
+
+def test_conditional_kernel_generate_runs_and_is_stochastic():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    generated = model.generate(batch, n_samples=2)
+    out = generated["var0"]
+    assert out.shape == (3, 2, n_times, fine_height, fine_width)
+    assert torch.isfinite(out).all()
+    assert not torch.allclose(out[:, 0, 0], out[:, 1, 0], atol=1e-4)
+
+
+def test_conditional_kernel_exact_coarse_recovery():
+    """Prop 4 must still hold under conditional kernels -- the exactness
+    guarantee comes from assemble_fine_output/masking, not the noise
+    mechanism, so it should be unaffected by which kernel g_phi selects."""
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+    generated = model.generate(batch, n_samples=2)
+
+    coarse_norm = model._pack_normalized(batch.coarse.data, model.coarse_normalizer)
+    interp_phys = model._denormalize_invert(coarse_temporal_interp(coarse_norm))
+
+    for name in OUT_NAMES:
+        gen_downsampled = conservative_downsample(generated[name], factor)
+        interp_b = interp_phys[name].unsqueeze(1).expand_as(gen_downsampled)
+        assert torch.allclose(gen_downsampled[:, :, 0], interp_b[:, :, 0], atol=1e-4)
+        assert torch.allclose(gen_downsampled[:, :, -1], interp_b[:, :, -1], atol=1e-4)
+
+
+@pytest.mark.parametrize("model_fixture", ["two_block", "conditional_kernel"])
+def test_two_block_noise_respects_block_subspaces(model_fixture):
+    """Regression test for the noise mis-specification bug: fine-resolution
+    white noise for either block leaks variance into a subspace its target
+    never occupies (r: block-constant / image of U; d: null(D)). Verifies
+    _two_block_noise's actual output, not just the underlying twoblock.py
+    primitives (already covered by test_twoblock.py) -- this checks the
+    model wiring calls them correctly."""
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = (
+        _two_block_model(n_times)
+        if model_fixture == "two_block"
+        else _conditional_kernel_model(n_times)
+    )
+    n_channels = len(OUT_NAMES)
+    coarse_height, coarse_width = fine_height // factor, fine_width // factor
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+    coarse_clip = model._pack_normalized(batch.coarse.data, model.coarse_normalizer)
+    r_mixing, d_mixing, _ = model._two_block_mixings_and_weight_fit_loss(
+        coarse_clip, n_channels
+    )
+    torch.manual_seed(0)
+    noise = model._two_block_noise(
+        torch.empty(2, n_channels, n_times, coarse_height, coarse_width),
+        torch.empty(2, n_channels, n_times, fine_height, fine_width),
+        r_mixing,
+        d_mixing,
+        factor,
+    )
+    noise_r, noise_d = noise.split(n_channels, dim=CHANNEL_AXIS)
+
+    # r's noise must be exactly block-constant (image of U): every fine
+    # pixel within a factor x factor block has the identical value.
+    noise_r_downsampled = conservative_downsample(noise_r, factor)
+    noise_r_reconstructed = torch.repeat_interleave(
+        torch.repeat_interleave(noise_r_downsampled, factor, dim=-2), factor, dim=-1
+    )
+    assert torch.allclose(noise_r, noise_r_reconstructed, atol=1e-5)
+    # ... and not degenerate (nonzero variance across blocks/time).
+    assert noise_r_downsampled.std() > 1e-3
+
+    # d's noise must be exactly in null(D): D(noise_d) == 0.
+    assert torch.allclose(
+        conservative_downsample(noise_d, factor),
+        torch.zeros(2, n_channels, n_times, coarse_height, coarse_width),
+        atol=1e-5,
+    )
+    assert noise_d.std() > 1e-3  # not degenerate

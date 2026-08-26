@@ -42,7 +42,7 @@ three regimes (``VideoDiffusionModelConfig.endpoints_observed`` /
 """
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import torch
@@ -55,6 +55,13 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.rand import randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.downscaling.conditional_kernel import (
+    ConditionEncoder,
+    build_kernel_basis,
+    condition_features,
+    empirical_covariance,
+    project_onto_kernel_hull,
+)
 from fme.downscaling.data import (
     BatchedLatLonCoordinates,
     PairedVideoBatchData,
@@ -77,8 +84,40 @@ from fme.downscaling.noise import (
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
+from fme.downscaling.twoblock import (
+    assemble_fine_output,
+    block_replicate_upsample,
+    coarse_temporal_interp,
+    conservative_downsample,
+    d_target,
+    null_space_projector,
+    r_target,
+)
 
 CHANNEL_AXIS = 1
+
+# Fixed kernel bases for two_block_conditional_kernel mode (see
+# VideoDiffusionModelConfig.two_block_conditional_kernel's docstring and
+# conditional_kernel.py). Hardcoded rather than exposed as config for v1 --
+# picking/tuning a basis is a separate experiment from validating the
+# conditional-weighting mechanism itself. r's basis is pin_endpoints=True
+# (matches the r-block's own vanish-at-endpoints requirement); d's is
+# pin_endpoints=False. Length scales for d mirror noise.py's OU/RBF
+# docstrings (toy/process_residual_bridge_report.md's empirically-fit
+# values, spread across a plausible range rather than reusing this
+# codebase's exact fitted values, since a basis should bracket the true
+# kernel rather than assume it's already known).
+_DEFAULT_R_KERNEL_BASIS: list[tuple[str, float | None]] = [
+    ("independent", None),
+    ("brownian_bridge", None),
+    ("ou", 0.5),
+]
+_DEFAULT_D_KERNEL_BASIS: list[tuple[str, float | None]] = [
+    ("independent", None),
+    ("ou", 0.3),
+    ("ou", 0.6),
+    ("rbf", 0.4),
+]
 
 
 def _interior_mask(
@@ -380,6 +419,78 @@ class VideoDiffusionModelConfig:
     # while toggling the loss). 0.0 (default) disables it (single pass, exact
     # prior behavior).
     marginal_consistency_weight: float = 0.0
+    # Two-block (r, d) mode: see idea/spatiotemoral/twoblock_theory.md and
+    # fme/downscaling/twoblock.py. Only valid combined with
+    # endpoints_observed=False, coarse_endpoints_only=True (the exact
+    # "coarse endpoints in, full fine trajectory out" setting the theory
+    # targets). Splits the single joint residual the coarse_endpoints_only
+    # mode otherwise diffuses into a pinned coarse-temporal residual `r`
+    # (zero at the two endpoints by construction, temporal kernel
+    # `r_kernel`) and an unpinned fine-detail residual `d` (present at
+    # every frame including the endpoints, temporal kernel `d_kernel`),
+    # trained/denoised as one 2*n_channels-wide state -- `r` broadcast to
+    # fine resolution via the exact block-replicate upsample (so it can
+    # share a single flat-channel network with `d`), `d` natively at fine
+    # resolution -- and reassembled via twoblock.assemble_fine_output,
+    # which guarantees D(x_hat) == interp + r_hat exactly (Prop 4 of the
+    # theory doc) regardless of network quality.
+    #
+    # This "v1" design costs the full fine-resolution compute for BOTH
+    # blocks, not the theory's Mc/Mf ~ 6%-of-state ideal (which would need
+    # a genuinely dual-resolution network architecture, out of scope here)
+    # -- see its usage in `build()`.
+    #
+    # Mutually exclusive with the original single-block noise config
+    # (temporal_noise_correlation must stay "independent";
+    # sigma_data_by_channel/sigma_min_by_channel/sigma_max_by_channel/
+    # training_noise_distribution(s) must stay unset) -- use the r_*/d_*
+    # fields below instead, which apply ONE shared kernel/noise schedule
+    # per block (not per physical channel) -- the "fixed kernel" scope of
+    # the first version; a learned/conditional per-block kernel is a later
+    # extension. Also incompatible with subset_augmentation_prob,
+    # marginal_consistency_weight, and endpoint_super_resolution (none
+    # implemented for this mode -- out of scope for the first version).
+    two_block: bool = False
+    r_kernel: str = "brownian_bridge"  # "independent" or "brownian_bridge"
+    d_kernel: str = "independent"  # "independent", "ou", or "rbf"
+    # Required iff d_kernel in ("ou", "rbf"); see
+    # per_channel_kernel_length_scale's docstring for units.
+    d_kernel_length_scale: float | None = None
+    r_sigma_data_by_channel: dict[str, float] | None = None
+    d_sigma_data_by_channel: dict[str, float] | None = None
+    r_sigma_min_by_channel: dict[str, float] | None = None
+    r_sigma_max_by_channel: dict[str, float] | None = None
+    d_sigma_min_by_channel: dict[str, float] | None = None
+    d_sigma_max_by_channel: dict[str, float] | None = None
+    r_training_noise_distribution: (
+        LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
+    ) = None
+    d_training_noise_distribution: (
+        LogNormalNoiseDistribution | LogUniformNoiseDistribution | None
+    ) = None
+    # Conditional-kernel mode (idea/conditional_kernel_theory.md): replaces
+    # two_block's single fixed r_kernel/d_kernel with a small fixed BASIS of
+    # kernels per block plus a tiny conditioning network g_phi(c) -> simplex
+    # weights (fme/downscaling/conditional_kernel.py), so the effective
+    # kernel varies with the condition c = (x_0^c, x_T^c) instead of being
+    # the same for every sample. Requires two_block=True; r_kernel/d_kernel/
+    # d_kernel_length_scale must stay at their defaults (superseded by the
+    # fixed basis hardcoded in VideoDiffusionModel -- see
+    # conditional_kernel.py's module docstring for why the basis itself
+    # isn't exposed as config: v1 keeps it fixed/hardcoded, not tuned per
+    # experiment).
+    #
+    # Critically, g_phi is NOT trained through the DSM loss -- see
+    # conditional_kernel.py's module docstring and
+    # conditional_kernel_theory.md's central caveat ("plain DSM does NOT
+    # learn w*"). It's trained by weight_fit_loss (weighted by
+    # weight_fit_loss_weight below), a convex moment-matching regression
+    # target built from the batch's own empirical residual covariance
+    # (conditional_kernel.project_onto_kernel_hull) -- kept out of the DSM
+    # graph via detach(), not a second optimizer.
+    two_block_conditional_kernel: bool = False
+    weight_fit_loss_weight: float = 1.0
+    condition_encoder_hidden: int = 16
 
     def __post_init__(self):
         if self.n_timesteps < 3:
@@ -578,6 +689,139 @@ class VideoDiffusionModelConfig:
                     "to be set -- stage A super-resolves the coarse endpoint "
                     "frames."
                 )
+        two_block_only_fields = (
+            "r_sigma_data_by_channel",
+            "d_sigma_data_by_channel",
+            "r_sigma_min_by_channel",
+            "r_sigma_max_by_channel",
+            "d_sigma_min_by_channel",
+            "d_sigma_max_by_channel",
+            "r_training_noise_distribution",
+            "d_training_noise_distribution",
+        )
+        if self.two_block:
+            if self.endpoints_observed or not self.coarse_endpoints_only:
+                raise ValueError(
+                    "two_block requires endpoints_observed=False and "
+                    "coarse_endpoints_only=True -- it's specifically the "
+                    "coarse-endpoints-in/full-fine-trajectory-out setting."
+                )
+            if self.temporal_noise_correlation != "independent":
+                raise ValueError(
+                    "two_block uses its own r_kernel/d_kernel instead of "
+                    "temporal_noise_correlation -- leave the latter at its "
+                    "'independent' default."
+                )
+            if self.per_channel_noise_kernel is not None:
+                raise ValueError(
+                    "two_block is incompatible with per_channel_noise_kernel; "
+                    "use r_kernel/d_kernel instead."
+                )
+            if any(
+                getattr(self, name) is not None
+                for name in (
+                    "sigma_data_by_channel",
+                    "sigma_min_by_channel",
+                    "sigma_max_by_channel",
+                    "training_noise_distribution",
+                    "training_noise_distributions",
+                )
+            ):
+                raise ValueError(
+                    "two_block uses its own r_*/d_*-prefixed sigma/noise "
+                    "fields instead of the single-block ones "
+                    "(sigma_data_by_channel, sigma_min_by_channel, "
+                    "sigma_max_by_channel, training_noise_distribution(s))."
+                )
+            if self.subset_augmentation_prob > 0.0:
+                raise ValueError(
+                    "two_block does not support subset_augmentation_prob > "
+                    "0 yet -- out of scope for the first version."
+                )
+            if self.marginal_consistency_weight > 0.0:
+                raise ValueError(
+                    "two_block does not support marginal_consistency_weight "
+                    "> 0 yet -- out of scope for the first version."
+                )
+            if self.endpoint_super_resolution is not None:
+                raise ValueError(
+                    "two_block is incompatible with endpoint_super_resolution "
+                    "(requires endpoints_observed=True, which two_block "
+                    "forbids)."
+                )
+            if self.r_kernel not in ("independent", "brownian_bridge"):
+                raise ValueError(
+                    "r_kernel must be 'independent' or 'brownian_bridge', "
+                    f"got {self.r_kernel!r}."
+                )
+            if self.d_kernel not in ("independent", "ou", "rbf"):
+                raise ValueError(
+                    "d_kernel must be 'independent', 'ou', or 'rbf', got "
+                    f"{self.d_kernel!r}."
+                )
+            if self.d_kernel in ("ou", "rbf") and self.d_kernel_length_scale is None:
+                raise ValueError(
+                    f"d_kernel={self.d_kernel!r} requires d_kernel_length_scale."
+                )
+            if (
+                self.d_kernel_length_scale is not None
+                and self.d_kernel_length_scale <= 0.0
+            ):
+                raise ValueError(
+                    "d_kernel_length_scale must be > 0, got "
+                    f"{self.d_kernel_length_scale}."
+                )
+            for field_name in two_block_only_fields[:6]:  # the *_by_channel ones
+                values = getattr(self, field_name)
+                if values is None:
+                    continue
+                unknown = set(values) - set(self.out_names)
+                if unknown:
+                    raise ValueError(
+                        f"{field_name} contains channels not in out_names: "
+                        f"{sorted(unknown)}"
+                    )
+            if (self.r_sigma_min_by_channel is None) != (
+                self.r_sigma_max_by_channel is None
+            ):
+                raise ValueError(
+                    "r_sigma_min_by_channel and r_sigma_max_by_channel must "
+                    "be specified together."
+                )
+            if (self.d_sigma_min_by_channel is None) != (
+                self.d_sigma_max_by_channel is None
+            ):
+                raise ValueError(
+                    "d_sigma_min_by_channel and d_sigma_max_by_channel must "
+                    "be specified together."
+                )
+        elif any(getattr(self, name) is not None for name in two_block_only_fields):
+            raise ValueError("r_*/d_*-prefixed fields require two_block=True.")
+        if self.two_block_conditional_kernel:
+            if not self.two_block:
+                raise ValueError(
+                    "two_block_conditional_kernel requires two_block=True."
+                )
+            if (
+                self.r_kernel != "brownian_bridge"
+                or self.d_kernel != "independent"
+                or self.d_kernel_length_scale is not None
+            ):
+                raise ValueError(
+                    "two_block_conditional_kernel supersedes r_kernel/"
+                    "d_kernel/d_kernel_length_scale with its own fixed "
+                    "kernel basis -- leave those three at their defaults."
+                )
+            if self.weight_fit_loss_weight < 0.0:
+                raise ValueError(
+                    "weight_fit_loss_weight must be >= 0, got "
+                    f"{self.weight_fit_loss_weight}."
+                )
+            if self.condition_encoder_hidden < 1:
+                raise ValueError(
+                    "condition_encoder_hidden must be >= 1, got "
+                    f"{self.condition_encoder_hidden}."
+                )
         if self.backbone not in ("simple", "songunet"):
             raise ValueError(
                 f"backbone must be 'simple' or 'songunet', got {self.backbone}."
@@ -646,6 +890,78 @@ class VideoDiffusionModelConfig:
         return sigma_min, sigma_max
 
     @property
+    def r_noise_distribution(self) -> NoiseDistribution:
+        if self.r_training_noise_distribution is not None:
+            return self.r_training_noise_distribution
+        return LogNormalNoiseDistribution(p_mean=-1.2, p_std=1.2)
+
+    @property
+    def d_noise_distribution(self) -> NoiseDistribution:
+        if self.d_training_noise_distribution is not None:
+            return self.d_training_noise_distribution
+        return LogNormalNoiseDistribution(p_mean=-1.2, p_std=1.2)
+
+    def two_block_sample_training_noise(
+        self, batch_size: int, device: torch.device
+    ) -> torch.Tensor:
+        """``(B, 2*n_channels, 1, 1)`` sigma: one shared ``sigma_r`` draw for
+        every r-block channel and one shared ``sigma_d`` draw for every
+        d-block channel (not per physical channel) -- the "fixed kernel"
+        scope of the two-block v1 (see ``two_block``'s docstring).
+        """
+        n_channels = len(self.out_names)
+        sigma_r = self.r_noise_distribution.sample(batch_size, device)
+        sigma_d = self.d_noise_distribution.sample(batch_size, device)
+        return torch.cat(
+            [
+                sigma_r.expand(-1, n_channels, -1, -1),
+                sigma_d.expand(-1, n_channels, -1, -1),
+            ],
+            dim=1,
+        )
+
+    def _block_channel_tensor(
+        self,
+        by_channel: dict[str, float] | None,
+        default: float,
+        device: torch.device,
+    ) -> torch.Tensor:
+        return torch.tensor(
+            [
+                default if by_channel is None else by_channel.get(name, default)
+                for name in self.out_names
+            ],
+            dtype=torch.float32,
+            device=device,
+        )
+
+    def two_block_sigma_data_tensor(self, device: torch.device) -> torch.Tensor:
+        """``(2*n_channels,)`` sigma_data, ordered ``[r-block (n_channels) |
+        d-block (n_channels)]``, each in ``out_names`` order.
+        """
+        r = self._block_channel_tensor(self.r_sigma_data_by_channel, 1.0, device)
+        d = self._block_channel_tensor(self.d_sigma_data_by_channel, 1.0, device)
+        return torch.cat([r, d])
+
+    def two_block_generation_sigma_bounds(
+        self, device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Same ordering as ``two_block_sigma_data_tensor``."""
+        r_min = self._block_channel_tensor(
+            self.r_sigma_min_by_channel, self.sigma_min, device
+        )
+        r_max = self._block_channel_tensor(
+            self.r_sigma_max_by_channel, self.sigma_max, device
+        )
+        d_min = self._block_channel_tensor(
+            self.d_sigma_min_by_channel, self.sigma_min, device
+        )
+        d_max = self._block_channel_tensor(
+            self.d_sigma_max_by_channel, self.sigma_max, device
+        )
+        return torch.cat([r_min, d_min]), torch.cat([r_max, d_max])
+
+    @property
     def data_requirements(self) -> "DataRequirements":
         # fine and coarse share out_names; coarse may be a lower spatial
         # resolution of the same variables (see coarse_normalization).
@@ -700,20 +1016,35 @@ class VideoDiffusionModelConfig:
         #    it's the full unmasked per-frame clip with no mask channel needed)
         # endpoints_observed=False requires coarse_normalizer set (validated in
         # __post_init__), so in_channels is always well-defined.
-        in_channels = 2 * n_channels
-        if self.endpoints_observed:
-            in_channels += n_channels + 1
-        if coarse_normalizer is not None:
-            in_channels += n_channels
-            if self.endpoints_observed or self.coarse_endpoints_only:
-                in_channels += 1  # coarse-observed mask channel
+        if self.two_block:
+            # two_block requires endpoints_observed=False, coarse_endpoints_only
+            # =True (validated in __post_init__), so the fine-endpoint block
+            # never enters conditioning and coarse_normalizer is always set --
+            # this mirrors the non-two_block coarse_endpoints_only branch
+            # below, just with a 2*n_channels-wide noisy-latent/log-sigma
+            # state (r-block + d-block, see `two_block`'s docstring) instead
+            # of n_channels.
+            assert coarse_normalizer is not None
+            in_channels = 4 * n_channels + n_channels + 1
+            out_channels = 2 * n_channels
+            sigma_data = self.two_block_sigma_data_tensor(get_device())
+        else:
+            in_channels = 2 * n_channels
+            if self.endpoints_observed:
+                in_channels += n_channels + 1
+            if coarse_normalizer is not None:
+                in_channels += n_channels
+                if self.endpoints_observed or self.coarse_endpoints_only:
+                    in_channels += 1  # coarse-observed mask channel
+            out_channels = n_channels
+            sigma_data = self.sigma_data_tensor(get_device())
         if self.backbone == "songunet":
             from fme.downscaling.modules.video_song_unet import VideoSongUNet
 
             default_attn = self.img_resolution[0] >> (len(self.channel_mult) - 1)
             net = VideoSongUNet(
                 in_channels=in_channels,
-                out_channels=n_channels,
+                out_channels=out_channels,
                 img_resolution=self.img_resolution,
                 seq_length=self.n_timesteps,
                 model_channels=self.model_channels,
@@ -726,7 +1057,7 @@ class VideoDiffusionModelConfig:
         else:
             net = VideoUNet(
                 in_channels=in_channels,
-                out_channels=n_channels,
+                out_channels=out_channels,
                 seq_length=self.n_timesteps,
                 model_channels=self.model_channels,
                 channel_mult=tuple(self.channel_mult),
@@ -741,7 +1072,7 @@ class VideoDiffusionModelConfig:
                 num_freqs=self.num_freqs,
                 noise_embedding_type=self.noise_embedding_type,
             )
-        module = VideoEDMPrecond(net, sigma_data=self.sigma_data_tensor(get_device()))
+        module = VideoEDMPrecond(net, sigma_data=sigma_data)
         endpoint_sr_module = None
         if self.endpoint_super_resolution is not None:
             endpoint_sr_module = self.endpoint_super_resolution.build(n_channels)
@@ -893,11 +1224,71 @@ class VideoDiffusionModel:
         else:
             self._noise_mixing = None
 
+        self.two_block = config.two_block
+        self.two_block_conditional_kernel = config.two_block_conditional_kernel
+        self._two_block_noise_mixing: torch.Tensor | None = None
+        self._r_basis: torch.Tensor | None = None
+        self._d_basis: torch.Tensor | None = None
+        self._r_encoder: torch.nn.Module | None = None
+        self._d_encoder: torch.nn.Module | None = None
+        self._weight_fit_loss_weight = config.weight_fit_loss_weight
+        if self.two_block_conditional_kernel:
+            n_channels = len(out_names)
+            self._r_basis = build_kernel_basis(
+                self._full_tau, _DEFAULT_R_KERNEL_BASIS, pin_endpoints=True
+            ).to(get_device())
+            self._d_basis = build_kernel_basis(
+                self._full_tau, _DEFAULT_D_KERNEL_BASIS, pin_endpoints=False
+            ).to(get_device())
+            self._r_encoder = dist.wrap_module(
+                ConditionEncoder(
+                    n_channels,
+                    len(_DEFAULT_R_KERNEL_BASIS),
+                    hidden=config.condition_encoder_hidden,
+                ).to(get_device())
+            )
+            self._d_encoder = dist.wrap_module(
+                ConditionEncoder(
+                    n_channels,
+                    len(_DEFAULT_D_KERNEL_BASIS),
+                    hidden=config.condition_encoder_hidden,
+                ).to(get_device())
+            )
+        elif self.two_block:
+            n_channels = len(out_names)
+            r_mixing = _channel_mixing_matrix(
+                self._full_tau, config.r_kernel, None, pin_endpoints=True
+            )
+            d_mixing = _channel_mixing_matrix(
+                self._full_tau,
+                config.d_kernel,
+                config.d_kernel_length_scale,
+                pin_endpoints=False,
+            )
+            # (2*n_channels, T, T): the r_kernel for every r-block channel,
+            # then the d_kernel for every d-block channel -- one shared
+            # kernel per block (not per physical channel), matching
+            # two_block's "fixed kernel" scope. Reuses the existing
+            # per-channel ("cti,bcihw->bcthw") einsum path in
+            # _sample_residual_noise/_video_edm_sample, which already
+            # applies a different kernel to each channel independently.
+            self._two_block_noise_mixing = torch.cat(
+                [
+                    r_mixing.unsqueeze(0).expand(n_channels, -1, -1),
+                    d_mixing.unsqueeze(0).expand(n_channels, -1, -1),
+                ],
+                dim=0,
+            ).to(get_device())
+
     @property
     def modules(self) -> torch.nn.ModuleList:
         modules = [self.module]
         if self.endpoint_sr_module is not None:
             modules.append(self.endpoint_sr_module)
+        if self._r_encoder is not None:
+            modules.append(self._r_encoder)
+        if self._d_encoder is not None:
+            modules.append(self._d_encoder)
         return torch.nn.ModuleList(modules)
 
     def _sample_residual_noise(
@@ -909,8 +1300,12 @@ class VideoDiffusionModel:
 
         ``mixing`` defaults to the full-grid mixing tensor; pass a subset matrix
         for a subset of frames, or ``None`` stays independent (mixing is ``None``
-        in independent mode regardless). ``mixing`` is either ``(T, T)`` (same
-        kernel for every channel) or ``(C, T, T)`` (per-channel kernels).
+        in independent mode regardless). ``mixing`` is ``(T, T)`` (same kernel
+        for every channel and sample), ``(C, T, T)`` (per-channel kernels,
+        shared across the batch), or ``(B, C, T, T)`` (per-sample-per-channel
+        kernels -- the conditional-kernel case, see
+        ``conditional_kernel.py``, where each batch element's own condition
+        ``c`` selects a different kernel mixture).
         """
         noise = randn_like(like)
         if mixing is None:
@@ -918,6 +1313,8 @@ class VideoDiffusionModel:
         if mixing is None:
             return noise
         mixing = mixing.to(device=noise.device, dtype=noise.dtype)
+        if mixing.ndim == 4:
+            return torch.einsum("bcti,bcihw->bcthw", mixing, noise)
         if mixing.ndim == 3:
             return torch.einsum("cti,bcihw->bcthw", mixing, noise)
         return torch.einsum("ti,bcihw->bcthw", mixing, noise)
@@ -1253,7 +1650,228 @@ class VideoDiffusionModel:
         anchor_clip[:, :, [0, -1]] = sr_endpoints
         return anchor_clip, loss_a
 
+    def _two_block_mixings_and_weight_fit_loss(
+        self,
+        coarse_clip: torch.Tensor,
+        n_channels: int,
+        r: torch.Tensor | None = None,
+        d: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """``(r_mixing, d_mixing, weight_fit_loss)`` for one batch.
+
+        Returned SEPARATELY (not concatenated into one ``2C``-channel
+        tensor) because ``r`` and ``d`` must be noised at their own native
+        resolution/subspace -- see ``_train_on_batch_two_block`` and
+        ``_generate_two_block``'s noise construction, and the correctness
+        note in ``VideoDiffusionModelConfig.two_block``'s docstring: noise
+        drawn as fine-resolution white noise (this method's caller used to
+        do, pre-fix) does not respect ``r``'s block-constant structure
+        (image of ``U``) or ``d``'s ``null(D)`` structure, unlike the
+        theory's forward-noise construction (Section 2:
+        ``K = diag(K_r ⊗ I_Mc, Pi(K_d ⊗ I_Mf) Pi^T)``).
+
+        Each of ``r_mixing``/``d_mixing`` is either ``(C, T, T)`` (fixed
+        kernel, shared across the batch) or, under
+        ``two_block_conditional_kernel``, ``(B, C, T, T)`` (per-sample,
+        built from ``g_phi(condition_features(coarse_clip))`` -- see
+        ``conditional_kernel.py``). Both are shared across channels within
+        their block (not per physical channel), matching two_block's
+        "fixed/conditional kernel per block" scope either way.
+
+        ``weight_fit_loss`` is only computed (non-``None``) in conditional
+        mode when the true ``r``/``d`` targets are given (training only,
+        not generation). Critically, ``r_mixing``/``d_mixing`` are built
+        from ``w_r.detach()``/``w_d.detach()`` -- gradients from the DSM
+        loss that uses them can never reach ``g_phi``'s parameters. Only
+        ``weight_fit_loss`` (built from the un-detached ``w_r``/``w_d``)
+        trains ``g_phi``, per ``conditional_kernel_theory.md``'s central
+        caveat that plain DSM does not learn the process-matched weights.
+        """
+        if not self.two_block_conditional_kernel:
+            assert self._two_block_noise_mixing is not None
+            r_mixing, d_mixing = self._two_block_noise_mixing.split(n_channels, dim=0)
+            return r_mixing, d_mixing, None
+        assert self._r_encoder is not None and self._d_encoder is not None
+        assert self._r_basis is not None and self._d_basis is not None
+        features = condition_features(coarse_clip)
+        w_r = self._r_encoder(features)  # (B, n_basis_r), grad-carrying
+        w_d = self._d_encoder(features)  # (B, n_basis_d)
+
+        weight_fit_loss = None
+        if r is not None and d is not None:
+            sigma_hat_r = empirical_covariance(r)
+            sigma_hat_d = empirical_covariance(d)
+            w_dagger_r = project_onto_kernel_hull(self._r_basis, sigma_hat_r)
+            w_dagger_d = project_onto_kernel_hull(self._d_basis, sigma_hat_d)
+            weight_fit_loss = torch.nn.functional.mse_loss(
+                w_r.mean(dim=0), w_dagger_r
+            ) + torch.nn.functional.mse_loss(w_d.mean(dim=0), w_dagger_d)
+
+        eps = 1e-4
+        n_times = self._r_basis.shape[-1]
+        eye = torch.eye(n_times, device=w_r.device, dtype=w_r.dtype)
+        # Detach here: everything downstream of k_r/k_d (the noise actually
+        # fed to the DSM loss) must be gradient-free w.r.t. g_phi.
+        k_r = torch.einsum("nb,bij->nij", w_r.detach(), self._r_basis)
+        k_d = torch.einsum("nb,bij->nij", w_d.detach(), self._d_basis)
+        l_r = torch.linalg.cholesky(k_r + eps * eye)
+        l_d = torch.linalg.cholesky(k_d + eps * eye)
+        r_mixing = l_r.unsqueeze(1).expand(-1, n_channels, -1, -1)  # (B, C, T, T)
+        d_mixing = l_d.unsqueeze(1).expand(-1, n_channels, -1, -1)  # (B, C, T, T)
+        return r_mixing, d_mixing, weight_fit_loss
+
+    def _two_block_noise(
+        self,
+        r_like: torch.Tensor,
+        d_like: torch.Tensor,
+        r_mixing: torch.Tensor,
+        d_mixing: torch.Tensor,
+        factor: int,
+    ) -> torch.Tensor:
+        """Structurally-correct two-block noise, shared by training and the
+        initial-latents draw at generation: ``r`` is drawn NATIVELY at
+        coarse resolution (``r_like``'s shape) then broadcast to fine
+        resolution via ``U`` -- matching ``r_fine``'s block-constant
+        structure (image of ``U``) -- and ``d`` is drawn at fine resolution
+        (``d_like``'s shape) then projected via ``Pi`` onto ``null(D)``.
+
+        Fine-resolution white noise for either block (this method's
+        predecessor) would be mis-specified: ``r``'s target is
+        block-constant but white noise carries ~``(factor**2-1)/factor**2``
+        of its variance outside that subspace, and ``d``'s target lives in
+        ``null(D)`` but white noise carries ``1/factor**2`` of its variance
+        in the coarse-representable complement. Matches the theory's
+        forward-noise construction exactly (Section 2 of
+        ``idea/spatiotemoral/twoblock_theory.md``): ``K = diag(K_r x I_Mc,
+        Pi(K_d x I_Mf) Pi^T)``. See ``_generate_two_block``'s
+        ``project_churn_noise`` for the analogous per-sampler-step
+        correction applied to the reverse-diffusion churn noise.
+        """
+        noise_r = self._sample_residual_noise(r_like, r_mixing)
+        noise_r_fine = block_replicate_upsample(noise_r, factor)
+        noise_d = null_space_projector(
+            self._sample_residual_noise(d_like, d_mixing), factor
+        )
+        return torch.cat([noise_r_fine, noise_d], dim=CHANNEL_AXIS)
+
+    def _train_on_batch_two_block(
+        self, batch: PairedVideoBatchData, optimizer
+    ) -> ModelOutputs:
+        """Two-block (r, d) training step -- see ``VideoDiffusionModelConfig
+        .two_block``'s docstring and ``fme/downscaling/twoblock.py``. A
+        separate method from ``train_on_batch`` (rather than more branches
+        threaded through it) because two_block disables subset
+        augmentation, marginal consistency, and stage A entirely (validated
+        in ``__post_init__``), so almost none of that method's other
+        branching applies here.
+        """
+        fine = batch.fine
+        fine_clip = self._pack_normalized(fine.data)
+        assert self.coarse_normalizer is not None  # validated in __post_init__
+        coarse_clip = self._pack_normalized(batch.coarse.data, self.coarse_normalizer)
+        day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+        batch_size, n_channels, n_times, fine_h, fine_w = fine_clip.shape
+        factor = fine_h // coarse_clip.shape[-2]
+
+        r, interp = r_target(coarse_clip)
+        d = d_target(fine_clip, coarse_clip, factor)
+        r_fine = block_replicate_upsample(r, factor)
+        residual = torch.cat([r_fine, d], dim=CHANNEL_AXIS)  # (B, 2C, T, Hf, Wf)
+
+        r_mask = _interior_mask(n_times, fine_clip.device, endpoints_observed=True)
+        d_mask = _interior_mask(n_times, fine_clip.device, endpoints_observed=False)
+        mask = torch.cat(
+            [
+                r_mask.expand(-1, n_channels, -1, -1, -1),
+                d_mask.expand(-1, n_channels, -1, -1, -1),
+            ],
+            dim=CHANNEL_AXIS,
+        )
+
+        coarse_upsampled = block_replicate_upsample(coarse_clip, factor)
+        # _conditioning's fine-endpoint block is a no-op here (endpoints_observed
+        # is False, validated in __post_init__) -- only coarse_upsampled matters,
+        # masked to the endpoint positions via coarse_endpoints_only.
+        condition = self._conditioning(fine_clip, r_mask, coarse_upsampled)
+
+        r_mixing, d_mixing, weight_fit_loss = (
+            self._two_block_mixings_and_weight_fit_loss(
+                coarse_clip, n_channels, r=r, d=d
+            )
+        )
+
+        sigma = self.config.two_block_sample_training_noise(
+            batch_size, fine_clip.device
+        ).reshape(batch_size, 2 * n_channels, 1, 1, 1)
+        noise = self._two_block_noise(r, d, r_mixing, d_mixing, factor)
+        noised = residual + noise * sigma * mask
+
+        denoised = self.module(
+            noised, condition, sigma, day_of_year, second_of_day, lon, frame_index=None
+        )
+
+        sigma_data = self.config.two_block_sigma_data_tensor(fine_clip.device).reshape(
+            1, -1, 1, 1, 1
+        )
+        weight = (
+            (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+        ) ** self.config.loss_weight_exponent
+        sq_err = (denoised - residual) ** 2 * mask
+        n_masked = mask.expand_as(sq_err).sum()
+        dsm_loss = (weight * sq_err).sum() / n_masked
+        loss = dsm_loss
+        if weight_fit_loss is not None:
+            loss = loss + self._weight_fit_loss_weight * weight_fit_loss
+
+        optimizer.accumulate_loss(loss)
+        optimizer.step_weights()
+
+        with torch.no_grad():
+            denoised_r_fine, denoised_d = denoised.split(n_channels, dim=CHANNEL_AXIS)
+            r_hat = conservative_downsample(denoised_r_fine, factor) * r_mask
+            d_hat = denoised_d * d_mask
+            full_norm = assemble_fine_output(interp, r_hat, d_hat, factor)
+            prediction = self._denormalize_invert(full_norm)
+
+            weighted_sq_err = sq_err * weight
+            r_elems = r_mask.expand(batch_size, 1, n_times, fine_h, fine_w).sum(
+                dim=(-3, -2, -1)
+            )
+            d_elems = d_mask.expand(batch_size, 1, n_times, fine_h, fine_w).sum(
+                dim=(-3, -2, -1)
+            )
+            total_r_elems = r_elems.sum().clamp(min=1)
+            total_d_elems = d_elems.sum().clamp(min=1)
+            channel_losses = {}
+            per_sample_channel_loss = {}
+            for i, name in enumerate(self.out_names):
+                r_sum = weighted_sq_err[:, i].sum(dim=(-3, -2, -1))
+                d_sum = weighted_sq_err[:, n_channels + i].sum(dim=(-3, -2, -1))
+                channel_losses[name] = (r_sum.sum() + d_sum.sum()) / (
+                    total_r_elems + total_d_elems
+                )
+                per_sample_channel_loss[name] = (r_sum + d_sum) / (
+                    r_elems.flatten() + d_elems.flatten()
+                ).clamp(min=1)
+
+        target = {k: fine.data[k] for k in self.out_names}
+        return ModelOutputs(
+            prediction=prediction,
+            target=target,
+            loss=loss,
+            marginal_consistency_loss=None,
+            channel_losses=channel_losses,
+            sigma=sigma.squeeze(-1).squeeze(-1).squeeze(-1),
+            per_sample_channel_loss=per_sample_channel_loss,
+            endpoint_sr_loss=None,
+            weight_fit_loss=(
+                None if weight_fit_loss is None else weight_fit_loss.detach()
+            ),
+        )
+
     def train_on_batch(self, batch: PairedVideoBatchData, optimizer) -> ModelOutputs:
+        if self.two_block:
+            return self._train_on_batch_two_block(batch, optimizer)
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
         day_of_year, second_of_day, lon = self._calendar_inputs(fine)
@@ -1407,6 +2025,140 @@ class VideoDiffusionModel:
         )
 
     @torch.no_grad()
+    def _generate_two_block(
+        self,
+        batch: PairedVideoBatchData,
+        n_samples: int = 1,
+        frames: list[int] | None = None,
+    ) -> TensorDict:
+        """Two-block (r, d) generation -- see ``_train_on_batch_two_block``
+        and ``VideoDiffusionModelConfig.two_block``'s docstring. Frame
+        subsetting isn't supported yet (out of scope for the first
+        version, matching ``subset_augmentation_prob``'s two_block
+        restriction).
+        """
+        if frames is not None:
+            raise NotImplementedError(
+                "two_block does not support frame subsetting yet."
+            )
+        fine = batch.fine
+        fine_clip = self._pack_normalized(fine.data)
+        assert self.coarse_normalizer is not None  # validated in __post_init__
+        coarse_clip = self._pack_normalized(batch.coarse.data, self.coarse_normalizer)
+        day_of_year, second_of_day, lon = self._calendar_inputs(fine)
+        batch_size, n_channels, n_times, fine_h, fine_w = fine_clip.shape
+        factor = fine_h // coarse_clip.shape[-2]
+
+        interp = coarse_temporal_interp(coarse_clip)
+        r_mask = _interior_mask(n_times, fine_clip.device, endpoints_observed=True)
+        d_mask = _interior_mask(n_times, fine_clip.device, endpoints_observed=False)
+        mask = torch.cat(
+            [
+                r_mask.expand(-1, n_channels, -1, -1, -1),
+                d_mask.expand(-1, n_channels, -1, -1, -1),
+            ],
+            dim=CHANNEL_AXIS,
+        )
+        coarse_h, coarse_w = coarse_clip.shape[-2:]
+        coarse_upsampled = block_replicate_upsample(coarse_clip, factor)
+        condition = self._conditioning(fine_clip, r_mask, coarse_upsampled)
+        # Computed on the un-repeated batch: condition features/g_phi only
+        # depend on the true condition c, not the ensemble size.
+        r_mixing, d_mixing, _ = self._two_block_mixings_and_weight_fit_loss(
+            coarse_clip, n_channels
+        )
+
+        def repeat(t):
+            return t.repeat_interleave(n_samples, dim=0)
+
+        condition = repeat(condition)
+        interp = repeat(interp)
+        day_of_year = repeat(day_of_year)
+        second_of_day = repeat(second_of_day)
+        mask_b = mask.expand(batch_size * n_samples, 2 * n_channels, n_times, 1, 1)
+        if r_mixing.ndim == 4:  # (B, C, T, T): per-sample, repeat per ensemble member
+            r_mixing = repeat(r_mixing)
+            d_mixing = repeat(d_mixing)
+
+        latents = self._two_block_noise(
+            torch.empty(
+                batch_size * n_samples,
+                n_channels,
+                n_times,
+                coarse_h,
+                coarse_w,
+                device=fine_clip.device,
+            ),
+            torch.empty(
+                batch_size * n_samples,
+                n_channels,
+                n_times,
+                fine_h,
+                fine_w,
+                device=fine_clip.device,
+            ),
+            r_mixing,
+            d_mixing,
+            factor,
+        )
+        sigma_min, sigma_max = self.config.two_block_generation_sigma_bounds(
+            fine_clip.device
+        )
+
+        def project_churn_noise(noise: torch.Tensor) -> torch.Tensor:
+            """Same r/d structural correction as the noise construction
+            above, applied to the sampler's per-step stochastic churn term
+            (_video_edm_sample's noise_mixing produces fine-resolution
+            noise for both blocks uniformly; this restores each block's
+            true subspace). r: project onto row(U) (average within each
+            block, re-broadcast) and rescale by `factor` to restore unit
+            variance (averaging factor**2 iid values divides variance by
+            factor**2, so undoing that needs a sqrt(factor**2)=factor
+            correction -- verified numerically, see git history). d:
+            project onto null(D) via Pi, same as the initial latents.
+            """
+            noise_r_part, noise_d_part = noise.split(n_channels, dim=CHANNEL_AXIS)
+            noise_r_part = (
+                block_replicate_upsample(
+                    conservative_downsample(noise_r_part, factor), factor
+                )
+                * factor
+            )
+            noise_d_part = null_space_projector(noise_d_part, factor)
+            return torch.cat([noise_r_part, noise_d_part], dim=CHANNEL_AXIS)
+
+        # Recombined into one 2C-channel tensor for _video_edm_sample's
+        # generic temporal-mixing step; project_churn_noise applies the
+        # per-block spatial correction afterward, every reverse-diffusion
+        # step (not just the initial latents draw above).
+        combined_mixing = torch.cat(
+            [r_mixing, d_mixing], dim=1 if r_mixing.ndim == 4 else 0
+        )
+        residual = _video_edm_sample(
+            self.module,
+            latents,
+            condition,
+            mask_b,
+            day_of_year,
+            second_of_day,
+            lon,
+            num_steps=self.config.num_diffusion_generation_steps,
+            sigma_min=sigma_min,
+            sigma_max=sigma_max,
+            s_churn=self.config.churn,
+            noise_mixing=combined_mixing,
+            project_noise=project_churn_noise,
+            frame_index=None,
+        )
+        denoised_r_fine, denoised_d = residual.split(n_channels, dim=CHANNEL_AXIS)
+        r_hat = conservative_downsample(denoised_r_fine, factor)
+        full_norm = assemble_fine_output(interp, r_hat, denoised_d, factor)
+        generated = self._denormalize_invert(full_norm)
+        return {
+            k: v.reshape(batch_size, n_samples, *v.shape[1:])
+            for k, v in generated.items()
+        }
+
     def generate(
         self,
         batch: PairedVideoBatchData,
@@ -1425,6 +2177,8 @@ class VideoDiffusionModel:
         bridge noise use the subset's true times, so a subset draws from the
         exact marginal of the full-window process. Defaults to the full grid.
         """
+        if self.two_block:
+            return self._generate_two_block(batch, n_samples, frames)
         fine = batch.fine
         clip = self._pack_normalized(fine.data)
         day_of_year, second_of_day, lon = self._calendar_inputs(fine)
@@ -1602,6 +2356,10 @@ class VideoDiffusionModel:
         }
         if self.endpoint_sr_module is not None:
             state["endpoint_sr_module"] = self.endpoint_sr_module.state_dict()
+        if self._r_encoder is not None:
+            assert self._d_encoder is not None
+            state["r_encoder"] = self._r_encoder.state_dict()
+            state["d_encoder"] = self._d_encoder.state_dict()
         return state
 
 
@@ -1619,11 +2377,20 @@ def _video_edm_sample(
     rho: float = 7.0,
     s_churn: float = 0.0,
     noise_mixing: torch.Tensor | None = None,
+    project_noise: Callable[[torch.Tensor], torch.Tensor] | None = None,
     frame_index: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """EDM stochastic sampler that keeps the observed endpoints pinned (re-zeroed
     after every update). When ``noise_mixing`` is given, the stochastic churn noise
-    is temporally correlated with that mixing matrix (matching the training noise).
+    is temporally correlated with that mixing matrix (matching the training noise;
+    shapes ``(T, T)``/``(C, T, T)``/``(B, C, T, T)`` -- see
+    ``VideoDiffusionModel._sample_residual_noise``'s docstring). ``project_noise``,
+    if given, is applied to the churn noise after temporal mixing -- used by
+    two_block to restore each block's true spatial subspace (r: image of
+    ``U``; d: ``null(D)``) every reverse-diffusion step, since the temporal
+    mixing alone is spatially white and would otherwise leak noise into a
+    subspace the target never occupies (see
+    ``VideoDiffusionModel._generate_two_block``'s ``project_churn_noise``).
     """
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
     sigma_min_t = torch.as_tensor(
@@ -1659,11 +2426,18 @@ def _video_edm_sample(
     def churn_noise(x):
         noise = torch.randn_like(x)
         if noise_mixing is None:
-            return noise
-        mixing = noise_mixing.to(device=noise.device, dtype=noise.dtype)
-        if mixing.ndim == 3:
-            return torch.einsum("cti,bcihw->bcthw", mixing, noise)
-        return torch.einsum("ti,bcihw->bcthw", mixing, noise)
+            mixed = noise
+        else:
+            mixing = noise_mixing.to(device=noise.device, dtype=noise.dtype)
+            if mixing.ndim == 4:
+                mixed = torch.einsum("bcti,bcihw->bcthw", mixing, noise)
+            elif mixing.ndim == 3:
+                mixed = torch.einsum("cti,bcihw->bcthw", mixing, noise)
+            else:
+                mixed = torch.einsum("ti,bcihw->bcthw", mixing, noise)
+        if project_noise is not None:
+            mixed = project_noise(mixed.to(x.dtype))
+        return mixed
 
     x = latents.to(compute_dtype) * t[0] * mask
     for i, (t_cur, t_next) in enumerate(zip(t[:-1], t[1:])):

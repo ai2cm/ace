@@ -1,0 +1,239 @@
+# Stage 2: spatiotemporal video PMD, TWO-BLOCK mode (2026-08-26).
+#
+# See idea/spatiotemoral/twoblock_theory.md (repo root) and
+# fme/downscaling/twoblock.py for the full derivation. This is the Day 4-5
+# "first version" of the two-block (r, d) design applied to the exact same
+# LR-endpoints-in/HR-full-out setting as
+# ../2026-08-07-video-pmd-spatiotemporal-25km-100km-singlestage-coarse-endpoints-flat/
+# (endpoints_observed=false, coarse_endpoints_only=true) -- same data,
+# channels, and backbone size, so the two runs are directly comparable.
+#
+# What changes vs. that config: instead of diffusing one joint residual
+# with a single noise kernel (which idea/spatiotemoral/twoblock_theory.md's
+# Prop 1/2 show is provably mis-specified -- the residual is a sum of a
+# pinned coarse-temporal part and an unpinned fine-detail part that no
+# single "temporal kernel (x) spatial identity" noise class can fit), this
+# splits the residual into two blocks with two dedicated kernels
+# (VideoDiffusionModelConfig.two_block -- see its docstring in
+# fme/downscaling/video_models.py):
+#   - r: coarse-temporal residual, pinned to 0 at the two endpoints,
+#     brownian_bridge kernel (r_kernel).
+#   - d: fine-detail residual, present at every frame including the
+#     endpoints, independent/flat kernel (d_kernel) -- the "-flat" in this
+#     experiment's name refers to d_kernel, matching the existing
+#     -flat/-ou naming convention for the single-stage variants.
+# Reassembled via twoblock.assemble_fine_output, which guarantees
+# D(x_hat) == I + r_hat exactly (Prop 4) -- verify this didn't regress in
+# the real training run the same way test_two_block_exact_coarse_recovery
+# checks it on synthetic data (e.g. spot-check a val batch's
+# conservative_downsample(generated) against the coarse-interpolated
+# baseline; should match to float32 precision, not just approximately).
+#
+# in_channels changed (4C+C+1 instead of 3C+1: the noisy latent and its
+# log-sigma feature map are now 2C wide, r-block + d-block stacked), so
+# this is a from-scratch run, not resumed from the single-block checkpoint.
+#
+# r_sigma_data_by_channel/d_sigma_data_by_channel are calibrated below
+# (see the model block's own comment for the script/methodology) -- FIXED
+# from this run's predecessor, which left them at the 1.0 default.
+#
+# KNOWN CAVEAT (quantified, not yet designed around): coarse_clip and
+# fine_clip are independently-sourced stores, not a literal D-downsample
+# pair (see twoblock.d_target's docstring) -- ||x_c - D(x_f)|| is
+# 9-28% of r_std and 26-56% of d_std per channel (winds/PRMSL grow toward
+# the poles, consistent with D being an unweighted box mean vs. a
+# plausibly area-weighted native regrid; PRATEsfc peaks at the equator,
+# more likely genuine subgrid convective heterogeneity). This is an
+# IRREDUCIBLE bias in the assembled output relative to fine truth, not
+# attributable to model error -- eval scripts comparing D(generated)
+# against fine truth (rather than against the coarse input) need to
+# account for this floor. Kept as-is (r pinned to the real coarse
+# store, matching actual inference-time input) rather than switching r's
+# target to D(x_f)-I (which would make assembly exact against fine truth
+# but pinning only approximate against the real coarse input this model
+# will actually be given at inference) -- see
+# scripts/video_pmd_eval/residual_calibration_diagnostic.py's docstring
+# and idea/spatiotemoral/twoblock_theory.md's implementation-status
+# section for the full reasoning.
+#
+# Data: 2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr on weka
+# (/climate-default/2026-06-25-temporal-diffusion), same store/split as
+# every other spatiotemporal config in this family. downscale_factor = 4.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20
+max_test_batches: 50
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-25km-100km-spatiotemporal-two-block-5ch-coarse-endpoints-flat
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+coarse_patch_extent_lat: 44
+coarse_patch_extent_lon: 72
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 4  # global across ranks (4 GPUs x 1 sample/GPU) -- matches the single-block configs
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  # Two-block mode: see the header comment above and
+  # VideoDiffusionModelConfig.two_block's docstring in
+  # fme/downscaling/video_models.py.
+  endpoints_observed: false
+  coarse_endpoints_only: true
+  two_block: true
+  r_kernel: brownian_bridge
+  d_kernel: independent
+  # temporal_noise_correlation must stay at its "independent" default (not
+  # set here) -- two_block uses r_kernel/d_kernel instead (validated in
+  # __post_init__).
+  # Calibrated from scripts/video_pmd_eval/residual_calibration_diagnostic.py
+  # (run via run_residual_calibration_diagnostic.sh on real weka data,
+  # 2026-08-26): std of r_target/d_target in the model's own normalized
+  # units, pooled over 8 seasonal windows, global grid. Previously left at
+  # the 1.0 default -- per the single-block configs' own experience
+  # (toy/compute_residual_std.py), this calibration is a make-or-break item
+  # for EDM preconditioning/loss weighting, not a "fix later if training
+  # behaves unexpectedly" afterthought.
+  r_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.3201
+    northward_wind_at_ten_meters: 0.4415
+    PRMSL: 0.1783
+    PRATEsfc: 0.6825
+    air_temperature_at_two_meters: 0.1229
+  d_sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.1617
+    northward_wind_at_ten_meters: 0.1892
+    PRMSL: 0.0586
+    PRATEsfc: 0.4254
+    air_temperature_at_two_meters: 0.0529
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # fine (25km), train-only, global domain -- toy/compute_norm_stats_25km.py
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074   # log1p(PRATEsfc * 86400) space, matching log_transform_channels
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:  # coarse (100km), train-only, global domain -- reused verbatim
+    # from the stage-1 config: verified 2026-07-24 that the 100km store is
+    # byte-identical to the dataset those stats were computed from.
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363

@@ -52,6 +52,10 @@ class ModelOutputs:
     # Optional stage-A (endpoint super-resolution) denoising loss, for
     # logging only -- already included (weighted) in `loss`.
     endpoint_sr_loss: torch.Tensor | None = None
+    # Optional two-block conditional-kernel moment-matching loss (see
+    # fme/downscaling/conditional_kernel.py), for logging only -- already
+    # included (weighted) in `loss`.
+    weight_fit_loss: torch.Tensor | None = None
 
 
 def _rename_normalizer(
