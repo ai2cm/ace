@@ -1,36 +1,27 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr|rs0|01M0BMH6E3X1YGX06CM5N96PWA|training|best_inference_ckpt|normal|--min-runtime 8h
+# ocean_precorr
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr|rs1|01M0BMHK8B9GXZ3E437M5NSV7Z|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs0|01M0BMH6E3X1YGX06CM5N96PWA|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr|rs2|01M0BMJ0F52G1YD6SDE3A4AVX0|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs1|01M0BMHK8B9GXZ3E437M5NSV7Z|cancelled|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr|rs2|01M0BMJ0F52G1YD6SDE3A4AVX0|cancelled|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|training|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|training|best_inference_ckpt|normal|--min-runtime 8h
+# ocean_precorr_clip
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|run_1pct-ic0001-130yr|best_inference_ckpt||high|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs1|01M0DCTFB5TE15VNF02VRC858P|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|run_1pct-ic0001-130yr|best_inference_ckpt||high|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs2|01M0DCTWTK1M2515F9WBR4SQAC|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|run_1pct-ic0001-130yr|best_inference_ckpt||high|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
 
-# ICx1 130-yr out-of-sample evaluation, 2026-08-24 -- the fill-0.0 /
-# current-exclude cell of the fill-value x masking-scope 2x2, which is these
-# three ocean_precorr_clip seeds. Same evaluator-config-ICx1-130yr.yaml as the
-# five arms in ocean_precorr_clip_maskfill/ (kept byte-identical), so the 2x2 is
-# evaluated under one setup and the control's seed spread is available to read
-# the single-seed arms against.
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
 
-# piControl 200-yr rollout, 2026-08-24 -- the fill-0.0 / current-exclude cell of
-# the 2x2, these three ocean_precorr_clip seeds. Same evaluator-config-piC-200yr.yaml
-# as the five arms in ocean_precorr_clip_maskfill/ (kept byte-identical).
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs0|01M0C73HGGYHY94EZXWAJXECTE|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs1|01M0C73Z1EPCK8A4VBX6T2F67P|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+# ocean_precorr_clip_cde1
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|trained|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs1|01M0DCTFB5TE15VNF02VRC858P|trained|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs2|01M0DCTWTK1M2515F9WBR4SQAC|trained|best_inference_ckpt|normal|--min-runtime 8h
