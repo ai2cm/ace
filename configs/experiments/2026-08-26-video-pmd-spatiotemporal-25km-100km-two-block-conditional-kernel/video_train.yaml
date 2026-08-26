@@ -1,0 +1,202 @@
+# Stage 2: spatiotemporal video PMD, TWO-BLOCK + CONDITIONAL-KERNEL mode
+# (2026-08-26).
+#
+# See idea/conditional_kernel_theory.md and idea/spatiotemoral/
+# twoblock_theory.md (repo root) plus fme/downscaling/conditional_kernel.py
+# / fme/downscaling/twoblock.py for the full derivation. Same
+# LR-endpoints-in/HR-full-out setting, data, channels, and backbone size as
+# ../2026-08-26-video-pmd-spatiotemporal-25km-100km-two-block/ (the fixed-
+# kernel two-block run) -- directly comparable to that run and to
+# ../2026-08-07-video-pmd-spatiotemporal-25km-100km-singlestage-coarse-endpoints-flat/.
+#
+# What changes vs. the fixed-kernel two-block config: instead of one shared
+# r_kernel (brownian_bridge) and one shared d_kernel (independent) for
+# every sample, VideoDiffusionModelConfig.two_block_conditional_kernel
+# replaces each with a small fixed BASIS of kernels
+# (_DEFAULT_R_KERNEL_BASIS / _DEFAULT_D_KERNEL_BASIS in
+# fme/downscaling/video_models.py) plus a tiny conditioning network g_phi
+# that maps the coarse endpoint-difference statistics to per-sample simplex
+# weights over that basis -- so different samples (e.g. a quiet period vs.
+# a storm) can get different effective noise kernels. g_phi is trained by a
+# separate convex moment-matching loss (weight_fit_loss,
+# weight_fit_loss_weight below), NOT the denoising loss -- see
+# conditional_kernel.py's module docstring and
+# idea/conditional_kernel_theory.md's central caveat ("plain DSM does NOT
+# learn w*"); this is verified in
+# test_conditional_kernel_dsm_loss_does_not_backprop_into_encoders.
+#
+# r_kernel/d_kernel/d_kernel_length_scale are omitted below (must stay at
+# their defaults, validated in __post_init__ -- the fixed basis supersedes
+# them). r_sigma_data_by_channel/d_sigma_data_by_channel are left UNSET
+# (default 1.0), same caveat as the fixed-kernel config: no two-block
+# residual-std calibration script exists yet.
+#
+# What to check in this run beyond the fixed-kernel comparison (CRPS,
+# endpoint-time error, D(x_hat)=I+r_hat exactness): whether conditioning
+# actually helps -- idea/conditional_kernel_theory.md's falsifiable
+# prediction is that conditional weights only beat a single global/fixed
+# kernel "iff the binned block covariances vary across bins" (Prop 3), so a
+# null result here (no improvement over the fixed-kernel run) is itself
+# informative, not just a bug to chase.
+#
+# Data: 2026-07-14-X-SHiELD-AMIP-FME-3h-{25km,100km}.zarr on weka
+# (/climate-default/2026-06-25-temporal-diffusion), same store/split as
+# every other spatiotemporal config in this family. downscale_factor = 4.
+experiment_dir: /results
+max_epochs: 200
+validate_using_ema: true
+validate_interval: 10
+test_interval: 20
+max_val_batches: 20
+max_test_batches: 50
+generate_n_samples: 1
+log_loss_vs_noise: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-temporal-interp
+  name: global-25km-100km-spatiotemporal-two-block-conditional-kernel-5ch-coarse-endpoints
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+ema:
+  decay: 0.9999
+coarse_patch_extent_lat: 44
+coarse_patch_extent_lon: 72
+train_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2013-01-02"
+        stop_time: "2021-12-31"
+  batch_size: 4  # global across ranks (4 GPUs x 1 sample/GPU) -- matches the two-block config
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+validation_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2022-01-01"
+        stop_time: "2022-12-31"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+test_data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-25km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2026-07-14-X-SHiELD-AMIP-FME-3h-100km.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 4
+  num_data_workers: 2
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  # Two-block + conditional-kernel mode: see the header comment above and
+  # VideoDiffusionModelConfig.two_block/two_block_conditional_kernel's
+  # docstrings in fme/downscaling/video_models.py. r_kernel/d_kernel/
+  # d_kernel_length_scale intentionally omitted -- must stay at their
+  # defaults (validated in __post_init__), superseded by the fixed basis.
+  endpoints_observed: false
+  coarse_endpoints_only: true
+  two_block: true
+  two_block_conditional_kernel: true
+  weight_fit_loss_weight: 1.0
+  condition_encoder_hidden: 16
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # fine (25km), train-only, global domain -- toy/compute_norm_stats_25km.py
+    means:
+      eastward_wind_at_ten_meters: -0.036200
+      northward_wind_at_ten_meters: 0.170470
+      PRMSL: 1008.160699
+      PRATEsfc: 0.484074   # log1p(PRATEsfc * 86400) space, matching log_transform_channels
+      air_temperature_at_two_meters: 279.675977
+    stds:
+      eastward_wind_at_ten_meters: 5.627319
+      northward_wind_at_ten_meters: 4.692752
+      PRMSL: 15.043594
+      PRATEsfc: 0.850964
+      air_temperature_at_two_meters: 20.455977
+  coarse_normalization:  # coarse (100km), train-only, global domain -- reused verbatim
+    # from the stage-1 config: verified 2026-07-24 that the 100km store is
+    # byte-identical to the dataset those stats were computed from.
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
