@@ -181,13 +181,12 @@ def _samudra(**kwargs):
     )
 
 
+def _noise_only_context(noise):
+    return Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=noise)
+
+
 def _context(n_noise, n_samples, img_shape):
-    return Context(
-        embedding_scalar=None,
-        embedding_pos=None,
-        labels=None,
-        noise=torch.randn(n_samples, n_noise, *img_shape),
-    )
+    return _noise_only_context(torch.randn(n_samples, n_noise, *img_shape))
 
 
 def _noise_context_config(n_noise):
@@ -247,32 +246,36 @@ def test_convnext_block_conditioning_resamples_coarser_noise():
         torch.nn.init.normal_(module.W_bias.weight, std=0.1)
     x = torch.randn(2, 4, 4, 8)
     fine = torch.randn(2, n_noise, 16, 32)
-    coarse = torch.nn.functional.adaptive_avg_pool2d(fine, (4, 8))
+    subsampled = fine[..., ::4, ::4]
+    averaged = torch.nn.functional.adaptive_avg_pool2d(fine, (4, 8))
     with torch.no_grad():
-        from_fine = block(
-            x,
-            Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=fine),
-        )
-        from_coarse = block(
-            x,
-            Context(
-                embedding_scalar=None, embedding_pos=None, labels=None, noise=coarse
-            ),
-        )
-        # a resampling that keeps the shape but not the area average
-        from_subsample = block(
-            x,
-            Context(
-                embedding_scalar=None,
-                embedding_pos=None,
-                labels=None,
-                noise=fine[..., ::4, ::4],
-            ),
-        )
+        from_fine = block(x, _noise_only_context(fine))
+        from_subsampled = block(x, _noise_only_context(subsampled))
+        from_averaged = block(x, _noise_only_context(averaged))
     assert from_fine.shape == x.shape
-    # the resampling is the area average, not just any shape-matching reduction
-    torch.testing.assert_close(from_fine, from_coarse, rtol=0.0, atol=0.0)
-    assert not torch.allclose(from_fine, from_subsample)
+    # the resampling is the subsample, which preserves the noise amplitude...
+    torch.testing.assert_close(from_fine, from_subsampled, rtol=0.0, atol=0.0)
+    # ...and not the area average, which would divide it by the pooling factor
+    assert not torch.allclose(from_fine, from_averaged)
+
+
+def test_conditioning_noise_keeps_unit_variance_at_every_depth():
+    """Conditioning weights are shared-LR and zero-initialized, so the noise
+    reaching each block has to be the same size at every depth. Area-averaging
+    would hand the bottleneck ~1/16 amplitude on the 4-degree grid and spread it
+    20-fold across the blocks ``all_blocks`` conditions.
+    """
+    torch.manual_seed(0)
+    conditioning = NoiseConditioning(n_channels=3, embed_dim_noise=2)
+    # the 4-degree ocean grid and the block resolutions Samudra's AvgPools give
+    noise = torch.randn(64, 2, 45, 90)
+    for target in [(45, 90), (22, 45), (11, 22), (5, 11), (2, 5)]:
+        x = torch.zeros(64, 3, *target)
+        resampled = torch.nn.functional.interpolate(noise, size=target, mode="nearest")
+        assert resampled.shape[-2:] == target
+        assert abs(resampled.std().item() - 1.0) < 0.05, target
+        # and the conditioning really consumes that resampled field
+        conditioning(x, noise)
 
 
 @pytest.mark.parametrize("noise_injection", ["bottleneck", "all_blocks"])

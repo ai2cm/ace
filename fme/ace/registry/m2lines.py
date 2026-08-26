@@ -61,7 +61,7 @@ class SamudraBuilder(ModuleConfig):
 
 @ModuleSelector.register("NoiseConditionedSamudra")
 @dataclasses.dataclass
-class NoiseConditionedSamudraBuilder(SamudraBuilder):
+class NoiseConditionedSamudraBuilder(ModuleConfig):
     """
     Configuration for a noise-conditioned M2Lines Samudra architecture.
 
@@ -70,6 +70,10 @@ class NoiseConditionedSamudraBuilder(SamudraBuilder):
     members can be drawn from one input and trained against a proper scoring
     rule. The conditioning weights are zero-initialized, so an untrained model
     is exactly deterministic.
+
+    Deliberately a sibling of ``SamudraBuilder`` rather than a subclass, matching
+    ``NoiseConditionedSwinTransformerBuilder``: the architecture fields are
+    repeated so neither builder's methods need to be `@final`.
 
     Parameters:
         noise_embed_dim: Number of noise channels drawn and projected onto each
@@ -82,18 +86,27 @@ class NoiseConditionedSamudraBuilder(SamudraBuilder):
             which also reaches the finest scales.
     """
 
+    ch_width: list[int] = dataclasses.field(
+        default_factory=lambda: [200, 250, 300, 400]
+    )
+    n_layers: list[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1])
+    dilation: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
+    pad: str = "circular"
+    norm: str = "instance"
+    norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    upscale_factor: int = 4
+    checkpoint_strategy: Literal["all", "simple"] | None = None
+    zonally_periodic_upsample: bool = False
     noise_embed_dim: int = 32
     noise_injection: NoiseInjection = "bottleneck"
 
     def __post_init__(self):
-        super().__post_init__()
+        if "num_features" in self.norm_kwargs:
+            raise ValueError("norm_kwargs should not have num_features")
+        if "normalized_shape" in self.norm_kwargs:
+            raise ValueError("norm_kwargs should not have normalized_shape")
         if self.noise_embed_dim <= 0:
             raise ValueError("noise_embed_dim must be positive")
-        if self.norm is None:
-            raise ValueError(
-                "noise conditioning needs a normalization layer to condition, "
-                "so norm cannot be None"
-            )
 
     def build(
         self,

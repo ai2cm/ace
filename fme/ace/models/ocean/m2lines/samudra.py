@@ -133,22 +133,22 @@ class Samudra(torch.nn.Module):
             raise ValueError("noise_injection requires context_config to be set")
         self.noise_injection = noise_injection
 
-        # Blocks are numbered in construction order: the num_steps encoder
-        # blocks, the bottleneck block, then the num_steps decoder blocks.
+        # Blocks are built in this order: the num_steps encoder blocks, the
+        # bottleneck block, then the num_steps decoder blocks. `block_context`
+        # is called once per block, in that order, and hands back the context
+        # for the blocks this injection variant conditions.
         num_steps = len(self.ch_width)
-        n_blocks = 2 * num_steps + 1
-        if noise_injection == "bottleneck":
-            conditioned_blocks = {num_steps}
-        elif noise_injection == "all_blocks":
-            conditioned_blocks = set(range(n_blocks))
-        else:
-            conditioned_blocks = set()
-        block_contexts = iter(
-            [
-                context_config if i in conditioned_blocks else None
-                for i in range(n_blocks)
-            ]
-        )
+        n_built = 0
+
+        def block_context() -> ContextConfig | None:
+            nonlocal n_built
+            is_bottleneck = n_built == num_steps
+            n_built += 1
+            if noise_injection == "all_blocks":
+                return context_config
+            if noise_injection == "bottleneck" and is_bottleneck:
+                return context_config
+            return None
 
         ch_width_with_input = (self.input_channels, *self.ch_width)
 
@@ -166,7 +166,7 @@ class Samudra(torch.nn.Module):
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
                     checkpoint_strategy=self.checkpoint_strategy,
-                    context_config=next(block_contexts),
+                    context_config=block_context(),
                 )
             )
             layers.append(AvgPool())
@@ -181,7 +181,7 @@ class Samudra(torch.nn.Module):
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
                 checkpoint_strategy=self.checkpoint_strategy,
-                context_config=next(block_contexts),
+                context_config=block_context(),
             )
         )
         layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -200,7 +200,7 @@ class Samudra(torch.nn.Module):
                     norm_kwargs=self.norm_kwargs,
                     upscale_factor=self.upscale_factor,
                     checkpoint_strategy=self.checkpoint_strategy,
-                    context_config=next(block_contexts),
+                    context_config=block_context(),
                 )
             )
             layers.append(upsample_cls(in_channels=b, out_channels=b))
@@ -215,14 +215,12 @@ class Samudra(torch.nn.Module):
                 norm_kwargs=self.norm_kwargs,
                 upscale_factor=self.upscale_factor,
                 checkpoint_strategy=self.checkpoint_strategy,
-                context_config=next(block_contexts),
+                context_config=block_context(),
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
 
-        unconsumed = object()
-        if next(block_contexts, unconsumed) is not unconsumed:
-            raise AssertionError("not every ConvNeXt block consumed a block context")
+        assert n_built == 2 * num_steps + 1
 
         self.layers = nn.ModuleList(layers)
         self.num_steps = int(len(ch_width_with_input) - 1)

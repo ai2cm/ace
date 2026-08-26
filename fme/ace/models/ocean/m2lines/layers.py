@@ -75,7 +75,16 @@ class NoiseConditioning(torch.nn.Module):
 
     The noise field is drawn at the model's input resolution, while a
     conditioned block may run at a coarser resolution inside the U-Net, so the
-    noise is area-averaged onto the block's grid before projection.
+    noise is subsampled onto the block's grid before projection. Subsampling
+    rather than area-averaging is what keeps the noise at unit variance at every
+    injection depth: averaging iid noise over a k-by-k window divides its
+    standard deviation by k, which on a 45x90 grid would hand the bottleneck
+    block noise of std 0.05 and spread the amplitude 20-fold across the depths
+    that ``all_blocks`` conditions. The SFNO reference has no such problem
+    because its latent never changes resolution, so ``ConditionalLayerNorm``
+    always sees std-1 noise; DLESyM-Ocean likewise draws its bottleneck noise
+    at bottleneck resolution. Subsampling iid noise leaves it iid, so the
+    coarse field is white noise of unit variance whatever the shape ratio is.
     """
 
     def __init__(self, n_channels: int, embed_dim_noise: int):
@@ -92,7 +101,7 @@ class NoiseConditioning(torch.nn.Module):
     def forward(self, x: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
         target = (x.shape[-2], x.shape[-1])
         if (noise.shape[-2], noise.shape[-1]) != target:
-            noise = torch.nn.functional.adaptive_avg_pool2d(noise, target)
+            noise = torch.nn.functional.interpolate(noise, size=target, mode="nearest")
         return x * (1.0 + self.W_scale(noise)) + self.W_bias(noise)
 
 
@@ -133,9 +142,7 @@ class ConvNeXtBlock(torch.nn.Module):
         self.N_pad = int((kernel_size + (kernel_size - 1) * (dilation - 1) - 1) / 2)
         self.pad = pad
         self.norm = norm
-        self.norm_kwargs = norm_kwargs
-        if self.norm_kwargs is None:
-            self.norm_kwargs = {}
+        self.norm_kwargs: Mapping[str, Any] = {} if norm_kwargs is None else norm_kwargs
         self.checkpoint_strategy = checkpoint_strategy
         assert n_layers == 1, "Can only use a single layer here!"  # Needs fixing
 
@@ -215,7 +222,6 @@ class ConvNeXtBlock(torch.nn.Module):
                 )
 
     def _build_norm(self, norm: str | None, num_features: int) -> list[torch.nn.Module]:
-        assert self.norm_kwargs is not None
         if norm == "batch":
             return [torch.nn.BatchNorm2d(num_features, **self.norm_kwargs)]
         elif norm == "instance":
