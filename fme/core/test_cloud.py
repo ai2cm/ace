@@ -116,21 +116,68 @@ def test_staged_file_local_writes_in_place(tmp_path: Path):
 
 
 def test_staged_file_remote_uploads_on_upload(tmp_path: Path):
-    destination = "memory://staged-test/remote.txt"
+    # nested destination directory: put_file creates the parents it needs.
+    destination = "memory://staged-test/nested/dir/remote.nc"
     fs, _ = fsspec.url_to_fs(destination)
+    contents = b"\x89HDF\r\n\x1a\n" + bytes(range(256))
     staged = StagedFile(destination)
     assert is_local(staged.path)
-    assert os.path.basename(staged.path) == "remote.txt"
-    with open(staged.path, "w") as f:
-        f.write("test")
+    assert os.path.basename(staged.path) == "remote.nc"
+    with open(staged.path, "wb") as f:
+        f.write(contents)
     # nothing lands remotely until the file is closed and uploaded
     assert not fs.exists(destination)
 
     staged.upload()
-    assert fs.read_text(destination) == "test"
+    assert fs.cat_file(destination) == contents
     # staging copy is discarded, and a second upload is a no-op
     assert not os.path.exists(staged.path)
     staged.upload()
-    assert fs.read_text(destination) == "test"
+    assert fs.cat_file(destination) == contents
 
-    fs.rm(destination, recursive=True)
+    fs.rm("memory://staged-test", recursive=True)
+
+
+def test_staged_file_upload_uses_destination_put_file(tmp_path: Path, monkeypatch):
+    # the upload must go through the destination filesystem's put_file, which
+    # is what gets gcsfs's chunked, checksum-verified upload for multi-GB files.
+    destination = "memory://staged-put-file-test/remote.nc"
+    fs, _ = fsspec.url_to_fs(destination)
+    calls = []
+    original = type(fs).put_file
+
+    def spy(self, lpath, rpath, *args, **kwargs):
+        calls.append((lpath, rpath))
+        return original(self, lpath, rpath, *args, **kwargs)
+
+    monkeypatch.setattr(type(fs), "put_file", spy)
+
+    staged = StagedFile(destination)
+    with open(staged.path, "wb") as f:
+        f.write(b"test")
+    staged_path = staged.path
+    staged.upload()
+
+    assert calls == [(staged_path, destination)]
+    assert fs.cat_file(destination) == b"test"
+
+    fs.rm("memory://staged-put-file-test", recursive=True)
+
+
+def test_staged_file_upload_error_propagates(tmp_path: Path, monkeypatch):
+    destination = "memory://staged-error-test/remote.nc"
+    fs, _ = fsspec.url_to_fs(destination)
+
+    def boom(self, lpath, rpath, *args, **kwargs):
+        raise OSError("upload failed")
+
+    monkeypatch.setattr(type(fs), "put_file", boom)
+
+    staged = StagedFile(destination)
+    with open(staged.path, "wb") as f:
+        f.write(b"test")
+    with pytest.raises(OSError, match="upload failed"):
+        staged.upload()
+    # the staging copy survives a failed upload, so nothing is silently lost
+    assert Path(staged.path).read_bytes() == b"test"
+    assert not fs.exists(destination)

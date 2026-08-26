@@ -43,8 +43,15 @@ class StagedFile:
     Writers that stream into an open local file handle (e.g. a
     ``netCDF4.Dataset``) cannot target a remote store directly. This stages
     such a file: writes go to ``path``, and ``upload`` copies it to
-    ``destination``. Call ``upload`` once the file handle is closed, so a
-    complete file is what lands remotely.
+    ``destination`` with the destination filesystem's ``put_file``. Call
+    ``upload`` once the file handle is closed, so a complete file is what
+    lands remotely.
+
+    ``put_file`` rather than ``inter_filesystem_copy`` because staged netCDF
+    files are multi-GB: gcsfs's ``put_file`` uploads in 50 MiB chunks and
+    verifies the object's checksum on completion, where a stream through
+    ``fsspec.open`` uses a ~5 MiB write block and checks nothing, so silent
+    corruption would go undetected.
 
     When ``destination`` is already local there is no staging at all:
     ``path`` is ``destination`` and ``upload`` does nothing, so local
@@ -70,10 +77,12 @@ class StagedFile:
     def upload(self):
         """Copy the staged file to its destination and discard the staging copy.
 
-        A no-op for a local destination, or if already called.
+        A no-op for a local destination, or if already called. Errors from
+        the upload propagate; the staging copy is kept if it fails.
         """
         if self._tmpdir is not None:
-            inter_filesystem_copy(self._path, self._destination)
+            fs, _ = fsspec.url_to_fs(self._destination)
+            fs.put_file(self._path, self._destination)
             self._tmpdir.cleanup()
             self._tmpdir = None
 
