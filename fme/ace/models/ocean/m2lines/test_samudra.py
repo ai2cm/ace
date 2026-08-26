@@ -246,8 +246,33 @@ def test_convnext_block_conditioning_resamples_coarser_noise():
         torch.nn.init.normal_(module.W_scale.weight, std=0.1)
         torch.nn.init.normal_(module.W_bias.weight, std=0.1)
     x = torch.randn(2, 4, 4, 8)
-    out = block(x, _context(n_noise, 2, (16, 32)))
-    assert out.shape == x.shape
+    fine = torch.randn(2, n_noise, 16, 32)
+    coarse = torch.nn.functional.adaptive_avg_pool2d(fine, (4, 8))
+    with torch.no_grad():
+        from_fine = block(
+            x,
+            Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=fine),
+        )
+        from_coarse = block(
+            x,
+            Context(
+                embedding_scalar=None, embedding_pos=None, labels=None, noise=coarse
+            ),
+        )
+        # a resampling that keeps the shape but not the area average
+        from_subsample = block(
+            x,
+            Context(
+                embedding_scalar=None,
+                embedding_pos=None,
+                labels=None,
+                noise=fine[..., ::4, ::4],
+            ),
+        )
+    assert from_fine.shape == x.shape
+    # the resampling is the area average, not just any shape-matching reduction
+    torch.testing.assert_close(from_fine, from_coarse, rtol=0.0, atol=0.0)
+    assert not torch.allclose(from_fine, from_subsample)
 
 
 @pytest.mark.parametrize("noise_injection", ["bottleneck", "all_blocks"])
