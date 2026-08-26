@@ -1338,3 +1338,136 @@ def test_two_block_exact_coarse_recovery():
         # D(x_hat(0)) == x_0_c and D(x_hat(T)) == x_T_c exactly.
         assert torch.allclose(gen_downsampled[:, :, 0], interp_b[:, :, 0], atol=1e-4)
         assert torch.allclose(gen_downsampled[:, :, -1], interp_b[:, :, -1], atol=1e-4)
+
+
+def _conditional_kernel_model(n_times, **config_kwargs):
+    return _two_block_model(n_times, two_block_conditional_kernel=True, **config_kwargs)
+
+
+def test_conditional_kernel_requires_two_block():
+    with pytest.raises(ValueError, match="requires two_block=True"):
+        _spatial_model(
+            5,
+            endpoints_observed=False,
+            coarse_endpoints_only=True,
+            two_block=False,
+            two_block_conditional_kernel=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_kwargs",
+    [
+        {"r_kernel": "independent"},
+        {"d_kernel": "ou", "d_kernel_length_scale": 0.5},
+        {"d_kernel_length_scale": 0.3},
+    ],
+)
+def test_conditional_kernel_rejects_customized_fixed_kernel_fields(bad_kwargs):
+    with pytest.raises(ValueError, match="supersedes r_kernel"):
+        _conditional_kernel_model(5, **bad_kwargs)
+
+
+def test_conditional_kernel_rejects_bad_weight_fit_loss_weight():
+    with pytest.raises(ValueError, match="weight_fit_loss_weight"):
+        _conditional_kernel_model(5, weight_fit_loss_weight=-1.0)
+
+
+def test_conditional_kernel_encoders_are_registered_modules():
+    model = _conditional_kernel_model(5)
+    assert model._r_encoder is not None
+    assert model._d_encoder is not None
+    assert model._r_encoder in model.modules
+    assert model._d_encoder in model.modules
+
+
+def test_conditional_kernel_train_on_batch_runs_and_backprops():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    assert torch.isfinite(outputs.loss)
+    assert outputs.weight_fit_loss is not None
+    assert torch.isfinite(outputs.weight_fit_loss)
+    outputs.loss.backward()
+    main_grads = [p.grad for p in model.module.parameters() if p.grad is not None]
+    assert len(main_grads) > 0
+    assert all(torch.isfinite(g).all() for g in main_grads)
+    r_enc_grads = [p.grad for p in model._r_encoder.parameters()]
+    d_enc_grads = [p.grad for p in model._d_encoder.parameters()]
+    # weight_fit_loss_weight defaults to 1.0 -- g_phi SHOULD receive gradient.
+    assert any(g is not None for g in r_enc_grads)
+    assert any(g is not None for g in d_enc_grads)
+    assert all(torch.isfinite(g).all() for g in r_enc_grads if g is not None)
+
+
+def test_conditional_kernel_dsm_loss_does_not_backprop_into_encoders():
+    """The doc's central caveat: plain DSM must not train g_phi. With
+    weight_fit_loss_weight=0, the only remaining loss term is DSM -- the
+    encoders must receive exactly zero gradient."""
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times, weight_fit_loss_weight=0.0)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    outputs = model.train_on_batch(batch, NullOptimization())
+    outputs.loss.backward()
+    r_enc_grads = [p.grad for p in model._r_encoder.parameters()]
+    d_enc_grads = [p.grad for p in model._d_encoder.parameters()]
+    assert not any(g is not None and g.abs().sum() > 0 for g in r_enc_grads)
+    assert not any(g is not None and g.abs().sum() > 0 for g in d_enc_grads)
+
+
+def test_conditional_kernel_generate_runs_and_is_stochastic():
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+
+    generated = model.generate(batch, n_samples=2)
+    out = generated["var0"]
+    assert out.shape == (3, 2, n_times, fine_height, fine_width)
+    assert torch.isfinite(out).all()
+    assert not torch.allclose(out[:, 0, 0], out[:, 1, 0], atol=1e-4)
+
+
+def test_conditional_kernel_exact_coarse_recovery():
+    """Prop 4 must still hold under conditional kernels -- the exactness
+    guarantee comes from assemble_fine_output/masking, not the noise
+    mechanism, so it should be unaffected by which kernel g_phi selects."""
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = _conditional_kernel_model(n_times)
+    batch = _spatial_paired_batch(
+        batch_size=3,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+    generated = model.generate(batch, n_samples=2)
+
+    coarse_norm = model._pack_normalized(batch.coarse.data, model.coarse_normalizer)
+    interp_phys = model._denormalize_invert(coarse_temporal_interp(coarse_norm))
+
+    for name in OUT_NAMES:
+        gen_downsampled = conservative_downsample(generated[name], factor)
+        interp_b = interp_phys[name].unsqueeze(1).expand_as(gen_downsampled)
+        assert torch.allclose(gen_downsampled[:, :, 0], interp_b[:, :, 0], atol=1e-4)
+        assert torch.allclose(gen_downsampled[:, :, -1], interp_b[:, :, -1], atol=1e-4)
