@@ -29,8 +29,8 @@ Since the 2026-08-17 handoff, four things changed
    [Evaluating the fine-tunes](FINETUNE.md#evaluating-the-fine-tunes).
 
 **All four `-mstepft` runs have now finished**, all four reached epoch 20, and
-all four eval suite configs are written (unsubmitted). Those evals run at
-`--checkpoint lastepoch` only — see
+all four eval suite configs are written. Those evals run at
+`--checkpoint lastepochema` only — see
 [Evaluating the fine-tunes](FINETUNE.md#evaluating-the-fine-tunes). The four
 `-mstepftaimip` configs are still unsubmitted — that remains the open action.
 
@@ -161,8 +161,9 @@ Design decisions (each is a commit; see history below):
    `weights_path` — as `FT_VARIANTS` in `generate_finetune_configs.py`. Note
    `best_inference_ckpt.tar` is an *earlier* epoch than `best_ckpt.tar` in all
    four source datasets, so `-mstepftaimip` also starts less-trained. The suffix
-   avoids ending in `-bestinf` because `update_beaker_map.py`'s `SKIP_SUFFIXES`
-   filters such names out of the run → dataset map.
+   avoids ending in a checkpoint suffix because `update_beaker_map.py` filters
+   names matching `eval_checkpoints.is_derived_run_name` out of the run →
+   dataset map.
 
 6. **`gmron-mask0` is on seed1, not the seed2 interim.** seed1's checkpoint
    succeeded on 08-15 (dataset `01KZSAQJD15697SFFCTJ1SRSA0`). The seed2 FT config
@@ -240,9 +241,10 @@ PY
 Evaluate after training with the existing eval tooling in this dir
 (`update_beaker_map.py` → `generate_eval_configs.py -v v5` → `submit_eval_jobs.py`;
 see the top-level project notes). For the fine-tunes pass
-`--checkpoint lastepoch` and plot `-lastepoch`; the pre-training runs keep the
-default three checkpoints and are plotted on `-bestinf`. Rationale and the
-epoch-20 verification snippet are in
+`--checkpoint lastepochema` and plot `-lastepochema`; the pre-training runs keep
+the default checkpoint set and are plotted on `-bestinf`. `-lastepoch` is the
+same epoch without EMA, i.e. not the model the training charts show. Rationale,
+the measured gap and the epoch-20 verification snippet are in
 [Evaluating the fine-tunes](FINETUNE.md#evaluating-the-fine-tunes).
 
 ## Open follow-ups
@@ -266,24 +268,25 @@ epoch-20 verification snippet are in
    final step under the flag and every step without it. Nothing to do unless
    review asks for changes; this branch keeps its own copy of the commit either
    way, so a merge needs no action here.
-3. **Evaluate the FT checkpoints.** Suite configs for all four `-mstepft` runs
-   are written and validated but **not submitted**. At `--checkpoint lastepoch`
-   that is 4 jobs (not 12), each running the full unpruned suite including the
-   67176-step `long_46year`:
+3. **Re-evaluate the FT checkpoints at `lastepochema`.** All four
+   `…-mstepft-lastepoch` eval runs have finished, but `-lastepoch` is the raw
+   final-epoch model, not the EMA one the training charts report, so those
+   numbers do not compare against the pre-training `-bestinf` evaluations (also
+   EMA). At `--checkpoint lastepochema` that is 4 jobs, each running the full
+   unpruned suite including the 67176-step `long_46year` (~11.5 h apiece, going
+   by the finished `-lastepoch` runs):
    ```bash
-   python update_beaker_map.py -v v5
-   python generate_eval_configs.py -v v5
-   python submit_eval_jobs.py --dry-run --checkpoint lastepoch \
+   python submit_eval_jobs.py --dry-run --checkpoint lastepochema \
      ace-eval-suite-config-4deg-nc-sfno-era5-gmroff-mask0-seed1-v5-mstepft.yaml \
      ace-eval-suite-config-4deg-nc-sfno-era5-gmroff-mask20-seed1-v5-mstepft.yaml \
      ace-eval-suite-config-4deg-nc-sfno-era5-gmron-mask0-seed1-v5-mstepft.yaml \
      ace-eval-suite-config-4deg-nc-sfno-era5-gmron-mask20-seed0-v5-mstepft.yaml
    ```
    Drop `--dry-run` to submit; defaults are workspace ai2/climate-titan, cluster
-   ai2/titan, priority urgent, and these are 1-GPU inference jobs. Omit
-   `--skip-evaluated` on a first submit — with one checkpoint per config there
-   is no partial-completion case for it to fix. `--inference-name` on the
-   generator narrows the suite if the multi-year entries prove too costly.
+   ai2/titan, priority urgent, and these are 1-GPU inference jobs. Keep
+   `--checkpoint lastepochema` explicit — the default is now every checkpoint,
+   so omitting it resubmits the three that already ran. `--inference-name` on
+   the generator narrows the suite if the multi-year entries prove too costly.
 4. **main merge was intentionally deferred.** `exp/alexey8` already has its own
    mature distributed-shutdown implementation; main's `#1398`/`#1425` are an
    independent (newer, NCCL-abort-on-listener-thread) implementation of the same

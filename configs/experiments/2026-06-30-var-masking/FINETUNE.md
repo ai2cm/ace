@@ -75,9 +75,9 @@ so `-mstepftaimip` also starts from a less-trained model.
 
 `-mstepftaimip` matches the criterion the `-bestinf` evaluations report on,
 which is why it is worth running alongside. The suffix deliberately avoids
-ending in `-bestinf`: `update_beaker_map.py` filters names ending in
-`-bestinf`/`-besttrain`/`-lastepoch` (`SKIP_SUFFIXES`) out of the run -> dataset
-map, since those denote evaluation runs.
+ending in a checkpoint suffix: `update_beaker_map.py` filters names for which
+`eval_checkpoints.is_derived_run_name` is true out of the run -> dataset map,
+since those denote evaluation runs.
 
 ## Run
 
@@ -135,20 +135,46 @@ python update_beaker_map.py -v v5      # pick up finished FT result datasets
 python generate_eval_configs.py -v v5  # writes ace-eval-suite-config-...-mstepft.yaml
 # submit only the FT suites — naming configs positionally bypasses --version,
 # so a v5 eval sweep of the pre-training runs is not dragged along
-python submit_eval_jobs.py --dry-run --checkpoint lastepoch \
+python submit_eval_jobs.py --dry-run --checkpoint lastepochema \
   ace-eval-suite-config-4deg-nc-sfno-era5-gmron-mask20-seed0-v5-mstepft.yaml
 ```
 
-**Evaluate the fine-tunes at `--checkpoint lastepoch` only.** The default runs
-each suite against all three checkpoints of the result dataset, which is right
+**Evaluate the fine-tunes at `--checkpoint lastepochema` only.** The default
+runs each suite against every checkpoint of the result dataset, which is right
 for the pre-training runs (reported on `-bestinf`), but a fine-tune is a fixed
 `max_epochs: 20` continuation of an already-converged checkpoint: the
 fine-tuned model *is* the final epoch, and `best_ckpt.tar` /
 `best_inference_ckpt.tar` can only select a partially fine-tuned one. Passing
-one checkpoint also cuts the pass from 3 jobs per cell to 1, each carrying the
-67176-step `long_46year`. Before submitting, confirm the run actually reached
-epoch 20 — a wandb state of `finished` is not proof, since `ckpt.tar` is
-whatever the last epoch written was:
+one checkpoint also cuts the pass from 4 jobs per cell to 1, each carrying the
+67176-step `long_46year`.
+
+**`lastepochema`, not `lastepoch`: the final epoch has two checkpoints and only
+one of them is the model you have been looking at.** These runs set
+`validate_using_ema: true`, so validation and inline inference run inside
+`EMATracker.applied_params` and every number on the training run's own charts is
+the EMA-averaged model. `ckpt.tar` is the restart checkpoint, saved *outside*
+that context, and its EMA state lives in a separate `"ema"` key that
+`load_stepper` never reads — so `-lastepoch` evaluates the raw weights.
+`ema_ckpt_0020.tar` is written inside the context by `save_all_checkpoints` and
+is what `lastepochema` resolves to. Measured on
+`ace2-var-mask-nc-sfno-era5-gmron-mask20-seed0-v5-mstepft`, at the same epoch 20
+and on the same data, `aimip_checkpoint/annual/rmse/air_temperature_7` is
+**0.0428** inline (EMA) against **0.1818** from `-lastepoch` (raw). Note
+`best_ckpt.tar` and `best_inference_ckpt.tar` are *also* saved inside the EMA
+context, so `-besttrain`/`-bestinf` were EMA evaluations all along: `-lastepoch`
+was the only odd one out, and a pre-training-vs-fine-tune comparison across
+those two was comparing weight flavors, not training recipes.
+
+`lastepochema` resolves its path by listing the result dataset and taking the
+highest-epoch `ema_ckpt_XXXX.tar` (0020 for the fine-tunes, 0150 for
+pre-training), so it needs no per-family configuration. A run with no EMA
+checkpoint at all — killed before the first epoch `ema_checkpoint_save_epochs`
+selects — has that one job skipped with a message, and the rest of the sweep
+proceeds.
+
+Before submitting, confirm the run actually reached epoch 20 — a wandb state of
+`finished` is not proof, since `ckpt.tar` is whatever the last epoch written
+was:
 
 ```python
 import wandb
@@ -169,9 +195,22 @@ fine-tune config: the fine-tune config has `INLINE_INFERENCE_DROP` applied, so
 inheriting it would mean the multi-year diagnostics never run anywhere. Each
 suite therefore holds all six inference entries — `aimip_checkpoint` and the
 two `weather` entries kept inline, plus `10year`, `10year_insample` and
-`long_46year`. `long_46year/annual/*` (51 variables) lands on the eval run
-`…-mstepft-lastepoch`, not on the fine-tune run's own charts. Plot
-`-lastepoch` for the fine-tunes; the pre-training runs stay on `-bestinf`.
+`long_46year`. Plot `-lastepochema` for the fine-tunes; the pre-training runs
+stay on `-bestinf`.
+
+The four `-mstepft` runs launched before `001a58702` applied
+`INLINE_INFERENCE_DROP`, so their wandb configs still carry all six inline
+entries and `long_46year/annual/*` **is** on their own charts — but only from
+epochs 1 and 11, since those entries run on an `epochs: {start: 0, step: 10}`
+schedule that never lands on epoch 20. That is the second reason an inline
+number and its `-lastepoch` counterpart disagreed: different epoch on top of
+different weight flavor. Fine-tunes generated after that commit have the
+multi-year entries pruned and get them only from the eval suite.
+
+Regenerating an eval pass for a pre-v5 family means passing `--checkpoint
+bestinf` explicitly. Those families were evaluated when the default was three
+checkpoints wide; taking today's default would submit a `-lastepochema` job for
+every cell.
 
 ## Memory
 
