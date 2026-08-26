@@ -58,6 +58,15 @@ PATCHED_MODELS = {
         "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-ou/"
         "test-2023-2024-ens4-global.zarr"
     ),
+    # Cascade: 100km temporal infill -> 25km spatial SR (same "hiro"
+    # checkpoint, conditioned on the infill output instead of real dense
+    # truth). See crps_eval.py's PATCHED_MODELS comment for the full
+    # pipeline rationale.
+    "cascade-infill-then-sr": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "hiro-downscaling-25km-100km-global-5ch-v6-cascade-infill-then-sr/"
+        "test-2023-2024-ens4.zarr"
+    ),
     # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
     # (see crps_eval.py's PATCHED_MODELS comment for the full caveat --
     # epoch 41/200, preliminary/undertrained).
@@ -155,8 +164,12 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Global snapshot + temporal series for a stage-2 model"
     )
-    parser.add_argument("--model", default="st-singlestage-flat", choices=sorted(PATCHED_MODELS))
-    parser.add_argument("--date", default="2023-07-15", help="Clip start date (00h UTC).")
+    parser.add_argument(
+        "--model", default="st-singlestage-flat", choices=sorted(PATCHED_MODELS)
+    )
+    parser.add_argument(
+        "--date", default="2023-07-15", help="Clip start date (00h UTC)."
+    )
     parser.add_argument("--outdir", default=".")
     return parser.parse_args()
 
@@ -272,8 +285,15 @@ def main():
             if t == 0:
                 ax.set_ylabel("HR truth", fontsize=9)
 
-        fig.colorbar(im, ax=axes.ravel().tolist(), label=f"{varname} ({UNITS[varname]})", shrink=0.6)
-        fig.suptitle(f"{varname} -- {ARGS.date} full day, LR input / {ARGS.model} / HR truth")
+        fig.colorbar(
+            im,
+            ax=axes.ravel().tolist(),
+            label=f"{varname} ({UNITS[varname]})",
+            shrink=0.6,
+        )
+        fig.suptitle(
+            f"{varname} -- {ARGS.date} full day, LR input / {ARGS.model} / HR truth"
+        )
         fig.savefig(f"{OUTDIR}/temporal_series_{varname}_{ARGS.model}.png", dpi=150)
         plt.close(fig)
         print(f"wrote temporal_series_{varname}_{ARGS.model}.png")

@@ -301,6 +301,22 @@ PATCHED_MODELS = {
             "test-2023-2024-ens4-region-lat-88to-44-lon0to360.zarr"
         ),
     },
+    # Cascade: 100km temporal infill (video-pmd-5ch-per-channel-kernel-
+    # global-1degree-24to3-v1, already-generated ens32 test output, member 0
+    # selected) -> 25km spatial SR (SAME checkpoint as "hiro" above, v6,
+    # 01KZ1WGMKRX6AKWWQXB8JJWRZP) -- tests a realistic sparse-observation
+    # deployment scenario instead of conditioning the SR step on real dense
+    # 100km truth like every other PATCHED_MODELS entry does. See
+    # configs/experiments/2026-08-24-hiro-downscaling-cascade-infill-then-sr/
+    # inference.yaml for the full pipeline rationale. Global patch-tiled
+    # inference via fme.downscaling.inference (same architecture family as
+    # "hiro" and the coarse-endpoints singlestage models above), ONE
+    # contiguous global zarr on weka -- plain str path.
+    "cascade-infill-then-sr": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "hiro-downscaling-25km-100km-global-5ch-v6-cascade-infill-then-sr/"
+        "test-2023-2024-ens4.zarr"
+    ),
 }
 # Every KNOWN_MODELS/PATCHED_MODELS label resolves to a pred spec (str path
 # or a PATCHED_MODELS region dict) via this combined lookup.
@@ -335,48 +351,73 @@ UNITS = {
 # boundary (00:00) and spans a whole number of days, so the lead-time-within-
 # window logic below stays valid independently in each window.
 SAMPLE_WINDOWS = [
-    ("winter (Jan)", cftime.DatetimeJulian(2023, 1, 1), cftime.DatetimeJulian(2023, 1, 4)),
-    ("spring (Apr)", cftime.DatetimeJulian(2023, 4, 1), cftime.DatetimeJulian(2023, 4, 4)),
-    ("summer (Jul)", cftime.DatetimeJulian(2023, 7, 1), cftime.DatetimeJulian(2023, 7, 4)),
-    ("fall (Oct)", cftime.DatetimeJulian(2023, 10, 1), cftime.DatetimeJulian(2023, 10, 4)),
+    (
+        "winter (Jan)",
+        cftime.DatetimeJulian(2023, 1, 1),
+        cftime.DatetimeJulian(2023, 1, 4),
+    ),
+    (
+        "spring (Apr)",
+        cftime.DatetimeJulian(2023, 4, 1),
+        cftime.DatetimeJulian(2023, 4, 4),
+    ),
+    (
+        "summer (Jul)",
+        cftime.DatetimeJulian(2023, 7, 1),
+        cftime.DatetimeJulian(2023, 7, 4),
+    ),
+    (
+        "fall (Oct)",
+        cftime.DatetimeJulian(2023, 10, 1),
+        cftime.DatetimeJulian(2023, 10, 4),
+    ),
 ]
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Video PMD CRPS/spread-skill eval")
     parser.add_argument(
-        "--model", choices=sorted(ALL_MODELS), default="pcn-v1",
+        "--model",
+        choices=sorted(ALL_MODELS),
+        default="pcn-v1",
         help="Which known inference output to evaluate. Stage-2 spatiotemporal "
-             "models (st-flat, st-ou) are 4-way tiled and get combined into "
-             "one global-coverage Dataset automatically.",
+        "models (st-flat, st-ou) are 4-way tiled and get combined into "
+        "one global-coverage Dataset automatically.",
     )
     parser.add_argument(
-        "--pred-zarr", default=None,
+        "--pred-zarr",
+        default=None,
         help="Explicit path to an inference output zarr, overriding --model "
-             "for one-off runs not yet in KNOWN_MODELS. Not usable for "
-             "PATCHED_MODELS entries (st-flat/st-ou) since those need 4 paths.",
+        "for one-off runs not yet in KNOWN_MODELS. Not usable for "
+        "PATCHED_MODELS entries (st-flat/st-ou) since those need 4 paths.",
     )
     parser.add_argument(
-        "--models", nargs="+", choices=sorted(ALL_MODELS), default=None,
+        "--models",
+        nargs="+",
+        choices=sorted(ALL_MODELS),
+        default=None,
         help="Two or more known models to compare side by side in one run "
-             "(overrides --model/--pred-zarr). E.g. "
-             "--models pcn-v1 bb-subset-cons10.",
+        "(overrides --model/--pred-zarr). E.g. "
+        "--models pcn-v1 bb-subset-cons10.",
     )
     parser.add_argument(
-        "--outdir", default=".", help="Where to save the PNG figures.",
+        "--outdir",
+        default=".",
+        help="Where to save the PNG figures.",
     )
     parser.add_argument(
-        "--inflate", action="store_true",
+        "--inflate",
+        action="store_true",
         help="Apply post-hoc ensemble spread inflation, per channel, "
-             "calibrated from each model's own measured overall spread/skill "
-             "ratio (factor = max(1, 1/ratio), so already-calibrated or "
-             "overdispersive channels are left alone). Rescales each "
-             "member's deviation from the ensemble mean -- does not change "
-             "the ensemble mean or its RMSE, only spread/CRPS. This is a "
-             "statistical correction on top of the existing ensemble, not a "
-             "fix to the generative model itself; see COMPARISON_REPORT.md "
-             "for why brownian-bridge noise underdisperses in the first "
-             "place. Output labels/filenames get an '-inflated' suffix.",
+        "calibrated from each model's own measured overall spread/skill "
+        "ratio (factor = max(1, 1/ratio), so already-calibrated or "
+        "overdispersive channels are left alone). Rescales each "
+        "member's deviation from the ensemble mean -- does not change "
+        "the ensemble mean or its RMSE, only spread/CRPS. This is a "
+        "statistical correction on top of the existing ensemble, not a "
+        "fix to the generative model itself; see COMPARISON_REPORT.md "
+        "for why brownian-bridge noise underdisperses in the first "
+        "place. Output labels/filenames get an '-inflated' suffix.",
     )
     return parser.parse_args()
 
@@ -435,7 +476,9 @@ def _load_pred_window(pred_spec, t0, t1):
         for region, path in pred_spec.items():
             parts[region] = xr.open_zarr(path).sel(time=slice(t0, t1)).load()
         mid_band = xr.concat([parts["mid_west"], parts["mid_east"]], dim="longitude")
-        return xr.concat([parts["south_cap"], mid_band, parts["north_cap"]], dim="latitude")
+        return xr.concat(
+            [parts["south_cap"], mid_band, parts["north_cap"]], dim="latitude"
+        )
     return xr.open_zarr(pred_spec).sel(time=slice(t0, t1)).load()
 
 
@@ -452,9 +495,11 @@ def load_window(pred_spec, truth_raw, t0, t1):
     axis (even lazily) was part of the same OOM pattern.
     """
     p = _load_pred_window(pred_spec, t0, t1)
-    t = truth_raw.sel(time=slice(t0, t1)).sel(
-        latitude=p.latitude, longitude=p.longitude, method="nearest"
-    ).load()
+    t = (
+        truth_raw.sel(time=slice(t0, t1))
+        .sel(latitude=p.latitude, longitude=p.longitude, method="nearest")
+        .load()
+    )
     # hiro (and any other non-video, frame-by-frame-independent model) has
     # no frame_source -- every frame is scoreable, no interior/endpoint
     # distinction. lead_hour is still computed the same way for such a
@@ -500,17 +545,27 @@ def compute_model_scores(pred_full, truth_full, channels, inflation_factors=None
     area_weight = np.cos(np.radians(lat))  # (lat,), broadcasts against (..., lat, lon)
 
     for name, p, t, interior_mask, _ in windows:
-        print(f"{name:14s} {p.sizes['time']:3d} timesteps, {int(interior_mask.sum()):2d} interior")
+        print(
+            f"{name:14s} {p.sizes['time']:3d} timesteps, {int(interior_mask.sum()):2d} interior"
+        )
 
     # ---- Global per-channel scores (all interior frames, all windows) ----
     rows = []
     for name in channels:
         p_parts, t_parts = [], []
         for _, p_ds, t_ds, interior_mask, _ in windows:
-            p_parts.append(p_ds[name].isel(time=interior_mask).transpose(
-                "time", "latitude", "longitude", "ensemble").values)
-            t_parts.append(t_ds[name].isel(time=interior_mask).transpose(
-                "time", "latitude", "longitude").values)
+            p_parts.append(
+                p_ds[name]
+                .isel(time=interior_mask)
+                .transpose("time", "latitude", "longitude", "ensemble")
+                .values
+            )
+            t_parts.append(
+                t_ds[name]
+                .isel(time=interior_mask)
+                .transpose("time", "latitude", "longitude")
+                .values
+            )
         p = np.concatenate(p_parts, axis=0)
         t = np.concatenate(t_parts, axis=0)
         if inflation_factors:
@@ -519,16 +574,18 @@ def compute_model_scores(pred_full, truth_full, channels, inflation_factors=None
         crps_val = area_weighted_mean(crps_fair(p, t), area_weight, lat_axis=1)
         spread, rmse, ratio = spread_skill(p, t, area_weight, lat_axis=1)
 
-        rows.append({
-            "channel": name,
-            "units": UNITS[name],
-            "n_frames": p.shape[0],
-            "CRPS": crps_val,
-            "spread": spread,
-            "MSE (ens mean)": rmse ** 2,
-            "RMSE (ens mean)": rmse,
-            "spread/skill ratio": ratio,
-        })
+        rows.append(
+            {
+                "channel": name,
+                "units": UNITS[name],
+                "n_frames": p.shape[0],
+                "CRPS": crps_val,
+                "spread": spread,
+                "MSE (ens mean)": rmse**2,
+                "RMSE (ens mean)": rmse,
+                "spread/skill ratio": ratio,
+            }
+        )
         # Each channel's concatenated (time, lat, lon, ensemble) array is
         # ~1.4GB at the stage-2 25km global grid (16x the stage-1 1-degree
         # grid's footprint) -- explicit collect between channels rather than
@@ -548,20 +605,35 @@ def compute_model_scores(pred_full, truth_full, channels, inflation_factors=None
                 sel = interior_mask & (lead_hour_per_step == lead)
                 if not sel.any():
                     continue
-                p_parts.append(p_ds[name].isel(time=sel).transpose(
-                    "time", "latitude", "longitude", "ensemble").values)
-                t_parts.append(t_ds[name].isel(time=sel).transpose(
-                    "time", "latitude", "longitude").values)
+                p_parts.append(
+                    p_ds[name]
+                    .isel(time=sel)
+                    .transpose("time", "latitude", "longitude", "ensemble")
+                    .values
+                )
+                t_parts.append(
+                    t_ds[name]
+                    .isel(time=sel)
+                    .transpose("time", "latitude", "longitude")
+                    .values
+                )
             p = np.concatenate(p_parts, axis=0)
             t = np.concatenate(t_parts, axis=0)
             if inflation_factors:
                 p = inflate_ensemble(p, inflation_factors.get(name, 1.0))
             crps_val = area_weighted_mean(crps_fair(p, t), area_weight, lat_axis=1)
             spread, rmse, ratio = spread_skill(p, t, area_weight, lat_axis=1)
-            lead_rows.append({
-                "channel": name, "lead_hour": lead, "n_frames": p.shape[0],
-                "CRPS": crps_val, "spread": spread, "RMSE": rmse, "ratio": ratio,
-            })
+            lead_rows.append(
+                {
+                    "channel": name,
+                    "lead_hour": lead,
+                    "n_frames": p.shape[0],
+                    "CRPS": crps_val,
+                    "spread": spread,
+                    "RMSE": rmse,
+                    "ratio": ratio,
+                }
+            )
             del p, t, p_parts, t_parts
         gc.collect()
 
@@ -572,10 +644,15 @@ def compute_model_scores(pred_full, truth_full, channels, inflation_factors=None
     p_parts, t_parts = [], []
     for _, p_ds, t_ds, interior_mask, lead_hour_per_step in windows:
         sel = interior_mask & (lead_hour_per_step == 12)
-        p_parts.append(p_ds[name].isel(time=sel).transpose(
-            "time", "latitude", "longitude", "ensemble").values)
-        t_parts.append(t_ds[name].isel(time=sel).transpose(
-            "time", "latitude", "longitude").values)
+        p_parts.append(
+            p_ds[name]
+            .isel(time=sel)
+            .transpose("time", "latitude", "longitude", "ensemble")
+            .values
+        )
+        t_parts.append(
+            t_ds[name].isel(time=sel).transpose("time", "latitude", "longitude").values
+        )
     p = np.concatenate(p_parts, axis=0)
     t = np.concatenate(t_parts, axis=0)
     if inflation_factors:
@@ -612,12 +689,16 @@ def plot_single_model(label, summary, lead_df, crps_map, lat, lon):
     fig.colorbar(im, ax=ax, label=f"CRPS ({UNITS[name]})")
     ax.set_xlabel("longitude (deg E)")
     ax.set_ylabel("latitude")
-    ax.set_title(f"{label}: {name} CRPS at 12h lead (hardest interior frame), 4-season mean")
+    ax.set_title(
+        f"{label}: {name} CRPS at 12h lead (hardest interior frame), 4-season mean"
+    )
     fig.tight_layout()
     fig.savefig(f"{OUTDIR}/crps_map_{label}.png", dpi=150)
     plt.close(fig)
 
-    print(f"\nSaved {OUTDIR}/crps_lead_time_{label}.png and {OUTDIR}/crps_map_{label}.png")
+    print(
+        f"\nSaved {OUTDIR}/crps_lead_time_{label}.png and {OUTDIR}/crps_map_{label}.png"
+    )
 
 
 def plot_comparison(results):
@@ -628,7 +709,9 @@ def plot_comparison(results):
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     present = {name for label in labels for name in results[label][0].index}
     all_channels = [name for name in CHANNELS_5CH if name in present]
-    channel_color = {name: colors[i % len(colors)] for i, name in enumerate(all_channels)}
+    channel_color = {
+        name: colors[i % len(colors)] for i, name in enumerate(all_channels)
+    }
 
     # ---- Combined lead-time plot: color = channel, linestyle = model ----
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
@@ -638,10 +721,22 @@ def plot_comparison(results):
         for name in summary.index:
             sub = lead_df[lead_df["channel"] == name]
             leg = f"{name} ({label})"
-            axes[0].plot(sub["lead_hour"], sub["CRPS"], marker="o", ls=ls,
-                         color=channel_color[name], label=leg)
-            axes[1].plot(sub["lead_hour"], sub["ratio"], marker="o", ls=ls,
-                         color=channel_color[name], label=leg)
+            axes[0].plot(
+                sub["lead_hour"],
+                sub["CRPS"],
+                marker="o",
+                ls=ls,
+                color=channel_color[name],
+                label=leg,
+            )
+            axes[1].plot(
+                sub["lead_hour"],
+                sub["ratio"],
+                marker="o",
+                ls=ls,
+                color=channel_color[name],
+                label=leg,
+            )
     axes[0].set_title("CRPS vs. lead time")
     axes[0].set_ylabel("CRPS (native units)")
     axes[1].set_title("Spread/skill ratio vs. lead time")
@@ -662,7 +757,9 @@ def plot_comparison(results):
     maps = {label: results[label][2] for label in labels}
     vmin = min(m.min() for m in maps.values())
     vmax = max(m.max() for m in maps.values())
-    fig, axes = plt.subplots(1, len(labels), figsize=(9 * len(labels), 4.2), squeeze=False)
+    fig, axes = plt.subplots(
+        1, len(labels), figsize=(9 * len(labels), 4.2), squeeze=False
+    )
     axes = axes[0]
     im = None
     for ax, label in zip(axes, labels):
@@ -680,9 +777,19 @@ def plot_comparison(results):
     combined = pd.concat(
         {label: results[label][0] for label in labels}, names=["model"]
     ).reset_index()
-    combined = combined[["model", "channel", "units", "n_frames", "CRPS",
-                          "spread", "MSE (ens mean)", "RMSE (ens mean)",
-                          "spread/skill ratio"]]
+    combined = combined[
+        [
+            "model",
+            "channel",
+            "units",
+            "n_frames",
+            "CRPS",
+            "spread",
+            "MSE (ens mean)",
+            "RMSE (ens mean)",
+            "spread/skill ratio",
+        ]
+    ]
     print(f"\n=== Combined comparison ({' vs. '.join(labels)}) ===")
     print(combined.set_index(["channel", "model"]).sort_index())
     csv_path = f"{OUTDIR}/comparison_summary_{tag}.csv"
@@ -731,8 +838,10 @@ def main():
                 ch: max(1.0, 1.0 / summary.loc[ch, "spread/skill ratio"])
                 for ch in channels
             }
-            print(f"\nSpread inflation factors (from this model's own "
-                  f"measured ratio, capped at >=1): {inflation_factors}")
+            print(
+                f"\nSpread inflation factors (from this model's own "
+                f"measured ratio, capped at >=1): {inflation_factors}"
+            )
             summary, lead_df, crps_map, lat, lon = compute_model_scores(
                 pred_full, truth_full, channels, inflation_factors=inflation_factors
             )
@@ -791,9 +900,13 @@ def spread_skill(ens, truth_arr, area_weight, lat_axis, member_axis=-1):
     a reliable ensemble (ratio approx 1)."""
     M = ens.shape[member_axis]
     ens_mean = ens.mean(axis=member_axis)
-    rmse = np.sqrt(area_weighted_mean((ens_mean - truth_arr) ** 2, area_weight, lat_axis))
+    rmse = np.sqrt(
+        area_weighted_mean((ens_mean - truth_arr) ** 2, area_weight, lat_axis)
+    )
     var = ens.var(axis=member_axis, ddof=1)
-    spread = np.sqrt(area_weighted_mean(var, area_weight, lat_axis)) * np.sqrt((M + 1) / M)
+    spread = np.sqrt(area_weighted_mean(var, area_weight, lat_axis)) * np.sqrt(
+        (M + 1) / M
+    )
     return spread, rmse, spread / rmse
 
 

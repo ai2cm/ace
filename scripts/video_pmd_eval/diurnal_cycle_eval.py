@@ -77,6 +77,15 @@ PATCHED_MODELS = {
         "video-pmd-spatiotemporal-25km-100km-global-5ch-singlestage-coarse-endpoints-ou/"
         "test-2023-2024-ens4-global.zarr"
     ),
+    # Cascade: 100km temporal infill -> 25km spatial SR (same "hiro"
+    # checkpoint, conditioned on the infill output instead of real dense
+    # truth). See crps_eval.py's PATCHED_MODELS comment for the full
+    # pipeline rationale.
+    "cascade-infill-then-sr": (
+        "/climate-default/2026-06-25-temporal-diffusion/inference/"
+        "hiro-downscaling-25km-100km-global-5ch-v6-cascade-infill-then-sr/"
+        "test-2023-2024-ens4.zarr"
+    ),
     # v2 retrains of st-flat/st-ou after the endpoint-only-conditioning fix
     # (see crps_eval.py's PATCHED_MODELS comment for the full caveat --
     # epoch 41/200, preliminary/undertrained).
@@ -178,7 +187,9 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Diurnal cycle of T2m/precip for a 4-region-tiled stage-2 model"
     )
-    parser.add_argument("--model", default="st-singlestage-flat", choices=sorted(PATCHED_MODELS))
+    parser.add_argument(
+        "--model", default="st-singlestage-flat", choices=sorted(PATCHED_MODELS)
+    )
     parser.add_argument("--year", type=int, default=2023)
     parser.add_argument("--outdir", default=".")
     return parser.parse_args()
@@ -188,7 +199,9 @@ ARGS = parse_args()
 OUTDIR = ARGS.outdir
 
 
-def _load_region_tiled(pred_spec, t0, t1, variables: list[str] | None = None) -> xr.Dataset:
+def _load_region_tiled(
+    pred_spec, t0, t1, variables: list[str] | None = None
+) -> xr.Dataset:
     """Same manual per-region-then-concat loading as crps_eval.py's
     _load_pred_window -- see that function's docstring for why a lazy
     4-way concat over the full multi-year time axis reliably OOMs and this
@@ -270,7 +283,9 @@ def main():
     # no frame_source -- every frame is scoreable, no interior/endpoint
     # distinction, so don't request a variable that doesn't exist.
     pred_spec = PATCHED_MODELS[ARGS.model]
-    probe_path = pred_spec if isinstance(pred_spec, str) else next(iter(pred_spec.values()))
+    probe_path = (
+        pred_spec if isinstance(pred_spec, str) else next(iter(pred_spec.values()))
+    )
     has_frame_source = "frame_source" in xr.open_zarr(probe_path).data_vars
     variables = ["air_temperature_at_two_meters", "PRATEsfc"]
     if has_frame_source:
@@ -313,9 +328,15 @@ def main():
     local_hour = (utc_hour[:, None] + (lon / 15.0)[None, :]) % 24.0
 
     REGIONS = {
-        "land_global": region_mask(lat, lon, land_fraction, (-60, 60), (0, 360), land=True),
-        "ocean_global": region_mask(lat, lon, land_fraction, (-60, 60), (0, 360), land=False),
-        "ne_pacific_stratus": region_mask(lat, lon, land_fraction, (15, 30), (225, 250), land=False),
+        "land_global": region_mask(
+            lat, lon, land_fraction, (-60, 60), (0, 360), land=True
+        ),
+        "ocean_global": region_mask(
+            lat, lon, land_fraction, (-60, 60), (0, 360), land=False
+        ),
+        "ne_pacific_stratus": region_mask(
+            lat, lon, land_fraction, (15, 30), (225, 250), land=False
+        ),
         "se_us": region_mask(lat, lon, land_fraction, (28, 35), (270, 280), land=True),
     }
     print("region pixel counts:", {k: int(v.sum()) for k, v in REGIONS.items()})
@@ -384,10 +405,24 @@ def main():
 
         fig, ax = plt.subplots(figsize=(6, 4.2))
         for region_name, r in results[varname].items():
-            ax.plot(r["truth_hours"], r["truth_values"], ls="--", marker="o", label=f"{region_name} (truth)")
-            ax.plot(r["model_hours"], r["model_values"], ls="-", marker="s", label=f"{region_name} ({ARGS.model})")
+            ax.plot(
+                r["truth_hours"],
+                r["truth_values"],
+                ls="--",
+                marker="o",
+                label=f"{region_name} (truth)",
+            )
+            ax.plot(
+                r["model_hours"],
+                r["model_values"],
+                ls="-",
+                marker="s",
+                label=f"{region_name} ({ARGS.model})",
+            )
         ax.set_xlabel("local solar time (hr)")
-        ax.set_ylabel(f"anomaly ({results[varname][next(iter(results[varname]))]['unit']})")
+        ax.set_ylabel(
+            f"anomaly ({results[varname][next(iter(results[varname]))]['unit']})"
+        )
         ax.set_xticks(range(0, 25, 3))
         ax.axhline(0, color="gray", lw=0.6)
         ax.legend(fontsize=6, ncol=2)
@@ -396,8 +431,10 @@ def main():
         fig.savefig(f"{OUTDIR}/diurnal_{tag}_comparison_{ARGS.model}.png", dpi=150)
         plt.close(fig)
 
-    print(f"\nSaved diurnal_results_{ARGS.model}.json, diurnal_{{temp,precip}}_summary_{ARGS.model}.csv, "
-          f"diurnal_{{temp,precip}}_comparison_{ARGS.model}.png")
+    print(
+        f"\nSaved diurnal_results_{ARGS.model}.json, diurnal_{{temp,precip}}_summary_{ARGS.model}.csv, "
+        f"diurnal_{{temp,precip}}_comparison_{ARGS.model}.png"
+    )
 
 
 if __name__ == "__main__":
