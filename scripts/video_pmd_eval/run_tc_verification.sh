@@ -16,12 +16,22 @@
 # Run:  bash scripts/video_pmd_eval/run_tc_verification.sh [model]
 #   model: any label in combine_regions_to_zarr.py's PATCHED_MODELS
 #     (default: st-singlestage-flat).
+#
+# Timeout is 8h, not the 2h that's plenty for most models: any model
+# sharing hiro's checkpoint/pipeline (hiro, cascade-infill-then-sr) is
+# produced by fme.downscaling.inference's ZarrWriter, which writes zarr v3
+# shards -- combine_regions_to_zarr.py's re-chunking .to_zarr() write on
+# that source is measured at only ~9.5 GB/h (vs. finishing well within 2h
+# for plainly-chunked video-PMD sources), so the ~60GB combined store alone
+# can take ~6h+. A cascade-infill-then-sr run hit exactly this and was
+# killed by the old 2h timeout with zero progress logged after "Writing
+# to ..." -- not stuck/hung, just genuinely that slow.
 set -e
 
 MODEL="${1:-st-singlestage-flat}"
 JOB_NAME="tc-verification-${MODEL}-$(date +%s)"
 WORKSPACE="ai2/climate-titan"
-CLUSTER="ai2/saturn"
+CLUSTER="ai2/neptune"
 KNOWN_TRACKS_DATASET="01KZT2P2PS0QZC5J69PQGE6XK8"
 # "hiro" is not on weka -- its zarr lives in its own Beaker result dataset,
 # mounted at /hiro_result only when requested (same pattern as
@@ -66,7 +76,7 @@ CREATE_OUTPUT=$(beaker session create \
     --cpus "$CPUS" \
     --memory "$MEMORY" \
     --gpus 0 \
-    --timeout 2h \
+    --timeout 8h \
     --name "$JOB_NAME" \
     --result /results \
     -- bash -c "
