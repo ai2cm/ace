@@ -57,8 +57,8 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|01M0FY2JC8QWR61KBKXY57B0J4
 # rollout took ~65 min without them), but the piC-200yr wave lost two of three
 # jobs to preemption minutes before the end at 1h.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
