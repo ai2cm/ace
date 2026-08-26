@@ -14,7 +14,7 @@ CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 declare -A MODELS=( \
-    [deterministic-full-rs0-intermediate]="01M0ZHYYC4M41MFRYWX25HPSS4" \
+    [deterministic-full-rs0-intermediate]="01M0XKES08YB82WA253SWVKQAW" \
 )
 
 for name in "${!MODELS[@]}"; do
