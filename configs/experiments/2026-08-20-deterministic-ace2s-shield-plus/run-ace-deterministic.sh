@@ -8,7 +8,7 @@ CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 WANDB_USERNAME=spencerc_ai2
 WANDB_GROUP=ace-shield
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8  # Use 8 GPUs if targeting jupiter
+N_GPUS=4  # Use 8 GPUs if targeting jupiter
 STATS_DATASET=andrep/2026-02-06-vertically-resolved-1deg-c96-shield-ramped-climSST-random-CO2-ensemble-fme-dataset-stats
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this
@@ -24,7 +24,7 @@ do
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority high \
-        --cluster ai2/jupiter \
+        --cluster ai2/titan \
         --env CM_PRIORITY=high \
         --env WANDB_NAME=$job_name \
         --env WANDB_USERNAME=$WANDB_USERNAME \
