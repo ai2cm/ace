@@ -277,6 +277,15 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-patch.yaml" \
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-pes90-es10.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-pes90-es10-1-step-pre-training-rs0" 4 ai2/titan
 
+# 0.8 patch-ES / 0.2 spectral-power-CRPS pretrain arm (per Jeremy 2026-08-26):
+# same fork with the 0.1 spectral ES swapped for a 0.2-weight per-degree
+# log-power CRPS (ported from bake-off commit 1ce0c1d40). Jupiter per Jeremy
+# (note: earlier jupiter pretrains died at epoch-boundary validation with
+# NCCL unhandled cuda errors). Launch alone:
+#   ./run-train.sh pes80-spcrps20
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-pes80-spcrps20.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-1-step-pre-training-rs0" 4 ai2/jupiter
+
 # Fine-tune — launch separately after the pes90-es10 pretrain is done and its
 # final job's result dataset is filled into the config's "# arg: --dataset"
 # header. All FTs per Jeremy 2026-08-26: titan, 3 steps (jupiter kills this
