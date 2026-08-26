@@ -13,7 +13,7 @@ STATS_DATASET=andrep/2026-02-06-vertically-resolved-1deg-c96-shield-ramped-climS
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this
 
-for seed in 0 1
+for seed in 0
 do
     job_name="ace-shield-deterministic-train-full-b16-rs${seed}"
     override="seed=${seed}"
