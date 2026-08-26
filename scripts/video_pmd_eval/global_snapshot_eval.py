@@ -201,7 +201,6 @@ def main():
     lat = pred["latitude"].values
     lon = pred["longitude"].values
     n_times = pred.sizes["time"]
-    interior_mask = pred["frame_source"].values == 1
 
     print("Loading HR truth...")
     truth = (
