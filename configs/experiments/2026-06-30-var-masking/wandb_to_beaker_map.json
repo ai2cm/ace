@@ -133,5 +133,15 @@
   "ace2-var-mask-nc-sfno-era5-gmron-mask20-seed2-v5": "01KYWZKTWXBVPEC9V1Z25GHYFG",
   "ace2-var-mask-nc-sfno-era5-gmroff-mask0-seed1-v5": "01KZEZNEAASGS4JAJKSQB192GF",
   "ace2-var-mask-nc-sfno-era5-gmroff-mask20-seed1-v5": "01KZEFBKGFJ2V38N8V9HNAVZ27",
-  "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed1-v5": "01KZSAQJD15697SFFCTJ1SRSA0"
+  "ace2-var-mask-nc-sfno-era5-gmron-mask0-seed1-v5": "01KZSAQJD15697SFFCTJ1SRSA0",
+  "ace2-var-mask-nc-sfno-era5-gmroff-bern10-co2default-seed0-v3": "01M0SG0E2RC4RGNT59ZWJNK4ZW",
+  "ace2-var-mask-nc-sfno-era5-gmroff-bern10-co2default-seed1-v3": "01M0MCWW2Z8Q2W988H3XEJJ7XD",
+  "ace2-var-mask-nc-sfno-era5-gmroff-bern10-co2default-seed2-v3": "01M0PE4GK1FZ86V5WXN0MBRF0Y",
+  "ace2-var-mask-nc-sfno-era5-gmroff-bern10-co2default-seed3-v3": "01M0N99GM3QXA2E7N2TTWFXNEZ",
+  "ace2-var-mask-nc-sfno-era5-gmroff-bern10-co2default-seed4-v3": "01M0MCWW6BZDCCRBWF4JFJRP4B",
+  "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed0-v3": "01M0KX3ETE5TNYCF880ACNKVWF",
+  "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed1-v3": "01M0N99EDWZ7BGKKZXW6G4GCJE",
+  "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed2-v3": "01M0M2Y75D9DEFA86BYX03WW9Y",
+  "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed3-v3": "01M0NMDJ0YCPMMHK0VFFYBBMKM",
+  "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed4-v3": "01M0KQV9AG9ZNY67MP1FY3A3T1"
 }
