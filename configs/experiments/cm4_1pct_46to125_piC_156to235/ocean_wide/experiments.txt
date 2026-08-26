@@ -45,8 +45,20 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|01M0FY2JC8QWR61KBKXY57B0J4
 
 # ocean_wide_ohc_clip-ft
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+# The 1pct-ic0001-130yr rows override data_writer.save_monthly_files to false.
+# The shared config (configs/experiments/cm4_eval/ocean) leaves it on, and the
+# three pretrained ohc_clip rows above ran with it on: each left a 76 GiB beaker
+# result dataset, 228 GiB for the wave, for output no analysis of this arm has
+# asked for. The wandb per-step and time-mean series carry the 130-yr comparison
+# against those runs. Overridden per row rather than changed in the shared file
+# so the other arms' evaluations stay byte-identical to what they have run.
+# --min-runtime is 3h, not the 1h the pretrained rows used: with the monthly
+# writers off this should finish in well under an hour (the 14598-step piC-200yr
+# rollout took ~65 min without them), but the piC-200yr wave lost two of three
+# jobs to preemption minutes before the end at 1h.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|run_piC-200yr-var|best_inference_ckpt|high|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
