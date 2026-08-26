@@ -2,11 +2,8 @@
 
 Each generated evaluator suite is run against one or more checkpoints from the
 corresponding training result dataset, selected with ``--checkpoint`` (default:
-all three):
-
-  - besttrain -> training_checkpoints/best_ckpt.tar
-  - bestinf   -> training_checkpoints/best_inference_ckpt.tar
-  - lastepoch -> training_checkpoints/ckpt.tar
+all of them). The checkpoints, their paths within the result dataset and the
+evaluator run name suffix each one gets are defined in eval_checkpoints.py.
 
 The pre-training runs are reported on ``-bestinf``, so they want the default.
 The multi-step fine-tunes want ``--checkpoint lastepoch`` alone: they run a
@@ -39,7 +36,9 @@ import argparse
 import os
 import pathlib
 import subprocess
+from collections.abc import Sequence
 
+from eval_checkpoints import EvalCheckpoint, by_names, names
 from generate_eval_configs import (
     EVAL_SUITE_CONFIG_PREFIX,
     TRAINING_RESULT_DATASETS,
@@ -59,18 +58,6 @@ from fme.core.distributed import Distributed
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-eval.sh"
 WANDB_GROUP = "ace2-var-masking-eval-2026-06-30"
-
-# Checkpoints an eval suite can be run against: ``--checkpoint`` name ->
-# (path within the training result dataset, evaluator run name suffix). The key
-# is the CLI choice, so adding an entry here is the only change needed to make
-# another checkpoint selectable. The suffix is spelled out rather than derived
-# from the key because it is part of the wandb run name that --skip-evaluated
-# matches on; renaming a key must not silently rename existing runs.
-CHECKPOINTS = {
-    "besttrain": ("training_checkpoints/best_ckpt.tar", "-besttrain"),
-    "bestinf": ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
-    "lastepoch": ("training_checkpoints/ckpt.tar", "-lastepoch"),
-}
 
 # Wandb states meaning "this evaluator job is done or on its way", i.e. no
 # resubmission needed. Anything else (crashed, failed, killed, ...) is a dead
@@ -118,13 +105,10 @@ def validate_configs(config_filenames: list[str]) -> None:
 
 def config_to_jobs(
     config_filename: str,
-    selected_checkpoints: list[tuple[str, str]],
+    selected_checkpoints: Sequence[EvalCheckpoint],
     evaluated_states: dict[str, str] | None = None,
 ) -> list[tuple[str, str, str]]:
     """Jobs to submit for one eval suite config, one per selected checkpoint.
-
-    ``selected_checkpoints`` is (path, run name suffix) pairs, i.e. the
-    ``CHECKPOINTS`` values the caller asked for.
 
     ``evaluated_states`` maps wandb run name -> state; checkpoints whose run is
     in an in-flight state are dropped. Filtering happens before the beaker map
@@ -133,19 +117,19 @@ def config_to_jobs(
     """
     run_name = eval_suite_config_to_run_name(config_filename)
     checkpoints = []
-    for checkpoint_path, name_suffix in selected_checkpoints:
-        job_name = f"{run_name}{name_suffix}"
+    for checkpoint in selected_checkpoints:
+        job_name = f"{run_name}{checkpoint.suffix}"
         state = (evaluated_states or {}).get(job_name)
         if state in IN_FLIGHT_STATES:
             print(f"Skipping {job_name} (state={state})")
             continue
-        checkpoints.append((job_name, checkpoint_path))
+        checkpoints.append((job_name, checkpoint))
     if not checkpoints:
         return []
     source_dataset_id = TRAINING_RESULT_DATASETS[run_name]
     return [
-        (job_name, source_dataset_id, checkpoint_path)
-        for job_name, checkpoint_path in checkpoints
+        (job_name, source_dataset_id, checkpoint.path)
+        for job_name, checkpoint in checkpoints
     ]
 
 
@@ -196,12 +180,12 @@ def main() -> None:
         # configs positionally is this script's main path.
         "--checkpoint",
         action="append",
-        choices=list(CHECKPOINTS),
+        choices=list(names()),
         default=None,
         metavar="NAME",
         help=(
             "Checkpoint from each training result dataset to evaluate; repeat "
-            f"to select several (default: all of {', '.join(CHECKPOINTS)}). "
+            f"to select several (default: all of {', '.join(names())}). "
             "Pass --checkpoint lastepoch for the multi-step fine-tunes, whose "
             "final epoch is the fine-tuned model (see module docstring)."
         ),
@@ -231,10 +215,7 @@ def main() -> None:
     )
     # Resolve jobs up front so configs with nothing left to submit are dropped
     # before the (comparatively slow) validation pass.
-    # Iterate CHECKPOINTS rather than args.checkpoint so the canonical order is
-    # kept and a repeated --checkpoint name does not submit the job twice.
-    wanted = set(args.checkpoint or CHECKPOINTS)
-    selected_checkpoints = [CHECKPOINTS[name] for name in CHECKPOINTS if name in wanted]
+    selected_checkpoints = by_names(args.checkpoint or names())
 
     jobs_by_config = {
         config_filename: config_to_jobs(

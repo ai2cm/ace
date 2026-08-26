@@ -66,9 +66,9 @@ PRETRAIN_CONFIGS_DIR = HERE / "pretrain_source_configs"
 #                                           criterion the -bestinf evaluations
 #                                           report on.
 #
-# Suffixes must not end in one of update_beaker_map.py's SKIP_SUFFIXES
-# ("-bestinf", "-besttrain", "-lastepoch"), or the fine-tune runs are filtered
-# out of the run -> dataset map.
+# Suffixes must not make eval_checkpoints.is_derived_run_name true, or the
+# fine-tune runs are read as evaluations and filtered out of the run -> dataset
+# map by update_beaker_map.py.
 FT_VARIANTS = (
     ("-mstepft", "training_checkpoints/best_ckpt.tar"),
     ("-mstepftaimip", "training_checkpoints/best_inference_ckpt.tar"),

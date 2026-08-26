@@ -20,6 +20,7 @@ import pathlib
 import re
 import subprocess
 
+import eval_checkpoints
 from generate_masking_configs import (
     BASE_CONFIG_FILENAMES,
     WANDB_ENTITY,
@@ -32,9 +33,9 @@ DEFAULT_MAP = HERE / "wandb_to_beaker_map.json"
 
 EXPERIMENT_RE = re.compile(r"beaker\.org/ex/([0-9A-Za-z]+)")
 
-# Eval/export runs reuse a training run's name with one of these suffixes; they
-# are not training runs and must not enter the map.
-SKIP_SUFFIXES = ("-bestinf", "-besttrain", "-lastepoch")
+# Eval runs reuse a training run's name with a checkpoint suffix; they are not
+# training runs and must not enter the map. eval_checkpoints owns the suffix
+# list, so a checkpoint added there is excluded here without a second edit.
 
 
 def _experiment_id_from_notes(notes: str | None) -> str | None:
@@ -104,7 +105,7 @@ def main() -> None:
 
     new_map = dict(old_map)
     for run_name, notes in sorted(run_notes.items()):
-        if run_name.endswith(SKIP_SUFFIXES):
+        if eval_checkpoints.is_derived_run_name(run_name):
             continue
         if args.version is not None and not stem_has_version(run_name, args.version):
             continue

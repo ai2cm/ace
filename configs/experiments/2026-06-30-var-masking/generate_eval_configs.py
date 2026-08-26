@@ -44,6 +44,7 @@ import functools
 import json
 import pathlib
 
+import eval_checkpoints
 import yaml
 from generate_finetune_configs import iter_train_configs as iter_finetune_train_configs
 from generate_masking_configs import (
@@ -62,8 +63,10 @@ from generate_seed_configs import iter_train_configs as iter_seed_train_configs
 
 HERE = pathlib.Path(__file__).parent
 # Each eval suite config produces one wandb run per checkpoint variant; the run
-# name is the base name plus one of these suffixes (see submit_eval_jobs.py).
-CHECKPOINT_RUN_SUFFIXES = ("-besttrain", "-bestinf", "-lastepoch")
+# name is the base name plus one of these suffixes. Defined in
+# eval_checkpoints.py so that adding a checkpoint there also makes a suite
+# require its run before counting as fully evaluated.
+CHECKPOINT_RUN_SUFFIXES = eval_checkpoints.suffixes()
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 
