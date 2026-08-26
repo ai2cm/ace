@@ -1471,3 +1471,59 @@ def test_conditional_kernel_exact_coarse_recovery():
         interp_b = interp_phys[name].unsqueeze(1).expand_as(gen_downsampled)
         assert torch.allclose(gen_downsampled[:, :, 0], interp_b[:, :, 0], atol=1e-4)
         assert torch.allclose(gen_downsampled[:, :, -1], interp_b[:, :, -1], atol=1e-4)
+
+
+@pytest.mark.parametrize("model_fixture", ["two_block", "conditional_kernel"])
+def test_two_block_noise_respects_block_subspaces(model_fixture):
+    """Regression test for the noise mis-specification bug: fine-resolution
+    white noise for either block leaks variance into a subspace its target
+    never occupies (r: block-constant / image of U; d: null(D)). Verifies
+    _two_block_noise's actual output, not just the underlying twoblock.py
+    primitives (already covered by test_twoblock.py) -- this checks the
+    model wiring calls them correctly."""
+    n_times, fine_height, fine_width, factor = 5, 8, 8, 2
+    model = (
+        _two_block_model(n_times)
+        if model_fixture == "two_block"
+        else _conditional_kernel_model(n_times)
+    )
+    n_channels = len(OUT_NAMES)
+    coarse_height, coarse_width = fine_height // factor, fine_width // factor
+    batch = _spatial_paired_batch(
+        batch_size=2,
+        n_times=n_times,
+        fine_height=fine_height,
+        fine_width=fine_width,
+        downscale_factor=factor,
+    )
+    coarse_clip = model._pack_normalized(batch.coarse.data, model.coarse_normalizer)
+    r_mixing, d_mixing, _ = model._two_block_mixings_and_weight_fit_loss(
+        coarse_clip, n_channels
+    )
+    torch.manual_seed(0)
+    noise = model._two_block_noise(
+        torch.empty(2, n_channels, n_times, coarse_height, coarse_width),
+        torch.empty(2, n_channels, n_times, fine_height, fine_width),
+        r_mixing,
+        d_mixing,
+        factor,
+    )
+    noise_r, noise_d = noise.split(n_channels, dim=CHANNEL_AXIS)
+
+    # r's noise must be exactly block-constant (image of U): every fine
+    # pixel within a factor x factor block has the identical value.
+    noise_r_downsampled = conservative_downsample(noise_r, factor)
+    noise_r_reconstructed = torch.repeat_interleave(
+        torch.repeat_interleave(noise_r_downsampled, factor, dim=-2), factor, dim=-1
+    )
+    assert torch.allclose(noise_r, noise_r_reconstructed, atol=1e-5)
+    # ... and not degenerate (nonzero variance across blocks/time).
+    assert noise_r_downsampled.std() > 1e-3
+
+    # d's noise must be exactly in null(D): D(noise_d) == 0.
+    assert torch.allclose(
+        conservative_downsample(noise_d, factor),
+        torch.zeros(2, n_channels, n_times, coarse_height, coarse_width),
+        atol=1e-5,
+    )
+    assert noise_d.std() > 1e-3  # not degenerate

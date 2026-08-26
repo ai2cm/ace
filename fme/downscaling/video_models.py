@@ -42,7 +42,7 @@ three regimes (``VideoDiffusionModelConfig.endpoints_observed`` /
 """
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import torch
@@ -90,6 +90,7 @@ from fme.downscaling.twoblock import (
     coarse_temporal_interp,
     conservative_downsample,
     d_target,
+    null_space_projector,
     r_target,
 )
 
@@ -1649,34 +1650,47 @@ class VideoDiffusionModel:
         anchor_clip[:, :, [0, -1]] = sr_endpoints
         return anchor_clip, loss_a
 
-    def _two_block_mixing_and_weight_fit_loss(
+    def _two_block_mixings_and_weight_fit_loss(
         self,
         coarse_clip: torch.Tensor,
         n_channels: int,
         r: torch.Tensor | None = None,
         d: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        """``(mixing, weight_fit_loss)`` for one batch.
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """``(r_mixing, d_mixing, weight_fit_loss)`` for one batch.
 
-        ``mixing`` is either the fixed ``_two_block_noise_mixing``
-        (``(2C, T, T)``, shared across the batch) or, under
-        ``two_block_conditional_kernel``, a per-sample ``(B, 2C, T, T)``
-        tensor built from ``g_phi(condition_features(coarse_clip))`` --
-        see ``conditional_kernel.py``.
+        Returned SEPARATELY (not concatenated into one ``2C``-channel
+        tensor) because ``r`` and ``d`` must be noised at their own native
+        resolution/subspace -- see ``_train_on_batch_two_block`` and
+        ``_generate_two_block``'s noise construction, and the correctness
+        note in ``VideoDiffusionModelConfig.two_block``'s docstring: noise
+        drawn as fine-resolution white noise (this method's caller used to
+        do, pre-fix) does not respect ``r``'s block-constant structure
+        (image of ``U``) or ``d``'s ``null(D)`` structure, unlike the
+        theory's forward-noise construction (Section 2:
+        ``K = diag(K_r ⊗ I_Mc, Pi(K_d ⊗ I_Mf) Pi^T)``).
+
+        Each of ``r_mixing``/``d_mixing`` is either ``(C, T, T)`` (fixed
+        kernel, shared across the batch) or, under
+        ``two_block_conditional_kernel``, ``(B, C, T, T)`` (per-sample,
+        built from ``g_phi(condition_features(coarse_clip))`` -- see
+        ``conditional_kernel.py``). Both are shared across channels within
+        their block (not per physical channel), matching two_block's
+        "fixed/conditional kernel per block" scope either way.
 
         ``weight_fit_loss`` is only computed (non-``None``) in conditional
         mode when the true ``r``/``d`` targets are given (training only,
-        not generation). Critically, the ``mixing`` returned here is built
+        not generation). Critically, ``r_mixing``/``d_mixing`` are built
         from ``w_r.detach()``/``w_d.detach()`` -- gradients from the DSM
-        loss that uses this ``mixing`` can never reach ``g_phi``'s
-        parameters. Only ``weight_fit_loss`` (built from the un-detached
-        ``w_r``/``w_d``) trains ``g_phi``, per
-        ``conditional_kernel_theory.md``'s central caveat that plain DSM
-        does not learn the process-matched weights.
+        loss that uses them can never reach ``g_phi``'s parameters. Only
+        ``weight_fit_loss`` (built from the un-detached ``w_r``/``w_d``)
+        trains ``g_phi``, per ``conditional_kernel_theory.md``'s central
+        caveat that plain DSM does not learn the process-matched weights.
         """
         if not self.two_block_conditional_kernel:
             assert self._two_block_noise_mixing is not None
-            return self._two_block_noise_mixing, None
+            r_mixing, d_mixing = self._two_block_noise_mixing.split(n_channels, dim=0)
+            return r_mixing, d_mixing, None
         assert self._r_encoder is not None and self._d_encoder is not None
         assert self._r_basis is not None and self._d_basis is not None
         features = condition_features(coarse_clip)
@@ -1702,14 +1716,43 @@ class VideoDiffusionModel:
         k_d = torch.einsum("nb,bij->nij", w_d.detach(), self._d_basis)
         l_r = torch.linalg.cholesky(k_r + eps * eye)
         l_d = torch.linalg.cholesky(k_d + eps * eye)
-        mixing = torch.cat(
-            [
-                l_r.unsqueeze(1).expand(-1, n_channels, -1, -1),
-                l_d.unsqueeze(1).expand(-1, n_channels, -1, -1),
-            ],
-            dim=1,
-        )  # (B, 2C, T, T)
-        return mixing, weight_fit_loss
+        r_mixing = l_r.unsqueeze(1).expand(-1, n_channels, -1, -1)  # (B, C, T, T)
+        d_mixing = l_d.unsqueeze(1).expand(-1, n_channels, -1, -1)  # (B, C, T, T)
+        return r_mixing, d_mixing, weight_fit_loss
+
+    def _two_block_noise(
+        self,
+        r_like: torch.Tensor,
+        d_like: torch.Tensor,
+        r_mixing: torch.Tensor,
+        d_mixing: torch.Tensor,
+        factor: int,
+    ) -> torch.Tensor:
+        """Structurally-correct two-block noise, shared by training and the
+        initial-latents draw at generation: ``r`` is drawn NATIVELY at
+        coarse resolution (``r_like``'s shape) then broadcast to fine
+        resolution via ``U`` -- matching ``r_fine``'s block-constant
+        structure (image of ``U``) -- and ``d`` is drawn at fine resolution
+        (``d_like``'s shape) then projected via ``Pi`` onto ``null(D)``.
+
+        Fine-resolution white noise for either block (this method's
+        predecessor) would be mis-specified: ``r``'s target is
+        block-constant but white noise carries ~``(factor**2-1)/factor**2``
+        of its variance outside that subspace, and ``d``'s target lives in
+        ``null(D)`` but white noise carries ``1/factor**2`` of its variance
+        in the coarse-representable complement. Matches the theory's
+        forward-noise construction exactly (Section 2 of
+        ``idea/spatiotemoral/twoblock_theory.md``): ``K = diag(K_r x I_Mc,
+        Pi(K_d x I_Mf) Pi^T)``. See ``_generate_two_block``'s
+        ``project_churn_noise`` for the analogous per-sampler-step
+        correction applied to the reverse-diffusion churn noise.
+        """
+        noise_r = self._sample_residual_noise(r_like, r_mixing)
+        noise_r_fine = block_replicate_upsample(noise_r, factor)
+        noise_d = null_space_projector(
+            self._sample_residual_noise(d_like, d_mixing), factor
+        )
+        return torch.cat([noise_r_fine, noise_d], dim=CHANNEL_AXIS)
 
     def _train_on_batch_two_block(
         self, batch: PairedVideoBatchData, optimizer
@@ -1751,14 +1794,16 @@ class VideoDiffusionModel:
         # masked to the endpoint positions via coarse_endpoints_only.
         condition = self._conditioning(fine_clip, r_mask, coarse_upsampled)
 
-        mixing, weight_fit_loss = self._two_block_mixing_and_weight_fit_loss(
-            coarse_clip, n_channels, r=r, d=d
+        r_mixing, d_mixing, weight_fit_loss = (
+            self._two_block_mixings_and_weight_fit_loss(
+                coarse_clip, n_channels, r=r, d=d
+            )
         )
 
         sigma = self.config.two_block_sample_training_noise(
             batch_size, fine_clip.device
         ).reshape(batch_size, 2 * n_channels, 1, 1, 1)
-        noise = self._sample_residual_noise(residual, mixing)
+        noise = self._two_block_noise(r, d, r_mixing, d_mixing, factor)
         noised = residual + noise * sigma * mask
 
         denoised = self.module(
@@ -1980,7 +2025,6 @@ class VideoDiffusionModel:
         )
 
     @torch.no_grad()
-    @torch.no_grad()
     def _generate_two_block(
         self,
         batch: PairedVideoBatchData,
@@ -2015,11 +2059,14 @@ class VideoDiffusionModel:
             ],
             dim=CHANNEL_AXIS,
         )
+        coarse_h, coarse_w = coarse_clip.shape[-2:]
         coarse_upsampled = block_replicate_upsample(coarse_clip, factor)
         condition = self._conditioning(fine_clip, r_mask, coarse_upsampled)
         # Computed on the un-repeated batch: condition features/g_phi only
         # depend on the true condition c, not the ensemble size.
-        mixing, _ = self._two_block_mixing_and_weight_fit_loss(coarse_clip, n_channels)
+        r_mixing, d_mixing, _ = self._two_block_mixings_and_weight_fit_loss(
+            coarse_clip, n_channels
+        )
 
         def repeat(t):
             return t.repeat_interleave(n_samples, dim=0)
@@ -2029,22 +2076,63 @@ class VideoDiffusionModel:
         day_of_year = repeat(day_of_year)
         second_of_day = repeat(second_of_day)
         mask_b = mask.expand(batch_size * n_samples, 2 * n_channels, n_times, 1, 1)
-        if mixing.ndim == 4:  # (B, 2C, T, T): per-sample, repeat per ensemble member
-            mixing = repeat(mixing)
+        if r_mixing.ndim == 4:  # (B, C, T, T): per-sample, repeat per ensemble member
+            r_mixing = repeat(r_mixing)
+            d_mixing = repeat(d_mixing)
 
-        latents = self._sample_residual_noise(
+        latents = self._two_block_noise(
             torch.empty(
                 batch_size * n_samples,
-                2 * n_channels,
+                n_channels,
+                n_times,
+                coarse_h,
+                coarse_w,
+                device=fine_clip.device,
+            ),
+            torch.empty(
+                batch_size * n_samples,
+                n_channels,
                 n_times,
                 fine_h,
                 fine_w,
                 device=fine_clip.device,
             ),
-            mixing,
+            r_mixing,
+            d_mixing,
+            factor,
         )
         sigma_min, sigma_max = self.config.two_block_generation_sigma_bounds(
             fine_clip.device
+        )
+
+        def project_churn_noise(noise: torch.Tensor) -> torch.Tensor:
+            """Same r/d structural correction as the noise construction
+            above, applied to the sampler's per-step stochastic churn term
+            (_video_edm_sample's noise_mixing produces fine-resolution
+            noise for both blocks uniformly; this restores each block's
+            true subspace). r: project onto row(U) (average within each
+            block, re-broadcast) and rescale by `factor` to restore unit
+            variance (averaging factor**2 iid values divides variance by
+            factor**2, so undoing that needs a sqrt(factor**2)=factor
+            correction -- verified numerically, see git history). d:
+            project onto null(D) via Pi, same as the initial latents.
+            """
+            noise_r_part, noise_d_part = noise.split(n_channels, dim=CHANNEL_AXIS)
+            noise_r_part = (
+                block_replicate_upsample(
+                    conservative_downsample(noise_r_part, factor), factor
+                )
+                * factor
+            )
+            noise_d_part = null_space_projector(noise_d_part, factor)
+            return torch.cat([noise_r_part, noise_d_part], dim=CHANNEL_AXIS)
+
+        # Recombined into one 2C-channel tensor for _video_edm_sample's
+        # generic temporal-mixing step; project_churn_noise applies the
+        # per-block spatial correction afterward, every reverse-diffusion
+        # step (not just the initial latents draw above).
+        combined_mixing = torch.cat(
+            [r_mixing, d_mixing], dim=1 if r_mixing.ndim == 4 else 0
         )
         residual = _video_edm_sample(
             self.module,
@@ -2058,7 +2146,8 @@ class VideoDiffusionModel:
             sigma_min=sigma_min,
             sigma_max=sigma_max,
             s_churn=self.config.churn,
-            noise_mixing=mixing,
+            noise_mixing=combined_mixing,
+            project_noise=project_churn_noise,
             frame_index=None,
         )
         denoised_r_fine, denoised_d = residual.split(n_channels, dim=CHANNEL_AXIS)
@@ -2288,13 +2377,20 @@ def _video_edm_sample(
     rho: float = 7.0,
     s_churn: float = 0.0,
     noise_mixing: torch.Tensor | None = None,
+    project_noise: Callable[[torch.Tensor], torch.Tensor] | None = None,
     frame_index: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """EDM stochastic sampler that keeps the observed endpoints pinned (re-zeroed
     after every update). When ``noise_mixing`` is given, the stochastic churn noise
     is temporally correlated with that mixing matrix (matching the training noise;
     shapes ``(T, T)``/``(C, T, T)``/``(B, C, T, T)`` -- see
-    ``VideoDiffusionModel._sample_residual_noise``'s docstring).
+    ``VideoDiffusionModel._sample_residual_noise``'s docstring). ``project_noise``,
+    if given, is applied to the churn noise after temporal mixing -- used by
+    two_block to restore each block's true spatial subspace (r: image of
+    ``U``; d: ``null(D)``) every reverse-diffusion step, since the temporal
+    mixing alone is spatially white and would otherwise leak noise into a
+    subspace the target never occupies (see
+    ``VideoDiffusionModel._generate_two_block``'s ``project_churn_noise``).
     """
     compute_dtype = torch.float32 if latents.device.type == "mps" else torch.float64
     sigma_min_t = torch.as_tensor(
@@ -2330,13 +2426,18 @@ def _video_edm_sample(
     def churn_noise(x):
         noise = torch.randn_like(x)
         if noise_mixing is None:
-            return noise
-        mixing = noise_mixing.to(device=noise.device, dtype=noise.dtype)
-        if mixing.ndim == 4:
-            return torch.einsum("bcti,bcihw->bcthw", mixing, noise)
-        if mixing.ndim == 3:
-            return torch.einsum("cti,bcihw->bcthw", mixing, noise)
-        return torch.einsum("ti,bcihw->bcthw", mixing, noise)
+            mixed = noise
+        else:
+            mixing = noise_mixing.to(device=noise.device, dtype=noise.dtype)
+            if mixing.ndim == 4:
+                mixed = torch.einsum("bcti,bcihw->bcthw", mixing, noise)
+            elif mixing.ndim == 3:
+                mixed = torch.einsum("cti,bcihw->bcthw", mixing, noise)
+            else:
+                mixed = torch.einsum("ti,bcihw->bcthw", mixing, noise)
+        if project_noise is not None:
+            mixed = project_noise(mixed.to(x.dtype))
+        return mixed
 
     x = latents.to(compute_dtype) * t[0] * mask
     for i, (t_cur, t_next) in enumerate(zip(t[:-1], t[1:])):
