@@ -220,7 +220,12 @@ class Samudra(torch.nn.Module):
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
 
-        assert n_built == 2 * num_steps + 1
+        if n_built != 2 * num_steps + 1:
+            # a bare assert would vanish under `python -O`, and miscounting
+            # silently moves which block "bottleneck" conditions
+            raise AssertionError(
+                f"built {n_built} ConvNeXt blocks, expected {2 * num_steps + 1}"
+            )
 
         self.layers = nn.ModuleList(layers)
         self.num_steps = int(len(ch_width_with_input) - 1)

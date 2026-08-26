@@ -424,3 +424,9 @@ def test_samudra_rejects_inconsistent_conditioning_config():
             ),
             noise_injection="bottleneck",
         )
+
+
+def test_conditioning_rejects_noise_coarser_than_the_block():
+    conditioning = NoiseConditioning(n_channels=3, embed_dim_noise=2)
+    with pytest.raises(ValueError, match="coarser than the block grid"):
+        conditioning(torch.zeros(1, 3, 16, 32), torch.randn(1, 2, 4, 8))

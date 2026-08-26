@@ -101,6 +101,17 @@ class NoiseConditioning(torch.nn.Module):
     def forward(self, x: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
         target = (x.shape[-2], x.shape[-1])
         if (noise.shape[-2], noise.shape[-1]) != target:
+            if noise.shape[-2] < target[0] or noise.shape[-1] < target[1]:
+                # subsampling only stays iid while it discards cells: upsampling
+                # would duplicate them, correlating neighbours and breaking the
+                # unit variance this resampling exists to preserve. Samudra
+                # never asks for it (the noise is drawn at input resolution and
+                # every block is coarser), so this is an invariant, not a case
+                # to handle.
+                raise ValueError(
+                    f"noise field {tuple(noise.shape[-2:])} is coarser than the "
+                    f"block grid {target}; it must be at least as fine."
+                )
             noise = torch.nn.functional.interpolate(noise, size=target, mode="nearest")
         return x * (1.0 + self.W_scale(noise)) + self.W_bias(noise)
 
