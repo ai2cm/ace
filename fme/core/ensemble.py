@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 
 
 def get_crps(
@@ -89,3 +90,111 @@ def get_energy_score(
     target_term = torch.abs(gen - target).mean(axis=1)
     internal_term = -0.5 * torch.abs(gen[:, 0, ...] - gen[:, 1, ...])
     return target_term + internal_term
+
+
+def _patch_l2_distance(diff: torch.Tensor, patch_size: int) -> torch.Tensor:
+    """
+    Compute the per-point Euclidean distance between the patches of two
+    fields, given their pointwise difference.
+
+    ||patch(u) - patch(v)||^2 at each point equals the patch_size x patch_size
+    box-sum of (u - v)^2, because patch extraction is linear and the windows
+    of the two fields are aligned; no patch tensor is ever materialized.
+
+    Args:
+        diff: The pointwise difference of two fields, of shape
+            [..., n_lat, n_lon].
+        patch_size: Odd width of the square patch in grid points.
+
+    Returns:
+        The patch distance, of the same shape as diff.
+    """
+    halo = patch_size // 2
+    shape = diff.shape
+    squared = (diff * diff).reshape(-1, 1, shape[-2], shape[-1])
+    squared = F.pad(squared, (halo, halo, 0, 0), mode="circular")
+    squared = F.pad(squared, (0, 0, halo, halo), mode="constant", value=0.0)
+    box_sum = F.avg_pool2d(
+        squared, kernel_size=patch_size, stride=1, divisor_override=1
+    )
+    # sqrt has an unbounded gradient at zero (identical members, constant
+    # patches); clamping gives a zero subgradient there, like abs() in CRPS.
+    return torch.sqrt(box_sum.clamp_min(1e-12)).reshape(shape)
+
+
+def get_patch_energy_score(
+    gen: torch.Tensor,
+    target: torch.Tensor,
+    patch_size: int = 3,
+) -> torch.Tensor:
+    """
+    Compute a per-channel patch energy score.
+
+    Each grid point is scored with the energy score of the
+    patch_size x patch_size patch of a single channel centered on it, using
+    the Euclidean norm over patch values:
+
+    .. math::
+
+        E[||X - y||] - 1/2 E[||X - X'||]
+
+    The east-west boundary is periodic and the north-south boundary is
+    zero-padded. Both fields receive identical padding (implemented as
+    padding of their pointwise squared difference, which is equivalent), so
+    out-of-domain entries contribute zero to every patch distance and polar
+    patches are effectively truncated to their valid entries. Because the
+    score is divided by the fixed factor patch_size regardless of that
+    truncation, rows within halo distance of a pole contribute
+    proportionally less loss than interior rows (roughly by
+    sqrt(n_valid) / patch_size); this mild polar down-weighting is accepted
+    behavior.
+
+    The division by patch_size (the square root of the patch
+    dimensionality) makes the magnitude comparable to CRPS; at patch_size=1
+    it equals fair CRPS up to the numerical floor below. The squared patch
+    distance is floored at 1e-12 before the square root (a 1e-6 floor on
+    each distance), giving collapsed ensembles a zero subgradient instead
+    of the unbounded gradient of sqrt at zero.
+
+    The horizontal layout is assumed to be [..., n_lat, n_lon] with a
+    periodic last dimension (a lat-lon grid). Other layouts -- e.g. the
+    HEALPix [..., face, ny, nx] -- would be silently mis-padded, as with
+    the finite-difference CRPS loss.
+
+    Args:
+        gen: The generated ensemble members, of shape
+            [n_batch, n_ensemble, ..., n_lat, n_lon].
+        target: The target, of shape [n_batch, 1, ..., n_lat, n_lon].
+        patch_size: Odd width of the square patch in grid points; at most
+            n_lon.
+
+    Returns:
+        The patch energy score, of shape [n_batch, ..., n_lat, n_lon].
+    """
+    if gen.shape[1] != 2:
+        raise NotImplementedError(
+            "Patch energy score is written here specifically for 2 ensemble "
+            f"members, got {gen.shape[1]} ensemble members. "
+            "Update this function (and its tests) to support more."
+        )
+    if patch_size < 1 or patch_size % 2 == 0:
+        raise ValueError(f"patch_size must be a positive odd integer, got {patch_size}")
+    if patch_size > gen.shape[-1]:
+        raise ValueError(
+            f"patch_size ({patch_size}) must not exceed the longitude "
+            f"dimension ({gen.shape[-1]})"
+        )
+    n_batch = gen.shape[0]
+    # One pad + pool pass over all three difference fields, stacked on batch.
+    diffs = torch.cat(
+        [
+            gen[:, 0] - target[:, 0],
+            gen[:, 1] - target[:, 0],
+            gen[:, 0] - gen[:, 1],
+        ],
+        dim=0,
+    )
+    distance = _patch_l2_distance(diffs, patch_size)
+    target_term = 0.5 * (distance[:n_batch] + distance[n_batch : 2 * n_batch])
+    internal_term = -0.5 * distance[2 * n_batch :]
+    return (target_term + internal_term) / patch_size
