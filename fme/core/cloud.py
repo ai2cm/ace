@@ -67,11 +67,6 @@ class StagedFile:
         """The local path to write to."""
         return self._path
 
-    @property
-    def destination(self) -> str:
-        """The final path of the file, local or remote."""
-        return self._destination
-
     def upload(self):
         """Copy the staged file to its destination and discard the staging copy.
 

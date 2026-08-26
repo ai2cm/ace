@@ -124,7 +124,7 @@ class RawDataWriter:
         """
         # netCDF4 can only stream into a local file handle, so a remote
         # destination is staged locally and uploaded by ``finalize``.
-        self._staged_file = StagedFile(os.path.join(str(path), f"{label}.nc"))
+        self._staged_file = StagedFile(os.path.join(path, f"{label}.nc"))
         filename = self._staged_file.path
         calendar = infer_calendar(initial_condition_times)
         n_initial_conditions = len(initial_condition_times)

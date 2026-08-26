@@ -947,5 +947,11 @@ def test_netcdf_writers_upload_only_on_finalize():
         )
         writer.flush()
         assert fs.ls(experiment_dir) == []
+        # the same files do land once the writer is finalized, so the
+        # assertion above is about the timing of the upload, not about the
+        # writers being inert
+        writer.finalize()
+        for filename in NETCDF_OUTPUT_FILENAMES:
+            assert fs.exists(os.path.join(experiment_dir, filename))
     finally:
         fs.rm(experiment_dir, recursive=True)
