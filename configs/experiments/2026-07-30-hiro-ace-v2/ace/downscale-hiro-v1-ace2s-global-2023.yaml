@@ -1,4 +1,4 @@
-experiment_dir: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-25-hiro-v1-ace2s-downscale-global-2023-ic0000
+experiment_dir: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-26-hiro-v1-ace2s-downscale-global-2023-ic0000
 patch:
   divide_generation: true
   composite_prediction: true

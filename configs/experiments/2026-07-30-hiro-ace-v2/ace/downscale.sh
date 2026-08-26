@@ -40,7 +40,7 @@ wandb_group=""
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/ace \
+    --workspace ai2/climate-titan \
     --priority urgent \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
@@ -48,7 +48,6 @@ gantry run \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
     --env WANDB_RUN_GROUP=$wandb_group \
-    --env CM_PRIORITY=high \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
