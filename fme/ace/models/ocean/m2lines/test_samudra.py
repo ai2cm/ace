@@ -266,16 +266,47 @@ def test_conditioning_noise_keeps_unit_variance_at_every_depth():
     20-fold across the blocks ``all_blocks`` conditions.
     """
     torch.manual_seed(0)
-    conditioning = NoiseConditioning(n_channels=3, embed_dim_noise=2)
-    # the 4-degree ocean grid and the block resolutions Samudra's AvgPools give
-    noise = torch.randn(64, 2, 45, 90)
-    for target in [(45, 90), (22, 45), (11, 22), (5, 11), (2, 5)]:
-        x = torch.zeros(64, 3, *target)
-        resampled = torch.nn.functional.interpolate(noise, size=target, mode="nearest")
+    n_noise = 2
+    conditioning = NoiseConditioning(n_channels=n_noise, embed_dim_noise=n_noise)
+    # read the resampled field straight off the module: zero scale, identity
+    # bias and a zero input make the output exactly the noise it resampled, so
+    # what follows tests the module rather than re-testing interpolate
+    torch.nn.init.zeros_(conditioning.W_scale.weight)
+    with torch.no_grad():
+        conditioning.W_bias.weight.copy_(
+            torch.eye(n_noise).reshape(n_noise, n_noise, 1, 1)
+        )
+    # the 4-degree ocean grid and the block resolutions Samudra's AvgPools give.
+    # 45 -> 22 and 45 -> 11 are the non-integer ratios, where a fixed integer
+    # stride would drift off the nearest-neighbour cell.
+    targets = [(45, 90), (22, 45), (11, 22), (5, 11), (2, 5)]
+
+    noise = torch.randn(64, n_noise, 45, 90)
+    for target in targets:
+        resampled = conditioning(torch.zeros(64, n_noise, *target), noise)
         assert resampled.shape[-2:] == target
         assert abs(resampled.std().item() - 1.0) < 0.05, target
-        # and the conditioning really consumes that resampled field
-        conditioning(x, noise)
+
+    # a field whose values are the flat source index reveals exactly which
+    # source cell each output cell drew from
+    index_field = (
+        torch.arange(45 * 90, dtype=torch.float32)
+        .reshape(1, 1, 45, 90)
+        .expand(1, n_noise, 45, 90)
+        .contiguous()
+    )
+    for target in targets:
+        picked = conditioning(torch.zeros(1, n_noise, *target), index_field)[0, 0]
+        rows, cols = picked[:, 0] // 90, picked[0] % 90
+        # every output cell draws a *distinct* source cell, so the coarse field
+        # is a subset of iid draws and is iid at unit variance by construction.
+        # Averaging or interpolating would blend cells; reusing one would
+        # correlate neighbours.
+        assert torch.all(rows[1:] > rows[:-1]), target
+        assert torch.all(cols[1:] > cols[:-1]), target
+        # and the sample spans the whole field rather than cropping a corner
+        assert rows[-1] >= 45 - -(-45 // target[0]), target
+        assert cols[-1] >= 90 - -(-90 // target[1]), target
 
 
 @pytest.mark.parametrize("noise_injection", ["bottleneck", "all_blocks"])
