@@ -8,30 +8,39 @@ error``. That raises SXid errors, so the GPUs need a reboot and the cluster
 cordons the node. To avoid that outcome, no rank may exit until every rank has
 stopped its own NCCL kernels.
 
-Each rank handles this on its own, with no cross-rank coordination: on a
-termination signal it aborts its own communicators -- ``ncclCommAbort`` kills
-the local kernels and unblocks whatever host thread was waiting on them --
-then holds its exit until no peer can still be aborting (see
-`_wait_for_peer_aborts`), so its memory stays mapped until every peer's
-kernels have stopped.
-
-The abort itself is deferred until this rank's collectives are idle or merely
-waiting. Aborting communicators whose kernels are actively exchanging data
+Each rank handles this on its own, with no cross-rank coordination. The
+abort must not meet a kernel that is actively exchanging data: aborting one
 faulted the fabric in a real preemption (8xH100, mid-training-step: contained
 NVLink peer-access errors, an unrecoverable NVSwitch SXid, node cordoned),
 while aborting idle or *waiting* kernels was validated safe on H100 and B200.
-So the training, validation, and inference loops offer every batch boundary
-as a stopping point (`park_if_terminating`), and the listener aborts at one
-uniform instant across ranks -- the park deadline after the signal -- once
-the main thread has parked at a boundary or unwound into the context's exit.
-A main thread that misses the deadline is wedged in a collective a peer will
-never complete, where the kernels are waiting rather than transferring and
-the abort is safe anyway. The abort must not come *early* on a parked rank
-even though that rank is idle: freeing its communicator buffers faults the
-waiting kernels of peers still wedged in a collective it never joined
-(observed contained on H100, the same error class as the fabric fault), so
-parked ranks abort a settle period *after* the deadline, once every wedged
-peer's own abort has already killed its kernels.
+So the training, validation, and inference loops offer every batch boundary as
+a stopping point (`park_if_terminating`), and a rank that reaches one drains
+its device work and skips the abort entirely: it holds no kernels for an abort
+to stop and no host thread for it to release, while freeing its communicator
+buffers would fault the waiting kernels of a peer still wedged in a collective
+it never joined (observed contained on H100, the same error class as the
+fabric fault). Only a rank that misses the park deadline aborts --
+``ncclCommAbort`` kills its local kernels and unblocks the host thread waiting
+on them -- and by missing the deadline that rank has shown it is wedged in a
+collective a peer will never complete, where the kernels are waiting rather
+than transferring.
+
+Every rank, aborting or not, then holds its exit until no peer can still be
+aborting (see `_wait_for_peer_aborts`), so its memory stays mapped until every
+peer's kernels have stopped. That floor is the only cross-rank timing here,
+and it is deliberately loose: ranks compare nothing, and each measures from
+its *own* signal, which torchrun's agent delivers to the local workers one
+after another -- 1.1s apart on a 2-GPU node in the field, and the gap grows
+with the world size.
+
+Nothing on this path may wait forever. A hang here is worse than a hard exit:
+a rank wedged in the GPU driver cannot be killed at all, SIGKILL included, so
+its container never stops and the scheduler records a plain failure instead of
+a preemption -- which costs the run its automatic requeue. So the abort is
+bounded (`_abort_local_communicators`), the stderr writes cannot block
+(`write_stderr`), and a watchdog armed at the signal
+(`_start_hard_deadline_watchdog`) exits with the signal's code at a fixed
+deadline whatever else is stuck.
 
 The signal is received on a *listener* -- a dedicated thread whose only job is
 to wait for the signal -- because the main thread cannot be trusted to receive
@@ -48,6 +57,7 @@ notably.
 
 import contextlib
 import os
+import select
 import signal
 import threading
 import time
@@ -61,59 +71,71 @@ from ._signal_listener import SignalListener
 
 TERMINATION_SIGNALS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
 
-# Allowance past the latest possible peer abort *start* (the park deadline
-# plus the settle period after the signal) for the abort itself and for
-# rank-to-rank signal skew: no rank may exit before
+# Allowance for a peer's abort to run, on top of the park deadline it starts
+# at and the settle period covering signal skew: no rank may exit before
 # signal + park_deadline + settle_period + grace_period (see
 # `_wait_for_peer_aborts`). Aborts return in under a second on a wedged 8-GPU
-# node (measured on H100 and B200), so this generously covers both while the
-# sum fits torchrun's shared 30s SIGTERM-to-SIGKILL budget (`PContext.close`'s
+# node (measured on H100 and B200), so this is a generous cover, and the sum
+# stays well inside torchrun's 30s SIGTERM-to-SIGKILL budget (`PContext.close`'s
 # default timeout, torch/distributed/elastic/agent/server/local_elastic_agent.py).
 DEFAULT_GRACE_PERIOD = 5.0
 
 # How long the listener waits for the main thread to stop touching training
 # state (see _ExitCoordination.mark_training_state_frozen) before giving up on the
 # post-abort callbacks. One batch of compute bounds the wait in the common
-# case; together with the callbacks and grace period this must fit torchrun's
-# 30s SIGTERM-to-SIGKILL budget.
+# case; a rank that parked has already frozen, so the wait is free there.
 DEFAULT_STATE_FREEZE_TIMEOUT = 5.0
 
-# The uniform abort time: how long after the signal every rank aborts,
-# parked or not. For a wedged main thread it is the wait before aborting
-# anyway -- long enough for the tail of a training batch or an inference
-# window (sub-second to a few seconds); missing it means the thread is wedged
-# in a collective a peer will never complete, whose kernels are waiting
-# rather than transferring, so the abort is safe without the park. A parked
-# rank holds its abort to the same instant (plus the settle period): aborting
-# early would free buffers that a wedged peer's waiting kernels still poll
-# (see _wait_for_main_thread_to_park). With the settle period, abort,
-# post-abort callbacks, and grace period behind it, the sum must fit the same
-# 30s budget -- and the restart checkpoint, a post-abort callback, only gets
-# what remains of that budget after the abort time (hardware-trial writes took
-# ~19s), so the deadline stays as small as the batch tail allows.
+# How long the listener waits for the main thread to reach a loop boundary
+# before concluding it is wedged and aborting without it -- long enough for
+# the tail of a training batch or an inference window (sub-second to a few
+# seconds). A rank that parks within it never aborts at all, so this is also
+# how long a healthy rank waits before starting its restart checkpoint.
 DEFAULT_PARK_DEADLINE = 5.0
 
-# How long past the park deadline a parked rank holds its abort, so that
-# every wedged peer's deadline abort has already killed its kernels -- despite
-# rank-to-rank signal skew (tens of milliseconds) -- before this rank frees
-# the buffers those kernels were waiting on. Aborts return in under a second
-# on a wedged 8-GPU node, so this is a generous cover.
-DEFAULT_SETTLE_PERIOD = 1.0
+# Rank-to-rank signal skew the exit floor tolerates, on top of the park
+# deadline an aborting peer starts from. torchrun's agent signals its local
+# workers one after another, so a peer's clock may lag this rank's by seconds
+# (1.1s apart on a 2-GPU node in the field, more as the world grows). Skew
+# past `settle_period + grace_period` minus the abort's own duration would let
+# this rank exit -- unmapping its memory -- while a peer's kernels are still
+# waiting on it.
+DEFAULT_SETTLE_PERIOD = 3.0
+
+# How long the abort may take before the listener stops waiting on it.
+# `ncclCommAbort` returns in under a second on a wedged 8-GPU node; one that
+# has not returned in this long is wedged in the driver and will not return at
+# all, and waiting on it forfeits the restart checkpoint and the orderly exit
+# for nothing (see `_abort_local_communicators`).
+DEFAULT_ABORT_BUDGET = 3.0
+
+# When the watchdog gives up on an orderly termination and exits anyway,
+# measured from this rank's signal. Clamped up to the exit floor, and kept
+# inside torchrun's 30s SIGTERM-to-SIGKILL budget with room for the skew
+# between the agent's clock and this rank's signal -- being killed is the
+# outcome the watchdog exists to avoid.
+DEFAULT_HARD_DEADLINE = 24.0
+
+# Longest a single message may hold up the exit path. stderr's reader may be
+# gone (EPIPE) or, worse, alive and not draining: a full pipe blocks a plain
+# write indefinitely, which is not a wait this path may take.
+_STDERR_WRITE_TIMEOUT = 1.0
 
 _post_abort_callbacks: list[Callable[[], None]] = []
 
 
 def add_post_abort_callback(callback: Callable[[], None]) -> None:
-    """Run ``callback`` on the listener thread after the abort, before exit.
+    """Run ``callback`` on the listener thread before exit, past the abort.
 
-    Callbacks run only once the main thread has unwound into the context's
-    exit, where it blocks until the process ends -- so their reads of training
-    state cannot race it. A main thread that has not unwound within
-    ``state_freeze_timeout`` (still computing, or stuck somewhere that is not
-    a collective) forfeits the callbacks rather than risk a torn snapshot.
-    Best-effort in duration too: the scheduler's SIGKILL caps how long a
-    callback may take. The communicators are gone by then, so callbacks must
-    not use collectives, nor the logging module (see ``write_stderr``).
+    Callbacks run only once the main thread has parked at a loop boundary or
+    unwound into the context's exit, where it blocks until the process ends --
+    so their reads of training state cannot race it. A main thread that has
+    done neither within ``state_freeze_timeout`` (still computing, or stuck
+    somewhere that is not a collective) forfeits the callbacks rather than
+    risk a torn snapshot. Best-effort in duration too: the hard deadline caps
+    how long a callback may take (see ``_start_hard_deadline_watchdog``).
+    Peers may have aborted their communicators by now, so callbacks must not
+    use collectives, nor the logging module (see ``write_stderr``).
     """
     _post_abort_callbacks.append(callback)
 
@@ -127,11 +149,16 @@ def write_stderr(message: str) -> None:
 
     ``os.write``, not the logger: a logging handler's lock may be held by a
     thread blocked writing to a stalled stderr, and nothing on the exit path
-    may deadlock on it. Never raises: stderr's reader may already be gone
-    mid-preemption (EPIPE), and losing a message must not lose the abort,
-    the grace period, or the exit.
+    may deadlock on it. Never raises and never blocks for long: stderr's
+    reader may already be gone mid-preemption (EPIPE) or still holding a full
+    pipe it has stopped draining, and losing a message must not lose the
+    abort, the grace period, or the exit. A message larger than the pipe's
+    remaining room can still block after the readiness check; the watchdog
+    covers that (see `_start_hard_deadline_watchdog`).
     """
     try:
+        if not select.select([], [2], [], _STDERR_WRITE_TIMEOUT)[1]:
+            return
         os.write(2, message.encode())
     except OSError:
         pass
@@ -216,11 +243,10 @@ def park_if_terminating() -> None:
     (DDP enqueues its gradient all-reduce asynchronously and nothing in a
     default-config batch blocks the host on it) -- and then blocks here
     permanently. That freezes training state at the boundary with the
-    device idle, which tells the listener it may abort
-    (`_wait_for_main_thread_to_park`) and lets the post-abort callbacks
-    snapshot a boundary-consistent state. The listener's exit ends the
-    process out from under the parked thread; the scheduler's SIGKILL is the
-    backstop.
+    device idle, which tells the listener this rank has no kernels to stop --
+    so it skips the abort (`_abort_and_exit`) -- and lets the post-abort
+    callbacks snapshot a boundary-consistent state. The listener's exit ends
+    the process out from under the parked thread.
 
     A drain that hangs (a collective a peer will never complete) or raises (a
     sticky device error) leaves the freeze unset, so the listener takes the
@@ -253,43 +279,53 @@ def park_if_terminating() -> None:
 
 def _wait_for_main_thread_to_park(
     coordination: _ExitCoordination,
-    signal_time: float,
     park_deadline: float,
-    settle_period: float,
-) -> None:
-    """Hold the abort until the uniform abort time, park or no park.
+) -> bool:
+    """Wait out the park deadline. True if training state froze within it.
 
     A parked main thread has drained its device work (`park_if_terminating`
     synchronizes before freezing) and launches no further collectives; a main
-    thread that unwound into the context's exit drains there likewise. But an
-    idle rank's abort is still destructive to its *peers*: freeing this
-    rank's communicator buffers faults the waiting kernels of a peer wedged
-    in a collective this rank never joined. So a frozen rank holds its abort
-    until a settle period past the park deadline, when every wedged peer's
-    own deadline abort has already killed its kernels. A main thread that
-    never freezes is wedged in such a collective itself (or in a drain of
-    one); its kernels are waiting, not transferring, which is safe to abort
-    with its peers at the deadline -- simultaneous aborts of waiting kernels
-    are the probe-validated shape.
+    thread that unwound into the context's exit drains there likewise. Either
+    way the rank holds no kernels for an abort to stop and no host thread for
+    it to release, so the caller skips the abort rather than free buffers a
+    peer wedged in a collective this rank never joined is still polling. A
+    main thread that never freezes is wedged in such a collective itself (or
+    in a drain of one), which is the case the abort exists for: its kernels
+    are waiting rather than transferring, and simultaneous aborts of waiting
+    kernels are the probe-validated shape.
     """
     if coordination.wait_until_training_state_frozen(park_deadline):
-        abort_time = signal_time + park_deadline + settle_period
-        time.sleep(max(0.0, abort_time - time.monotonic()))
-    else:
+        return True
+    write_stderr(
+        f"Main thread has not parked {park_deadline}s after the signal; "
+        "aborting without it.\n"
+    )
+    return False
+
+
+def _abort_local_communicators(abort: Callable[[], None], budget: float) -> None:
+    """Stop this rank's own NCCL kernels and release its wedged host threads.
+
+    Bounded, and on its own thread. An abort that has not returned within the
+    budget is wedged in the driver and will not return, while the listener
+    still owes the peers their grace period and the scheduler an exit that
+    reads as a preemption. The thread is left behind; the exit ends it.
+    """
+
+    def run() -> None:
+        try:
+            abort()
+        except BaseException:
+            write_stderr(f"Aborting communicators failed:\n{traceback.format_exc()}")
+
+    aborter = threading.Thread(target=run, name="fme-abort", daemon=True)
+    aborter.start()
+    aborter.join(budget)
+    if aborter.is_alive():
         write_stderr(
-            f"Main thread has not parked {park_deadline}s after the signal; "
-            "aborting without it.\n"
+            f"Aborting communicators has not returned {budget}s after it "
+            "started; continuing to the exit without it.\n"
         )
-
-
-def _abort_local_communicators(abort: Callable[[], None]) -> None:
-    """Stop this rank's own NCCL kernels and release its wedged host threads."""
-    try:
-        # not bounded: if the abort hangs, exiting anyway would guarantee the
-        # peer-GPU fault, so the rank rides to the scheduler's SIGKILL instead
-        abort()
-    except BaseException:
-        write_stderr(f"Aborting communicators failed:\n{traceback.format_exc()}")
 
 
 def _run_post_abort_callbacks(
@@ -297,11 +333,15 @@ def _run_post_abort_callbacks(
 ) -> None:
     """Run the registered callbacks once training state is safe to read.
 
-    The abort releases only a main thread blocked in a collective; one between
-    collectives keeps computing until the next collective raises, and the
-    callbacks' reads of training state would race it. Wait for it to block in
-    the context's exit, and forfeit the callbacks rather than record a torn
-    snapshot if it never does.
+    A rank that parked at a loop boundary froze its state there, so this
+    reaches the callbacks immediately -- and, having skipped the abort, with
+    the whole budget before the hard deadline left to write in.
+
+    On the abort path the abort releases only a main thread blocked in a
+    collective; one between collectives keeps computing until the next
+    collective raises, and the callbacks' reads of training state would race
+    it. Wait for it to block in the context's exit, and forfeit the callbacks
+    rather than record a torn snapshot if it never does.
     """
     if not _post_abort_callbacks:
         return
@@ -327,15 +367,42 @@ def _wait_for_peer_aborts(
     """Peers' aborts must finish, so their kernels stop touching this rank's
     memory, before this rank exits.
 
-    A fixed sleep from this rank's own abort would let a rank whose abort
-    fired early exit -- unmapping its memory -- while a peer's kernels are
-    still waiting on it. So every rank instead holds its exit until the
-    latest instant a peer can still be aborting: the latest abort start (a
-    settle period past the park deadline, a frozen peer's abort time), plus
-    the grace period for the abort itself and rank-to-rank signal skew.
+    A peer that aborts starts at its own park deadline, measured from its own
+    signal, which may lag this rank's by the skew in torchrun's per-worker
+    signalling. So every rank holds its exit until the latest instant a peer
+    can still be aborting: the park deadline, plus the settle period for that
+    skew, plus the grace period for the abort itself. A rank that parked never
+    aborts and so has no abort of its own to wait out, but it must still wait
+    out its peers'.
     """
     exit_time = signal_time + park_deadline + settle_period + grace_period
     time.sleep(max(0.0, exit_time - time.monotonic()))
+
+
+def _start_hard_deadline_watchdog(
+    signum: signal.Signals, signal_time: float, deadline: float
+) -> None:
+    """Exit ``deadline`` seconds after the signal, whatever else is stuck.
+
+    Every other step is bounded, so reaching this means a driver that has
+    stopped answering, a callback still writing, a stderr message that
+    outlasted its readiness check, or a bug. The scheduler's SIGKILL is not a
+    backstop for any of them: a thread wedged in the GPU driver is unkillable,
+    and a container that cannot stop is recorded as a failure rather than a
+    preemption -- which is what costs the run its requeue.
+    """
+
+    def wait_then_exit() -> None:
+        time.sleep(max(0.0, signal_time + deadline - time.monotonic()))
+        write_stderr(
+            f"Termination has not finished {deadline}s after the signal; "
+            f"exiting with code {128 + signum} anyway.\n"
+        )
+        os._exit(128 + signum)
+
+    threading.Thread(
+        target=wait_then_exit, name="fme-termination-watchdog", daemon=True
+    ).start()
 
 
 def _abort_and_exit(
@@ -346,19 +413,23 @@ def _abort_and_exit(
     state_freeze_timeout: float,
     park_deadline: float,
     settle_period: float,
+    abort_budget: float,
+    hard_deadline: float,
 ) -> None:
     """The termination policy. Runs on the listener thread."""
     signal_time = time.monotonic()
     coordination.mark_listener_owns_exit()
-    write_stderr(
-        f"Received {signal.Signals(signum).name}, aborting distributed "
-        "communicators before exiting.\n"
-    )
-    _wait_for_main_thread_to_park(
-        coordination, signal_time, park_deadline, settle_period
-    )
-    coordination.mark_abort_started()
-    _abort_local_communicators(abort)
+    exit_floor = park_deadline + settle_period + grace_period
+    _start_hard_deadline_watchdog(signum, signal_time, max(hard_deadline, exit_floor))
+    write_stderr(f"Received {signal.Signals(signum).name}; terminating this rank.\n")
+    if _wait_for_main_thread_to_park(coordination, park_deadline):
+        write_stderr(
+            "Main thread parked with the device idle; this rank has nothing "
+            "to abort.\n"
+        )
+    else:
+        coordination.mark_abort_started()
+        _abort_local_communicators(abort, abort_budget)
     _run_post_abort_callbacks(coordination, state_freeze_timeout)
     _wait_for_peer_aborts(signal_time, grace_period, park_deadline, settle_period)
     write_stderr(f"Exiting with code {128 + signum}.\n")
@@ -372,6 +443,8 @@ def abort_and_exit_on_termination(
     state_freeze_timeout: float = DEFAULT_STATE_FREEZE_TIMEOUT,
     park_deadline: float = DEFAULT_PARK_DEADLINE,
     settle_period: float = DEFAULT_SETTLE_PERIOD,
+    abort_budget: float = DEFAULT_ABORT_BUDGET,
+    hard_deadline: float = DEFAULT_HARD_DEADLINE,
     drain: Callable[[], None] | None = None,
 ) -> Generator[None, None, None]:
     """Exit on SIGTERM or SIGINT, aborting the distributed backend first.
@@ -387,10 +460,10 @@ def abort_and_exit_on_termination(
     nothing on the way out may ``os._exit`` or ``SIG_DFL`` its way around it.
 
     Args:
-        abort: Locally aborts the backend's communicators. Called on the
-            listener thread, typically while the main thread is blocked in a
-            collective or parked at a loop boundary, so it must not require
-            the main thread's cooperation.
+        abort: Locally aborts the backend's communicators. Called on its
+            own thread, only when the main thread failed to park -- so it runs
+            while that thread is blocked in a collective, and must not require
+            its cooperation.
         grace_period: Allowance for a peer's abort to run and for signal
             skew: no rank exits before ``park_deadline + settle_period +
             grace_period`` after the signal, so peers' aborts finish while
@@ -399,17 +472,24 @@ def abort_and_exit_on_termination(
         state_freeze_timeout: Seconds the listener waits for the main thread
             to block in this context's exit before skipping the post-abort
             callbacks (see ``add_post_abort_callback``).
-        park_deadline: The uniform abort time, in seconds after the signal:
-            how long the listener waits for the main thread to park at a
-            loop boundary before aborting anyway (see ``park_if_terminating``
-            and ``_wait_for_main_thread_to_park``).
-        settle_period: Seconds past the park deadline a frozen rank holds
-            its abort, so every wedged peer's deadline abort lands first.
+        park_deadline: Seconds after the signal the listener waits for the
+            main thread to park at a loop boundary before concluding it is
+            wedged and aborting without it (see ``park_if_terminating`` and
+            ``_wait_for_main_thread_to_park``).
+        settle_period: Seconds of rank-to-rank signal skew the exit floor
+            tolerates, on top of the park deadline an aborting peer starts
+            from (see ``_wait_for_peer_aborts``).
+        abort_budget: Seconds the listener waits for ``abort`` to return
+            before moving on to the callbacks and the exit (see
+            ``_abort_local_communicators``).
+        hard_deadline: Seconds after the signal at which the process exits
+            regardless of what is still stuck, clamped up to the exit floor
+            (see ``_start_hard_deadline_watchdog``).
         drain: Blocks until every kernel this rank has enqueued has completed
             (``torch.cuda.synchronize`` or equivalent). Called on the main
-            thread before it freezes training state, so a frozen rank's abort
-            cannot meet its own kernels still running. None means there is
-            nothing asynchronous to drain.
+            thread before it freezes training state, so that a frozen rank --
+            which skips the abort -- is known to hold no running kernels of
+            its own. None means there is nothing asynchronous to drain.
     """
     global _armed_context, _at_fork_registered
     if drain is None:
@@ -440,6 +520,8 @@ def abort_and_exit_on_termination(
             state_freeze_timeout,
             park_deadline,
             settle_period,
+            abort_budget,
+            hard_deadline,
         ),
     )
     if not _at_fork_registered:

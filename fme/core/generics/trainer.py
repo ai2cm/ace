@@ -330,12 +330,13 @@ class Trainer:
         def save_restart_checkpoints_on_terminate():
             """Preserve mid-epoch progress when the job is preempted.
 
-            Runs on the termination listener's thread, after the communicators
-            are aborted and once the main thread has parked at a loop boundary
-            or blocked in the shutdown context's exit, so it must stay free of
-            collectives and of the logging module (see
-            `add_post_abort_callback` and `write_stderr`). `save_checkpoint`
-            is root-only and reads local state, which satisfies that.
+            Runs on the termination listener's thread, once the main thread
+            has parked at a loop boundary or blocked in the shutdown context's
+            exit -- and, on a rank that had to abort its communicators, after
+            that abort. So it must stay free of collectives and of the logging
+            module (see `add_post_abort_callback` and `write_stderr`).
+            `save_checkpoint` is root-only and reads local state, which
+            satisfies that.
             """
             if (
                 self._current_epoch_num_batches_seen > 0

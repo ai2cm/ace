@@ -554,93 +554,263 @@ def test_no_listener_installed_in_a_dataloader_worker(monkeypatch):
 
 
 @pytest.mark.medium_duration
-def test_a_parked_main_thread_is_aborted_at_the_uniform_time_with_callbacks():
-    """Parking at a loop boundary freezes state, but the abort must not come
-    early: an idle rank's abort frees buffers a peer wedged in a later
-    collective is still waiting on, so a parked rank aborts at the uniform
-    time -- a settle period past the park deadline, after every wedged peer's
-    deadline abort -- and the post-abort callbacks run against the
-    boundary-frozen state rather than being skipped.
+def test_a_parked_main_thread_skips_the_abort_and_still_runs_callbacks():
+    """A rank parked at a loop boundary has drained its device work, so it
+    holds no kernels for an abort to stop and no host thread for it to
+    release. Aborting anyway would only free buffers a peer wedged in a later
+    collective is still polling, so the parked rank does not abort at all --
+    and its callbacks still run against the boundary-frozen state, with the
+    whole budget to write in rather than what is left after an abort.
     """
-    park_deadline = 0.5
-    settle_period = 0.2
     result = _run_listener_program(
-        f"""
-        import signal, time
+        """
+        import signal
         from fme.core.distributed.shutdown import (
             abort_and_exit_on_termination,
             add_post_abort_callback,
             park_if_terminating,
         )
 
-        signaled = {{"at": 0.0}}
-
-        def abort():
-            print(f"elapsed {{time.monotonic() - signaled['at']:.3f}}", flush=True)
-
         add_post_abort_callback(lambda: print("callback", flush=True))
         with abort_and_exit_on_termination(
-            abort=abort,
+            abort=lambda: print("abort", flush=True),
             grace_period=0.1,
-            park_deadline={park_deadline},
-            settle_period={settle_period},
+            park_deadline=0.5,
+            settle_period=0.2,
         ):
-            signaled["at"] = time.monotonic()
             signal.raise_signal(signal.SIGTERM)
             while True:  # the training loop: a boundary between batches
                 park_if_terminating()
         """
     )
 
+    assert result.stdout.split() == ["callback"]  # no abort
     assert "parked at a loop boundary" in result.stderr
+    assert "nothing to abort" in result.stderr
     assert "has not parked" not in result.stderr
-    label, elapsed, callback = result.stdout.split()
-    assert (label, callback) == ("elapsed", "callback")
-    assert float(elapsed) >= (park_deadline + settle_period) * 0.9
-    assert float(elapsed) < 5.0  # parked, not hung: the abort still comes
     assert result.returncode == 128 + signal.SIGTERM
 
 
 @pytest.mark.medium_duration
-def test_the_settle_period_holds_a_parked_abort_past_the_deadline():
-    """A wedged peer aborts at the park deadline on its own clock, which may
-    lag this rank's by the signal skew. The settle period is what puts a
-    parked rank's abort strictly after every such peer's, so it must land on
-    top of the deadline, not replace it.
+def test_a_parked_rank_still_waits_out_its_peers_aborts():
+    """Skipping the abort does not excuse a parked rank from the exit floor:
+    its memory must stay mapped until every peer's abort could have finished,
+    and a peer aborts at its own park deadline on its own clock.
     """
     park_deadline = 0.3
-    settle_period = 0.6
-    result = _run_listener_program(
+    settle_period = 0.3
+    grace_period = 0.6
+    program = textwrap.dedent(
         f"""
-        import signal, time
+        import signal
         from fme.core.distributed.shutdown import (
             abort_and_exit_on_termination,
             park_if_terminating,
         )
 
-        signaled = {{"at": 0.0}}
-
-        def abort():
-            print(f"settle {{time.monotonic() - signaled['at']:.3f}}", flush=True)
-
         with abort_and_exit_on_termination(
-            abort=abort,
-            grace_period=0.1,
+            abort=lambda: print("abort", flush=True),
+            grace_period={grace_period},
             park_deadline={park_deadline},
             settle_period={settle_period},
         ):
-            signaled["at"] = time.monotonic()
-            signal.raise_signal(signal.SIGTERM)
+            print("ready", flush=True)
             while True:
                 park_if_terminating()
         """
     )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "ready"
+        start = time.monotonic()
+        proc.send_signal(signal.SIGTERM)
+        stdout, stderr = proc.communicate(timeout=30)
+        elapsed = time.monotonic() - start
+    finally:
+        proc.kill()
+        proc.wait()
 
-    assert "parked at a loop boundary" in result.stderr
-    label, observed = result.stdout.split()
-    assert label == "settle"
-    assert float(observed) >= (park_deadline + settle_period) * 0.9
+    assert stdout.split() == []  # the parked rank never aborted
+    assert "nothing to abort" in stderr
+    assert elapsed >= (park_deadline + settle_period + grace_period) * 0.9
+    assert proc.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_an_abort_that_hangs_cannot_stop_the_exit():
+    """A hung ``ncclCommAbort`` is what took a real run down: the listener
+    waited on it forever, the container never stopped, and the scheduler
+    recorded a failure instead of a preemption -- losing the automatic
+    requeue. The abort gets a budget, and the exit happens without it.
+    """
+    result = _run_listener_program(
+        """
+        import signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        def abort():
+            print("abort started", flush=True)
+            threading.Event().wait()  # wedged in the driver, never returns
+
+        with abort_and_exit_on_termination(
+            abort=abort,
+            grace_period=0.1,
+            park_deadline=0.2,
+            settle_period=0.1,
+            abort_budget=0.3,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()  # wedged "in a collective"
+        """
+    )
+
+    assert result.stdout.split() == ["abort", "started"]
+    assert "has not returned 0.3s" in result.stderr
     assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_a_stalled_stderr_cannot_stop_the_abort_or_the_exit():
+    """A reader that stops draining is worse than one that dies: the pipe
+    fills and a plain write blocks forever, wedging the listener before it
+    can abort. The writes give up on the message instead.
+    """
+    result = _run_listener_program(
+        """
+        import fcntl, os, signal, threading
+        from fme.core.distributed.shutdown import abort_and_exit_on_termination
+
+        r, w = os.pipe()  # r stays open and is never read from
+        os.dup2(w, 2)
+        fcntl.fcntl(2, fcntl.F_SETFL, os.O_NONBLOCK)
+        try:
+            while True:
+                os.write(2, b"x" * 4096)  # fill the pipe
+        except BlockingIOError:
+            pass
+        fcntl.fcntl(2, fcntl.F_SETFL, 0)  # a full, blocking stderr
+        with abort_and_exit_on_termination(
+            abort=lambda: print("abort", flush=True),
+            grace_period=0.1,
+            park_deadline=0.2,
+            settle_period=0.1,
+        ):
+            signal.raise_signal(signal.SIGTERM)
+            threading.Event().wait()
+        """
+    )
+
+    assert result.stdout.split() == ["abort"]
+    assert result.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_watchdog_exits_when_a_callback_never_returns():
+    """The restart checkpoint writes to a network mount that can stall, and
+    the callbacks are deliberately unbounded so a slow write still lands. The
+    watchdog is what keeps that from costing the exit.
+    """
+    hard_deadline = 2.0
+    program = textwrap.dedent(
+        f"""
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+            park_if_terminating,
+        )
+
+        add_post_abort_callback(lambda: threading.Event().wait())  # stalled write
+        with abort_and_exit_on_termination(
+            abort=lambda: None,
+            grace_period=0.1,
+            park_deadline=0.2,
+            settle_period=0.1,
+            hard_deadline={hard_deadline},
+        ):
+            print("ready", flush=True)
+            while True:
+                park_if_terminating()
+        """
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "ready"
+        start = time.monotonic()
+        proc.send_signal(signal.SIGTERM)
+        _, stderr = proc.communicate(timeout=30)
+        elapsed = time.monotonic() - start
+    finally:
+        proc.kill()
+        proc.wait()
+
+    assert "has not finished" in stderr
+    assert hard_deadline * 0.9 <= elapsed < hard_deadline + 10.0
+    assert proc.returncode == 128 + signal.SIGTERM
+
+
+@pytest.mark.medium_duration
+def test_the_watchdog_cannot_exit_before_the_exit_floor():
+    """A hard deadline shorter than the floor would trade the fabric
+    guarantee for a fast exit, so it is clamped up to the floor instead.
+    """
+    park_deadline = 0.2
+    settle_period = 0.3
+    grace_period = 0.7
+    program = textwrap.dedent(
+        f"""
+        import signal, threading
+        from fme.core.distributed.shutdown import (
+            abort_and_exit_on_termination,
+            add_post_abort_callback,
+            park_if_terminating,
+        )
+
+        add_post_abort_callback(lambda: threading.Event().wait())
+        with abort_and_exit_on_termination(
+            abort=lambda: None,
+            grace_period={grace_period},
+            park_deadline={park_deadline},
+            settle_period={settle_period},
+            hard_deadline=0.0,
+        ):
+            print("ready", flush=True)
+            while True:
+                park_if_terminating()
+        """
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", program],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "ready"
+        start = time.monotonic()
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=30)
+        elapsed = time.monotonic() - start
+    finally:
+        proc.kill()
+        proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
+
+    assert elapsed >= (park_deadline + settle_period + grace_period) * 0.9
+    assert proc.returncode == 128 + signal.SIGTERM
 
 
 @pytest.mark.medium_duration
@@ -670,18 +840,23 @@ def test_the_deadline_bounds_the_wait_for_a_main_thread_that_never_parks():
 
 
 @pytest.mark.medium_duration
-def test_a_park_wedge_split_keeps_aborts_ordered_and_exits_last():
+def test_a_park_wedge_split_survives_skew_larger_than_the_settle_period():
     """Signal skew around one park check sends two ranks down different
     paths: one parks, one wedges in a collective the parked rank never joins.
-    Two invariants protect the wedged rank: the parked rank must not abort
-    first (freeing buffers the wedged rank's waiting kernels still poll --
-    its abort comes a settle period after the wedged rank's deadline abort),
-    and no rank may exit -- unmapping its memory -- before every rank has
-    aborted.
+
+    torchrun's agent signals its local workers one after another, so the skew
+    is seconds, not milliseconds -- it was 1.1s on the 2-GPU node where this
+    failed in the field. Ordering the parked rank's abort *after* the wedged
+    rank's could not survive that: both are timed from their own signals, so
+    skew past the settle period put the parked rank first, and freeing its
+    buffers under the wedged rank's polling kernels faulted the fabric. The
+    parked rank must not abort at all, and must still outlive its peer's
+    abort.
     """
     park_deadline = 1.0
-    settle_period = 0.2
+    settle_period = 0.2  # deliberately smaller than the skew below
     grace_period = 0.5
+    skew = 0.6
     child = textwrap.dedent(
         f"""
         import sys, time
@@ -718,44 +893,31 @@ def test_a_park_wedge_split_keeps_aborts_ordered_and_exits_last():
         assert proc.stdout.readline().strip() == "READY"  # startup paid
         procs[role] = proc
 
-    aborted_at: dict[str, float] = {}
-    exited_at: dict[str, float] = {}
-    stderr_of: dict[str, str] = {}
-
-    def observe(role: str) -> None:
-        proc = procs[role]
-        assert proc.stdout is not None
-        label, at = proc.stdout.readline().split()
-        assert label == "abort"
-        aborted_at[role] = float(at)
-        assert proc.stderr is not None
-        stderr_of[role] = proc.stderr.read()  # EOF at exit
-        proc.wait(timeout=30)
-        exited_at[role] = time.monotonic()
-
-    observers = [threading.Thread(target=observe, args=(role,)) for role in procs]
     try:
-        for proc in procs.values():
-            proc.send_signal(signal.SIGTERM)  # one each, as torchrun's agent does
-        for thread in observers:
-            thread.start()
-        for thread in observers:
-            thread.join(timeout=30)
+        # one each, as torchrun's agent does, and as far apart
+        procs["park"].send_signal(signal.SIGTERM)
+        time.sleep(skew)
+        procs["wedge"].send_signal(signal.SIGTERM)
+
+        wedge_stdout, wedge_stderr = procs["wedge"].communicate(timeout=30)
+        wedge_aborted_at = float(wedge_stdout.split()[1])
+        park_stdout, park_stderr = procs["park"].communicate(timeout=30)
+        # time.monotonic() is CLOCK_MONOTONIC, shared across processes on
+        # Linux, so the child's abort stamp and the parent's clock compare
+        park_exited_at = time.monotonic()
     finally:
         for proc in procs.values():
             proc.kill()
             proc.wait()
-            for pipe in (proc.stdout, proc.stderr):
-                if pipe is not None:
-                    pipe.close()
 
-    assert set(exited_at) == {"park", "wedge"}
-    assert "parked at a loop boundary" in stderr_of["park"]
-    assert "has not parked" in stderr_of["wedge"]
-    # time.monotonic() is CLOCK_MONOTONIC, shared across processes on Linux,
-    # so the children's abort stamps and the parent's exit stamps compare
-    assert aborted_at["wedge"] < aborted_at["park"]
-    assert min(exited_at.values()) > max(aborted_at.values())
+    assert park_stdout.split() == []  # the parked rank never aborted at all
+    assert park_exited_at > wedge_aborted_at  # nor exited before its peer did
+    assert "has not parked" in wedge_stderr
+    assert wedge_stdout.split()[0] == "abort"
+    assert "parked at a loop boundary" in park_stderr
+    assert "nothing to abort" in park_stderr
+    assert procs["park"].returncode == 128 + signal.SIGTERM
+    assert procs["wedge"].returncode == 128 + signal.SIGTERM
 
 
 @pytest.mark.medium_duration
@@ -802,10 +964,11 @@ def test_park_is_a_noop_without_a_pending_termination():
 
 
 @pytest.mark.medium_duration
-def test_the_drain_runs_before_the_park_and_the_abort():
+def test_the_drain_runs_before_the_park():
     """The loop reaching a boundary is a host-side fact; the batch's last
     collectives may still be running on the device. The park must drain them
-    before freezing state, and the abort must come after the drain.
+    before freezing state, since a frozen rank skips the abort and so is
+    taken at its word about holding no running kernels.
     """
     result = _run_listener_program(
         """
@@ -828,7 +991,7 @@ def test_the_drain_runs_before_the_park_and_the_abort():
         """
     )
 
-    assert result.stdout.split() == ["drain", "abort"]
+    assert result.stdout.split() == ["drain"]  # drained, then parked, no abort
     assert "parked at a loop boundary" in result.stderr
     assert result.returncode == 128 + signal.SIGTERM
 
@@ -965,8 +1128,8 @@ def test_park_returns_immediately_in_a_dataloader_worker(monkeypatch):
 def test_the_context_exit_drains_when_the_abort_has_not_started():
     """An exception racing the signal unwinds into the context's exit while
     the listener may not have read the signal yet: the exit must drain
-    whenever the abort has not fired, or the settle-path abort meets an
-    undrained rank."""
+    whenever the abort has not fired, because the freeze it then marks is
+    what makes this rank one that skips the abort."""
     result = _run_listener_program(
         """
         import signal
@@ -991,7 +1154,7 @@ def test_the_context_exit_drains_when_the_abort_has_not_started():
         """
     )
 
-    assert result.stdout.split() == ["drain", "abort", "callback"]
+    assert result.stdout.split() == ["drain", "callback"]  # frozen: no abort
     assert result.returncode == 128 + signal.SIGTERM
 
 
