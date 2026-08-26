@@ -15,6 +15,7 @@ from fme.core.loss import (
     LossConfig,
     LossOutput,
     LpLoss,
+    SpectralPowerCRPSLoss,
     SpectralWhitening,
     SpectralWhiteningConfig,
     StandardLoss,
@@ -997,3 +998,101 @@ def test_ensemble_loss_with_whitening_builds_and_runs(whitening):
     out = loss(x, y)
     assert all(isinstance(c, LossComponent) for c in out)
     assert torch.isfinite(_components_total(out))
+
+
+def test_spectral_power_crps_phase_invariant():
+    """The spectral-power CRPS ignores phase: random phase rotations are a no-op."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_l = n_m = 12
+    valid = _valid_mask(n_l, n_m, DEVICE).to(torch.cfloat)
+    gen = torch.randn(4, 2, 3, n_l, n_m, dtype=torch.cfloat, device=DEVICE) * valid
+    target = torch.randn(4, 1, 3, n_l, n_m, dtype=torch.cfloat, device=DEVICE) * valid
+    loss = SpectralPowerCRPSLoss(sht=lambda z: z)
+    base = _components_total(loss(gen, target))
+    angles = 2 * torch.pi * torch.rand(4, 2, 3, n_l, n_m, device=DEVICE)
+    phases = torch.exp(1j * angles)
+    rotated = _components_total(loss(gen * phases, target))
+    torch.testing.assert_close(base, rotated, rtol=1e-4, atol=1e-6)
+
+
+def test_spectral_power_crps_prefers_correct_amplitude():
+    """Members with the target's per-degree power beat spectrally damped members."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_batch, n_l, n_m = 500, 12, 12
+    valid = _valid_mask(n_l, n_m, DEVICE).to(torch.cfloat)
+    red = (1.0 / (1.0 + torch.arange(n_l, device=DEVICE).float())).reshape(
+        1, 1, 1, -1, 1
+    )
+
+    def draw(shape):
+        return torch.randn(*shape, dtype=torch.cfloat, device=DEVICE) * red * valid
+
+    target = draw((n_batch, 1, 1, n_l, n_m))
+    matched = draw((n_batch, 2, 1, n_l, n_m))
+    damped = matched.clone()
+    damping = torch.linspace(1.0, 0.2, n_l, device=DEVICE).reshape(1, 1, 1, -1, 1)
+    damped = damped * damping
+    loss = SpectralPowerCRPSLoss(sht=lambda z: z)
+    matched_score = _components_total(loss(matched, target))
+    damped_score = _components_total(loss(damped, target))
+    assert matched_score < damped_score
+
+
+def test_ensemble_loss_with_spectral_power_crps_builds_and_runs():
+    """EnsembleLoss accepts spectral_power_crps_weight and adds a component."""
+    DEVICE = get_device()
+    n_lat, n_lon = 8, 16
+    ops = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE))
+    base_config = LossConfig(
+        type="EnsembleLoss",
+        kwargs={"crps_weight": 0.9, "energy_score_weight": 0.1},
+    )
+    with_term = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            "crps_weight": 0.9,
+            "energy_score_weight": 0.1,
+            "spectral_power_crps_weight": 0.05,
+        },
+    )
+    x = torch.rand(4, 2, 3, n_lat, n_lon, device=DEVICE)
+    y = torch.rand(4, 1, 3, n_lat, n_lon, device=DEVICE)
+    base_out = base_config.build(gridded_operations=ops)(x, y)
+    term_out = with_term.build(gridded_operations=ops)(x, y)
+    assert len(term_out) == len(base_out) + 1
+    total = _components_total(term_out)
+    assert torch.isfinite(total)
+
+
+def test_ensemble_loss_spectral_power_crps_whitening_reaches_power_term():
+    """energy_score_whitening reweights the spectral-power-CRPS term too, not
+    only the energy score. With energy_score_weight=0 the components are
+    [crps, spectral_power]; the plain-CRPS term is whitening-independent, so any
+    difference in the last (power) component proves whitening reaches it."""
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_lat, n_lon = 8, 16
+    ops = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE))
+    common = {
+        "crps_weight": 0.9,
+        "energy_score_weight": 0.0,
+        "spectral_power_crps_weight": 0.1,
+    }
+    no_whiten = LossConfig(type="EnsembleLoss", kwargs=dict(common))
+    with_whiten = LossConfig(
+        type="EnsembleLoss",
+        kwargs={
+            **common,
+            "energy_score_whitening": {"kind": "per_sample", "exponent": 0.5},
+        },
+    )
+    x = torch.rand(4, 2, 3, n_lat, n_lon, device=DEVICE)
+    y = torch.rand(4, 1, 3, n_lat, n_lon, device=DEVICE)
+    out_plain = no_whiten.build(gridded_operations=ops)(x, y)
+    out_whiten = with_whiten.build(gridded_operations=ops)(x, y)
+    assert len(out_plain) == 2 and len(out_whiten) == 2
+    power_plain = out_plain[-1].reduce_to_channel().mean()
+    power_whiten = out_whiten[-1].reduce_to_channel().mean()
+    assert not torch.allclose(power_plain, power_whiten, rtol=1e-4, atol=1e-6)
