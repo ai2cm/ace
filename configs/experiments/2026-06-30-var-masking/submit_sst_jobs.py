@@ -24,6 +24,7 @@ import sys
 from generate_eval_configs import TRAINING_RESULT_DATASETS
 from generate_masking_configs import BASE_CONFIG_FILENAMES, WANDB_PROJECT
 from generate_sst_configs import RUN_CONFIGS_DIR, SST_PERTURBATIONS, sst_config_filename
+from submit_preflight import check_submit_preconditions
 
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-inference.sh"
@@ -123,6 +124,11 @@ def main() -> None:
             raise FileNotFoundError(
                 f"{config_path.name} not found — run generate_sst_configs.py first"
             )
+
+    check_submit_preconditions(
+        [RUN_CONFIGS_DIR / sst_config_filename(level) for level in levels],
+        args.dry_run,
+    )
 
     if not args.dry_run:
         validate_configs(levels)

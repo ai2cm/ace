@@ -23,6 +23,7 @@ from generate_masking_configs import (
     WANDB_PROJECT,
     stem_has_version,
 )
+from submit_preflight import check_submit_preconditions
 
 HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-train.sh"
@@ -94,6 +95,11 @@ def main() -> None:
         raise FileNotFoundError(
             f"no seed configs in {RUN_CONFIGS_DIR} — run generate_seed_configs.py first"
         )
+
+    check_submit_preconditions(
+        [RUN_CONFIGS_DIR / config_filename for config_filename in configs],
+        args.dry_run,
+    )
 
     base_env = {
         **os.environ,

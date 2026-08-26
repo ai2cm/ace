@@ -38,6 +38,7 @@ from generate_masking_configs import (
     stem_has_version,
 )
 from run_eval_suite import run_eval_suite
+from submit_preflight import check_submit_preconditions
 
 from fme.core.distributed import Distributed
 
@@ -192,6 +193,14 @@ def main() -> None:
     if not jobs_by_config:
         print("Nothing to submit: all eval jobs already exist in wandb.")
         return
+
+    # The evaluator entrypoint is run by repository path, so it is declared
+    # alongside the configs; both must be in the commit gantry sends to Beaker.
+    check_submit_preconditions(
+        [RUN_CONFIGS_DIR / config_filename for config_filename in jobs_by_config]
+        + [HERE / "run_eval_suite.py"],
+        args.dry_run,
+    )
 
     if not args.dry_run:
         validate_configs(list(jobs_by_config))
