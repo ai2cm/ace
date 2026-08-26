@@ -1340,8 +1340,8 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         loader=data.inference_data_loader_config,
         aggregator=InferenceEvaluatorAggregatorConfig(),
         data_writer=DataWriterConfig(
-            save_monthly_files=False,
-            save_prediction_files=False,
+            save_monthly_files=True,
+            save_prediction_files=True,
             files=files,
         ),
         allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
@@ -1362,6 +1362,11 @@ def test_evaluator_with_non_local_experiment_dir(tmp_path: pathlib.Path):
         "zonal_mean_diagnostics.nc",
         "time_mean_diagnostics.nc",
         "time_mean_norm_diagnostics.nc",
+        # netCDF writers stage locally and upload on finalize
+        "autoregressive_predictions.nc",
+        "autoregressive_target.nc",
+        "monthly_mean_predictions.nc",
+        "monthly_mean_target.nc",
     ]
     fs, _ = fsspec.url_to_fs(experiment_dir)
     for file in expected_files:

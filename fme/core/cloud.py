@@ -37,6 +37,52 @@ def exists(path: str | Path) -> bool:
     return fs.exists(path)
 
 
+class StagedFile:
+    """A file streamed to local disk, copied to its destination when closed.
+
+    Writers that stream into an open local file handle (e.g. a
+    ``netCDF4.Dataset``) cannot target a remote store directly. This stages
+    such a file: writes go to ``path``, and ``upload`` copies it to
+    ``destination``. Call ``upload`` once the file handle is closed, so a
+    complete file is what lands remotely.
+
+    When ``destination`` is already local there is no staging at all:
+    ``path`` is ``destination`` and ``upload`` does nothing, so local
+    behavior is unchanged.
+    """
+
+    def __init__(self, destination: str | Path):
+        self._destination = str(destination)
+        self._tmpdir: tempfile.TemporaryDirectory | None = None
+        if is_local(self._destination):
+            self._path = self._destination
+        else:
+            self._tmpdir = tempfile.TemporaryDirectory()
+            self._path = os.path.join(
+                self._tmpdir.name, os.path.basename(self._destination)
+            )
+
+    @property
+    def path(self) -> str:
+        """The local path to write to."""
+        return self._path
+
+    @property
+    def destination(self) -> str:
+        """The final path of the file, local or remote."""
+        return self._destination
+
+    def upload(self):
+        """Copy the staged file to its destination and discard the staging copy.
+
+        A no-op for a local destination, or if already called.
+        """
+        if self._tmpdir is not None:
+            inter_filesystem_copy(self._path, self._destination)
+            self._tmpdir.cleanup()
+            self._tmpdir = None
+
+
 def to_netcdf_via_inter_filesystem_copy(ds: xr.Dataset, filename: str | Path):
     """Write an xarray dataset to a netCDF file via an inter-filesystem copy."""
     with tempfile.TemporaryDirectory() as tmpdir:

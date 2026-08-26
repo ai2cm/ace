@@ -1,7 +1,7 @@
 import copy
 import datetime
+import os
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
 
 import cftime
 import numpy as np
@@ -17,7 +17,7 @@ from fme.ace.inference.data_writer.utils import (
     DIM_INFO_LATLON,
     get_all_names,
 )
-from fme.core.cloud import is_local
+from fme.core.cloud import StagedFile
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.writer import DATETIME_ENCODING_UNITS
 
@@ -105,7 +105,9 @@ class MonthlyDataWriter:
     ):
         """
         Args:
-            path: Directory to write netCDF file(s).
+            path: Directory to write netCDF file(s). May be remote (e.g.
+                ``gs://``), in which case the file is written to a local
+                staging directory and uploaded when the writer is finalized.
             label: Label to append to the filename.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
@@ -116,9 +118,10 @@ class MonthlyDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
-        if not is_local(path):
-            raise ValueError("MonthlyDataWriter only supports local file systems.")
-        filename = str(Path(path) / f"{label}.nc")
+        # netCDF4 can only stream into a local file handle, so a remote
+        # destination is staged locally and uploaded by ``finalize``.
+        self._staged_file = StagedFile(os.path.join(str(path), f"{label}.nc"))
+        filename = self._staged_file.path
         n_initial_conditions = len(initial_condition_times)
         calendar = infer_calendar(initial_condition_times)
         self._save_names = save_names
@@ -334,6 +337,7 @@ class MonthlyDataWriter:
     def finalize(self):
         self.flush()
         self.dataset.close()
+        self._staged_file.upload()
 
 
 def add_data(

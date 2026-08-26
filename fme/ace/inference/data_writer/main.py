@@ -15,7 +15,7 @@ from fme.ace.data_loading.batch_data import (
     PairedData,
     PrognosticState,
 )
-from fme.core.cloud import to_netcdf_via_inter_filesystem_copy
+from fme.core.cloud import makedirs, to_netcdf_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
@@ -175,7 +175,7 @@ class DataWriterConfig:
 
         def writer_factory(name: str) -> RawDataWriter | TimeCoarsen:
             path = os.path.join(experiment_dir, STEP_DIAGNOSTICS_DIR)
-            os.makedirs(path, exist_ok=True)
+            makedirs(path, exist_ok=True)
             writer: RawDataWriter | TimeCoarsen = RawDataWriter(
                 path=path,
                 label=name,

@@ -6,6 +6,7 @@ import pytest
 import xarray as xr
 
 from fme.core.cloud import (
+    StagedFile,
     exists,
     inter_filesystem_copy,
     is_local,
@@ -102,3 +103,34 @@ def test_open_dataset_via_inter_filesystem_copy():
 
     fs, _ = fsspec.url_to_fs(filename)
     fs.rm(filename, recursive=True)
+
+
+def test_staged_file_local_writes_in_place(tmp_path: Path):
+    destination = str(tmp_path / "local.txt")
+    staged = StagedFile(destination)
+    assert staged.path == destination
+    with open(staged.path, "w") as f:
+        f.write("test")
+    staged.upload()
+    assert Path(destination).read_text() == "test"
+
+
+def test_staged_file_remote_uploads_on_upload(tmp_path: Path):
+    destination = "memory://staged-test/remote.txt"
+    fs, _ = fsspec.url_to_fs(destination)
+    staged = StagedFile(destination)
+    assert is_local(staged.path)
+    assert os.path.basename(staged.path) == "remote.txt"
+    with open(staged.path, "w") as f:
+        f.write("test")
+    # nothing lands remotely until the file is closed and uploaded
+    assert not fs.exists(destination)
+
+    staged.upload()
+    assert fs.read_text(destination) == "test"
+    # staging copy is discarded, and a second upload is a no-op
+    assert not os.path.exists(staged.path)
+    staged.upload()
+    assert fs.read_text(destination) == "test"
+
+    fs.rm(destination, recursive=True)

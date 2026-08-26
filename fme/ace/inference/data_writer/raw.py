@@ -1,8 +1,8 @@
 import copy
 import dataclasses
 import datetime
+import os
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
 from typing import Literal
 
 import cftime
@@ -18,7 +18,7 @@ from fme.ace.inference.data_writer.utils import (
     DIM_INFO_LATLON,
     get_all_names,
 )
-from fme.core.cloud import is_local
+from fme.core.cloud import StagedFile
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.writer import DATETIME_ENCODING_UNITS, TIMEDELTA_ENCODING_UNITS
 
@@ -110,7 +110,9 @@ class RawDataWriter:
     ):
         """
         Args:
-            path: Directory within which to write the file.
+            path: Directory within which to write the file. May be remote
+                (e.g. ``gs://``), in which case the file is written to a local
+                staging directory and uploaded when the writer is finalized.
             label: Name of the file to write.
             initial_condition_times: 1D array of initial condition times
                 (start time for each inference run).
@@ -120,13 +122,10 @@ class RawDataWriter:
             coords: Coordinate data to be written to the file.
             dataset_metadata: Metadata for the dataset.
         """
-        if not is_local(path):
-            raise ValueError(
-                "The RawDataWriter only supports local file systems. Consider "
-                "using the ZarrWriter instead, which supports writing to a "
-                "non-local filesystem."
-            )
-        filename = str(Path(path) / f"{label}.nc")
+        # netCDF4 can only stream into a local file handle, so a remote
+        # destination is staged locally and uploaded by ``finalize``.
+        self._staged_file = StagedFile(os.path.join(str(path), f"{label}.nc"))
+        filename = self._staged_file.path
         calendar = infer_calendar(initial_condition_times)
         n_initial_conditions = len(initial_condition_times)
         self._save_names = save_names
@@ -261,6 +260,7 @@ class RawDataWriter:
     def finalize(self):
         self.flush()
         self.dataset.close()
+        self._staged_file.upload()
 
 
 def get_batch_lead_time_microseconds(

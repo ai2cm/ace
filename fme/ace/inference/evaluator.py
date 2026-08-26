@@ -178,13 +178,16 @@ class InferenceEvaluatorConfig:
                 While most types of output can be written to a remote
                 ``experiment_dir``, there are some limitations:
 
-                - To write raw or time-coarsened data, the zarr writer must be
-                  used. See the ``files`` parameter of the
-                  :class:`fme.ace.DataWriterConfig` for more details on how this
-                  can be configured. Note that monthly coarsened data cannot
-                  currently be written to zarr, and hence a remote directory,
-                  since it uses a different code path than uniformly coarsened
-                  data.
+                - netCDF output cannot be streamed to a remote store, so each
+                  netCDF file is written to a local temporary directory and
+                  uploaded when it is closed at the end of the run. Its full
+                  contents therefore occupy local disk for the duration of the
+                  run (in the system temporary directory, so set ``TMPDIR`` to
+                  a volume with room for the whole output), and a run that dies
+                  before finalizing leaves no netCDF behind. The zarr writer
+                  (see the ``files`` parameter of
+                  :class:`fme.ace.DataWriterConfig`) writes to a remote store
+                  incrementally and has neither property.
                 - Piping logging output to a file in the ``experiment_dir``
                   is not supported. To silence the warning related to this, set
                   ``log_to_file`` to ``False`` in the

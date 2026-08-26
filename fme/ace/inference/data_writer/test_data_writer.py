@@ -1,6 +1,8 @@
 import datetime
+import os
 
 import cftime
+import fsspec
 import numpy as np
 import numpy.typing as npt
 import pytest
@@ -16,6 +18,7 @@ from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
+from fme.core.cloud import open_dataset_via_inter_filesystem_copy
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.labels import BatchLabels
@@ -847,3 +850,102 @@ def test_get_batch_lead_time_microseconds_overflow(years_ahead, overflow):
     else:
         with pytest.raises(OverflowError):
             get_batch_lead_time_microseconds(init_times, batch_time)
+
+
+def _write_batches_and_finalize(experiment_dir: str, n_lat: int = 4, n_lon: int = 5):
+    """Write two batches of paired data through the netCDF sub-writers."""
+    n_initial_conditions = 2
+    calendar = "proleptic_gregorian"
+    initial_condition_times = get_initial_condition_times(
+        (2020, 1, 1, 0, 0, 0), calendar, n_initial_conditions
+    )
+    writer = DataWriterConfig(
+        save_prediction_files=True,
+        save_monthly_files=True,
+        names=None,
+    ).build_paired(
+        experiment_dir=experiment_dir,
+        initial_condition_times=initial_condition_times,
+        n_timesteps=8,
+        timestep=TIMESTEP,
+        variable_metadata={"a": VariableMetadata(units="m", long_name="a_name")},
+        coords={"lat": np.arange(n_lat), "lon": np.arange(n_lon)},
+        dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
+    )
+    torch.manual_seed(0)
+    for i_batch in range(2):
+        batch_time = xr.concat(
+            [
+                xr.DataArray(
+                    xr.date_range(
+                        cftime.DatetimeProlepticGregorian(2020, 1, 1 + 2 * i_batch),
+                        periods=4,
+                        freq="6h",
+                        calendar=calendar,
+                        use_cftime=True,
+                    ).values,
+                    dims="time",
+                )
+                for _ in range(n_initial_conditions)
+            ],
+            dim="sample",
+        )
+        data = {"a": torch.rand(n_initial_conditions, 4, n_lat, n_lon)}
+        writer.append_batch(
+            batch=get_paired_data(prediction=data, reference=data, time=batch_time)
+        )
+    writer.finalize()
+
+
+NETCDF_OUTPUT_FILENAMES = [
+    "autoregressive_predictions.nc",
+    "autoregressive_target.nc",
+    "monthly_mean_predictions.nc",
+    "monthly_mean_target.nc",
+]
+
+
+def test_netcdf_writers_with_non_local_experiment_dir(tmp_path):
+    """netCDF output written to a remote store matches the local output."""
+    experiment_dir = "memory://netcdf-remote-test"
+    fs, _ = fsspec.url_to_fs(experiment_dir)
+    fs.makedirs(experiment_dir, exist_ok=True)
+    try:
+        _write_batches_and_finalize(experiment_dir)
+        _write_batches_and_finalize(str(tmp_path))
+        for filename in NETCDF_OUTPUT_FILENAMES:
+            remote = os.path.join(experiment_dir, filename)
+            assert fs.exists(remote), f"{filename} was not uploaded"
+            remote_ds = open_dataset_via_inter_filesystem_copy(
+                remote, decode_timedelta=False
+            )
+            local_ds = xr.open_dataset(tmp_path / filename, decode_timedelta=False)
+            xr.testing.assert_identical(remote_ds, local_ds)
+    finally:
+        fs.rm(experiment_dir, recursive=True)
+
+
+def test_netcdf_writers_upload_only_on_finalize():
+    """A run that dies before finalizing leaves nothing at the destination."""
+    experiment_dir = "memory://netcdf-remote-partial-test"
+    fs, _ = fsspec.url_to_fs(experiment_dir)
+    fs.makedirs(experiment_dir, exist_ok=True)
+    try:
+        writer = DataWriterConfig(
+            save_prediction_files=True,
+            save_monthly_files=True,
+        ).build_paired(
+            experiment_dir=experiment_dir,
+            initial_condition_times=get_initial_condition_times(
+                (2020, 1, 1, 0, 0, 0), "proleptic_gregorian", 1
+            ),
+            n_timesteps=4,
+            timestep=TIMESTEP,
+            variable_metadata={},
+            coords={"lat": np.arange(4), "lon": np.arange(5)},
+            dataset_metadata=DatasetMetadata(),
+        )
+        writer.flush()
+        assert fs.ls(experiment_dir) == []
+    finally:
+        fs.rm(experiment_dir, recursive=True)
