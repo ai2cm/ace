@@ -5,9 +5,12 @@ import torch
 
 from fme.ace.models.ocean.m2lines.layers import (
     BilinearUpsample,
+    ConvNeXtBlock,
+    NoiseConditioning,
     ZonallyPeriodicBilinearUpsample,
 )
 from fme.core.device import get_device
+from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.testing import validate_tensor
 
 DIR = os.path.abspath(os.path.dirname(__file__))
@@ -165,3 +168,265 @@ def test_samudra_output_is_unchanged():
         output,
         os.path.join(DIR, "testdata/test_samudra_output_is_unchanged.pt"),
     )
+
+
+def _samudra(**kwargs):
+    return Samudra(
+        input_channels=4,
+        output_channels=3,
+        ch_width=[8, 12],
+        dilation=[1, 2],
+        n_layers=[1, 1],
+        **kwargs,
+    )
+
+
+def _noise_only_context(noise):
+    return Context(embedding_scalar=None, embedding_pos=None, labels=None, noise=noise)
+
+
+def _context(n_noise, n_samples, img_shape):
+    return _noise_only_context(torch.randn(n_samples, n_noise, *img_shape))
+
+
+def _noise_context_config(n_noise):
+    return ContextConfig(
+        embed_dim_scalar=0,
+        embed_dim_labels=0,
+        embed_dim_noise=n_noise,
+        embed_dim_pos=0,
+    )
+
+
+def test_unconditioned_convnext_block_state_dict_has_no_conditioning_keys():
+    """Checkpoints predating conditioning must still load, so an unconditioned
+    block's state dict must be byte-for-byte the same set of keys."""
+    block = ConvNeXtBlock(in_channels=4, out_channels=4, upscale_factor=2)
+    keys = set(block.state_dict())
+    assert not any("noise_conditioning" in key for key in keys)
+    assert keys == {
+        "convblock.0.weight",
+        "convblock.0.bias",
+        "convblock.2.cap",
+        "convblock.3.weight",
+        "convblock.3.bias",
+        "convblock.5.cap",
+        "convblock.6.weight",
+        "convblock.6.bias",
+    }
+
+
+def test_convnext_block_conditioning_requires_a_norm():
+    with pytest.raises(ValueError, match="requires a normalization layer"):
+        ConvNeXtBlock(
+            in_channels=4,
+            out_channels=4,
+            norm=None,
+            context_config=_noise_context_config(4),
+        )
+
+
+def test_convnext_block_conditioning_requires_context_at_forward():
+    block = ConvNeXtBlock(
+        in_channels=4, out_channels=4, context_config=_noise_context_config(4)
+    )
+    with pytest.raises(ValueError, match="requires a"):
+        block(torch.randn(2, 4, 8, 16))
+
+
+def test_convnext_block_conditioning_resamples_coarser_noise():
+    """Inside the U-Net a conditioned block runs at coarser resolution than the
+    input-resolution noise field, so the conditioning must resample."""
+    n_noise = 4
+    block = ConvNeXtBlock(
+        in_channels=4, out_channels=4, context_config=_noise_context_config(n_noise)
+    )
+    for module in block.noise_conditioning.values():
+        torch.nn.init.normal_(module.W_scale.weight, std=0.1)
+        torch.nn.init.normal_(module.W_bias.weight, std=0.1)
+    x = torch.randn(2, 4, 4, 8)
+    fine = torch.randn(2, n_noise, 16, 32)
+    subsampled = fine[..., ::4, ::4]
+    averaged = torch.nn.functional.adaptive_avg_pool2d(fine, (4, 8))
+    with torch.no_grad():
+        from_fine = block(x, _noise_only_context(fine))
+        from_subsampled = block(x, _noise_only_context(subsampled))
+        from_averaged = block(x, _noise_only_context(averaged))
+    assert from_fine.shape == x.shape
+    # the resampling is the subsample, which preserves the noise amplitude...
+    torch.testing.assert_close(from_fine, from_subsampled, rtol=0.0, atol=0.0)
+    # ...and not the area average, which would divide it by the pooling factor
+    assert not torch.allclose(from_fine, from_averaged)
+
+
+def test_conditioning_noise_keeps_unit_variance_at_every_depth():
+    """Conditioning weights are shared-LR and zero-initialized, so the noise
+    reaching each block has to be the same size at every depth. Area-averaging
+    would hand the bottleneck ~1/16 amplitude on the 4-degree grid and spread it
+    20-fold across the blocks ``all_blocks`` conditions.
+    """
+    torch.manual_seed(0)
+    n_noise = 2
+    conditioning = NoiseConditioning(n_channels=n_noise, embed_dim_noise=n_noise)
+    # read the resampled field straight off the module: zero scale, identity
+    # bias and a zero input make the output exactly the noise it resampled, so
+    # what follows tests the module rather than re-testing interpolate
+    torch.nn.init.zeros_(conditioning.W_scale.weight)
+    with torch.no_grad():
+        conditioning.W_bias.weight.copy_(
+            torch.eye(n_noise).reshape(n_noise, n_noise, 1, 1)
+        )
+    # the 4-degree ocean grid and the block resolutions Samudra's AvgPools give.
+    # 45 -> 22 and 45 -> 11 are the non-integer ratios, where a fixed integer
+    # stride would drift off the nearest-neighbour cell.
+    targets = [(45, 90), (22, 45), (11, 22), (5, 11), (2, 5)]
+
+    noise = torch.randn(64, n_noise, 45, 90)
+    for target in targets:
+        resampled = conditioning(torch.zeros(64, n_noise, *target), noise)
+        assert resampled.shape[-2:] == target
+        assert abs(resampled.std().item() - 1.0) < 0.05, target
+
+    # a field whose values are the flat source index reveals exactly which
+    # source cell each output cell drew from
+    index_field = (
+        torch.arange(45 * 90, dtype=torch.float32)
+        .reshape(1, 1, 45, 90)
+        .expand(1, n_noise, 45, 90)
+        .contiguous()
+    )
+    for target in targets:
+        picked = conditioning(torch.zeros(1, n_noise, *target), index_field)[0, 0]
+        rows, cols = picked[:, 0] // 90, picked[0] % 90
+        # every output cell draws a *distinct* source cell, so the coarse field
+        # is a subset of iid draws and is iid at unit variance by construction.
+        # Averaging or interpolating would blend cells; reusing one would
+        # correlate neighbours.
+        assert torch.all(rows[1:] > rows[:-1]), target
+        assert torch.all(cols[1:] > cols[:-1]), target
+        # and the sample spans the whole field rather than cropping a corner
+        assert rows[-1] >= 45 - -(-45 // target[0]), target
+        assert cols[-1] >= 90 - -(-90 // target[1]), target
+
+
+@pytest.mark.parametrize("noise_injection", ["bottleneck", "all_blocks"])
+def test_samudra_noise_injection_conditions_expected_blocks(noise_injection):
+    n_noise = 4
+    model = _samudra(
+        context_config=_noise_context_config(n_noise),
+        noise_injection=noise_injection,
+    )
+    blocks = [layer for layer in model.layers if isinstance(layer, ConvNeXtBlock)]
+    # 2 encoder blocks + bottleneck + 2 decoder blocks
+    assert len(blocks) == 5
+    conditioned = [len(block.noise_conditioning) > 0 for block in blocks]
+    if noise_injection == "bottleneck":
+        assert conditioned == [False, False, True, False, False]
+    else:
+        assert conditioned == [True] * 5
+
+
+@pytest.mark.parametrize("noise_injection", ["bottleneck", "all_blocks"])
+def test_samudra_conditioning_is_zero_init_so_noise_is_inert(noise_injection):
+    """Zero-initialized conditioning weights make training start deterministic:
+    two different noise draws must give bit-identical output, and that output
+    must match the unconditioned model with the same parameters."""
+    torch.manual_seed(0)
+    n_noise = 4
+    img_shape = (16, 32)
+    conditioned = _samudra(
+        context_config=_noise_context_config(n_noise),
+        noise_injection=noise_injection,
+    )
+    x = torch.randn(2, 4, *img_shape)
+    with torch.no_grad():
+        first = conditioned(x, _context(n_noise, 2, img_shape))
+        second = conditioned(x, _context(n_noise, 2, img_shape))
+    torch.testing.assert_close(first, second, rtol=0.0, atol=0.0)
+
+    plain = _samudra()
+    plain.load_state_dict(
+        {
+            key: value
+            for key, value in conditioned.state_dict().items()
+            if "noise_conditioning" not in key
+        }
+    )
+    with torch.no_grad():
+        torch.testing.assert_close(plain(x), first, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize("noise_injection", ["bottleneck", "all_blocks"])
+def test_samudra_noise_changes_output_once_conditioning_is_trained(noise_injection):
+    torch.manual_seed(0)
+    n_noise = 4
+    img_shape = (16, 32)
+    model = _samudra(
+        context_config=_noise_context_config(n_noise),
+        noise_injection=noise_injection,
+    )
+    for module in model.modules():
+        if isinstance(module, NoiseConditioning):
+            torch.nn.init.normal_(module.W_scale.weight, std=0.1)
+            torch.nn.init.normal_(module.W_bias.weight, std=0.1)
+    x = torch.randn(2, 4, *img_shape)
+    with torch.no_grad():
+        first = model(x, _context(n_noise, 2, img_shape))
+        second = model(x, _context(n_noise, 2, img_shape))
+    assert first.shape == (2, 3, *img_shape)
+    assert not torch.allclose(first, second)
+
+
+def test_samudra_conditioning_gradients_reach_conditioning_weights():
+    n_noise = 4
+    img_shape = (16, 32)
+    model = _samudra(
+        context_config=_noise_context_config(n_noise), noise_injection="all_blocks"
+    )
+    model(
+        torch.randn(2, 4, *img_shape), _context(n_noise, 2, img_shape)
+    ).sum().backward()
+    for module in model.modules():
+        if isinstance(module, NoiseConditioning):
+            assert module.W_bias.weight.grad is not None
+            assert torch.any(module.W_bias.weight.grad != 0.0)
+
+
+def test_samudra_checkpointing_with_conditioning():
+    n_noise = 4
+    img_shape = (16, 32)
+    model = _samudra(
+        context_config=_noise_context_config(n_noise),
+        noise_injection="all_blocks",
+        checkpoint_strategy="all",
+    )
+    x = torch.randn(2, 4, *img_shape, requires_grad=True)
+    out = model(x, _context(n_noise, 2, img_shape))
+    assert out.shape == (2, 3, *img_shape)
+    out.sum().backward()
+    assert x.grad is not None
+
+
+def test_samudra_rejects_inconsistent_conditioning_config():
+    with pytest.raises(ValueError, match="noise_injection to be set"):
+        _samudra(context_config=_noise_context_config(4))
+    with pytest.raises(ValueError, match="requires context_config"):
+        _samudra(noise_injection="bottleneck")
+    with pytest.raises(ValueError, match="embed_dim_noise > 0"):
+        _samudra(context_config=_noise_context_config(0), noise_injection="bottleneck")
+    with pytest.raises(ValueError, match="only supports noise conditioning"):
+        _samudra(
+            context_config=ContextConfig(
+                embed_dim_scalar=0,
+                embed_dim_labels=0,
+                embed_dim_noise=4,
+                embed_dim_pos=8,
+            ),
+            noise_injection="bottleneck",
+        )
+
+
+def test_conditioning_rejects_noise_coarser_than_the_block():
+    conditioning = NoiseConditioning(n_channels=3, embed_dim_noise=2)
+    with pytest.raises(ValueError, match="coarser than the block grid"):
+        conditioning(torch.zeros(1, 3, 16, 32), torch.randn(1, 2, 4, 8))
