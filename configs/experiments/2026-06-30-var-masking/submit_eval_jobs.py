@@ -5,16 +5,18 @@ corresponding training result dataset, selected with ``--checkpoint`` (default:
 all of them). The checkpoints, their paths within the result dataset and the
 evaluator run name suffix each one gets are defined in eval_checkpoints.py.
 
-The pre-training runs are reported on ``-bestinf``, so they want the default.
-The multi-step fine-tunes want ``--checkpoint lastepoch`` alone: they run a
-fixed ``max_epochs: 20`` continuation of an already-converged checkpoint, so
-the fine-tuned model *is* the final epoch and the two selection-based
-checkpoints only re-evaluate a partially fine-tuned one.
+The multi-step fine-tunes want ``--checkpoint lastepochema`` alone: they run a
+fixed ``max_epochs: 20`` continuation of an already-converged checkpoint, so the
+fine-tuned model *is* the final epoch, and the EMA-averaged weights are what the
+training run's own inline inference charts report. ``lastepoch`` is the same
+epoch of the same run evaluated without EMA, which is a different and much worse
+model; the two selection-based checkpoints only re-evaluate a partially
+fine-tuned one.
 
 ``--skip-evaluated`` drops the individual checkpoint jobs whose evaluator run
 already exists in wandb, so a config whose evaluation was only partly
 completed (e.g. one checkpoint preempted) resubmits just the missing
-checkpoints rather than all three.
+checkpoints rather than every one.
 
 Naming configs positionally submits exactly those and ignores ``--version`` --
 use it to evaluate one run (or the multi-step fine-tune family, whose eval
@@ -127,10 +129,23 @@ def config_to_jobs(
     if not checkpoints:
         return []
     source_dataset_id = TRAINING_RESULT_DATASETS[run_name]
-    return [
-        (job_name, source_dataset_id, checkpoint.path)
-        for job_name, checkpoint in checkpoints
-    ]
+    jobs = []
+    for job_name, checkpoint in checkpoints:
+        # Resolved after the map lookup, since resolving needs the dataset ID.
+        checkpoint_path = checkpoint.resolve(source_dataset_id)
+        if checkpoint_path is None:
+            # The run never reached an epoch this checkpoint is written at, so
+            # there is nothing to evaluate. Skip the one job rather than failing
+            # the submission: one short run should not block a sweep, and a
+            # missing final-epoch EMA checkpoint is worth printing because it
+            # means the run trained less far than the caller thinks.
+            print(
+                f"Skipping {job_name}: no {checkpoint.name} checkpoint in "
+                f"{source_dataset_id}"
+            )
+            continue
+        jobs.append((job_name, source_dataset_id, checkpoint_path))
+    return jobs
 
 
 def main() -> None:
@@ -186,8 +201,9 @@ def main() -> None:
         help=(
             "Checkpoint from each training result dataset to evaluate; repeat "
             f"to select several (default: all of {', '.join(names())}). "
-            "Pass --checkpoint lastepoch for the multi-step fine-tunes, whose "
-            "final epoch is the fine-tuned model (see module docstring)."
+            "Pass --checkpoint lastepochema for the multi-step fine-tunes, "
+            "whose final epoch is the fine-tuned model and whose charts report "
+            "EMA weights (see module docstring)."
         ),
     )
     parser.add_argument(
