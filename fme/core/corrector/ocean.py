@@ -349,7 +349,29 @@ class OceanCorrectorConfig(CorrectorConfigABC):
 
 
 class OceanCorrector(CorrectionSequence):
-    pass
+    def __call__(
+        self,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
+        forcing_data: TensorMapping,
+        corrector_state: CorrectorState | None,
+    ):
+        if "hfds_total_area" in forcing_data:
+            # Prescribing hfds_total_area only changes the trajectory through
+            # the SurfaceEnergyFluxCorrection early return feeding
+            # OceanHeatContentCorrection; with either correction missing the
+            # prescription would silently no-op on the dynamics.
+            correction_types = {type(c) for c in self._corrections}
+            required = {SurfaceEnergyFluxCorrection, OceanHeatContentCorrection}
+            if not required <= correction_types:
+                raise ValueError(
+                    "hfds_total_area is prescribed via forcing_data, but the "
+                    "ocean corrector is missing "
+                    f"{[t.__name__ for t in required - correction_types]}; "
+                    "the prescription requires both SurfaceEnergyFluxCorrection "
+                    "and OceanHeatContentCorrection to be active."
+                )
+        return super().__call__(input_data, gen_data, forcing_data, corrector_state)
 
 
 def _compute_ocean_net_surface_energy_flux(
@@ -393,6 +415,11 @@ def _correct_hfds(
         residual_prediction: gen_hfds + ocean_fraction * net_flux
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     """
+    # Hack: keys on "hfds_total_area" in forcing_data (supplied only when it is
+    # in prescribed_prognostic_names) and is only valid for checkpoints emitting
+    # hfds_total_area — a checkpoint emitting hfds would take a wrong path.
+    if "hfds_total_area" in forcing_data:
+        return {"hfds_total_area": forcing_data["hfds_total_area"]}
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
     ocean_fraction = input.ocean_fraction

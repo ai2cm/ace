@@ -368,6 +368,174 @@ def test_surface_energy_flux_correction_prescribed():
     )
 
 
+def _make_prescribed_hfds_total_area_setup():
+    """Setup for the prescribed-hfds_total_area tests: masked ops, depth
+    coordinate, and input/gen/forcing dicts for a corrector with both the
+    surface energy flux and ocean heat content corrections active."""
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon, nlevels = 4, 3, 3, 2
+    mask = torch.ones(nlat, nlon, nlevels, device=DEVICE)
+    mask[0, 0, :] = 0.0
+    masks = {
+        "mask_0": mask[:, :, 0],
+        "mask_1": mask[:, :, 1],
+        "mask_2d": mask[:, :, 0],
+    }
+    ops = LatLonOperations(torch.ones(nlat, nlon), SpatialMaskProvider(masks))
+    idepth = torch.tensor([2.5, 10, 20], device=DEVICE)
+    depth_coordinate = DepthCoordinate(idepth, mask)
+    sea_surface_fraction = mask[:, :, 0]
+    land_fraction = 1 - sea_surface_fraction
+    input_data = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon, device=DEVICE),
+        "thetao_1": torch.ones(nsamples, nlat, nlon, device=DEVICE),
+        "sst": torch.ones(nsamples, nlat, nlon, device=DEVICE) + 273.15,
+        "land_fraction": land_fraction,
+        "sea_ice_fraction": torch.zeros(nsamples, nlat, nlon, device=DEVICE),
+    }
+    gen_data = {
+        "thetao_0": torch.ones(nsamples, nlat, nlon, device=DEVICE) * 2,
+        "thetao_1": torch.ones(nsamples, nlat, nlon, device=DEVICE) * 2,
+        "sst": torch.ones(nsamples, nlat, nlon, device=DEVICE) * 2 + 273.15,
+        "hfds_total_area": torch.full((nsamples, nlat, nlon), 5.0, device=DEVICE),
+    }
+    forcing_data = {
+        "land_fraction": land_fraction,
+        "sea_surface_fraction": sea_surface_fraction,
+        "hfgeou": torch.ones(nsamples, nlat, nlon, device=DEVICE),
+        **_make_atmos_forcing_data((nsamples, nlat, nlon)),
+    }
+    return timestep, ops, depth_coordinate, input_data, gen_data, forcing_data
+
+
+def _prescribed_hfds_total_area_target(forcing_data):
+    """A target hfds_total_area with NaN over land, as in the zarr stores."""
+    sea_surface_fraction = forcing_data["sea_surface_fraction"]
+    target = torch.full_like(forcing_data["hfgeou"], 7.0) * sea_surface_fraction
+    return torch.where(
+        sea_surface_fraction > 0,
+        target,
+        torch.full_like(target, float("nan")),
+    )
+
+
+def test_prescribed_hfds_total_area_forcing_overrides_correction():
+    (
+        timestep,
+        ops,
+        depth_coordinate,
+        input_data,
+        gen_data,
+        forcing_data,
+    ) = _make_prescribed_hfds_total_area_setup()
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed"
+        ),
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature"
+        ),
+    )
+    corrector = config._build(ops, depth_coordinate, timestep)
+    target = _prescribed_hfds_total_area_target(forcing_data)
+    forcing_data = {**forcing_data, "hfds_total_area": target}
+
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+
+    # the corrector emits the forcing value verbatim (NaN over land included)
+    torch.testing.assert_close(corrected["hfds_total_area"], target, equal_nan=True)
+    # the OHC correction scales temperature against the prescribed flux; the
+    # masked area mean keeps the land NaN out of the budget
+    flux = target + forcing_data["hfgeou"] * forcing_data["sea_surface_fraction"]
+    flux_mean = ops.area_weighted_mean(flux, keepdim=True, name="ocean_heat_content")
+    input_ohc = ops.area_weighted_mean(
+        OceanData(input_data, depth_coordinate).ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    gen_ohc = ops.area_weighted_mean(
+        OceanData(gen_data, depth_coordinate).ocean_heat_content,
+        keepdim=True,
+        name="ocean_heat_content",
+    )
+    ratio = (input_ohc + flux_mean * timestep.total_seconds()) / gen_ohc
+    assert torch.isfinite(ratio).all()
+    for name in ["thetao_0", "thetao_1"]:
+        torch.testing.assert_close(corrected[name], gen_data[name] * ratio)
+    torch.testing.assert_close(
+        corrected["sst"], (gen_data["sst"] - 273.15) * ratio + 273.15
+    )
+
+
+def test_prescribed_hfds_total_area_absent_keeps_existing_correction():
+    (
+        timestep,
+        ops,
+        depth_coordinate,
+        input_data,
+        gen_data,
+        forcing_data,
+    ) = _make_prescribed_hfds_total_area_setup()
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed"
+        ),
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature"
+        ),
+    )
+    corrector = config._build(ops, depth_coordinate, timestep)
+
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+
+    ocean_fraction = 1 - input_data["land_fraction"] - input_data["sea_ice_fraction"]
+    net_flux = (
+        _compute_ocean_net_surface_energy_flux(forcing_data, input_data["sst"])
+        * forcing_data["sea_surface_fraction"]
+    )
+    expected = net_flux * ocean_fraction + gen_data["hfds_total_area"] * (
+        1 - ocean_fraction
+    )
+    torch.testing.assert_close(corrected["hfds_total_area"], expected)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param(
+            OceanCorrectorConfig(
+                surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+                    method="prescribed"
+                )
+            ),
+            id="missing_ohc_correction",
+        ),
+        pytest.param(
+            OceanCorrectorConfig(
+                ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+                    method="scaled_temperature"
+                )
+            ),
+            id="missing_surface_energy_flux_correction",
+        ),
+    ],
+)
+def test_prescribed_hfds_total_area_requires_both_corrections(config):
+    (
+        timestep,
+        ops,
+        depth_coordinate,
+        input_data,
+        gen_data,
+        forcing_data,
+    ) = _make_prescribed_hfds_total_area_setup()
+    corrector = config._build(ops, depth_coordinate, timestep)
+    target = _prescribed_hfds_total_area_target(forcing_data)
+    forcing_data = {**forcing_data, "hfds_total_area": target}
+    with pytest.raises(ValueError, match="hfds_total_area is prescribed"):
+        corrector(input_data, gen_data, forcing_data, None)
+
+
 @pytest.mark.parametrize(
     "hfds_type",
     [
