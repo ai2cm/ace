@@ -1,0 +1,54 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/ocean
+#
+# Short 30-year piControl rollout started from truth at 0160-01-06.
+# inside the training window (0156-0235): years the model was fit on
+#
+# One of a set of four (ic0160, ic0180, ic0250, ic0300) that differ ONLY in the
+# start year. Forcing is stationary, so all four see the same forcing
+# distribution and the same statistics of ocean state; what differs is whether
+# the model was fit on those particular years. Two starts sit inside the
+# training window and two inside the holdout, so the seen/unseen contrast is
+# measured at SHORT lead, before any drift has accumulated -- which is what the
+# 200-year rollout cannot provide, since by the time it reaches the holdout it
+# carries 85 years of drift.
+#
+# 30 years x 73 steps/yr (noleap, 5-daily) = 2190 steps, ending 0160+30. All
+# four windows lie inside the store's 0151-0350 record. forward_steps_in_memory
+# need not divide n_forward_steps (the 200-yr config's 40 does not divide
+# 14598 either).
+#
+# Outputs: nothing to disk. The comparison is the annual global-mean series the
+# aggregator logs to wandb, which carry both target and prediction. The Nino3.4
+# and IPO index plots are off: they add cost and a 30-year window is far too
+# short for either index to mean anything.
+experiment_dir: /results
+n_forward_steps: 2190
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0160-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  log_histograms: true
+  log_nino34_index: false
+  log_ipo_index: false
