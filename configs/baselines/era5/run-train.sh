@@ -265,6 +265,18 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-no-r1.yaml" \
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-patch.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-patch-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan urgent
 
+# PatchDiscriminator 1-step pretrains (added 2026-08-27): high-capacity CNN D
+# (hidden_dim 512) with spectral norm, D lr 1e-4 matching G. Prior PatchD
+# run (h9v70lqi, hidden_dim 64, D lr 1e-5) froze D at chance for 15 epochs.
+# Two arms: surface-only (8 fields) and all in/out fields.
+#   ./run-train.sh gan-patch-sfc
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan-patch-sfc.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-gan-patch-sfc-1-step-pre-training-rs0" 8 ai2/jupiter urgent
+
+#   ./run-train.sh gan-patch-all
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan-patch-all.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-gan-patch-all-1-step-pre-training-rs0" 8 ai2/jupiter urgent
+
 # Patch energy score arm (added 2026-08-25): the stochastic pretrain with the
 # 0.1-weight spectral energy score replaced by a 0.1-weight patch energy score
 # (3x3 patches; research repo investigation
