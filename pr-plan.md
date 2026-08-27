@@ -1,5 +1,3 @@
-Diagnostics pr plan
-
 # Overview
 
 Currently the Corrector in ace is responsible for diagnosing derived output values used in the loss, because no dedicated pathway existed for doing so. This leads to strange behaviors like having neural network output channels that are ignored (e.g. advection of moisture), and other outputs that are interpreted as something other than what they are (e.g. hfds network output being its value under sea ice but final value being hfds over the full gridcell). This makes the code significantly more confusing to think about, leading to complex consequences for example when thinking about pre-corrector optimization and corrector regularization.
