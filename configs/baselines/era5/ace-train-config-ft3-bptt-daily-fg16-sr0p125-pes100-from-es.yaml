@@ -1,16 +1,14 @@
 # arg: --dataset troya/2026-07-24-era5-1deg-8layer-daily-stats-1990-2019:/statsdata
-# TODO after the patch-es pretrain completes: add its final job's result
-# dataset (holding best_ckpt.tar) as a header line here:
-#   # arg: --dataset <dataset-id>:/weights
+# arg: --dataset 01KZTA4P87A6AGDQQNNDAXKD4V:/weights
 #
-# Patch energy score variant of
-# ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml (wandb c8hp09jm) for the
-# patch-vs-spectral energy score investigation. The ONLY changes from that
-# config are:
-#   - the EnsembleLoss energy-score term: 0.1-weight spectral energy score
-#     replaced by a 0.1-weight patch energy score (3x3), crps_weight 0.9
-#   - donor checkpoint dataset: the patch-es pretrain's final result dataset
-#     (its best_ckpt.tar), instead of r95iprjt's
+# Cross-donor patch energy score fine-tune, 100% patch-ES arm (per Jeremy
+# 2026-08-26): pure 3x3 patch energy score loss (no spectral ES, no CRPS)
+# fine-tuning the CRPS-led 90/10 pretrain
+# checkpoint (donor r95iprjt, best_ckpt.tar in dataset
+# 01KZTA4P87A6AGDQQNNDAXKD4V -- the same donor as the c8hp09jm fine-tune).
+# Identical to ace-train-config-ft3-bptt-daily-fg16-sr0p125.yaml except the
+# loss kwargs. Gives a fast viability read on the patch ES before its own
+# pretrain finishes. Sibling ...-pes100-from-es.yaml is the 100% patch-ES arm.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -100,8 +98,9 @@ stepper_training:
     weights:
       h500: 5.0
     kwargs:
-      crps_weight: 0.9
-      patch_energy_score_weight: 0.1
+      crps_weight: 0.0
+      energy_score_weight: 0.0
+      patch_energy_score_weight: 1.0
       patch_energy_score_size: 3
 stepper:
   checkpoint_path: /weights/training_checkpoints/best_ckpt.tar

@@ -277,27 +277,43 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan-patch-sfc.
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan-patch-all.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-patch-all-1-step-pre-training-rs0" 8 ai2/jupiter urgent
 
-# Patch energy score arm (added 2026-08-25): the stochastic pretrain with the
-# 0.1-weight spectral energy score replaced by a 0.1-weight patch energy score
-# (3x3 patches; research repo investigation
-# 2026-08-25-patch-vs-spectral-energy-score; ace PR #1459). Target per Jeremy
-# 2026-08-25: jupiter, 4 GPUs. The arms above are done or live -- launch the
-# pretrain alone:
-#   ./run-train.sh patch-es-1-step
-run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-patch-es.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-patch-es-1-step-pre-training-rs0" 4 ai2/jupiter
+# Patch energy score arm (reworked 2026-08-26): the stochastic pretrain with
+# EnsembleLoss 0.9 patch-ES (3x3) / 0.1 spectral-ES, no CRPS -- the patch ES
+# takes CRPS's place (research repo investigation
+# 2026-08-25-patch-vs-spectral-energy-score; ace PR #1459). The first cut
+# (0.9 CRPS / 0.1 patch-ES, wandb v0d7iiz4) was canceled at epoch 21 per
+# Jeremy. Titan, 4 GPUs, matching donor r95iprjt -- jupiter kills this family
+# with NCCL unhandled cuda errors at every epoch-boundary validation
+# (80 GB H100s). Launch alone:
+#   ./run-train.sh pes90-es10-1-step
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-pes90-es10.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-1-step-pre-training-rs0" 4 ai2/titan
 
-# Fine-tune — launch separately after the pretrain is done and its final
-# job's result dataset is filled into the config's "# arg: --dataset" header
-# (jupiter per Jeremy 2026-08-25):
-#   ./run-train.sh patch-es-ft3
-run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-patch-es.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-patch-es-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
+# 0.8 patch-ES / 0.2 spectral-power-CRPS pretrain arm (per Jeremy 2026-08-26):
+# same fork with the 0.1 spectral ES swapped for a 0.2-weight per-degree
+# log-power CRPS (ported from bake-off commit 1ce0c1d40). Jupiter per Jeremy
+# (note: earlier jupiter pretrains died at epoch-boundary validation with
+# NCCL unhandled cuda errors). Launch alone:
+#   ./run-train.sh pes80-spcrps20
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-pes80-spcrps20.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-1-step-pre-training-rs0" 4 ai2/jupiter
 
-# Cross-donor patch-ES fine-tune (added 2026-08-25): the 0.9/0.1 CRPS/patch-ES
-# loss fine-tuning the spectral-ES 90/10 pretrain (donor r95iprjt) -- a fast
-# viability read on the patch ES that doesn't wait for its own pretrain.
-# Target per Jeremy 2026-08-25: jupiter, 8 GPUs. Launch alone:
-#   ./run-train.sh patch-es-from-es
-run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-patch-es-from-es.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-patch-es-from-es-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
+# Fine-tune — launch separately after the pes90-es10 pretrain is done and its
+# final job's result dataset is filled into the config's "# arg: --dataset"
+# header. All FTs per Jeremy 2026-08-26: titan, 3 steps (jupiter kills this
+# family at epoch-boundary validation; 2-step jupiter cut abandoned).
+#   ./run-train.sh pes90-es10-ft3
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes90-es10.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/titan
+
+# Cross-donor patch-ES fine-tunes: patch-ES-led losses fine-tuning the
+# CRPS-led 90/10 pretrain (donor r95iprjt, same donor as c8hp09jm) -- fast
+# viability reads on the patch ES that don't wait for its own pretrain.
+# Two arms per Jeremy 2026-08-26: 0.9 patch-ES / 0.1 spectral-ES, and 100%
+# patch-ES. Titan, 8 GPUs, 3 steps (exact c8hp09jm compute match). Launch:
+#   ./run-train.sh pes90-es10-from-es
+#   ./run-train.sh pes100-from-es
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes90-es10-from-es.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-from-es-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/titan
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes100-from-es.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes100-from-es-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/titan
