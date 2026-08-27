@@ -8,13 +8,14 @@ Usage:
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]
+                               [--cm-priority PRIORITY]
 """
 
 import argparse
-import os
 import pathlib
 import subprocess
 
+import beaker_submit
 from generate_masking_configs import (
     BASE_CONFIG_FILENAMES,
     CONFIG_PREFIX,
@@ -59,23 +60,7 @@ def main() -> None:
     parser.add_argument(
         "--dry-run", action="store_true", help="Print commands without executing them."
     )
-    parser.add_argument(
-        "--beaker-workspace",
-        default="ai2/climate-titan",
-        help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
-    )
-    parser.add_argument(
-        "--beaker-cluster",
-        nargs="+",
-        default=["ai2/titan"],
-        metavar="CLUSTER",
-        help="Beaker cluster(s) to target (ex: ai2/titan ai2/jupiter ai2/ceres).",
-    )
-    parser.add_argument(
-        "--beaker-priority",
-        default="urgent",
-        help="Beaker job priority (ex: high or urgent).",
-    )
+    beaker_submit.add_arguments(parser)
     parser.add_argument(
         "--version",
         "-v",
@@ -95,12 +80,7 @@ def main() -> None:
             f"no seed configs in {RUN_CONFIGS_DIR} — run generate_seed_configs.py first"
         )
 
-    base_env = {
-        **os.environ,
-        "BEAKER_WORKSPACE": args.beaker_workspace,
-        "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
-        "BEAKER_PRIORITY": args.beaker_priority,
-    }
+    base_env = beaker_submit.env(args)
     for config_filename in configs:
         job_name = config_to_job_name(config_filename)
         env = {

@@ -22,13 +22,14 @@ Usage:
                                    [--beaker-workspace WORKSPACE]
                                    [--beaker-cluster CLUSTER [CLUSTER ...]]
                                    [--beaker-priority PRIORITY]
+                                   [--cm-priority PRIORITY]
 """
 
 import argparse
-import os
 import pathlib
 import subprocess
 
+import beaker_submit
 from generate_masking_configs import CONFIG_PREFIX, RUN_CONFIGS_DIR, WANDB_PREFIX
 
 HERE = pathlib.Path(__file__).parent
@@ -156,23 +157,7 @@ def main() -> None:
             " restarts those runs from epoch 0."
         ),
     )
-    parser.add_argument(
-        "--beaker-workspace",
-        default="ai2/climate-titan",
-        help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
-    )
-    parser.add_argument(
-        "--beaker-cluster",
-        nargs="+",
-        default=["ai2/titan"],
-        metavar="CLUSTER",
-        help="Beaker cluster(s) to target (ex: ai2/titan ai2/jupiter ai2/ceres).",
-    )
-    parser.add_argument(
-        "--beaker-priority",
-        default="high",
-        help="Beaker job priority (ex: high or urgent).",
-    )
+    beaker_submit.add_arguments(parser)
     args = parser.parse_args()
 
     configs = select_configs(args.variant, args.configs)
@@ -180,15 +165,12 @@ def main() -> None:
     print(f"Submitting {len(configs)} {described} fine-tune config(s).")
 
     n_gpus = n_gpus_for_clusters(args.beaker_cluster)
-    base_env = {
-        **os.environ,
-        "WANDB_PROJECT": WANDB_PROJECT,
-        "BEAKER_WORKSPACE": args.beaker_workspace,
-        "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
-        "BEAKER_PRIORITY": args.beaker_priority,
-        "N_GPUS": n_gpus,
-        "BEAKER_SHARED_MEMORY": V5_SHARED_MEMORY,
-    }
+    base_env = beaker_submit.env(
+        args,
+        WANDB_PROJECT=WANDB_PROJECT,
+        N_GPUS=n_gpus,
+        BEAKER_SHARED_MEMORY=V5_SHARED_MEMORY,
+    )
     print(f"Using N_GPUS={n_gpus} for cluster(s): {' '.join(args.beaker_cluster)}")
     for config_filename in configs:
         config_text = (RUN_CONFIGS_DIR / config_filename).read_text()

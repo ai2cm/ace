@@ -8,8 +8,15 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_PROJECT=${WANDB_PROJECT:-VarMasking8}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
-BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/saturn ai2/jupiter ai2/ceres"}
-BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
+BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan"}
+BEAKER_PRIORITY=${BEAKER_PRIORITY:-urgent}
+# CM_PRIORITY opts the job into scripts/beaker_balancer/balance.py, which keeps
+# the team inside its urgent-priority allocation: the label is the job's rank
+# when urgent slots are scarce and the priority it is dropped to when it does
+# not get one. Set it empty to submit an unlabelled job the balancer leaves
+# alone. Note the balancer never *raises* a running job, so BEAKER_PRIORITY
+# should already be the priority you want.
+CM_PRIORITY=${CM_PRIORITY-urgent}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=${N_GPUS:-2}
 BEAKER_SHARED_MEMORY=${BEAKER_SHARED_MEMORY:-100GiB}
@@ -37,6 +44,11 @@ run_training() {
     cluster_args+=(--cluster "$cluster")
   done
 
+  local cm_priority_args=()
+  if [[ -n "$CM_PRIORITY" ]]; then
+    cm_priority_args+=(--env CM_PRIORITY="$CM_PRIORITY")
+  fi
+
   gantry run \
     --name "$job_name" \
     --task-name "$job_name" \
@@ -44,6 +56,7 @@ run_training() {
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace "$BEAKER_WORKSPACE" \
     --priority "$BEAKER_PRIORITY" \
+    "${cm_priority_args[@]}" \
     "${cluster_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \

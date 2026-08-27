@@ -32,14 +32,15 @@ Usage:
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]
+                               [--cm-priority PRIORITY]
 """
 
 import argparse
-import os
 import pathlib
 import subprocess
 from collections.abc import Sequence
 
+import beaker_submit
 from eval_checkpoints import EvalCheckpoint, by_names, names
 from generate_eval_configs import (
     EVAL_SUITE_CONFIG_PREFIX,
@@ -165,23 +166,7 @@ def main() -> None:
         action="store_true",
         help="Print commands without executing them.",
     )
-    parser.add_argument(
-        "--beaker-workspace",
-        default="ai2/climate-titan",
-        help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
-    )
-    parser.add_argument(
-        "--beaker-cluster",
-        nargs="+",
-        default=["ai2/titan"],
-        metavar="CLUSTER",
-        help="Beaker cluster(s) to target (default: ai2/titan).",
-    )
-    parser.add_argument(
-        "--beaker-priority",
-        default="urgent",
-        help="Beaker job priority (default: urgent).",
-    )
+    beaker_submit.add_arguments(parser)
     parser.add_argument(
         "--version",
         "-v",
@@ -263,14 +248,9 @@ def main() -> None:
             ]
             print("Submitting:", " ".join(cmd))
             if not args.dry_run:
-                env = {
-                    **os.environ,
-                    "WANDB_PROJECT": WANDB_PROJECT,
-                    "BEAKER_WORKSPACE": args.beaker_workspace,
-                    "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
-                    "BEAKER_PRIORITY": args.beaker_priority,
-                    "SKIP_VALIDATE": "1",
-                }
+                env = beaker_submit.env(
+                    args, WANDB_PROJECT=WANDB_PROJECT, SKIP_VALIDATE="1"
+                )
                 subprocess.run(cmd, check=True, cwd=HERE, env=env)
 
 
