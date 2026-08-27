@@ -19,7 +19,7 @@ import pathlib
 from typing import NamedTuple
 
 import yaml
-from generate_eval_configs import TRAINING_RESULT_DATASETS, _fetch_wandb_run_names
+from generate_eval_configs import TRAINING_RESULT_DATASETS, _finished_run_names
 from generate_masking_configs import RUN_CONFIGS_DIR, WANDB_PROJECT
 
 HERE = pathlib.Path(__file__).parent
@@ -63,7 +63,7 @@ def _all_runs_finished_in_wandb(level: str) -> bool:
     SST perturbation level (job name ``{run_name}-{level}``, submitted by
     submit_sst_jobs.py into the training project).
     """
-    finished_runs = _fetch_wandb_run_names(WANDB_PROJECT)
+    finished_runs = _finished_run_names(WANDB_PROJECT)
     return all(
         f"{run_name}-{level}" in finished_runs for run_name in TRAINING_RESULT_DATASETS
     )
