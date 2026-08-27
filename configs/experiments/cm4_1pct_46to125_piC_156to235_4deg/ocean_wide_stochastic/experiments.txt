@@ -1,2 +1,4 @@
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ohc_clip|rs0|01M10QW2R5129W3Y4ADE06NDJ9|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ohc_clip|rs1|01M10QWBZ7XWHZZAB8V83SM8SY|training|best_inference_ckpt|normal|--min-runtime 8h
