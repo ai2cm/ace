@@ -25,9 +25,9 @@ cm4_1pct_46to125_piC_156to235-ocean_baseline|rs1|01M01AXQP8Q3MKMVEBKH6MFSKX|trai
 
 cm4_1pct_46to125_piC_156to235-ocean_baseline|rs2|01M01AY4W5WVQ6XX3VZJQBVT9E|trained|best_inference_ckpt|normal|--min-runtime 8h
 
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|01M06TXEMBTJNS6085BE9BW89H|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|01M08JR4AQE9MGJM3H55KK67W4|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs2|01M08JRM77J2RHQZT125JGB4Z4|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs0|01M06TXEMBTJNS6085BE9BW89H|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs1|01M08JR4AQE9MGJM3H55KK67W4|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_baseline-ft|rs2|01M08JRM77J2RHQZT125JGB4Z4|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter
 
 # The three -ft rows above are set to the 200-yr piControl rollout as the
 # lightest rung of a corrector ablation: this arm's finetune template strips the
