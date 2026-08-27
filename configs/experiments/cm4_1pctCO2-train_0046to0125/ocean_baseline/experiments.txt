@@ -24,7 +24,7 @@ cm4_1pctCO2-train_0046to0125-ocean_baseline|rs2|01KYX3HSXFMBPA6QMXRPKWQ5ZQ|train
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|01KZ2AW7KB3683TT7HGA4PYWY3|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|01KZ2AWRDK6Y2VKN7RMM8TDRNV|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
-cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|01KZ2AW7KB3683TT7HGA4PYWY3|run_1pct-ic0001-1yr-hfds|best_inference_ckpt|high|--min-runtime 30m
-cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|01KZ2AWRDK6Y2VKN7RMM8TDRNV|run_1pct-ic0001-1yr-hfds|best_inference_ckpt|high|--min-runtime 30m
+cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs0|01KZ2AW7KB3683TT7HGA4PYWY3|run_1pct-ic0001-1yr-hfds|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|jupiter|||30GiB
+cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs1|01KZ2AWRDK6Y2VKN7RMM8TDRNV|run_1pct-ic0001-1yr-hfds|best_inference_ckpt|high|--min-runtime 30m|||ai2/ace|jupiter|||30GiB
 
 cm4_1pctCO2-train_0046to0125-ocean_baseline-ft|rs2|01M0V19PXM3X7JH7J8B0TF5388|training|best_inference_ckpt|normal|--min-runtime 8h
