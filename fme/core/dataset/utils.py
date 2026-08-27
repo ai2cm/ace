@@ -59,16 +59,28 @@ def _get_indexers(
     return tuple(indexers)
 
 
+def as_alignable_tensor(
+    variable: xr.Variable,
+    dims: Sequence[Hashable],
+) -> torch.tensor:
+    """Load data from variable as a tensor with a singleton axis for each of the
+    given dims that the variable does not have.
+
+    The result is not yet broadcast to a particular shape, so it does not depend
+    on the length of the time dimension and can be reused across samples.
+    """
+    arr = variable.values
+    indexers = _get_indexers(variable, dims)
+    return torch.as_tensor(arr[indexers])
+
+
 def as_broadcasted_tensor(
     variable: xr.Variable,
     dims: Sequence[Hashable],
     shape: Sequence[int],
 ) -> torch.tensor:
     """Load data from variable and broadcast to tensor with the given shape."""
-    arr = variable.values
-    indexers = _get_indexers(variable, dims)
-    tensor = torch.as_tensor(arr[indexers])
-    return torch.broadcast_to(tensor, shape)
+    return torch.broadcast_to(as_alignable_tensor(variable, dims), shape)
 
 
 def _broadcast_array_to_tensor(

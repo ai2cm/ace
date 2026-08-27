@@ -46,11 +46,16 @@ _DRIVER = textwrap.dedent(
 
 
     def record(event, detail=""):
+        # Readers poll by filename and `open(path, "w")` publishes the name
+        # before the detail, so rename in. The temp name must not start with
+        # the event, or they match it.
         path = os.path.join(MARKER_DIR, f"{event}.{os.getpid()}")
-        with open(path, "w") as f:
+        partial = os.path.join(MARKER_DIR, f".partial.{event}.{os.getpid()}")
+        with open(partial, "w") as f:
             f.write(detail)
             f.flush()
             os.fsync(f.fileno())
+        os.replace(partial, path)
 
 
     def started_worker_pids():
