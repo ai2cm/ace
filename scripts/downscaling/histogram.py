@@ -27,6 +27,12 @@ LAT_DIM_NAMES = ("lat", "latitude", "grid_yt")
 # ProgressBar writes at completion. LineProgressBar below writes a real "\n"
 # each update instead, so periodic progress actually appears in the log.
 PROGRESS_BAR_UPDATE_INTERVAL_SECONDS = 3
+# gcsfs runs GCS calls through its own asyncio event loop in a background
+# thread; dask's default threaded scheduler hitting that loop concurrently
+# from many worker threads is a known deadlock trigger (most easily hit when
+# a mid-computation credential refresh is involved). Processes each get
+# their own event loop, avoiding the shared-loop deadlock.
+DASK_SCHEDULER = "processes"
 
 
 class LineProgressBar(ProgressBar):
@@ -154,7 +160,7 @@ def compute_histograms(
     """
     counts = {var: da.histogram(ds[var].data, bins=bins[var])[0] for var in variables}
     with LineProgressBar(dt=progress_interval):
-        (counts,) = dask.compute(counts)
+        (counts,) = dask.compute(counts, scheduler=DASK_SCHEDULER)
     # bins are explicit edges, so they are the edges da.histogram would return
     return {var: (counts[var], bins[var]) for var in variables}
 
@@ -208,7 +214,9 @@ def estimate_bins(
     data: xr.DataArray, nbins: int = 500, stretch_factor: float = 6
 ) -> np.ndarray:
     data_0 = data.isel(time=0)
-    data_min, data_max = dask.compute(data_0.min(), data_0.max())
+    data_min, data_max = dask.compute(
+        data_0.min(), data_0.max(), scheduler=DASK_SCHEDULER
+    )
     center = (float(data_min) + float(data_max)) / 2
     half_width = (float(data_max) - float(data_min)) / 2 * stretch_factor
     return np.linspace(center - half_width, center + half_width, nbins + 1)

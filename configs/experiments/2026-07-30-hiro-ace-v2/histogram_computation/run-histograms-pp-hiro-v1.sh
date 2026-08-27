@@ -28,6 +28,8 @@ submit_histogram_job() {
         --budget ai2/atec-climate \
         --beaker-image "$DEPS_ONLY_IMAGE" \
         --weka climate-default:/climate-default \
+        --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+        --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --system-python \
         --allow-dirty \
         --install "pip install --no-deps ." \
