@@ -9,16 +9,26 @@ pointed somewhere else.
 
 Defaults target the balancer's managed workspace. ``ai2/ace`` is the workspace
 ``scripts/beaker_balancer/balance.py`` modifies -- in ``ai2/climate-titan`` it
-only counts urgent slots and never touches a job. ``ai2/titan`` is the B200
-cluster this directory's runs are sized for; it holds the smaller half of the
-allocation (32 slots against jupiter's 72), so urgent is scarcer there.
+only counts urgent slots and never touches a job.
+
+``ai2/titan`` is the B200 cluster this directory's runs are sized for, with
+``ai2/jupiter`` behind it so a job is not stuck waiting on titan's 32 urgent
+slots when jupiter's 72 are free. Note Beaker treats several ``--cluster`` flags
+as a constraint set rather than an ordered preference: the job lands wherever it
+is placed first, so this is "either is acceptable", not "titan, then jupiter".
+
+Two consequences, both from scripts/beaker_balancer/README.md. A *queued* urgent
+job is charged pessimistically against every budgeted cluster it could land on,
+so being eligible for two costs headroom on both until it is placed (after
+which only the cluster it landed on is charged). And a job that must have one
+particular cluster has to say so -- see ``default_clusters`` below.
 """
 
 import argparse
 import os
 
 DEFAULT_WORKSPACE = "ai2/ace"
-DEFAULT_CLUSTERS = ["ai2/titan"]
+DEFAULT_CLUSTERS = ["ai2/titan", "ai2/jupiter"]
 DEFAULT_PRIORITY = "urgent"
 
 # Priorities the balancer accepts as a CM_PRIORITY label, plus "none" to submit
@@ -32,8 +42,18 @@ DEFAULT_CM_PRIORITY = "urgent"
 NO_CM_PRIORITY = "none"
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add the shared beaker submission options to ``parser``."""
+def add_arguments(
+    parser: argparse.ArgumentParser, default_clusters: list[str] | None = None
+) -> None:
+    """Add the shared beaker submission options to ``parser``.
+
+    ``default_clusters`` overrides DEFAULT_CLUSTERS for a family whose jobs do
+    not fit everywhere -- a GPU footprint that only one cluster has, or a
+    per-cluster GPU count the submit script has to resolve to a single value.
+    Everything else stays shared, so such a family still moves with the team
+    policy on workspace, priority and the balancer label.
+    """
+    clusters = list(DEFAULT_CLUSTERS if default_clusters is None else default_clusters)
     parser.add_argument(
         "--beaker-workspace",
         default=DEFAULT_WORKSPACE,
@@ -42,11 +62,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--beaker-cluster",
         nargs="+",
-        default=list(DEFAULT_CLUSTERS),
+        default=clusters,
         metavar="CLUSTER",
         help=(
-            "Beaker cluster(s) to target (ex: ai2/titan ai2/jupiter; default: "
-            f"{' '.join(DEFAULT_CLUSTERS)})."
+            "Beaker cluster(s) the job may land on, in no particular order "
+            f"(ex: ai2/titan ai2/jupiter; default: {' '.join(clusters)})."
         ),
     )
     parser.add_argument(

@@ -14,7 +14,7 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_PROJECT=${WANDB_PROJECT:-VarMasking8}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
-BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan"}
+BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-urgent}
 # CM_PRIORITY opts the job into scripts/beaker_balancer/balance.py, which keeps
 # the team inside its urgent-priority allocation: the label is the job's rank

@@ -34,7 +34,7 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 def test_defaults_target_the_balancer_managed_workspace():
     args = _parse([])
     assert args.beaker_workspace == "ai2/ace"
-    assert args.beaker_cluster == ["ai2/titan"]
+    assert args.beaker_cluster == ["ai2/titan", "ai2/jupiter"]
     assert args.beaker_priority == "urgent"
     assert args.cm_priority == "urgent"
 
@@ -42,7 +42,7 @@ def test_defaults_target_the_balancer_managed_workspace():
 def test_env_carries_the_settings_the_wrappers_read():
     env = beaker_submit.env(_parse([]))
     assert env["BEAKER_WORKSPACE"] == "ai2/ace"
-    assert env["BEAKER_CLUSTER"] == "ai2/titan"
+    assert env["BEAKER_CLUSTER"] == "ai2/titan ai2/jupiter"
     assert env["BEAKER_PRIORITY"] == "urgent"
     assert env["CM_PRIORITY"] == "urgent"
     # os.environ is inherited, since the wrappers need PATH and BEAKER_TOKEN.
@@ -50,8 +50,41 @@ def test_env_carries_the_settings_the_wrappers_read():
 
 
 def test_several_clusters_become_one_space_separated_value():
-    env = beaker_submit.env(_parse(["--beaker-cluster", "ai2/titan", "ai2/jupiter"]))
-    assert env["BEAKER_CLUSTER"] == "ai2/titan ai2/jupiter"
+    """The wrappers split BEAKER_CLUSTER on whitespace into one --cluster each."""
+    env = beaker_submit.env(_parse(["--beaker-cluster", "ai2/jupiter"]))
+    assert env["BEAKER_CLUSTER"] == "ai2/jupiter"
+    env = beaker_submit.env(_parse(["--beaker-cluster", "ai2/titan", "ai2/ceres"]))
+    assert env["BEAKER_CLUSTER"] == "ai2/titan ai2/ceres"
+
+
+def test_a_family_can_narrow_the_clusters_without_losing_the_rest():
+    parser = argparse.ArgumentParser()
+    beaker_submit.add_arguments(parser, default_clusters=["ai2/titan"])
+    args = parser.parse_args([])
+    assert args.beaker_cluster == ["ai2/titan"]
+    assert args.beaker_workspace == "ai2/ace"
+    assert args.beaker_priority == "urgent"
+    assert args.cm_priority == "urgent"
+
+
+def test_the_fine_tunes_are_titan_only():
+    """They OOM on jupiter's H100s, and their GPU count is per-cluster.
+
+    submit_finetune_jobs.n_gpus_for_clusters refuses clusters whose standard
+    counts differ, so inheriting the shared two-cluster default would make a
+    bare submit raise instead of submitting.
+    """
+    import submit_finetune_jobs
+
+    assert submit_finetune_jobs.FT_CLUSTERS == ["ai2/titan"]
+    parser = argparse.ArgumentParser()
+    beaker_submit.add_arguments(
+        parser, default_clusters=submit_finetune_jobs.FT_CLUSTERS
+    )
+    clusters = parser.parse_args([]).beaker_cluster
+    assert submit_finetune_jobs.n_gpus_for_clusters(clusters) == "4"
+    with pytest.raises(ValueError, match="different standard GPU counts"):
+        submit_finetune_jobs.n_gpus_for_clusters(beaker_submit.DEFAULT_CLUSTERS)
 
 
 def test_opting_out_sets_an_empty_label_rather_than_dropping_it():
@@ -82,7 +115,7 @@ def test_every_submit_script_uses_the_shared_settings(module_name):
     """A new submit script must route through here rather than reimplement it."""
     module = importlib.import_module(module_name)
     source = inspect.getsource(module)
-    assert "beaker_submit.add_arguments(parser)" in source
+    assert "beaker_submit.add_arguments(parser" in source
     assert "beaker_submit.env(" in source
     # Reimplementing any of the three would silently shadow the shared default.
     assert '"--beaker-workspace"' not in source

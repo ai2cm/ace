@@ -53,6 +53,14 @@ VARIANT_SUFFIXES = {
 # jupiter (H100) uses the standard 8, but titan (B200) does the same work with 4.
 # batch_size (8) is the *global* batch (local = batch_size // world_size), so 4
 # vs 8 GPUs gives identical training and 8 stays divisible by both.
+# Fine-tunes are titan-only, unlike the rest of this directory, which may also
+# land on jupiter. Two independent reasons: the 20-step rollout of the
+# embed_dim-512 model (channel-mask inputs double the input channels, plus GMR)
+# is a genuine ~80 GiB shortfall on jupiter's H100s and OOMed there, and
+# n_gpus_for_clusters below cannot resolve a single GPU count across clusters
+# whose standard counts differ.
+FT_CLUSTERS = ["ai2/titan"]
+
 GPUS_PER_CLUSTER = {
     "ai2/titan": "4",  # B200
     "ai2/jupiter": "8",  # H100
@@ -157,7 +165,7 @@ def main() -> None:
             " restarts those runs from epoch 0."
         ),
     )
-    beaker_submit.add_arguments(parser)
+    beaker_submit.add_arguments(parser, default_clusters=FT_CLUSTERS)
     args = parser.parse_args()
 
     configs = select_configs(args.variant, args.configs)
