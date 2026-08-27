@@ -298,6 +298,14 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-pes90-es10.yam
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-pes80-spcrps20.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-1-step-pre-training-rs0" 4 ai2/jupiter
 
+# CRPS control for the arm above (per Jeremy 2026-08-27): 0.8 CRPS /
+# 0.2 spectral-power-CRPS at the same embed_dim 384, isolating patch-ES vs
+# CRPS at matched spectral-power-CRPS weight and width. Jupiter to match its
+# sibling. Launch alone:
+#   ./run-train.sh crps80-spcrps20
+run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-crps80-spcrps20.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-crps80-spcrps20-1-step-pre-training-rs0" 4 ai2/jupiter
+
 # Fine-tune — launch separately after the pes90-es10 pretrain is done and its
 # final job's result dataset is filled into the config's "# arg: --dataset"
 # header. All FTs per Jeremy 2026-08-26: titan, 3 steps (jupiter kills this
