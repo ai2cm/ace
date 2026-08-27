@@ -8,3 +8,5 @@ cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ohc_clip|rs2|01M10QWMWZMGWAG3XS6GE
 cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps|rs0|01M10QWY4QAH9MFW8957H681ZF|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps|rs1|01M10QX74FX20HB1SWH6BP2GE7|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_stoch_crps|rs2|01M10QXH2PPKY78TQY1N04B3A3|training|best_inference_ckpt|normal|--min-runtime 8h
