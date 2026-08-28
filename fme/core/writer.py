@@ -96,7 +96,6 @@ def _initialize_zarr(
     array_attributes: dict[str, dict[str, str]] | None = None,
     group_attributes: dict[str, str] | None = None,
     mode: str = "w-",
-    fill_value: float | None = None,
 ):
     """
     Initialize a Zarr group with the specified dimensions and chunk sizes.
@@ -155,7 +154,6 @@ def _initialize_zarr(
             nondim_coord_ds.attrs.update(da.attrs)
 
     array_attributes = array_attributes or {}
-    fill_value_kwargs = {} if fill_value is None else {"fill_value": fill_value}
 
     written_coords = set()
     for var in vars:
@@ -167,7 +165,6 @@ def _initialize_zarr(
             dtype=dtype,
             dimension_names=dim_names,
             attributes=array_attributes.get(var, {}),
-            **fill_value_kwargs,
         )
         # Following xarray, only associate non-dimension coordinates
         # with a variable if the non-dimension coordinate's dimensions
@@ -231,7 +228,6 @@ class ZarrWriter:
         time_units: str = DATETIME_ENCODING_UNITS,
         time_calendar: str | None = "julian",
         nondim_coords: dict[str, xr.DataArray] | None = None,
-        fill_value: float | None = None,
     ):
         """
         Initialize the ZarrWriter with the specified parameters.
@@ -264,9 +260,7 @@ class ZarrWriter:
             that are not associated with a dimension (ex. init_time, valid_time). Values
             are data arrays to allow for more freedom in these coords (e.g. can be
             multidimensional).
-        fill_value: Fill value for data variable arrays. Defaults to zarr's own
-            default (0 for numeric dtypes) if not provided; pass e.g. ``float("nan")``
-            so unwritten cells are distinguishable from real data.
+
 
         Note: If not using .initialize(), the first call to .record_batch() will
         automatically initialize the zarr store based on the data provided in that call.
@@ -287,7 +281,6 @@ class ZarrWriter:
         self._time_calendar = time_calendar
         self._nondim_coords = nondim_coords
         self._mode = mode
-        self._fill_value = fill_value
 
         if mode == "a" or mode == "r+":
             self._store_initialized = True if self._path_exists() else False
@@ -389,7 +382,6 @@ class ZarrWriter:
                 array_attributes=self._array_attributes,
                 group_attributes=self._group_attributes,
                 mode=self._mode,
-                fill_value=self._fill_value,
             )
             self._store_initialized = True
             self._dist.barrier()
