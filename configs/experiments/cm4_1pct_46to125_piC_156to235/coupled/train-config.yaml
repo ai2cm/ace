@@ -9,13 +9,9 @@ ema:
 max_epochs: 8 # 160 yr x 73/yr (ocean step) / bs 8 = 1,460 iter/epoch -> ~11,680 iterations
 inference:
   - name: inference_1pct
-    !!merge <<: &inference_settings
-      weight: 1.0
-      n_coupled_steps: 1460 # exactly 20 noleap years at the 5-day ocean step
-      coupled_steps_in_memory: 2
-      epochs:
-        start: -1
-        step: -2
+    weight: 1.0
+    n_coupled_steps: 1460 # exactly 20 noleap years at the 5-day ocean step
+    coupled_steps_in_memory: 2
     loader:
       num_data_workers: 4
       start_indices:
@@ -43,7 +39,7 @@ inference:
               data_path: /climate-default
               file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
               engine: zarr
-            - &ocean_1pct_5daily
+            - &ocean_1pct_base
               data_path: /climate-default
               file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
               engine: zarr
@@ -53,15 +49,17 @@ inference:
               data_path: /climate-default
               file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
               engine: zarr
-            - &atmos_1pct_land
+            - &atmos_1pct_base
               data_path: /climate-default
               file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
               engine: zarr
-    aggregator: &inference_aggregator
+    aggregator:
       log_zonal_mean_images: false
       log_histograms: false
   - name: inference_piC
-    !!merge <<: *inference_settings
+    weight: 1.0
+    n_coupled_steps: 1460 # exactly 20 noleap years at the 5-day ocean step
+    coupled_steps_in_memory: 2
     loader:
       num_data_workers: 4
       start_indices:
@@ -86,7 +84,7 @@ inference:
               data_path: /climate-default
               file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
               engine: zarr
-            - &ocean_piC_5daily
+            - &ocean_piC_base
               data_path: /climate-default
               file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
               engine: zarr
@@ -96,11 +94,13 @@ inference:
               data_path: /climate-default
               file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
               engine: zarr
-            - &atmos_piC_land
+            - &atmos_piC_base
               data_path: /climate-default
               file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
               engine: zarr
-    aggregator: *inference_aggregator
+    aggregator:
+      log_zonal_mean_images: false
+      log_histograms: false
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -127,44 +127,35 @@ train_loader:
       - ocean:
           merge:
             - !!merge <<: *ocean_1pct_coupled
-              subset: &train_window_1pct_ocean
+              subset: &train_window_1pct
                 start_time: '0046-01-06T00:00:00'
                 stop_time: '0126-01-01T00:00:00'
-            - !!merge <<: *ocean_1pct_5daily
-              subset: *train_window_1pct_ocean
+            - !!merge <<: *ocean_1pct_base
+              subset: *train_window_1pct
         atmosphere:
           merge:
-            - data_path: /climate-default
-              file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-sea_ice.zarr
-              engine: zarr
-              subset: &train_window_1pct_atmos
-                start_time: '0046-01-01T06:00:00'
-                stop_time: '0126-01-01T00:00:00'
-            - !!merge <<: *atmos_1pct_land
-              subset: *train_window_1pct_atmos
+            - !!merge <<: *atmos_1pct_coupled
+              subset: *train_window_1pct
+            - !!merge <<: *atmos_1pct_base
+              subset: *train_window_1pct
       - ocean:
           merge:
             - !!merge <<: *ocean_piC_coupled
-              subset: &train_window_piC_ocean
+              subset: &train_window_piC
                 start_time: '0156-01-06T00:00:00'
                 stop_time: '0236-01-01T00:00:00'
-            - !!merge <<: *ocean_piC_5daily
-              subset: *train_window_piC_ocean
+            - !!merge <<: *ocean_piC_base
+              subset: *train_window_piC
         atmosphere:
           merge:
-            - data_path: /climate-default
-              file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-sea_ice.zarr
-              engine: zarr
-              subset: &train_window_piC_atmos
-                start_time: '0156-01-01T06:00:00'
-                stop_time: '0236-01-01T00:00:00'
-            - !!merge <<: *atmos_piC_land
-              subset: *train_window_piC_atmos
+            - !!merge <<: *atmos_piC_coupled
+              subset: *train_window_piC
+            - !!merge <<: *atmos_piC_base
+              subset: *train_window_piC
 validation:
   - name: val_1pct_early
-    !!merge <<: &validation_settings
-      evaluate_all_steps: false
-      weight: 1.0
+    evaluate_all_steps: false
+    weight: 1.0
     loader:
       !!merge <<: &validation_loader_settings
         batch_size: 8
@@ -177,16 +168,17 @@ validation:
               subset: &val_window_1pct_early
                 start_time: '0041-01-06T00:00:00'
                 stop_time: '0046-01-01T00:00:00'
-            - !!merge <<: *ocean_1pct_5daily
+            - !!merge <<: *ocean_1pct_base
               subset: *val_window_1pct_early
         atmosphere:
           merge:
             - !!merge <<: *atmos_1pct_coupled
               subset: *val_window_1pct_early
-            - !!merge <<: *atmos_1pct_land
+            - !!merge <<: *atmos_1pct_base
               subset: *val_window_1pct_early
   - name: val_1pct_late
-    !!merge <<: *validation_settings
+    evaluate_all_steps: false
+    weight: 1.0
     loader:
       !!merge <<: *validation_loader_settings
       dataset:
@@ -196,16 +188,17 @@ validation:
               subset: &val_window_1pct_late
                 start_time: '0126-01-06T00:00:00'
                 stop_time: '0131-01-01T00:00:00'
-            - !!merge <<: *ocean_1pct_5daily
+            - !!merge <<: *ocean_1pct_base
               subset: *val_window_1pct_late
         atmosphere:
           merge:
             - !!merge <<: *atmos_1pct_coupled
               subset: *val_window_1pct_late
-            - !!merge <<: *atmos_1pct_land
+            - !!merge <<: *atmos_1pct_base
               subset: *val_window_1pct_late
   - name: val_piC
-    !!merge <<: *validation_settings
+    evaluate_all_steps: false
+    weight: 1.0
     loader:
       !!merge <<: *validation_loader_settings
       dataset:
@@ -215,13 +208,13 @@ validation:
               subset: &val_window_piC
                 start_time: '0236-01-06T00:00:00'
                 stop_time: '0241-01-01T00:00:00'
-            - !!merge <<: *ocean_piC_5daily
+            - !!merge <<: *ocean_piC_base
               subset: *val_window_piC
         atmosphere:
           merge:
             - !!merge <<: *atmos_piC_coupled
               subset: *val_window_piC
-            - !!merge <<: *atmos_piC_land
+            - !!merge <<: *atmos_piC_base
               subset: *val_window_piC
 optimization:
   use_gradient_accumulation: true
@@ -251,7 +244,7 @@ stepper_training:
     n_steps: 4
     optimize_last_step_only: false
     loss_weight: 1.0
-    loss: &ensemble_loss
+    loss:
       type: EnsembleLoss
       kwargs:
         crps_weight: 0.9
@@ -266,7 +259,10 @@ stepper_training:
     n_steps: 0
     loss_weight: 0.0
     loss:
-      !!merge <<: *ensemble_loss
+      type: EnsembleLoss
+      kwargs:
+        crps_weight: 0.9
+        energy_score_weight: 0.1
       weights:
         h500: 5
 stepper:
