@@ -8,11 +8,9 @@ cd "$REPO_ROOT"
 DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 HISTOGRAM_SCRIPT="scripts/downscaling/histogram.py"
-#ZARR_PATH="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/global_perfect_prediction.zarr"
-#OUTPUT_DIR="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/prediction_histograms"
+ZARR_PATH="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/global_perfect_prediction.zarr"
+OUTPUT_DIR="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023/prediction_histograms"
 
-ZARR_PATH="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-25-hiro-v1-ace2s-downscale-global-2023-ic0000/global_ace2s_downscaled_v1_2023.zarr"
-OUTPUT_DIR="/climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-25-hiro-v1-ace2s-downscale-global-2023-ic0000/prediction_histograms"
 
 submit_histogram_job() {
     local job_name="$1"
@@ -36,9 +34,12 @@ submit_histogram_job() {
             --progress-interval 120 \
             --output-dir '$OUTPUT_DIR' \
             --lat-range -65 65 \
-            --variables ${variables[*]}"
+            --variables ${variables[*]}
+            --start-time 20230101:0000 \
+            --stop-time 20231231:1800"
 }
-submit_histogram_job "hiro-v1-histograms-precip-2023" PRATEsfc
+submit_histogram_job "hiro-perfect-pred-percentiles-mslp-perfect-pred-2023" PRATEsfc PRMSL
+submit_histogram_job "hiro-perfect-pred-percentiles-winds-perfect-pred-2023" UGRD10m VGRD10m wind_speed
 
 #submit_histogram_job "hiro-histograms-precip-mslp-perfect-pred-2023" PRATEsfc PRMSL
 #submit_histogram_job "hiro-histograms-wind-perfect-pred-2023" UGRD10m VGRD10m wind_speed

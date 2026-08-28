@@ -2,10 +2,10 @@
 
 set -e
 
-JOB_NAME="hiro-v2-inference-2023-global"
+JOB_NAME="hiro-ablation-inference-2023-global"
 #JOB_NAME="eval-global-trained-denoising-moe-events"
 
-CONFIG_FILENAME="inference-global.yaml"
+CONFIG_FILENAME="inference-global-ablation-model.yaml"
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -17,7 +17,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 N_NODES=1
-NGPU=8
+NGPU=4
 
 IMAGE="$(cat latest_deps_only_image.txt)"
 # bundled moe- can't rename
@@ -25,19 +25,27 @@ IMAGE="$(cat latest_deps_only_image.txt)"
 EXISTING_RESULTS_DATASET_HIGH_SIGMA=01KRGZT4X2QCW2RFH7WN7X8BYA
 EXISTING_RESULTS_DATASET_LOW_SIGMA=01KRBYGNYJ6FD7PGNF3VVHQ5V1
 
+# ablation model
+EXISTING_RESULTS_DATASET=01M0ZZ9NMQ2WBSHBRQE91PQKWC
+
 wandb_group=""
 
 #--not-preemptible \
 #     --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
 #    --dataset $EXISTING_RESULTS_DATASET:bundled_moe_multivariate.ckpt:/ckpt.tar  \
 
+#    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
+#    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
+
+
 gantry run \
     --name $JOB_NAME \
     --description 'Run 100km to 3km evaluation on coarsened X-SHiELD' \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority urgent \
     --cluster ai2/titan \
     --beaker-image $IMAGE \
+    --env CM_PRIORITY=urgent \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
@@ -45,8 +53,7 @@ gantry run \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-annak \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET_HIGH_SIGMA:checkpoints:/checkpoints_high_sigma  \
-    --dataset $EXISTING_RESULTS_DATASET_LOW_SIGMA:checkpoints:/checkpoints_low_sigma  \
+    --dataset $EXISTING_RESULTS_DATASET:checkpoints:/checkpoints \
     --weka climate-default:/climate-default \
     --gpus $NGPU \
     --shared-memory 400GiB \

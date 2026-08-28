@@ -42,7 +42,7 @@ submit_histogram_job() {
             --stop-time 20231231:1800"
 }
 
-submit_histogram_job "hiro-v1-perfect-pred-histograms-prate-2023" PRATEsfc  --percentiles-only
+submit_histogram_job "hiro-v1-perfect-pred-percentiles-prate-2023" PRATEsfc
 #submit_histogram_job "hiro-histograms-prate-reference-2023" PRATEsfc
 
 #submit_histogram_job "hiro-histograms-wind-reference-2023" eastward_wind_at_ten_meters northward_wind_at_ten_meters wind_speed

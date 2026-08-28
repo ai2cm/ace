@@ -1,0 +1,34 @@
+experiment_dir: /climate-default/2026-08-03-hiro-ace-v2-outputs/2026-08-03-hiro-perfect-pred-global-2023
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+model:
+  checkpoint_path: /checkpoints/best.ckpt
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+    - data_path: /climate-default
+      file_pattern: 2026-07-01-X-SHiELD-AMIP-1deg-8layer-11yr.zarr
+      engine: zarr
+  batch_size: 8
+  num_data_workers: 2
+  strict_ensemble: false
+outputs:
+  - name: "global_perfect_prediction"
+    save_vars: ["PRATEsfc", "UGRD10m", "VGRD10m", "PRMSL"]
+    n_ens: 1
+    max_samples_per_gpu: 32
+    time_range:
+      start_time: "2023-01-01T00:00:00"
+      stop_time: "2023-12-31T18:00:00"
+    lat_extent:
+      start: -65.0
+      stop: 65.0
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: multivariate-downscaling
+  entity: ai2cm

@@ -33,9 +33,11 @@ submit_histogram_job() {
             --progress-interval 120 \
             --output-dir '$OUTPUT_DIR' \
             --lat-range -65 65 \
-            --variables ${variables[*]}"
+            --variables ${variables[*]} \
+            --start-time 20230101:0000 \
+            --stop-time 20231231:1800"
 }
 
-submit_histogram_job "hiro-histograms-precip-hiro-ace-2023" PRATEsfc
-submit_histogram_job "hiro-histograms-prmsl-hiro-ace-2023" PRMSL
-submit_histogram_job "hiro-histograms-wind-hiro-ace-2023" UGRD10m VGRD10m wind_speed
+submit_histogram_job "hiro-percentiles-precip-hiro-ace-2023" PRATEsfc
+submit_histogram_job "hiro-percentiles-prmsl-hiro-ace-2023" PRMSL
+submit_histogram_job "hiro-percentiles-wind-hiro-ace-2023" UGRD10m VGRD10m wind_speed
