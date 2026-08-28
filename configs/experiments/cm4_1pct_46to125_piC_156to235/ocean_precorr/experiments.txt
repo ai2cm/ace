@@ -20,11 +20,11 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip|rs2|01M0C74BN2PA20XF9EW42T1RY2|
 
 # ocean_precorr_clip_cde1
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|run_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|run_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs0|01M0DCT13CYHTRM5R5093T9H02|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs1|01M0DCTFB5TE15VNF02VRC858P|run_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs1|01M0DCTFB5TE15VNF02VRC858P|run_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs1|01M0DCTFB5TE15VNF02VRC858P|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs1|01M0DCTFB5TE15VNF02VRC858P|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
 
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs2|01M0DCTWTK1M2515F9WBR4SQAC|run_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs2|01M0DCTWTK1M2515F9WBR4SQAC|run_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs2|01M0DCTWTK1M2515F9WBR4SQAC|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_cde1|rs2|01M0DCTWTK1M2515F9WBR4SQAC|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter|||30GiB
