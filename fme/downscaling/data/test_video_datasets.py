@@ -140,10 +140,10 @@ def test_build_video_shapes_and_time_features(tmp_path):
     # model, narrower than fine_coords (the pre-crop full domain).
     assert len(data.fine_extent_latlon_coords.lat) < len(data.fine_coords.lat)
     torch.testing.assert_close(
-        data.fine_extent_latlon_coords.lat, batch.fine.latlon_coordinates.lat[0]
+        data.fine_extent_latlon_coords.lat, batch.fine.latlon_coordinates.lat[0].cpu()
     )
     torch.testing.assert_close(
-        data.fine_extent_latlon_coords.lon, batch.fine.latlon_coordinates.lon[0]
+        data.fine_extent_latlon_coords.lon, batch.fine.latlon_coordinates.lon[0].cpu()
     )
 
 
