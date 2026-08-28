@@ -144,7 +144,8 @@ class SingleModuleStepConfig(StepConfigABC):
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            residual_scaled_names=sorted(self.prognostic_names)
+            + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -155,52 +156,50 @@ class SingleModuleStepConfig(StepConfigABC):
         )
 
     @property
-    def _normalize_names(self):
+    def _normalize_names(self) -> list[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return list(set(self.in_names).union(self.output_names))
+        return sorted(set(self.in_names) | self.output_names)
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         """
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
         """
         if self.ocean is None:
-            return self.in_names
+            return frozenset(self.in_names)
         else:
-            return list(set(self.in_names).union(self.ocean.forcing_names))
+            return frozenset(self.in_names) | frozenset(self.ocean.forcing_names)
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
         return self.next_step_forcing_names
 
     @property
-    def diagnostic_names(self) -> list[str]:
+    def diagnostic_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
-        return list(set(self.output_names).difference(self.in_names))
+        return self.output_names - set(self.in_names)
 
     @property
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         secondary_names = (
             self.secondary_decoder.secondary_diagnostic_names
             if self.secondary_decoder is not None
             else []
         )
-        return list(set(self.out_names).union(secondary_names))
+        return frozenset(self.out_names) | frozenset(secondary_names)
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self.input_names).difference(self.output_names)
-        result = set(input_only_names)
+        result = self.input_names - self.output_names
         if self.ocean is not None:
-            result = result.union(self.ocean.forcing_names)
-        result = result.union(self.prescribed_prognostic_names)
-        return list(result)
+            result = result | frozenset(self.ocean.forcing_names)
+        return result | frozenset(self.prescribed_prognostic_names)
 
     @property
     def loss_names(self) -> list[str]:
-        return self.output_names
+        return sorted(self.output_names)
 
     @property
     def allow_missing_variables(self) -> bool:
@@ -611,7 +610,7 @@ def step_with_adjustments(
     corrector: CorrectorABC | None,
     ocean: Ocean | None,
     residual_prediction: bool,
-    prognostic_names: list[str],
+    prognostic_names: frozenset[str],
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,

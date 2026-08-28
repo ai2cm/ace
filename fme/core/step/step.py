@@ -46,12 +46,12 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         pass
 
     @property
     @abc.abstractmethod
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
         """
@@ -59,7 +59,7 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -67,8 +67,8 @@ class StepConfigABC(abc.ABC):
 
     @property
     @final
-    def prognostic_names(self) -> list[str]:
-        return list(set(self.input_names).intersection(self.output_names))
+    def prognostic_names(self) -> frozenset[str]:
+        return self.input_names & self.output_names
 
     @property
     @abc.abstractmethod
@@ -182,18 +182,18 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.get_next_step_forcing_names()
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self._step_config_instance.input_names
 
     @property
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         """
         Names of variables output by the step.
         """
         return self._step_config_instance.output_names
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -290,17 +290,17 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self.config.input_names
 
     @property
     @final
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         return self.config.output_names
 
     @property
     @final
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         return self.config.prognostic_names
 
     @property
@@ -320,7 +320,7 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """

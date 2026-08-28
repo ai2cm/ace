@@ -1233,12 +1233,11 @@ def test_stepper_config_input_only_and_all_names_are_sets():
     assert isinstance(config.input_only_names, set)
     assert config.input_only_names == {"a", "c"}
 
-    assert isinstance(config.all_names, set)
+    assert isinstance(config.all_names, frozenset)
     assert config.all_names == {"a", "b", "c", "d"}
 
-    # base config values represent ML channel order and must stay list[str]
-    assert isinstance(config.input_names, list)
-    assert isinstance(config.output_names, list)
+    assert isinstance(config.input_names, frozenset)
+    assert isinstance(config.output_names, frozenset)
 
 
 def _init_train_stepper(

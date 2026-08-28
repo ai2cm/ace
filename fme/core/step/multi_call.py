@@ -169,24 +169,24 @@ class MultiCallStepConfig(StepConfigABC):
         return self.config.names
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         return self.wrapped_step.input_names
 
     def get_next_step_forcing_names(self) -> list[str]:
         return self.wrapped_step.get_next_step_forcing_names()
 
     @property
-    def output_names(self) -> list[str]:
-        return self.wrapped_step.output_names + self._multi_call_outputs
+    def output_names(self) -> frozenset[str]:
+        return self.wrapped_step.output_names | frozenset(self._multi_call_outputs)
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         return self.wrapped_step.next_step_input_names
 
     @property
     def loss_names(self) -> list[str]:
         if self.include_multi_call_in_loss:
-            return self.wrapped_step.loss_names + self._multi_call_outputs
+            return sorted(self.output_names)
         else:
             return self.wrapped_step.loss_names
 

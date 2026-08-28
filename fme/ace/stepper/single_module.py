@@ -684,14 +684,14 @@ class StepperConfig:
         return self.step.loss_names
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         """Names of variables which are required as inputs."""
         return self.step.input_names
 
     @property
-    def all_names(self) -> set[str]:
+    def all_names(self) -> frozenset[str]:
         """Names of all variables."""
-        return set(self.input_names).union(self.output_names)
+        return self.input_names | self.output_names
 
     @property
     def next_step_forcing_names(self) -> list[str]:
@@ -703,12 +703,12 @@ class StepperConfig:
         return self.step.get_next_step_forcing_names()
 
     @property
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         """Names of variables which both inputs and outputs."""
         return self.step.prognostic_names
 
     @property
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
         return self.step.output_names
 
@@ -1015,11 +1015,11 @@ class Stepper:
         return self._parameter_initializer.base_weights
 
     @property
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         return self._step_obj.prognostic_names
 
     @property
-    def out_names(self) -> list[str]:
+    def out_names(self) -> frozenset[str]:
         return self._step_obj.output_names
 
     @property

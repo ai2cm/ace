@@ -129,7 +129,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
             names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            residual_scaled_names=sorted(self.prognostic_names)
+            + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -141,7 +142,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     @property
     def _normalize_names(self) -> list[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        all_names = set()
+        all_names: set[str] = set()
         for names in (
             self.main_prognostic_names,
             self.shared_forcing_names,
@@ -150,12 +151,12 @@ class SeparateRadiationStepConfig(StepConfigABC):
             self.radiation_diagnostic_names,
         ):
             all_names.update(names)
-        return list(all_names)
+        return sorted(all_names)
 
     @property
     def _forcing_names(self) -> list[str]:
-        return list(
-            set(self.shared_forcing_names).union(self.radiation_only_forcing_names)
+        return sorted(
+            set(self.shared_forcing_names) | set(self.radiation_only_forcing_names)
         )
 
     def get_next_step_forcing_names(self) -> list[str]:
@@ -172,9 +173,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return False
 
     @property
-    def diagnostic_names(self) -> list[str]:
-        return list(
-            set(self.main_diagnostic_names).union(self.radiation_diagnostic_names)
+    def diagnostic_names(self) -> frozenset[str]:
+        return frozenset(self.main_diagnostic_names) | frozenset(
+            self.radiation_diagnostic_names
         )
 
     @property
@@ -202,8 +203,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return self.main_prognostic_names + self.main_diagnostic_names
 
     @property
-    def input_names(self) -> list[str]:
-        ml_in_names = (
+    def input_names(self) -> frozenset[str]:
+        ml_in_names = frozenset(
             self.main_prognostic_names
             + self.shared_forcing_names
             + self.radiation_only_forcing_names
@@ -211,27 +212,27 @@ class SeparateRadiationStepConfig(StepConfigABC):
         if self.ocean is None:
             return ml_in_names
         else:
-            return list(set(ml_in_names).union(self.ocean.forcing_names))
+            return ml_in_names | frozenset(self.ocean.forcing_names)
 
     @property
-    def output_names(self) -> list[str]:
-        return (
+    def output_names(self) -> frozenset[str]:
+        return frozenset(
             self.main_prognostic_names
             + self.main_diagnostic_names
             + self.radiation_diagnostic_names
         )
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self.input_names).difference(self.output_names)
-        if self.ocean is None:
-            return list(input_only_names)
-        return list(input_only_names.union(self.ocean.forcing_names))
+        result = self.input_names - self.output_names
+        if self.ocean is not None:
+            result = result | frozenset(self.ocean.forcing_names)
+        return result
 
     @property
     def loss_names(self) -> list[str]:
-        return self.output_names
+        return sorted(self.output_names)
 
     def replace_ocean(self, ocean: OceanConfig | None):
         self.ocean = ocean
