@@ -135,6 +135,16 @@ def test_build_video_shapes_and_time_features(tmp_path):
     # daily timesteps in the fixture -> every frame at midnight UTC
     assert torch.all(batch.fine.second_of_day == 0)
 
+    # fine_extent_latlon_coords is the post-crop domain actually fed to the
+    # model, narrower than fine_coords (the pre-crop full domain).
+    assert len(data.fine_extent_latlon_coords.lat) < len(data.fine_coords.lat)
+    torch.testing.assert_close(
+        data.fine_extent_latlon_coords.lat, batch.fine.latlon_coordinates.lat[0]
+    )
+    torch.testing.assert_close(
+        data.fine_extent_latlon_coords.lon, batch.fine.latlon_coordinates.lon[0]
+    )
+
 
 def test_build_video_default_is_per_day_non_overlapping(tmp_path):
     # 18 timesteps, clip length 9 -> 10 stride-one clip starts.

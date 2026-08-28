@@ -311,7 +311,8 @@ class PairedVideoGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
-    fine_coords: LatLonCoordinates
+    fine_coords: LatLonCoordinates  # full-domain fine coordinates
+    fine_extent_latlon_coords: LatLonCoordinates  # post-crop fine coordinates
 
     @property
     def loader(self) -> DataLoader[PairedVideoBatchData]:
