@@ -4,6 +4,7 @@ fine/coarse machinery used for training and inference.
 """
 
 import dataclasses
+import datetime
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Self
 
@@ -310,7 +311,8 @@ class PairedVideoGriddedData:
     n_timesteps: int
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
-    all_times: xr.CFTimeIndex
+    all_times: xr.CFTimeIndex  # clip start times
+    timestep: datetime.timedelta | None  # spacing between consecutive frames
     fine_coords: LatLonCoordinates  # full-domain fine coordinates
     fine_extent_latlon_coords: LatLonCoordinates  # post-crop fine coordinates
 

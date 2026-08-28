@@ -16,8 +16,8 @@ Run (mirrors video_train.py's invocation):
 
 import argparse
 import dataclasses
+import datetime
 import logging
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -28,8 +28,6 @@ import xarray as xr
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.dataset.time import TimeSlice
-from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
@@ -63,29 +61,18 @@ def _bare_module(wrapped: torch.nn.Module) -> torch.nn.Module:
     return bare
 
 
-def _reference_time_and_attrs(
-    data_config: PairedVideoLoaderConfig, out_names: list[str]
-) -> tuple[np.ndarray, dict[str, dict[str, str]]]:
-    """Read the input zarr's own time coordinate + variable attrs for the test
-    subset, so the output's timestamps and metadata match the input exactly.
+def _reference_time_axis(
+    all_times: xr.CFTimeIndex, n_timesteps: int, timestep: datetime.timedelta
+) -> np.ndarray:
+    """Full per-frame time axis spanning every tumbling clip's coverage.
+
+    ``all_times`` holds each clip's start time. Tumbling clips share their
+    boundary frame, so consecutive clips together cover
+    ``(len(all_times) - 1) * (n_timesteps - 1) + n_timesteps`` distinct
+    frames at ``timestep`` spacing, starting from the first clip's start time.
     """
-    src = data_config.fine[0]
-    if not isinstance(src, XarrayDataConfig):
-        raise ValueError(
-            "Expected an XarrayDataConfig for data.fine[0] for video inference, "
-            f"got {type(src)}."
-        )
-    ds = xr.open_zarr(os.path.join(src.data_path, src.file_pattern))
-    subset = src.subset
-    if not isinstance(subset, TimeSlice):
-        raise ValueError(
-            "Expected a TimeSlice subset on data.fine[0] for video inference, "
-            f"got {type(subset)}."
-        )
-    ds = ds.sel(time=slice(subset.start_time, subset.stop_time))
-    time = ds["time"].values
-    attrs = {name: dict(ds[name].attrs) for name in out_names if name in ds}
-    return time, attrs
+    n_time = (len(all_times) - 1) * (n_timesteps - 1) + n_timesteps
+    return np.array([all_times[0] + i * timestep for i in range(n_time)])
 
 
 def _splice_observed_endpoints(
@@ -136,17 +123,6 @@ def _validate_world_size(n_clips: int, world_size: int) -> None:
         raise RuntimeError(
             f"Only {n_clips} clip(s) available but {world_size} rank(s) "
             "requested; every rank needs at least one clip."
-        )
-
-
-def _validate_full_coverage(n_time: int, n_timesteps: int) -> None:
-    """Tumbling clips of ``n_timesteps`` frames must exactly tile the
-    reference time axis, or the test period would not get full coverage.
-    """
-    if (n_time - 1) % (n_timesteps - 1) != 0:
-        raise ValueError(
-            f"Reference time axis of length {n_time} does not divide evenly "
-            f"into tumbling clips of {n_timesteps} frames."
         )
 
 
@@ -253,7 +229,19 @@ class VideoInferenceConfig:
         griddata = self.data.build_video(
             train=False, requirements=self.model.data_requirements, drop_last=False
         )
-        time, var_attrs = _reference_time_and_attrs(self.data, model.out_names)
+        if griddata.timestep is None:
+            raise ValueError(
+                "griddata.timestep is None; enable infer_timestep on the fine "
+                "XarrayDataConfig(s) so the output's time axis can be built."
+            )
+        time = _reference_time_axis(
+            griddata.all_times, self.model.n_timesteps, griddata.timestep
+        )
+        var_attrs = {
+            name: griddata.variable_metadata[name].as_attrs()
+            for name in model.out_names
+            if name in griddata.variable_metadata
+        }
         return VideoInferenceRunner(
             model=model,
             griddata=griddata,
@@ -309,7 +297,6 @@ class VideoInferenceRunner:
 
         n_time = len(time)
         n_timesteps = model.n_timesteps
-        _validate_full_coverage(n_time, n_timesteps)
         clip_stride = n_timesteps - 1  # tumbling clips share only their boundary frame
 
         # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),

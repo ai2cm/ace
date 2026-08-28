@@ -134,6 +134,7 @@ def test_build_video_shapes_and_time_features(tmp_path):
     assert torch.equal(batch.fine.day_of_year, batch.coarse.day_of_year)
     # daily timesteps in the fixture -> every frame at midnight UTC
     assert torch.all(batch.fine.second_of_day == 0)
+    assert data.timestep == datetime.timedelta(days=1)
 
     # fine_extent_latlon_coords is the post-crop domain actually fed to the
     # model, narrower than fine_coords (the pre-crop full domain).

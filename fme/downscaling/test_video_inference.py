@@ -21,8 +21,8 @@ from fme.downscaling.video_inference import (
     VideoInferenceConfig,
     _bare_module,
     _clip_write_slice,
+    _reference_time_axis,
     _splice_observed_endpoints,
-    _validate_full_coverage,
     _validate_world_size,
 )
 from fme.downscaling.video_models import VideoDiffusionModelConfig
@@ -148,13 +148,27 @@ def test_validate_world_size_passes_when_clips_cover_ranks():
     _validate_world_size(n_clips=3, world_size=2)
 
 
-def test_validate_full_coverage_raises_on_remainder():
-    with pytest.raises(ValueError, match="does not divide evenly"):
-        _validate_full_coverage(n_time=10, n_timesteps=9)
-
-
-def test_validate_full_coverage_passes_when_divisible():
-    _validate_full_coverage(n_time=17, n_timesteps=9)  # (17-1) % (9-1) == 0
+def test_reference_time_axis_spans_tumbling_clip_coverage():
+    # 3 clips (stride 4) of 5 frames each, sharing boundaries: clip 0 covers
+    # frames 0-4, clip 1 (start 4) covers 4-8, clip 2 (start 8) covers 8-12
+    # -> 13 total distinct frames.
+    all_times = xr.CFTimeIndex(
+        [
+            cftime.DatetimeJulian(2000, 1, 1) + datetime.timedelta(days=4 * i)
+            for i in range(3)
+        ]
+    )
+    time = _reference_time_axis(
+        all_times, n_timesteps=5, timestep=datetime.timedelta(days=1)
+    )
+    assert len(time) == 13
+    assert time[0] == all_times[0]
+    assert time[-1] == all_times[-1] + 4 * datetime.timedelta(days=1)
+    # evenly spaced at the given timestep
+    assert all(
+        time[i + 1] - time[i] == datetime.timedelta(days=1)
+        for i in range(len(time) - 1)
+    )
 
 
 def _valid_inference_kwargs(trainer_config, tmp_path):

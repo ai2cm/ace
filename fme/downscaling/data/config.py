@@ -809,6 +809,7 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
             dims=example.fine.latlon_coordinates.dims,
             variable_metadata=variable_metadata,
             all_times=all_times,
+            timestep=properties_fine.timestep,
             fine_coords=get_latlon_coords_from_properties(properties_fine),
             fine_extent_latlon_coords=example.fine.latlon_coordinates,
         )
