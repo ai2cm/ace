@@ -16,7 +16,7 @@ data:
   num_data_workers: 2
   strict_ensemble: false
 outputs:
-  - name: "global_perfect_prediction"
+  - name: "global_perfect_prediction_ablation_model"
     save_vars: ["PRATEsfc", "UGRD10m", "VGRD10m", "PRMSL"]
     n_ens: 1
     max_samples_per_gpu: 32
