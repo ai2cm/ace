@@ -68,7 +68,7 @@ class StepConfigABC(abc.ABC):
     @property
     @final
     def prognostic_names(self) -> frozenset[str]:
-        return self.input_names & self.output_names
+        return frozenset(set(self.input_names).intersection(self.output_names))
 
     @property
     @abc.abstractmethod

@@ -229,7 +229,7 @@ class FCN3StepConfig(StepConfigABC):
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
-            names=self._normalize_names + extra_names,
+            names=sorted(self._normalize_names) + extra_names,
             residual_scaled_names=sorted(self.prognostic_names)
             + extra_residual_scaled_names,
         )
@@ -242,9 +242,9 @@ class FCN3StepConfig(StepConfigABC):
         )
 
     @property
-    def _normalize_names(self) -> list[str]:
+    def _normalize_names(self) -> frozenset[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return sorted(set(self.in_names) | set(self.out_names))
+        return frozenset(set(self.in_names).union(self.out_names))
 
     @property
     def input_names(self) -> frozenset[str]:
@@ -255,7 +255,7 @@ class FCN3StepConfig(StepConfigABC):
         if self.ocean is None:
             return frozenset(self.in_names)
         else:
-            return frozenset(self.in_names) | frozenset(self.ocean.forcing_names)
+            return frozenset(set(self.in_names).union(self.ocean.forcing_names))
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
@@ -273,10 +273,11 @@ class FCN3StepConfig(StepConfigABC):
     @property
     def next_step_input_names(self) -> frozenset[str]:
         """Names of variables provided in next_step_input_data."""
-        result = self.input_names - self.output_names
+        result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
-            result = result | frozenset(self.ocean.forcing_names)
-        return result | frozenset(self.prescribed_prognostic_names)
+            result = result.union(self.ocean.forcing_names)
+        result = result.union(self.prescribed_prognostic_names)
+        return frozenset(result)
 
     @property
     def loss_names(self) -> list[str]:
@@ -319,7 +320,9 @@ class FCN3StepConfig(StepConfigABC):
     ) -> "FCN3Step":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
-        normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        normalizer = self.normalization.get_network_normalizer(
+            sorted(self._normalize_names)
+        )
         return FCN3Step(
             config=self,
             dataset_info=dataset_info,

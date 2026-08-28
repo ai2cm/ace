@@ -177,7 +177,9 @@ class MultiCallStepConfig(StepConfigABC):
 
     @property
     def output_names(self) -> frozenset[str]:
-        return self.wrapped_step.output_names | frozenset(self._multi_call_outputs)
+        return frozenset(
+            set(self.wrapped_step.output_names).union(self._multi_call_outputs)
+        )
 
     @property
     def next_step_input_names(self) -> frozenset[str]:

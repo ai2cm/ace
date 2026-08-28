@@ -691,7 +691,7 @@ class StepperConfig:
     @property
     def all_names(self) -> frozenset[str]:
         """Names of all variables."""
-        return self.input_names | self.output_names
+        return frozenset(set(self.input_names).union(self.output_names))
 
     @property
     def next_step_forcing_names(self) -> list[str]:

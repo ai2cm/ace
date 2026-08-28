@@ -150,7 +150,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
-            names=self._normalize_names + extra_names,
+            names=sorted(self._normalize_names) + extra_names,
             residual_scaled_names=sorted(self.prognostic_names)
             + extra_residual_scaled_names,
         )
@@ -162,9 +162,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
         )
 
     @property
-    def _normalize_names(self) -> list[str]:
+    def _normalize_names(self) -> frozenset[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return sorted(set(self.in_names) | self.output_names)
+        return frozenset(set(self.in_names).union(self.output_names))
 
     @property
     def input_names(self) -> frozenset[str]:
@@ -175,7 +175,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
         if self.ocean is None:
             return frozenset(self.in_names)
         else:
-            return frozenset(self.in_names) | frozenset(self.ocean.forcing_names)
+            return frozenset(set(self.in_names).union(self.ocean.forcing_names))
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
@@ -184,7 +184,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
     @property
     def diagnostic_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
-        return self.output_names - set(self.in_names)
+        return frozenset(set(self.output_names).difference(self.in_names))
 
     @property
     def output_names(self) -> frozenset[str]:
@@ -193,20 +193,20 @@ class SecondaryModuleStepConfig(StepConfigABC):
             if self.secondary_decoder is not None
             else []
         )
-        return (
-            frozenset(self.out_names)
-            | frozenset(secondary_decoder_names)
-            | frozenset(self.secondary_out_names)
-            | frozenset(self.secondary_residual_out_names)
+        return frozenset(
+            set(self.out_names)
+            .union(secondary_decoder_names)
+            .union(self.secondary_out_names)
+            .union(self.secondary_residual_out_names)
         )
 
     @property
     def next_step_input_names(self) -> frozenset[str]:
         """Names of variables provided in next_step_input_data."""
-        result = self.input_names - self.output_names
+        result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
-            result = result | frozenset(self.ocean.forcing_names)
-        return result | frozenset(self.prescribed_prognostic_names)
+            result = result.union(self.ocean.forcing_names)
+        return frozenset(result.union(self.prescribed_prognostic_names))
 
     @property
     def loss_names(self) -> list[str]:
@@ -244,7 +244,9 @@ class SecondaryModuleStepConfig(StepConfigABC):
     ) -> "SecondaryModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
-        normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        normalizer = self.normalization.get_network_normalizer(
+            sorted(self._normalize_names)
+        )
         return SecondaryModuleStep(
             config=self,
             dataset_info=dataset_info,
