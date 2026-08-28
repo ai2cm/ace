@@ -30,14 +30,14 @@ cm4_1pct_46to125_piC_156to235-ocean_wide|rs2|01M09FH1ACEWZA2CZ103X2C396|training
 
 # ocean_wide_ohc_cde1
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs0|01M0C6H44XHV5F74T3KP113T5G|run_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs0|01M0C6H44XHV5F74T3KP113T5G|run_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs0|01M0C6H44XHV5F74T3KP113T5G|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs0|01M0C6H44XHV5F74T3KP113T5G|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs1|01M0C6HGKSEQVTT5T5ZDW4Z1VA|run_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs1|01M0C6HGKSEQVTT5T5ZDW4Z1VA|run_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs1|01M0C6HGKSEQVTT5T5ZDW4Z1VA|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs1|01M0C6HGKSEQVTT5T5ZDW4Z1VA|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs2|01M0C6HXWDGT24KFDG208M3S33|run_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs2|01M0C6HXWDGT24KFDG208M3S33|run_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs2|01M0C6HXWDGT24KFDG208M3S33|ran_1pct-ic0001-130yr|best_inference_ckpt|urgent|--min-runtime 1h|||ai2/ace|jupiter
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_cde1|rs2|01M0C6HXWDGT24KFDG208M3S33|ran_piC-ic0151-200yr|best_inference_ckpt|urgent|--min-runtime 2h|||ai2/ace|jupiter
 
 
 # ocean_wide_ohc_clip
