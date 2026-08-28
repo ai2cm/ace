@@ -21,9 +21,6 @@ WIND_COMPONENT_NAMES = (
 # latitude dimension names, tried in order against the dataset
 LAT_DIM_NAMES = ("lat", "latitude", "grid_yt")
 
-# upper-tail percentiles reported alongside the histograms
-PERCENTILES = (99.0, 99.99, 99.9999)
-
 # ProgressBar redraws via a bare "\r" with no newline, intended for a tty to
 # overwrite in place. Log streaming (e.g. beaker/gantry) is line-buffered on
 # "\n", so those redraws never surface at all until the one real newline
@@ -103,18 +100,6 @@ def parse_args():
         help="Seconds between progress bar updates",
     )
     parser.add_argument(
-        "--percentiles",
-        nargs="+",
-        type=float,
-        default=list(PERCENTILES),
-        help="Percentiles to compute for each variable",
-    )
-    parser.add_argument(
-        "--percentiles-only",
-        action="store_true",
-        help="Compute percentiles only, skipping the histograms",
-    )
-    parser.add_argument(
         "--lat-range",
         nargs=2,
         type=float,
@@ -180,34 +165,6 @@ def compute_histograms(
     return {var: (counts[var], bins[var]) for var in variables}
 
 
-def compute_percentiles(
-    ds: xr.Dataset,
-    variables: list[str],
-    percentiles: list[float],
-    progress_interval: float = PROGRESS_BAR_UPDATE_INTERVAL_SECONDS,
-) -> dict[str, np.ndarray]:
-    """Percentiles of ``variables`` over every element of the dataset.
-
-    Never materializes a variable: ``da.percentile`` is what
-    ``np.percentile(ds[var].data.flatten(), percentiles)`` dispatches to for a
-    dask-backed array, and it works chunk-wise, so peak memory is set by the
-    chunking rather than by the dataset size. As with the histograms, all
-    variables go into one graph so shared inputs are read once.
-
-    Note that this is dask's approximate percentile: exact order statistics are
-    taken per chunk and merged by weighted interpolation, which is exact only
-    for a single-chunk array. The error grows with the number of chunks and with
-    how far into the tail the percentile sits, so the most extreme values here
-    are the least precise.
-    """
-    q = np.asarray(percentiles, dtype=float)
-    # da.percentile takes 1-D input only, and flatten() keeps the reshape lazy
-    values = {var: da.percentile(ds[var].data.flatten(), q) for var in variables}
-    with LineProgressBar(dt=progress_interval):
-        (values,) = dask.compute(values, scheduler=DASK_SCHEDULER)
-    return {var: np.asarray(values[var]) for var in variables}
-
-
 def trim_empty_bins(
     counts: np.ndarray, edges: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -251,21 +208,6 @@ def save_histogram(
     plt.title(f"{variable}")
     plt.savefig(f"{output_dir}/{variable}_histogram.png")
     plt.close()
-
-
-def save_percentiles(
-    values: np.ndarray,
-    percentiles: list[float],
-    variable: str,
-    output_dir: str,
-    units: str,
-) -> None:
-    np.savez(
-        f"{output_dir}/{variable}_percentiles.npz",
-        percentiles=np.asarray(percentiles, dtype=float),
-        values=values,
-        units=units,
-    )
 
 
 def estimate_bins(
@@ -337,12 +279,6 @@ def main():
     if len(args.variables) == 0:
         raise ValueError("No variables provided to compute histograms for.")
 
-    if len(args.percentiles) == 0:
-        raise ValueError("No percentiles provided.")
-    out_of_range = [q for q in args.percentiles if not 0 <= q <= 100]
-    if out_of_range:
-        raise ValueError(f"percentiles must be in [0, 100], got {out_of_range}")
-
     os.makedirs(args.output_dir, exist_ok=True)
 
     variables = list(args.variables)
@@ -357,32 +293,17 @@ def main():
     ]
 
     for group in groups:
-        if not args.percentiles_only:
-            print(f"computing bins for {', '.join(group)}...")
-            bins = {var: estimate_bins(ds[var]) for var in group}
-            print(f"computing histograms for {', '.join(group)}...")
-            histograms = compute_histograms(
-                ds, group, bins, progress_interval=args.progress_interval
-            )
-
-            for var, (var_counts, var_edges) in histograms.items():
-                save_histogram(
-                    var_counts,
-                    var_edges,
-                    var,
-                    args.output_dir,
-                    units=ds[var].attrs.get("units", ""),
-                )
-
-        print(f"computing percentiles for {', '.join(group)}...")
-        percentiles = compute_percentiles(
-            ds, group, args.percentiles, progress_interval=args.progress_interval
+        print(f"computing bins for {', '.join(group)}...")
+        bins = {var: estimate_bins(ds[var]) for var in group}
+        print(f"computing histograms for {', '.join(group)}...")
+        histograms = compute_histograms(
+            ds, group, bins, progress_interval=args.progress_interval
         )
 
-        for var, var_values in percentiles.items():
-            save_percentiles(
-                var_values,
-                args.percentiles,
+        for var, (var_counts, var_edges) in histograms.items():
+            save_histogram(
+                var_counts,
+                var_edges,
                 var,
                 args.output_dir,
                 units=ds[var].attrs.get("units", ""),
