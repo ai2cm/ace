@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Sequence
 
+import torch.multiprocessing
 import torch.utils.data
 
 from fme.ace.data_loading.batch_data import BatchData
@@ -72,6 +73,20 @@ def _get_sampler(
     return sampler
 
 
+def _use_file_system_tensor_sharing() -> None:
+    """Share CPU tensors by shared-memory filename rather than by descriptor.
+
+    Under forkserver the dataset is pickled to each worker, and the default
+    "file_descriptor" strategy sends one file descriptor per CPU tensor it
+    holds, which the process descriptor limit caps. The tradeoff is reclamation:
+    shared memory is freed when the owning process cleans up rather than when
+    the last descriptor closes, so a process killed outright can leave entries
+    behind in /dev/shm.
+    """
+    torch.multiprocessing.set_sharing_strategy("file_system")
+    logger.info("Set torch tensor sharing strategy to file_system.")
+
+
 def get_gridded_data(
     config: DataLoaderConfig,
     train: bool,
@@ -107,6 +122,9 @@ def get_gridded_data(
     sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
     if _force_forkserver or (config.zarr_engine_used and config.num_data_workers > 0):
+        # set before enable_shared_memory below, which shares storage using
+        # whichever strategy is active at that moment
+        _use_file_system_tensor_sharing()
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # reading zarr with async from weka also requires forkserver
         mp_context = "forkserver"
@@ -206,6 +224,7 @@ def get_inference_data(
     properties = dataset.properties
 
     if config.zarr_engine_used or _force_forkserver:
+        _use_file_system_tensor_sharing()
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
