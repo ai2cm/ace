@@ -18,12 +18,12 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # tags: o0a0rs0 = ocean rs0 + atmos rs0 + coupled rs0
 
 # coupled-owc_a2s
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a2rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|urgent|b200|4|500GiB|3|ai2/ace|seed=0|
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|urgent|b200|4|500GiB|3|ai2/ace|seed=0|
 
 
 # coupled-owc8_a2s
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a2rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper_training.n_coupled_steps=8 stepper_training.ocean.n_steps=8
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled-owc8_a2s-fto|o2a0rs0|ace-samudra-cm4|pxz4q8hw|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper_training.n_coupled_steps=8 stepper_training.ocean.n_steps=8
 
 
 # coupled_mse-owc_a2s
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse2-owc_a2s-fto|o2a2rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper_training.n_ensemble=1 stepper_training.ocean.loss.type=MSE|1h
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_mse2-owc_a2s-fto|o2a0rs0|ace-samudra-cm4|pjxiw906|best_inference_ckpt|ace2-cm4-atmos-noLSM|j0ng1tw3|best_inference_ckpt|train|high|b200|4|500GiB|3|ai2/ace|seed=0 stepper_training.n_ensemble=1 stepper_training.ocean.loss.type=MSE|1h
