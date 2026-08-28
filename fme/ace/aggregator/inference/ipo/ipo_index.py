@@ -14,7 +14,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict
 
-from ...plotting import plot_mean_and_samples
+from ...plotting import clamp_date_axis, plot_mean_and_samples
 from ..build_context import MetricBuildContext, MetricNotSupportedError
 from ..data import InferenceBatchData, MetricBuildResult
 from ..utils import (
@@ -348,6 +348,7 @@ class PairedIPOIndexAggregator:
         ax.set_title("IPO TPI (13-yr low-pass filtered)")
         ax.set_ylabel("K")
         ax.legend()
+        clamp_date_axis(ax)
         fig.tight_layout()
         return fig
 
