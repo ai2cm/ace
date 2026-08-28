@@ -53,7 +53,7 @@ not validate cross-backend correctness.
 When committing changes, do not include Co-Authored-By: Claude in the commit message. This is because Claude bears no accountability or responsibility for the changes, the user is the sole author accountable.
 
 When committing to a branch that has an open PR, check whether the PR description needs to be updated to reflect the changes; update it via the `write-pr-prose` skill (see "PR description template").
-When amending a PR description, make sure it still reflects the change _from main_, not the change from a previous, ephemeral state of the PR.
+When amending a PR description, make sure it still reflects the change _from the PR's base branch_ (main, unless the PR is stacked on another branch), not the change from a previous, ephemeral state of the PR.
 
 ### PR description template
 
