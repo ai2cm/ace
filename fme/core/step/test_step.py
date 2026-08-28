@@ -788,25 +788,31 @@ def test_step_with_prescribed_prognostic_overwrites_output():
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
 
 
-def test_step_returns_step_output_with_populated_detached_delta():
+def test_corrector_deltas_stay_attached():
+    # The deltas are never detached at the step boundary, while the corrected
+    # output is the same as it is with the graph switched off.
     selector = get_single_module_with_atmosphere_corrector_selector()
     img_shape = DEFAULT_IMG_SHAPE
     step = get_step(selector, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
     next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
-    result = step.step(
-        args=StepArgs(
-            input=input_data,
-            next_step_input_data=next_step_input_data,
-            labels=None,
-        ),
+    args = StepArgs(
+        input=input_data,
+        next_step_input_data=next_step_input_data,
+        labels=None,
     )
+    result = step.step(args=args)
     assert isinstance(result, StepOutput)
     delta = result.corrector_diagnostics.delta
     assert delta  # the atmosphere corrector modifies fields
     for name, tensor in delta.items():
         assert name in result.output
-        assert not tensor.requires_grad  # detached at the step boundary
+        assert tensor.grad_fn is not None
+
+    with torch.no_grad():
+        reference = step.step(args=args)
+    for name, value in reference.output.items():
+        torch.testing.assert_close(result.output[name], value)
 
 
 def test_step_empty_delta_when_no_corrector():
