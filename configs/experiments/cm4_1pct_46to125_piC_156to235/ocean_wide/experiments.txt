@@ -45,8 +45,22 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip|rs2|01M0FY2JC8QWR61KBKXY57B0J4
 
 # ocean_wide_ohc_clip-ft
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|training|best_inference_ckpt|normal|--min-runtime 8h
+# Prescribed-hfds test on the wide finetuned arm, plus its matched control.
+#
+# The imposed open-ocean flux from _compute_ocean_net_surface_energy_flux
+# delivers ~+0.14 W/m2 more heat than the reference's own surface flux, which
+# accounts for essentially all of the ocean heat drift these rollouts show.
+# The -hfds rows feed the reference flux instead; the plain rows are the same
+# rollout on the same commit without the prescription, so the pair differs in
+# one thing. Both use 30GiB shared memory (the prescribed run carries
+# hfds_total_area as forcing) and 3h min-runtime -- the 200-yr rollout takes
+# ~65 min and a 1h guarantee lost two of three jobs to preemption once already.
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|run_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|run_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|run_piC-ic0151-200yr-hfds|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|training|best_inference_ckpt|normal|--min-runtime 8h
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|01M0V08JNBNHZRMDRJDRHN3674|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|01M0V08XTS8J78AR7KST6330D2|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|01M0V09A0WX09C7X1GZ1Y9EH49|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 3h|data_writer.save_monthly_files=false||ai2/ace|jupiter|||30GiB
+
