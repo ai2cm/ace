@@ -87,6 +87,20 @@ def test_the_fine_tunes_are_titan_only():
         submit_finetune_jobs.n_gpus_for_clusters(beaker_submit.DEFAULT_CLUSTERS)
 
 
+def test_the_evaluations_are_titan_only():
+    """Single-GPU eval jobs should not hold queued urgent headroom on jupiter."""
+    import submit_eval_jobs
+
+    assert submit_eval_jobs.EVAL_CLUSTERS == ["ai2/titan"]
+    parser = argparse.ArgumentParser()
+    beaker_submit.add_arguments(parser, default_clusters=submit_eval_jobs.EVAL_CLUSTERS)
+    args = parser.parse_args([])
+    assert args.beaker_cluster == ["ai2/titan"]
+    assert args.beaker_workspace == "ai2/ace"
+    assert args.beaker_priority == "urgent"
+    assert args.cm_priority == "urgent"
+
+
 def test_opting_out_sets_an_empty_label_rather_than_dropping_it():
     """An unset CM_PRIORITY would take the wrapper's default of urgent.
 

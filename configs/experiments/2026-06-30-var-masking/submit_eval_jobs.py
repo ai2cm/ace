@@ -62,6 +62,13 @@ HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-eval.sh"
 WANDB_GROUP = "ace2-var-masking-eval-2026-06-30"
 
+# Evaluations are titan-only, like the fine-tunes they score. A queued urgent
+# job is charged pessimistically against every cluster it could land on (see
+# beaker_submit and scripts/beaker_balancer/README.md), so making these
+# single-GPU jobs eligible for jupiter too holds headroom there that the
+# multi-GPU training jobs need.
+EVAL_CLUSTERS = ["ai2/titan"]
+
 # Wandb states meaning "this evaluator job is done or on its way", i.e. no
 # resubmission needed. Anything else (crashed, failed, killed, ...) is a dead
 # run worth retrying. Listing the live states rather than the dead ones keeps
@@ -166,7 +173,7 @@ def main() -> None:
         action="store_true",
         help="Print commands without executing them.",
     )
-    beaker_submit.add_arguments(parser)
+    beaker_submit.add_arguments(parser, default_clusters=EVAL_CLUSTERS)
     parser.add_argument(
         "--version",
         "-v",
