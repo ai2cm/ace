@@ -32,9 +32,13 @@ esac
 
 # Preemption guarantee. --preemptible/--not-preemptible are deprecated, and since the
 # 2026-08-28 scheduler change priority no longer buys protection either; --min-runtime is
-# the lever that remains. Priority still orders contention within our own budget, which is
-# why these run at `high` rather than `urgent`.
+# the lever that remains.
 MIN_RUNTIME=8h
+
+# Priority orders contention within our own budget -- `high` rather than `urgent` so these
+# stay polite to the rest of the group. Set once: it feeds both the gantry flag and the
+# CM_PRIORITY env var the job reads, which must not drift apart.
+PRIORITY=high
 
 # cwd guard: an empty SCRIPT_PATH means this was run from the repo root, which would make
 # CONFIG_PATH absolute and submit a doomed job.
@@ -90,11 +94,12 @@ BATCHCHECK
     --description "ACE2.2 variant campaign (harmonized split; near-surface diagnostics) on $CLUSTER" \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority high \
+    --priority "$PRIORITY" \
     --min-runtime "$MIN_RUNTIME" \
     --timeout 0 \
     --no-logs \
     --cluster "$BEAKER_CLUSTER" \
+    --env CM_PRIORITY="$PRIORITY" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
