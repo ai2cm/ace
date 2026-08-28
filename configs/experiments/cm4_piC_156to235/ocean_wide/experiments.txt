@@ -1,0 +1,7 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+cm4_piC_156to235-ocean_wide_ohc_clip|rs0|01M12F8M7J73QZ3XPWMJ4SW0R2|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_piC_156to235-ocean_wide_ohc_clip|rs1|01M12F919398AR7105DAWBQ8QG|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_piC_156to235-ocean_wide_ohc_clip|rs2|01M12F9E040CXDM33J0KQSX4BB|training|best_inference_ckpt|normal|--min-runtime 8h
