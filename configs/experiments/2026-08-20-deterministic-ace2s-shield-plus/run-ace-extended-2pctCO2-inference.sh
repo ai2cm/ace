@@ -48,6 +48,7 @@ for model in "${!MODELS[@]}"; do
         n_forward_steps=$SPIN_UP_N_FORWARD_STEPS \
         logging.log_to_wandb=$spin_up_log_to_wandb \
         data_writer.files=[] \
+        seed=0 \
     "
     main_overrides="\
         experiment_dir=$MAIN_EXPERIMENT_DIR \
@@ -57,6 +58,7 @@ for model in "${!MODELS[@]}"; do
         initial_condition.path=$MAIN_INITIAL_CONDITION_PATH \
         initial_condition.start_indices=null \
         n_forward_steps=$MAIN_N_FORWARD_STEPS \
+        seed=0 \
     "
 
     python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
@@ -68,7 +70,6 @@ for model in "${!MODELS[@]}"; do
         --workspace ai2/ace \
         --priority high \
         --cluster ai2/titan \
-        --cluster ai2/jupiter \
         --not-preemptible \
         --env CM_PRIORITY=high \
         --env WANDB_USERNAME=$WANDB_USERNAME \
