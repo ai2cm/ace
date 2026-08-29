@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from fme.ace.models.graphcast import GRAPHCAST_AVAIL
 from fme.ace.models.graphcast.main import GraphCast
-from fme.ace.models.ocean.m2lines.samudra import NoiseInjection, Samudra
+from fme.ace.models.ocean.m2lines.samudra import ConditionedBlocks, Samudra
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 from fme.ace.registry.stochastic_sfno import NoiseConditionedModel
 from fme.core.dataset_info import DatasetInfo
@@ -16,6 +16,29 @@ from fme.core.models.conditional_sfno.layers import ContextConfig
 class SamudraBuilder(ModuleConfig):
     """
     Configuration for the M2Lines Samudra architecture.
+
+    Setting ``noise_embed_dim`` above zero makes the network noise-conditioned:
+    a noise field is drawn on every forward call and supplied as conditioning
+    input to the ConvNeXt blocks named by ``conditioned_blocks``, so an ensemble
+    of members can be drawn from one input and trained against a proper scoring
+    rule. The conditioning weights are zero-initialized, so an untrained
+    noise-conditioned model is exactly deterministic and identical to the
+    unconditioned one.
+
+    Parameters:
+        noise_embed_dim: Number of noise channels drawn and projected onto each
+            conditioned block's scale and bias. Zero (the default) builds the
+            deterministic network; DLESyM-Ocean uses 32.
+        conditioned_blocks: Which ConvNeXt blocks are conditioned, required
+            when ``noise_embed_dim`` is non-zero and rejected otherwise.
+            "bottleneck" conditions only the block at the coarsest resolution;
+            after the encoder's AvgPools that grid is 1/16 of the input, so on a
+            45x90 domain it is 2x5 cells and only the largest scales can be
+            perturbed. "all_blocks" conditions every block, the pattern the ACE
+            SFNO uses, which also reaches the finest scales.
+        norm: Note that conditioning is applied as a FiLM layer after the norm,
+            which is principled after "layer" (the SFNO's ConditionalLayerNorm
+            construction) and degenerate after "instance" -- see ConvNeXtBlock.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -29,12 +52,26 @@ class SamudraBuilder(ModuleConfig):
     upscale_factor: int = 4
     checkpoint_strategy: Literal["all", "simple"] | None = None
     zonally_periodic_upsample: bool = False
+    noise_embed_dim: int = 0
+    conditioned_blocks: ConditionedBlocks | None = None
 
     def __post_init__(self):
         if "num_features" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have num_features")
         if "normalized_shape" in self.norm_kwargs:
             raise ValueError("norm_kwargs should not have normalized_shape")
+        if self.noise_embed_dim < 0:
+            raise ValueError("noise_embed_dim must not be negative")
+        if self.noise_embed_dim > 0 and self.conditioned_blocks is None:
+            raise ValueError(
+                "noise_embed_dim requires conditioned_blocks to be set; there is "
+                "no default choice of where to inject noise."
+            )
+        if self.noise_embed_dim == 0 and self.conditioned_blocks is not None:
+            raise ValueError(
+                "conditioned_blocks requires a non-zero noise_embed_dim; without "
+                "it the network is deterministic and conditions on nothing."
+            )
 
     def build(
         self,
@@ -44,84 +81,15 @@ class SamudraBuilder(ModuleConfig):
     ):
         if len(dataset_info.all_labels) > 0:
             raise ValueError("Samudra does not support labels")
-        return Samudra(
-            input_channels=n_in_channels,
-            output_channels=n_out_channels,
-            ch_width=self.ch_width,
-            dilation=self.dilation,
-            n_layers=self.n_layers,
-            pad=self.pad,
-            norm=self.norm,
-            norm_kwargs=self.norm_kwargs,
-            upscale_factor=self.upscale_factor,
-            checkpoint_strategy=self.checkpoint_strategy,
-            zonally_periodic_upsample=self.zonally_periodic_upsample,
-        )
-
-
-@ModuleSelector.register("NoiseConditionedSamudra")
-@dataclasses.dataclass
-class NoiseConditionedSamudraBuilder(ModuleConfig):
-    """
-    Configuration for a noise-conditioned M2Lines Samudra architecture.
-
-    A noise field is drawn on every forward call and supplied as conditioning
-    input to the ConvNeXt blocks' normalization layers, so an ensemble of
-    members can be drawn from one input and trained against a proper scoring
-    rule. The conditioning weights are zero-initialized, so an untrained model
-    is exactly deterministic.
-
-    Deliberately a sibling of ``SamudraBuilder`` rather than a subclass, matching
-    ``NoiseConditionedSwinTransformerBuilder``: the architecture fields are
-    repeated so neither builder's methods need to be `@final`.
-
-    Parameters:
-        noise_embed_dim: Number of noise channels drawn and projected onto each
-            conditioned block's scale and bias. Defaults to 32, DLESyM-Ocean's
-            choice.
-        noise_injection: Which ConvNeXt blocks are conditioned. "bottleneck"
-            conditions only the block at the coarsest resolution (after the
-            encoder's AvgPools), so the noise perturbs large scales;
-            "all_blocks" conditions every block, the pattern the ACE SFNO uses,
-            which also reaches the finest scales.
-    """
-
-    ch_width: list[int] = dataclasses.field(
-        default_factory=lambda: [200, 250, 300, 400]
-    )
-    n_layers: list[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1])
-    dilation: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
-    pad: str = "circular"
-    norm: str = "instance"
-    norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    upscale_factor: int = 4
-    checkpoint_strategy: Literal["all", "simple"] | None = None
-    zonally_periodic_upsample: bool = False
-    noise_embed_dim: int = 32
-    noise_injection: NoiseInjection = "bottleneck"
-
-    def __post_init__(self):
-        if "num_features" in self.norm_kwargs:
-            raise ValueError("norm_kwargs should not have num_features")
-        if "normalized_shape" in self.norm_kwargs:
-            raise ValueError("norm_kwargs should not have normalized_shape")
-        if self.noise_embed_dim <= 0:
-            raise ValueError("noise_embed_dim must be positive")
-
-    def build(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        dataset_info: DatasetInfo,
-    ):
-        if len(dataset_info.all_labels) > 0:
-            raise ValueError("NoiseConditionedSamudra does not support labels")
-        context_config = ContextConfig(
-            embed_dim_scalar=0,
-            embed_dim_labels=0,
-            embed_dim_noise=self.noise_embed_dim,
-            embed_dim_pos=0,
-        )
+        if self.noise_embed_dim > 0:
+            context_config: ContextConfig | None = ContextConfig(
+                embed_dim_scalar=0,
+                embed_dim_labels=0,
+                embed_dim_noise=self.noise_embed_dim,
+                embed_dim_pos=0,
+            )
+        else:
+            context_config = None
         samudra = Samudra(
             input_channels=n_in_channels,
             output_channels=n_out_channels,
@@ -135,8 +103,10 @@ class NoiseConditionedSamudraBuilder(ModuleConfig):
             checkpoint_strategy=self.checkpoint_strategy,
             zonally_periodic_upsample=self.zonally_periodic_upsample,
             context_config=context_config,
-            noise_injection=self.noise_injection,
+            conditioned_blocks=self.conditioned_blocks,
         )
+        if context_config is None:
+            return samudra
         return NoiseConditionedModel(
             samudra,
             img_shape=dataset_info.img_shape,
