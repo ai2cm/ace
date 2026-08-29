@@ -1,0 +1,52 @@
+# 4deg port of the shared 1deg config
+# configs/experiments/cm4_eval/ocean/evaluator-config-piC-ic0151-200yr.yaml on
+# exper/2026-07-16-jamesd, i.e. evaluations/icx1-1deg-picontrol-200yr in the
+# research repo. Differs from it only in the two zarr paths (1deg -> 4deg
+# stores); the IC, the step count and the horizon are identical, since both
+# stores are 5-daily and span years 0151-0351.
+#
+# This is the pre-registered criterion for the stochastic-Samudra screen: the
+# coast-distance interannual-variance curve and the western-boundary-current
+# boxes are computed from the monthly SST written here, and no inline metric
+# measures them. save_monthly_files is therefore ON, against the usual default
+# -- the gridded monthly fields ARE the deliverable. Expect a few GiB per arm;
+# audit with `rsrch results` and delete once the analysis has been written up.
+#
+# Run from exp/stochastic-samudra and NOT from a branch carrying ai2cm/ace#1464:
+# that PR renames noise_injection -> conditioned_blocks and removes the
+# NoiseConditionedSamudra registry entry, and ModuleSelector deserializes a
+# stored config with dacite(strict=True), so these checkpoints will not load
+# there.
+#
+# job_runner/evaluate.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235_4deg/ocean_wide_stochastic .
+experiment_dir: /results
+n_forward_steps: 14598 # 200 noleap years x 73 five-day steps, minus 1
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2026-07-22-cm4-picontrol-4deg-coupled-ocean.zarr
+      engine: zarr
+    - data_path: /climate-default
+      file_pattern: 2026-07-15-om4-picontrol-4deg-ocean-5daily.zarr
+      engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+aggregator:
+  log_histograms: true
+  log_nino34_index: true
+  log_ipo_index: true
