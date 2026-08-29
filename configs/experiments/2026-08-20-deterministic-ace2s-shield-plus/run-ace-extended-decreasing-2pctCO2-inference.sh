@@ -57,9 +57,6 @@ for model in "${!MODELS[@]}"; do
     "
     main_overrides="\
         experiment_dir=$MAIN_EXPERIMENT_DIR \
-        forcing_loader.dataset.data_path=$MAIN_FORCING_ROOT \
-        forcing_loader.dataset.engine=zarr \
-        forcing_loader.dataset.file_pattern=$MAIN_FORCING_PATH \
         initial_condition.path=$MAIN_INITIAL_CONDITION_PATH \
         initial_condition.start_indices=null \
         n_forward_steps=$MAIN_N_FORWARD_STEPS \
