@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ln_det|trial|01M15E35ACJY3MSH0TM6Y5DD0F|training|best_inference_ckpt|normal|--min-runtime 8h
