@@ -6,7 +6,9 @@ WANDB_USERNAME=spencerc_ai2
 SPINUP_CONFIG_FILENAME="ace-som-2pctCO2-inference-config.yaml"
 MAIN_CONFIG_FILENAME="ace-som-extended-decreasing-2pctCO2-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
-CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
+SPINUP_CONFIG_PATH=$SCRIPT_PATH/$SPINUP_CONFIG_FILENAME
+MAIN_CONFIG_PATH=$SCRIPT_PATH/$MAIN_CONFIG_FILENAME
+
 
 SPIN_UP_FORCING_ROOT=/climate-default/2024-08-15-vertically-resolved-1deg-c96-shield-som-ensemble-spin-up-fme-dataset/netcdfs/concatenated-4xCO2-ic_0005
 
