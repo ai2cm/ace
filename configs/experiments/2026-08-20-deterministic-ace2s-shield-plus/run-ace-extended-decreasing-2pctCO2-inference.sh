@@ -3,13 +3,15 @@
 set -e
 
 WANDB_USERNAME=spencerc_ai2
-CONFIG_FILENAME="ace-som-2pctCO2-inference-config.yaml"
+SPINUP_CONFIG_FILENAME="ace-som-2pctCO2-inference-config.yaml"
+MAIN_CONFIG_FILENAME="ace-som-extended-decreasing-2pctCO2-inference-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 
-SPIN_UP_FORCING_ROOT=/climate-default/2024-08-15-vertically-resolved-1deg-c96-shield-som-ensemble-spin-up-fme-dataset/netcdfs/concatenated-1xCO2-ic_0005
+SPIN_UP_FORCING_ROOT=/climate-default/2024-08-15-vertically-resolved-1deg-c96-shield-som-ensemble-spin-up-fme-dataset/netcdfs/concatenated-4xCO2-ic_0005
+
 MAIN_FORCING_ROOT=/climate-default
-MAIN_FORCING_PATH=2026-08-28-SHiELD-SOM-forcing-140-year-2pctCO2.zarr
+MAIN_FORCING_PATH=2026-08-28-SHiELD-SOM-co2-forcing-140-year-decreasing-2pctCO2-from-4xCO2.zarr
 
 declare -A MODELS=( \
     # [no-random-co2-rs0]="01KHGDAMB2BDZQS8JFF65A2YDR" \
@@ -33,10 +35,10 @@ MAIN_INITIAL_CONDITION_TIME="2031-01-01T06:00:00"
 MAIN_INITIAL_CONDITION_PATH="/results/spin-up/restart.nc"
 MAIN_N_FORWARD_STEPS=204535
 MAIN_EXPERIMENT_DIR="/results/main"
-SEED=1
+SEED=0
 
 for model in "${!MODELS[@]}"; do
-    job_name=2026-08-28-$model-extended-2pctCO2-inference-seed-$SEED
+    job_name=2026-08-28-$model-extended-decreasing-2pctCO2-inference-seed-$SEED
     dataset_id="${MODELS[$model]}"
 
     spin_up_initial_condition_path=$SPIN_UP_FORCING_ROOT/2030010100.nc
@@ -62,8 +64,8 @@ for model in "${!MODELS[@]}"; do
         seed=$SEED \
     "
 
-    python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $spin_up_overrides
-    python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $main_overrides
+    python -m fme.ace.validate_config --config_type inference $SPINUP_CONFIG_PATH --override $spin_up_overrides
+    python -m fme.ace.validate_config --config_type inference $MAIN_CONFIG_PATH --override $main_overrides
     gantry run \
         --name $job_name \
         --description 'Run inference with ACE' \
@@ -87,8 +89,8 @@ for model in "${!MODELS[@]}"; do
         --system-python \
         --install "pip install --no-deps ." \
         -- /bin/bash -c "\
-            python -I -m fme.ace.inference $CONFIG_PATH --override $spin_up_overrides \
+            python -I -m fme.ace.inference $SPINUP_CONFIG_PATH --override $spin_up_overrides \
             && \
-            python -I -m fme.ace.inference $CONFIG_PATH --override $main_overrides \
+            python -I -m fme.ace.inference $MAIN_CONFIG_PATH --override $main_overrides \
         "
 done
