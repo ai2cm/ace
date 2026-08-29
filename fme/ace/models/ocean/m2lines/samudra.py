@@ -15,7 +15,7 @@ from fme.ace.models.ocean.m2lines.layers import (
 from fme.ace.models.ocean.m2lines.utils import pairwise
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 
-NoiseInjection = Literal["bottleneck", "all_blocks"]
+ConditionedBlocks = Literal["bottleneck", "all_blocks"]
 
 
 class Samudra(torch.nn.Module):
@@ -48,14 +48,17 @@ class Samudra(torch.nn.Module):
         the behavior of checkpoints trained without it.
     context_config : ContextConfig, optional
         If given (with a non-zero noise embedding), the ConvNeXt blocks selected
-        by ``noise_injection`` take a conditional scale and bias off the noise
+        by ``conditioned_blocks`` take a conditional scale and bias off the noise
         field in the ``Context`` passed to ``forward``. Only noise conditioning
-        is supported; scalar, label, and positional embeddings are not.
-    noise_injection : {"bottleneck", "all_blocks"}, optional
-        Which ConvNeXt blocks are noise-conditioned. ``"bottleneck"`` conditions
-        only the block at the coarsest resolution (DLESyM-Ocean's choice, which
-        perturbs large scales); ``"all_blocks"`` conditions every block (the
-        pattern the ACE SFNO uses). Required when ``context_config`` is given.
+        is supported so far; scalar, label, and positional embeddings are not.
+    conditioned_blocks : {"bottleneck", "all_blocks"}, optional
+        Which ConvNeXt blocks are conditioned. ``"bottleneck"`` conditions only
+        the block at the coarsest resolution, DLESyM-Ocean's choice; note that
+        after the encoder's AvgPools that grid is 1/16 of the input, so on a
+        45x90 domain it is 2x5 cells and can only perturb the largest scales.
+        ``"all_blocks"`` conditions every block, the pattern the ACE SFNO uses,
+        which also reaches the finest scales. Required when ``context_config``
+        is given.
 
     Example:
     --------
@@ -88,7 +91,7 @@ class Samudra(torch.nn.Module):
         checkpoint_strategy: Literal["all", "simple"] | None = None,
         zonally_periodic_upsample: bool = False,
         context_config: ContextConfig | None = None,
-        noise_injection: NoiseInjection | None = None,
+        conditioned_blocks: ConditionedBlocks | None = None,
     ):
         super().__init__()
 
@@ -127,11 +130,11 @@ class Samudra(torch.nn.Module):
                     "Samudra only supports noise conditioning; scalar, label, and "
                     "positional embeddings are not implemented."
                 )
-            if noise_injection is None:
-                raise ValueError("context_config requires noise_injection to be set")
-        elif noise_injection is not None:
-            raise ValueError("noise_injection requires context_config to be set")
-        self.noise_injection = noise_injection
+            if conditioned_blocks is None:
+                raise ValueError("context_config requires conditioned_blocks to be set")
+        elif conditioned_blocks is not None:
+            raise ValueError("conditioned_blocks requires context_config to be set")
+        self.conditioned_blocks = conditioned_blocks
 
         # Blocks are built in this order: the num_steps encoder blocks, the
         # bottleneck block, then the num_steps decoder blocks. `block_context`
@@ -144,9 +147,9 @@ class Samudra(torch.nn.Module):
             nonlocal n_built
             is_bottleneck = n_built == num_steps
             n_built += 1
-            if noise_injection == "all_blocks":
+            if conditioned_blocks == "all_blocks":
                 return context_config
-            if noise_injection == "bottleneck" and is_bottleneck:
+            if conditioned_blocks == "bottleneck" and is_bottleneck:
                 return context_config
             return None
 

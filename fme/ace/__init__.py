@@ -78,11 +78,7 @@ from fme.ace.registry.hpx import (
     UNetEncoderConfig,
 )
 from fme.ace.registry.land_net import LandNetBuilder
-from fme.ace.registry.m2lines import (
-    FloeNetBuilder,
-    NoiseConditionedSamudraBuilder,
-    SamudraBuilder,
-)
+from fme.ace.registry.m2lines import FloeNetBuilder, SamudraBuilder
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNO
 from fme.ace.stepper import DerivedForcingsConfig, StepperOverrideConfig
