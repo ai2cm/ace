@@ -1,3 +1,4 @@
+import json
 import math
 import os
 
@@ -10,13 +11,14 @@ from fme.ace.models.ocean.m2lines.layers import (
     MultiResolutionFiLM,
     ZonallyPeriodicBilinearUpsample,
 )
+from fme.ace.models.ocean.m2lines.samudra import Samudra
+from fme.ace.registry.registry import ModuleSelector
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.models.conditional_sfno.layers import Context, ContextConfig
 from fme.core.testing import validate_tensor
 
 DIR = os.path.abspath(os.path.dirname(__file__))
-
-from fme.ace.models.ocean.m2lines.samudra import Samudra
 
 
 @pytest.mark.parametrize(
@@ -169,6 +171,51 @@ def test_samudra_output_is_unchanged():
         output,
         os.path.join(DIR, "testdata/test_samudra_output_is_unchanged.pt"),
     )
+
+
+def test_released_checkpoint_still_loads():
+    """A released checkpoint must keep loading into this module.
+
+    Checked against a committed manifest of the SamudrACE-E3SMv3 ocean
+    checkpoint -- its builder config and the name and shape of every parameter
+    it contains -- rather than the 327 MB artifact itself. Rebuilding from the
+    recorded config and matching the resulting state_dict against the recorded
+    parameters is exactly the condition ``load_state_dict(strict=True)`` needs,
+    and it is the property that structural edits to ``ConvNeXtBlock`` (layer
+    order, container type, new submodules) break. Numerics are pinned
+    separately by ``test_samudra_output_is_unchanged``.
+
+    Unlike the ``validate_tensor`` regression files, this manifest is never
+    written by the test suite: it is derived only from the released artifact,
+    so it cannot be quietly re-derived from the code it constrains. See its
+    ``_comment`` for how to regenerate it when a new checkpoint is released.
+    """
+    path = os.path.join(DIR, "testdata/samudrace_e3smv3_ocean_manifest.json")
+    with open(path) as f:
+        manifest = json.load(f)
+
+    # goes through ModuleSelector rather than the builder directly: the
+    # checkpoint stores this config as a dict and it is deserialized with
+    # dacite(strict=True), which is its own compatibility surface -- a renamed
+    # or removed field fails here before any state dict is involved
+    selector = ModuleSelector(**manifest["builder"])
+    module = selector.build(
+        manifest["n_in_channels"],
+        manifest["n_out_channels"],
+        DatasetInfo(img_shape=tuple(manifest["img_shape"])),
+    )
+    built = {k: list(v.shape) for k, v in module.torch_module.state_dict().items()}
+    recorded = manifest["parameters"]
+
+    assert set(built) == set(recorded), (
+        f"state dict keys drifted from the released checkpoint; "
+        f"missing {sorted(set(recorded) - set(built))}, "
+        f"unexpected {sorted(set(built) - set(recorded))}"
+    )
+    mismatched = {
+        k: (recorded[k], built[k]) for k in recorded if recorded[k] != built[k]
+    }
+    assert not mismatched, f"parameter shapes drifted: {mismatched}"
 
 
 def _samudra(**kwargs):
