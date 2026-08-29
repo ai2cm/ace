@@ -1,0 +1,21 @@
+# Layer-norm smoke test for the stochastic Samudra round -- two rows, 3 epochs
+# each. Not an arm: this only establishes that the layer-norm network builds,
+# trains and logs under the merged Samudra builder, and what it costs per step
+# relative to instance norm. The round-2 arms get their own config.
+#
+# The deterministic row is here so the comparison isolates the norm: if layer
+# norm trains badly, it will show up without the noise path confusing it.
+#
+# min_runtime is set on every row: as of 2026-08-28 the Beaker scheduler
+# requires one, and uncoupled_train.sh otherwise defaults it to 0. 3h is a
+# starting value, not a tuned one.
+#
+# Launch with:
+#   job_runner/uncoupled_train.sh \
+#     configs/experiments/cm4_1pct_46to125_piC_156to235_4deg/ocean_wide_stochastic_ln . \
+#     --coupled_stats elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ln_det|trial|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0|3h
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_ln_stoch|trial|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.noise_embed_dim=32 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3|3h
