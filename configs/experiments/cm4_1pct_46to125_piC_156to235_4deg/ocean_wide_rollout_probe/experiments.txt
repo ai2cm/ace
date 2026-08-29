@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235_4deg-ocean_wide_probe_nfs12|probe|01M162JG69VX1QRTBZ98DB8A53|training|best_inference_ckpt|normal|--min-runtime 8h
