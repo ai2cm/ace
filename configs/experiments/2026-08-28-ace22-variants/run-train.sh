@@ -155,19 +155,20 @@ p2="train-1deg-6hourly-v2-harmonized-split-ns-diag"
 # and the P0 probe showed stage-1 behaviour does not predict it -- so a spread measured
 # at stage 1 cannot stand in. The three chains also bound the selection advantage
 # ACE2.1 gained from best-of-4 and ACE2.2 did not.
-declare -A P1_STAGE1_DONOR=(
-  [0]=01M1593HPH0QBKHZWXH4PFEF5G
-  [1]=01M1593YRY24A0P9AK1B7V2FPE
-  [2]=01M1594BP4TEP1RJVN3G58H3ZE
-)
-for SEED in 0 1 2; do
-  run_training "$p1-multi-step-ft.yaml" "ace22-p1-harmonized-multistep-rs${SEED}" \
-    "seed=${SEED}" "${P1_STAGE1_DONOR[$SEED]}"
-done
+# LAUNCHED 2026-08-30 06:22-06:35; leave commented.
+# declare -A P1_STAGE1_DONOR=(
+#   [0]=01M1593HPH0QBKHZWXH4PFEF5G
+#   [1]=01M1593YRY24A0P9AK1B7V2FPE
+#   [2]=01M1594BP4TEP1RJVN3G58H3ZE
+# )
+# for SEED in 0 1 2; do
+#   run_training "$p1-multi-step-ft.yaml" "ace22-p1-harmonized-multistep-rs${SEED}" \
+#     "seed=${SEED}" "${P1_STAGE1_DONOR[$SEED]}"
+# done
 
-# --- P2 stage 2 (waiting on its stage-1 result dataset to commit) ---
-# run_training "$p2-multi-step-ft.yaml" "ace22-p2-nsdiag-multistep-rs0" \
-#   "seed=0" "01M1594RJD2ZJM9YDCM8BSSZ9A"
+# --- P2 stage 2 ---
+run_training "$p2-multi-step-ft.yaml" "ace22-p2-nsdiag-multistep-rs0" \
+  "seed=0" "01M1594RJD2ZJM9YDCM8BSSZ9A"
 
 # --- Stage 3: pressure-level FT, donor = each chain's own stage-2 result dataset ---
 # for SEED in 0 1 2; do
