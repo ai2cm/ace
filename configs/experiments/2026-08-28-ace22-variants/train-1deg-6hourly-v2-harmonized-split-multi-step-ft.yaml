@@ -1,5 +1,5 @@
 # arg: --dataset FILL-AFTER-PREVIOUS-STAGE-SELECTION:/weights
-# (gantry will fail loudly on the placeholder if launched unfilled)
+# (the launcher substitutes the donor per chain; gantry fails loudly if left unfilled)
 # ACE2.2 variant P1, stage 2: multi-step fine-tune of the harmonized-split pretrain.
 # Same deltas from the 2026-08-12 experiment as stage 1 (split, OOS selection,
 # holdout-clean inline entries). Donor: the SELECTED stage-1 seed's result dataset.

@@ -80,6 +80,27 @@ preemption — it only orders contention inside our own budget, hence `high` rat
 Seeds come from the launcher via `--override seed=N`, as in ACE2.1's `run-ace-train.sh`;
 the configs themselves all say `seed: 0`.
 
-Stages 2 and 3 are commented out in `run-train.sh`. They run only for the selected
-stage-1 seed, and each config's `# arg:` header must first be filled with the donor
-result dataset id — the launcher refuses to submit while the placeholder is present.
+Each stage after the first needs a donor result dataset. The launcher passes it per
+chain as a fourth argument to `run_training`, substituting it into the config's `# arg:`
+header, so one config serves all three seeds; it refuses to submit if the placeholder
+survives. Uncomment the block for the stage you are launching — the completed stages
+stay commented so a rerun cannot resubmit them.
+
+## Status
+
+Stage 1 complete (2026-08-29), all four exit 0 at 40/40 epochs. `best_inference_error`:
+rs2 0.04743, rs0 0.05786, rs1 0.06422 — a ±15% seed spread. P2's stage-1 figure is not
+comparable, since it scores a smaller output set.
+
+**All three P1 seeds continue through stages 2 and 3**, rather than the ACE2.1 protocol's
+best-of-N single chain. The decision rules need a seed spread on the final metrics, and
+the P0 probe showed stage-1 behaviour does not predict those, so a stage-1 spread cannot
+stand in. The three chains additionally bound the selection advantage ACE2.1 gained from
+best-of-4 seeds and ACE2.2, a single seed, did not: for a downstream metric that bonus is
+at most about one standard deviation of the seed spread on that metric.
+
+Comparing P1 and P2 at stage 1 is possible on the shared variables — P2's logged metrics
+are a strict subset of P1's — but only as a diagnostic. At matched epoch, P2 is ~2%
+*better* on single-step validation and ~2x worse on free-running rollout metrics,
+concentrated in moisture and the TOA energy budget. Rollout stability is exactly what
+stage 2 exists to fix, so this is a prediction to test after stage 2, not a verdict.

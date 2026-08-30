@@ -53,6 +53,7 @@ run_training() {
   local config_filename="$1"
   local job_name="$2"
   local override="${3:-}"          # e.g. "seed=1"; empty for none
+  local donor="${4:-}"             # stage-1/2 result dataset id, for the stages that need one
   local CONFIG_PATH="$SCRIPT_PATH/$config_filename"
 
   python -m fme.ace.validate_config --config_type train "$CONFIG_PATH"
@@ -63,6 +64,11 @@ run_training() {
   while IFS= read -r line; do
     [[ "$line" =~ ^#\ arg:\ (.*) ]] && extra_args+=(${BASH_REMATCH[1]})
   done < "$CONFIG_PATH"
+
+  # A chain supplies its own donor, so one config serves all seeds.
+  if [[ -n "$donor" ]]; then
+    extra_args=("${extra_args[@]//FILL-AFTER-PREVIOUS-STAGE-SELECTION/$donor}")
+  fi
 
   # Fail before submit on an unfilled donor placeholder rather than after scheduling.
   if [[ "${extra_args[*]}" == *FILL-AFTER-PREVIOUS-STAGE-SELECTION* ]]; then
@@ -133,20 +139,39 @@ BATCHCHECK
 p1="train-1deg-6hourly-v2-harmonized-split"
 p2="train-1deg-6hourly-v2-harmonized-split-ns-diag"
 
-# --- P1 stage 1: three seeds ---
+# --- Stage 1 (COMPLETE 2026-08-29; leave commented) ---
+# All four finished exit 0 at 40/40 epochs. best_inference_error: rs2 0.04743,
+# rs0 0.05786, rs1 0.06422. P2 is not comparable to these -- at stage 1 it scores a
+# smaller output set.
+#
+# for SEED in 0 1 2; do
+#   run_training "$p1.yaml" "ace22-p1-harmonized-1step-rs${SEED}" "seed=${SEED}"
+# done
+# run_training "$p2.yaml" "ace22-p2-nsdiag-1step-rs0" "seed=0"
+
+# --- P1 stage 2: multi-step FT, one chain per stage-1 seed ---
+# All three seeds continue, rather than the ACE2.1 protocol's best-of-N single chain.
+# The campaign's decision rules are written against a seed spread on the FINAL metrics,
+# and the P0 probe showed stage-1 behaviour does not predict it -- so a spread measured
+# at stage 1 cannot stand in. The three chains also bound the selection advantage
+# ACE2.1 gained from best-of-4 and ACE2.2 did not.
+declare -A P1_STAGE1_DONOR=(
+  [0]=01M1593HPH0QBKHZWXH4PFEF5G
+  [1]=01M1593YRY24A0P9AK1B7V2FPE
+  [2]=01M1594BP4TEP1RJVN3G58H3ZE
+)
 for SEED in 0 1 2; do
-  run_training "$p1.yaml" "ace22-p1-harmonized-1step-rs${SEED}" "seed=${SEED}"
+  run_training "$p1-multi-step-ft.yaml" "ace22-p1-harmonized-multistep-rs${SEED}" \
+    "seed=${SEED}" "${P1_STAGE1_DONOR[$SEED]}"
 done
 
-# --- P2 stage 1: one seed ---
-run_training "$p2.yaml" "ace22-p2-nsdiag-1step-rs0" "seed=0"
+# --- P2 stage 2 (waiting on its stage-1 result dataset to commit) ---
+# run_training "$p2-multi-step-ft.yaml" "ace22-p2-nsdiag-multistep-rs0" \
+#   "seed=0" "01M1594RJD2ZJM9YDCM8BSSZ9A"
 
-# --- Stages 2 and 3 (run after stage-1 seed selection) ---
-# Fill the `# arg:` donor id in each config first; the guard above will refuse otherwise.
-# Select the P1 seed by best_inference_error, which now scores the out-of-sample
-# 2009-2014 window, then:
-#
-# run_training "$p1-multi-step-ft.yaml" "ace22-p1-harmonized-multistep-rs<N>"
-# run_training "$p1-plev-ft.yaml"       "ace22-p1-harmonized-plev-rs<N>"
-# run_training "$p2-multi-step-ft.yaml" "ace22-p2-nsdiag-multistep-rs0"
-# run_training "$p2-plev-ft.yaml"       "ace22-p2-nsdiag-plev-rs0"
+# --- Stage 3: pressure-level FT, donor = each chain's own stage-2 result dataset ---
+# for SEED in 0 1 2; do
+#   run_training "$p1-plev-ft.yaml" "ace22-p1-harmonized-plev-rs${SEED}" \
+#     "seed=${SEED}" "<stage-2 result dataset for rs${SEED}>"
+# done
+# run_training "$p2-plev-ft.yaml" "ace22-p2-nsdiag-plev-rs0" "seed=0" "<P2 stage-2 dataset>"
