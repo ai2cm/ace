@@ -70,9 +70,15 @@ launch() {
     module="fme.ace.train"
     mounts=(--dataset "${ALLINONE_STATS_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "shallow" ]]; then
+    config="${CONFIG_DIR}/shallow-pretrain.yaml"
+    module="fme.ace.train"
+    mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
+  fi
 
   python "${SCRIPT_PATH}/make_wave1_configs.py" >/dev/null
   python "${SCRIPT_PATH}/make_allinone_config.py" >/dev/null
+  python "${SCRIPT_PATH}/make_shallow_config.py" >/dev/null
 
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "  [dry-run] $job_name ($module, $config)"
@@ -108,6 +114,7 @@ launch() {
     -- bash -c \
         "python '${SCRIPT_PATH}/make_wave1_configs.py' && \
          python '${SCRIPT_PATH}/make_allinone_config.py' && \
+         python '${SCRIPT_PATH}/make_shallow_config.py' && \
          torchrun --nproc_per_node=${N_GPUS} -m ${module} '${config}'"
 }
 
