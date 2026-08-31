@@ -1,0 +1,21 @@
+# STAGE 1 (1-step stochastic pretraining) arms at 1deg. Stage 2 is
+# finetuning.txt against finetune-config-template.yaml.
+#
+# Two injection variants at one loss. The loss weights and the injection point
+# are baked into stage 1, so a different loss needs its own stage-1 run: 0.9/0.1
+# CRPS / 3x3 patch energy score is chosen rather than swept because round 1
+# found CRPS and CRPS+PES3 indistinguishable, and the patch energy score is the
+# only term in the loss that can see the spatial covariance the pre-registered
+# criterion is defined on.
+#
+# min_runtime set on every row -- the Beaker scheduler has required one since
+# 2026-08-28 and uncoupled_train.sh otherwise defaults it to 0.
+
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks|rs0|train|high|jupiter|2|800GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks|rs1|train|high|jupiter|2|800GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks|rs2|train|high|jupiter|2|800GiB|3|ai2/ace|seed=2 stepper.step.config.builder.config.conditioned_blocks=all_blocks stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck|rs0|train|high|jupiter|2|800GiB|3|ai2/ace|seed=0 stepper.step.config.builder.config.conditioned_blocks=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck|rs1|train|high|jupiter|2|800GiB|3|ai2/ace|seed=1 stepper.step.config.builder.config.conditioned_blocks=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3|3h
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck|rs2|train|high|jupiter|2|800GiB|3|ai2/ace|seed=2 stepper.step.config.builder.config.conditioned_blocks=bottleneck stepper.step.config.builder.config.noise_embed_dim=32 stepper_training.n_ensemble=2 stepper_training.loss.type=EnsembleLoss stepper_training.loss.kwargs.crps_weight=0.9 stepper_training.loss.kwargs.energy_score_weight=0.0 stepper_training.loss.kwargs.patch_energy_score_weight=0.1 stepper_training.loss.kwargs.patch_energy_score_size=3|3h
