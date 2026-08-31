@@ -43,6 +43,13 @@ BOXES = {
 }
 
 
+def _find_dim(dims, candidates):
+    for c in candidates:
+        if c in dims:
+            return c
+    raise SystemExit(f"no dim among {candidates} in {dims}")
+
+
 def deseason(x, period=12):
     """Remove the mean annual cycle along the leading (time) axis."""
     n = x.shape[0]
@@ -116,18 +123,37 @@ def main():
     pred = xr.open_dataset(data / "monthly_mean_predictions.nc")
     targ = xr.open_dataset(data / "monthly_mean_target.nc")
 
+    # Print the layout before touching it: a failed run then carries everything
+    # needed to fix it, which matters when each attempt costs ~20 min of
+    # dataset attach.
+    print("dims:", dict(pred.sizes), flush=True)
+    print("sst dims:", pred["sst"].dims if "sst" in pred else "ABSENT", flush=True)
+    print("coords:", list(pred.coords), flush=True)
     if "sst" not in pred:
         raise SystemExit(f"sst absent; monthly file has {list(pred.data_vars)[:20]}")
-    tdim = [d for d in pred["sst"].dims if d not in ("lat", "lon")][0]
-    n_time = pred.sizes[tdim]
-    if n_time != 2400:
-        raise SystemExit(f"expected 2400 months, got {n_time}")
-    print(f"sst present, {n_time} months, dims {pred['sst'].dims}", flush=True)
 
-    lat = pred["lat"].values
-    lon = pred["lon"].values
-    p = pred["sst"].transpose(tdim, "lat", "lon").values.astype("float64")
-    t = targ["sst"].transpose(tdim, "lat", "lon").values.astype("float64")
+    latname = _find_dim(pred["sst"].dims, ("lat", "latitude", "grid_yt", "y"))
+    lonname = _find_dim(pred["sst"].dims, ("lon", "longitude", "grid_xt", "x"))
+    # Drop any length-1 leading axis (the evaluator writes one IC per file, so
+    # the sample dimension is present but degenerate) and take the time axis as
+    # the longest remaining non-horizontal dim rather than the first.
+    da_p = pred["sst"].squeeze(drop=True)
+    da_t = targ["sst"].squeeze(drop=True)
+    rest = [d for d in da_p.dims if d not in (latname, lonname)]
+    if len(rest) != 1:
+        raise SystemExit(f"expected one time-like dim after squeeze, got {rest} "
+                         f"from {da_p.dims}")
+    tdim = rest[0]
+    n_time = da_p.sizes[tdim]
+    if n_time != 2400:
+        raise SystemExit(f"expected 2400 months on {tdim!r}, got {n_time}; "
+                         f"full dims {dict(da_p.sizes)}")
+    print(f"sst ok: {n_time} months on {tdim!r}, grid {latname}/{lonname}", flush=True)
+
+    lat = pred[latname].values
+    lon = pred[lonname].values
+    p = da_p.transpose(tdim, latname, lonname).values.astype("float64")
+    t = da_t.transpose(tdim, latname, lonname).values.astype("float64")
 
     ocean = np.isfinite(t).all(axis=0)
     print(f"ocean cells {ocean.sum()} of {ocean.size}", flush=True)
@@ -177,8 +203,10 @@ def main():
                      ("thetao_18", "thetao_deep")]:
         if var not in pred:
             continue
-        pv = pred[var].transpose(tdim, "lat", "lon").values.astype("float64")
-        tv = targ[var].transpose(tdim, "lat", "lon").values.astype("float64")
+        pv = (pred[var].squeeze(drop=True)
+              .transpose(tdim, latname, lonname).values.astype("float64"))
+        tv = (targ[var].squeeze(drop=True)
+              .transpose(tdim, latname, lonname).values.astype("float64"))
         bpp, bpt = band_power(deseason(pv)), band_power(deseason(tv))
         om = np.isfinite(tv).all(axis=0)
         for band in BANDS:
