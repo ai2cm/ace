@@ -1,5 +1,5 @@
 # job_runner/uncoupled_train.sh configs/experiments/cm4_randco2_ic1and2_1pct_46to125_piC_156to235_randco2_stats/atmos_ace2s . \
-#   --coupled_stats spencerc/2026-08-18-CM4-like-AM4-random-CO2-coupled-stats-uncoupled-atmosphere
+#   --atmos_stats spencerc/2026-08-18-CM4-like-AM4-random-CO2-coupled-stats-uncoupled-atmosphere
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
