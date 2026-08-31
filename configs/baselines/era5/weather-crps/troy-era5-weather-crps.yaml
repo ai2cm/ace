@@ -1,0 +1,36 @@
+# Troy ERA5 baseline weather eval with prediction saving for CRPS.
+# arg: --dataset 01KZQTGDJRSD536S8521YDW9VY:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar
+experiment_dir: /results
+n_forward_steps: 60
+forward_steps_in_memory: 1
+n_ensemble_per_ic: 2
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    first: 116880
+    interval: 56
+    n_initial_conditions: 12
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  zonal_mean:
+    enabled: false
+  histogram:
+    enabled: false
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  names:
+    - TMP2m
+    - TMP850
+    - h500
+    - VGRD10m
