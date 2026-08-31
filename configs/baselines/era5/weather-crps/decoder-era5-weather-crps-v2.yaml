@@ -1,0 +1,43 @@
+# ACE2S decoder (daily) weather eval with prediction saving for CRPS.
+# Uses cleaned checkpoint (discriminator/include_input_step stripped for code compat).
+# arg: --dataset 01M1CYRTQ4HQKJ9H31MZASWEZ3:best_inference_ckpt_cleaned.tar:/ckpt.tar
+experiment_dir: /results
+n_forward_steps: 15
+forward_steps_in_memory: 1
+n_ensemble_per_ic: 2
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  start_indices:
+    first: 29219
+    interval: 14
+    n_initial_conditions: 12
+  dataset:
+    merge:
+    - data_path: /climate-default/
+      file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+    - data_path: /climate-default/
+      file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+  num_data_workers: 8
+aggregator:
+  zonal_mean:
+    enabled: false
+  histogram:
+    enabled: false
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: false
+  names:
+    - TMP2m
+    - TMP2m_mean
+    - TMP850
+    - h500
+    - VGRD10m
+    - VGRD10m_mean
