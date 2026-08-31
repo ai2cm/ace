@@ -1,8 +1,17 @@
 import json
 
 import numpy as np
+import pytest
 import xarray as xr
-from time_coarsen import TimeCoarsenConfig, TimeSlice, coarsen, process_path_pair
+from get_stats import StatsConfig
+from time_coarsen import (
+    Config,
+    TimeCoarsenConfig,
+    TimeSlice,
+    coarsen,
+    main,
+    process_path_pair,
+)
 from zarr.codecs import BloscCodec
 
 from fme.ace.testing import DimSize, DimSizes, get_nd_dataset
@@ -160,3 +169,78 @@ def test_coarsen_input_time_slice() -> None:
         xr.DataArray(times[2::2], dims=["time"]),  # Jan 3, Jan 5
     )
     assert "start='2000-01-02', stop=None" in ds_coarsened.attrs["history"]
+
+
+def test_main_output_names(tmp_path) -> None:
+    ds = xr.Dataset(
+        {
+            "temp": xr.DataArray(np.arange(4.0), dims=["time"]),
+            "temp_tendency": xr.DataArray(np.arange(4.0), dims=["time"]),
+        },
+        coords={"time": xr.date_range("2000-01-01", periods=4, freq="1D")},
+    )
+    input_dir = str(tmp_path / "raw")
+    output_dir = str(tmp_path / "daily")
+    ds.to_zarr(f"{input_dir}/my-6h-data.zarr", mode="w")
+    config = Config(
+        runs={"my-6h-data": ""},
+        data_output_directory=input_dir,
+        stats=StatsConfig(output_directory="", data_type="ERA5"),
+        time_coarsen=TimeCoarsenConfig(
+            factor=2,
+            data_output_directory=output_dir,
+            stats_output_directory="",
+            snapshot_names=["temp"],
+            window_names=["temp_tendency"],
+            constant_prefixes=[],
+            output_names={"my-6h-data": "my-daily-data"},
+        ),
+    )
+    main(config, run=0, dry_run=False)
+    assert (tmp_path / "daily" / "my-daily-data.zarr").exists()
+    assert not (tmp_path / "daily" / "my-6h-data.zarr").exists()
+
+
+def test_main_raises_on_input_equals_output(tmp_path) -> None:
+    ds = xr.Dataset(
+        {
+            "temp": xr.DataArray(np.arange(4.0), dims=["time"]),
+        },
+        coords={"time": xr.date_range("2000-01-01", periods=4, freq="1D")},
+    )
+    shared_dir = str(tmp_path / "data")
+    ds.to_zarr(f"{shared_dir}/my-data.zarr", mode="w")
+    config = Config(
+        runs={"my-data": ""},
+        data_output_directory=shared_dir,
+        stats=StatsConfig(output_directory="", data_type="ERA5"),
+        time_coarsen=TimeCoarsenConfig(
+            factor=2,
+            data_output_directory=shared_dir,
+            stats_output_directory="",
+            snapshot_names=["temp"],
+            window_names=[],
+            constant_prefixes=[],
+        ),
+    )
+    with pytest.raises(ValueError, match="identical to input path"):
+        main(config, run=0)
+
+
+def test_main_raises_on_unknown_output_names_key() -> None:
+    config = Config(
+        runs={"run-a": ""},
+        data_output_directory="/in",
+        stats=StatsConfig(output_directory="", data_type="ERA5"),
+        time_coarsen=TimeCoarsenConfig(
+            factor=2,
+            data_output_directory="/out",
+            stats_output_directory="",
+            snapshot_names=[],
+            window_names=[],
+            constant_prefixes=[],
+            output_names={"typo-run": "renamed"},
+        ),
+    )
+    with pytest.raises(ValueError, match="not found in runs"):
+        main(config, run=0)
