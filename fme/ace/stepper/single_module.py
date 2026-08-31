@@ -27,6 +27,7 @@ from fme.ace.stepper.parameter_init import (
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.loss_config import CorrectorLossConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.utils import encode_timestep
@@ -35,7 +36,13 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.labels import BatchLabels
-from fme.core.loss import ChannelLossInfo, StepLoss, StepLossConfig
+from fme.core.loss import (
+    ChannelLossInfo,
+    CorrectorLoss,
+    StepLoss,
+    StepLossConfig,
+    StepOutputLoss,
+)
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -546,7 +553,7 @@ class StepperConfig:
         self, n_forward_steps: int | IntSchedule
     ) -> DataRequirements:
         requirements = DataRequirements(
-            names=self.all_names,
+            names=list(self.all_names),
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
         )
@@ -559,16 +566,14 @@ class StepperConfig:
         )
 
     @property
-    def input_only_names(self) -> list[str]:
-        return list(set(self.input_names) - set(self.output_names))
+    def input_only_names(self) -> set[str]:
+        return set(self.input_names) - set(self.output_names)
 
     def get_forcing_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
         requirements = DataRequirements(
-            names=list(
-                set(self.input_only_names).union(self.step.next_step_input_names)
-            ),
+            names=list(self.input_only_names.union(self.step.next_step_input_names)),
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
         )
@@ -686,14 +691,14 @@ class StepperConfig:
         return self.step.loss_names
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         """Names of variables which are required as inputs."""
         return self.step.input_names
 
     @property
-    def all_names(self) -> list[str]:
+    def all_names(self) -> frozenset[str]:
         """Names of all variables."""
-        return list(set(self.input_names + self.output_names))
+        return frozenset(set(self.input_names).union(self.output_names))
 
     @property
     def next_step_forcing_names(self) -> list[str]:
@@ -705,12 +710,12 @@ class StepperConfig:
         return self.step.get_next_step_forcing_names()
 
     @property
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         """Names of variables which both inputs and outputs."""
         return self.step.prognostic_names
 
     @property
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
         return self.step.output_names
 
@@ -743,6 +748,9 @@ class StepperConfig:
         prescribed_prognostic_names.
         """
         self.step.replace_prescribed_prognostic_names(names)
+
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self.step.get_prescribed_prognostic_names()
 
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
@@ -887,6 +895,27 @@ class Stepper:
             normalizer=loss_normalizer,
         )
 
+    def build_corrector_loss(
+        self, corrector_loss: CorrectorLossConfig | None
+    ) -> CorrectorLoss | None:
+        """Validate and build the corrector-delta half of the training loss,
+        if configured.
+
+        Args:
+            corrector_loss: Optional. With the null default, this method builds
+                nothing.
+
+        Returns:
+            A CorrectorLoss, or None when no corrector loss is configured.
+        """
+        if corrector_loss is None:
+            return None
+        return corrector_loss.build(
+            self.loss_names,
+            normalizer=self._step_obj.get_loss_normalizer(),
+            channel_dim=self.CHANNEL_DIM,
+        )
+
     @property
     def config(self) -> StepperConfig:
         return self._config
@@ -991,6 +1020,9 @@ class Stepper:
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self._config.get_prescribed_prognostic_names()
+
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
         Replace the derived forcings configuration with a new one.
@@ -1011,11 +1043,11 @@ class Stepper:
         return self._parameter_initializer.base_weights
 
     @property
-    def prognostic_names(self) -> list[str]:
+    def prognostic_names(self) -> frozenset[str]:
         return self._step_obj.prognostic_names
 
     @property
-    def out_names(self) -> list[str]:
+    def out_names(self) -> frozenset[str]:
         return self._step_obj.output_names
 
     @property
@@ -1114,10 +1146,8 @@ class Stepper:
         )
 
     @property
-    def _input_only_names(self) -> list[str]:
-        return list(
-            set(self._step_obj.input_names).difference(set(self._step_obj.output_names))
-        )
+    def _input_only_names(self) -> set[str]:
+        return set(self._step_obj.input_names).difference(self._step_obj.output_names)
 
     def predict_generator(
         self,
@@ -1193,7 +1223,7 @@ class Stepper:
             which can be used as a new initial condition.
         """
         timer = GlobalTimer.get_instance()
-        forcing_names = set(self._input_only_names).union(
+        forcing_names = self._input_only_names.union(
             self._step_obj.next_step_input_names
         )
 
@@ -1460,6 +1490,8 @@ class TrainStepperConfig:
             be less than or equal to the number of timesteps present
             in the training dataset samples.
         parameter_init: The parameter initialization configuration for fine-tuning.
+        corrector_loss: Optional configuration for consuming the corrector's
+            correction deltas in the loss.
     """
 
     loss: StepLossConfig = dataclasses.field(default_factory=lambda: StepLossConfig())
@@ -1469,6 +1501,7 @@ class TrainStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    corrector_loss: CorrectorLossConfig | None = None
 
     def __post_init__(self):
         if self.n_ensemble == -1:
@@ -1591,7 +1624,10 @@ class TrainStepper(
 
         self._prognostic_names = self._stepper.prognostic_names
         self._derive_func = self._stepper.derive_func
-        self._loss_obj = self._stepper.build_loss(config.loss)
+        self._loss_obj = StepOutputLoss(
+            self._stepper.build_loss(config.loss),
+            self._stepper.build_corrector_loss(config.corrector_loss),
+        )
 
     def train_on_batch(
         self,
@@ -1709,9 +1745,16 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step = next(output_iterator).output
-                gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+                step_output = next(output_iterator)
+                gen_step = unfold_ensemble_dim(
+                    step_output.output, n_ensemble=n_ensemble
+                )
                 output_list.append(gen_step)
+                # Deltas come from the StepOutput, never the StepDiagnostics carriage.
+                deltas = unfold_ensemble_dim(
+                    dict(step_output.corrector_diagnostics.delta),
+                    n_ensemble=n_ensemble,
+                )
                 target_step = add_ensemble_dim(
                     {
                         k: v.select(self.TIME_DIM, step)
@@ -1727,6 +1770,7 @@ class TrainStepper(
                     metrics=metrics,
                     weighted_sums=weighted_sums,
                     total_counts=total_counts,
+                    deltas=deltas,
                 )
             if optimize_step:
                 optimization.accumulate_loss(step_total_loss)
@@ -1742,12 +1786,14 @@ class TrainStepper(
         metrics: dict[str, float],
         weighted_sums: dict[str, torch.Tensor],
         total_counts: dict[str, int],
+        deltas: TensorMapping,
     ) -> torch.Tensor:
         step_loss = self._loss_obj(
             gen_step,
             target_step,
             step=step,
             data_mask=data_mask,
+            deltas=deltas,
         )
         step_total_loss = step_loss.total()
         metrics[f"loss_step_{step}"] = step_total_loss.detach()
@@ -1806,15 +1852,6 @@ class TrainStepper(
         return self._stepper.predict_paired(
             initial_condition, forcing, compute_derived_variables
         )
-
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        """
-        Effective loss scalings used to normalize outputs before computing loss.
-        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i.
-        """
-        return self._loss_obj.effective_loss_scaling
 
     def seed_eval(self, seed: int) -> None:
         self._loss_schedule.seed_eval(seed)
@@ -1927,32 +1964,38 @@ def load_stepper(
         The stepper serialized in the checkpoint, with appropriate options
         overridden.
     """
-    if override_config is None:
-        override_config = StepperOverrideConfig()
-
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
+    apply_stepper_override(stepper, override_config)
+    return stepper
 
+
+def apply_stepper_override(
+    stepper: Stepper, override_config: StepperOverrideConfig | None = None
+) -> None:
+    """Apply optional inference-time overrides to a loaded stepper.
+
+    Used by load_stepper and by coupled inference when loading component steppers.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
     if override_config.ocean != "keep":
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
         )
         stepper.replace_ocean(override_config.ocean)
-
     if override_config.multi_call != "keep":
         logging.info(
             "Overriding training multi_call configuration with a new "
             "multi_call configuration."
         )
         stepper.replace_multi_call(override_config.multi_call)
-
     if override_config.derived_forcings != "keep":
         logging.info(
             "Overriding training derived_forcings configuration with a new "
             "derived_forcings configuration."
         )
         stepper.replace_derived_forcings(override_config.derived_forcings)
-
     if override_config.prescribed_prognostic_names != "keep":
         logging.info(
             "Overriding prescribed_prognostic_names with %s.",
@@ -1961,4 +2004,42 @@ def load_stepper(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
-    return stepper
+
+
+def apply_stepper_override_to_stepper_config(
+    stepper_config: StepperConfig,
+    override_config: StepperOverrideConfig | None = None,
+) -> None:
+    """Apply optional inference-time overrides to a ``StepperConfig``.
+
+    Mirrors :func:`apply_stepper_override` for a config that is not backed by a
+    built ``Stepper`` (e.g. when computing data requirements before loading
+    weights). A ``multi_call`` override is rejected because replacing it needs
+    the serialized step state, which only a full ``Stepper`` carries.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
+    if override_config.ocean != "keep":
+        logging.info(
+            "Overriding training ocean configuration with a new ocean configuration."
+        )
+        stepper_config.replace_ocean(override_config.ocean)
+    if override_config.multi_call != "keep":
+        raise ValueError(
+            "StepperOverrideConfig.multi_call cannot be applied to a StepperConfig "
+            "without a built Stepper; load the full Stepper to override multi_call."
+        )
+    if override_config.derived_forcings != "keep":
+        logging.info(
+            "Overriding training derived_forcings configuration with a new "
+            "derived_forcings configuration."
+        )
+        stepper_config.replace_derived_forcings(override_config.derived_forcings)
+    if override_config.prescribed_prognostic_names != "keep":
+        logging.info(
+            "Overriding prescribed_prognostic_names with %s.",
+            override_config.prescribed_prognostic_names,
+        )
+        stepper_config.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )

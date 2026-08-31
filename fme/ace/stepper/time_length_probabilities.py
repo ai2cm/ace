@@ -98,6 +98,13 @@ class TimeLengthSchedule:
         """
         return cls(start_value=value, milestones=[])
 
+    @property
+    def is_constant(self) -> bool:
+        """Whether the schedule yields the same fixed step count at every epoch."""
+        return len(self.milestones) == 0 and (
+            isinstance(self.start_value, int) or len(self.start_value.outcomes) == 1
+        )
+
     def get_value(self, epoch: int) -> TimeLength:
         return self._validated_milestones.get_value(epoch)
 

@@ -3,7 +3,7 @@ import pathlib
 import tempfile
 import unittest
 import unittest.mock
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 import dacite
 import pytest
@@ -187,6 +187,43 @@ def get_single_module_noise_conditioned_selector(
                 secondary_decoder=SecondaryDecoderConfig(
                     secondary_diagnostic_names=["diagnostic_rad"],
                     network=ModuleSelector(type="MLP", config={}),
+                ),
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_single_module_include_input_step_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+            "diagnostic_rad",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main"],
+                secondary_decoder=SecondaryDecoderConfig(
+                    secondary_diagnostic_names=["diagnostic_rad"],
+                    network=ModuleSelector(type="MLP", config={}),
+                    include_input_step=True,
                 ),
                 normalization=normalization,
             ),
@@ -451,6 +488,7 @@ SELECTOR_GETTERS = [
     get_separate_radiation_selector,
     get_single_module_selector,
     get_single_module_noise_conditioned_selector,
+    get_single_module_include_input_step_selector,
     get_secondary_module_selector,
     get_multi_call_selector,
 ]
@@ -485,7 +523,7 @@ HAS_NEXT_STEP_FORCING_NAME_CASES = [
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, int], n_samples: int
+    names: Collection[str], img_shape: tuple[int, int], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -750,25 +788,31 @@ def test_step_with_prescribed_prognostic_overwrites_output():
     torch.testing.assert_close(output["diagnostic_main"], prescribed_value)
 
 
-def test_step_returns_step_output_with_populated_detached_delta():
+def test_corrector_deltas_stay_attached():
+    # The deltas are never detached at the step boundary, while the corrected
+    # output is the same as it is with the graph switched off.
     selector = get_single_module_with_atmosphere_corrector_selector()
     img_shape = DEFAULT_IMG_SHAPE
     step = get_step(selector, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples=2)
     next_step_input_data = get_tensor_dict(step.next_step_input_names, img_shape, 2)
-    result = step.step(
-        args=StepArgs(
-            input=input_data,
-            next_step_input_data=next_step_input_data,
-            labels=None,
-        ),
+    args = StepArgs(
+        input=input_data,
+        next_step_input_data=next_step_input_data,
+        labels=None,
     )
+    result = step.step(args=args)
     assert isinstance(result, StepOutput)
     delta = result.corrector_diagnostics.delta
     assert delta  # the atmosphere corrector modifies fields
     for name, tensor in delta.items():
         assert name in result.output
-        assert not tensor.requires_grad  # detached at the step boundary
+        assert tensor.grad_fn is not None
+
+    with torch.no_grad():
+        reference = step.step(args=args)
+    for name, value in reference.output.items():
+        torch.testing.assert_close(result.output[name], value)
 
 
 def test_step_empty_delta_when_no_corrector():
@@ -1086,6 +1130,34 @@ def test_secondary_module_output_names_residual_on_input_only():
     )
     assert "a" in config.output_names
     assert "b" in config.output_names
+
+
+def test_loss_names_sorted_regardless_of_input_order():
+    """loss_names must be deterministic (sorted) regardless of out_names order.
+
+    On main, output_names was list(set(...)) whose iteration order depends on
+    PYTHONHASHSEED. loss_names derived from output_names, so the Packer received
+    a different channel ordering in each new process. This test verifies the
+    fix: loss_names is always alphabetically sorted.
+    """
+    names_a = ["z_var", "a_var", "m_var"]
+    names_b = list(reversed(names_a))
+    normalization_a = get_network_and_loss_normalization_config(names=names_a)
+    normalization_b = get_network_and_loss_normalization_config(names=names_b)
+    config_a = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=names_a,
+        out_names=names_a,
+        normalization=normalization_a,
+    )
+    config_b = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=names_b,
+        out_names=names_b,
+        normalization=normalization_b,
+    )
+    assert config_a.loss_names == config_b.loss_names
+    assert config_a.loss_names == sorted(names_a)
 
 
 @pytest.mark.parallel

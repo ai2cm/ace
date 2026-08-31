@@ -34,7 +34,6 @@ def _mock_step_loss(fn):
     mock.side_effect = lambda data, target, step: _wrap_as_loss_output(
         fn(data, target, step)
     )
-    mock.effective_loss_scaling = {}
     return mock
 
 

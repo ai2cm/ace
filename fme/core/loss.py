@@ -1,6 +1,7 @@
 import abc
 import dataclasses
-from collections.abc import Callable, Mapping
+import logging
+from collections.abc import Callable, Collection, Mapping
 from typing import Any, Literal
 
 import torch
@@ -10,9 +11,10 @@ import torch.nn.functional as F
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps, get_energy_score
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -302,14 +304,6 @@ class WeightedMappingLoss:
 
     def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
-
-    @property
-    def effective_loss_scaling(self) -> dict[str, float]:
-        custom_weights = dict(zip(self.packer.names, self._weight_tensor.flatten()))
-        loss_normalizer_stds = self.normalizer.stds
-        return {
-            k: loss_normalizer_stds[k] / custom_weights[k] for k in self.packer.names
-        }
 
 
 def _construct_weight_tensor(
@@ -893,10 +887,6 @@ class StepLoss(torch.nn.Module):
         # private because this is only used in unit tests
         return self.loss.normalizer
 
-    @property
-    def effective_loss_scaling(self) -> dict[str, float]:
-        return self.loss.effective_loss_scaling
-
     def forward(
         self,
         predict_dict: TensorMapping,
@@ -986,4 +976,314 @@ class StepLossConfig:
                 normalizer=normalizer,
             ),
             sqrt_loss_decay_constant=self.sqrt_loss_step_decay_constant,
+        )
+
+
+def require_matched_entries(
+    selection: NameAndPrefixSelection,
+    names: Collection[str],
+    feature: str,
+    subject: str,
+) -> list[str]:
+    """The names the selection matches, sorted; raises if any entry matches none.
+
+    The one validation primitive of corrector-loss name selection, used both at
+    build against the names the loss covers and at runtime against the
+    corrector's actual delta keys.
+
+    Args:
+        selection: The configured entries.
+        names: The names to match against.
+        feature: The config field the entries came from, for the error text.
+        subject: A plural noun phrase for what ``names`` are, for the error
+            text (e.g. "variables the loss covers").
+    """
+    unmatched = selection.unmatched_entries(names)
+    if unmatched:
+        raise ValueError(
+            f"{feature} selects entries that match none of the {subject}: "
+            + "; ".join(f"{entry!r} matches none" for entry in unmatched)
+            + f". The {subject} are {sorted(names)}."
+        )
+    return selection.matched(names)
+
+
+class CorrectorRegularizer(torch.nn.Module):
+    """A penalty pushing selected correction deltas toward zero.
+
+    Holds the three things the penalty is: the selection of deltas it is taken
+    over, a factory for the loss over them, and the weight it enters the step
+    total with. The names and the loss are fixed by :meth:`resolve`, because
+    which names the selection covers is not knowable until the corrector's
+    first non-empty delta arrives.
+    """
+
+    def __init__(
+        self,
+        selection: NameAndPrefixSelection,
+        build_loss: Callable[[list[str]], WeightedMappingLoss],
+        weight: float,
+    ):
+        """
+        Args:
+            selection: The configured selection of correction deltas.
+            build_loss: Builds the loss applied to the normalized deltas
+                against zeros, over the names it is given.
+            weight: The weight applied to the penalty in the step total.
+        """
+        super().__init__()
+        self._selection = selection
+        self._build_loss = build_loss
+        self._loss: WeightedMappingLoss | None = None
+        self._names: list[str] = []
+        self._weight = weight
+
+    @property
+    def weight(self) -> float:
+        return self._weight
+
+    @property
+    def names(self) -> list[str]:
+        """The names the penalty is taken over, empty before :meth:`resolve`."""
+        return list(self._names)
+
+    def resolve(self, delta_names: Collection[str]) -> None:
+        """Fix the penalty's channels to the selection's matches among
+        ``delta_names`` and build the loss over them.
+
+        The loss is built over the matched delta keys rather than over the
+        matched loss names, so the penalty is not taken over levels the
+        corrector never touched.
+        """
+        self._names = require_matched_entries(
+            self._selection,
+            delta_names,
+            "regularization",
+            "correction deltas the corrector produced",
+        )
+        self._loss = self._build_loss(self._names)
+
+    def forward(
+        self, deltas: TensorMapping, data_mask: TensorMapping | None = None
+    ) -> LossOutput:
+        """Penalty over the selected deltas, per channel.
+
+        The deltas are compared against zeros in loss-normalized space, so with
+        an affine normalizer the means cancel and this penalizes ``delta/std``.
+        The mask is the main loss's, so both halves of the step total average
+        over the same samples per channel.
+
+        NaN-filled delta points are zeroed on both sides by
+        ``WeightedMappingLoss``, matching how the main loss treats a NaN
+        target: they enter the channel mean contributing zero, so the penalty
+        is diluted by the masked fraction rather than renormalized over the
+        kept points. With ``fill_nans_on_normalize`` set on the loss
+        normalizer the NaN is filled before that mask is taken, and no point
+        is zeroed at all.
+        """
+        if self._loss is None:
+            raise RuntimeError(
+                "the penalty was taken before its channels were resolved; "
+                "CorrectorLoss.resolve_names must run first."
+            )
+        selected: TensorDict = {}
+        targets: TensorDict = {}
+        for name in self._names:
+            _require_delta(deltas, name, "regularization")
+            delta = deltas[name]
+            selected[name] = delta
+            # NaN target where the delta is NaN-filled; see the docstring for
+            # what the downstream loss does with it.
+            targets[name] = torch.where(
+                delta.isnan(),
+                torch.full_like(delta, torch.nan),
+                torch.zeros_like(delta),
+            )
+        return self._loss(selected, targets, data_mask)
+
+
+class CorrectorLoss(torch.nn.Module):
+    """Loss for corrector optimization.
+
+    Owns both features that consume the correction deltas of a ``StepOutput``:
+    pre-corrector optimization and corrector regularization.
+    """
+
+    def __init__(
+        self,
+        precorrector_selection: NameAndPrefixSelection | None,
+        regularizer: CorrectorRegularizer | None,
+    ):
+        """
+        Args:
+            precorrector_selection: Selection of the variables whose main-loss
+                prediction is the pre-corrector network output, or None when
+                the feature is off.
+            regularizer: The penalty over the selected deltas, or None when
+                the feature is off.
+        """
+        super().__init__()
+        self._precorrector_selection = precorrector_selection
+        self._precorrector_names: list[str] | None = None
+        self._regularizer = regularizer
+        self._resolved = False
+
+    @property
+    def penalty_weight(self) -> float:
+        """The weight the penalty enters the step total with, 1.0 with no penalty."""
+        if self._regularizer is None:
+            return 1.0
+        return self._regularizer.weight
+
+    def resolve_names(self, delta_names: Collection[str]) -> None:
+        """Validate both features' entries against the corrector's delta keys
+        and fix the names each acts on. A no-op after the first call.
+
+        Called on the first step whose deltas are non-empty, which is the first
+        point at which the keys the corrector really produces are observable.
+        Empty-delta steps -- every train-mode step of an
+        ``EpochScheduledCorrector``'s disabled epochs -- do not consume it: the
+        corrector is always applied in eval mode, so the end-of-epoch
+        validation pass resolves at the latest.
+        """
+        if self._resolved:
+            return
+        subject = "correction deltas the corrector produced"
+        if self._precorrector_selection is not None:
+            self._precorrector_names = require_matched_entries(
+                self._precorrector_selection,
+                delta_names,
+                "precorrector_optimization",
+                subject,
+            )
+        if self._regularizer is not None:
+            self._regularizer.resolve(delta_names)
+        self._resolved = True
+        if self._precorrector_names is not None:
+            logging.info(
+                "corrector_loss: optimizing pre-corrector outputs for "
+                f"{self._precorrector_names}"
+            )
+        if self._regularizer is not None:
+            logging.info(
+                f"corrector_loss: penalizing deltas for {self._regularizer.names} "
+                f"with weight {self._regularizer.weight}"
+            )
+
+    def pre_corrector_outputs(
+        self, predict_dict: TensorMapping, deltas: TensorMapping
+    ) -> TensorDict:
+        """``predict_dict[k] - deltas[k]`` for the selected names, else
+        ``predict_dict[k]``; raises when a selected name is missing.
+        """
+        net_output = dict(predict_dict)
+        if self._precorrector_selection is None or len(deltas) == 0:
+            return net_output
+        if self._precorrector_names is None:
+            raise RuntimeError(
+                "the pre-corrector outputs were taken before their names were "
+                "resolved; CorrectorLoss.resolve_names must run first."
+            )
+        for name in self._precorrector_names:
+            _require_delta(deltas, name, "precorrector_optimization")
+            net_output[name] = predict_dict[name] - deltas[name]
+        return net_output
+
+    def penalty(
+        self, deltas: TensorMapping, data_mask: TensorMapping | None = None
+    ) -> LossOutput | None:
+        """The regularizer's penalty, or None when the feature is off or the
+        deltas are empty.
+        """
+        if self._regularizer is None or len(deltas) == 0:
+            return None
+        return self._regularizer(deltas, data_mask)
+
+
+def _require_delta(deltas: TensorMapping, name: str, feature: str) -> None:
+    if name not in deltas:
+        raise ValueError(
+            f"{feature} selects {name!r}, but the corrector produced no delta "
+            f"for it; it produced deltas for {sorted(deltas)}. An active "
+            "corrector must produce deltas for every selected name."
+        )
+
+
+@dataclasses.dataclass
+class StepOutputLossOutput:
+    """The loss of one step, main term plus the corrector penalty.
+
+    Parameters:
+        main: The main ``StepLoss`` output.
+        corrector_penalty: The penalty's own per-channel ``LossOutput``, or
+            None when there is no penalty.
+        corrector_penalty_weight: The weight applied to the penalty in
+            ``total()``.
+    """
+
+    main: LossOutput
+    corrector_penalty: LossOutput | None = None
+    corrector_penalty_weight: float = 1.0
+
+    def total(self) -> torch.Tensor:
+        """``main.total() + weight * corrector_penalty.total()``."""
+        # The penalty rides the per-step total, so one backward() call
+        # carries it; a second would double-backward under accumulation.
+        total = self.main.total()
+        if self.corrector_penalty is not None:
+            total = (
+                total + self.corrector_penalty_weight * self.corrector_penalty.total()
+            )
+        return total
+
+    def get_channel_losses(self) -> dict[str, ChannelLossInfo]:
+        """Per-channel main-loss values; the penalty is in ``total()`` only."""
+        return self.main.get_channel_losses()
+
+
+class StepOutputLoss(torch.nn.Module):
+    """``StepLoss`` plus the corrector-delta terms of a ``StepOutput``.
+
+    Deltas come from the ``StepOutput``, never the inference-only
+    ``StepDiagnostics`` carriage. The penalty takes no per-step decay, and the
+    two corrector features may be enabled together.
+    """
+
+    def __init__(self, step_loss: StepLoss, corrector_loss: CorrectorLoss | None):
+        super().__init__()
+        self.step_loss = step_loss
+        self.corrector_loss = corrector_loss
+
+    def forward(
+        self,
+        predict_dict: TensorMapping,
+        target_dict: TensorMapping,
+        step: int,
+        data_mask: TensorMapping | None = None,
+        deltas: TensorMapping | None = None,
+    ) -> StepOutputLossOutput:
+        """
+        Args:
+            predict_dict: The predicted (corrected) data.
+            target_dict: The target data.
+            step: The step number, indexed from 0 for the first step.
+            data_mask: Optional per-variable boolean masks forwarded to the
+                main loss.
+            deltas: The corrector's per-variable correction deltas, empty or
+                None when the corrector was inactive.
+        """
+        if self.corrector_loss is None or deltas is None or len(deltas) == 0:
+            # Inert path: exactly the StepLoss result. An epoch-disabled
+            # corrector lands here.
+            return StepOutputLossOutput(
+                main=self.step_loss(predict_dict, target_dict, step, data_mask)
+            )
+        self.corrector_loss.resolve_names(deltas.keys())
+        # Pre-corrector outputs first, so StepLoss never sees a delta.
+        net_output = self.corrector_loss.pre_corrector_outputs(predict_dict, deltas)
+        main = self.step_loss(net_output, target_dict, step, data_mask)
+        return StepOutputLossOutput(
+            main=main,
+            corrector_penalty=self.corrector_loss.penalty(deltas, data_mask),
+            corrector_penalty_weight=self.corrector_loss.penalty_weight,
         )

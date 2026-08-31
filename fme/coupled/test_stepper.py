@@ -24,6 +24,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import StepLossConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.rand import randn_like
 from fme.core.random_state import RandomState
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
@@ -1194,6 +1195,17 @@ class TimesTwo(torch.nn.Module):
         return 2 * x
 
 
+class AddOneWithNoise(torch.nn.Module):
+    """``AddOne`` plus a standard-normal draw made through ``fme.core.rand``.
+
+    Stands in for a trained stochastic module such as ``NoiseConditionedSFNO``
+    in tests that need seeding to have an observable effect.
+    """
+
+    def forward(self, x):
+        return x + 1 + randn_like(x)
+
+
 def get_stepper_config(
     ocean_in_names: list[str],
     ocean_out_names: list[str],
@@ -1207,6 +1219,8 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    ocean_prescribed_prognostic_names: list[str] | None = None,
+    atmosphere_prescribed_prognostic_names: list[str] | None = None,
     atmosphere_input_dropout: VariableMaskingConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
@@ -1229,6 +1243,9 @@ def get_stepper_config(
     if ocean_builder is None:
         ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
 
+    ocean_prescribed = list(ocean_prescribed_prognostic_names or [])
+    atmosphere_prescribed = list(atmosphere_prescribed_prognostic_names or [])
+
     config = CoupledStepperConfig(
         atmosphere=ComponentConfig(
             timedelta=atmosphere_timedelta,
@@ -1240,6 +1257,7 @@ def get_stepper_config(
                             builder=atmosphere_builder,
                             in_names=atmosphere_in_names,
                             out_names=atmosphere_out_names,
+                            prescribed_prognostic_names=atmosphere_prescribed,
                             normalization=trivial_network_and_loss_normalization(
                                 atmos_norm_names
                             ),
@@ -1264,6 +1282,7 @@ def get_stepper_config(
                             in_names=ocean_in_names,
                             out_names=ocean_out_names,
                             next_step_forcing_names=next_step_forcing_names,
+                            prescribed_prognostic_names=ocean_prescribed,
                             normalization=trivial_network_and_loss_normalization(
                                 ocean_norm_names
                             ),
@@ -1584,6 +1603,149 @@ def test__get_ocean_forcings():
     torch.testing.assert_close(
         new_ocean_forcings["o_exog"], expected_ocean_forcings["o_exog"]
     )
+
+
+def test_ocean_forcing_window_names_include_prescribed_prognostics():
+    "Prescribed ocean prognostics (e.g. SST, layer T) must appear in forcing window."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_prescribed_prognostic_names=["sst", "thetao_18"],
+    )
+    assert set(config.ocean_forcing_window_names) == (
+        set(config.ocean_forcing_exogenous_names)
+        - set(config.shared_forcing_exogenous_names)
+        | {"sst", "thetao_18"}
+    )
+    reqs = config.get_forcing_window_data_requirements(1)
+    assert "thetao_18" in reqs.ocean_requirements.names
+    assert "sst" in reqs.ocean_requirements.names
+
+
+def test_atmosphere_forcing_window_names_include_prescribed_prognostics():
+    "Prescribed atmosphere prognostics must appear in the atmosphere forcing window."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp", "a_prog"]
+    atmos_out_names = ["a_diag", "sfc_temp", "a_prog"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_prescribed_prognostic_names=["a_prog"],
+    )
+    assert set(config.atmosphere_forcing_window_names) == (
+        set(config.atmosphere_forcing_exogenous_names) | {"a_prog"}
+    )
+    reqs = config.get_forcing_window_data_requirements(1)
+    assert "a_prog" in reqs.atmosphere_requirements.names
+
+
+def test__get_atmosphere_forcings_includes_prescribed_prognostic_tensors():
+    torch.manual_seed(1)
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp", "a_prog"]
+    atmos_out_names = ["a_diag", "sfc_temp", "a_prog"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        atmosphere_prescribed_prognostic_names=["a_prog"],
+    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    n_atmos = coupler.n_inner_steps + 1
+    atmos_shape = (1, n_atmos, N_LAT, N_LON)
+    ocean_shape = (1, 1, N_LAT, N_LON)
+    atmos_data = {
+        "exog": torch.rand(*atmos_shape, device=fme.get_device()),
+        "ocean_frac": torch.rand(*atmos_shape, device=fme.get_device()),
+        "a_prog": torch.rand(*atmos_shape, device=fme.get_device()),
+    }
+    ocean_ic = {"sst": torch.rand(*ocean_shape, device=fme.get_device())}
+    new_atmos_forcings = coupler._get_atmosphere_forcings(atmos_data, ocean_ic)
+    torch.testing.assert_close(new_atmos_forcings["a_prog"], atmos_data["a_prog"])
+
+
+def test_config_raises_on_ocean_supplied_prescribed_collision():
+    "Prescribing an atmosphere name the ocean also supplies must fail at config build."
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp"]
+    ocean_out_names = ["sst"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    with pytest.raises(ValueError, match="overlap ocean-supplied"):
+        get_stepper_config(
+            ocean_in_names=ocean_in_names,
+            ocean_out_names=ocean_out_names,
+            atmosphere_in_names=atmos_in_names,
+            atmosphere_out_names=atmos_out_names,
+            sst_name_in_ocean_data="sst",
+            sfc_temp_name_in_atmosphere_data="sfc_temp",
+            ocean_fraction_name="ocean_frac",
+            # sfc_temp is supplied to the atmosphere from the ocean SST;
+            # prescribing it would be silently overwritten.
+            atmosphere_prescribed_prognostic_names=["sfc_temp"],
+        )
+
+
+def test__get_ocean_forcings_includes_prescribed_prognostic_tensors():
+    torch.manual_seed(1)
+    ocean_in_names = ["o_exog", "exog", "sst", "a_diag", "sfc_temp", "thetao_18"]
+    ocean_out_names = ["sst", "thetao_18"]
+    atmos_in_names = ["exog", "ocean_frac", "sfc_temp"]
+    atmos_out_names = ["a_diag", "sfc_temp"]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="sst",
+        sfc_temp_name_in_atmosphere_data="sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_prescribed_prognostic_names=["thetao_18"],
+    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    ocean_shape = (1, 2, N_LAT, N_LON)
+    atmos_shape = (1, 2, N_LAT, N_LON)
+    ocean_data = {
+        "o_exog": torch.rand(*ocean_shape, device=fme.get_device()),
+        "sst": torch.rand(*ocean_shape, device=fme.get_device()),
+        "thetao_18": torch.rand(*ocean_shape, device=fme.get_device()),
+    }
+    atmos_gen = {
+        "a_diag": torch.rand(*atmos_shape, device=fme.get_device()),
+        "sfc_temp": torch.rand(*atmos_shape, device=fme.get_device()),
+    }
+    atmos_forcings = {"exog": torch.rand(*atmos_shape, device=fme.get_device())}
+    new_ocean_forcings = coupler._get_ocean_forcings(
+        ocean_data, atmos_gen, atmos_forcings
+    )
+    torch.testing.assert_close(new_ocean_forcings["thetao_18"], ocean_data["thetao_18"])
 
 
 def test_predict_paired():
@@ -2271,3 +2433,69 @@ def test_single_component_validation_loss_is_single_component_and_reproducible()
     second = _eval_sequence()
     assert first == second
     assert set(first) == {"ocean", "atmosphere"}
+
+
+@pytest.mark.parametrize("evaluate_all_steps", [False, True])
+def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
+    evaluate_all_steps,
+):
+    """Sparse vs. dense per-realm per-step metrics under stochastic n_steps.
+
+    The atmosphere samples its per-batch step count; with
+    evaluate_all_steps=False only the sampled contiguous step range carries
+    metrics (varying across batches), while True yields metrics for every
+    available step in every batch. The ocean has no sampler, so its metrics
+    are dense either way.
+    """
+    from fme.ace.stepper.time_length_probabilities import (
+        TimeLengthProbabilities,
+        TimeLengthProbability,
+    )
+
+    torch.manual_seed(0)
+    train_stepper_config = CoupledTrainStepperConfig(
+        n_coupled_steps=2,
+        ocean=ComponentTrainingConfig(loss=StepLossConfig(type="MSE")),
+        atmosphere=ComponentTrainingConfig(
+            loss=StepLossConfig(type="MSE"),
+            n_steps=TimeLengthProbabilities(
+                outcomes=[
+                    TimeLengthProbability(steps=1, probability=0.5),
+                    TimeLengthProbability(steps=4, probability=0.5),
+                ]
+            ),
+        ),
+    )
+    train_stepper, coupled_data, _, _ = get_train_stepper_and_batch(
+        train_stepper_config=train_stepper_config,
+        ocean_in_names=["sst", "mask_0"],
+        ocean_out_names=["sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=3,
+    )
+    train_stepper.set_eval()
+    train_stepper.seed_eval(0)
+
+    ocean_key_sets = []
+    atmos_key_sets = []
+    for _ in range(12):
+        stepped = train_stepper.train_on_batch(
+            data=coupled_data.data,
+            optimization=NullOptimization(),
+            evaluate_all_steps=evaluate_all_steps,
+        )
+        ocean_key_sets.append({k for k in stepped.ocean.metrics if "_step_" in k})
+        atmos_key_sets.append({k for k in stepped.atmosphere.metrics if "_step_" in k})
+
+    dense_ocean = {f"loss/ocean_step_{step}" for step in range(2)}
+    dense_atmos = {f"loss/atmosphere_step_{step}" for step in range(4)}
+    assert all(keys == dense_ocean for keys in ocean_key_sets)
+    if evaluate_all_steps:
+        assert all(keys == dense_atmos for keys in atmos_key_sets)
+    else:
+        assert {len(keys) for keys in atmos_key_sets} == {1, 4}
+        for keys in atmos_key_sets:
+            assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}
