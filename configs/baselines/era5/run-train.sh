@@ -134,7 +134,6 @@ run_training() {
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
     --priority "$PRIORITY" \
-    --preemptible \
     --min-runtime 4h \
     --cluster "$CLUSTER" \
     "${cm_priority_args[@]}" \
