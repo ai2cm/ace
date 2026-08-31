@@ -29,6 +29,9 @@ VARS = [
     "DSWRFtoa",
     "carbon_dioxide",
 ]
+# time-invariant fields copied verbatim (orography for the predicted
+# atmosphere: a convolutional trunk cannot infer elevation on its own)
+STATIC_VARS = ["HGTsfc"]
 TIME_CHUNK = 360
 
 
@@ -101,6 +104,15 @@ def main() -> None:
             )
             ov[start:stop] = v[raw]
         print(f"wrote {name}: {ov.shape} chunks={chunks}")
+
+    for name in STATIC_VARS:
+        v = src[name]
+        ov = out.create_array(
+            name, shape=v.shape, dtype=v.dtype, dimension_names=("lat", "lon")
+        )
+        ov[:] = v[:]
+        ov.attrs.update(dict(v.attrs))
+        print(f"wrote {name} (static): {ov.shape}")
 
     zarr.consolidate_metadata(out.store)
     print("done; metadata consolidated")

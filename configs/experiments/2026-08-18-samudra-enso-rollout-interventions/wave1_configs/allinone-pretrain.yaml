@@ -118,6 +118,7 @@ stepper:
     - PRESsfc
     - DSWRFtoa
     - carbon_dioxide
+    - HGTsfc
   step:
     type: single_module
     config:
@@ -282,6 +283,7 @@ stepper:
       - PRESsfc
       - DSWRFtoa
       - carbon_dioxide
+      - HGTsfc
       out_names:
       - sst
       - ssu

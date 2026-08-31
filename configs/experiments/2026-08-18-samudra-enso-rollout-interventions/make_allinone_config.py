@@ -51,6 +51,7 @@ NEW_PROGNOSTICS = [
     "PRESsfc",
 ]
 NEW_FORCINGS = ["DSWRFtoa", "carbon_dioxide"]
+NEW_STATICS = ["HGTsfc"]
 
 
 def add_snapshot_zarr(loader: dict) -> None:
@@ -79,7 +80,7 @@ def main() -> None:
     assert cfg["next_step_forcing_names"] == FLUXES_TO_PROGNOSE
     cfg["next_step_forcing_names"] = list(NEW_FORCINGS)
 
-    for name in NEW_PROGNOSTICS + NEW_FORCINGS:
+    for name in NEW_PROGNOSTICS + NEW_FORCINGS + NEW_STATICS:
         assert name not in cfg["in_names"]
         cfg["in_names"].append(name)
     for name in FLUXES_TO_PROGNOSE + NEW_PROGNOSTICS:
@@ -87,7 +88,7 @@ def main() -> None:
         cfg["out_names"].append(name)
 
     excludes = stepper["input_masking"]["exclude_names_and_prefixes"]
-    for name in NEW_PROGNOSTICS + NEW_FORCINGS:
+    for name in NEW_PROGNOSTICS + NEW_FORCINGS + NEW_STATICS:
         assert name not in excludes
         excludes.append(name)
 
