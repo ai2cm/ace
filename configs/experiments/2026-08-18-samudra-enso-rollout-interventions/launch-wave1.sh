@@ -86,7 +86,6 @@ launch() {
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
     --workspace ai2/ace \
     --priority "$PRIORITY" \
-    --preemptible \
     --min-runtime "${MIN_RUNTIME:-8h}" \
     --cluster ai2/ceres \
     --cluster ai2/jupiter \
