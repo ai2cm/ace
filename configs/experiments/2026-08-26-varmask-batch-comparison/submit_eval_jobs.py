@@ -77,9 +77,9 @@ def main() -> None:
     parser.add_argument(
         "--beaker-cluster",
         nargs="+",
-        default=["ai2/titan"],
+        default=["ai2/titan", "ai2/jupiter"],
         metavar="CLUSTER",
-        help="Beaker cluster(s) to target (default: ai2/titan).",
+        help="Beaker cluster(s) to target (default: ai2/titan ai2/jupiter).",
     )
     parser.add_argument(
         "--beaker-priority",

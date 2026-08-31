@@ -17,7 +17,7 @@ WANDB_PROJECT=${WANDB_PROJECT:-VarMaskingInfoComparison}
 # ai2/ace is the workspace scripts/beaker_balancer manages, so CM_PRIORITY
 # below is honoured here; it is ignored in a merely-observed workspace.
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
-BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter"}
+BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
 # Opts the job in to scripts/beaker_balancer, which keeps the team inside its
 # urgent-priority allocation by moving opted-in jobs between priorities.
