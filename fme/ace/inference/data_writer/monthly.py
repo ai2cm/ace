@@ -92,9 +92,11 @@ class PairedMonthlyDataWriter:
 
 class MonthlyDataWriter:
     """
-    Write monthly total data and sample counts to a netCDF file.
+    Write monthly mean data and sample counts to a netCDF file.
 
-    Allows computing the mean afterwards by dividing the total by the counts.
+    Each batch is folded into the stored means using the stored counts, so the
+    values on disk are means over however many timesteps have been written for
+    that calendar month, and the counts say how many that is.
     """
 
     def __init__(

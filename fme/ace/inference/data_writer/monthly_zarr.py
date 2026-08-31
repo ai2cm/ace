@@ -1,5 +1,6 @@
 import copy
 import datetime
+import os
 from collections.abc import Iterable, Mapping, Sequence
 
 import cftime
@@ -89,7 +90,7 @@ class MonthlyZarrWriter:
         ]
         self._chunks = _validate_chunks(chunks)
 
-        label = path.rstrip("/").rsplit("/", 1)[-1].removesuffix(".zarr")
+        label = os.path.basename(path).removesuffix(".zarr")
         dataset_metadata = copy.copy(dataset_metadata)
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         self._dataset_metadata = dataset_metadata.as_flat_str_dict()
@@ -273,10 +274,10 @@ class MonthlyZarrWriter:
         )
 
     def flush(self):
-        pass
+        """No-op: each append_batch writes through to the store."""
 
     def finalize(self):
-        pass
+        """No-op: each append_batch writes through to the store."""
 
 
 def _validate_chunks(chunks: Mapping[str, int] | None) -> dict[str, int]:

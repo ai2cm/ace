@@ -273,14 +273,20 @@ class FileWriterConfig:
                 raise NotImplementedError(
                     "Time selection is not currently supported when writing to zarr."
                 )
-            if (
-                isinstance(self.time_coarsen, MonthlyCoarsenConfig)
-                and self.separate_ensemble_members
-            ):
-                raise NotImplementedError(
-                    "Writing separate ensemble members is not currently supported "
-                    "for monthly coarsening."
-                )
+            if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
+                if self.separate_ensemble_members:
+                    raise NotImplementedError(
+                        "Writing separate ensemble members is not currently supported "
+                        "for monthly coarsening."
+                    )
+                if self.format.overwrite_check:
+                    # monthly means are written by re-reading and overwriting the
+                    # months a batch touches, so there is no write-once invariant
+                    # for the check to enforce
+                    raise NotImplementedError(
+                        "overwrite_check is not applicable to monthly coarsening, "
+                        "which overwrites the months each batch touches by design."
+                    )
 
         if isinstance(self.time_coarsen, MonthlyCoarsenConfig):
             if self.time_selection is not None:

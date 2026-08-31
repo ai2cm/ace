@@ -603,6 +603,15 @@ def test_file_writer_rejects_monthly_zarr_with_separate_ensemble_members():
         )
 
 
+def test_file_writer_rejects_monthly_zarr_with_overwrite_check():
+    with pytest.raises(NotImplementedError, match="overwrite_check"):
+        FileWriterConfig(
+            label="monthly_mean_output",
+            time_coarsen=MonthlyCoarsenConfig(),
+            format=ZarrWriterConfig(overwrite_check=True),
+        )
+
+
 @pytest.mark.parametrize("save_reference", [True, False])
 def test_file_writer_paired_save_reference(tmpdir, save_reference: bool):
     config = FileWriterConfig(

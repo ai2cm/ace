@@ -31,11 +31,17 @@ def _writer(path, initial_condition_times, n_timesteps, **kwargs) -> MonthlyZarr
     )
 
 
+# a spatially varying pattern, so that a wrong lat/lon layout in the store
+# shows up in the values and not only in the shapes; 1.0 at (lat=0, lon=0)
+# keeps the hand-computed expectations below readable
+SPATIAL_PATTERN = 1.0 + torch.arange(
+    len(COORDS["lat"]) * len(COORDS["lon"]), dtype=torch.float32
+).reshape(len(COORDS["lat"]), len(COORDS["lon"]))
+
+
 def _batch(values, times):
-    """A batch of shape [sample, time, lat, lon], constant in space."""
-    data = torch.tensor(values, dtype=torch.float32)[..., None, None] * torch.ones(
-        1, 1, len(COORDS["lat"]), len(COORDS["lon"])
-    )
+    """A batch of shape [sample, time, lat, lon]."""
+    data = torch.tensor(values, dtype=torch.float32)[..., None, None] * SPATIAL_PATTERN
     return {"foo": data}, xr.DataArray(times, dims=["sample", "time"])
 
 
@@ -73,6 +79,12 @@ def test_monthly_zarr_writer_accumulates_across_batches(tmp_path):
     assert dict(ds.sizes) == {"sample": 1, "time": 2, "lat": 2, "lon": 3}
     np.testing.assert_array_equal(ds["counts"].values, [[2, 2]])
     np.testing.assert_allclose(ds["foo"].isel(sample=0, lat=0, lon=0), [1.5, 4.0])
+    # the same means scaled by the spatial pattern, so the lat/lon layout is checked
+    np.testing.assert_allclose(
+        ds["foo"].isel(sample=0, lat=1, lon=2),
+        np.array([1.5, 4.0]) * SPATIAL_PATTERN[1, 2].item(),
+        rtol=1e-6,
+    )
     assert ds["foo"].attrs["units"] == "m"
     assert "counts" in ds.coords
     assert "counts" in ds["foo"].coords
