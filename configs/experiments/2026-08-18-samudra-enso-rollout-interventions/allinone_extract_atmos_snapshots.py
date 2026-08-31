@@ -32,6 +32,30 @@ VARS = [
 # time-invariant fields copied verbatim (orography for the predicted
 # atmosphere: a convolutional trunk cannot infer elevation on its own)
 STATIC_VARS = ["HGTsfc"]
+# All-ones variable-specific masks for every field the all-in-one model
+# predicts and feeds back. Without these, the ocean dataset's catch-all
+# mask_2d (and, for *_2 names, the ocean level-2 mask) captures them, the
+# output masker NaN-fills their land points by design, and the NaN returns
+# as network input on the next step. A variable-specific mask outranks both
+# fallbacks, and all-ones means "valid everywhere": nothing is filled.
+FULL_FIELD_MASKS = [
+    "DLWRFsfc",
+    "DSWRFsfc",
+    "ULWRFsfc",
+    "USWRFsfc",
+    "LHTFLsfc",
+    "SHTFLsfc",
+    "PRATEsfc",
+    "eastward_surface_wind_stress",
+    "northward_surface_wind_stress",
+    "total_frozen_precipitation_rate",
+    "h500",
+    "TMP850",
+    "eastward_wind_2",
+    "northward_wind_2",
+    "PRESsfc",
+    "PRMSL",
+]
 TIME_CHUNK = 360
 
 
@@ -113,6 +137,17 @@ def main() -> None:
         ov[:] = v[:]
         ov.attrs.update(dict(v.attrs))
         print(f"wrote {name} (static): {ov.shape}")
+
+    nlat, nlon = src["HGTsfc"].shape
+    for name in FULL_FIELD_MASKS:
+        ov = out.create_array(
+            f"mask_{name}",
+            shape=(nlat, nlon),
+            dtype="float32",
+            dimension_names=("lat", "lon"),
+        )
+        ov[:] = np.ones((nlat, nlon), dtype="float32")
+    print(f"wrote {len(FULL_FIELD_MASKS)} all-ones masks")
 
     zarr.consolidate_metadata(out.store)
     print("done; metadata consolidated")

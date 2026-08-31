@@ -29,8 +29,8 @@ def nan_report(label, mapping):
     print(f"[{label}] tensors with NaN:", "; ".join(bad) if bad else "NONE")
 
 
-def main(yaml_path):
-    config_data = prepare_config(yaml_path, override=None)
+def main(yaml_path, override=None):
+    config_data = prepare_config(yaml_path, override=override)
     config = dacite.from_dict(
         data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
     )
@@ -67,4 +67,4 @@ def main(yaml_path):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], override=sys.argv[2:] or None)
