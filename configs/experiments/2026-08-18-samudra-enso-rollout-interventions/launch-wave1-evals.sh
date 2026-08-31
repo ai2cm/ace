@@ -35,8 +35,8 @@ for arm in $ARMS; do
       --name "$job" --task-name "$job" \
       --description "Wave-1 arm ${arm}: scouting-IC coupled rollout eval, year ${ys}" \
       --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-      --workspace ai2/climate-titan --priority "$PRIORITY" --preemptible \
-      --cluster ai2/titan --weka climate-default:/climate-default \
+      --workspace ai2/ace --priority "$PRIORITY" --preemptible \
+      --cluster ai2/ceres-cirrascale --cluster ai2/jupiter-cirrascale --cluster ai2/titan --weka climate-default:/climate-default \
       --env WANDB_USERNAME="$BEAKER_USERNAME" --env WANDB_NAME="$job" \
       --env WANDB_JOB_TYPE=evaluation --env WANDB_RUN_GROUP=samudra-enso-w1-evals \
       --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \

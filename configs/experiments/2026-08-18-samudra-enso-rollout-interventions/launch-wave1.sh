@@ -76,9 +76,11 @@ launch() {
     --task-name "$job_name" \
     --description "ENSO rollout intervention wave 1, arm ${arm}" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority "$PRIORITY" \
     --preemptible \
+    --cluster ai2/ceres-cirrascale \
+    --cluster ai2/jupiter-cirrascale \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \
