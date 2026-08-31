@@ -1,0 +1,99 @@
+# Backfill of the `long_36year` inline metric for models that never logged it: ACE2.2-ERA5,
+# whose training logged `long_46year` (1979-2024) and so cannot be used to choose between
+# configurations without touching the AIMIP 2015-2024 holdout, and ACE2.1-ERA5's four seeds,
+# whose 1979-2014 runs used a single initial condition where this uses eight -- a difference
+# that inflates their apparent seed spread with single-member internal variability.
+#
+# `loader`, `n_forward_steps` and `aggregator` are copied verbatim from the `long_36year`
+# entry of ../train-1deg-6hourly-v2-harmonized-split.yaml, so this logs the identical metric
+# keys and is directly comparable to the P1/P2 inline values. The ERA5 training store serves
+# as initial condition, forcing and target, as it does inline -- the AIMIP forcing zarr's
+# SSTs differ from it by ~0.5 K (skin temperature vs SST), which would otherwise appear as a
+# model difference.
+#
+# No output files are written; only the aggregator summary metrics are wanted.
+#
+# The checkpoint is mounted at /ckpt.tar by the launcher, once per model.
+checkpoint_path: /ckpt.tar
+experiment_dir: /results
+n_forward_steps: 52566
+forward_steps_in_memory: 40
+logging:
+  project: ace
+loader:
+  start_indices:
+    times:
+    - '1979-01-01T06:00:00'
+    - '1979-01-02T06:00:00'
+    - '1979-01-03T06:00:00'
+    - '1979-01-04T06:00:00'
+    - '1979-01-05T06:00:00'
+    - '1979-01-06T06:00:00'
+    - '1979-01-07T06:00:00'
+    - '1979-01-08T06:00:00'
+  dataset:
+    data_path: /climate-default/
+    file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  step_means: []
+  ensembles: []
+  mean_denorm:
+    enabled: false
+    target: denorm
+  mean_norm:
+    enabled: false
+    target: norm
+  zonal_mean:
+    enabled: false
+  time_mean_denorm:
+    target: denorm
+    variables: &id001
+    - PRATEsfc
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - h500
+    - TMP850
+    - PRESsfc
+    - surface_temperature
+    - ULWRFsfc
+    - DLWRFsfc
+    - USWRFsfc
+    - DSWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - LHTFLsfc
+    - SHTFLsfc
+    - tendency_of_total_water_path_due_to_advection
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_3
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_3
+    - specific_total_water_7
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_3
+    - eastward_wind_7
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_3
+    - northward_wind_7
+    - total_water_path
+  time_mean_norm:
+    target: norm
+    variables: *id001
+  annual:
+    variables: *id001
+  power_spectrum:
+    variables: *id001
+  histogram:
+    enabled: true
