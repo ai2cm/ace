@@ -7,7 +7,9 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username by default
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_PROJECT=${WANDB_PROJECT:-VarMaskingInfoComparison}
-BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
+# ai2/ace is the workspace scripts/beaker_balancer manages, so CM_PRIORITY
+# below is honoured here; it is ignored in a merely-observed workspace.
+BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-urgent}
 # Opts the job in to scripts/beaker_balancer, which keeps the team inside its

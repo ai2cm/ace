@@ -67,8 +67,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--beaker-workspace",
-        default="ai2/climate-titan",
-        help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
+        default="ai2/ace",
+        help=(
+            "Beaker workspace to submit jobs to (default: ai2/ace, the "
+            "workspace scripts/beaker_balancer manages, so CM_PRIORITY is "
+            "honoured)."
+        ),
     )
     parser.add_argument(
         "--beaker-cluster",

@@ -14,7 +14,9 @@ CONFIG_PATH=$SCRIPT_PATH/$RUN_CONFIGS_SUBDIR/$CONFIG_FILENAME
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_PROJECT=${WANDB_PROJECT:-VarMaskingInfoComparison}
-BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
+# ai2/ace is the workspace scripts/beaker_balancer manages, so CM_PRIORITY
+# below is honoured here; it is ignored in a merely-observed workspace.
+BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
 # Opts the job in to scripts/beaker_balancer, which keeps the team inside its
