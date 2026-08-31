@@ -28,7 +28,6 @@ for name in "${!MODELS[@]}"; do
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
         --priority high \
-        --not-preemptible \
         --cluster ai2/titan \
         --env CM_PRIORITY=high \
         --env WANDB_USERNAME=$WANDB_USERNAME \
