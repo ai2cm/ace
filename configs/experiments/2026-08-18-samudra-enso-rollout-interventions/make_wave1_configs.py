@@ -217,6 +217,10 @@ def arm_tendloss(c: dict) -> dict:
         "global_means_path": "/ocean_stats/ocean/centering.nc",
         "global_stds_path": "/ocean_stats/ocean/scaling-residual.nc",
     }
+    # On merged main the pre-training validation pass OOMs at batch 16 on
+    # 80 GB (in the one-step aggregator's normalize) -- same failure class
+    # hzn12 hit. Training batch is untouched.
+    c["validation"]["loader"]["batch_size"] = 4
     return c
 
 

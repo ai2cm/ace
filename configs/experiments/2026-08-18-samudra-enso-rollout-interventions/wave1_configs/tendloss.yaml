@@ -88,7 +88,7 @@ train_loader:
           stop_time: '0349-01-01T12:00:00'
 validation:
   loader:
-    batch_size: 16
+    batch_size: 4
     num_data_workers: 2
     prefetch_factor: 2
     dataset:
