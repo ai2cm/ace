@@ -328,9 +328,9 @@ run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes90-es10.yaml" \
 #   ./run-train.sh pes80-spcrps20-ft
 #   ./run-train.sh crps80-spcrps20-ft
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes80-spcrps20-ft.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
+  "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-crps80-spcrps20-ft.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-crps80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
+  "ace2s-era5-daily-fg16-sr0p125-crps80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan
 
 # Cross-donor patch-ES fine-tunes: patch-ES-led losses fine-tuning the
 # CRPS-led 90/10 pretrain (donor r95iprjt, same donor as c8hp09jm) -- fast
