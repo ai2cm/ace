@@ -189,6 +189,11 @@ validation:
             start_time: '0236-01-06T00:00:00'
             stop_time: '0241-01-01T00:00:00'
 optimization:
+  # The "clip" of the ocean_wide_ohc_clip arm, which passes it as an
+  # override_arg. Stated here so every arm inherits it. This is not
+  # optional at 1deg: unclipped, these runs diverge (see the report
+  # 'Gradient clipping fixes the 1deg mean-fill training failure').
+  max_grad_norm: 1.0
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
   lr: 0.0001
