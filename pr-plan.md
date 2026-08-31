@@ -2,6 +2,16 @@
 
 Currently the Corrector in ace is responsible for diagnosing derived output values used in the loss, because no dedicated pathway existed for doing so. This leads to strange behaviors like having neural network output channels that are ignored (e.g. advection of moisture), and other outputs that are interpreted as something other than what they are (e.g. hfds network output being its value under sea ice but final value being hfds over the full gridcell). This makes the code significantly more confusing to think about, leading to complex consequences for example when thinking about pre-corrector optimization and corrector regularization.
 
+Let's talk specifically about surface precipitation. In our critical path model, the corrector uses the network output for PRATEsfc in combination with the water budget defined by each other moisture field, and determines the magnitude needed for PRATEsfc to close the water budget. In other words, the network output is really the pattern of precipitation, and the corrector is responsible for deriving the final value of PRATEsfc. Afterwards, the corrector also clips PRATEsfc so it is strictly positive - this is a correction applied to the predicted PRATEsfc value.
+
+Currently, there is no way to distinguish between these two actions applied to PRATEsfc. They both appear as a "delta", and it is not possible for example to regularize the magnitude of predicted negative precipitation without also regularizing the "derivation" of PRATEsfc. Applying pre-corrector optimization on the zero clipping may (or may not) make sense, but applying it to the derivation of PRATEsfc never would, as it would remove all gradient pathway to the budget non-closure in the other moisture fields.
+
+In a sense, the code currently lies about the neural network output being PRATEsfc, which can confuse external users into thinking these are meant to represent the physical field they say they represent (e.g. Chapman et al. 2026 https://arxiv.org/pdf/2607.18416). In this plan, we address these issues by updating the presentation to match what the code is doing. This has a secondary benefit of making it easier to reason about corrector regularization and pre-corrector optimization - it should be scientifically valid to "apply corrector regularization to all corrected fields", but it currently is not.
+
+If we later decided the network output should in fact be PRATEsfc and not just its relative pattern, the code would be updated accordingly so that it continues to reflect what our model actually does.
+
+# Plan
+
 We’d like to decouple these responsibilities by formalizing two classes of output variables:
 - Values computed by the Module, but which are never optimized in the loss (computed-unoptimized, in this draft).
 - Values which are derived from Module-output values, and are optimized in the loss (derived-optimized, in this draft).
@@ -10,7 +20,6 @@ Certain corrector features treat these two values as one identical value, with o
 
 This first slice will target one such feature - precipitation in the context of global-mean moisture conservation - to prove out the code framework. It will introduce a field `PRATEsfc_relative_pattern` which is output by the neural network when this type of correction is enabled, has no target data, will not be optimized in the loss. It should be reported in aggregators in the way any other derived value without target data is reported. `PRATEsfc` itself will be a value derived from this value, which is directly optimized in the loss despite not being a NN output. Because of this, there will be no corrector "delta" assigned to PRATEsfc - it is derived, not corrected. In this pass, the responsibility for deriving PRATEsfc will remain in the corrector. Any renaming of the corrector or other refactoring to make this clearer is left for future work.
 
-Note this is meant to make the current behavior of our critical path models more clearly reflected in the output of the Step. If we decided to use pre-corrector optimization for this field, we would need to remove this behavior or add a configuration toggle, which would be straightforward for an experiment branch. This is unlikely to be a good idea for this specific field - doing so would mean conservative closure biases in other moisture fields have no gradient pathway to the loss, as they would only exist as an unoptimized delta applied to precipitation. We should not design this feature for a case we do not use, and retain the freedom to redesign/modify this feature in the case we do use it or something similar.
 
 # Separation of concerns
 
