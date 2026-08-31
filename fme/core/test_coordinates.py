@@ -395,7 +395,7 @@ def test_healpix_coordinates_xyz(pad: bool):
     # Apply HEALPix padding
     if pad:
         padding = 2
-        healpix_padding = HEALPixPadding(padding=padding, enable_nhwc=False)
+        healpix_padding = HEALPixPadding(padding=padding)
         padded_x = healpix_padding(torch.Tensor(x).unsqueeze(1)).squeeze(1)
         padded_y = healpix_padding(torch.Tensor(y).unsqueeze(1)).squeeze(1)
         padded_z = healpix_padding(torch.Tensor(z).unsqueeze(1)).squeeze(1)

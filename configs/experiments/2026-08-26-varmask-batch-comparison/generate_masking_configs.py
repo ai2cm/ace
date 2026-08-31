@@ -90,7 +90,7 @@ def iter_train_configs(n_seeds: int = DEFAULT_N_SEEDS) -> list[tuple[str, dict]]
     # The masking level lives in the base config but is asserted here so the
     # value baked into every run name cannot silently disagree with it.
     base_masking = base["stepper"]["step"]["config"]["input_dropout"]
-    if base_masking != {"kind": "uniform", "max_masked_vars": MAX_MASKED_VARS}:
+    if base_masking != {"default": {"max_masked_vars": MAX_MASKED_VARS}}:
         raise ValueError(
             f"base config input_dropout {base_masking} does not match the "
             f"uniform max_masked_vars={MAX_MASKED_VARS} this sweep names"

@@ -605,6 +605,6 @@ stepper:
         kind: shared
         append_as_input: true
       input_dropout:
-        kind: uniform
-        max_masked_vars: 20
+        default:
+          max_masked_vars: 20
       include_channel_mask_inputs: true

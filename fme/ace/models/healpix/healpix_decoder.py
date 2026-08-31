@@ -16,12 +16,12 @@
 # limitations under the License.
 
 import dataclasses
-from typing import List, Literal, Optional, Sequence
+from typing import List, Optional, Sequence
 
-import torch as th
+import torch
 import torch.nn as nn
 
-from .healpix_blocks import ConvBlockConfig, UpsamplingBlockConfig
+from .healpix_blocks import ConvBlockConfig, HEALPixBuildContext, UpsamplingBlockConfig
 
 
 @dataclasses.dataclass
@@ -36,13 +36,7 @@ class UNetDecoderConfig:
         output_layer: Configuration for the output layer block.
         n_channels: Number of channels for each layer, by default (34, 68, 136).
         n_layers: Number of layers in each block, by default (1, 2, 2).
-        output_channels: Number of output channels, by default 1.
         dilations: List of dilation rates for the layers, by default None.
-        enable_nhwc: Flag to enable NHWC data format, by default False.
-        hpx_padding_mode: HEALPix padding backend (``"earth2grid"``, ``"karlbauer"``,
-            or ``"isolatitude"``), by default ``"earth2grid"``.
-        nside: Face height/width per decoder level (shallowest to deepest), or
-            ``None`` to omit per-level padding resolution.
     """
 
     conv_block: ConvBlockConfig
@@ -50,90 +44,54 @@ class UNetDecoderConfig:
     output_layer: ConvBlockConfig
     n_channels: List[int] = dataclasses.field(default_factory=lambda: [34, 68, 136])
     n_layers: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 2])
-    output_channels: int = 1
     dilations: Optional[list] = None
-    enable_nhwc: bool = False
-    hpx_padding_mode: Literal["earth2grid", "karlbauer", "isolatitude"] = "earth2grid"
-    nside: Optional[Sequence[int]] = None
 
-    def build(self) -> nn.Module:
+    def build(
+        self,
+        output_channels: int,
+        *,
+        ctx: HEALPixBuildContext,
+    ) -> nn.Module:
         """
         Builds the UNet Decoder model.
+
+        Args:
+            output_channels: Number of output channels (determined at build time).
+            ctx: Shared HEALPix runtime settings for all child modules.
 
         Returns:
             UNet Decoder model.
         """
-        return UNetDecoder(
-            conv_block=self.conv_block,
-            up_sampling_block=self.up_sampling_block,
-            output_layer=self.output_layer,
-            n_channels=self.n_channels,
-            n_layers=self.n_layers,
-            output_channels=self.output_channels,
-            dilations=self.dilations,
-            enable_nhwc=self.enable_nhwc,
-            hpx_padding_mode=self.hpx_padding_mode,
-            nside=self.nside,
-        )
+        nside_levels = ctx.nside_levels
+        if nside_levels is not None and len(nside_levels) != len(self.n_channels):
+            raise ValueError(
+                f"nside length must match decoder levels; got {len(nside_levels)} "
+                f"vs {len(self.n_channels)}"
+            )
+        return self._build(output_channels, ctx=ctx)
 
-
-class UNetDecoder(nn.Module):
-    """Generic UNetDecoder that can be applied to arbitrary meshes."""
-
-    def __init__(
+    def _build(
         self,
-        conv_block: ConvBlockConfig,
-        up_sampling_block: UpsamplingBlockConfig,
-        output_layer: ConvBlockConfig,
-        n_channels: Sequence = (64, 32, 16),
-        n_layers: Sequence = (1, 2, 2),
-        output_channels: int = 1,
-        dilations: Optional[list] = None,
-        enable_nhwc: bool = False,
-        hpx_padding_mode: Literal[
-            "earth2grid", "karlbauer", "isolatitude"
-        ] = "earth2grid",
-        nside: Optional[Sequence[int]] = None,
-    ):
-        """
-        Initialize the UNetDecoder.
+        output_channels: int,
+        *,
+        ctx: HEALPixBuildContext,
+    ) -> "UNetDecoder":
+        """Construct the ordered per-level decoder modules plus output layer.
 
-        Args:
-            conv_block: Configuration for the convolutional block.
-            up_sampling_block: Configuration for the upsampling block.
-            output_layer: Configuration for the output layer.
-            n_channels: Sequence specifying the number of channels in each decoder layer.
-            n_layers: Sequence specifying the number of layers in each block.
-            output_channels: Number of output channels.
-            dilations: List of dilations to use for the convolutional blocks.
-            enable_nhwc: If True, use channel last format.
-            hpx_padding_mode: HEALPix padding backend. Default ``"earth2grid"``;
-                also supports ``"karlbauer"`` and ``"isolatitude"``.
-            nside: Face height/width per level (shallowest to deepest). Length must
-                match ``len(n_channels)`` when set. Decoder stage ``n`` (deepest first)
-                uses ``nside[-(n + 1)]``.
+        Builds one :class:`DecoderLevel` per level (threading channel counts and
+        validating the nside upsample ratios) and the output layer, then passes
+        the built modules to :class:`UNetDecoder`.
         """
-        super().__init__()
-        self.channel_dim = 1
-
+        dilations = self.dilations
         if dilations is None:
-            dilations = [1 for _ in range(len(n_channels))]
+            dilations = [1 for _ in range(len(self.n_channels))]
 
-        nside_levels: Optional[tuple[int, ...]] = None
-        if nside is not None:
-            nside_levels = tuple(int(v) for v in nside)
-            if len(nside_levels) != len(n_channels):
-                raise ValueError(
-                    f"nside length must match decoder levels; got {len(nside_levels)} "
-                    f"vs {len(n_channels)}"
-                )
-
-        conv_tpl = dataclasses.replace(conv_block)
-        up_tpl = dataclasses.replace(up_sampling_block)
-        up_factor = up_tpl.stride
+        nside_levels = ctx.nside_levels
+        up_factor = self.up_sampling_block.stride
+        n_channels = self.n_channels
         n_levels = len(n_channels)
 
-        self.decoder = []
+        decoder: list[DecoderLevel] = []
         for n, curr_channel in enumerate(n_channels):
             up_sample_module = None
             level_nside = (
@@ -149,71 +107,110 @@ class UNetDecoder(nn.Module):
                             f"must equal nside[{n_levels - n}] * upsample factor "
                             f"({up_factor}), but nside[{n_levels - n}]={before}"
                         )
-                up_cfg = dataclasses.replace(
-                    up_tpl,
+                up_sample_module = self.up_sampling_block.build(
                     in_channels=curr_channel,
                     out_channels=curr_channel,
-                    enable_nhwc=enable_nhwc,
-                    hpx_padding_mode=hpx_padding_mode,
-                    nside=None if nside_levels is None else nside_levels[n_levels - n],
-                    nside_after=level_nside,
+                    ctx=ctx.layer(
+                        n_levels - n,
+                        nside_after=level_nside,
+                    ),
                 )
-                up_sample_module = up_cfg.build()
 
             next_channel = (
                 n_channels[n + 1] if n < len(n_channels) - 1 else n_channels[-1]
             )
 
-            conv_cfg = dataclasses.replace(
-                conv_tpl,
+            conv_module = self.conv_block.build(
                 in_channels=curr_channel * 2 if n > 0 else curr_channel,
-                latent_channels=curr_channel,
                 out_channels=next_channel,
+                latent_channels=curr_channel,
                 dilation=dilations[n],
-                n_layers=n_layers[n],
-                enable_nhwc=enable_nhwc,
-                hpx_padding_mode=hpx_padding_mode,
-                nside=level_nside,
-            )
-            conv_module = conv_cfg.build()
-
-            self.decoder.append(
-                nn.ModuleDict(
-                    {
-                        "upsamp": up_sample_module,
-                        "conv": conv_module,
-                    }
-                )
+                n_layers=self.n_layers[n],
+                ctx=ctx.layer(n_levels - 1 - n),
             )
 
-        self.decoder = nn.ModuleList(self.decoder)
+            decoder.append(DecoderLevel(upsamp=up_sample_module, conv=conv_module))
 
-        out_nside = None if nside_levels is None else nside_levels[0]
-        out_cfg = dataclasses.replace(
-            output_layer,
+        output_layer = self.output_layer.build(
             in_channels=curr_channel,
             out_channels=output_channels,
             dilation=dilations[-1],
-            enable_nhwc=enable_nhwc,
-            hpx_padding_mode=hpx_padding_mode,
-            nside=out_nside,
+            ctx=ctx.layer(0),
         )
-        self.output_layer = out_cfg.build()
 
-    def forward(self, inputs: Sequence[th.Tensor]) -> th.Tensor:
+        return UNetDecoder(
+            decoder=decoder,
+            output_layer=output_layer,
+        )
+
+
+class DecoderLevel(nn.Module):
+    """One decoder level: optional upsample + skip-concat, then a conv block.
+
+    The deepest level (built first, ``upsamp is None``) receives the encoder
+    bottleneck and applies only its conv block. Each shallower level upsamples
+    the running activation, concatenates the matching encoder skip connection
+    along the channel dimension, then applies its conv block. Bundling the
+    upsample and conv into one module keeps this per-level branching structure
+    with the module that runs it, so :class:`UNetDecoder.forward` never reaches
+    into the level's internals.
+    """
+
+    def __init__(self, upsamp: Optional[nn.Module], conv: nn.Module):
+        super().__init__()
+        self.upsamp = upsamp
+        self.conv = conv
+        self.channel_dim = 1
+
+    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Running activation from the deeper level.
+            skip: Matching encoder skip connection (unused when ``upsamp`` is
+                ``None``, i.e. the deepest level).
+        """
+        if self.upsamp is not None:
+            x = torch.cat([self.upsamp(x), skip], dim=self.channel_dim)
+        return self.conv(x)
+
+
+class UNetDecoder(nn.Module):
+    """Applies the decoder levels deepest-to-shallowest, then the output layer.
+
+    Receives the ordered per-level :class:`DecoderLevel` modules and the output
+    layer already built by :meth:`UNetDecoderConfig._build`; it constructs
+    nothing itself, so it is directly constructible from its signature and its
+    ``forward`` needs no knowledge of how the levels were assembled.
+    """
+
+    def __init__(
+        self,
+        decoder: list[DecoderLevel],
+        output_layer: nn.Module,
+    ):
+        """
+        Args:
+            decoder: Ordered per-level :class:`DecoderLevel` modules built by
+                :meth:`UNetDecoderConfig._build`; wrapped in an
+                ``nn.ModuleList`` here for submodule registration.
+            output_layer: Final output-projection module.
+        """
+        super().__init__()
+        self.decoder = nn.ModuleList(decoder)
+        self.output_layer = output_layer
+
+    def forward(self, inputs: Sequence[torch.Tensor]) -> torch.Tensor:
         """
         Forward pass of the UNetDecoder.
 
         Args:
-            inputs: Sequence of tensors, one for each decoder level.
+            inputs: Sequence of tensors, one per decoder level (encoder outputs,
+                shallow-to-deep).
 
         Returns:
             The decoded values.
         """
         x = inputs[-1]
-        for n, layer in enumerate(self.decoder):
-            if layer["upsamp"] is not None:
-                up = layer["upsamp"](x)
-                x = th.cat([up, inputs[-1 - n]], dim=self.channel_dim)
-            x = layer["conv"](x)
+        for n, level in enumerate(self.decoder):
+            x = level(x, inputs[-1 - n])
         return self.output_layer(x)

@@ -153,6 +153,9 @@ class LoggingConfig:
         notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(
             config=config_copy,
+            # wandb reads WANDB_NAME only on the first init in a process, so pass
+            # it explicitly for later runs (e.g. segments) to be named correctly.
+            name=os.environ.get("WANDB_NAME"),
             project=self.project,
             entity=self.entity,
             experiment_dir=experiment_dir,

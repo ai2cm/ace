@@ -1,5 +1,4 @@
 import contextlib
-import dataclasses
 import os
 import signal
 import unittest.mock
@@ -10,6 +9,7 @@ import pytest
 import torch
 
 from fme.core.device import get_device
+from fme.core.distributed.shutdown import handle_termination_signals
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -25,8 +25,8 @@ from fme.core.generics.trainer import (
     AggregatorBuilderABC,
     CheckpointPaths,
     InferenceTask,
-    TrainConfigProtocol,
     Trainer,
+    TrainerParams,
     TrainOutputABC,
     TrainStepperABC,
     ValidationTask,
@@ -166,6 +166,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         self.loaded_state: dict[str, Any] | None = None
         self.train_batches_seen: list[int] = []
         self.validation_batches_seen: list[int] = []
+        self.validation_evaluate_all_steps_seen: list[bool] = []
 
     def get_state(self) -> dict[str, Any]:
         return {**self._state, "modules": self._modules.state_dict()}
@@ -211,6 +212,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         optimization.step_weights()
         if isinstance(optimization, NullOptimization):
             self.validation_batches_seen.append(batch.i)
+            self.validation_evaluate_all_steps_seen.append(evaluate_all_steps)
         else:
             self.train_batches_seen.append(batch.i)
         return TrainOutput()
@@ -226,35 +228,6 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
 
     def update_training_history(self, *args: Any, **kwargs: Any) -> None:
         pass
-
-
-@dataclasses.dataclass
-class Config:
-    experiment_dir: str = "test_experiment_dir"
-    checkpoint_dir: str = "test_checkpoint_dir"
-    output_dir: str = "test_output_dir"
-    max_epochs: int = 2
-    save_checkpoint: bool = True
-    validate_using_ema: bool = True
-    log_train_every_n_batches: int = 1
-    checkpoint_every_n_batches: int = 0
-    train_evaluation_batches: int = 2
-    inference_n_forward_steps: int = 1
-    checkpoint_save_epochs: Slice | None = None
-    ema_checkpoint_save_epochs: Slice | None = None
-    segment_epochs: int | None = None
-    evaluate_before_training: bool = False
-    save_best_inference_epoch_checkpoints: bool = False
-    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
-    lr_tuning: LRTuningConfig | None = None
-    pre_cooldown_checkpoint_epoch: int | None = None
-
-    def __post_init__(self):
-        start_epoch = 0 if self.evaluate_before_training else 1
-        self._inference_epochs = [i for i in range(start_epoch, self.max_epochs + 1)]
-
-
-_: TrainConfigProtocol = Config()
 
 
 class TrainAggregator(AggregatorABC[TrainOutput]):
@@ -364,7 +337,7 @@ def get_trainer(
     resume_optimizer_ckpt_path: str | None = None,
     resume_ema_ckpt_path: str | None = None,
     lr: float = 0.01,
-) -> tuple[TrainConfigProtocol, Trainer]:
+) -> tuple[TrainerParams, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
     if train_losses is None:
@@ -439,19 +412,21 @@ def get_trainer(
     def build_ema(modules: torch.nn.ModuleList) -> EMATracker:
         return ema_config.build(modules)
 
-    config = Config(
+    config = TrainerParams(
         experiment_dir=tmp_path,
         checkpoint_dir=checkpoint_dir,
         checkpoint_save_epochs=checkpoint_save_epochs,
+        ema_checkpoint_save_epochs=None,
         checkpoint_every_n_batches=checkpoint_every_n_batches,
         segment_epochs=segment_epochs,
         max_epochs=max_epochs,
         validate_using_ema=validate_using_ema,
+        log_train_every_n_batches=1,
+        train_evaluation_batches=2,
         evaluate_before_training=evaluate_before_training,
         save_best_inference_epoch_checkpoints=save_best_inference_epoch_checkpoints,
         pre_cooldown_checkpoint_epoch=pre_cooldown_checkpoint_epoch,
         save_checkpoint=save_checkpoint,
-        ema=ema_config,
         lr_tuning=lr_tuning,
     )
     aggregator_builder = AggregatorBuilder(
@@ -459,7 +434,8 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    inference_epochs = config._inference_epochs
+    start_epoch = 0 if evaluate_before_training else 1
+    inference_epochs = list(range(start_epoch, max_epochs + 1))
 
     def validation_callback(epoch: int) -> tuple[dict[str, Any], float]:
         validation_data.set_epoch(epoch)
@@ -518,7 +494,7 @@ def get_trainer(
         stepper=stepper,
         build_optimization=build_optimization,
         build_ema=build_ema,
-        config=config,
+        params=config,
         aggregator_builder=aggregator_builder,
         validation_callback=validation_callback,
         end_of_batch_callback=unittest.mock.MagicMock(),
@@ -631,10 +607,13 @@ def preempt_after_calls_patch(object, method: str, call_count: int):
 
     with unittest.mock.patch.object(object, method) as mock:
         mock.side_effect = wrapper
-        try:
-            yield mock
-        except SystemExit:
-            pass
+        # the handler that turns SIGTERM into a restart checkpoint is installed
+        # by Distributed.context() around the whole job in production
+        with handle_termination_signals(shutdown=lambda: None):
+            try:
+                yield mock
+            except SystemExit:
+                pass
 
 
 @pytest.mark.parametrize(
@@ -1663,7 +1642,7 @@ class TestBuildValidationCallback:
     """
 
     @staticmethod
-    def _make_task(name, weight=1.0, aggregator=None):
+    def _make_task(name, weight=1.0, aggregator=None, evaluate_all_steps=True):
         data = unittest.mock.MagicMock()
         if aggregator is None:
             aggregator = unittest.mock.MagicMock()
@@ -1672,6 +1651,7 @@ class TestBuildValidationCallback:
             data=data,
             aggregator_factory=lambda: aggregator,
             weight=weight,
+            evaluate_all_steps=evaluate_all_steps,
         )
 
     @staticmethod
@@ -1774,6 +1754,27 @@ class TestBuildValidationCallback:
         )
         for task in tasks:
             task.data.set_epoch.assert_called_once_with(7)
+
+    def test_per_task_evaluate_all_steps_passed_to_run_validation(self):
+        tasks = [
+            self._make_task("a"),
+            self._make_task("b", evaluate_all_steps=False),
+        ]
+        stepper = unittest.mock.MagicMock()
+        with unittest.mock.patch(
+            "fme.core.generics.trainer.run_validation",
+            side_effect=[
+                AggregatorSummary(logs={"a/mean/loss": 0.1}, loss=0.1),
+                AggregatorSummary(logs={"b/mean/loss": 0.2}, loss=0.2),
+            ],
+        ) as mock_run_validation:
+            callback = build_validation_callback(tasks=tasks, stepper=stepper)
+            callback(epoch=1)
+        flags = [
+            call.kwargs["evaluate_all_steps"]
+            for call in mock_run_validation.call_args_list
+        ]
+        assert flags == [True, False]
 
     def test_aggregator_factory_called_per_invocation(self):
         factory = unittest.mock.MagicMock(return_value=unittest.mock.MagicMock())

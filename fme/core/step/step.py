@@ -12,7 +12,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.step.args import StepArgs
-from fme.core.stepper_state import StepperState
+from fme.core.step.output import StepOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -110,6 +110,14 @@ class StepConfigABC(abc.ABC):
     @abc.abstractmethod
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         """Replace prescribed prognostic names (e.g. when loading from checkpoint)."""
+
+    @abc.abstractmethod
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        """Names of prognostic variables overwritten from forcing data each step.
+
+        The getter half of ``replace_prescribed_prognostic_names``. Wrapping
+        step configs (e.g. multi-call) delegate to the wrapped config.
+        """
 
     @property
     @abc.abstractmethod
@@ -218,6 +226,9 @@ class StepSelector(StepConfigABC):
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
         self._step_config_instance.replace_prescribed_prognostic_names(names)
         self.config = dataclasses.asdict(self._step_config_instance)
+
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self._step_config_instance.get_prescribed_prognostic_names()
 
     @property
     def allow_missing_variables(self) -> bool:
@@ -356,39 +367,12 @@ class StepABC(abc.ABC):
         """
         pass
 
-    def make_input_dropout_mask(
-        self, batch_size: int, device: torch.device
-    ) -> TensorMapping | None:
-        """
-        Sample a synthetic input-dropout presence mask, if configured.
-
-        The returned mapping is keyed by this Step's packed input channel
-        names, with ``[batch_size]`` bool values (True = present, False =
-        synthetically dropped). This is a sampling hook, not application: the
-        sampled mask is passed back to the Step via
-        ``StepArgs.input_dropout_mask``.
-
-        Returns ``None`` when input dropout is not configured, or when the
-        Step's module is in eval mode (dropout is training-only). Because the
-        result is mode-dependent and random, use ``has_input_dropout`` to
-        detect configuration instead of this method.
-        """
-        return None
-
-    def has_input_dropout(self) -> bool:
-        """
-        Whether this Step has input dropout configured.
-
-        Non-random and mode-independent, unlike ``make_input_dropout_mask``.
-        """
-        return False
-
     @abc.abstractmethod
     def step(
         self: SelfType,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -397,9 +381,9 @@ class StepABC(abc.ABC):
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            A tuple ``(output, stepper_state)`` where ``output`` is the
-            denormalized data at the next time step and ``stepper_state`` is
-            the per-sample state to thread into the next call (or ``None``).
+            A ``StepOutput`` carrying the denormalized data at the next time
+            step, the per-sample state to thread into the next call (or
+            ``None``), and the corrector's per-variable correction diagnostics.
         """
         pass
 

@@ -25,11 +25,7 @@ from fme.ace.stepper.parameter_init import (
     null_weights_and_history,
 )
 from fme.ace.stepper.time_length_probabilities import TimeLength, TimeLengthSchedule
-from fme.core.coordinates import (
-    NullPostProcessFn,
-    SerializableVerticalCoordinate,
-    VerticalCoordinate,
-)
+from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.schedule import IntSchedule
@@ -47,8 +43,13 @@ from fme.core.normalizer import (
 )
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.rand import use_generator
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.spatial_masking import NullSpatialMasking, StaticSpatialMaskingConfig
+from fme.core.spatial_masking import (
+    NullSpatialMasking,
+    SpatialMasking,
+    StaticSpatialMaskingConfig,
+)
 from fme.core.step.args import StepArgs
 from fme.core.step.global_mean_removal import GlobalMeanRemovalConfigUnion
 from fme.core.step.multi_call import (
@@ -56,6 +57,7 @@ from fme.core.step.multi_call import (
     MultiCallStepConfig,
     replace_multi_call,
 )
+from fme.core.step.output import StepOutput
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.stepper_state import StepperState
@@ -482,21 +484,6 @@ def stack_list_of_tensor_dicts(
     return stack_dict
 
 
-def _repeat_interleaved_tensor_mapping(
-    mask: TensorMapping | None, n_ensemble: int
-) -> TensorMapping | None:
-    """Expand a per-base-sample mask to the folded ensemble batch dimension.
-
-    Each row is repeated ``n_ensemble`` times (interleaved), matching
-    ``broadcast_ensemble``, so ensemble members of a base sample share the
-    same mask. Returns ``None`` unchanged so the no-dropout path stays a clean
-    pass-through.
-    """
-    if mask is None:
-        return None
-    return {k: v.repeat_interleave(n_ensemble, dim=0) for k, v in mask.items()}
-
-
 def process_ensemble_prediction_generator_list(
     output_list: list[EnsembleTensorDict],
 ) -> EnsembleTensorDict:
@@ -509,7 +496,7 @@ def process_ensemble_prediction_generator_list(
 
 
 def process_prediction_generator_list(
-    output_list: list[tuple[TensorDict, StepperState | None]],
+    output_list: list[StepOutput],
     time: xr.DataArray,
     n_ensemble: int,
     labels: BatchLabels | None = None,
@@ -521,8 +508,8 @@ def process_prediction_generator_list(
     ``output_list``) to the returned BatchData so it can propagate to the
     next ``Stepper.predict`` call.
     """
-    output_dicts = [item[0] for item in output_list]
-    terminal_state = output_list[-1][1] if output_list else None
+    output_dicts = [item.output for item in output_list]
+    terminal_state = output_list[-1].stepper_state if output_list else None
     output_timeseries = stack_list_of_tensor_dicts(output_dicts, time_dim=1)
     return BatchData.new_on_device(
         data=output_timeseries,
@@ -559,7 +546,7 @@ class StepperConfig:
         self, n_forward_steps: int | IntSchedule
     ) -> DataRequirements:
         requirements = DataRequirements(
-            names=self.all_names,
+            names=list(self.all_names),
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
         )
@@ -572,16 +559,14 @@ class StepperConfig:
         )
 
     @property
-    def input_only_names(self) -> list[str]:
-        return list(set(self.input_names) - set(self.output_names))
+    def input_only_names(self) -> set[str]:
+        return set(self.input_names) - set(self.output_names)
 
     def get_forcing_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
         requirements = DataRequirements(
-            names=list(
-                set(self.input_only_names).union(self.step.next_step_input_names)
-            ),
+            names=list(self.input_only_names.union(self.step.next_step_input_names)),
             n_timesteps=self._window_steps_required(n_forward_steps),
             allow_missing_variables=self.step.allow_missing_variables,
         )
@@ -635,17 +620,17 @@ class StepperConfig:
                 means=step.normalizer.means,
             )
         try:
-            output_process_func = (
+            output_masking: SpatialMasking = (
                 dataset_info.spatial_mask_provider.build_output_spatial_masker()
             )
         except MissingDatasetInfo:
-            output_process_func = NullPostProcessFn()
+            output_masking = NullSpatialMasking()
         return Stepper(
             config=self,
             step=step,
             dataset_info=dataset_info,
             input_process_func=input_masking,
-            output_process_func=output_process_func,
+            output_masking=output_masking,
             derive_func=derive_func,
             parameter_initializer=parameter_initializer,
             training_history=training_history,
@@ -704,9 +689,9 @@ class StepperConfig:
         return self.step.input_names
 
     @property
-    def all_names(self) -> list[str]:
+    def all_names(self) -> set[str]:
         """Names of all variables."""
-        return list(set(self.input_names + self.output_names))
+        return set(self.input_names).union(self.output_names)
 
     @property
     def next_step_forcing_names(self) -> list[str]:
@@ -756,6 +741,9 @@ class StepperConfig:
         prescribed_prognostic_names.
         """
         self.step.replace_prescribed_prognostic_names(names)
+
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self.step.get_prescribed_prognostic_names()
 
     def replace_multi_call(
         self, multi_call: MultiCallConfig | None, state: dict[str, Any]
@@ -826,7 +814,7 @@ class Stepper:
         step: StepABC,
         dataset_info: DatasetInfo,
         input_process_func: Callable[[TensorMapping], TensorDict],
-        output_process_func: Callable[[TensorMapping], TensorDict],
+        output_masking: SpatialMasking,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         parameter_initializer: ParameterInitializer,
         training_history: TrainingHistory | None = None,
@@ -836,8 +824,8 @@ class Stepper:
             config: The configuration.
             step: The step object.
             dataset_info: Information about dataset used for training.
-            output_process_func: Function to post-process the output of the step
-                function.
+            output_masking: Spatial masking applied to the step output and to
+                the corrector diagnostics carried alongside it.
             derive_func: Function to compute derived variables.
             input_process_func: Optional function for processing inputs and next-step
                 inputs before passing them to the step object, e.g., by masking
@@ -850,7 +838,7 @@ class Stepper:
         self._step_obj = step
         self._dataset_info = dataset_info
         self._derive_func = derive_func
-        self._output_process_func = output_process_func
+        self._output_masking = output_masking
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
         self._parameter_initializer = parameter_initializer
@@ -933,14 +921,6 @@ class Stepper:
         """
         return self._step_obj.prescribe_sst(mask_data, gen_data, target_data)
 
-    def make_input_dropout_mask(
-        self, batch_size: int, device: torch.device
-    ) -> TensorMapping | None:
-        return self._step_obj.make_input_dropout_mask(batch_size, device)
-
-    def has_input_dropout(self) -> bool:
-        return self._step_obj.has_input_dropout()
-
     @property
     def training_dataset_info(self) -> DatasetInfo:
         return self._dataset_info
@@ -1012,6 +992,9 @@ class Stepper:
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return self._config.get_prescribed_prognostic_names()
+
     def replace_derived_forcings(self, derived_forcings: DerivedForcingsConfig):
         """
         Replace the derived forcings configuration with a new one.
@@ -1063,7 +1046,7 @@ class Stepper:
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
         """
         Step the model forward one timestep given input data.
 
@@ -1072,13 +1055,24 @@ class Stepper:
             wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
-            A tuple ``(output, stepper_state)`` where ``output`` is the
-            denormalized data at the next time step and ``stepper_state`` is
-            the per-sample state to thread into the next call (or ``None``).
+            A ``StepOutput`` carrying the denormalized data at the next time
+            step, the per-sample state to thread into the next call (or
+            ``None``), and the corrector's per-variable correction diagnostics,
+            spatially masked consistently with the output.
         """
         args = args.apply_input_process_func(self._input_process_func)
-        output, stepper_state = self._step_obj.step(args=args, wrapper=wrapper)
-        return self._output_process_func(output), stepper_state
+        random_state = (
+            args.stepper_state.random_state if args.stepper_state is not None else None
+        )
+        with use_generator(None if random_state is None else random_state.generator):
+            result = self._step_obj.step(args=args, wrapper=wrapper)
+        return StepOutput(
+            output=self._output_masking(result.output),
+            stepper_state=result.stepper_state,
+            corrector_diagnostics=result.corrector_diagnostics.apply_output_masking(
+                self._output_masking
+            ),
+        )
 
     def get_prediction_generator(
         self,
@@ -1086,7 +1080,7 @@ class Stepper:
         forcing_data: BatchData,
         n_forward_steps: int,
         optimizer: OptimizationABC,
-    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
+    ) -> Generator[StepOutput, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -1103,7 +1097,7 @@ class Stepper:
             optimizer: The optimizer to use for updating the module.
 
         Returns:
-            Generator yielding (output, stepper_state) tuples at each timestep.
+            Generator yielding a ``StepOutput`` at each timestep.
         """
         ic_batch_data = initial_condition.as_batch_data()
         if ic_batch_data.labels != forcing_data.labels:
@@ -1124,10 +1118,8 @@ class Stepper:
         )
 
     @property
-    def _input_only_names(self) -> list[str]:
-        return list(
-            set(self._step_obj.input_names).difference(set(self._step_obj.output_names))
-        )
+    def _input_only_names(self) -> set[str]:
+        return set(self._step_obj.input_names).difference(self._step_obj.output_names)
 
     def predict_generator(
         self,
@@ -1138,8 +1130,7 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
-        input_dropout_mask: TensorMapping | None = None,
-    ) -> Generator[tuple[TensorDict, StepperState | None], None, None]:
+    ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
             input_forcing = {
@@ -1160,18 +1151,19 @@ class Stepper:
                 return optimizer.checkpoint(module, step=step)
 
             with optimizer.autocast():
-                state, stepper_state = self.step(
+                result = self.step(
                     StepArgs(
                         input=input_data,
                         next_step_input_data=next_step_input_dict,
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
-                        input_dropout_mask=input_dropout_mask,
                     ),
                     wrapper=checkpoint,
                 )
-            yield state, stepper_state
+            state = result.output
+            stepper_state = result.stepper_state
+            yield result
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
     def predict(
@@ -1203,7 +1195,7 @@ class Stepper:
             which can be used as a new initial condition.
         """
         timer = GlobalTimer.get_instance()
-        forcing_names = set(self._input_only_names).union(
+        forcing_names = self._input_only_names.union(
             self._step_obj.next_step_input_names
         )
 
@@ -1250,6 +1242,11 @@ class Stepper:
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
         prognostic_state = data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        # Attach the stacked per-step diagnostics only at this final
+        # reconstruction, after the derived-variables prepend/remove dance:
+        # here the data and the series are both n_forward_steps long and
+        # time-aligned, so the diagnostics never pass through a time-changing
+        # BatchData method (which would raise).
         data = BatchData.new_on_device(
             data=data.data,
             time=data.time,
@@ -1257,6 +1254,7 @@ class Stepper:
             labels=data.labels,
             n_ensemble=data.n_ensemble,
             stepper_state=data.stepper_state,
+            step_diagnostics=StepOutput.stack_diagnostics(output_list),
         )
         return data, prognostic_state
 
@@ -1689,15 +1687,6 @@ class TrainStepper(
                 "Initial condition and forcing data must have the same labels, "
                 f"got {input_batch_data.labels} and {data.labels}."
             )
-        # Sample and broadcast the synthetic input-dropout mask for the ensemble batch.
-        sample_tensor = next(iter(input_batch_data.data.values()))
-        input_dropout_mask = _repeat_interleaved_tensor_mapping(
-            self._stepper.make_input_dropout_mask(
-                batch_size=sample_tensor.shape[0],
-                device=sample_tensor.device,
-            ),
-            n_ensemble,
-        )
         input_ensemble_data = input_data.as_batch_data().broadcast_ensemble(n_ensemble)
         forcing_ensemble_data = data.broadcast_ensemble(n_ensemble)
         output_generator = self._stepper.predict_generator(
@@ -1708,7 +1697,6 @@ class TrainStepper(
             labels=input_ensemble_data.labels,
             data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
-            input_dropout_mask=input_dropout_mask,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)
@@ -1723,7 +1711,7 @@ class TrainStepper(
                 contextlib.nullcontext() if optimize_step else torch.no_grad()
             )
             with grad_context:
-                gen_step, _ = next(output_iterator)
+                gen_step = next(output_iterator).output
                 gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
                 output_list.append(gen_step)
                 target_step = add_ensemble_dim(
@@ -1820,15 +1808,6 @@ class TrainStepper(
         return self._stepper.predict_paired(
             initial_condition, forcing, compute_derived_variables
         )
-
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        """
-        Effective loss scalings used to normalize outputs before computing loss.
-        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i.
-        """
-        return self._loss_obj.effective_loss_scaling
 
     def seed_eval(self, seed: int) -> None:
         self._loss_schedule.seed_eval(seed)
@@ -1941,32 +1920,38 @@ def load_stepper(
         The stepper serialized in the checkpoint, with appropriate options
         overridden.
     """
-    if override_config is None:
-        override_config = StepperOverrideConfig()
-
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     stepper = Stepper.from_state(checkpoint["stepper"])
+    apply_stepper_override(stepper, override_config)
+    return stepper
 
+
+def apply_stepper_override(
+    stepper: Stepper, override_config: StepperOverrideConfig | None = None
+) -> None:
+    """Apply optional inference-time overrides to a loaded stepper.
+
+    Used by load_stepper and by coupled inference when loading component steppers.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
     if override_config.ocean != "keep":
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
         )
         stepper.replace_ocean(override_config.ocean)
-
     if override_config.multi_call != "keep":
         logging.info(
             "Overriding training multi_call configuration with a new "
             "multi_call configuration."
         )
         stepper.replace_multi_call(override_config.multi_call)
-
     if override_config.derived_forcings != "keep":
         logging.info(
             "Overriding training derived_forcings configuration with a new "
             "derived_forcings configuration."
         )
         stepper.replace_derived_forcings(override_config.derived_forcings)
-
     if override_config.prescribed_prognostic_names != "keep":
         logging.info(
             "Overriding prescribed_prognostic_names with %s.",
@@ -1975,4 +1960,42 @@ def load_stepper(
         stepper.replace_prescribed_prognostic_names(
             override_config.prescribed_prognostic_names
         )
-    return stepper
+
+
+def apply_stepper_override_to_stepper_config(
+    stepper_config: StepperConfig,
+    override_config: StepperOverrideConfig | None = None,
+) -> None:
+    """Apply optional inference-time overrides to a ``StepperConfig``.
+
+    Mirrors :func:`apply_stepper_override` for a config that is not backed by a
+    built ``Stepper`` (e.g. when computing data requirements before loading
+    weights). A ``multi_call`` override is rejected because replacing it needs
+    the serialized step state, which only a full ``Stepper`` carries.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
+    if override_config.ocean != "keep":
+        logging.info(
+            "Overriding training ocean configuration with a new ocean configuration."
+        )
+        stepper_config.replace_ocean(override_config.ocean)
+    if override_config.multi_call != "keep":
+        raise ValueError(
+            "StepperOverrideConfig.multi_call cannot be applied to a StepperConfig "
+            "without a built Stepper; load the full Stepper to override multi_call."
+        )
+    if override_config.derived_forcings != "keep":
+        logging.info(
+            "Overriding training derived_forcings configuration with a new "
+            "derived_forcings configuration."
+        )
+        stepper_config.replace_derived_forcings(override_config.derived_forcings)
+    if override_config.prescribed_prognostic_names != "keep":
+        logging.info(
+            "Overriding prescribed_prognostic_names with %s.",
+            override_config.prescribed_prognostic_names,
+        )
+        stepper_config.replace_prescribed_prognostic_names(
+            override_config.prescribed_prognostic_names
+        )

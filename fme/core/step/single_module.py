@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
@@ -29,6 +30,7 @@ from fme.core.step.global_mean_removal import (
     NoGlobalMeanRemoval,
     extra_channel_source_field,
 )
+from fme.core.step.output import StepOutput
 from fme.core.step.secondary_decoder import (
     NoSecondaryDecoder,
     SecondaryDecoder,
@@ -37,7 +39,7 @@ from fme.core.step.secondary_decoder import (
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.stepper_state import StepperState
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.var_masking import VariableMaskingConfig
+from fme.core.var_masking import VariableMasking, VariableMaskingConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -73,8 +75,9 @@ class SingleModuleStepConfig(StepConfigABC):
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
         input_dropout: Optional training-time input channel dropout. When set,
-            a random subset of input channels is zeroed per sample during
-            training. Disabled during inference (eval mode).
+            a random subset of input channels is zeroed during training, with
+            the same mask broadcast across the whole batch. Disabled during
+            inference (eval mode).
     """
 
     builder: ModuleSelector
@@ -95,8 +98,6 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def __post_init__(self):
         self.crps_training = None  # unused, kept for backwards compatibility
-        if self.input_dropout is not None:
-            self.input_dropout.validate_names(self.in_names)
         if self.global_mean_removal is not None:
             self.global_mean_removal.validate_names(self.in_names, self.out_names)
         for name in self.prescribed_prognostic_names:
@@ -227,6 +228,9 @@ class SingleModuleStepConfig(StepConfigABC):
                 )
         self.prescribed_prognostic_names = names
 
+    def get_prescribed_prognostic_names(self) -> list[str]:
+        return list(self.prescribed_prognostic_names)
+
     @classmethod
     def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
@@ -292,6 +296,14 @@ class SingleModuleStep(StepABC):
         # flow through the packer and channel-mask machinery uniformly.
         packed_in_names = (
             list(config.in_names) + self._global_mean_removal.extra_channel_names
+        )
+        # Build the runtime masking object once; build raises loud on a typo'd
+        # group variable name (packed_in_names is the full maskable set: inputs
+        # plus GMR extra sentinels).
+        self._input_masking: VariableMasking | None = (
+            config.input_dropout.build(packed_in_names)
+            if config.input_dropout is not None
+            else None
         )
         n_in_channels = len(packed_in_names)
         if config.include_channel_mask_inputs:
@@ -388,12 +400,14 @@ class SingleModuleStep(StepABC):
         self,
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
-    ) -> tuple[TensorDict, StepperState | None]:
+    ) -> StepOutput:
+        input_dropout_mask = self._draw_input_dropout_mask()
+
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
                 input_norm = _apply_input_mask(input_norm, args.data_mask)
-            if args.input_dropout_mask is not None:
-                input_norm = _apply_input_mask(input_norm, args.input_dropout_mask)
+            if input_dropout_mask is not None:
+                input_norm = _apply_input_mask(input_norm, input_dropout_mask)
             input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
             # Fail loud if a NaN survives masking/normalization to the network
             # input (cf. PR #1262). Gated on grad-enabled so the no_grad
@@ -405,7 +419,7 @@ class SingleModuleStep(StepABC):
                     self.in_packer.names,
                     args.data_mask,
                     input_tensor,
-                    args.input_dropout_mask,
+                    input_dropout_mask,
                 )
                 mask_tensor = self.in_packer.pack(mask_dict, axis=self.CHANNEL_DIM)
                 input_tensor = torch.cat(
@@ -416,7 +430,7 @@ class SingleModuleStep(StepABC):
                 channel_mask = _build_channel_presence_vector(
                     self.in_packer.names,
                     args.data_mask,
-                    args.input_dropout_mask,
+                    input_dropout_mask,
                     input_tensor.shape[0],
                     input_tensor.device,
                     input_tensor.dtype,
@@ -456,27 +470,25 @@ class SingleModuleStep(StepABC):
             stepper_state=args.stepper_state,
         )
 
-    def make_input_dropout_mask(
-        self, batch_size: int, device: torch.device
-    ) -> TensorMapping | None:
-        if self._config.input_dropout is None:
+    def _draw_input_dropout_mask(self) -> TensorMapping | None:
+        """Draw a fresh input-dropout mask for this forward step.
+
+        Each ``step`` samples independently; the mask has no lifetime beyond
+        the call. Returns ``None`` (no dropout) when input dropout is
+        unconfigured or the module is in eval mode, so inference and
+        validation batches stay inert.
+        """
+        if self._input_masking is None:
             return None
         if not self.module.torch_module.training:
             return None
         names = self.in_packer.names
-        mask = self._config.input_dropout.sample_mask(
-            len(names), batch_size, device, channel_names=list(names)
-        )
-        # The mask is per-sample with no spatial dim, so it cannot be sliced
-        # per-tile. Under spatial/model parallelism every co-rank holds the same
-        # samples but advances torch.rand independently; broadcast the spatial
-        # root's mask so all tiles of a sample agree. Data-parallel ranks keep
-        # distinct masks (the backend broadcasts over the spatial group only).
+        mask = self._input_masking.sample_mask(get_device())
+        # Broadcast so spatial-group tiles agree; no-op for non-distributed
         mask = Distributed.get_instance().broadcast_spatial(mask)
-        return {name: mask[:, i] for i, name in enumerate(names)}
-
-    def has_input_dropout(self) -> bool:
-        return self._config.input_dropout is not None
+        # Emit only dropped channels; absent key means present, skips a no-op where.
+        present = mask[0].tolist()
+        return {name: mask[:, i] for i, name in enumerate(names) if not present[i]}
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
@@ -569,15 +581,15 @@ def _build_channel_presence_vector(
     The presence value is the AND-combined presence of the real ``data_mask``
     (genuinely-absent variables) and the synthetic ``input_dropout_mask``: a
     channel is present only if it is both really present and not synthetically
-    dropped. This is the same combination ``_build_channel_mask_dict`` uses for
-    the concat indicators, so the FiLM and concat paths condition on an
-    identical presence signal.
+    dropped. ``_build_channel_mask_dict`` expands this same vector into the
+    concat indicators, so the FiLM and concat paths condition on an identical
+    presence signal.
 
     Args:
-        in_names: Input variable names, in channel order.
+        in_names: Packed input channel names (incl. GMR extra sentinels).
         data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
-        input_dropout_mask: Per-channel synthetic dropout presence masks of
-            shape ``[batch]`` keyed by packed channel name, or None.
+        input_dropout_mask: Per-channel synthetic dropout presence masks
+            (broadcast over batch) keyed by packed channel name, or None.
         batch: Batch size.
         device: Device on which to build the tensor.
         dtype: Dtype of the resulting tensor.
@@ -593,14 +605,15 @@ def _build_channel_presence_vector(
             real = data_mask[lookup_name].to(device=device).bool()
         else:
             real = torch.ones(batch, device=device, dtype=torch.bool)
-        # Synthetic dropout is keyed by packed channel name directly (GMR
-        # extras are independently maskable), not by the source field.
+        # Synthetic dropout is keyed by the packed channel name itself. Its
+        # masks are broadcast over the batch, so expand to the batch length
+        # before stacking columns.
         if input_dropout_mask is not None and name in input_dropout_mask:
             synthetic = input_dropout_mask[name].to(device=device).bool()
             combined = real & synthetic
         else:
             combined = real
-        columns.append(combined.to(dtype=dtype))
+        columns.append(combined.expand(batch).to(dtype=dtype))
     return torch.stack(columns, dim=1)
 
 
@@ -626,8 +639,8 @@ def _build_channel_mask_dict(
         in_names: Packed input channel names (incl. GMR extra sentinels).
         data_mask: Per-variable boolean masks of shape ``[batch]``, or None.
         packed_input: The packed input tensor, used to infer shape and device.
-        input_dropout_mask: Per-channel synthetic dropout presence masks of
-            shape ``[batch]`` keyed by packed channel name, or None.
+        input_dropout_mask: Per-channel synthetic dropout presence masks
+            (broadcast over batch) keyed by packed channel name, or None.
     """
     batch = packed_input.shape[0]
     spatial = packed_input.shape[-2:]
@@ -656,7 +669,7 @@ def step_with_adjustments(
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
-) -> tuple[TensorDict, StepperState | None]:
+) -> StepOutput:
     """
     Step the model forward one timestep given input data.
 
@@ -687,12 +700,14 @@ def step_with_adjustments(
             ``global_mean_removal.forward_transform``.
         stepper_state: Per-sample state carried across step calls. The
             corrector's slice (``stepper_state.corrector_state``) is passed to
-            the corrector and any updates are written back into a returned
-            ``StepperState``. Pass-through unchanged when no corrector is set.
+            the corrector and any updates are written back into the returned
+            ``StepperState``; the other fields (e.g. ``random_state``) pass
+            through unchanged. Pass-through unchanged when no corrector is set.
 
     Returns:
-        A tuple ``(output, stepper_state)`` where ``output`` is the
-        denormalized data at the next time step.
+        A ``StepOutput`` carrying the denormalized data at the next time step,
+        the updated per-sample state, and the corrector's per-variable
+        correction diagnostics.
     """
     if prescribed_prognostic_names is None:
         prescribed_prognostic_names = []
@@ -715,15 +730,45 @@ def step_with_adjustments(
     if global_mean_removal is not None:
         assert gmr_state is not None
         output = global_mean_removal.inverse_transform(output, gmr_state)
+    diagnostics = CorrectorDiagnostics()
     if corrector is not None:
         corrector_state: CorrectorState | None = (
             stepper_state.corrector_state if stepper_state is not None else None
         )
-        output, corrector_state = corrector(
-            input, output, next_step_input_data, corrector_state
+        result = corrector(input, output, next_step_input_data, corrector_state)
+        output = result.corrected
+        # Detach the corrector diagnostic tensors.
+        diagnostics = CorrectorDiagnostics(
+            delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
         )
-        if corrector_state is not None:
-            stepper_state = StepperState(corrector_state=corrector_state)
+        if result.corrector_state is not None:
+            # Preserve the incoming state's other fields (e.g. random_state)
+            # rather than rebuilding from scratch, so StepperState stays
+            # coherent across step calls.
+            stepper_state = (
+                StepperState(corrector_state=result.corrector_state)
+                if stepper_state is None
+                else dataclasses.replace(
+                    stepper_state, corrector_state=result.corrector_state
+                )
+            )
+
+    # The ocean surface temperature prescription runs after the corrector and is
+    # excluded from the diagnostics. Its written name must stay disjoint from the
+    # corrector's modified names, or ``delta = output - input_snapshot`` would no
+    # longer be exact for an overlapping variable. A prescribed prognostic
+    # overwrite is exempt from this guard: it is an intentional "use the given
+    # value regardless of what the network or corrector produced" operation, and
+    # the corrector's delta for the overwritten variable is dropped below so the
+    # reported delta stays exact for every variable it still contains.
+    if ocean is not None:
+        overlap = {ocean.surface_temperature_name} & set(diagnostics.delta)
+        if overlap:
+            raise ValueError(
+                "post-corrector adjustment names overlap the corrector's modified "
+                f"names: {sorted(overlap)}"
+            )
+
     if ocean is not None:
         output = ocean(input, output, next_step_input_data)
     for name in prescribed_prognostic_names:
@@ -733,4 +778,20 @@ def step_with_adjustments(
             raise ValueError(
                 f"prescribed_prognostic_name '{name}' not in next_step_input_data"
             )
-    return output, stepper_state
+    # A prescribed overwrite replaces the output with the prescribed value, so the
+    # corrector's delta for that variable no longer describes the returned output.
+    # Drop prescribed names from the reported delta (a no-op for names the
+    # corrector never modified).
+    if prescribed_prognostic_names:
+        diagnostics = CorrectorDiagnostics(
+            delta={
+                name: value
+                for name, value in diagnostics.delta.items()
+                if name not in prescribed_prognostic_names
+            }
+        )
+    return StepOutput(
+        output=output,
+        stepper_state=stepper_state,
+        corrector_diagnostics=diagnostics,
+    )

@@ -38,7 +38,12 @@ from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import trivial_network_and_loss_normalization
 from fme.core.typing_ import TensorDict
-from fme.core.var_masking import PerVariableMaskingConfig
+from fme.core.var_masking import (
+    BernoulliMaskingConfig,
+    MaskingGroupConfig,
+    UniformMaskingConfig,
+    VariableMaskingConfig,
+)
 
 DEFAULT_IMG_SHAPE = (45, 90)
 
@@ -99,42 +104,6 @@ def get_single_module_noise_conditioned_selector(
                     secondary_diagnostic_names=["diagnostic_rad"],
                     network=ModuleSelector(type="MLP", config={}),
                 ),
-                normalization=normalization,
-            ),
-        ),
-    )
-
-
-def get_single_module_channel_mask_conditioned_selector(
-    dir: pathlib.Path | None = None,
-) -> StepSelector:
-    normalization = get_network_and_loss_normalization_config(
-        names=[
-            "forcing_shared",
-            "forcing_rad",
-            "diagnostic_main",
-        ],
-        dir=dir,
-    )
-    return StepSelector(
-        type="single_module",
-        config=dataclasses.asdict(
-            SingleModuleStepConfig(
-                builder=ModuleSelector(
-                    type="NoiseConditionedSFNO",
-                    config=dataclasses.asdict(
-                        NoiseConditionedSFNOBuilder(
-                            embed_dim=4,
-                            noise_embed_dim=4,
-                            noise_type="isotropic",
-                            num_layers=2,
-                            local_blocks=[0],
-                            condition_on_channel_mask=True,
-                        )
-                    ),
-                ),
-                in_names=["forcing_shared", "forcing_rad"],
-                out_names=["diagnostic_main"],
                 normalization=normalization,
             ),
         ),
@@ -245,9 +214,6 @@ def get_multi_call_selector(
 SELECTOR_GETTERS = {
     "sm_with_atmos_corr": get_single_module_with_atmosphere_corrector_selector,
     "sm_noise_conditioned": get_single_module_noise_conditioned_selector,
-    "sm_channel_mask_conditioned": (
-        get_single_module_channel_mask_conditioned_selector
-    ),
     "multi_call": get_multi_call_selector,
 }
 
@@ -492,12 +458,12 @@ def test_step_regression(
     input_data = dist.scatter_spatial(input_data, img_shape)
     next_step_input_data = dist.scatter_spatial(next_step_input_data, img_shape)
 
-    output, _ = step.step(
+    output = step.step(
         args=StepArgs(
             input=input_data, next_step_input_data=next_step_input_data, labels=labels
         ),
         wrapper=lambda x: x,
-    )
+    ).output
 
     # Gather local outputs back to global for comparison
     output = dist.gather_spatial(output, img_shape)
@@ -531,19 +497,38 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
                 in_names=in_names,
                 out_names=out_names,
                 normalization=get_network_and_loss_normalization_config(in_names),
-                input_dropout=PerVariableMaskingConfig(rate=0.5),
+                input_dropout=VariableMaskingConfig(
+                    default=UniformMaskingConfig(2),
+                    override_groups=[
+                        MaskingGroupConfig(
+                            variables=["a"], masking=BernoulliMaskingConfig(rate=0.5)
+                        ),
+                        MaskingGroupConfig(
+                            variables=["b"], masking=BernoulliMaskingConfig(rate=0.5)
+                        ),
+                    ],
+                ),
             )
         ),
     )
     step = get_step(selector, DEFAULT_IMG_SHAPE)
+    assert isinstance(step, SingleModuleStep)
     for module in step.modules:
         module.train()
     # Force per-rank RNG divergence to mimic real spatial-parallel training.
     torch.manual_seed(dist.rank)
-    batch_size = 3
-    mask = step.make_input_dropout_mask(batch_size, fme.get_device())
+    mask = step._draw_input_dropout_mask()
     assert mask is not None
-    stacked = torch.stack([mask[name].float() for name in in_names])  # [C, batch]
+    # Absent key means the channel is present (not dropped); reconstruct the
+    # full per-channel indicator so tiles that drop different channels compare.
+    stacked = torch.stack(
+        [
+            mask[name].float()
+            if name in mask
+            else torch.ones(1, device=fme.get_device())
+            for name in in_names
+        ]
+    )  # [C, 1]
     gathered = dist.gather(stacked)
     if dist.is_root():
         assert gathered is not None
@@ -560,8 +545,8 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
 def test_channel_mask_film_on_dropout_identical_across_spatial_tiles():
     """FiLM channel_mask under input_dropout must agree across spatial tiles.
 
-    The presence vector fed to FiLM is built from the (already
-    spatially-broadcast) input_dropout_mask combined with data_mask. Since it is
+    The presence vector fed to FiLM is built from the input-dropout mask the
+    Step draws (and spatially broadcasts) combined with data_mask. Since it is
     per-sample with no spatial dim, all co-ranks of a spatial group must see an
     identical Context.channel_mask, while data-parallel groups may differ.
     """
@@ -592,7 +577,15 @@ def test_channel_mask_film_on_dropout_identical_across_spatial_tiles():
                 in_names=["forcing_shared", "forcing_rad"],
                 out_names=["diagnostic_main"],
                 normalization=normalization,
-                input_dropout=PerVariableMaskingConfig(rate=0.5),
+                input_dropout=VariableMaskingConfig(
+                    default=UniformMaskingConfig(1),
+                    override_groups=[
+                        MaskingGroupConfig(
+                            variables=["forcing_rad"],
+                            masking=BernoulliMaskingConfig(rate=0.5),
+                        ),
+                    ],
+                ),
             ),
         ),
     )
@@ -612,8 +605,6 @@ def test_channel_mask_film_on_dropout_identical_across_spatial_tiles():
     # Force per-rank RNG divergence to mimic real spatial-parallel training.
     torch.manual_seed(dist.rank)
     batch_size = 3
-    dropout_mask = step.make_input_dropout_mask(batch_size, fme.get_device())
-    assert dropout_mask is not None
     input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, batch_size)
     next_step_input_data = get_tensor_dict(
         step.next_step_input_names, DEFAULT_IMG_SHAPE, batch_size
@@ -625,7 +616,6 @@ def test_channel_mask_film_on_dropout_identical_across_spatial_tiles():
             input=input_data,
             next_step_input_data=next_step_input_data,
             labels=None,
-            input_dropout_mask=dropout_mask,
         ),
     )
     mask = captured["channel_mask"]  # [batch, n_in_channels]
