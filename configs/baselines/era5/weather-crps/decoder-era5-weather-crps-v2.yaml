@@ -6,6 +6,7 @@ n_forward_steps: 15
 forward_steps_in_memory: 1
 n_ensemble_per_ic: 2
 checkpoint_path: /ckpt.tar
+allow_incompatible_dataset: true
 logging:
   log_to_screen: true
   log_to_wandb: true
