@@ -1,10 +1,11 @@
 # arg: --dataset troya/2026-07-24-era5-1deg-8layer-daily-stats-1990-2019:/statsdata
-# arg: --dataset 01M12RM9CZ2DVVKB0T91XKGR9Y:/weights
+# arg: --dataset 01M12BF4602BBJEC3XR9R1N5DV:/weights
 #
-# Own-pretrain BPTT fine-tune of the pes90-es10 pretrain (donor ha4l6wu4,
-# wandb ha4l6wu4, beaker 01M0Z5T6AXGKKP3TNXKP29EC0F). 0.9 patch-ES (3x3) /
-# 0.1 spectral-ES loss, matching the pretrain. 512-wide, titan, 4 GPUs,
-# 20 epochs. Part of the patch-vs-spectral energy score investigation.
+# Own-pretrain BPTT fine-tune of the crps80-spcrps20 pretrain (donor dt9hxnlg,
+# beaker 01M12BF45QMV8SC9056PNPRF7D). 0.8 CRPS / 0.2 spectral-power-CRPS
+# loss, matching the pretrain (no patch-ES). 384-wide, jupiter, 8 GPUs,
+# 20 epochs. CRPS control for the pes80-spcrps20 FT arm; part of the
+# patch-vs-spectral energy score investigation.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -94,9 +95,8 @@ stepper_training:
     weights:
       h500: 5.0
     kwargs:
-      crps_weight: 0.0
-      energy_score_weight: 0.1
-      patch_energy_score_weight: 0.9
-      patch_energy_score_size: 3
+      crps_weight: 0.8
+      energy_score_weight: 0.0
+      spectral_power_crps_weight: 0.2
 stepper:
   checkpoint_path: /weights/training_checkpoints/best_ckpt.tar

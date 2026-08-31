@@ -320,7 +320,17 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-crps80-spcrps2
 # family at epoch-boundary validation; 2-step jupiter cut abandoned).
 #   ./run-train.sh pes90-es10-ft3
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes90-es10.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/titan
+  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan
+
+# Own-pretrain BPTT fine-tunes for the 384-wide arms (pes80-spcrps20 and its
+# CRPS control crps80-spcrps20), part of the patch-vs-spectral ES
+# investigation. Jupiter, 8 GPUs, 20 epochs. Launch alone:
+#   ./run-train.sh pes80-spcrps20-ft
+#   ./run-train.sh crps80-spcrps20-ft
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes80-spcrps20-ft.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-crps80-spcrps20-ft.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-crps80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/jupiter
 
 # Cross-donor patch-ES fine-tunes: patch-ES-led losses fine-tuning the
 # CRPS-led 90/10 pretrain (donor r95iprjt, same donor as c8hp09jm) -- fast
