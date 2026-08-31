@@ -135,6 +135,7 @@ run_training() {
     --workspace ai2/ace \
     --priority "$PRIORITY" \
     --preemptible \
+    --min-runtime 4h \
     --cluster "$CLUSTER" \
     "${cm_priority_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
