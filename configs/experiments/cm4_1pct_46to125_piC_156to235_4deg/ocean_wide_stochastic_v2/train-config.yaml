@@ -19,6 +19,10 @@
 #
 # Loss weights, noise embedding and injection point come from training.txt
 # override_args, so every arm shares this file.
+#
+# job_runner/uncoupled_train.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235_4deg/ocean_wide_stochastic_v2 . \
+#   --coupled_stats elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats
 
 experiment_dir: /results
 save_checkpoint: true

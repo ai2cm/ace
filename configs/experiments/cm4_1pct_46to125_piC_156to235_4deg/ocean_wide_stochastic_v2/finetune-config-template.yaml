@@ -14,6 +14,10 @@
 # As with the deterministic finetune the stepper block is dropped:
 # uncoupled_finetune.sh merges it in from the pretraining run's saved config,
 # so masking, corrector and variable lists carry over verbatim.
+#
+# job_runner/uncoupled_finetune.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235_4deg/ocean_wide_stochastic_v2 . \
+#   --coupled_stats elynn/2026-07-22-cm4-1pctco2-4deg-coupled-stats
 
 experiment_dir: /results
 evaluate_before_training: true # epoch-0 reference for the pretrained checkpoint
