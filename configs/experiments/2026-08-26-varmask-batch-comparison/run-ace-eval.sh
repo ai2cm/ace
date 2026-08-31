@@ -17,6 +17,9 @@ WANDB_PROJECT=${WANDB_PROJECT:-VarMaskingInfoComparison}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/jupiter"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
+# Opts the job in to scripts/beaker_balancer, which keeps the team inside its
+# urgent-priority allocation by moving opted-in jobs between priorities.
+CM_PRIORITY=${CM_PRIORITY:-high}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -39,6 +42,7 @@ cd $REPO_ROOT && gantry run \
     --priority "$BEAKER_PRIORITY" \
     --preemptible \
     "${cluster_args[@]}" \
+    --env CM_PRIORITY="$CM_PRIORITY" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$JOB_NAME" \
     --env WANDB_JOB_TYPE=inference \

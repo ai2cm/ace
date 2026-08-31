@@ -10,6 +10,9 @@ WANDB_PROJECT=${WANDB_PROJECT:-VarMaskingInfoComparison}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-urgent}
+# Opts the job in to scripts/beaker_balancer, which keeps the team inside its
+# urgent-priority allocation by moving opted-in jobs between priorities.
+CM_PRIORITY=${CM_PRIORITY:-high}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=${N_GPUS:-2}
 BEAKER_SHARED_MEMORY=${BEAKER_SHARED_MEMORY:-100GiB}
@@ -46,6 +49,7 @@ run_training() {
     --priority "$BEAKER_PRIORITY" \
     --preemptible \
     "${cluster_args[@]}" \
+    --env CM_PRIORITY="$CM_PRIORITY" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \

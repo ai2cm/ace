@@ -82,6 +82,15 @@ def main() -> None:
         default="urgent",
         help="Beaker job priority (default: urgent).",
     )
+    parser.add_argument(
+        "--cm-priority",
+        default="high",
+        choices=["low", "normal", "high", "urgent"],
+        help=(
+            "CM_PRIORITY env var set on the job, opting it in to "
+            "scripts/beaker_balancer (default: high)."
+        ),
+    )
     args = parser.parse_args()
 
     if not args.dry_run:
@@ -112,6 +121,7 @@ def main() -> None:
                     "BEAKER_WORKSPACE": args.beaker_workspace,
                     "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
                     "BEAKER_PRIORITY": args.beaker_priority,
+                    "CM_PRIORITY": args.cm_priority,
                     "SKIP_VALIDATE": "1",
                 }
                 subprocess.run(cmd, check=True, cwd=HERE, env=env)
