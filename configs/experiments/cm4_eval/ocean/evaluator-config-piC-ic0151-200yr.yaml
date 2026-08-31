@@ -25,7 +25,7 @@ loader:
   num_data_workers: 4
 data_writer:
   save_prediction_files: false
-  save_monthly_files: true
+  save_monthly_files: false
 aggregator:
   log_histograms: true
   log_nino34_index: true
