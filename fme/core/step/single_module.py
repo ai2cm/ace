@@ -430,8 +430,18 @@ class SingleModuleStep(StepABC):
                 labels=args.labels,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            if (
+                self._config.secondary_decoder is not None
+                and self._config.secondary_decoder.include_input_step
+            ):
+                sd_input = torch.cat(
+                    [output_tensor.detach(), input_tensor.detach()],
+                    dim=self.CHANNEL_DIM,
+                )
+            else:
+                sd_input = output_tensor.detach()
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+                sd_input
             )
             output_dict.update(secondary_output_dict)
             return output_dict
