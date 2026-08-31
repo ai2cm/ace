@@ -3,8 +3,16 @@
 Each ``*-seed*.yaml`` config in run_configs/ (from generate_seed_configs.py) is
 submitted via run-ace-train.sh, which validates it and calls gantry.
 
+``--match`` restricts submission to configs whose filename contains a given
+substring. ``run_configs/`` accumulates configs for arms whose runs already
+exist (only ``--delete-if-in-wandb`` prunes them, and eval configs are kept
+while their eval jobs are in flight), and nothing downstream notices a
+duplicate submission, so a sweep of one arm needs a narrower filter than
+``--version``. Repeat the flag to submit several arms.
+
 Usage:
     python submit_seed_jobs.py [--dry-run] [--version {v1,v2,v3,v4}]
+                               [--match SUBSTRING [SUBSTRING ...]]
                                [--beaker-workspace WORKSPACE]
                                [--beaker-cluster CLUSTER [CLUSTER ...]]
                                [--beaker-priority PRIORITY]
@@ -84,16 +92,28 @@ def main() -> None:
         default=None,
         help="Restrict to configs of this baseline version (default: all).",
     )
+    parser.add_argument(
+        "--match",
+        nargs="+",
+        default=None,
+        metavar="SUBSTRING",
+        help=(
+            "Restrict to configs whose filename contains any of these "
+            "substrings (ex: --match maskbatch masksample). Default: all."
+        ),
+    )
     args = parser.parse_args()
 
     configs = sorted(
         path.name
         for path in RUN_CONFIGS_DIR.glob("*-seed*.yaml")
-        if args.version is None or stem_has_version(path.stem, args.version)
+        if (args.version is None or stem_has_version(path.stem, args.version))
+        and (args.match is None or any(m in path.name for m in args.match))
     )
     if not configs:
         raise FileNotFoundError(
-            f"no seed configs in {RUN_CONFIGS_DIR} — run generate_seed_configs.py first"
+            f"no seed configs in {RUN_CONFIGS_DIR} matching the given filters "
+            "— run generate_seed_configs.py first, or widen --version/--match"
         )
 
     check_submit_preconditions(
