@@ -28,6 +28,7 @@ class SecondaryDecoderConfig:
 
     secondary_diagnostic_names: list[str]
     network: ModuleSelector
+    include_input_step: bool = False
 
     def build(
         self,

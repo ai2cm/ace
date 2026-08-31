@@ -1,6 +1,6 @@
 # ACE2S decoder (daily) weather eval with prediction saving for CRPS.
 # Uses cleaned checkpoint (discriminator/include_input_step stripped for code compat).
-# arg: --dataset 01M1CYRTQ4HQKJ9H31MZASWEZ3:best_inference_ckpt_cleaned.tar:/ckpt.tar
+# arg: --dataset 01M1D1SKA34Y1S41GTQ4W3CR5S:best_inference_ckpt_cleaned_v2.tar:/ckpt.tar
 experiment_dir: /results
 n_forward_steps: 15
 forward_steps_in_memory: 1

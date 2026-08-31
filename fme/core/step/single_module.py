@@ -328,9 +328,12 @@ class SingleModuleStep(StepABC):
         dist = Distributed.get_instance()
 
         if config.secondary_decoder is not None:
+            sd_in_channels = n_out_channels
+            if config.secondary_decoder.include_input_step:
+                sd_in_channels += n_in_channels
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
-                    n_in_channels=n_out_channels,
+                    n_in_channels=sd_in_channels,
                     dataset_info=dataset_info,
                 ).to(get_device())
             )
