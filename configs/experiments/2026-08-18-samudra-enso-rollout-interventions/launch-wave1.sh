@@ -87,6 +87,7 @@ launch() {
     --workspace ai2/ace \
     --priority "$PRIORITY" \
     --preemptible \
+    --min-runtime "${MIN_RUNTIME:-8h}" \
     --cluster ai2/ceres \
     --cluster ai2/jupiter \
     --cluster ai2/titan \
