@@ -4,3 +4,5 @@ cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks|rs0|01M1B5GJF1FZRR9XPC
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks|rs1|01M1B5GVRGHAGC2QKQFRPF5F7M|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks|rs2|01M1B5H4CBW4ZHN3PVX73R7J7Y|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck|rs0|01M1B5HD1CBW24CHSBPNFYKRX0|training|best_inference_ckpt|normal|--min-runtime 8h
