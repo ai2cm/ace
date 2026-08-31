@@ -14,9 +14,13 @@ loader:
     interval: 7
     n_initial_conditions: 24
   dataset:
-    data_path: /climate-default/
-    file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
-    engine: zarr
+    merge:
+    - data_path: /climate-default/
+      file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
+    - data_path: /climate-default/
+      file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+      engine: zarr
   num_data_workers: 8
 aggregator:
   zonal_mean:
