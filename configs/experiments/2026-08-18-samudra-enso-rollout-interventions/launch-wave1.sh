@@ -39,6 +39,8 @@ OCEAN_CKPT_DATASET="${OCEAN_CKPT_DATASET:-01KW2BQ83EGZ90WZ74CZ4TJATN}"
 # these was the first launch's failure: /ocean_stats/ocean/centering.nc).
 STATS_BUNDLE_DATASET="${STATS_BUNDLE_DATASET:-01KHGYVHSX504ZBHJC223S63F0}"
 FT_OCEAN_STATS_DATASET="${FT_OCEAN_STATS_DATASET:-01KXH6AFMYSRYSV6PA230Q3JG7}"
+# Ocean stats extended with the all-in-one arm's 8 atmosphere variables.
+ALLINONE_STATS_DATASET="${ALLINONE_STATS_DATASET:-01M1CKM28NZZVT4YFHC456DPXH}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -63,8 +65,14 @@ launch() {
     module="fme.ace.train"
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "allinone" ]]; then
+    config="${CONFIG_DIR}/allinone-pretrain.yaml"
+    module="fme.ace.train"
+    mounts=(--dataset "${ALLINONE_STATS_DATASET}:/ocean_stats")
+  fi
 
   python "${SCRIPT_PATH}/make_wave1_configs.py" >/dev/null
+  python "${SCRIPT_PATH}/make_allinone_config.py" >/dev/null
 
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "  [dry-run] $job_name ($module, $config)"
@@ -99,6 +107,7 @@ launch() {
     --install "pip install --no-deps ." \
     -- bash -c \
         "python '${SCRIPT_PATH}/make_wave1_configs.py' && \
+         python '${SCRIPT_PATH}/make_allinone_config.py' && \
          torchrun --nproc_per_node=${N_GPUS} -m ${module} '${config}'"
 }
 
