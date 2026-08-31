@@ -2,7 +2,7 @@
 
 set -e
 
-DATE="2026-08-26"
+DATE="2026-08-31"
 CONFIG_FILENAME="ace-abrupt-4xCO2-ensemble-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
@@ -14,7 +14,8 @@ CHECKPOINT_PATH=training_checkpoints/best_inference_ckpt.tar
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 declare -A MODELS=( \
-    [deterministic-full-rs0-intermediate]="01M0XKES08YB82WA253SWVKQAW" \
+    # [deterministic-full-rs0-intermediate]="01M0XKES08YB82WA253SWVKQAW" \
+    [ace2-som-like-full-rs0]="01M17655EQD9BVRB9MY4T7S6EY" \
 )
 
 for name in "${!MODELS[@]}"; do
@@ -26,10 +27,10 @@ for name in "${!MODELS[@]}"; do
         --description 'Run ACE abrupt 4xCO2 ensemble evaluator' \
         --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
         --workspace ai2/ace \
-        --priority low \
-        --preemptible \
-        --cluster ai2/jupiter \
+        --priority high \
+        --not-preemptible \
         --cluster ai2/titan \
+        --env CM_PRIORITY=high \
         --env WANDB_USERNAME=$WANDB_USERNAME \
         --env WANDB_NAME=$job_name \
         --env WANDB_JOB_TYPE=inference \
@@ -38,6 +39,7 @@ for name in "${!MODELS[@]}"; do
         --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
         --dataset-secret google-credentials:/tmp/google_application_credentials.json \
         --dataset $existing_results_dataset:$CHECKPOINT_PATH:/ckpt.tar \
+        --min-runtime 1h \
         --gpus 1 \
         --shared-memory 20GiB \
         --weka climate-default:/climate-default \
