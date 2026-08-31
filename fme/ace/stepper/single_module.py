@@ -1115,6 +1115,7 @@ class Stepper:
             forcing_data.labels,
             data_mask=forcing_data.data_mask,
             stepper_state=ic_batch_data.stepper_state,
+            n_ensemble=forcing_data.n_ensemble,
         )
 
     @property
@@ -1130,6 +1131,7 @@ class Stepper:
         labels: BatchLabels | None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        n_ensemble: int = 1,
     ) -> Generator[StepOutput, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
@@ -1158,6 +1160,7 @@ class Stepper:
                         labels=labels,
                         data_mask=data_mask,
                         stepper_state=stepper_state,
+                        n_ensemble=n_ensemble,
                     ),
                     wrapper=checkpoint,
                 )
@@ -1697,6 +1700,7 @@ class TrainStepper(
             labels=input_ensemble_data.labels,
             data_mask=forcing_ensemble_data.data_mask,
             stepper_state=input_ensemble_data.stepper_state,
+            n_ensemble=n_ensemble,
         )
         output_list: list[EnsembleTensorDict] = []
         output_iterator = iter(output_generator)

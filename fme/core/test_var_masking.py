@@ -396,3 +396,61 @@ def test_multiple_groups_fire_independently():
         # both rate-1 groups fire; all four grouped vars dropped, var_4 kept
         assert int((~mask).sum().item()) == 4
         assert bool(mask[0, 4].item())
+
+
+def test_per_sample_validation():
+    with pytest.raises(ValueError, match="per_sample"):
+        VariableMaskingConfig(per_sample=1)  # type: ignore[arg-type]
+
+
+def test_per_sample_shape():
+    """per_sample draws one row per sample; the default keeps a single row."""
+    config = VariableMaskingConfig(default=UniformMaskingConfig(3), per_sample=True)
+    assert _build(config, 10).sample_mask(DEVICE, 4).shape == (4, 10)
+    shared = VariableMaskingConfig(default=UniformMaskingConfig(3))
+    # n_samples is ignored without per_sample, so the mask still broadcasts.
+    assert _build(shared, 10).sample_mask(DEVICE, 4).shape == (1, 10)
+
+
+def test_per_sample_rows_differ():
+    """Rows of a per_sample mask are independent draws, not copies.
+
+    With ``max_masked_vars == n`` on 8 channels, two rows agreeing exactly is
+    rare, so over 64 draws of 4 rows at least one draw must show two distinct
+    rows unless the rows are being copied.
+    """
+    masking = _build(
+        VariableMaskingConfig(default=UniformMaskingConfig(8), per_sample=True), 8
+    )
+    assert any(
+        len({tuple(row) for row in masking.sample_mask(DEVICE, 4).tolist()}) > 1
+        for _ in range(64)
+    )
+
+
+def test_per_sample_false_matches_omitted():
+    """per_sample=False replays the RNG stream of a config omitting the field.
+
+    The batch-shared arm of the shared-mask ablation must stay comparable to
+    runs trained before ``per_sample`` existed, so the default must take the
+    same draws in the same order rather than merely the same shape.
+    """
+    omitted = VariableMaskingConfig(default=UniformMaskingConfig(max_masked_vars=3))
+    explicit = VariableMaskingConfig(
+        default=UniformMaskingConfig(max_masked_vars=3), per_sample=False
+    )
+    assert _sequence(omitted, 5, 64) == _sequence(explicit, 5, 64)
+
+
+def test_per_sample_draws_do_not_disturb_shared_stream():
+    """A shared-mask config's stream is unchanged by the n_samples argument.
+
+    ``sample_mask(device, n)`` must not consume ``n`` draws when per_sample is
+    off, otherwise passing a batch size would silently reseed the comparison.
+    """
+    config = VariableMaskingConfig(default=UniformMaskingConfig(max_masked_vars=3))
+    masking_a = _build(config, 5)
+    masking_b = _build(config, 5)
+    a = [tuple(masking_a.sample_mask(DEVICE)[0].tolist()) for _ in range(64)]
+    b = [tuple(masking_b.sample_mask(DEVICE, 16)[0].tolist()) for _ in range(64)]
+    assert a == b

@@ -401,7 +401,7 @@ class SingleModuleStep(StepABC):
         args: StepArgs,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> StepOutput:
-        input_dropout_mask = self._draw_input_dropout_mask()
+        input_dropout_mask = self._draw_input_dropout_mask(args)
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             if args.data_mask is not None:
@@ -459,24 +459,37 @@ class SingleModuleStep(StepABC):
             stepper_state=args.stepper_state,
         )
 
-    def _draw_input_dropout_mask(self) -> TensorMapping | None:
+    def _draw_input_dropout_mask(self, args: StepArgs) -> TensorMapping | None:
         """Draw a fresh input-dropout mask for this forward step.
 
         Each ``step`` samples independently; the mask has no lifetime beyond
         the call. Returns ``None`` (no dropout) when input dropout is
         unconfigured or the module is in eval mode, so inference and
         validation batches stay inert.
+
+        Under per-sample masking the draw is per *sample*, not per row of the
+        folded batch: ``args.input``'s leading dimension is
+        ``n_samples * n_ensemble`` with each sample's members adjacent, so the
+        sampled rows are repeat-interleaved back over the members. That keeps a
+        sample's ensemble members on identical inputs, so masking does not
+        become a second source of ensemble spread alongside the injected noise.
         """
         if self._input_masking is None:
             return None
         if not self.module.torch_module.training:
             return None
         names = self.in_packer.names
-        mask = self._input_masking.sample_mask(get_device())
-        # Broadcast so spatial-group tiles agree; no-op for non-distributed
+        n_samples = _n_samples(args)
+        mask = self._input_masking.sample_mask(get_device(), n_samples)
+        # Broadcast so spatial-group tiles agree; no-op for non-distributed.
+        # Done before the ensemble expansion below, so the collective carries
+        # one row per sample rather than one per folded batch member.
         mask = Distributed.get_instance().broadcast_spatial(mask)
-        # Emit only dropped channels; absent key means present, skips a no-op where.
-        present = mask[0].tolist()
+        if mask.shape[0] > 1:
+            mask = torch.repeat_interleave(mask, args.n_ensemble, dim=0)
+        # Emit only channels dropped for at least one sample; an absent key
+        # means present for every sample, which skips a no-op where.
+        present = mask.all(dim=0).tolist()
         return {name: mask[:, i] for i, name in enumerate(names) if not present[i]}
 
     def get_regularizer_loss(self):
@@ -535,6 +548,27 @@ def _raise_input_nan_error(input_norm: TensorMapping) -> None:
         "the data_mask passed to the stepper includes every input variable that "
         "may be masked (cf. PR #1262), or enable fill_nans_on_normalize."
     )
+
+
+def _n_samples(args: StepArgs) -> int:
+    """Number of true samples in ``args``, i.e. its batch net of the ensemble.
+
+    ``args.input``'s leading dimension is ``n_samples * n_ensemble`` (see
+    ``StepArgs.n_ensemble``). An empty input has no defined batch, so it counts
+    as a single sample; masking a nonexistent batch is a no-op either way.
+    """
+    for tensor in args.input.values():
+        batch = tensor.shape[0]
+        break
+    else:
+        return 1
+    if batch % args.n_ensemble != 0:
+        raise ValueError(
+            f"batch dimension {batch} is not divisible by "
+            f"n_ensemble={args.n_ensemble}; the ensemble dimension is folded "
+            "into the batch, so the batch must be a whole number of samples"
+        )
+    return batch // args.n_ensemble
 
 
 def _apply_input_mask(input_norm: TensorDict, data_mask: TensorMapping) -> TensorDict:

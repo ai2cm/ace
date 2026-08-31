@@ -7,6 +7,7 @@ from fme.core.stepper_state import StepperState
 
 
 def test_apply_input_process_func_propagates_metadata():
+    n_ensemble = 2
     n_batch = 4
     input_data = {"a": torch.randn(n_batch, 8, 16), "b": torch.randn(n_batch, 8, 16)}
     next_step = {"a": torch.randn(n_batch, 8, 16), "b": torch.randn(n_batch, 8, 16)}
@@ -26,6 +27,7 @@ def test_apply_input_process_func_propagates_metadata():
         labels=labels,
         data_mask=data_mask,
         stepper_state=stepper_state,
+        n_ensemble=n_ensemble,
     )
 
     def double(tensors):
@@ -44,6 +46,7 @@ def test_apply_input_process_func_propagates_metadata():
     for name in data_mask:
         torch.testing.assert_close(result.data_mask[name], data_mask[name])
     assert result.stepper_state is stepper_state
+    assert result.n_ensemble == n_ensemble
 
     known_attrs = {
         "input",
@@ -51,6 +54,7 @@ def test_apply_input_process_func_propagates_metadata():
         "labels",
         "data_mask",
         "stepper_state",
+        "n_ensemble",
     }
     actual_attrs = {
         name

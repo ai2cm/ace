@@ -26,6 +26,12 @@ class StepArgs:
             corrector references seeded from the IC). ``None`` if no state
             has been seeded yet. The step returns an updated stepper_state
             alongside its output dict.
+        n_ensemble: Number of ensemble members folded into the leading
+            dimension of ``input``, which is therefore
+            ``n_samples * n_ensemble`` with each sample's members adjacent
+            (``repeat_interleave`` ordering). Lets a step tell samples apart
+            from members, e.g. to give a sample's members the same synthetic
+            input mask. Defaults to 1 (no ensemble dimension folded in).
     """
 
     def __init__(
@@ -35,12 +41,14 @@ class StepArgs:
         labels: BatchLabels | None = None,
         data_mask: TensorMapping | None = None,
         stepper_state: StepperState | None = None,
+        n_ensemble: int = 1,
     ):
         self.input = input
         self.next_step_input_data = next_step_input_data
         self.labels = labels
         self.data_mask = data_mask
         self.stepper_state = stepper_state
+        self.n_ensemble = n_ensemble
 
     def apply_input_process_func(
         self, func: Callable[[TensorMapping], TensorMapping]
@@ -53,4 +61,5 @@ class StepArgs:
             labels=self.labels,
             data_mask=self.data_mask,
             stepper_state=self.stepper_state,
+            n_ensemble=self.n_ensemble,
         )

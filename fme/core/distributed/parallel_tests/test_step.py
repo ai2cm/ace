@@ -471,8 +471,9 @@ def test_step_regression(
     cache_step_output(output, DATA_DIR / f"{case_name}_output.pt")
 
 
+@pytest.mark.parametrize("per_sample", [False, True], ids=["shared", "per_sample"])
 @pytest.mark.parallel
-def test_input_dropout_mask_identical_across_spatial_tiles():
+def test_input_dropout_mask_identical_across_spatial_tiles(per_sample: bool):
     """The sampled input-dropout mask must be identical across spatial tiles.
 
     All spatial co-ranks hold the same samples but advance ``torch.rand``
@@ -480,8 +481,14 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
     channels and corrupt the sample.  We force RNG divergence by seeding each
     rank with its global rank, then verify ranks within a spatial group receive
     identical masks while letting data-parallel groups differ.
+
+    Run for both masking modes: under ``per_sample`` the broadcast carries one
+    row per sample instead of one row for the batch, so a shape-sensitive
+    collective would only fail in that mode.
     """
     dist = Distributed.get_instance()
+    n_samples, n_ensemble = 3, 2
+    n_rows = n_samples * n_ensemble if per_sample else 1
     n_dp = dist.total_data_parallel_ranks
     spatial_size = dist.world_size // n_dp
     in_names = ["a", "b", "c", "d"]
@@ -507,6 +514,7 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
                             variables=["b"], masking=BernoulliMaskingConfig(rate=0.5)
                         ),
                     ],
+                    per_sample=per_sample,
                 ),
             )
         ),
@@ -517,7 +525,22 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
         module.train()
     # Force per-rank RNG divergence to mimic real spatial-parallel training.
     torch.manual_seed(dist.rank)
-    mask = step._draw_input_dropout_mask()
+    batch = n_samples * n_ensemble
+    # Only the batch dimension matters here: drawing a mask never touches the
+    # spatial dims, so these need no spatial scatter.
+    args = StepArgs(
+        input={
+            name: torch.rand(batch, *DEFAULT_IMG_SHAPE, device=fme.get_device())
+            for name in step.input_names
+        },
+        next_step_input_data={
+            name: torch.rand(batch, *DEFAULT_IMG_SHAPE, device=fme.get_device())
+            for name in step.next_step_input_names
+        },
+        labels=None,
+        n_ensemble=n_ensemble,
+    )
+    mask = step._draw_input_dropout_mask(args)
     assert mask is not None
     # Absent key means the channel is present (not dropped); reconstruct the
     # full per-channel indicator so tiles that drop different channels compare.
@@ -525,10 +548,11 @@ def test_input_dropout_mask_identical_across_spatial_tiles():
         [
             mask[name].float()
             if name in mask
-            else torch.ones(1, device=fme.get_device())
+            else torch.ones(n_rows, device=fme.get_device())
             for name in in_names
         ]
-    )  # [C, 1]
+    )  # [C, n_rows]
+    assert stacked.shape == (len(in_names), n_rows)
     gathered = dist.gather(stacked)
     if dist.is_root():
         assert gathered is not None

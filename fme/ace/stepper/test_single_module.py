@@ -1348,6 +1348,66 @@ def test_input_dropout_same_mask_across_batch_and_ensemble():
     ).all(), "every batch and ensemble member must share the dropout mask"
 
 
+def test_input_dropout_per_sample_varies_by_sample_not_by_member():
+    """per_sample draws one mask per sample, shared by that sample's members.
+
+    The end-to-end counterpart of
+    ``test_input_dropout_same_mask_across_batch_and_ensemble``: the ensemble
+    dimension is folded into the batch before the Step sees it, so a naive
+    per-row draw would give members of one sample different inputs and turn
+    masking into a source of ensemble spread.
+    """
+    n_base, n_ensemble, n_steps = 4, 3, 1
+    config = _input_dropout_stepper_config(
+        ["a", "b"],
+        ["a"],
+        VariableMaskingConfig(
+            default=UniformMaskingConfig(1),
+            override_groups=[
+                MaskingGroupConfig(
+                    variables=["a"], masking=BernoulliMaskingConfig(rate=0.5)
+                ),
+                MaskingGroupConfig(
+                    variables=["b"], masking=BernoulliMaskingConfig(rate=0.5)
+                ),
+            ],
+            per_sample=True,
+        ),
+    )
+    data = get_data(["a", "b"], n_samples=n_base, n_time=n_steps + 1).data
+    n_channels = 2  # inputs "a", "b"; second half is the indicator
+
+    def _indicators(seed: int) -> torch.Tensor:
+        torch.manual_seed(seed)
+        stepper = _get_train_stepper(
+            config, n_ensemble=n_ensemble, loss=StepLossConfig(type="MSE")
+        )
+        captured: list[torch.Tensor] = []
+
+        def _pre_hook(module, args):
+            captured.append(args[0].detach().cpu())
+
+        handle = stepper.modules[0].register_forward_pre_hook(_pre_hook)
+        optimization = OptimizationConfig().build(
+            modules=list(stepper.modules), max_epochs=1
+        )
+        try:
+            stepper.train_on_batch(data, optimization=optimization)
+        finally:
+            handle.remove()
+        assert captured, "module should have been called in train mode"
+        return captured[0][:, n_channels:, 0, 0].view(n_base, n_ensemble, n_channels)
+
+    saw_sample_variation = False
+    for seed in range(16):
+        grouped = _indicators(seed)
+        assert (
+            grouped == grouped[:, :1]
+        ).all(), "ensemble members of a sample must share the dropout mask"
+        saw_sample_variation |= not bool((grouped == grouped[:1]).all().item())
+    assert saw_sample_variation, "per-sample masks never differed between samples"
+
+
 def test_input_dropout_mask_sampled_per_forward_step():
     """The Step samples an independent dropout mask on every forward step.
 
@@ -1365,7 +1425,7 @@ def test_input_dropout_mask_sampled_per_forward_step():
     data = get_data(["a"], n_samples=n_base, n_time=n_steps + 1).data
     base_mask = torch.tensor([False], dtype=torch.bool, device=DEVICE)  # [1], broadcast
 
-    def _fixed_input_dropout_mask():
+    def _fixed_input_dropout_mask(args):
         return {"a": base_mask}
 
     captured: list[torch.Tensor] = []

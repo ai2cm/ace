@@ -164,8 +164,12 @@ class VariableMaskingConfig:
 
     Each configured masking scheme owns a disjoint slice of channels and answers
     which of its channels to drop this step; the final mask is the union of all
-    outputs, broadcast across the batch (shape ``[1, n_channels]``) so every
-    sample and ensemble member is masked identically.
+    outputs.
+
+    By default one mask is drawn per step and shared by the whole batch (shape
+    ``[1, n_channels]``), so every sample and ensemble member is masked
+    identically. With ``per_sample`` a separate mask is drawn for each sample
+    (shape ``[n_samples, n_channels]``).
 
     Channels named in an ``override_groups`` entry are governed solely by that
     group's masking scheme; all remaining (ungrouped) channels are governed by
@@ -178,14 +182,24 @@ class VariableMaskingConfig:
             ``UniformMaskingConfig(0)``, which masks no ungrouped channels.
         override_groups: Optional list of variable groups, each with its own
             masking scheme. A variable may appear in at most one group.
+        per_sample: Whether to draw an independent mask for each sample instead
+            of sharing one mask across the batch. "Sample" means a true sample:
+            the caller is responsible for giving every ensemble member of a
+            sample the same mask, so masking never becomes a source of ensemble
+            spread. Defaults to ``False`` (one mask shared across the batch),
+            which draws the identical RNG sequence as configs predating this
+            field.
     """
 
     default: MaskingConfig = dataclasses.field(
         default_factory=lambda: UniformMaskingConfig(0)
     )
     override_groups: list[MaskingGroupConfig] = dataclasses.field(default_factory=list)
+    per_sample: bool = False
 
     def __post_init__(self):
+        if not isinstance(self.per_sample, bool):
+            raise ValueError(f"per_sample must be a bool, got {self.per_sample!r}")
         seen: set[str] = set()
         for group in self.override_groups:
             for name in group.variables:
@@ -221,15 +235,21 @@ class VariableMaskingConfig:
         generators += [
             group.masking.build(group.variables) for group in self.override_groups
         ]
-        return VariableMasking(names, generators)
+        return VariableMasking(names, generators, per_sample=self.per_sample)
 
 
 class VariableMasking:
     """Runtime union of masking generators over a fixed channel list."""
 
-    def __init__(self, names: list[str], generators: list[MaskingGenerator]):
+    def __init__(
+        self,
+        names: list[str],
+        generators: list[MaskingGenerator],
+        per_sample: bool = False,
+    ):
         self._names = list(names)
         self._generators = list(generators)
+        self._per_sample = per_sample
         self._generator: torch.Generator | None = None
 
     def _get_generator(self) -> torch.Generator:
@@ -248,19 +268,33 @@ class VariableMasking:
             self._generator.manual_seed(dist.get_seed() + dist.rank)
         return self._generator
 
-    def sample_mask(self, device: torch.device) -> torch.Tensor:
-        """Sample a boolean presence mask of shape ``[1, n_channels]``.
-
-        ``True`` means the channel is present; ``False`` means it is dropped.
-        The leading dimension is 1 so the mask broadcasts over the batch (and
-        hence over ensemble members) when applied.
-        """
-        generator = self._get_generator()
+    def _sample_dropped(self, generator: torch.Generator) -> set[str]:
+        """Union of every generator's dropped names for one draw."""
         dropped: set[str] = set()
         for masking_generator in self._generators:
             dropped.update(masking_generator.sample(generator))
+        return dropped
+
+    def sample_mask(self, device: torch.device, n_samples: int = 1) -> torch.Tensor:
+        """Sample a boolean presence mask over channels.
+
+        ``True`` means the channel is present; ``False`` means it is dropped.
+
+        Without ``per_sample`` the shape is ``[1, n_channels]``: one draw is
+        shared by the whole batch, and ``n_samples`` is ignored so the RNG
+        sequence stays identical to configs predating ``per_sample``. With
+        ``per_sample`` the shape is ``[n_samples, n_channels]``, one independent
+        draw per row.
+
+        The caller expands the leading dimension to the batch being masked; with
+        ``per_sample`` that means repeating each row across its sample's ensemble
+        members, so masking is never a source of ensemble spread.
+        """
+        generator = self._get_generator()
+        n_rows = n_samples if self._per_sample else 1
+        rows = [self._sample_dropped(generator) for _ in range(n_rows)]
         present = torch.tensor(
-            [[name not in dropped for name in self._names]],
+            [[name not in dropped for name in self._names] for dropped in rows],
             dtype=torch.bool,
         )
         return present.to(device)

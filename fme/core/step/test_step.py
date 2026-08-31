@@ -1877,7 +1877,7 @@ def _inject_input_dropout_mask(
     for no dropout) so the application path is exercised without relying on
     the random sampler.
     """
-    step._draw_input_dropout_mask = lambda: mask  # type: ignore[method-assign]
+    step._draw_input_dropout_mask = lambda args: mask  # type: ignore[method-assign]
 
 
 def test_input_dropout_unknown_group_variable_raises_at_build():
@@ -1996,6 +1996,129 @@ def test_input_dropout_mask_indicator_reflects_combined_presence():
     assert (indicator_half[:, 1:] == 1.0).all()
 
 
+def _dropout_args(
+    step: SingleModuleStep, n_samples: int = 1, n_ensemble: int = 1
+) -> StepArgs:
+    """StepArgs sized for ``n_samples`` samples of ``n_ensemble`` members each.
+
+    ``_draw_input_dropout_mask`` reads the sample count off these, so tests that
+    call it directly need a batch of the right shape.
+    """
+    batch = n_samples * n_ensemble
+    return StepArgs(
+        input=get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, batch),
+        next_step_input_data=get_tensor_dict(
+            step.next_step_input_names, DEFAULT_IMG_SHAPE, batch
+        ),
+        labels=None,
+        n_ensemble=n_ensemble,
+    )
+
+
+def _drawn_dropout_mask(
+    step: SingleModuleStep, n_samples: int, n_ensemble: int
+) -> TensorMapping:
+    """The mask the Step actually draws for a batch of ``n_samples`` samples."""
+    mask = step._draw_input_dropout_mask(_dropout_args(step, n_samples, n_ensemble))
+    assert mask is not None
+    return mask
+
+
+def test_per_sample_dropout_mask_shared_within_ensemble_member():
+    """Per-sample masks vary by sample but agree across a sample's members.
+
+    The batch dimension is ``n_samples * n_ensemble`` with a sample's members
+    adjacent, so rows ``2i``/``2i + 1`` must be equal. Otherwise masking would
+    perturb inputs within an ensemble and show up as ensemble spread in the
+    CRPS/energy-score terms rather than as the input dropout being ablated.
+    """
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(2), per_sample=True)
+    )
+    step.module.torch_module.train()
+    n_samples, n_ensemble = 3, 2
+    saw_sample_variation = False
+    for _ in range(64):
+        mask = _drawn_dropout_mask(step, n_samples, n_ensemble)
+        for tensor in mask.values():
+            assert tensor.shape == (n_samples * n_ensemble,)
+            rows = tensor.tolist()
+            for sample in range(n_samples):
+                member_rows = rows[sample * n_ensemble : (sample + 1) * n_ensemble]
+                assert len(set(member_rows)) == 1, "members disagree within a sample"
+            per_sample = [rows[sample * n_ensemble] for sample in range(n_samples)]
+            saw_sample_variation |= len(set(per_sample)) > 1
+    assert saw_sample_variation, "per-sample masks never differed between samples"
+
+
+def test_shared_dropout_mask_stays_broadcast_over_batch():
+    """Without per_sample the drawn mask keeps a single broadcast row."""
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(2))
+    )
+    step.module.torch_module.train()
+    for _ in range(32):
+        mask = _drawn_dropout_mask(step, n_samples=3, n_ensemble=2)
+        for tensor in mask.values():
+            assert tensor.shape == (1,)
+
+
+def test_per_sample_dropout_indicator_agrees_row_by_row():
+    """The mask-indicator channel follows a per-sample mask sample by sample.
+
+    ``include_channel_mask_inputs`` is on in the shared-mask ablation's configs,
+    so a per-sample data mask paired with a batch-broadcast indicator would tell
+    the network a channel is present while feeding it zeros.
+    """
+    step = _make_single_module_step(
+        VariableMaskingConfig(default=UniformMaskingConfig(1), per_sample=True),
+        include_channel_mask_inputs=True,
+    )
+    step.module.torch_module.eval()
+    in_names = step.in_packer.names
+    n_channels = len(in_names)
+    n_samples = 4
+    # Drop channel 0 for the odd-numbered samples only.
+    present = torch.tensor(
+        [i % 2 == 0 for i in range(n_samples)],
+        dtype=torch.bool,
+        device=fme.get_device(),
+    )
+    dropout_mask = {in_names[0]: present}
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    next_step = get_tensor_dict(
+        step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+    )
+
+    captured: list[torch.Tensor] = []
+
+    def _pre_hook(module, args):
+        captured.append(args[0].detach().cpu())
+
+    handle = step.module.torch_module.register_forward_pre_hook(_pre_hook)
+    try:
+        _inject_input_dropout_mask(step, dropout_mask)
+        step.step(
+            args=StepArgs(
+                input=input_data,
+                next_step_input_data=next_step,
+                labels=None,
+            )
+        )
+    finally:
+        handle.remove()
+
+    packed = captured[0]
+    expected = present.cpu()
+    # Channel 0's indicator and data both follow the per-sample mask; every
+    # other channel stays present for the whole batch.
+    torch.testing.assert_close(
+        packed[:, n_channels, 0, 0], expected.to(dtype=packed.dtype)
+    )
+    assert ((packed[:, 0] == 0.0).all(dim=-1).all(dim=-1) == ~expected).all()
+    assert (packed[:, n_channels + 1 :] == 1.0).all()
+
+
 def test_input_dropout_mask_and_combine_with_data_mask():
     """AND-combine: data_mask=0 wins even when dropout leaves the channel present.
 
@@ -2104,7 +2227,7 @@ def test_draw_input_dropout_mask_shape_and_dtype():
         VariableMaskingConfig(default=BernoulliMaskingConfig(rate=1.0))
     )
     step.module.torch_module.train()
-    mask = step._draw_input_dropout_mask()
+    mask = step._draw_input_dropout_mask(_dropout_args(step))
     assert mask is not None
     # keyed by dropped channels, one [1] bool tensor each; present channels omitted.
     assert set(mask.keys()) == set(step.in_packer.names)
@@ -2120,14 +2243,14 @@ def test_draw_input_dropout_mask_omits_present_channels():
         VariableMaskingConfig(default=BernoulliMaskingConfig(rate=0.0))
     )
     step.module.torch_module.train()
-    mask = step._draw_input_dropout_mask()
+    mask = step._draw_input_dropout_mask(_dropout_args(step))
     assert mask == {}
 
 
 def test_draw_input_dropout_mask_none_when_unset():
     step = _make_single_module_step(None)
     step.module.torch_module.train()
-    assert step._draw_input_dropout_mask() is None
+    assert step._draw_input_dropout_mask(_dropout_args(step)) is None
 
 
 def test_draw_input_dropout_mask_none_in_eval_mode():
@@ -2136,7 +2259,7 @@ def test_draw_input_dropout_mask_none_in_eval_mode():
     )
     step.module.torch_module.eval()
     # configured, but eval mode disables dropout sampling
-    assert step._draw_input_dropout_mask() is None
+    assert step._draw_input_dropout_mask(_dropout_args(step)) is None
 
 
 def test_draw_input_dropout_mask_includes_gmr_extras():
@@ -2146,7 +2269,7 @@ def test_draw_input_dropout_mask_includes_gmr_extras():
         include_channel_mask_inputs=False,
     )
     step.module.torch_module.train()
-    mask = step._draw_input_dropout_mask()
+    mask = step._draw_input_dropout_mask(_dropout_args(step))
     assert mask is not None
     # GMR extra sentinel channels are independently maskable
     assert set(mask.keys()) == set(step.in_packer.names)
