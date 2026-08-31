@@ -1,0 +1,100 @@
+# Same 1979-2014 rollout as long36-evaluator-config.yaml, but against the 2024 ERA5 build,
+# for the ACE2.1-ERA5 checkpoints.
+#
+# ACE2.1's checkpoints reject the 2026-03-19 store: the ak coefficients differ slightly
+# between builds, and fme checks the vertical coordinate against the checkpoint. The
+# difference is numerically tiny -- the layers are essentially the same -- so metrics from
+# the two stores remain comparable; this is a compatibility requirement, not a physical one.
+#
+# The dataset merge (8-layer netCDFs + separate pressure-level zarr) is copied from
+# ACE2.1-ERA5-AIMIP/configs/ace-evaluator-seed-selection-single-config.yaml, which is the
+# loader those checkpoints were evaluated with. Initial conditions, step count and
+# aggregator match the inline `long_36year` entry so the logged keys line up with the
+# P1/P2 chains and the ACE2.2 backfill.
+#
+# The checkpoint is mounted at /ckpt.tar by the launcher, once per seed.
+checkpoint_path: /ckpt.tar
+experiment_dir: /results
+n_forward_steps: 52566
+forward_steps_in_memory: 40
+logging:
+  project: ace
+loader:
+  start_indices:
+    times:
+    - '1979-01-01T06:00:00'
+    - '1979-01-02T06:00:00'
+    - '1979-01-03T06:00:00'
+    - '1979-01-04T06:00:00'
+    - '1979-01-05T06:00:00'
+    - '1979-01-06T06:00:00'
+    - '1979-01-07T06:00:00'
+    - '1979-01-08T06:00:00'
+  dataset:
+    merge:
+    - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+    - data_path: /climate-default/2025-11-10-era5-1deg-pressure-level-1940-2022
+      file_pattern: 2025-11-10-era5-1deg-pressure-level-1940-2022.zarr
+      engine: zarr
+  num_data_workers: 16
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+aggregator:
+  step_means: []
+  ensembles: []
+  mean_denorm:
+    enabled: false
+    target: denorm
+  mean_norm:
+    enabled: false
+    target: norm
+  zonal_mean:
+    enabled: false
+  time_mean_denorm:
+    target: denorm
+    variables: &id001
+    - PRATEsfc
+    - TMP2m
+    - Q2m
+    - UGRD10m
+    - VGRD10m
+    - h500
+    - TMP850
+    - PRESsfc
+    - surface_temperature
+    - ULWRFsfc
+    - DLWRFsfc
+    - USWRFsfc
+    - DSWRFsfc
+    - ULWRFtoa
+    - USWRFtoa
+    - LHTFLsfc
+    - SHTFLsfc
+    - tendency_of_total_water_path_due_to_advection
+    - air_temperature_0
+    - air_temperature_1
+    - air_temperature_3
+    - air_temperature_7
+    - specific_total_water_0
+    - specific_total_water_1
+    - specific_total_water_3
+    - specific_total_water_7
+    - eastward_wind_0
+    - eastward_wind_1
+    - eastward_wind_3
+    - eastward_wind_7
+    - northward_wind_0
+    - northward_wind_1
+    - northward_wind_3
+    - northward_wind_7
+    - total_water_path
+  time_mean_norm:
+    target: norm
+    variables: *id001
+  annual:
+    variables: *id001
+  power_spectrum:
+    variables: *id001
+  histogram:
+    enabled: true

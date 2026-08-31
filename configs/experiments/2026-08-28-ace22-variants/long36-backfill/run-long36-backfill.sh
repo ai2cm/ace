@@ -49,7 +49,14 @@ if [[ "$N_GPUS" -eq 1 ]]; then MIN_RUNTIME=8h; else MIN_RUNTIME=4h; fi
 # PREEMPTIBLE=1 gives up the min-runtime guarantee (--min-runtime 0 means "preemptible at
 # any time") and so does not consume allocated slots. Fine for a short smoke run; for the
 # real rollouts a preemption restarts from zero, since this config has no --segments.
-[[ -n "$PREEMPTIBLE" ]] && MIN_RUNTIME=0
+# Preemptible work takes no allocated slots, so it does not compete with the group's
+# guaranteed capacity and goes in at urgent -- at high it just sits behind allocated work
+# on a busy cluster. Both the gantry flag and CM_PRIORITY follow this one variable.
+PRIORITY=high
+if [[ -n "$PREEMPTIBLE" ]]; then
+  MIN_RUNTIME=0
+  PRIORITY=urgent
+fi
 
 # Optional substring filter on the run label: `bash run-long36-backfill.sh ace21-rs0`.
 SELECT="${1:-}"
@@ -62,8 +69,14 @@ case "$CLUSTER" in
 esac
 
 cd "$REPO_ROOT"
-CONFIG="$SCRIPT_PATH/long36-evaluator-config.yaml"
-python -m fme.ace.validate_config --config_type evaluator "$CONFIG"
+# Two configs. ACE2.2 and the variant chains read the 2026 ERA5 store; the ACE2.1
+# checkpoints require the 2024 build, whose ak coefficients they were trained against
+# (fme checks the vertical coordinate against the checkpoint). The ak difference is tiny,
+# so metrics from the two stores stay comparable.
+CONFIG_2026="$SCRIPT_PATH/long36-evaluator-config.yaml"
+CONFIG_2024="$SCRIPT_PATH/long36-ace21-evaluator-config.yaml"
+python -m fme.ace.validate_config --config_type evaluator "$CONFIG_2026"
+python -m fme.ace.validate_config --config_type evaluator "$CONFIG_2024"
 
 # Memory. Per-window cost scales as (initial conditions per rank) x forward_steps_in_memory,
 # and that product has an OOM ceiling that depends on the GPU:
@@ -101,7 +114,9 @@ run_eval () {
   if [[ -n "$SELECT" && "$label" != *"$SELECT"* ]]; then
     return 0
   fi
-  echo "  submitting $job_name"
+  local CONFIG="$CONFIG_2026"
+  [[ "$label" == ace21-* ]] && CONFIG="$CONFIG_2024"
+  echo "  submitting $job_name  ($(basename "$CONFIG"))"
 
   gantry run \
     --allow-dirty \
@@ -110,12 +125,12 @@ run_eval () {
     --description '1979-2014 rollout metrics, holdout-clean comparison against the ACE2.2 variant campaign' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority high \
+    --priority "$PRIORITY" \
     --min-runtime "$MIN_RUNTIME" \
     --timeout 0 \
     --no-logs \
     --cluster "$BEAKER_CLUSTER" \
-    --env CM_PRIORITY=high \
+    --env CM_PRIORITY="$PRIORITY" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=inference \
