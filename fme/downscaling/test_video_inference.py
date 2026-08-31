@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import torch
 import xarray as xr
+import zarr
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
@@ -21,9 +22,8 @@ from fme.downscaling.video_inference import (
     VideoInferenceConfig,
     _bare_module,
     _clip_write_slice,
-    _reference_time_axis,
     _splice_observed_endpoints,
-    _validate_world_size,
+    _warn_if_idle_ranks,
 )
 from fme.downscaling.video_models import VideoDiffusionModelConfig
 from fme.downscaling.video_train import VideoTrainerConfig, _save_checkpoint
@@ -114,18 +114,19 @@ def test_splice_observed_endpoints_overwrites_only_first_and_last_frame():
 
 def test_clip_write_slice_middle_clip_excludes_shared_boundary_frame():
     # 19 reference times; a 9-frame clip starting at index 8 is not the last
-    # (16 would be), so it should write only frames [8, 16) -- not its own
-    # trailing endpoint, which the next clip owns as its start frame.
+    # clip (that one starts at 16), so it should write only frames [8, 16)
+    # -- not its own trailing endpoint, which the next clip owns as its
+    # start frame.
     time = np.arange(19)
-    result = _clip_write_slice(8, time, n_timesteps=9)
+    result = _clip_write_slice(8, time, last_clip_start_idx=16, n_timesteps=9)
     assert result == slice(8, 16)
 
 
 def test_clip_write_slice_last_clip_includes_trailing_endpoint():
-    # 17 reference times; a 9-frame clip starting at index 8 ends at 16,
-    # i.e. the final reference time, so it must also write that endpoint.
+    # 17 reference times; a 9-frame clip starting at index 8 is the last
+    # clip, so it must also write its own trailing endpoint.
     time = np.arange(17)
-    result = _clip_write_slice(8, time, n_timesteps=9)
+    result = _clip_write_slice(8, time, last_clip_start_idx=8, n_timesteps=9)
     assert result == slice(8, 17)
 
 
@@ -135,40 +136,18 @@ def test_clip_write_slice_raises_on_start_time_mismatch():
     )
     bad_start = cftime.DatetimeProlepticGregorian(2020, 2, 1)
     with pytest.raises(ValueError, match="not found in the reference test time axis"):
-        _clip_write_slice(bad_start, time, n_timesteps=2)
+        _clip_write_slice(bad_start, time, last_clip_start_idx=0, n_timesteps=2)
 
 
-def test_validate_world_size_raises_when_clips_short_of_ranks():
-    with pytest.raises(RuntimeError, match="Only 1 clip"):
-        _validate_world_size(n_clips=1, world_size=2)
+def test_warn_if_idle_ranks_warns_when_clips_short_of_ranks(caplog):
+    _warn_if_idle_ranks(n_clips=1, world_size=2)
+    assert "Only 1 clip" in caplog.text
 
 
-def test_validate_world_size_passes_when_clips_cover_ranks():
-    _validate_world_size(n_clips=2, world_size=2)
-    _validate_world_size(n_clips=3, world_size=2)
-
-
-def test_reference_time_axis_spans_tumbling_clip_coverage():
-    # 3 clips (stride 4) of 5 frames each, sharing boundaries: clip 0 covers
-    # frames 0-4, clip 1 (start 4) covers 4-8, clip 2 (start 8) covers 8-12
-    # -> 13 total distinct frames.
-    all_times = xr.CFTimeIndex(
-        [
-            cftime.DatetimeJulian(2000, 1, 1) + datetime.timedelta(days=4 * i)
-            for i in range(3)
-        ]
-    )
-    time = _reference_time_axis(
-        all_times, n_timesteps=5, timestep=datetime.timedelta(days=1)
-    )
-    assert len(time) == 13
-    assert time[0] == all_times[0]
-    assert time[-1] == all_times[-1] + 4 * datetime.timedelta(days=1)
-    # evenly spaced at the given timestep
-    assert all(
-        time[i + 1] - time[i] == datetime.timedelta(days=1)
-        for i in range(len(time) - 1)
-    )
+def test_warn_if_idle_ranks_silent_when_clips_cover_ranks(caplog):
+    _warn_if_idle_ranks(n_clips=2, world_size=2)
+    _warn_if_idle_ranks(n_clips=3, world_size=2)
+    assert caplog.text == ""
 
 
 def _valid_inference_kwargs(trainer_config, tmp_path):
@@ -205,6 +184,14 @@ def test_post_init_rejects_repeated_data(tmp_path):
     kwargs = _valid_inference_kwargs(trainer_config, tmp_path)
     kwargs["data"] = dataclasses.replace(kwargs["data"], repeat=2)
     with pytest.raises(ValueError, match="data.repeat"):
+        VideoInferenceConfig(**kwargs)
+
+
+def test_post_init_rejects_sample_with_replacement(tmp_path):
+    trainer_config = _trainer_config(tmp_path)
+    kwargs = _valid_inference_kwargs(trainer_config, tmp_path)
+    kwargs["data"] = dataclasses.replace(kwargs["data"], sample_with_replacement=4)
+    with pytest.raises(ValueError, match="sample_with_replacement"):
         VideoInferenceConfig(**kwargs)
 
 
@@ -328,3 +315,7 @@ def test_build_and_run_end_to_end(tmp_path):
     np.testing.assert_array_equal(
         ds["frame_source"].values, np.array([0, 1, 1, 1, 0, 1, 1, 1, 0])
     )
+
+    # Sharded to one clip's full write: (n_timesteps - 1, n_ensemble, *spatial).
+    group = zarr.open_group(inference_config.output_path, mode="r")
+    assert group[_OUT_NAMES[0]].shards == (n_timesteps - 1, 2, 4, 4)

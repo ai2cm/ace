@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Test-set inference for the endpoint-conditioned video diffusion model.
 
-Given a trained checkpoint, runs an ensemble of samples over a test split:
-observed daily endpoint snapshots (0h, 24h) in, infilled 3-hourly interior
-frames (3h..21h) out. Writes a single zarr store matching the input dataset's
-format -- dims (time, ensemble, latitude, longitude) -- covering the full test
-period with no gaps: endpoint frames are the observed ground truth broadcast
-across the ensemble dimension, interior frames are the generated ensemble. A
+Given a trained checkpoint, runs an ensemble of samples over a test split and
+writes a single zarr store matching the input dataset's format -- dims
+(time, ensemble, latitude, longitude) -- covering the full test period with
+no gaps: endpoint frames are the observed ground truth broadcast across the
+ensemble dimension, interior frames are the generated ensemble. A
 ``frame_source`` time-coordinate flags observed (0) vs. generated (1) frames.
 
 Run (mirrors video_train.py's invocation):
@@ -16,7 +15,6 @@ Run (mirrors video_train.py's invocation):
 
 import argparse
 import dataclasses
-import datetime
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -61,20 +59,6 @@ def _bare_module(wrapped: torch.nn.Module) -> torch.nn.Module:
     return bare
 
 
-def _reference_time_axis(
-    all_times: xr.CFTimeIndex, n_timesteps: int, timestep: datetime.timedelta
-) -> np.ndarray:
-    """Full per-frame time axis spanning every tumbling clip's coverage.
-
-    ``all_times`` holds each clip's start time. Tumbling clips share their
-    boundary frame, so consecutive clips together cover
-    ``(len(all_times) - 1) * (n_timesteps - 1) + n_timesteps`` distinct
-    frames at ``timestep`` spacing, starting from the first clip's start time.
-    """
-    n_time = (len(all_times) - 1) * (n_timesteps - 1) + n_timesteps
-    return np.array([all_times[0] + i * timestep for i in range(n_time)])
-
-
 def _splice_observed_endpoints(
     generated: dict[str, torch.Tensor],
     truth: Mapping[str, torch.Tensor],
@@ -94,35 +78,35 @@ def _splice_observed_endpoints(
     return generated
 
 
-def _clip_write_slice(clip_start_time, time: np.ndarray, n_timesteps: int) -> slice:
+def _clip_write_slice(
+    clip_start_time,
+    frame_times: np.ndarray,
+    last_clip_start_idx: int,
+    n_timesteps: int,
+) -> slice:
     """Time-axis slice a clip should write to, given its start time.
 
     Tumbling clips share their boundary frame with the next clip, so every
     clip but the last writes only its first ``n_timesteps - 1`` frames; the
     last clip also writes its own trailing endpoint.
     """
-    n_time = len(time)
-    start_idx = int(np.searchsorted(time, clip_start_time))
-    if start_idx >= n_time or time[start_idx] != clip_start_time:
+    n_time = len(frame_times)
+    start_idx = int(np.searchsorted(frame_times, clip_start_time))
+    if start_idx >= n_time or frame_times[start_idx] != clip_start_time:
         raise ValueError(
             f"Clip start time {clip_start_time} not found in the reference "
             "test time axis; data/config mismatch."
         )
-    is_last_clip = start_idx + (n_timesteps - 1) == n_time - 1
+    is_last_clip = start_idx == last_clip_start_idx
     n_frames = n_timesteps if is_last_clip else n_timesteps - 1
     return slice(start_idx, start_idx + n_frames)
 
 
-def _validate_world_size(n_clips: int, world_size: int) -> None:
-    """A rank with zero clips would raise ``StopIteration`` before ever
-    reaching the barrier in ``writer.initialize_store()``, hanging every
-    other rank. This check is deterministic and identical on every rank, so
-    it can safely fail fast without any collective communication.
-    """
+def _warn_if_idle_ranks(n_clips: int, world_size: int) -> None:
     if n_clips < world_size:
-        raise RuntimeError(
+        logger.warning(
             f"Only {n_clips} clip(s) available but {world_size} rank(s) "
-            "requested; every rank needs at least one clip."
+            "requested; some ranks will sit idle."
         )
 
 
@@ -130,8 +114,8 @@ def _validate_world_size(n_clips: int, world_size: int) -> None:
 class VideoInferenceConfig:
     """Config for running test-set inference with a trained video PMD model.
 
-    ``model`` and ``data`` are pasted verbatim from the training config's
-    ``model:`` and ``test_data:`` blocks -- no new schema for those.
+    ``model`` and ``data`` come from the training config's ``model:`` and
+    ``test_data:`` blocks -- no new schema for those.
 
     Args:
         checkpoint_path: Path to the trained checkpoint to load.
@@ -176,6 +160,11 @@ class VideoInferenceConfig:
             raise ValueError(
                 "data.repeat must be 1 for test-set inference (no repeated "
                 f"clips), got {self.data.repeat}."
+            )
+        if self.data.sample_with_replacement is not None:
+            raise ValueError(
+                "data.sample_with_replacement must be unset for test-set "
+                "inference (every clip must be visited exactly once)."
             )
         if self.ensemble_chunk_size <= 0:
             raise ValueError(
@@ -229,14 +218,6 @@ class VideoInferenceConfig:
         griddata = self.data.build_video(
             train=False, requirements=self.model.data_requirements, drop_last=False
         )
-        if griddata.timestep is None:
-            raise ValueError(
-                "griddata.timestep is None; enable infer_timestep on the fine "
-                "XarrayDataConfig(s) so the output's time axis can be built."
-            )
-        time = _reference_time_axis(
-            griddata.all_times, self.model.n_timesteps, griddata.timestep
-        )
         var_attrs = {
             name: griddata.variable_metadata[name].as_attrs()
             for name in model.out_names
@@ -245,7 +226,6 @@ class VideoInferenceConfig:
         return VideoInferenceRunner(
             model=model,
             griddata=griddata,
-            time=time,
             var_attrs=var_attrs,
             output_path=self.output_path,
             n_ensemble=self.n_ensemble,
@@ -267,7 +247,6 @@ class VideoInferenceRunner:
         self,
         model: VideoDiffusionModel,
         griddata: PairedVideoGriddedData,
-        time: np.ndarray,
         var_attrs: dict[str, dict[str, str]],
         output_path: str,
         n_ensemble: int,
@@ -278,7 +257,6 @@ class VideoInferenceRunner:
     ):
         self.model = model
         self.griddata = griddata
-        self.time = time
         self.var_attrs = var_attrs
         self.output_path = output_path
         self.n_ensemble = n_ensemble
@@ -289,26 +267,26 @@ class VideoInferenceRunner:
 
     def run(self) -> None:
         dist = Distributed.get_instance()
-        model, griddata, time = self.model, self.griddata, self.time
+        model, griddata = self.model, self.griddata
+        frame_times = griddata.frame_times
+        last_clip_start_idx = griddata.clip_start_indices[-1]
 
-        _validate_world_size(len(griddata.all_times), dist.world_size)
+        _warn_if_idle_ranks(len(griddata.clip_start_times), dist.world_size)
 
         logger.info(f"Number of parameters: {count_parameters(model.modules)}")
 
-        n_time = len(time)
+        n_time = len(frame_times)
         n_timesteps = model.n_timesteps
-        clip_stride = n_timesteps - 1  # tumbling clips share only their boundary frame
 
-        # Observed at every clip boundary (0, clip_stride, 2*clip_stride, ...),
-        # generated everywhere else.
         frame_source = np.ones(n_time, dtype=np.int8)
-        frame_source[0::clip_stride] = 0
+        frame_source[griddata.clip_start_indices] = 0
+        frame_source[-1] = 0  # final frame is an observed endpoint, not a clip start
 
         lat = griddata.fine_extent_latlon_coords.lat.cpu().numpy()
         lon = griddata.fine_extent_latlon_coords.lon.cpu().numpy()
 
         coords = {
-            TIME_NAME: time,
+            TIME_NAME: np.asarray(frame_times),
             ENSEMBLE_NAME: np.arange(self.n_ensemble),
             LAT_NAME: lat,
             LON_NAME: lon,
@@ -318,6 +296,8 @@ class VideoInferenceRunner:
             data_shape=(n_time, self.n_ensemble, len(lat), len(lon)),
             bytes_per_element=4,
         )
+        # Shard to one clip's full write, avoiding an object per frame/member.
+        shards = {TIME_NAME: n_timesteps - 1, ENSEMBLE_NAME: self.n_ensemble}
 
         writer = ZarrWriter(
             path=self.output_path,
@@ -325,6 +305,7 @@ class VideoInferenceRunner:
             coords=coords,
             data_vars=model.out_names,
             chunks=chunks,
+            shards=shards,
             array_attributes=self.var_attrs,
             group_attributes={
                 "description": (
@@ -339,7 +320,7 @@ class VideoInferenceRunner:
                 "frame_source": xr.DataArray(frame_source, dims=[TIME_NAME]),
             },
             mode="w" if self.overwrite else "w-",
-            time_calendar=griddata.all_times.calendar,
+            time_calendar=frame_times.calendar,
         )
         writer.initialize_store(data_dtype=np.float32)
 
@@ -352,9 +333,6 @@ class VideoInferenceRunner:
             while remaining > 0:
                 n = min(self.ensemble_chunk_size, remaining)
                 generated = model.generate(batch, n_samples=n)
-                # ensemble_chunk_size bounds generate()'s GPU memory use;
-                # move each chunk off-GPU immediately so accumulating chunks
-                # here doesn't undo that bound.
                 for name in model.out_names:
                     ensemble_chunks[name].append(generated[name].cpu())
                 remaining -= n
@@ -368,7 +346,9 @@ class VideoInferenceRunner:
 
             clip_times = batch.fine.time.values  # (B, T) cftime
             for b in range(clip_times.shape[0]):
-                time_slice = _clip_write_slice(clip_times[b, 0], time, n_timesteps)
+                time_slice = _clip_write_slice(
+                    clip_times[b, 0], frame_times, last_clip_start_idx, n_timesteps
+                )
                 n_frames_to_write = time_slice.stop - time_slice.start
 
                 write_data = {
