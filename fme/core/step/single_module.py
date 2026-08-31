@@ -328,9 +328,12 @@ class SingleModuleStep(StepABC):
         dist = Distributed.get_instance()
 
         if config.secondary_decoder is not None:
+            secondary_decoder_n_in = n_out_channels
+            if config.secondary_decoder.include_input_step:
+                secondary_decoder_n_in += n_in_channels
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
-                    n_in_channels=n_out_channels,
+                    n_in_channels=secondary_decoder_n_in,
                     dataset_info=dataset_info,
                 ).to(get_device())
             )
@@ -427,8 +430,16 @@ class SingleModuleStep(StepABC):
                 labels=args.labels,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            secondary_input = output_tensor.detach()
+            if (
+                self._config.secondary_decoder is not None
+                and self._config.secondary_decoder.include_input_step
+            ):
+                secondary_input = torch.cat(
+                    [secondary_input, input_tensor.detach()], dim=self.CHANNEL_DIM
+                )
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+                secondary_input
             )
             output_dict.update(secondary_output_dict)
             return output_dict
@@ -673,10 +684,9 @@ def step_with_adjustments(
         )
         result = corrector(input, output, next_step_input_data, corrector_state)
         output = result.corrected
-        # Detach the corrector diagnostic tensors.
-        diagnostics = CorrectorDiagnostics(
-            delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
-        )
+        # The deltas stay on the autograd graph so a training loss can
+        # differentiate through the correction.
+        diagnostics = result.diagnostics
         if result.corrector_state is not None:
             # Preserve the incoming state's other fields (e.g. random_state)
             # rather than rebuilding from scratch, so StepperState stays
