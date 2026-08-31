@@ -559,6 +559,50 @@ def test_file_writer_monthly(tmpdir):
     assert ds.valid_time.isel(sample=0, time=1).values == np.datetime64("2020-02-15")
 
 
+def test_file_writer_monthly_zarr(tmpdir):
+    label = "monthly_mean_output"
+    config = FileWriterConfig(
+        label=label,
+        time_coarsen=MonthlyCoarsenConfig(),
+        format=ZarrWriterConfig(),
+    )
+    n_timesteps = 24
+    n_samples = 1
+    initial_condition_times = np.array([cftime.DatetimeGregorian(2020, 1, 1)])
+    writer = config.build(
+        experiment_dir=str(tmpdir),
+        initial_condition_times=initial_condition_times,
+        n_timesteps=n_timesteps,
+        timestep=datetime.timedelta(days=5),
+        variable_metadata={},
+        coords={"lat": np.linspace(-90, 90, 5), "lon": np.linspace(-180, 180, 5)},
+        dataset_metadata=DatasetMetadata(),
+    )
+    data = {"foo": torch.rand(n_samples, n_timesteps, 5, 5)}
+    batch_time = xr.DataArray(
+        xr.date_range("2020-01-01", periods=n_timesteps, freq="5D"), dims=["time"]
+    )
+    batch_time = xr.concat([batch_time] * n_samples, dim="sample")
+    writer.append_batch(data, batch_time=batch_time)
+    writer.finalize()
+    ds = xr.open_zarr(str(tmpdir / f"{label}.zarr"), decode_timedelta=False)
+    assert "counts" in ds.coords
+    assert "foo" in ds.data_vars
+    assert dict(ds.sizes) == {"sample": 1, "time": 4, "lat": 5, "lon": 5}
+    assert ds.valid_time.isel(sample=0, time=0).values == np.datetime64("2020-01-15")
+    assert ds.valid_time.isel(sample=0, time=1).values == np.datetime64("2020-02-15")
+
+
+def test_file_writer_rejects_monthly_zarr_with_separate_ensemble_members():
+    with pytest.raises(NotImplementedError, match="separate ensemble members"):
+        FileWriterConfig(
+            label="monthly_mean_output",
+            time_coarsen=MonthlyCoarsenConfig(),
+            format=ZarrWriterConfig(),
+            separate_ensemble_members=True,
+        )
+
+
 @pytest.mark.parametrize("save_reference", [True, False])
 def test_file_writer_paired_save_reference(tmpdir, save_reference: bool):
     config = FileWriterConfig(
