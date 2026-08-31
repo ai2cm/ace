@@ -79,8 +79,8 @@ launch() {
     --workspace ai2/ace \
     --priority "$PRIORITY" \
     --preemptible \
-    --cluster ai2/ceres-cirrascale \
-    --cluster ai2/jupiter-cirrascale \
+    --cluster ai2/ceres \
+    --cluster ai2/jupiter \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \
