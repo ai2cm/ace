@@ -1,6 +1,7 @@
 experiment_dir: /results
 n_forward_steps: 60
 forward_steps_in_memory: 1
+n_ensemble_per_ic: 4
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
@@ -12,7 +13,7 @@ loader:
   start_indices:
     first: 116880
     interval: 28
-    n_initial_conditions: 24
+    n_initial_conditions: 12
   dataset:
     data_path: /climate-default/
     file_pattern: 2026-03-19-era5-1deg-8layer-1940-2025.zarr
