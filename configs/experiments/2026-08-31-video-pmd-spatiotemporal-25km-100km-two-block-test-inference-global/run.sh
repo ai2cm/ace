@@ -19,11 +19,11 @@ set -e
 
 JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-coarse-endpoints-flat-test-inference-global"
 CONFIG_FILENAME="video_inference.yaml"
-WORKSPACE="ai2/climate-titan"
+WORKSPACE="ai2/ace"
 CLUSTER="ai2/jupiter"  # h100
 N_GPUS=4
 CHECKPOINT_DATASET="01M100MWQDFSZHWAQW1ZTJZFJ4"
-WANDB_SECRET="CHLOE_WANDB_API_KEY"
+# No WANDB_API_KEY secret in ai2/ace -- fine, this config has log_to_wandb: false.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -44,7 +44,6 @@ gantry run --allow-dirty \
     --budget ai2/atec-climate \
     --weka climate-default:/climate-default \
     --dataset "${CHECKPOINT_DATASET}:/checkpoint" \
-    --env-secret WANDB_API_KEY="$WANDB_SECRET" \
     --system-python \
     --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.downscaling.video_inference "$CONFIG_PATH"
