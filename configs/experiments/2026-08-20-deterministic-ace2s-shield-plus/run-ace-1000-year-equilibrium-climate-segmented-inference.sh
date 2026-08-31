@@ -47,7 +47,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 # deterministic model. No need to provide a seed. We will assume there are less
 # than 10 ensemble members per climate.
 for ensemble_member in {0..0}; do
-    day=(( ensemble_member + 1 ))
+    day=$(( ensemble_member + 1 ))
     initial_condition_time=2032-01-0${day}T00:00:00
     for model in "${!MODELS[@]}"; do
         dataset_id="${MODELS[$model]}"
