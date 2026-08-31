@@ -6,6 +6,8 @@ from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
+    CorrectorLoss,
+    CorrectorRegularizer,
     CRPSLoss,
     EnergyScoreLoss,
     EnsembleComponentLoss,
@@ -18,11 +20,14 @@ from fme.core.loss import (
     SpectralWhitening,
     SpectralWhiteningConfig,
     StandardLoss,
+    StepLoss,
     StepLossConfig,
+    StepOutputLoss,
     VariableWeightingLoss,
     WeightedMappingLoss,
     _construct_weight_tensor,
 )
+from fme.core.name_and_prefix_matcher import NameAndPrefixSelection
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 
@@ -997,3 +1002,378 @@ def test_ensemble_loss_with_whitening_builds_and_runs(whitening):
     out = loss(x, y)
     assert all(isinstance(c, LossComponent) for c in out)
     assert torch.isfinite(_components_total(out))
+
+
+# Corrector-delta loss objects. Deterministic setup: fixed prediction/target/delta
+# dicts, a normalizer with known means/stds and an MSE step loss, so every penalty
+# below is computable by hand.
+_CORRECTOR_SHAPE = (2, 2, 2)  # (batch, lat, lon)
+_CORRECTOR_NAMES = ["a", "b_0", "b_1"]
+_CORRECTOR_MEANS = {"a": 1.0, "b_0": -2.0, "b_1": 0.5}
+_CORRECTOR_STDS = {"a": 2.0, "b_0": 0.5, "b_1": 4.0}
+
+
+def _fixed(offset: float, scale: float) -> torch.Tensor:
+    n = _CORRECTOR_SHAPE[0] * _CORRECTOR_SHAPE[1] * _CORRECTOR_SHAPE[2]
+    values = offset + scale * torch.arange(n, dtype=torch.float32)
+    return values.reshape(_CORRECTOR_SHAPE).to(get_device())
+
+
+def _predict_dict() -> dict[str, torch.Tensor]:
+    return {
+        "a": _fixed(0.0, 0.25),
+        "b_0": _fixed(1.0, -0.5),
+        "b_1": _fixed(-3.0, 0.75),
+    }
+
+
+def _target_dict() -> dict[str, torch.Tensor]:
+    return {
+        "a": _fixed(0.5, 0.2),
+        "b_0": _fixed(-1.0, 0.4),
+        "b_1": _fixed(2.0, -0.3),
+    }
+
+
+def _delta_dict() -> dict[str, torch.Tensor]:
+    return {
+        "a": _fixed(0.1, 0.05),
+        "b_0": _fixed(-0.2, 0.1),
+        "b_1": _fixed(0.3, -0.15),
+    }
+
+
+def _corrector_normalizer() -> StandardNormalizer:
+    return StandardNormalizer(
+        means={
+            name: torch.as_tensor(_CORRECTOR_MEANS[name]) for name in _CORRECTOR_NAMES
+        },
+        stds={
+            name: torch.as_tensor(_CORRECTOR_STDS[name]) for name in _CORRECTOR_NAMES
+        },
+    )
+
+
+def _corrector_step_loss() -> StepLoss:
+    return StepLossConfig(type="MSE").build(
+        gridded_ops=None,
+        out_names=list(_CORRECTOR_NAMES),
+        normalizer=_corrector_normalizer(),
+    )
+
+
+def _corrector_regularizer(
+    entries: list[str], weight: float = 1.0
+) -> CorrectorRegularizer:
+    def build_loss(names: list[str]) -> WeightedMappingLoss:
+        return WeightedMappingLoss(
+            loss=LossConfig(type="MSE").build(gridded_operations=None),
+            weights={},
+            out_names=names,
+            normalizer=_corrector_normalizer(),
+            channel_dim=-3,
+        )
+
+    return CorrectorRegularizer(
+        selection=NameAndPrefixSelection(tuple(entries)),
+        build_loss=build_loss,
+        weight=weight,
+    )
+
+
+def _corrector_loss(
+    precorrector_names: list[str] | None = None,
+    regularizer_names: list[str] | None = None,
+    penalty_weight: float = 1.0,
+) -> CorrectorLoss:
+    """A corrector loss selecting the given entries, with names unresolved."""
+    return CorrectorLoss(
+        precorrector_selection=(
+            None
+            if precorrector_names is None
+            else NameAndPrefixSelection(tuple(precorrector_names))
+        ),
+        regularizer=(
+            None
+            if regularizer_names is None
+            else _corrector_regularizer(regularizer_names, penalty_weight)
+        ),
+    )
+
+
+def _resolved_corrector_loss(**kwargs) -> CorrectorLoss:
+    """As ``_corrector_loss``, resolved against the keys of ``_delta_dict``."""
+    corrector_loss = _corrector_loss(**kwargs)
+    corrector_loss.resolve_names(_delta_dict().keys())
+    return corrector_loss
+
+
+def _expected_penalty(deltas, names) -> torch.Tensor:
+    per_channel = []
+    for name in sorted(names):
+        normalized = torch.nan_to_num(deltas[name], nan=0.0) / _CORRECTOR_STDS[name]
+        per_channel.append((normalized**2).mean())
+    return torch.stack(per_channel).mean()
+
+
+def test_step_output_loss_without_corrector_loss_unchanged():
+    # with corrector_loss None, total() and get_channel_losses() match a
+    # bare StepLoss, deltas ignored.
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    bare = _corrector_step_loss()(predict, target, 0)
+    result = StepOutputLoss(_corrector_step_loss(), None)(
+        predict, target, 0, deltas=deltas
+    )
+    assert result.corrector_penalty is None
+    torch.testing.assert_close(result.total(), bare.total())
+    expected = bare.get_channel_losses()
+    actual = result.get_channel_losses()
+    assert set(actual) == set(expected)
+    for name in expected:
+        torch.testing.assert_close(actual[name].loss, expected[name].loss)
+
+
+def test_pre_corrector_outputs_selected_only():
+    # the main loss sees output − delta for the configured names only;
+    # other keys use the network output as-is; targets untouched.
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    corrector_loss = _resolved_corrector_loss(precorrector_names=["a"])
+    net_output = corrector_loss.pre_corrector_outputs(predict, deltas)
+    torch.testing.assert_close(net_output["a"], predict["a"] - deltas["a"])
+    for name in ("b_0", "b_1"):
+        torch.testing.assert_close(net_output[name], predict[name])
+    result = StepOutputLoss(_corrector_step_loss(), corrector_loss)(
+        predict, target, 0, deltas=deltas
+    )
+    expected = _corrector_step_loss()(net_output, target, 0)
+    torch.testing.assert_close(result.main.total(), expected.total())
+    assert result.corrector_penalty is None
+    # the target dict is never modified
+    for name, value in _target_dict().items():
+        torch.testing.assert_close(target[name], value)
+
+
+def test_penalty_analytic_value():
+    # penalty equals the hand-computed mean of (delta/std)^2 — normalizer
+    # means cancel against the zeros target.
+    deltas = _delta_dict()
+    penalty = _resolved_corrector_loss(regularizer_names=_CORRECTOR_NAMES).penalty(
+        deltas
+    )
+    assert penalty is not None
+    torch.testing.assert_close(
+        penalty.total(), _expected_penalty(deltas, _CORRECTOR_NAMES)
+    )
+
+
+def test_penalty_ignores_main_loss_weights():
+    # the penalty is built with weights={}, so a per-variable weight
+    # configured for the main loss does not reach it.
+    deltas = _delta_dict()
+    weighted_step_loss = StepLossConfig(
+        type="MSE", weights={name: 10.0 for name in _CORRECTOR_NAMES}
+    ).build(
+        gridded_ops=None,
+        out_names=list(_CORRECTOR_NAMES),
+        normalizer=_corrector_normalizer(),
+    )
+    corrector_loss = _corrector_loss(regularizer_names=list(_CORRECTOR_NAMES))
+    result = StepOutputLoss(weighted_step_loss, corrector_loss)(
+        _predict_dict(), _target_dict(), 0, deltas=deltas
+    )
+    assert result.corrector_penalty is not None
+    torch.testing.assert_close(
+        result.corrector_penalty.total(),
+        _expected_penalty(deltas, _CORRECTOR_NAMES),
+    )
+
+
+def test_penalty_escapes_the_step_decay():
+    # the decay lives inside StepLoss.forward; the penalty is added outside
+    # it, so it is constant across steps while the main loss shrinks.
+    deltas = _delta_dict()
+    predict, target = _predict_dict(), _target_dict()
+    corrector_loss = _corrector_loss(regularizer_names=list(_CORRECTOR_NAMES))
+
+    def _at_step(step: int):
+        decaying_step_loss = StepLossConfig(
+            type="MSE", sqrt_loss_step_decay_constant=3.0
+        ).build(
+            gridded_ops=None,
+            out_names=list(_CORRECTOR_NAMES),
+            normalizer=_corrector_normalizer(),
+        )
+        return StepOutputLoss(decaying_step_loss, corrector_loss)(
+            predict, target, step, deltas=deltas
+        )
+
+    first, second = _at_step(0), _at_step(1)
+    assert first.corrector_penalty is not None and second.corrector_penalty is not None
+    torch.testing.assert_close(
+        first.corrector_penalty.total(), second.corrector_penalty.total()
+    )
+    assert second.main.total() < first.main.total()
+
+
+def test_penalty_masked_points_dilute():
+    # NaN-filled delta points are zeroed on both sides, so they enter the
+    # channel mean contributing zero rather than being dropped from it;
+    # penalty and gradients stay finite.
+    deltas = _delta_dict()
+    masked = deltas["a"].clone()
+    masked[0] = torch.nan
+    masked.requires_grad_(True)
+    deltas["a"] = masked
+    penalty = _resolved_corrector_loss(regularizer_names=_CORRECTOR_NAMES).penalty(
+        deltas
+    )
+    assert penalty is not None
+    total = penalty.total()
+    assert torch.isfinite(total)
+    torch.testing.assert_close(total, _expected_penalty(deltas, _CORRECTOR_NAMES))
+    total.backward()
+    assert masked.grad is not None
+    assert torch.isfinite(masked.grad).all()
+    assert (masked.grad[0] == 0.0).all()
+
+
+def test_total_and_channel_decomposition():
+    # total() == main.total() + weight * penalty.total(), and
+    # get_channel_losses() equals the bare StepLoss channels — no penalty
+    # anywhere per channel.
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    corrector_loss = _corrector_loss(
+        precorrector_names=["a"],
+        regularizer_names=["b_0", "b_1"],
+        penalty_weight=3.0,
+    )
+    result = StepOutputLoss(_corrector_step_loss(), corrector_loss)(
+        predict, target, 0, deltas=deltas
+    )
+    assert result.corrector_penalty is not None
+    torch.testing.assert_close(
+        result.total(),
+        result.main.total() + 3.0 * result.corrector_penalty.total(),
+    )
+    net_output = corrector_loss.pre_corrector_outputs(predict, deltas)
+    expected = _corrector_step_loss()(net_output, target, 0).get_channel_losses()
+    actual = result.get_channel_losses()
+    assert list(actual) == _CORRECTOR_NAMES
+    for name in expected:
+        torch.testing.assert_close(actual[name].loss, expected[name].loss)
+
+
+def test_penalty_uses_the_data_mask():
+    # with a data_mask hiding one sample of a selected variable, that
+    # sample contributes to neither half of total().
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    keep = torch.ones(_CORRECTOR_SHAPE[0], dtype=torch.bool, device=get_device())
+    keep[0] = False
+    corrector_loss = _corrector_loss(regularizer_names=["a"])
+    result = StepOutputLoss(_corrector_step_loss(), corrector_loss)(
+        predict, target, 0, data_mask={"a": keep}, deltas=deltas
+    )
+    assert result.corrector_penalty is not None
+    torch.testing.assert_close(
+        result.corrector_penalty.get_channel_losses()["a"].loss,
+        _expected_penalty({name: v[keep] for name, v in deltas.items()}, ["a"]),
+    )
+    subset_main = _corrector_step_loss()(
+        {name: v[keep] for name, v in predict.items()},
+        {name: v[keep] for name, v in target.items()},
+        0,
+    )
+    torch.testing.assert_close(
+        result.main.get_channel_losses()["a"].loss,
+        subset_main.get_channel_losses()["a"].loss,
+    )
+
+
+@pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
+def test_shrinking_delta_keys_raise(feature):
+    # a resolved name absent from a later step's deltas raises through
+    # _require_delta rather than silently dropping out of the loss.
+    predict, target = _predict_dict(), _target_dict()
+    if feature == "precorrector_optimization":
+        corrector_loss = _resolved_corrector_loss(precorrector_names=["a"])
+    else:
+        corrector_loss = _resolved_corrector_loss(regularizer_names=["a"])
+    loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    shrunk = {k: v for k, v in _delta_dict().items() if k != "a"}
+    with pytest.raises(ValueError, match="produced no delta"):
+        loss(predict, target, 0, deltas=shrunk)
+
+
+@pytest.mark.parametrize("deltas", [None, {}])
+def test_empty_deltas_inert(deltas):
+    # empty deltas ⇒ no pre-corrector swap, no penalty; result matches
+    # the unconfigured case.
+    predict, target = _predict_dict(), _target_dict()
+    corrector_loss = _corrector_loss(
+        precorrector_names=["a"], regularizer_names=["b_0", "b_1"]
+    )
+    result = StepOutputLoss(_corrector_step_loss(), corrector_loss)(
+        predict, target, 0, deltas=deltas
+    )
+    unconfigured = StepOutputLoss(_corrector_step_loss(), None)(predict, target, 0)
+    assert result.corrector_penalty is None
+    torch.testing.assert_close(result.total(), unconfigured.total())
+
+
+@pytest.mark.parametrize("entry", ["missing_var", "missing_"])
+@pytest.mark.parametrize("feature", ["precorrector_optimization", "regularization"])
+def test_resolve_names_errors_on_unmatched_delta_key(feature, entry):
+    # the first non-empty-delta call raises, naming the feature, the unmatched
+    # entries and the delta keys the corrector produced.
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    if feature == "precorrector_optimization":
+        corrector_loss = _corrector_loss(precorrector_names=[entry])
+    else:
+        corrector_loss = _corrector_loss(regularizer_names=[entry])
+    loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    with pytest.raises(ValueError) as excinfo:
+        loss(predict, target, 0, deltas=deltas)
+    message = str(excinfo.value)
+    assert feature in message
+    assert repr(entry) in message
+    assert str(sorted(deltas)) in message
+
+
+def test_resolve_names_runs_once():
+    # after a first successful non-empty-delta call, a later call whose deltas
+    # would not satisfy the entries neither re-resolves nor raises; the penalty
+    # channels stay the ones first resolved.
+    predict, target, deltas = _predict_dict(), _target_dict(), _delta_dict()
+    corrector_loss = _corrector_loss(regularizer_names=["b_"])
+    loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    loss(predict, target, 0, deltas=deltas)
+    corrector_loss.resolve_names({"a"})
+    result = loss(predict, target, 0, deltas=deltas)
+    assert result.corrector_penalty is not None
+    assert list(result.corrector_penalty.get_channel_losses()) == ["b_0", "b_1"]
+
+
+def test_empty_deltas_do_not_consume_the_check():
+    # repeated empty-delta calls are inert, and an unmatched entry still raises
+    # on the first non-empty call afterwards.
+    predict, target = _predict_dict(), _target_dict()
+    corrector_loss = _corrector_loss(regularizer_names=["missing_var"])
+    loss = StepOutputLoss(_corrector_step_loss(), corrector_loss)
+    for _ in range(3):
+        result = loss(predict, target, 0, deltas={})
+        assert result.corrector_penalty is None
+    with pytest.raises(ValueError, match="match none of the correction deltas"):
+        loss(predict, target, 0, deltas=_delta_dict())
+
+
+def test_regularizer_channels_come_from_the_deltas():
+    # a prefix entry resolves to exactly the matching delta keys, not to every
+    # name the loss covers that it would match.
+    deltas = {name: value for name, value in _delta_dict().items() if name != "b_1"}
+    regularizer = _corrector_regularizer(["b_"])
+    assert regularizer.names == []
+    regularizer.resolve(deltas.keys())
+    assert regularizer.names == ["b_0"]
+    torch.testing.assert_close(
+        regularizer(deltas).total(), _expected_penalty(deltas, ["b_0"])
+    )
