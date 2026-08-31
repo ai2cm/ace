@@ -20,7 +20,7 @@ initial_condition:
   path: PLACEHOLDER
   engine: zarr
   start_indices:
-    list: []
+    times: []
 seed: 0
 # It should be safe to use the same stepper override even when using the
 # published baseline model, since its slab ocean model was configured

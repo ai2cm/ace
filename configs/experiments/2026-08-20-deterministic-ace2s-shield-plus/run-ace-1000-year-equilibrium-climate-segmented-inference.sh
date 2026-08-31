@@ -9,7 +9,6 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
 
 INITIAL_CONDITION_ROOT=/climate-default/2026-01-28-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset
-INITIAL_CONDITION_TIME=2032-01-01T00:00:00
 
 declare -A INITIAL_CONDITION_DATASETS
 INITIAL_CONDITION_DATASETS=( \
@@ -45,9 +44,11 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 # Use an initial condition ensemble to run multiple ensemble members with a
-# deterministic model. No need to provide a seed.
+# deterministic model. No need to provide a seed. We will assume there are less
+# than 10 ensemble members per climate.
 for ensemble_member in {0..0}; do
-    index=$((ensemble_member * 4))
+    day=(( ensemble_member + 1 ))
+    initial_condition_time=2032-01-0${day}T00:00:00
     for model in "${!MODELS[@]}"; do
         dataset_id="${MODELS[$model]}"
 
@@ -58,7 +59,7 @@ for ensemble_member in {0..0}; do
                 n_forward_steps=182621 \
                 forcing_loader.dataset.overwrite.constant.global_mean_co2=$co2_concentration \
                 initial_condition.path=$initial_condition_path \
-                initial_condition.start_indices.list=[$index] \
+                initial_condition.start_indices.times=[$initial_condition_time] \
             "
             python -m fme.ace.validate_config --config_type inference $CONFIG_PATH --override $override
 
