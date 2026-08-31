@@ -96,6 +96,16 @@ def _compute_ocean_derived_variable(
         output = derived_variable_func(ocean_data, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
+    except ValueError as value_error:
+        # A model carrying fewer vertical levels than the dataset's depth
+        # coordinate (e.g. an upper-ocean-only configuration) cannot support
+        # depth-integrated diagnostics; skip them rather than fail.
+        if "vertical layers" not in str(value_error):
+            raise
+        logging.debug(
+            f"Could not compute {label} because the data's vertical extent "
+            f"does not match the depth coordinate: {value_error}"
+        )
     else:  # if no exception was raised
         new_data[label] = output
     return new_data
