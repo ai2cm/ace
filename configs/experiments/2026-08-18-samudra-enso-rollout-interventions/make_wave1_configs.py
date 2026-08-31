@@ -195,6 +195,31 @@ def arm_hzn12(c: dict) -> dict:
     return c
 
 
+def arm_tendloss(c: dict) -> dict:
+    """Give the ocean the tendency-scaled loss the atmosphere already has.
+
+    In this coupled FT the atmosphere's normalization carries a `residual`
+    block (loss errors on prognostics measured against per-step tendency
+    stds) while the ocean's loss runs in plain full-field z-score units. In
+    those units a variable's per-step dynamics contribute at
+    (sigma_tend/sigma_field)^2: measured from the stats files, 1/900 for sst,
+    1/2500 for thetao_8, 1/180000 for thetao_18 -- the ocean is trained
+    overwhelmingly to hold still, and the diagnosis found it fails precisely
+    at evolving its interior. This arm mirrors the atmosphere's residual loss
+    block onto the ocean, rescaling the prognostic loss to the physically
+    correct per-variable magnitude (what wint5/wint20's flat x5/x20 nudges
+    were off by orders of magnitude from reaching). Network I/O normalization
+    is unchanged; forward path is unchanged; this is loss-only.
+    """
+    norm = c["stepper"]["ocean"]["stepper"]["step"]["config"]["normalization"]
+    assert "residual" not in norm and "loss" not in norm
+    norm["residual"] = {
+        "global_means_path": "/ocean_stats/ocean/centering.nc",
+        "global_stds_path": "/ocean_stats/ocean/scaling-residual.nc",
+    }
+    return c
+
+
 def arm_noohc(c: dict) -> dict:
     """Ablation: corrections OFF during fine-tuning (still on in pretraining).
 
@@ -219,6 +244,7 @@ ARMS = {
     "wint20": arm_wint20,
     "hzn12": arm_hzn12,
     "noohc": arm_noohc,
+    "tendloss": arm_tendloss,
 }
 
 
