@@ -117,6 +117,7 @@ def _apply_settings(
     co2_rate: float | None,
     keep_gmr: bool,
     extra_override_groups: list[dict] | None = None,
+    per_sample: bool = False,
 ) -> None:
     """Set the uniform ``default`` masking pool (``mask_level``) plus any
     ``override_groups`` entries: the co2 bernoulli group (if ``co2_rate`` is
@@ -124,6 +125,11 @@ def _apply_settings(
     group pulling one channel out of the uniform pool into its own rule; see
     ``generate_seed_configs.py``'s clock50 arm). Groups are disjoint pools, so
     both can be set at once.
+
+    ``per_sample`` draws an independent mask per sample instead of sharing one
+    across the batch (see ``generate_seed_configs.py``'s shared-mask arms). It
+    is only written when set, so every other config's ``input_dropout`` block
+    stays byte-identical to what it was before the field existed.
     """
     default: dict = {"max_masked_vars": mask_level}
     dropout: dict = {"default": default}
@@ -136,6 +142,8 @@ def _apply_settings(
         override_groups.extend(extra_override_groups)
     if override_groups:
         dropout["override_groups"] = override_groups
+    if per_sample:
+        dropout["per_sample"] = True
 
     step_cfg = cfg["stepper"]["step"]["config"]
     step_cfg["input_dropout"] = dropout

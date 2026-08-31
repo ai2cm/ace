@@ -90,6 +90,31 @@ is never masked in this arm — unlike ``mask20``, where it sits in the uniform
 pool. That is deliberate: the arm masks named variables only. This adds
 2 (gmr) x 5 (seeds) = 10 configs to v3.
 
+v3 also gets a ``maskbatch``/``masksample`` pair of arms
+(``SHARED_MASK_LEVELS``), rerunning the shared-mask-across-batch ablation on a
+baseline where ``global_mean_co2`` is not an input. For each uniform masking
+level in {10, 20} it writes one arm drawing a single mask shared by the batch
+(``maskbatch``, the default behaviour) and one drawing an independent mask per
+sample (``masksample``, ``per_sample: true`` on the ``input_dropout`` config).
+The arms are GMR-on only, matching the figure being reproduced, and are not
+crossed with the sst axis or with each other.
+
+The mask levels live on the arm rather than in ``SEED_GROUPS`` because
+``SEED_GROUPS`` is the shared sweep spine: adding ``mask10`` there would inject
+it into every version's sweep (and into v3's sst cross and v4's co2-input
+cross) for the sake of two configs.
+
+Unlike the other arms this one defaults to a single seed
+(``SHARED_MASK_DEFAULT_SEEDS``, overridable with ``--shared-mask-seeds``),
+since the comparison is a spot check rather than a spread estimate. That adds
+2 (mask level) x 2 (mask mode) x 1 (seed) = 4 configs to v3.
+
+Note ``maskbatch`` at mask20 reproduces the existing ``gmron-mask20`` arm
+bit-for-bit: ``per_sample: false`` takes the same RNG draws as configs written
+before the field existed, and the run name does not enter the seed. It is
+generated anyway so the comparison is self-contained, and it doubles as an
+end-to-end check of that guarantee.
+
 v5 is the mask0/mask20 sweep only (no sst axis, no ``TARGETED_ARMS``), crossed
 with the gmr axis (gmron/gmroff) instead of the co2-input axis: every v5 config
 trains without ``global_mean_co2`` as an input, with no co2 token in the config
@@ -242,8 +267,21 @@ def bern_override_groups(in_names: list[str]) -> list[dict]:
     return [{"variables": [name], "masking": {"rate": rate}} for name in in_names]
 
 
+# The shared-mask arms: uniform masking at each of these levels, once with a
+# single mask shared across the batch and once with an independent mask per
+# sample (see module docstring).
+SHARED_MASK_LEVELS = (10, 20)
+# Config/job name token keyed by whether the mask is drawn per sample.
+SHARED_MASK_OPTIONS = {"maskbatch": False, "masksample": True}
+# These arms answer a yes/no question about the masking implementation rather
+# than estimating seed spread, so one seed is the default.
+SHARED_MASK_DEFAULT_SEEDS = 1
+
+
 def iter_train_configs(
-    version: str, n_seeds: int = DEFAULT_N_SEEDS
+    version: str,
+    n_seeds: int = DEFAULT_N_SEEDS,
+    shared_mask_n_seeds: int = SHARED_MASK_DEFAULT_SEEDS,
 ) -> list[tuple[str, dict]]:
     """``(name, config)`` for every seed-replicate training run of ``version``.
 
@@ -390,6 +428,32 @@ def iter_train_configs(
                 )
                 cfg["seed"] = seed
                 configs.append((name, cfg))
+
+    if version == "v3":
+        # v3 shared-mask arms: uniform masking at each SHARED_MASK_LEVELS
+        # level, once with one mask shared across the batch and once with an
+        # independent mask per sample. GMR-on only (matching the figure being
+        # reproduced), not crossed with the sst axis, and on its own seed count
+        # (see module docstring).
+        gmron_name = next(name for name, keep in GMR_OPTIONS.items() if keep)
+        for mask_level in SHARED_MASK_LEVELS:
+            for mask_mode_name, per_sample in SHARED_MASK_OPTIONS.items():
+                for seed in range(shared_mask_n_seeds):
+                    name = (
+                        f"{BASE_CONFIG_STEM}-{gmron_name}-mask{mask_level}"
+                        f"-{mask_mode_name}-seed{seed}-{version}"
+                    )
+                    cfg = copy.deepcopy(base)
+                    _apply_co2_input(cfg, include_co2=False)
+                    _apply_settings(
+                        cfg,
+                        mask_level,
+                        co2_rate=None,
+                        keep_gmr=True,
+                        per_sample=per_sample,
+                    )
+                    cfg["seed"] = seed
+                    configs.append((name, cfg))
     return configs
 
 
@@ -414,6 +478,7 @@ def generate_configs(
     n_seeds: int = DEFAULT_N_SEEDS,
     fetch_wandb: bool = False,
     version: str = DEFAULT_VERSION,
+    shared_mask_n_seeds: int = SHARED_MASK_DEFAULT_SEEDS,
 ) -> None:
     RUN_CONFIGS_DIR.mkdir(exist_ok=True)
     for yaml_path in RUN_CONFIGS_DIR.glob("*-seed*.yaml"):
@@ -426,7 +491,7 @@ def generate_configs(
         wandb_run_names = _fetch_wandb_run_names(WANDB_PROJECT)
         print(f"Found {len(wandb_run_names)} existing runs.")
 
-    for name, cfg in iter_train_configs(version, n_seeds):
+    for name, cfg in iter_train_configs(version, n_seeds, shared_mask_n_seeds):
         _write_config(name, cfg, wandb_run_names)
 
 
@@ -439,6 +504,18 @@ def main() -> None:
         default=DEFAULT_N_SEEDS,
         dest="n_seeds",
         help=f"Number of seeds per config (default: {DEFAULT_N_SEEDS}).",
+    )
+    parser.add_argument(
+        "--shared-mask-seeds",
+        type=int,
+        default=SHARED_MASK_DEFAULT_SEEDS,
+        dest="shared_mask_n_seeds",
+        help=(
+            "Number of seeds for the v3 maskbatch/masksample arms only "
+            f"(default: {SHARED_MASK_DEFAULT_SEEDS}). Kept separate from "
+            "--seeds because the shared-mask comparison needs far fewer "
+            "replicates than the main sweep."
+        ),
     )
     parser.add_argument(
         "--version",
@@ -458,7 +535,10 @@ def main() -> None:
     args = parser.parse_args()
 
     generate_configs(
-        args.n_seeds, fetch_wandb=args.delete_if_in_wandb, version=args.version
+        args.n_seeds,
+        fetch_wandb=args.delete_if_in_wandb,
+        version=args.version,
+        shared_mask_n_seeds=args.shared_mask_n_seeds,
     )
 
 

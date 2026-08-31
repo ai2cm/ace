@@ -47,7 +47,7 @@ from generate_masking_configs import (
     config_name_to_run_name,
 )
 from generate_masking_configs import iter_train_configs as iter_masking_train_configs
-from generate_seed_configs import DEFAULT_N_SEEDS
+from generate_seed_configs import DEFAULT_N_SEEDS, SHARED_MASK_DEFAULT_SEEDS
 from generate_seed_configs import iter_train_configs as iter_seed_train_configs
 
 HERE = pathlib.Path(__file__).parent
@@ -367,6 +367,18 @@ def main() -> None:
         help=f"Number of seeds per seed-config group (default: {DEFAULT_N_SEEDS}).",
     )
     parser.add_argument(
+        "--shared-mask-seeds",
+        type=int,
+        default=SHARED_MASK_DEFAULT_SEEDS,
+        dest="shared_mask_n_seeds",
+        help=(
+            "Number of seeds for the v3 maskbatch/masksample arms only "
+            f"(default: {SHARED_MASK_DEFAULT_SEEDS}). Must match the value "
+            "generate_seed_configs.py was run with, or eval configs will be "
+            "missing for the trained seeds."
+        ),
+    )
+    parser.add_argument(
         "--delete-if-in-wandb",
         action="store_true",
         help=(
@@ -395,7 +407,7 @@ def main() -> None:
     versions = [args.version] if args.version else sorted(BASE_CONFIG_FILENAMES)
     for version in versions:
         train_configs = iter_masking_train_configs(version) + iter_seed_train_configs(
-            version, args.n_seeds
+            version, args.n_seeds, args.shared_mask_n_seeds
         )
         for config_name, train_cfg in train_configs:
             generate_eval_config(
