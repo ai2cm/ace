@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 
 import cftime
+import numpy as np
 import pytest
 import torch
 import xarray as xr
@@ -163,6 +164,28 @@ def test_build_video_default_is_per_day_non_overlapping(tmp_path):
         train=False, requirements=requirements
     )
     assert len(sliding_data.loader) == 10
+
+
+def test_build_video_frame_times_and_clip_start_indices(tmp_path):
+    paths = data_paths_helper(tmp_path, num_timesteps=18)
+    requirements = _requirements()
+
+    # Tumbling (default stride 8): clips start at 0, 8, sharing their
+    # boundary frame -> frame_times covers indices 0..16 (17 distinct
+    # frames); the 18th raw timestep is never a clip frame, so it's excluded.
+    tumbling = _video_config(paths).build_video(train=False, requirements=requirements)
+    assert len(tumbling.frame_times) == 17
+    np.testing.assert_array_equal(tumbling.clip_start_indices, [0, 8])
+    expected = [tumbling.clip_start_times[0] + i * tumbling.timestep for i in range(17)]
+    assert list(tumbling.frame_times) == expected
+
+    # Full sliding window (stride 1): 10 overlapping clips starting 0..9,
+    # together covering every one of the 18 raw timesteps.
+    sliding = _video_config(paths, time_stride=1).build_video(
+        train=False, requirements=requirements
+    )
+    assert len(sliding.frame_times) == 18
+    np.testing.assert_array_equal(sliding.clip_start_indices, list(range(10)))
 
 
 def test_build_video_drop_last_override(tmp_path):

@@ -1,8 +1,11 @@
 import dataclasses
+import datetime
 from collections.abc import Sequence
 from typing import final
 
+import numpy as np
 import torch
+import xarray as xr
 from torch.utils.data import DataLoader, Dataset, RandomSampler, Subset
 from torch.utils.data.distributed import DistributedSampler
 
@@ -40,6 +43,27 @@ from fme.downscaling.data.video_datasets import (
     VideoFineCoarsePairedDataset,
 )
 from fme.downscaling.requirements import DataRequirements
+
+
+def _expand_clip_starts_to_frame_times(
+    clip_start_times: xr.CFTimeIndex,
+    n_timesteps: int,
+    timestep: datetime.timedelta,
+) -> tuple[xr.CFTimeIndex, np.ndarray]:
+    """Sorted, deduplicated union of every clip's frame times, plus the index
+    of each clip's start time within that union.
+
+    Expands per clip start rather than from one global anchor, so this only
+    ever extrapolates within a clip's own span -- exactly what a non-None
+    ``timestep`` (see ``_get_timestep``) already guarantees is safe, since a
+    clip never spans a dataset boundary.
+    """
+    frame_time_set = {
+        t + j * timestep for t in clip_start_times for j in range(n_timesteps)
+    }
+    frame_times = xr.CFTimeIndex(sorted(frame_time_set))
+    clip_start_indices = np.array([frame_times.get_loc(t) for t in clip_start_times])
+    return frame_times, clip_start_indices
 
 
 def _roll_lons_to_extent_convention(
@@ -740,7 +764,12 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
                 f"Expected clips of {self.n_timesteps} timesteps, got "
                 f"{dataset_fine.sample_n_times}."
             )
-        all_times = dataset_fine.sample_start_times
+        clip_start_times = dataset_fine.sample_start_times
+        if properties_fine.timestep is None:
+            raise ValueError(
+                "Video clips require a uniform timestep; set infer_timestep=True "
+                "(the default) on the fine XarrayDataConfig(s)."
+            )
 
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
@@ -773,9 +802,13 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
         if stride > 1:
             keep = list(range(0, len(paired_dataset), stride))
             dataset = Subset(paired_dataset, keep)
-            all_times = all_times[::stride]
+            clip_start_times = clip_start_times[::stride]
         else:
             dataset = paired_dataset
+
+        frame_times, clip_start_indices = _expand_clip_starts_to_frame_times(
+            clip_start_times, self.n_timesteps, properties_fine.timestep
+        )
 
         sampler = self._get_sampler(
             dataset=dataset,
@@ -808,8 +841,10 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
             n_timesteps=self.n_timesteps,
             dims=example.fine.latlon_coordinates.dims,
             variable_metadata=variable_metadata,
-            all_times=all_times,
+            clip_start_times=clip_start_times,
             timestep=properties_fine.timestep,
+            frame_times=frame_times,
+            clip_start_indices=clip_start_indices,
             fine_coords=get_latlon_coords_from_properties(properties_fine),
             fine_extent_latlon_coords=example.fine.latlon_coordinates,
         )

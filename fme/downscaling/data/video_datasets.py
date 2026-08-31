@@ -311,8 +311,12 @@ class PairedVideoGriddedData:
     n_timesteps: int
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
-    all_times: xr.CFTimeIndex  # clip start times
-    timestep: datetime.timedelta | None  # spacing between consecutive frames
+    clip_start_times: xr.CFTimeIndex
+    timestep: datetime.timedelta  # spacing between consecutive frames
+    frame_times: xr.CFTimeIndex  # every distinct frame time covered by a clip
+    clip_start_indices: (
+        np.ndarray
+    )  # frame_times[clip_start_indices] == clip_start_times
     fine_coords: LatLonCoordinates  # full-domain fine coordinates
     fine_extent_latlon_coords: LatLonCoordinates  # post-crop fine coordinates
 
