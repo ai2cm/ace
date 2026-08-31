@@ -16,12 +16,21 @@ WANDB_PROJECT=${WANDB_PROJECT:-VarMasking8}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
+# Opt the job into scripts/beaker_balancer (low|normal|high|urgent). Only read
+# in the balancer's managed workspace (ai2/ace by default), so setting it for a
+# job submitted elsewhere does nothing. Unset: the job is left unmanaged.
+CM_PRIORITY=${CM_PRIORITY:-}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 if [[ "${SKIP_VALIDATE:-0}" != "1" ]]; then
     python "$SCRIPT_PATH/run_eval_suite.py" --validate-only "$CONFIG_PATH"
+fi
+
+cm_priority_args=()
+if [[ -n "$CM_PRIORITY" ]]; then
+    cm_priority_args+=(--env CM_PRIORITY="$CM_PRIORITY")
 fi
 
 cluster_args=()
@@ -42,6 +51,7 @@ cd $REPO_ROOT && gantry run \
     --env WANDB_JOB_TYPE=inference \
     --env WANDB_RUN_GROUP="$JOB_GROUP" \
     --env WANDB_PROJECT="$WANDB_PROJECT" \
+    "${cm_priority_args[@]}" \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
