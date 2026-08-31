@@ -6,6 +6,12 @@ set -euo pipefail
 ARMS="${ARMS:?set ARMS, e.g. ARMS=\"wint5 noohc\"}"
 YEARS="${YEARS:-233 246 250}"
 PRIORITY="${PRIORITY:-urgent}"
+# Which checkpoint to evaluate. noohc has no best_inference_ckpt.tar: its
+# checkpoint selection by inference error never fired because every inference
+# was NaN (the corrections-off instability), so it is evaluated at
+# best_ckpt.tar (best validation loss) -- a selection asymmetry vs the other
+# arms worth noting when comparing.
+CKPT_FILE="${CKPT_FILE:-best_inference_ckpt.tar}"
 declare -A ARM_DATASETS
 ARM_DATASETS[wint5]="${WINT5_DS:-01M0YJXAQS9HMYHNTK86KQ5ADP}"
 ARM_DATASETS[noohc]="${NOOHC_DS:-01M0VY2PS9Q71WCDW0F27K5ZY8}"
@@ -36,7 +42,7 @@ for arm in $ARMS; do
       --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
       --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
       --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-      --dataset "${ds}:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar" \
+      --dataset "${ds}:training_checkpoints/${CKPT_FILE}:/ckpt.tar" \
       --gpus 1 --shared-memory 400GiB --budget ai2/atec-climate \
       --allow-dirty --system-python --install "pip install --no-deps ." \
       -- bash -c "python '${SCRIPT_PATH}/make_wave1_eval_configs.py' --arms ${arm} && python -I -m fme.coupled.evaluator '$config'"
