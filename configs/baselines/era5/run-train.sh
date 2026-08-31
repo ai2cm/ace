@@ -277,6 +277,14 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan-patch-sfc.
 run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan-patch-all.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-gan-patch-all-1-step-pre-training-rs0" 8 ai2/jupiter urgent
 
+# 3-step BPTT fine-tune of the all-D GAN pretrain (added 2026-08-31), donor
+# sufug8tp via dataset 01M11T34XP492Y999NCQKBA6P9. Batch size 4 (D overhead on
+# top of the 3-step BPTT graph; the SFNO-D fine-tune OOMed at batch 8). Titan,
+# 4 GPUs. The arms above are done or live -- launch this alone:
+#   ./run-train.sh ft3-bptt-daily-fg16-sr0p125-gan-patch-all
+run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-gan-patch-all.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-gan-patch-all-ft3-bptt-multi-step-fine-tuning-rs0" 4
+
 # Patch energy score arm (reworked 2026-08-26): the stochastic pretrain with
 # EnsembleLoss 0.9 patch-ES (3x3) / 0.1 spectral-ES, no CRPS -- the patch ES
 # takes CRPS's place (research repo investigation
