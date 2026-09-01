@@ -97,6 +97,7 @@ launch() {
     --cluster ai2/jupiter \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \
+    --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \

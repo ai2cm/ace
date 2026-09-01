@@ -221,6 +221,12 @@ def arm_tendloss(c: dict) -> dict:
     # 80 GB (in the one-step aggregator's normalize) -- same failure class
     # hzn12 hit. Training batch is untouched.
     c["validation"]["loader"]["batch_size"] = 4
+    # Second OOM (after that fix): the first training step, in the atmosphere
+    # SFNO forward, with 72 GB still held after the 54-min pre-training
+    # inline inference. Skip that inference (it measures the init the
+    # original pre-merge tendloss run already logged) so training starts
+    # against a clean allocator.
+    c["evaluate_before_training"] = False
     return c
 
 
