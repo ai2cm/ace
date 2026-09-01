@@ -1,9 +1,0 @@
-runs:
-  2026-07-15-om4-1pctco2-4deg-ocean-5daily: gs://vcm-ml-intermediate
-data_output_directory: gs://vcm-ml-intermediate
-stats:
-  output_directory: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-4deg-ocean-5daily-stats
-  beaker_dataset: not_used
-  start_date: "0001-01-06"
-  end_date: "0141-01-01"
-  data_type: CM4
