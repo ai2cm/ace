@@ -83,10 +83,17 @@ launch() {
     clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
+  if [[ "$arm" == "allinonesfno" ]]; then
+    config="${CONFIG_DIR}/allinonesfno-pretrain.yaml"
+    module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
+    mounts=(--dataset "${ALLINONE_STATS_DATASET}:/ocean_stats")
+  fi
 
   python "${SCRIPT_PATH}/make_wave1_configs.py" >/dev/null
   python "${SCRIPT_PATH}/make_allinone_config.py" >/dev/null
   python "${SCRIPT_PATH}/make_shallow_config.py" >/dev/null
+  python "${SCRIPT_PATH}/make_allinone_sfno_config.py" >/dev/null
 
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "  [dry-run] $job_name ($module, $config)"
@@ -122,6 +129,7 @@ launch() {
         "python '${SCRIPT_PATH}/make_wave1_configs.py' && \
          python '${SCRIPT_PATH}/make_allinone_config.py' && \
          python '${SCRIPT_PATH}/make_shallow_config.py' && \
+         python '${SCRIPT_PATH}/make_allinone_sfno_config.py' && \
          torchrun --nproc_per_node=${N_GPUS} -m ${module} '${config}'"
 }
 
