@@ -352,13 +352,13 @@ create_coupled_datasets_env:
 	conda run --no-capture-output -n create_coupled_datasets python -m pip install uv
 	conda run --no-capture-output -n create_coupled_datasets uv pip install -r requirements-coupled.txt
 
-.PHONY: cm4_piControl_200yr_coupled
-cm4_piControl_200yr_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-1deg-200yr.yaml
+.PHONY: cm4_piControl_coupled
+cm4_piControl_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-$(RESOLUTION)-200yr.yaml
 
-.PHONY: cm4_1pctCO2_140yr_coupled
-cm4_1pctCO2_140yr_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-1deg-140yr.yaml
+.PHONY: cm4_1pctCO2_coupled
+cm4_1pctCO2_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-$(RESOLUTION)-140yr.yaml
 
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
