@@ -143,8 +143,9 @@ class SingleModuleStepConfig(StepConfigABC):
         if extra_residual_scaled_names is None:
             extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
-            names=self._normalize_names + extra_names,
-            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
+            names=sorted(self._normalize_names) + extra_names,
+            residual_scaled_names=sorted(self.prognostic_names)
+            + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -155,52 +156,50 @@ class SingleModuleStepConfig(StepConfigABC):
         )
 
     @property
-    def _normalize_names(self):
+    def _normalize_names(self) -> frozenset[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return list(set(self.in_names).union(self.output_names))
+        return frozenset(set(self.in_names).union(self.output_names))
 
     @property
-    def input_names(self) -> list[str]:
+    def input_names(self) -> frozenset[str]:
         """
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
         """
         if self.ocean is None:
-            return self.in_names
+            return frozenset(self.in_names)
         else:
-            return list(set(self.in_names).union(self.ocean.forcing_names))
+            return frozenset(set(self.in_names).union(self.ocean.forcing_names))
 
     def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
         return self.next_step_forcing_names
 
     @property
-    def diagnostic_names(self) -> list[str]:
+    def diagnostic_names(self) -> frozenset[str]:
         """Names of variables which are outputs only."""
-        return list(set(self.output_names).difference(self.in_names))
+        return frozenset(set(self.output_names).difference(self.in_names))
 
     @property
-    def output_names(self) -> list[str]:
+    def output_names(self) -> frozenset[str]:
         secondary_names = (
             self.secondary_decoder.secondary_diagnostic_names
             if self.secondary_decoder is not None
             else []
         )
-        return list(set(self.out_names).union(secondary_names))
+        return frozenset(set(self.out_names).union(secondary_names))
 
     @property
-    def next_step_input_names(self) -> list[str]:
+    def next_step_input_names(self) -> frozenset[str]:
         """Names of variables provided in next_step_input_data."""
-        input_only_names = set(self.input_names).difference(self.output_names)
-        result = set(input_only_names)
+        result = set(self.input_names).difference(self.output_names)
         if self.ocean is not None:
             result = result.union(self.ocean.forcing_names)
-        result = result.union(self.prescribed_prognostic_names)
-        return list(result)
+        return frozenset(result.union(self.prescribed_prognostic_names))
 
     @property
     def loss_names(self) -> list[str]:
-        return self.output_names
+        return sorted(self.output_names)
 
     @property
     def allow_missing_variables(self) -> bool:
@@ -245,7 +244,9 @@ class SingleModuleStepConfig(StepConfigABC):
     ) -> "SingleModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
-        normalizer = self.normalization.get_network_normalizer(self._normalize_names)
+        normalizer = self.normalization.get_network_normalizer(
+            sorted(self._normalize_names)
+        )
         return SingleModuleStep(
             config=self,
             dataset_info=dataset_info,
@@ -328,9 +329,12 @@ class SingleModuleStep(StepABC):
         dist = Distributed.get_instance()
 
         if config.secondary_decoder is not None:
+            secondary_decoder_n_in = n_out_channels
+            if config.secondary_decoder.include_input_step:
+                secondary_decoder_n_in += n_in_channels
             self.secondary_decoder: SecondaryDecoder | NoSecondaryDecoder = (
                 config.secondary_decoder.build(
-                    n_in_channels=n_out_channels,
+                    n_in_channels=secondary_decoder_n_in,
                     dataset_info=dataset_info,
                 ).to(get_device())
             )
@@ -427,8 +431,16 @@ class SingleModuleStep(StepABC):
                 labels=args.labels,
             )
             output_dict = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            secondary_input = output_tensor.detach()
+            if (
+                self._config.secondary_decoder is not None
+                and self._config.secondary_decoder.include_input_step
+            ):
+                secondary_input = torch.cat(
+                    [secondary_input, input_tensor.detach()], dim=self.CHANNEL_DIM
+                )
             secondary_output_dict = self.secondary_decoder.wrap_module(wrapper)(
-                output_tensor.detach()  # detach avoids changing base outputs
+                secondary_input
             )
             output_dict.update(secondary_output_dict)
             return output_dict
@@ -600,7 +612,7 @@ def step_with_adjustments(
     corrector: CorrectorABC | None,
     ocean: Ocean | None,
     residual_prediction: bool,
-    prognostic_names: list[str],
+    prognostic_names: frozenset[str],
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
@@ -673,10 +685,9 @@ def step_with_adjustments(
         )
         result = corrector(input, output, next_step_input_data, corrector_state)
         output = result.corrected
-        # Detach the corrector diagnostic tensors.
-        diagnostics = CorrectorDiagnostics(
-            delta={k: v.detach() for k, v in result.diagnostics.delta.items()}
-        )
+        # The deltas stay on the autograd graph so a training loss can
+        # differentiate through the correction.
+        diagnostics = result.diagnostics
         if result.corrector_state is not None:
             # Preserve the incoming state's other fields (e.g. random_state)
             # rather than rebuilding from scratch, so StepperState stays

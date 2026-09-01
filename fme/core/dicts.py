@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 
@@ -41,7 +41,7 @@ def to_nested_dict(d: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def add_names(
-    left: Mapping[str, Any], right: Mapping[str, Any], names: list[str]
+    left: Mapping[str, Any], right: Mapping[str, Any], names: Collection[str]
 ) -> dict[str, Any]:
     """Add the 'names' from left dict to the right dict and return result.
 
