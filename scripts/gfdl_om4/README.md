@@ -41,10 +41,9 @@ Contents:
   native vertical grid masks them as land). Scans the source, flags faces
   that are structurally zero with a dry tracer neighbor, and publishes the
   masks as a versioned GCS artifact; streams opt in via `face_mask_url`.
-  During center interpolation a wet cell whose faces on an axis are all
-  land is a wall for that axis, and that grid-relative component is set
-  to the no-normal-flow value 0 before rotation, so every velocity output
-  keeps the tracer wetmask footprint (`mask_k`).
+  See `run._rotate_pairs` for how the flagged faces and the wall-zero
+  fill keep every velocity output on the tracer wetmask footprint
+  (`mask_k`).
 
 ## Setup
 
@@ -60,8 +59,9 @@ make generate_face_masks     # per-simulation remap-born-zero face masks
 ```
 
 Face-mask artifacts are per-simulation (see `pipeline/face_masks.py`): each
-`generate_face_masks_*` target scans that source's first year against the
-independently-censused expected surface-face counts baked into the target.
+`generate_face_masks_*` target scans that source's first year and checks the
+flagged surface-face counts against the independent census baked into the
+target.
 
 ## Configs
 
@@ -86,12 +86,14 @@ make smoke_tests             # all four configs + the checks below
 make smoke_test_picontrol_1deg   # or any single config
 ```
 
-`make smoke_tests` additionally verifies that the piControl and 1pctCO2
-configs derive identical wetmasks (`make check_wetmask_equivalence`;
-downstream training/analysis assumes the stores share one mask — a
-difference is a stop-and-report finding, not something to conform around),
-and that a repeat run against an existing output store refuses to
-initialize into it (`make smoke_test_repeat_fails`).
+`make smoke_tests` additionally runs:
+
+- `make check_wetmask_equivalence` — the piControl and 1pctCO2 configs must
+  derive identical wetmasks. Downstream training/analysis assumes the
+  stores share one mask, so a difference is a stop-and-report finding, not
+  something to conform around.
+- `make smoke_test_repeat_fails` — a repeat run against an existing output
+  store must refuse to initialize into it.
 
 The pipeline can also be invoked directly, with any beam pipeline options
 after the script's own arguments:

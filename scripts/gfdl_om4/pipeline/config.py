@@ -53,12 +53,9 @@ class StreamConfig:
             order (see pipeline/postprocess.py).
         face_mask_url: URL prefix of a precomputed face-mask artifact (see
             pipeline/face_masks.py) for sources whose staggered velocities
-            carry remap-born zeros over land. When set, the stream's rotated
-            pairs have the flagged faces treated as invalid before center
-            interpolation, so the wall-zero fill at centers with no valid
-            face on an axis (see run._rotate_pairs) applies where a
-            properly-masked source would put it instead of the fake zeros
-            being averaged into coastal centers.
+            carry remap-born zeros over land. When set, the flagged faces
+            of the stream's rotated pairs are treated as invalid before
+            center interpolation (see run._rotate_pairs).
     """
 
     name: str
@@ -119,11 +116,9 @@ class WetmaskConfig:
 
     The wetmask is the NaN pattern of the reference variable's first
     timestep. Every processed variable's footprint must equal it exactly
-    and is masked to it (see run._conform_to_wetmask, which raises
-    otherwise), so the output NaN pattern equals the ``mask_k`` statics at
-    every timestep and a source whose footprint disagrees at any timestep
-    fails loudly instead of being silently clipped, zero-filled or
-    repaired.
+    (see run._conform_to_wetmask, which raises otherwise, with no repair),
+    so the output NaN pattern equals the ``mask_k`` statics at every
+    timestep.
 
     Attributes:
         store: URL of the zarr store holding the reference variable.

@@ -6,7 +6,7 @@ wetmask-normalized conservative regridding to a Gaussian grid, level
 splitting), and writes one templated, sharded zarr v3 store per invocation,
 driven by a YAML config (see pipeline/config.py and configs/).
 
-Run locally on a subset with the DirectRunner (see the Makefile test_run
+Run locally on a subset with the DirectRunner (see the Makefile smoke_test
 target), or on Google Cloud Dataflow by passing the corresponding beam
 pipeline options after the script's own arguments.
 
@@ -29,17 +29,12 @@ Masking conventions of the output store:
   sub-surface cells, seen in earlier trial sources — fails the run.
 - Rotated C-grid pairs are interpolated to tracer centers dropping invalid
   (land) faces from the average; a wet center whose faces on an axis are
-  all land is a wall for that axis, where the model's resolved normal
-  component is identically zero by no-normal-flow, so that grid-relative
-  component is set to 0.0 *before* rotation (rotation mixes the
-  components, so filling after it would zero a valid along-wall component
-  too — e.g. the along-channel flow of a one-cell-wide channel). Pairs of
-  a stream with a ``face_mask_url`` (sources whose staggered velocities
-  carry remap-born zeros over land; see pipeline/face_masks.py) first get
-  those fake faces invalidated, which makes the wall-zero fill apply at
-  the same centers a properly-masked source would produce. Either way the
-  pair's footprint is the tracer wetmask, so NaN-equals-``mask_k`` holds
-  for every output.
+  all land gets the no-normal-flow wall value 0.0 for that grid-relative
+  component, filled before rotation. Streams with a ``face_mask_url``
+  first invalidate faces the source carries as fake zeros over land (see
+  pipeline/face_masks.py). Either way the pair's footprint is the tracer
+  wetmask, so NaN-equals-``mask_k`` holds for every output; details and
+  rationale in _rotate_pairs.
 - ``sea_surface_fraction`` is the regridded surface ocean fraction (0 over
   land, not NaN), usable to weight coastal cells.
 - Variables listed in a stream's ``full_cell_variables`` (e.g.
