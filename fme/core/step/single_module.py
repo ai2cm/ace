@@ -69,9 +69,10 @@ class SingleModuleStepConfig(StepConfigABC):
             the network's prognostic outputs as residuals in
             residual-normalized units (the ``normalization.residual``
             statistics) instead of full-field-normalized units. The step adds
-            ``residual_mean + residual_std * network_output`` to the input in
-            physical units, so a unit network output corresponds to one
-            standard deviation of the true per-step tendency. Requires
+            ``residual_std * network_output`` to the input in physical units,
+            so a unit network output corresponds to one standard deviation of
+            the true per-step tendency; any nonzero mean tendency is learned
+            through the network output. Requires
             ``residual_prediction`` and a ``normalization.residual`` block.
         include_channel_mask_inputs: Whether to append per-variable mask indicator
             channels to the network input. When True, the network receives
@@ -312,22 +313,18 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
             residual_normalizer: When set, the per-step transform for
                 residual-normalized prediction: prognostic network outputs are
-                rescaled by ``residual_std / field_std`` and offset by
-                ``residual_mean / field_std`` in normalized space before being
-                added to the input.
+                rescaled by ``residual_std / field_std`` in normalized space
+                before being added to the input. Residual means are not used:
+                the stats convention pairs full-field centering with tendency
+                stds, and any nonzero mean tendency is learned through the
+                network output.
         """
         super().__init__()
         if residual_normalizer is not None:
-            self._residual_transform: tuple[TensorDict, TensorDict] | None = (
-                {
-                    name: residual_normalizer.stds[name] / normalizer.stds[name]
-                    for name in config.prognostic_names
-                },
-                {
-                    name: residual_normalizer.means[name] / normalizer.stds[name]
-                    for name in config.prognostic_names
-                },
-            )
+            self._residual_transform: TensorDict | None = {
+                name: residual_normalizer.stds[name] / normalizer.stds[name]
+                for name in config.prognostic_names
+            }
         else:
             self._residual_transform = None
         if config.global_mean_removal is not None:
@@ -659,7 +656,7 @@ def step_with_adjustments(
     ocean: Ocean | None,
     residual_prediction: bool,
     prognostic_names: list[str],
-    residual_transform: tuple[TensorMapping, TensorMapping] | None = None,
+    residual_transform: TensorMapping | None = None,
     prescribed_prognostic_names: list[str] | None = None,
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
@@ -683,12 +680,12 @@ def step_with_adjustments(
         ocean: The ocean model to use.
         residual_prediction: Whether to use residual prediction.
         prognostic_names: Names of prognostic variables.
-        residual_transform: Optional (scale, offset) per-prognostic mappings
-            for residual-normalized prediction: the network's prognostic
-            outputs are mapped to ``scale * output + offset`` in
+        residual_transform: Optional per-prognostic scale mapping for
+            residual-normalized prediction: the network's prognostic outputs
+            are multiplied by ``residual_std / field_std`` in
             full-field-normalized space before being added to the input, so a
             unit network output corresponds to one residual (per-step
-            tendency) standard deviation.
+            tendency) standard deviation. Residual means are never applied.
         prescribed_prognostic_names: Prognostic names to overwrite from
             next_step_input_data after the ocean step (e.g. for inference).
         global_mean_removal: Optional transform that removes per-sample
@@ -727,11 +724,10 @@ def step_with_adjustments(
     output_norm = network_calls(input_norm)
     if residual_prediction:
         if residual_transform is not None:
-            scale, offset = residual_transform
             output_norm = dict(output_norm)
             for name in prognostic_names:
                 if name in output_norm:
-                    output_norm[name] = output_norm[name] * scale[name] + offset[name]
+                    output_norm[name] = output_norm[name] * residual_transform[name]
         output_norm = add_names(input_norm, output_norm, prognostic_names)
     output = normalizer.denormalize(output_norm)
     if global_mean_removal is not None:

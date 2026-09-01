@@ -1500,7 +1500,8 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
 
 def test_step_residual_normalized_prediction():
     """A unit network output must correspond to one residual std, added to
-    the input in physical units (plus the residual mean)."""
+    the input in physical units; residual means are never applied (the stats
+    convention pairs full-field centering with tendency stds)."""
 
     class AddOne(torch.nn.Module):
         def forward(self, x):
@@ -1540,7 +1541,7 @@ def test_step_residual_normalized_prediction():
     for n in names:
         input_norm = (input_data[n] - field_means[n]) / field_stds[n]
         network_output = input_norm + 1
-        expected = input_data[n] + res_means[n] + res_stds[n] * network_output
+        expected = input_data[n] + res_stds[n] * network_output
         torch.testing.assert_close(output[n], expected)
 
 
