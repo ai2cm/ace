@@ -180,19 +180,20 @@ p2="train-1deg-6hourly-v2-harmonized-split-ns-diag"
 #   rs0  experiment 01M18N7FHWNEGCX4R854PAG5BC  job 01M19ZTFFWZGV7AA3QHQGPEYEX
 #   rs1  experiment 01M18N7W3B837SMFENP5FVA3TD  job 01M19ZTFKKXJV8X9JB60DM50P7
 #   rs2  experiment 01M18N890D20RZ3Z3M357JMDKY  job 01M19ZTGPZNW8GQ00BJCHHPEQ5
-declare -A P1_STAGE2_DONOR=(
-  [0]=01M19ZTFCEAKE8ZP8SGXP8KBZN
-  [1]=01M19ZTFGBA97R0Z2RX3VHSEFY
-  [2]=01M19ZTGKSNXXT7GPFGKDGT654
-)
-for SEED in 0 1 2; do
-  run_training "$p1-plev-ft.yaml" "ace22-p1-harmonized-plev-rs${SEED}" \
-    "seed=${SEED}" "${P1_STAGE2_DONOR[$SEED]}"
-done
+# LAUNCHED 2026-09-01; leave commented.
+# declare -A P1_STAGE2_DONOR=(
+#   [0]=01M19ZTFCEAKE8ZP8SGXP8KBZN
+#   [1]=01M19ZTFGBA97R0Z2RX3VHSEFY
+#   [2]=01M19ZTGKSNXXT7GPFGKDGT654
+# )
+# for SEED in 0 1 2; do
+#   run_training "$p1-plev-ft.yaml" "ace22-p1-harmonized-plev-rs${SEED}" \
+#     "seed=${SEED}" "${P1_STAGE2_DONOR[$SEED]}"
+# done
 
 # P2 stage 3. Its stage-2 chain (experiment 01M1A95R538H9MZX7M06W25MGB, job
 # 01M1A95R93E4AGB6KCDPMWJTGZ) is still running; the id below is that job's result dataset,
 # which is correct only if the job finishes without a restart. CONFIRM the job exited 0 and
 # the dataset committed before launching this line -- a restart would issue a new id.
-# run_training "$p2-plev-ft.yaml" "ace22-p2-nsdiag-plev-rs0" \
-#   "seed=0" "01M1A95R5J7J54GANKMG4GFJB8"
+run_training "$p2-plev-ft.yaml" "ace22-p2-nsdiag-plev-rs0" \
+  "seed=0" "01M1A95R5J7J54GANKMG4GFJB8"

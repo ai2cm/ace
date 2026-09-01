@@ -10,7 +10,11 @@ validate_using_ema: true
 ema_checkpoint_save_epochs:
   start: 5
   step: 5
-max_epochs: 50
+# 22 rather than 50. Across the three P1 stage-3 chains the inference error is flat
+# after ~epoch 8 (scatter 1.4-1.9%) and each chain's minimum falls at epoch 14-20, so
+# epochs 22-50 only let `best_inference_error` track the low tail of a noisy series.
+# Stopping at 22 covers the observed minimum range with margin at 44% of the cost.
+max_epochs: 22
 ema:
   decay: 0.999
 inference:
