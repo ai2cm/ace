@@ -1,11 +1,9 @@
 """Format-agnostic pieces of a monthly-mean output dataset.
 
-A monthly writer has two separable concerns: aggregating batches into
-per-calendar-month running means, and representing the result in a file
-format. This module owns the first: the month indexing, the running-mean
-update, the valid-time calendar arithmetic, and the dimension and variable
-names those quantities are stored under. ``monthly.py`` and
-``monthly_zarr.py`` own the second, for netCDF and zarr respectively.
+This module owns the month indexing, the running-mean update, the valid-time
+calendar arithmetic, and the names those quantities are stored under.
+``monthly.py`` and ``monthly_zarr.py`` own the netCDF and zarr
+representations built on them.
 """
 
 import datetime

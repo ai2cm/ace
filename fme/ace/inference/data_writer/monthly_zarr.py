@@ -39,14 +39,14 @@ class MonthlyZarrWriter:
     """
     Write monthly mean data and sample counts to a zarr store.
 
-    The zarr counterpart of ``MonthlyDataWriter``: the aggregation is the same,
-    but the lead-time axis is pre-allocated from the run's length rather than
-    grown as data arrives, since zarr has no unlimited dimension. Each
-    ``append_batch`` reads back the months the batch touches, folds the new
-    data into their stored means using the stored counts, and writes them back.
+    The zarr counterpart of ``MonthlyDataWriter``. The lead-time axis is
+    pre-allocated from the run's length, since zarr has no unlimited dimension,
+    and each ``append_batch`` reads back the months the batch touches, folds
+    the new data into their stored means using the stored counts, and writes
+    them back.
 
-    Unlike ``MonthlyDataWriter``, the store may live on any fsspec-compatible
-    filesystem, not only a local one.
+    The store may live on any fsspec-compatible filesystem, unlike the netCDF
+    writer's.
     """
 
     def __init__(
@@ -95,8 +95,7 @@ class MonthlyZarrWriter:
         dataset_metadata.title = f"ACE {label.replace('_', ' ')} data file"
         self._dataset_metadata = dataset_metadata.as_flat_str_dict()
 
-        # the store's spatial dimensions and month origin are only known once
-        # the first batch is seen
+        # spatial dims and the month origin aren't known until the first batch
         self._n_months: int | None = None
         self._root: zarr.Group | None = None
 
@@ -193,9 +192,8 @@ class MonthlyZarrWriter:
                 shape=sizes,
                 chunks=self._chunks_for(dims, sizes),
                 dtype=FLOAT_DTYPE,
-                # means start at zero rather than NaN, since add_data folds new
-                # data into the value already stored; months the run never
-                # reaches are identified by a zero count
+                # means start at zero, not NaN, since add_data folds into the
+                # stored value; months the run never reaches have a zero count
                 fill_value=0.0,
                 dimension_names=dims,
             )
