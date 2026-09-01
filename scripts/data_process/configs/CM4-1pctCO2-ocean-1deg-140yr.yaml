@@ -1,4 +1,4 @@
-# make cm4_1pctco2_ocean_stats RESOLUTION=1deg
+# make cm4_1pctCO2_ocean_stats RESOLUTION=1deg
 runs:
   2026-07-15-om4-1pctco2-1deg-ocean-5daily: ""  # store produced by scripts/gfdl_om4 xrbeam Dataflow pipeline
 data_output_directory: gs://vcm-ml-intermediate

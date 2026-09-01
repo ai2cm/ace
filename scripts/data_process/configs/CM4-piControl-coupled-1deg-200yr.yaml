@@ -1,3 +1,4 @@
+# make cm4_piControl_coupled RESOLUTION=1deg
 version: "2026-07-15"
 family_name: om4-picontrol-1deg-coupled
 output_directory: gs://vcm-ml-intermediate
