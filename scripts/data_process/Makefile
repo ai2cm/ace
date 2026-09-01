@@ -294,22 +294,6 @@ create_ocean_data_proc_env:
 	conda run --no-capture-output -n ocean_preprocess uv pip install -r requirements-ocean.txt
 	conda run --no-capture-output -n ocean_preprocess bash ./install_ocean_emulators.sh
 
-.PHONY: cm4_picontrol_1deg_ocean_stats_beaker_dataset
-cm4_picontrol_1deg_ocean_stats_beaker_dataset:
-	./compute_stats.sh --config configs/CM4-piControl-ocean-1deg-200yr.yaml
-
-.PHONY: cm4_1pctco2_1deg_ocean_stats_beaker_dataset
-cm4_1pctco2_1deg_ocean_stats_beaker_dataset:
-	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-1deg-140yr.yaml
-
-.PHONY: cm4_picontrol_4deg_ocean_stats_beaker_dataset
-cm4_picontrol_4deg_ocean_stats_beaker_dataset:
-	./compute_stats.sh --config configs/CM4-piControl-ocean-4deg.yaml
-
-.PHONY: cm4_1pctco2_4deg_ocean_stats_beaker_dataset
-cm4_1pctco2_4deg_ocean_stats_beaker_dataset:
-	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-4deg.yaml
-
 .PHONY: shield_som_c96_abrupt_4xCO2_ensemble_dataset
 shield_som_c96_abrupt4xCO2_ensemble_dataset:
 	./compute_dataset.sh --config configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-$(LAYERS).yaml
@@ -353,6 +337,22 @@ build_healpix_processing_image:
 .PHONY: push_healpix_image_to_beaker
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
+
+.PHONY: cm4_picontrol_1deg_ocean_stats
+cm4_picontrol_1deg_ocean_stats:
+	./compute_stats.sh --config configs/CM4-piControl-ocean-1deg-200yr.yaml
+
+.PHONY: cm4_1pctco2_1deg_ocean_stats
+cm4_1pctco2_1deg_ocean_stats:
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-1deg-140yr.yaml
+
+.PHONY: cm4_picontrol_4deg_ocean_stats
+cm4_picontrol_4deg_ocean_stats:
+	./compute_stats.sh --config configs/CM4-piControl-ocean-4deg.yaml
+
+.PHONY: cm4_1pctco2_4deg_ocean_stats
+cm4_1pctco2_4deg_ocean_stats:
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-4deg.yaml
 
 .PHONY: create_coupled_datasets_env
 create_coupled_datasets_env:
