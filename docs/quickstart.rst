@@ -5,8 +5,8 @@ Quickstart
 
 .. important::
 
-    This page documents the **uncoupled** model configuration.
-    For information on using the coupled atmosphere-ocean model, see :ref:`Coupled Emulation <coupled>`.
+    This page documents usage of **uncoupled** models like ACE, SamudraI or FloeNet.
+    For information on using coupled atmosphere-ocean models, see the :ref:`Coupled Inference <coupled>` section.
 
 Install
 =======
@@ -17,7 +17,7 @@ To install the latest release directly from PyPI, use:
 
     pip install fme
 
-If desired, see the :ref:`installation <installation>` page for more information on installing from source or using conda.
+See the :ref:`installation <installation>` page for more information on installing from source or using conda.
 
 Commands
 ========
@@ -28,6 +28,11 @@ The following commands are available, and can be run with ``--help`` for more in
 - ``python3 -m fme.ace.train`` - Train a model
 - ``python3 -m fme.ace.inference`` - Run a saved model checkpoint
 - ``python3 -m fme.ace.evaluator`` - Run a saved model checkpoint and compare to target data
+
+.. note::
+
+    These commands are not only used to train and run inference with atmosphere models like ACE,
+    but also for ocean and sea ice models like SamudraI and FloeNet.
 
 Accessing ACE checkpoints and datasets
 ======================================
