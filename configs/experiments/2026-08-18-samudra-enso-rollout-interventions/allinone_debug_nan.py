@@ -51,17 +51,17 @@ def main(yaml_path, override=None):
     print("metrics:", {k: float(v) for k, v in stepped.metrics.items()})
     pcl = stepped.per_channel_losses
     if pcl is not None:
-        nan_ch = {}
-        for k, v in sorted(pcl.items()):
-            val = float(v if isinstance(v, int | float) else v.float().mean())
-            if val != val or abs(val) > 1e6:
-                nan_ch[k] = val
-        print("per-channel losses (NaN or >1e6):", nan_ch if nan_ch else "NONE")
-        finite = {
-            k: round(float(v if isinstance(v, int | float) else v.float().mean()), 4)
-            for k, v in sorted(pcl.items())
-        }
-        print("all per-channel losses:", finite)
+
+        def as_float(v):
+            if isinstance(v, int | float):
+                return float(v)
+            if hasattr(v, "loss"):
+                return float(v.loss.float().mean())
+            return float(v.float().mean())
+
+        vals = {k: as_float(v) for k, v in pcl.items()}
+        top = sorted(vals.items(), key=lambda kv: -abs(kv[1]))[:12]
+        print("top-12 per-channel losses:", [(k, f"{v:.3g}") for k, v in top])
     nan_report("gen_data", stepped.gen_data)
     nan_report("target_data", stepped.target_data)
 
