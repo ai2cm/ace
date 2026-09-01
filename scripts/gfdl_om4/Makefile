@@ -37,7 +37,7 @@ generate_face_masks: generate_face_masks_picontrol generate_face_masks_1pctco2
 
 generate_face_masks_picontrol:
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.face_masks \
-		--config configs/om4-picontrol-1deg.yaml \
+		--config configs/om4-picontrol-1deg-5daily.yaml \
 		--stream snapshot_ocean \
 		--output-url $(FACE_MASKS_URL_ROOT)/om4-picontrol-2026-06-19 \
 		--start-time 0151-01-06 \
@@ -47,7 +47,7 @@ generate_face_masks_picontrol:
 
 generate_face_masks_1pctco2:
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.face_masks \
-		--config configs/om4-1pctco2-1deg.yaml \
+		--config configs/om4-1pctco2-1deg-5daily.yaml \
 		--stream snapshot_ocean \
 		--output-url $(FACE_MASKS_URL_ROOT)/om4-1pctco2-2026-06-19 \
 		--start-time 0001-01-06 \
@@ -55,7 +55,7 @@ generate_face_masks_1pctco2:
 		--expected-surface-count-u 16960 \
 		--expected-surface-count-v 16694
 
-CONFIG ?= configs/om4-picontrol-1deg.yaml
+CONFIG ?= configs/om4-picontrol-1deg-5daily.yaml
 
 SMOKE_NUM_TIMESTEPS ?= 6
 SMOKE_OUTPUT_ROOT ?= gs://vcm-ml-scratch/jamesd/gfdl-om4-test
@@ -79,16 +79,16 @@ smoke_test:
 		--expected-timesteps $(SMOKE_NUM_TIMESTEPS)
 
 smoke_test_picontrol_1deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-1deg.yaml
+	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-1deg-5daily.yaml
 
 smoke_test_picontrol_4deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-4deg.yaml
+	$(MAKE) smoke_test CONFIG=configs/om4-picontrol-4deg-5daily.yaml
 
 smoke_test_1pctco2_1deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-1deg.yaml
+	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-1deg-5daily.yaml
 
 smoke_test_1pctco2_4deg:
-	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-4deg.yaml
+	$(MAKE) smoke_test CONFIG=configs/om4-1pctco2-4deg-5daily.yaml
 
 # A repeat run against an already-written output store must refuse to
 # initialize into it (runs a smoke test first if its store is absent).
@@ -105,8 +105,8 @@ smoke_test_repeat_fails:
 # downstream training/analysis assumes the output stores share one mask.
 check_wetmask_equivalence:
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.check_wetmask_equivalence \
-		configs/om4-picontrol-1deg.yaml \
-		configs/om4-1pctco2-1deg.yaml
+		configs/om4-picontrol-1deg-5daily.yaml \
+		configs/om4-1pctco2-1deg-5daily.yaml
 
 smoke_tests: check_wetmask_equivalence smoke_test_picontrol_1deg \
 	smoke_test_picontrol_4deg smoke_test_1pctco2_1deg \
@@ -128,16 +128,16 @@ dataflow:
 		./run-dataflow.sh DataflowRunner $(CONFIG)
 
 dataflow_picontrol_1deg:
-	$(MAKE) dataflow CONFIG=configs/om4-picontrol-1deg.yaml
+	$(MAKE) dataflow CONFIG=configs/om4-picontrol-1deg-5daily.yaml
 
 dataflow_picontrol_4deg:
-	$(MAKE) dataflow CONFIG=configs/om4-picontrol-4deg.yaml
+	$(MAKE) dataflow CONFIG=configs/om4-picontrol-4deg-5daily.yaml
 
 dataflow_1pctco2_1deg:
-	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-1deg.yaml
+	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-1deg-5daily.yaml
 
 dataflow_1pctco2_4deg:
-	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-4deg.yaml
+	$(MAKE) dataflow CONFIG=configs/om4-1pctco2-4deg-5daily.yaml
 
 .PHONY: create_environment generate_weights generate_weights_one_degree \
 	generate_weights_four_degree generate_face_masks \

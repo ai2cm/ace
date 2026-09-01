@@ -38,7 +38,7 @@ immutable; generation is self-verifying (see generate_face_masks) and
 refuses to clobber. Example invocation (see also the Makefile):
 
     python -m pipeline.face_masks \\
-        --config configs/om4-picontrol-1deg.yaml \\
+        --config configs/om4-picontrol-1deg-5daily.yaml \\
         --stream snapshot_ocean \\
         --output-url $FACE_MASKS_URL_ROOT/om4-picontrol-2026-06-19 \\
         --start-time 0151-01-06 --end-time 0152-01-01 \\

@@ -98,7 +98,7 @@ The pipeline can also be invoked directly, with any beam pipeline options
 after the script's own arguments:
 
 ```
-python -m pipeline.run --config configs/om4-picontrol-1deg.yaml \
+python -m pipeline.run --config configs/om4-picontrol-1deg-5daily.yaml \
     --num-timesteps 6 --output-path <url> --runner DirectRunner
 ```
 
@@ -125,7 +125,7 @@ python -m pipeline.run --config configs/om4-picontrol-1deg.yaml \
 3. **Inspect** — after the job completes, check the store:
 
    ```
-   python -m pipeline.check_output --config configs/om4-picontrol-1deg.yaml
+   python -m pipeline.check_output --config configs/om4-picontrol-1deg-5daily.yaml
    ```
 
    and review the job's Dataflow console page for stage-level errors
