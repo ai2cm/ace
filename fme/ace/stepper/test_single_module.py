@@ -1498,6 +1498,70 @@ def test_step_with_forcing_and_diagnostic(residual_prediction):
     assert "c" in output
 
 
+def test_step_residual_normalized_prediction():
+    """A unit network output must correspond to one residual std, added to
+    the input in physical units (plus the residual mean)."""
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    names = ["a", "b"]
+    field_means = {"a": 1.0, "b": -2.0}
+    field_stds = {"a": 4.0, "b": 3.0}
+    res_means = {"a": 0.5, "b": 0.1}
+    res_stds = {"a": 0.25, "b": 0.05}
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=names,
+                    out_names=names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means=field_means, stds=field_stds),
+                        residual=NormalizationConfig(means=res_means, stds=res_stds),
+                    ),
+                    residual_prediction=True,
+                    residual_normalized_prediction=True,
+                )
+            ),
+        ),
+        derived_forcings=DerivedForcingsConfig(),
+    )
+    stepper = config.get_stepper(get_dataset_info())
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in names}
+    output = stepper.step(
+        StepArgs(input=input_data, next_step_input_data={}, labels=None)
+    ).output
+    for n in names:
+        input_norm = (input_data[n] - field_means[n]) / field_stds[n]
+        network_output = input_norm + 1
+        expected = input_data[n] + res_means[n] + res_stds[n] * network_output
+        torch.testing.assert_close(output[n], expected)
+
+
+def test_residual_normalized_prediction_requires_residual_block():
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    with pytest.raises(ValueError, match="normalization.residual"):
+        SingleModuleStepConfig(
+            builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
+            in_names=["a"],
+            out_names=["a"],
+            normalization=NetworkAndLossNormalizationConfig(
+                network=NormalizationConfig(means={"a": 0.0}, stds={"a": 1.0}),
+            ),
+            residual_prediction=True,
+            residual_normalized_prediction=True,
+        )
+
+
 def test_step_with_prescribed_ocean():
     stepper = _get_stepper(
         ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")

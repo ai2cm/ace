@@ -309,6 +309,28 @@ def make_resid_pretrain(seed: int) -> dict:
     return c
 
 
+def make_residfix_pretrain(seed: int) -> dict:
+    """Residual prediction with the forward path in tendency units.
+
+    The first resid arm demonstrated the structural failure of residual
+    prediction as previously wired: the network output is added to the input
+    in FULL-FIELD-normalized units, so representing a real 5-day tendency
+    requires outputs of 1/30th to 1/430th of a normalized unit, while the
+    tendency-scaled loss amplifies errors on the deepest levels by up to
+    180,000x. Validation loss fell four orders of magnitude and every one of
+    150 epoch-end rollouts was NaN.
+
+    residual_normalized_prediction fixes the forward path: the network's
+    prognostic outputs are treated as tendencies in residual-normalized units
+    (one unit of output = one std of the true 5-day tendency), added to the
+    input in physical units. The loss (residual block) then measures errors
+    in the same units end to end.
+    """
+    c = make_resid_pretrain(seed)
+    c["stepper"]["step"]["config"]["residual_normalized_prediction"] = True
+    return c
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -335,6 +357,10 @@ def main() -> None:
     rp = args.out_dir / "resid-pretrain.yaml"
     rp.write_text(yaml.safe_dump(make_resid_pretrain(args.seed), sort_keys=False))
     print(f"wrote {rp}")
+
+    rf = args.out_dir / "residfix-pretrain.yaml"
+    rf.write_text(yaml.safe_dump(make_residfix_pretrain(args.seed), sort_keys=False))
+    print(f"wrote {rf}")
 
 
 if __name__ == "__main__":
