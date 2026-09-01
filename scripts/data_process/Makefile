@@ -348,11 +348,11 @@ cm4_1pctco2_1deg_ocean_stats:
 
 .PHONY: cm4_picontrol_4deg_ocean_stats
 cm4_picontrol_4deg_ocean_stats:
-	./compute_stats.sh --config configs/CM4-piControl-ocean-4deg.yaml
+	./compute_stats.sh --config configs/CM4-piControl-ocean-4deg-200yr.yaml
 
 .PHONY: cm4_1pctco2_4deg_ocean_stats
 cm4_1pctco2_4deg_ocean_stats:
-	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-4deg.yaml
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-4deg-140yr.yaml
 
 .PHONY: create_coupled_datasets_env
 create_coupled_datasets_env:
@@ -362,11 +362,11 @@ create_coupled_datasets_env:
 
 .PHONY: cm4_piControl_200yr_coupled
 cm4_piControl_200yr_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-1deg-200yr.yaml
 
 .PHONY: cm4_1pctCO2_140yr_coupled
 cm4_1pctCO2_140yr_coupled:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-1deg-140yr.yaml
 
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
