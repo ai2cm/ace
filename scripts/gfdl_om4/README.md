@@ -90,8 +90,7 @@ make smoke_test_picontrol_1deg   # or any single config
 
 - `make check_wetmask_equivalence` — the piControl and 1pctCO2 configs must
   derive identical wetmasks. Downstream training/analysis assumes the
-  stores share one mask, so a difference is a stop-and-report finding, not
-  something to conform around.
+  stores share one mask.
 - `make smoke_test_repeat_fails` — a repeat run against an existing output
   store must refuse to initialize into it.
 

@@ -23,10 +23,7 @@ Masking conventions of the output store:
   cell NaNs the loss; a NaN target at an unmasked cell NaNs metrics).
   To guarantee this, each chunk passes through _conform_to_wetmask before
   regridding, which raises unless the chunk's valid-data footprint equals
-  the wetmask exactly, then masks the chunk to it. There is no repair
-  fallback: a source whose instantaneous footprint drifts — z*-remapped
-  bottom slivers drying and re-wetting with sea level at a handful of
-  sub-surface cells, seen in earlier trial sources — fails the run.
+  the wetmask exactly, then masks the chunk to it.
 - Rotated C-grid pairs are interpolated to tracer centers dropping invalid
   (land) faces from the average; a wet center whose faces on an axis are
   all land gets the no-normal-flow wall value 0.0 for that grid-relative
@@ -107,7 +104,7 @@ def _assert_output_store_absent(path: str) -> None:
 
     Output stores are written once and treated as immutable; initializing
     the template into an existing store would corrupt or silently overwrite
-    it. Delete the store explicitly or pick a new output path.
+    it.
     """
     fs, root = fsspec.url_to_fs(path)
     if fs.exists(root):
@@ -183,8 +180,7 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     da = ds[config.wetmask.variable].isel({TIME_DIM: 0}).load()
     if LEVEL_DIM not in da.dims:
         raise AssertionError(
-            f"wetmask variable {config.wetmask.variable!r} has no {LEVEL_DIM} "
-            "dimension"
+            f"wetmask variable {config.wetmask.variable!r} has no {LEVEL_DIM} dimension"
         )
     if da.sizes[LEVEL_DIM] != config.expected_level_count:
         raise AssertionError(
@@ -224,8 +220,7 @@ def _assert_time_alignment(datasets: dict[str, xr.Dataset]) -> xr.DataArray:
             or not (reference.values == other.values).all()
         ):
             raise AssertionError(
-                f"time coordinate of stream {name!r} differs from stream "
-                f"{names[0]!r}"
+                f"time coordinate of stream {name!r} differs from stream {names[0]!r}"
             )
     return reference
 
@@ -583,8 +578,7 @@ def build_statics(config: PipelineConfig, wetmask: xr.DataArray) -> xr.Dataset:
     missing = set(config.statics.variables) - set(source.data_vars)
     if missing:
         raise AssertionError(
-            f"static variables missing from {config.statics.store}: "
-            f"{sorted(missing)}"
+            f"static variables missing from {config.statics.store}: {sorted(missing)}"
         )
     fields = source[config.statics.variables].load()
     surface_wetmask = wetmask.isel({LEVEL_DIM: 0}, drop=True)

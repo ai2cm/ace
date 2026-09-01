@@ -3,9 +3,8 @@ LOCAL_ENVIRONMENT ?= gfdl-om4-ingestion
 VERSION ?= 2026-07-09-gfdl-om4-xrbeam-pipeline
 IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/gfdl-om4-ingest-dataflow:$(VERSION)
 
-# Durable pipeline inputs (static grid files, regridding weights, face
-# masks) live under one dated, immutable GCS prefix. Nothing consumed by a
-# production run may live under vcm-ml-scratch (auto-deletion risk).
+# Durable pipeline inputs (static grid files, regridding weights, face masks)
+# live under one dated, immutable GCS prefix.
 INPUTS_URL_ROOT ?= gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs
 HGRID_URL ?= $(INPUTS_URL_ROOT)/statics/ocean_hgrid.nc
 WEIGHTS_URL_ROOT ?= $(INPUTS_URL_ROOT)/regridding-weights
