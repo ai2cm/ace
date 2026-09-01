@@ -107,7 +107,6 @@ while read RESUMING; do
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
-    build_cm_priority_args "$PRIORITY"
     build_stats_dataset_args
 
     # Set config path variable for print functions
@@ -127,7 +126,6 @@ while read RESUMING; do
         echo " - Job name: ${JOB_NAME}"
         echo " - Resuming results dataset ID: ${EXISTING_RESULTS_DATASET}"
         echo " - Priority: ${PRIORITY}"
-        echo " - CM_PRIORITY: ${JOB_CM_PRIORITY}"
         echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
         echo " - Workspace: ${WORKSPACE}"
         echo " - GPUs: ${N_GPUS}"

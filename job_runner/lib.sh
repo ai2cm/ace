@@ -101,40 +101,6 @@ build_cluster_args() {
     export WORKSPACE
 }
 
-# Build CM_PRIORITY_ARGS array, the gantry flags that opt a job in to the
-# Beaker priority balancer (scripts/beaker_balancer).
-#
-# The balancer only manages jobs that set the CM_PRIORITY env var, and uses it
-# both as the ranking for a scarce urgent slot and as the priority the job rests
-# at when it doesn't get one. We default it to the priority from the input file
-# (training.txt, experiments.txt, ...), so jobs are managed by default and the
-# ranking matches what the file already asks for.
-#
-# Args: $1 = PRIORITY (the Beaker priority from the input file)
-# Env: CM_PRIORITY - if set, overrides the input-file priority for all jobs in
-#      this invocation. Set it to "none" to opt out of the balancer entirely.
-# Sets global CM_PRIORITY_ARGS array and JOB_CM_PRIORITY variable.
-build_cm_priority_args() {
-    local FILE_PRIORITY="$1"
-
-    JOB_CM_PRIORITY="${CM_PRIORITY:-$FILE_PRIORITY}"
-
-    case "$JOB_CM_PRIORITY" in
-        low | normal | high | urgent)
-            CM_PRIORITY_ARGS=(--env CM_PRIORITY="$JOB_CM_PRIORITY")
-            ;;
-        *)
-            # The balancer accepts only the four values above; "immediate" in
-            # particular is a deliberate human decision it must not undo. Anything
-            # else (including an empty priority field) leaves the job unmanaged.
-            CM_PRIORITY_ARGS=()
-            JOB_CM_PRIORITY="(unmanaged)"
-            ;;
-    esac
-
-    export JOB_CM_PRIORITY
-}
-
 # Build STATS_DATASET_ARGS array based on stats configuration
 # Handles both coupled and separate stats datasets
 # Sets global STATS_DATASET_ARGS array
@@ -224,8 +190,6 @@ run_gantry_training_job() {
         CHECKPOINT_DATASET_ARGS=()
     fi
 
-    build_cm_priority_args "$PRIORITY"
-
     local EXPERIMENT_ID=$(
         gantry run \
             --name "$JOB_NAME" \
@@ -243,7 +207,6 @@ run_gantry_training_job() {
             --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
             --env NCCL_DEBUG=WARN \
             --env NCCL_DEBUG_FILE=/results/nccl_debug.log \
-            "${CM_PRIORITY_ARGS[@]}" \
             --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${STATS_DATASET_ARGS[@]}" \
@@ -462,7 +425,6 @@ print_detailed_job_info() {
     echo "  TAG: ${TAG:-(empty)}"
     echo "  STATUS: $STATUS"
     echo "  PRIORITY: $PRIORITY"
-    echo "  CM_PRIORITY: ${JOB_CM_PRIORITY:-(unmanaged)}"
     echo "  CLUSTER: ${CLUSTER:-(default: H100 clusters)}"
     echo "  N_GPUS: $N_GPUS"
     echo "  SHARED_MEM: $SHARED_MEM"
@@ -489,9 +451,8 @@ print_condensed_job_info() {
     local SHARED_MEM="$5"
     local PRIORITY="$6"
 
-    printf "  - %-50s | %s | GPUs: %2s | Mem: %7s | Priority: %-8s | CM_PRIORITY: %-11s | Cluster: %s\n" \
-        "$JOB_NAME" "$CONFIG_PATH" "$N_GPUS" "$SHARED_MEM" "$PRIORITY" \
-        "${JOB_CM_PRIORITY:-(unmanaged)}" "${CLUSTER:-(default)}"
+    printf "  - %-50s | %s | GPUs: %2s | Mem: %7s | Priority: %-8s | Cluster: %s\n" \
+        "$JOB_NAME" "$CONFIG_PATH" "$N_GPUS" "$SHARED_MEM" "$PRIORITY" "${CLUSTER:-(default)}"
 }
 
 # Wrapper for gantry job that respects dry-run mode

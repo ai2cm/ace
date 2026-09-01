@@ -10,10 +10,6 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - CHANGELOG.md
 - [FEAT] Changelog TODO automation
 - `make jr_change`
-- Submit all jobs with a `CM_PRIORITY` env var to opt them in to the Beaker
-  priority balancer ([#1419](https://github.com/ai2cm/ace/pull/1419)). It
-  defaults to the `priority` field from the input file and can be overridden for
-  a whole invocation with the `CM_PRIORITY` environment variable.
 - [FEAT] Add `--config-dir` arg to `{evaluate,inference}.sh` for shared eval
   configs
 
