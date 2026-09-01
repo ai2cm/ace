@@ -22,16 +22,11 @@ Masking conventions of the output store:
   assumes NaN exactly where ``mask_k == 0`` (a finite target at a masked
   cell NaNs the loss; a NaN target at an unmasked cell NaNs metrics).
   To guarantee this, each chunk passes through _conform_to_wetmask before
-  regridding, which asserts the source's valid-data footprint equals the
-  wetmask and repairs any small drift: cells wet at time t but outside
-  the wetmask are dropped, and wetmask cells that are instantaneously dry
-  are filled from the level above (the water immediately overlying the
-  vacated sliver). Such drift — z*-remapped bottom slivers drying and
-  re-wetting with sea level at a handful of sub-surface cells — was
-  observed in earlier trial sources; the production sources have shown
-  none, and the smoke-test and production launch targets pin the conform
-  step to a no-op with --max-conformed-cells 0, so in practice it acts
-  as a strict per-chunk footprint check.
+  regridding, which raises unless the chunk's valid-data footprint equals
+  the wetmask exactly, then masks the chunk to it. There is no repair
+  fallback: a source whose instantaneous footprint drifts — z*-remapped
+  bottom slivers drying and re-wetting with sea level at a handful of
+  sub-surface cells, seen in earlier trial sources — fails the run.
 - Rotated C-grid pairs are interpolated to tracer centers dropping invalid
   (land) faces from the average; a wet center whose faces on an axis are
   all land is a wall for that axis, where the model's resolved normal
@@ -206,14 +201,6 @@ def load_wetmask(config: PipelineConfig) -> xr.DataArray:
     return wetmask
 
 
-# Instantaneous ocean coverage may drift slightly from the reference-time
-# wetmask (cells with time-varying validity at sub-surface levels); observed
-# drift is ~0.01% of wet cells. Anything larger indicates an inconsistent
-# source (wrong grid, dropped mask) and fails the run rather than being
-# silently conformed.
-MAX_FOOTPRINT_DRIFT_FRACTION = 0.001
-
-
 def _assert_footprint(da: xr.DataArray, wetmask: xr.DataArray, context: str) -> None:
     """Assert a variable's valid-data footprint exactly equals the wetmask.
 
@@ -274,106 +261,26 @@ def _get_areacello(target_grid_name: str) -> xr.DataArray:
     return _AREACELLO_CACHE[target_grid_name]
 
 
-# One lazily-opened source dataset per store per worker process, for the
-# targeted level-above reads made by _conform_to_wetmask.
-_SOURCE_CACHE: dict[str, xr.Dataset] = {}
-
-
-def _get_source(store_url: str) -> xr.Dataset:
-    if store_url not in _SOURCE_CACHE:
-        _SOURCE_CACHE[store_url] = xr.open_zarr(
-            _make_zarr_store(store_url), chunks=None, decode_timedelta=False
-        )
-    return _SOURCE_CACHE[store_url]
-
-
 def _conform_to_wetmask(
     ds: xr.Dataset,
-    stream: StreamConfig,
     wetmask: xr.DataArray,
-    level_index: int | None,
     context: str,
-    max_conformed_cells: int | None = None,
 ) -> xr.Dataset:
-    """Force every tracer-grid variable's valid-data footprint to equal the
-    reference-time wetmask.
+    """Assert every tracer-grid variable's valid-data footprint equals the
+    reference-time wetmask, and mask the dataset to it.
 
-    The sources' instantaneous ocean coverage differs from the wetmask at a
-    handful of sub-surface cells: the upstream z-level remap uses
-    instantaneous layer thicknesses, so a column whose total depth
-    (deptho + sea level) sits near a level interface has a bottom sliver
-    cell that dries and re-wets as sea level moves (~0.001% of wet cells
-    per timestep, verified over the piControl sample year). Training
-    requires the output NaN pattern to equal the static ``mask_k`` exactly,
-    so per chunk:
-
-    - cells valid at time t but outside the wetmask are dropped;
-    - cells inside the wetmask but instantaneously NaN are filled with the
-      value one level up at the same time and place — the water
-      immediately overlying the vacated sliver (every observed dry event
-      has a wet cell directly above), read from the source store.
-
-    The total conformed-cell count is bounded by
-    MAX_FOOTPRINT_DRIFT_FRACTION so a systematically inconsistent source
-    still fails loudly instead of being silently rewritten. Staggered
-    (C-grid) variables are not touched here; they conform to the wetmask
-    during center interpolation in _rotate_pairs.
-
-    ``max_conformed_cells``, when given, is a stricter per-variable bound on
-    the conformed-cell count for this chunk (0 asserts the conform step is a
-    no-op, e.g. in smoke-test runs over a few timesteps).
+    Training requires the output NaN pattern to equal the static ``mask_k``
+    exactly, so any instantaneous departure from the reference-time wetmask
+    fails the run — there is no conforming repair. Staggered (C-grid)
+    variables are not touched here; they conform to the wetmask during
+    center interpolation in _rotate_pairs.
     """
-    limit = MAX_FOOTPRINT_DRIFT_FRACTION * max(int(wetmask.sum()), 1)
     conformed = ds.copy()
     for name in ds.data_vars:
         da = ds[name]
         if not set(wetmask.dims).issubset(set(da.dims)):
             continue
-        valid, expected = xr.broadcast(da.notnull(), wetmask)
-        missing = int((expected & ~valid).sum())
-        dropped = int((valid & ~expected).sum())
-        if missing + dropped > limit * da.sizes.get(TIME_DIM, 1):
-            raise AssertionError(
-                f"{context}: footprint of {name!r} differs from the wetmask "
-                f"at {missing + dropped} cells (limit "
-                f"{limit * da.sizes.get(TIME_DIM, 1):.0f}); source is "
-                "inconsistent with the wetmask, refusing to conform"
-            )
-        if max_conformed_cells is not None and missing + dropped > max_conformed_cells:
-            raise AssertionError(
-                f"{context}: the wetmask conform step would touch "
-                f"{missing + dropped} cells of {name!r}, above the "
-                f"requested --max-conformed-cells bound of "
-                f"{max_conformed_cells}"
-            )
-        if missing:
-            if level_index is None or level_index == 0:
-                raise AssertionError(
-                    f"{context}: {name!r} is NaN at {missing} wetmask cells "
-                    "and there is no level above to fill from"
-                )
-            source = _get_source(stream.store)[name]
-            if stream.dim_renaming:
-                source = source.rename(
-                    {k: v for k, v in stream.dim_renaming.items() if k in source.dims}
-                )
-            try:
-                # Chunk time labels are the source's raw labels (subsetting
-                # and striding preserve values); only the midpoint-shift
-                # toggle rewrites them, in which case this lookup fails.
-                above = (
-                    source.isel({LEVEL_DIM: level_index - 1}, drop=True)
-                    .sel({TIME_DIM: da[TIME_DIM].values})
-                    .load()
-                )
-            except KeyError:
-                raise AssertionError(
-                    f"{context}: cannot read the level above to fill "
-                    f"{missing} dry wetmask cells of {name!r}: chunk time "
-                    "labels not found in the source (is "
-                    "shift_timestamps_to_avg_interval_midpoint enabled?)"
-                )
-            da = da.fillna(above)
+        _assert_footprint(da, wetmask, context)
         conformed[name] = da.where(wetmask).assign_attrs(da.attrs)
     return conformed
 
@@ -469,14 +376,13 @@ def _process_chunk(
     weights_url: str,
     target_grid_name: str,
     level_index: int | None,
-    max_conformed_cells: int | None = None,
 ) -> xr.Dataset:
     """Transform one in-memory chunk: conform to the wetmask, rotate, check
     footprints, regrid, and (for 3D chunks) split the level into suffixed 2D
     variables.
 
-    Every variable is conformed to the reference-time wetmask (see
-    _conform_to_wetmask), asserted to match it exactly, and the regrid is
+    Every variable's footprint is asserted equal to the reference-time
+    wetmask and masked to it (see _conform_to_wetmask), and the regrid is
     normalized by it — so the output NaN pattern equals the ``mask_k``
     statics at every timestep.
     """
@@ -490,9 +396,7 @@ def _process_chunk(
             {LEVEL_DIM: level_index if level_index is not None else 0}, drop=True
         )
 
-    ds = _conform_to_wetmask(
-        ds, stream, wetmask, level_index, context, max_conformed_cells
-    )
+    ds = _conform_to_wetmask(ds, wetmask, context)
     ds = _rotate_pairs(ds, stream, wetmask, weights_url, face_masks)
     for name in ds.data_vars:
         _assert_footprint(ds[name], wetmask, context)
@@ -554,7 +458,6 @@ def process_chunk(
     wetmask: xr.DataArray | None = None,
     weights_url: str | None = None,
     target_grid_name: str | None = None,
-    max_conformed_cells: int | None = None,
 ) -> tuple[xbeam.Key, xr.Dataset]:
     """Beam entry point: process one (time, level) chunk of a stream."""
     assert stream is not None
@@ -575,7 +478,6 @@ def process_chunk(
         weights_url,
         target_grid_name,
         level_index,
-        max_conformed_cells,
     )
     new_key = xbeam.Key(
         {TIME_DIM: key.offsets[TIME_DIM], "lat": 0, "lon": 0},
@@ -821,13 +723,6 @@ def _get_parser() -> argparse.ArgumentParser:
         help="Process only the first N timesteps (for subset test runs)",
     )
     parser.add_argument("--output-path", help="Override the config's output path")
-    parser.add_argument(
-        "--max-conformed-cells",
-        type=int,
-        help="Fail if the wetmask conform step touches more than this many "
-        "cells of any variable in any chunk (0 asserts the conform step is "
-        "a no-op, for smoke-test runs)",
-    )
     return parser
 
 
@@ -954,7 +849,6 @@ def main():
                         wetmask=wetmask,
                         weights_url=config.weights_url,
                         target_grid_name=config.target_grid,
-                        max_conformed_cells=args.max_conformed_cells,
                     )
                     | f"{label}_consolidate" >> xbeam.ConsolidateChunks(output_shards)
                     | f"{label}_to_zarr"
