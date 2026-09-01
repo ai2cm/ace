@@ -7,7 +7,7 @@ checkpoint_save_epochs: null
 log_train_every_n_batches: 10
 train_evaluation_samples: 32
 validate_using_ema: true
-evaluate_before_training: false
+evaluate_before_training: true
 ema:
   decay: 0.999
 max_epochs: 25
@@ -88,7 +88,7 @@ train_loader:
           stop_time: '0349-01-01T12:00:00'
 validation:
   loader:
-    batch_size: 4
+    batch_size: 16
     num_data_workers: 2
     prefetch_factor: 2
     dataset:

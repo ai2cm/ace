@@ -55,6 +55,11 @@ launch() {
   local job_name="samudra-enso-w1-${arm}"
   local config="${CONFIG_DIR}/${arm}.yaml"
   local module="fme.coupled.train"
+  # Coupled FT arms only fit on titan's B200s (180 GB): batch-8 coupled
+  # training OOMs three different ways on ceres/jupiter H100s (80 GB), and
+  # every coupled arm that ever succeeded ran on titan. The ocean-only
+  # pretrains fit 80 GB and keep the full scheduler list.
+  local clusters=(--cluster ai2/titan)
   local mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
                 --dataset "${OCEAN_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar"
                 --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
@@ -63,16 +68,19 @@ launch() {
   if [[ "$arm" == "resid" ]]; then
     config="${CONFIG_DIR}/resid-pretrain.yaml"
     module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
   if [[ "$arm" == "allinone" ]]; then
     config="${CONFIG_DIR}/allinone-pretrain.yaml"
     module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${ALLINONE_STATS_DATASET}:/ocean_stats")
   fi
   if [[ "$arm" == "shallow" ]]; then
     config="${CONFIG_DIR}/shallow-pretrain.yaml"
     module="fme.ace.train"
+    clusters=(--cluster ai2/ceres --cluster ai2/jupiter --cluster ai2/titan)
     mounts=(--dataset "${STATS_BUNDLE_DATASET}:/ocean_stats")
   fi
 
@@ -93,9 +101,7 @@ launch() {
     --workspace ai2/ace \
     --priority "$PRIORITY" \
     --min-runtime "${MIN_RUNTIME:-8h}" \
-    --cluster ai2/ceres \
-    --cluster ai2/jupiter \
-    --cluster ai2/titan \
+    "${clusters[@]}" \
     --weka climate-default:/climate-default \
     --env PYTORCH_ALLOC_CONF=expandable_segments:True \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \
