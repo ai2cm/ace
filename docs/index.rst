@@ -10,8 +10,8 @@ Why use **fme**?
 - **fme** provides a unified interface for training, running and evaluating AI models
   with a range of architectures (SFNO, GNNs, UNets) and applications (e.g. global atmosphere,
   ocean and sea ice modeling, regional downscaling).
-- We strive for a balance of flexibility to enable easy prototyping of new modeling strategies
-  with ease-of-use and performance.
+- We strive for a balance of flexibility---to enable easy prototyping of new modeling
+  strategies---with ease-of-use and performance.
 - Built by climate modelers for climate modelers! We follow similar configuration and
   evaluation practices as traditional climate models, making **fme** intuitive
   to adopt and use.
