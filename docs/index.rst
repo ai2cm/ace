@@ -22,8 +22,8 @@ Why use **fme**?
   `Ai2 Climate Modeling <https://allenai.org/climate-modeling>`_ group. Use at your own risk!
   We are actively developing this software and sometimes make breaking changes to the API.
 
-Documentation table of contents
--------------------------------
+Table of contents
+-----------------
 .. toctree::
    :maxdepth: 1
    :caption: Getting started:
