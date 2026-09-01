@@ -76,9 +76,11 @@ run_one() {
     --task-name "$job_name" \
     --description "Prescribe-from-truth probe (${arm}): which part of the coupled state carries ENSO phase" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
-    --workspace ai2/climate-titan \
+    --workspace ai2/ace \
     --priority high \
-    --preemptible \
+    --min-runtime 2h \
+    --cluster ai2/ceres \
+    --cluster ai2/jupiter \
     --cluster ai2/titan \
     --weka climate-default:/climate-default \
     --env WANDB_USERNAME="$BEAKER_USERNAME" \

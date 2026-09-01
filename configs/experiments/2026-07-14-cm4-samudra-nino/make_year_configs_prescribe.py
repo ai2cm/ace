@@ -108,6 +108,16 @@ ARMS: dict[str, tuple[list[str], list[str]]] = {
     "fluxturb": ([], FLUX_TURB),
     "fluxulw": ([], FLUX_ULW),
     "fluxradnoulw": ([], FLUX_RAD_NO_ULW),
+    # Everything the atmosphere hands the ocean, all at truth: the CM4 analog
+    # of "Samudra forced by perfect forcing". Includes the degenerate
+    # ULWRFsfc channel by construction (that is what full forcing means);
+    # interpret Nino3.4 skill with the fluxulw split in hand, and read the
+    # interior fields for whether the thermocline evolves correctly when
+    # every surface input is right.
+    "allforce": (
+        [],
+        FLUXES + WIND_STRESS + ["total_frozen_precipitation_rate"],
+    ),
 }
 
 
