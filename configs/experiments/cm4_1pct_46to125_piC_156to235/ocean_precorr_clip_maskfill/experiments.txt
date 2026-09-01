@@ -1,0 +1,40 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster
+
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|01M0GM0B4PB9TND5S3B0NQZ9CR|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|01M0GM0KSZGNGGWRG0J26NPC8Y|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|01M0GM0WD83F2R6THEEHBF2T9Y|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|01M0JR1EQ3PVNZ8JTEZ2SFKPWG|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|01M0JR1R32PZBQE7WSE9NQNH18|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# ICx1 130-yr out-of-sample evaluation, 2026-08-24. Rows with status
+# run_ICx1-130yr are read by job_runner/evaluate.sh, which mounts
+# training_checkpoints/best_inference_ckpt.tar from each training run's result
+# dataset and runs evaluator-config-ICx1-130yr.yaml against it. 130 years, not
+# 140: years 0131-0140 are kept as true held-out data (see the config header).
+# All five arms finished their 75 epochs on 2026-08-23/24.
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|01M0GM0B4PB9TND5S3B0NQZ9CR|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|01M0JR1EQ3PVNZ8JTEZ2SFKPWG|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|01M0JR1R32PZBQE7WSE9NQNH18|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|01M0GM0KSZGNGGWRG0J26NPC8Y|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|01M0GM0WD83F2R6THEEHBF2T9Y|ran_ICx1-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+
+# piControl 200-yr rollout, 2026-08-24. Rows with status run_piC-200yr are read
+# by job_runner/evaluate.sh against evaluator-config-piC-200yr.yaml. The whole
+# piControl record, years 0151-0350, under stationary forcing: the drift test the
+# 1pctCO2 rollouts cannot be, and 110 years of it are the piControl holdout.
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean|rs0|01M0GM0B4PB9TND5S3B0NQZ9CR|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw|rs0|01M0JR1EQ3PVNZ8JTEZ2SFKPWG|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskatm|rs0|01M0JR1R32PZBQE7WSE9NQNH18|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs0|01M0GM0KSZGNGGWRG0J26NPC8Y|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_maskall|rs0|01M0GM0WD83F2R6THEEHBF2T9Y|ran_piC-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs0|01M0TSBVYP97KP2MQQMMZXKEZZ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|01M0TXA8XRXAGJ2B3X3HHXGZPG|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|01M0TXAH2TN3X37F43F45EMM1Y|training|best_inference_ckpt|normal|--min-runtime 8h
