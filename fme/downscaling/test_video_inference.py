@@ -10,7 +10,6 @@ import zarr
 
 from fme.core.dataset.time import TimeSlice
 from fme.core.dataset.xarray import XarrayDataConfig
-from fme.core.device import get_device
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.ema import EMAConfig
 from fme.core.logging_utils import LoggingConfig
@@ -23,6 +22,7 @@ from fme.downscaling.video_inference import (
     _bare_module,
     _clip_write_slice,
     _splice_observed_endpoints,
+    _validate_contiguous_clips,
     _warn_if_idle_ranks,
 )
 from fme.downscaling.video_models import VideoDiffusionModelConfig
@@ -72,10 +72,9 @@ def test_build_model_round_trip(tmp_path):
     ckpt_path = str(tmp_path / "round_trip.ckpt")
     _save_checkpoint(trainer, ckpt_path)
 
-    device = get_device()
     loaded_ema = _inference_config(
         trainer_config, ckpt_path, tmp_path, use_ema=True
-    ).build_model(device)
+    ).build_model()
     actual_ema_state = _state_dict_cpu(_bare_module(loaded_ema.module))
     assert actual_ema_state.keys() == expected_ema_state.keys()
     for key, expected in expected_ema_state.items():
@@ -83,7 +82,7 @@ def test_build_model_round_trip(tmp_path):
 
     loaded_raw = _inference_config(
         trainer_config, ckpt_path, tmp_path, use_ema=False
-    ).build_model(device)
+    ).build_model()
     actual_raw_state = _state_dict_cpu(_bare_module(loaded_raw.module))
     assert actual_raw_state.keys() == expected_raw_state.keys()
     for key, expected in expected_raw_state.items():
@@ -148,6 +147,17 @@ def test_warn_if_idle_ranks_silent_when_clips_cover_ranks(caplog):
     _warn_if_idle_ranks(n_clips=2, world_size=2)
     _warn_if_idle_ranks(n_clips=3, world_size=2)
     assert caplog.text == ""
+
+
+def test_validate_contiguous_clips_passes_for_tumbling_starts():
+    # 3 clips of 9 frames, tumbling (stride 8) -> 25-frame axis.
+    _validate_contiguous_clips(np.array([0, 8, 16]), n_time=25, n_timesteps=9)
+
+
+def test_validate_contiguous_clips_raises_for_gap():
+    # A gap between clip starts (9 instead of 8) would leave frame 8 unwritten.
+    with pytest.raises(ValueError, match="do not tile"):
+        _validate_contiguous_clips(np.array([0, 9, 17]), n_time=26, n_timesteps=9)
 
 
 def _valid_inference_kwargs(trainer_config, tmp_path):
@@ -276,8 +286,9 @@ def test_build_and_run_end_to_end(tmp_path):
         ),
         ema=EMAConfig(decay=0.99),
     )
+    # No need to actually train for an inference test -- build() already
+    # initializes model/EMA/optimization state.
     trainer = trainer_config.build()
-    trainer.train()
     ckpt_path = str(tmp_path / "e2e.ckpt")
     _save_checkpoint(trainer, ckpt_path)
 

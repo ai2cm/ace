@@ -764,7 +764,7 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
                 f"Expected clips of {self.n_timesteps} timesteps, got "
                 f"{dataset_fine.sample_n_times}."
             )
-        clip_start_times = dataset_fine.sample_start_times
+        fine_start_times = dataset_fine.sample_start_times
         if properties_fine.timestep is None:
             raise ValueError(
                 "Video clips require a uniform timestep; set infer_timestep=True "
@@ -802,9 +802,10 @@ class PairedVideoLoaderConfig(PairedDataLoaderConfig):
         if stride > 1:
             keep = list(range(0, len(paired_dataset), stride))
             dataset = Subset(paired_dataset, keep)
-            clip_start_times = clip_start_times[::stride]
+            clip_start_times = fine_start_times[::stride]
         else:
             dataset = paired_dataset
+            clip_start_times = fine_start_times
 
         frame_times, clip_start_indices = _expand_clip_starts_to_frame_times(
             clip_start_times, self.n_timesteps, properties_fine.timestep

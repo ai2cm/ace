@@ -26,7 +26,6 @@ import xarray as xr
 import yaml
 
 from fme.core.cli import prepare_directory
-from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.trainer import count_parameters
@@ -102,11 +101,28 @@ def _clip_write_slice(
     return slice(start_idx, start_idx + n_frames)
 
 
+def _validate_contiguous_clips(
+    clip_start_indices: np.ndarray, n_time: int, n_timesteps: int
+) -> None:
+    """Guards against non-contiguous inputs (e.g. a multi-entry
+    ``data.fine``/``data.coarse``, or a strided subset): tumbling clips must
+    tile the frame axis in exact ``n_timesteps - 1`` steps with no gaps.
+    """
+    expected_starts = np.arange(0, n_time - n_timesteps + 1, n_timesteps - 1)
+    if not np.array_equal(clip_start_indices, expected_starts):
+        raise ValueError(
+            f"Clip starts {clip_start_indices.tolist()} do not tile the "
+            f"{n_time}-frame time axis in steps of {n_timesteps - 1}; some "
+            "frames would be left unwritten. Check for multiple entries in "
+            "data.fine/data.coarse or a strided data subset."
+        )
+
+
 def _warn_if_idle_ranks(n_clips: int, world_size: int) -> None:
     if n_clips < world_size:
         logger.warning(
             f"Only {n_clips} clip(s) available but {world_size} rank(s) "
-            "requested; some ranks will sit idle."
+            "requested; all but one rank will sit idle."
         )
 
 
@@ -177,7 +193,7 @@ class VideoInferenceConfig:
             self.experiment_dir, log_filename, config=config, resumable=True
         )
 
-    def build_model(self, device: torch.device) -> VideoDiffusionModel:
+    def build_model(self) -> VideoDiffusionModel:
         """Build the model from config and load trained weights.
 
         The training config used ``validate_using_ema: true``, so the checkpoint
@@ -187,7 +203,8 @@ class VideoInferenceConfig:
         EMA shadow, exactly mirroring ``VideoTrainer._ema_context()``.
         """
         model = self.model.build()
-        ckpt = torch.load(self.checkpoint_path, map_location=device, weights_only=False)
+        # Checkpoint tensors don't need to be on GPU just to load into model.
+        ckpt = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
         state_dict = {
             (key[len("module.") :] if key.startswith("module.") else key): value
             for key, value in ckpt["module"].items()
@@ -214,7 +231,7 @@ class VideoInferenceConfig:
 
     def build(self) -> "VideoInferenceRunner":
         """Build the model, load its checkpoint, and set up the test-set loader."""
-        model = self.build_model(get_device())
+        model = self.build_model()
         griddata = self.data.build_video(
             train=False, requirements=self.model.data_requirements, drop_last=False
         )
@@ -277,6 +294,7 @@ class VideoInferenceRunner:
 
         n_time = len(frame_times)
         n_timesteps = model.n_timesteps
+        _validate_contiguous_clips(griddata.clip_start_indices, n_time, n_timesteps)
 
         frame_source = np.ones(n_time, dtype=np.int8)
         frame_source[griddata.clip_start_indices] = 0

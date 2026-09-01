@@ -303,7 +303,23 @@ class PairedVideoBatchData:
 
 @dataclasses.dataclass
 class PairedVideoGriddedData:
-    """Loader wrapper analogous to ``PairedGriddedData`` for video clips."""
+    """Loader wrapper analogous to ``PairedGriddedData`` for video clips.
+
+    Attributes:
+        coarse_shape: Horizontal shape of the coarse grid.
+        downscale_factor: Fine/coarse horizontal resolution ratio.
+        n_timesteps: Number of frames per clip.
+        dims: Horizontal dimension names.
+        variable_metadata: Per-variable units/long_name.
+        clip_start_times: Each clip's start time, in loader order.
+        timestep: Spacing between consecutive frames.
+        frame_times: Every distinct frame time covered by a clip -- the
+            sorted, deduplicated union of each clip's own frames.
+        clip_start_indices: Each clip's position in ``frame_times``, i.e.
+            ``frame_times[clip_start_indices] == clip_start_times``.
+        fine_coords: Full-domain fine lat/lon coordinates (pre-crop).
+        fine_extent_latlon_coords: Post-crop fine lat/lon coordinates.
+    """
 
     _loader: torch.utils.data.DataLoader
     coarse_shape: tuple[int, int]
@@ -312,13 +328,11 @@ class PairedVideoGriddedData:
     dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     clip_start_times: xr.CFTimeIndex
-    timestep: datetime.timedelta  # spacing between consecutive frames
-    frame_times: xr.CFTimeIndex  # every distinct frame time covered by a clip
-    clip_start_indices: (
-        np.ndarray
-    )  # frame_times[clip_start_indices] == clip_start_times
-    fine_coords: LatLonCoordinates  # full-domain fine coordinates
-    fine_extent_latlon_coords: LatLonCoordinates  # post-crop fine coordinates
+    timestep: datetime.timedelta
+    frame_times: xr.CFTimeIndex
+    clip_start_indices: np.ndarray
+    fine_coords: LatLonCoordinates
+    fine_extent_latlon_coords: LatLonCoordinates
 
     @property
     def loader(self) -> DataLoader[PairedVideoBatchData]:
