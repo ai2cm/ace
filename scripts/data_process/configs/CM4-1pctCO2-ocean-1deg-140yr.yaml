@@ -1,4 +1,4 @@
-# make om4_1pctco2_1deg_ocean_stats_beaker_dataset
+# make cm4_1pctco2_1deg_ocean_stats
 runs:
   2026-07-15-om4-1pctco2-1deg-ocean-5daily: ""  # store produced by scripts/gfdl_om4 xrbeam Dataflow pipeline
 data_output_directory: gs://vcm-ml-intermediate
@@ -6,3 +6,5 @@ stats:
   output_directory: gs://vcm-ml-intermediate/2026-07-15-om4-1pctco2-1deg-ocean-5daily-stats
   data_type: CM4
   beaker_dataset: 2026-07-15-om4-1pctco2-1deg-ocean-5daily-stats
+  start_date: "0001-01-06"
+  end_date: "0141-01-01"
