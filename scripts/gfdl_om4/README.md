@@ -77,9 +77,9 @@ under `vcm-ml-scratch`.
 ### Smoke tests
 
 Each config has a local DirectRunner smoke test that runs a few timesteps
-into a throwaway scratch store — the run itself fails unless every chunk's
-valid-data footprint equals the wetmask — and checks the output opens with
-the expected variable set:
+into a throwaway scratch store, asserts the wetmask conform step is a no-op
+(`--max-conformed-cells 0`), and checks the output opens with the expected
+variable set:
 
 ```
 make smoke_tests             # all four configs + the checks below
@@ -107,10 +107,12 @@ python -m pipeline.run --config configs/om4-picontrol-1deg.yaml \
    config being launched) against the exact configs to be launched.
 2. **Launch** — build and push the worker image, then launch on Google
    Cloud Dataflow (the config's output path is used as-is, and the run
-   aborts if a store already exists there). Like the smoke tests, a launch
-   fails on any chunk whose valid-data footprint differs from the wetmask:
-   the production sources have a static footprint, so a difference is a
-   stop-and-report finding, not something to repair silently.
+   aborts if a store already exists there). Like the smoke tests, the
+   launch targets pass `--max-conformed-cells 0`: the production sources
+   have a static footprint, so any wetmask conforming is a failure, not
+   something to repair silently. A source that genuinely needs the
+   conform step's fill-from-above repair is a deliberate opt-in (invoke
+   `run-dataflow.sh` directly without the flag):
 
    ```
    make push_dataflow
