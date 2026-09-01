@@ -157,3 +157,15 @@ run_eval "ace21-rs0" "01K9B1MR70QWN90KNY7NM22K5M"
 run_eval "ace21-rs1" "01K9B1MT4QY1ZEZPPS53G2SXPK"
 run_eval "ace21-rs2" "01K9B1MVP3VS3NEABHT0W151AX"
 run_eval "ace21-rs3" "01K9B1MXD6V26S8BQH5CKY514C"
+
+# The variant chains' own stage-2 checkpoints. The inline `long_36year` entry evaluates
+# whatever weights the chain holds at that epoch, which is a different object from the
+# backfills above: those evaluate `best_inference_ckpt.tar`, a selected checkpoint. Epoch
+# snapshots also carry occasional large excursions -- P2's epoch-35 evaluation reads 0.044
+# against 0.027/0.028 either side of it, and P1-rs0's epoch 40 is similarly elevated -- so a
+# mean over inline evaluations is not comparable to a single backfill number. Running the
+# chains through the same path makes all six models the same object.
+run_eval "p1-rs0" "01M19ZTFCEAKE8ZP8SGXP8KBZN"
+run_eval "p1-rs1" "01M19ZTFGBA97R0Z2RX3VHSEFY"
+run_eval "p1-rs2" "01M19ZTGKSNXXT7GPFGKDGT654"
+run_eval "p2-rs0" "01M1A95R5J7J54GANKMG4GFJB8"
