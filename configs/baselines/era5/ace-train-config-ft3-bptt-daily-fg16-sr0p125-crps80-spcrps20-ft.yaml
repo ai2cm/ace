@@ -3,8 +3,8 @@
 #
 # Own-pretrain BPTT fine-tune of the crps80-spcrps20 pretrain (donor dt9hxnlg,
 # beaker 01M12BF45QMV8SC9056PNPRF7D). 0.8 CRPS / 0.2 spectral-power-CRPS
-# loss, matching the pretrain (no patch-ES). 384-wide, jupiter, 8 GPUs,
-# 20 epochs. CRPS control for the pes80-spcrps20 FT arm; part of the
+# loss, matching the pretrain (no patch-ES). 384-wide, titan, 4 GPUs,
+# batch 4, 20 epochs. CRPS control for the pes80-spcrps20 FT arm; part of the
 # patch-vs-spectral energy score investigation.
 seed: 0
 experiment_dir: /results
@@ -43,7 +43,7 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 8
+  batch_size: 4
   num_data_workers: 8
   prefetch_factor: 2
   dataset:

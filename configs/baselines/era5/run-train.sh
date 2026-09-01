@@ -318,19 +318,21 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-crps80-spcrps2
 # final job's result dataset is filled into the config's "# arg: --dataset"
 # header. All FTs per Jeremy 2026-08-26: titan, 3 steps (jupiter kills this
 # family at epoch-boundary validation; 2-step jupiter cut abandoned).
+# Batch 4 / 4 GPUs (OOM at batch 8 / 4 GPUs, also OOM at batch 8 / 8 GPUs).
 #   ./run-train.sh pes90-es10-ft3
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes90-es10.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/titan
+  "ace2s-era5-daily-fg16-sr0p125-pes90-es10-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan
 
 # Own-pretrain BPTT fine-tunes for the 384-wide arms (pes80-spcrps20 and its
 # CRPS control crps80-spcrps20), part of the patch-vs-spectral ES
-# investigation. Titan, 8 GPUs (4 GPUs OOM on 3-step BPTT). Launch alone:
+# investigation. Titan, 4 GPUs, batch 4 (OOM at batch 8 on both 4 and
+# 8 GPUs). Launch alone:
 #   ./run-train.sh pes80-spcrps20-ft
 #   ./run-train.sh crps80-spcrps20-ft
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-pes80-spcrps20-ft.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/titan
+  "ace2s-era5-daily-fg16-sr0p125-pes80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan
 run_training "ace-train-config-ft3-bptt-daily-fg16-sr0p125-crps80-spcrps20-ft.yaml" \
-  "ace2s-era5-daily-fg16-sr0p125-crps80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 8 ai2/titan
+  "ace2s-era5-daily-fg16-sr0p125-crps80-spcrps20-ft3-bptt-multi-step-fine-tuning-rs0" 4 ai2/titan
 
 # Cross-donor patch-ES fine-tunes: patch-ES-led losses fine-tuning the
 # CRPS-led 90/10 pretrain (donor r95iprjt, same donor as c8hp09jm) -- fast

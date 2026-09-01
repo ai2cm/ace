@@ -4,7 +4,7 @@
 # Own-pretrain BPTT fine-tune of the pes90-es10 pretrain (donor ha4l6wu4,
 # wandb ha4l6wu4, beaker 01M0Z5T6AXGKKP3TNXKP29EC0F). 0.9 patch-ES (3x3) /
 # 0.1 spectral-ES loss, matching the pretrain. 512-wide, titan, 4 GPUs,
-# 20 epochs. Part of the patch-vs-spectral energy score investigation.
+# batch 4, 20 epochs. Part of the patch-vs-spectral energy score investigation.
 seed: 0
 experiment_dir: /results
 save_checkpoint: true
@@ -42,7 +42,7 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 8
+  batch_size: 4
   num_data_workers: 8
   prefetch_factor: 2
   dataset:
