@@ -63,15 +63,15 @@ SMOKE_OUTPUT_ROOT ?= gs://vcm-ml-scratch/jamesd/gfdl-om4-test
 SMOKE_OUTPUT_PATH = $(SMOKE_OUTPUT_ROOT)/smoke-$(notdir $(basename $(CONFIG))).zarr
 
 # A few timesteps of $(CONFIG) through the DirectRunner into a throwaway
-# store: every chunk's footprint must equal the wetmask (the run fails
-# otherwise) and the output must open with the config's expected variable
-# set.
+# store: the wetmask conform step must be a no-op (zero conformed cells)
+# and the output must open with the config's expected variable set.
 smoke_test:
 	-gsutil -m -q rm -r $(SMOKE_OUTPUT_PATH) 2> /dev/null
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.run \
 		--config $(CONFIG) \
 		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
 		--output-path $(SMOKE_OUTPUT_PATH) \
+		--max-conformed-cells 0 \
 		--runner DirectRunner \
 		--job_server_timeout 3600
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.check_output \
@@ -123,10 +123,14 @@ push_dataflow: build_dataflow
 enter:
 	docker run --rm -v $$(pwd):/gfdl_om4 -w /gfdl_om4 --entrypoint "/bin/bash" -it $(IMAGE_NAME)
 
+# Production sources have a static footprint, so the wetmask conform step
+# must be a no-op in production launches too; a source that needs actual
+# conforming is a deliberate opt-in (drop the flag by invoking
+# run-dataflow.sh directly).
 dataflow:
 	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
-		./run-dataflow.sh DataflowRunner $(CONFIG)
+		./run-dataflow.sh DataflowRunner $(CONFIG) --max-conformed-cells 0
 
 dataflow_picontrol_1deg:
 	$(MAKE) dataflow CONFIG=configs/om4-picontrol-1deg.yaml
