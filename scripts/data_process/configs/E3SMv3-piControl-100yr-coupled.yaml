@@ -23,12 +23,16 @@ coupled_datasets:
         - TAUX
         - TAUY
   coupled_sea_ice:
-    window_avg:
+    sea_ice_fraction_resampling:
+      window_timedelta: 120h
+      first_timestamp: "0401-01-06T00:00:00"
+      shift_timestamps_to_avg_interval_midpoint: true
+    ts_resampling:
       window_timedelta: 120h
       first_timestamp: "0401-01-06T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
     include_ts: true
-    use_atmosphere_sea_ice_fraction_fallback: true
+    use_atmosphere_sea_ice_fraction: true
   output_writer:
     n_dask_workers: 32
   input_field_names:

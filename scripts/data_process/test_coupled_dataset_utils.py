@@ -105,42 +105,113 @@ def _synthetic_sea_ice(sea_ice_fraction=0.3, sea_surface_fraction=1.0) -> xr.Dat
 
 
 @pytest.mark.parametrize(
-    ("with_sea_ice_dataset", "ocean_has_sea_ice", "expected_ifrac"),
+    ("use_atmosphere", "with_sea_ice_dataset", "expected_ifrac"),
     [
-        pytest.param(True, True, 0.3, id="sea-ice-dataset-wins"),
-        pytest.param(False, True, 0.5, id="ocean-wins-over-atmosphere"),
-        pytest.param(False, False, 0.2, id="atmosphere-fallback"),
+        pytest.param(False, True, 0.3, id="sea-ice-dataset"),
+        pytest.param(False, False, 0.5, id="ocean"),
+        pytest.param(True, True, 0.2, id="atmosphere-over-sea-ice-dataset"),
+        pytest.param(True, False, 0.2, id="atmosphere"),
     ],
 )
-def test_sea_ice_source_priority(
-    with_sea_ice_dataset, ocean_has_sea_ice, expected_ifrac
-):
+def test_sea_ice_fraction_routing(use_atmosphere, with_sea_ice_dataset, expected_ifrac):
     atmos = _synthetic_atmos(sea_ice_fraction=0.2)
-    ocean = _synthetic_ocean(ocean_sea_ice_fraction=0.5 if ocean_has_sea_ice else None)
+    ocean = _synthetic_ocean(ocean_sea_ice_fraction=0.5)
     sea_ice = _synthetic_sea_ice(0.3) if with_sea_ice_dataset else None
-    config = CoupledSeaIceConfig(use_atmosphere_sea_ice_fraction_fallback=True)
+    config = CoupledSeaIceConfig(use_atmosphere_sea_ice_fraction=use_atmosphere)
     result = compute_coupled_sea_ice(atmos, config, sea_ice=sea_ice, ocean=ocean)
     np.testing.assert_allclose(result["sea_ice_fraction"].values, expected_ifrac)
 
 
-def test_window_avg_keeps_legacy_path():
-    # with a window_avg configured and no separate sea ice dataset, the ocean
-    # dataset's sea ice fields must be ignored: the output matches the
-    # atmosphere-sourced windowed result from an ocean without sea ice fields
+def test_ocean_route_without_ocean_sea_ice_fields_raises():
+    atmos = _synthetic_atmos()
+    with pytest.raises(ValueError, match="use_atmosphere_sea_ice_fraction"):
+        compute_coupled_sea_ice(atmos, CoupledSeaIceConfig(), ocean=_synthetic_ocean())
+    with pytest.raises(ValueError, match="use_atmosphere_sea_ice_fraction"):
+        compute_coupled_sea_ice(atmos, CoupledSeaIceConfig())
+
+
+def test_atmosphere_route_without_atmosphere_sea_ice_fraction_raises():
+    atmos = _synthetic_atmos().drop_vars("sea_ice_fraction")
+    config = CoupledSeaIceConfig(use_atmosphere_sea_ice_fraction=True)
+    with pytest.raises(ValueError, match="sea_ice_fraction"):
+        compute_coupled_sea_ice(atmos, config, ocean=_synthetic_ocean())
+
+
+@pytest.mark.parametrize(
+    "sea_ice_dataset_configured", [True, False], ids=["sea-ice-dataset", "no-sea-ice"]
+)
+def test_sea_ice_fraction_resampling_on_ocean_route_raises(sea_ice_dataset_configured):
+    config = CoupledSeaIceConfig(sea_ice_fraction_resampling=WINDOW_AVG)
+    if sea_ice_dataset_configured:
+        config.validate(sea_ice_dataset_configured=True)
+    else:
+        with pytest.raises(ValueError, match="sea_ice_fraction_resampling"):
+            config.validate(sea_ice_dataset_configured=False)
+
+
+def test_ts_resampling_without_include_ts_raises():
+    config = CoupledSeaIceConfig(ts_resampling=WINDOW_AVG, include_ts=False)
+    with pytest.raises(ValueError, match="include_ts"):
+        config.validate(sea_ice_dataset_configured=True)
+
+
+# the 120h window means of the 6-hourly ts ramp 270 + arange(N_ATMOS_TIMES),
+# forward-filled onto the atmosphere index: the first instant, then the mean
+# over each closed-right window
+TS_WINDOW_MEAN = {0: 270.0, 19: 270.0, 20: 280.5, 40: 300.5}
+# the same windows applied to the sea ice concentration ramp linspace(0, 1)
+SIC_WINDOW_MEAN = {0: 0.0, 19: 0.0, 20: 0.2625, 40: 0.7625}
+# (1 - ofrac) * ts + ofrac * ts_window_mean, with ofrac = 1 - sic_window_mean
+TS_BLEND = {0: 270.0, 19: 270.0, 20: 282.99375, 40: 307.74375}
+
+
+@pytest.mark.parametrize("route", ["sea-ice-dataset", "atmosphere"])
+def test_equal_resampling_of_fractions_and_ts(route):
+    # both fields set to one window config reproduces the pre-split behaviour of
+    # a single window average over the whole coupled sea ice dataset
     ramp = np.linspace(0.0, 1.0, N_ATMOS_TIMES)
-    atmos = _synthetic_atmos(sea_ice_fraction=ramp)
+    if route == "atmosphere":
+        atmos = _synthetic_atmos(sea_ice_fraction=ramp)
+        sea_ice = None
+    else:
+        atmos = _synthetic_atmos()
+        sea_ice = _synthetic_sea_ice(sea_ice_fraction=ramp)
     config = CoupledSeaIceConfig(
-        window_avg=WINDOW_AVG, use_atmosphere_sea_ice_fraction_fallback=True
+        use_atmosphere_sea_ice_fraction=route == "atmosphere",
+        sea_ice_fraction_resampling=WINDOW_AVG,
+        ts_resampling=WINDOW_AVG,
+        include_ts=True,
     )
-    result_ice_carrying_ocean = compute_coupled_sea_ice(
-        atmos, config, ocean=_synthetic_ocean(ocean_sea_ice_fraction=0.5)
+    result = compute_coupled_sea_ice(atmos, config, sea_ice=sea_ice)
+    for step, expected in SIC_WINDOW_MEAN.items():
+        np.testing.assert_allclose(
+            result["sea_ice_fraction"].isel(time=step).values, expected
+        )
+    for step, expected in TS_BLEND.items():
+        np.testing.assert_allclose(
+            result["surface_temperature"].isel(time=step).values, expected
+        )
+
+
+def test_ocean_route_ts_resampling():
+    # the previously inexpressible combination: ocean-cadence fractions with a
+    # window-mean ts ingredient
+    atmos = _synthetic_atmos(land_fraction=[[0.0, 1.0], [0.0, 0.0]])
+    ocean = _synthetic_ocean(
+        sea_surface_fraction=[[1.0, 0.0], [1.0, 1.0]],
+        ocean_sea_ice_fraction=0.0,
     )
-    result_plain_ocean = compute_coupled_sea_ice(
-        atmos, config, ocean=_synthetic_ocean()
-    )
-    xr.testing.assert_identical(result_ice_carrying_ocean, result_plain_ocean)
-    # sanity check that the ocean's constant concentration was not used
-    assert not np.allclose(result_ice_carrying_ocean["sea_ice_fraction"].values, 0.5)
+    config = CoupledSeaIceConfig(include_ts=True, ts_resampling=WINDOW_AVG)
+    result = compute_coupled_sea_ice(atmos, config, ocean=ocean)
+    # the fractions are the ocean's own, untouched by the window
+    np.testing.assert_allclose(result["ocean_sea_ice_fraction"].values, 0.0)
+    ts = result["surface_temperature"].values
+    steps = np.arange(N_ATMOS_TIMES)
+    for step, expected in TS_WINDOW_MEAN.items():
+        # over the open ocean cell, the forward-filled window mean
+        np.testing.assert_allclose(ts[step, 1, 0], expected)
+    # over the land cell, the instantaneous atmosphere value
+    np.testing.assert_allclose(ts[:, 0, 1], 270.0 + steps)
 
 
 @pytest.mark.parametrize("native_present", [True, False])
@@ -210,29 +281,6 @@ def test_ocean_sourced_skips_window_average():
     )
 
 
-@pytest.mark.parametrize("cause", ["no-ocean-sea-ice-fields", "window-avg-configured"])
-def test_atmosphere_fallback_disabled_raises(cause):
-    atmos = _synthetic_atmos()
-    if cause == "no-ocean-sea-ice-fields":
-        ocean = _synthetic_ocean()
-        window_avg = None
-    else:
-        ocean = _synthetic_ocean(ocean_sea_ice_fraction=0.5)
-        window_avg = WINDOW_AVG
-
-    disabled = CoupledSeaIceConfig(
-        window_avg=window_avg, use_atmosphere_sea_ice_fraction_fallback=False
-    )
-    with pytest.raises(ValueError, match="use_atmosphere_sea_ice_fraction_fallback"):
-        compute_coupled_sea_ice(atmos, disabled, ocean=ocean)
-
-    # same inputs succeed with the fallback enabled
-    enabled = CoupledSeaIceConfig(
-        window_avg=window_avg, use_atmosphere_sea_ice_fraction_fallback=True
-    )
-    compute_coupled_sea_ice(atmos, enabled, ocean=ocean)
-
-
 def test_ocean_sourced_include_ts_blend():
     land_fraction = [[0.0, 1.0], [0.0, 0.0]]
     sea_surface_fraction = [[1.0, 0.0], [1.0, 1.0]]
@@ -268,7 +316,7 @@ def test_legacy_mode_unchanged(with_sea_ice_dataset):
         expected_sic = 0.4
         expected_sfrac = 0.75
     config = CoupledSeaIceConfig(
-        use_atmosphere_sea_ice_fraction_fallback=not with_sea_ice_dataset
+        use_atmosphere_sea_ice_fraction=not with_sea_ice_dataset
     )
     result = compute_coupled_sea_ice(atmos, config, sea_ice=sea_ice)
     sfrac_mod = 0.75
@@ -302,7 +350,7 @@ def test_ocean_sourced_full_chain():
         sea_surface_fraction=sea_surface_fraction,
         ocean_sea_ice_fraction=[0.1, 0.4, 0.9],
     )
-    config = CoupledSeaIceConfig(use_atmosphere_sea_ice_fraction_fallback=False)
+    config = CoupledSeaIceConfig()
     coupled_sea_ice = compute_coupled_sea_ice(atmos, config, ocean=ocean)
     coupled_ocean = compute_coupled_ocean(
         ocean, atmos, coupled_sea_ice, _sea_surface_config()

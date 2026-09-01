@@ -28,7 +28,11 @@ coupled_datasets:
         - northward_surface_wind_stress
         - total_frozen_precipitation_rate
   coupled_sea_ice:
-    window_avg:
+    sea_ice_fraction_resampling:
+      window_timedelta: 120h
+      first_timestamp: "0211-01-06T00:00:00"
+      shift_timestamps_to_avg_interval_midpoint: true
+    ts_resampling:
       window_timedelta: 120h
       first_timestamp: "0211-01-06T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
