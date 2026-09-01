@@ -287,20 +287,27 @@ cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
 	--start-date "0151-01-01T06:00:00" \
 	--end-date "0351-01-01T00:00:00"
 
-.PHONY: om4_picontrol_1deg_ocean_stats_beaker_dataset
-om4_picontrol_1deg_ocean_stats_beaker_dataset:
+create_ocean_data_proc_env:
+	conda create -y -n ocean_preprocess python=3.11 pip yq
+	conda install -y -n ocean_preprocess -c conda-forge xesmf
+	conda run --no-capture-output -n ocean_preprocess python -m pip install uv
+	conda run --no-capture-output -n ocean_preprocess uv pip install -r requirements-ocean.txt
+	conda run --no-capture-output -n ocean_preprocess bash ./install_ocean_emulators.sh
+
+.PHONY: cm4_picontrol_1deg_ocean_stats_beaker_dataset
+cm4_picontrol_1deg_ocean_stats_beaker_dataset:
 	./compute_stats.sh --config configs/CM4-piControl-ocean-1deg-200yr.yaml
 
-.PHONY: om4_1pctco2_1deg_ocean_stats_beaker_dataset
-om4_1pctco2_1deg_ocean_stats_beaker_dataset:
+.PHONY: cm4_1pctco2_1deg_ocean_stats_beaker_dataset
+cm4_1pctco2_1deg_ocean_stats_beaker_dataset:
 	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-1deg-140yr.yaml
 
-.PHONY: om4_picontrol_4deg_ocean_stats_beaker_dataset
-om4_picontrol_4deg_ocean_stats_beaker_dataset:
+.PHONY: cm4_picontrol_4deg_ocean_stats_beaker_dataset
+cm4_picontrol_4deg_ocean_stats_beaker_dataset:
 	./compute_stats.sh --config configs/CM4-piControl-ocean-4deg.yaml
 
-.PHONY: om4_1pctco2_4deg_ocean_stats_beaker_dataset
-om4_1pctco2_4deg_ocean_stats_beaker_dataset:
+.PHONY: cm4_1pctco2_4deg_ocean_stats_beaker_dataset
+cm4_1pctco2_4deg_ocean_stats_beaker_dataset:
 	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-4deg.yaml
 
 .PHONY: shield_som_c96_abrupt_4xCO2_ensemble_dataset
