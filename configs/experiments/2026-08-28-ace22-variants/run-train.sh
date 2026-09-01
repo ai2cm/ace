@@ -166,13 +166,33 @@ p2="train-1deg-6hourly-v2-harmonized-split-ns-diag"
 #     "seed=${SEED}" "${P1_STAGE1_DONOR[$SEED]}"
 # done
 
-# --- P2 stage 2 ---
-run_training "$p2-multi-step-ft.yaml" "ace22-p2-nsdiag-multistep-rs0" \
-  "seed=0" "01M1594RJD2ZJM9YDCM8BSSZ9A"
+# --- P2 stage 2 (LAUNCHED 2026-08-30 21:36; leave commented) ---
+# run_training "$p2-multi-step-ft.yaml" "ace22-p2-nsdiag-multistep-rs0" \
+#   "seed=0" "01M1594RJD2ZJM9YDCM8BSSZ9A"
 
 # --- Stage 3: pressure-level FT, donor = each chain's own stage-2 result dataset ---
-# for SEED in 0 1 2; do
-#   run_training "$p1-plev-ft.yaml" "ace22-p1-harmonized-plev-rs${SEED}" \
-#     "seed=${SEED}" "<stage-2 result dataset for rs${SEED}>"
-# done
-# run_training "$p2-plev-ft.yaml" "ace22-p2-nsdiag-plev-rs0" "seed=0" "<P2 stage-2 dataset>"
+# Each stage-2 experiment ran TWO jobs: an initial one that died 2026-08-30 18:45 (exit 1,
+# all three within 14 s of each other) and a resumed one that finished exit 0. The donors
+# below are the SECOND job's datasets. The first job's results are committed too, with
+# checkpoints ~20 epochs short, so picking a stage-2 dataset by experiment alone will
+# silently mount the wrong weights -- always check the job's exit code.
+#
+#   rs0  experiment 01M18N7FHWNEGCX4R854PAG5BC  job 01M19ZTFFWZGV7AA3QHQGPEYEX
+#   rs1  experiment 01M18N7W3B837SMFENP5FVA3TD  job 01M19ZTFKKXJV8X9JB60DM50P7
+#   rs2  experiment 01M18N890D20RZ3Z3M357JMDKY  job 01M19ZTGPZNW8GQ00BJCHHPEQ5
+declare -A P1_STAGE2_DONOR=(
+  [0]=01M19ZTFCEAKE8ZP8SGXP8KBZN
+  [1]=01M19ZTFGBA97R0Z2RX3VHSEFY
+  [2]=01M19ZTGKSNXXT7GPFGKDGT654
+)
+for SEED in 0 1 2; do
+  run_training "$p1-plev-ft.yaml" "ace22-p1-harmonized-plev-rs${SEED}" \
+    "seed=${SEED}" "${P1_STAGE2_DONOR[$SEED]}"
+done
+
+# P2 stage 3. Its stage-2 chain (experiment 01M1A95R538H9MZX7M06W25MGB, job
+# 01M1A95R93E4AGB6KCDPMWJTGZ) is still running; the id below is that job's result dataset,
+# which is correct only if the job finishes without a restart. CONFIRM the job exited 0 and
+# the dataset committed before launching this line -- a restart would issue a new id.
+# run_training "$p2-plev-ft.yaml" "ace22-p2-nsdiag-plev-rs0" \
+#   "seed=0" "01M1A95R5J7J54GANKMG4GFJB8"
