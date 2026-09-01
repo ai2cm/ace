@@ -338,21 +338,13 @@ build_healpix_processing_image:
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
 
-.PHONY: cm4_picontrol_1deg_ocean_stats
-cm4_picontrol_1deg_ocean_stats:
-	./compute_stats.sh --config configs/CM4-piControl-ocean-1deg-200yr.yaml
+.PHONY: cm4_picontrol_ocean_stats
+cm4_picontrol_ocean_stats:
+	./compute_stats.sh --config configs/CM4-piControl-ocean-$(RESOLUTION)-200yr.yaml
 
-.PHONY: cm4_1pctco2_1deg_ocean_stats
-cm4_1pctco2_1deg_ocean_stats:
-	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-1deg-140yr.yaml
-
-.PHONY: cm4_picontrol_4deg_ocean_stats
-cm4_picontrol_4deg_ocean_stats:
-	./compute_stats.sh --config configs/CM4-piControl-ocean-4deg-200yr.yaml
-
-.PHONY: cm4_1pctco2_4deg_ocean_stats
-cm4_1pctco2_4deg_ocean_stats:
-	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-4deg-140yr.yaml
+.PHONY: cm4_1pctco2_ocean_stats
+cm4_1pctco2_ocean_stats:
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-$(RESOLUTION)-140yr.yaml
 
 .PHONY: create_coupled_datasets_env
 create_coupled_datasets_env:

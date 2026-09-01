@@ -1,4 +1,4 @@
-# make cm4_picontrol_4deg_ocean_stats
+# make cm4_picontrol_ocean_stats RESOLUTION=4deg
 runs:
   2026-07-15-om4-picontrol-4deg-ocean-5daily: ""  # store produced by scripts/gfdl_om4 xrbeam Dataflow pipeline
 data_output_directory: gs://vcm-ml-intermediate
