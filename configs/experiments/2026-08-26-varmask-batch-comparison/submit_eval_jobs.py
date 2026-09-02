@@ -30,6 +30,16 @@ HERE = pathlib.Path(__file__).parent
 RUN_SCRIPT = HERE / "run-ace-eval.sh"
 WANDB_GROUP = "ace2-varmask-batch-comparison-eval-2026-08-26"
 
+# ai2/ace is the workspace scripts/beaker_balancer manages, so CM_PRIORITY is
+# honoured there; in a merely-observed workspace it is ignored.
+BEAKER_WORKSPACE = "ai2/ace"
+# Both clusters, so a job lands on whichever frees up first.
+BEAKER_CLUSTERS = ("ai2/titan", "ai2/jupiter")
+# Guaranteed runtime before Beaker may preempt the job. The seed0 training runs
+# were preempted repeatedly at this priority, and an evaluator that is
+# preempted part-way through a suite has to redo every entry.
+MIN_RUNTIME = "4h"
+
 CHECKPOINTS = [
     ("training_checkpoints/best_inference_ckpt.tar", "-bestinf"),
 ]
@@ -78,22 +88,6 @@ def main() -> None:
         help="Print commands without executing them.",
     )
     parser.add_argument(
-        "--beaker-workspace",
-        default="ai2/ace",
-        help=(
-            "Beaker workspace to submit jobs to (default: ai2/ace, the "
-            "workspace scripts/beaker_balancer manages, so CM_PRIORITY is "
-            "honoured)."
-        ),
-    )
-    parser.add_argument(
-        "--beaker-cluster",
-        nargs="+",
-        default=["ai2/titan", "ai2/jupiter"],
-        metavar="CLUSTER",
-        help="Beaker cluster(s) to target (default: ai2/titan ai2/jupiter).",
-    )
-    parser.add_argument(
         "--beaker-priority",
         default="urgent",
         help="Beaker job priority (default: urgent).",
@@ -139,10 +133,11 @@ def main() -> None:
                 env = {
                     **os.environ,
                     "WANDB_PROJECT": WANDB_PROJECT,
-                    "BEAKER_WORKSPACE": args.beaker_workspace,
-                    "BEAKER_CLUSTER": " ".join(args.beaker_cluster),
+                    "BEAKER_WORKSPACE": BEAKER_WORKSPACE,
+                    "BEAKER_CLUSTER": " ".join(BEAKER_CLUSTERS),
                     "BEAKER_PRIORITY": args.beaker_priority,
                     "CM_PRIORITY": args.cm_priority,
+                    "MIN_RUNTIME": MIN_RUNTIME,
                     "SKIP_VALIDATE": "1",
                 }
                 subprocess.run(cmd, check=True, cwd=HERE, env=env)

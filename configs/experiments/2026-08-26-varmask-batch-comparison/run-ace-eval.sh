@@ -19,6 +19,9 @@ WANDB_PROJECT=${WANDB_PROJECT:-VarMaskingInfoComparison}
 BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
 BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter"}
 BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
+# Guaranteed runtime before Beaker may preempt the job; an evaluator preempted
+# part-way through a suite has to redo every entry.
+MIN_RUNTIME=${MIN_RUNTIME:-4h}
 # Opts the job in to scripts/beaker_balancer, which keeps the team inside its
 # urgent-priority allocation by moving opted-in jobs between priorities.
 CM_PRIORITY=${CM_PRIORITY:-high}
@@ -42,7 +45,7 @@ cd $REPO_ROOT && gantry run \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace "$BEAKER_WORKSPACE" \
     --priority "$BEAKER_PRIORITY" \
-    --preemptible \
+    --min-runtime "$MIN_RUNTIME" \
     "${cluster_args[@]}" \
     --env CM_PRIORITY="$CM_PRIORITY" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
