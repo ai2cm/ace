@@ -5,9 +5,10 @@
 # the fair, training-matched checkpoint vs. the per-channel-OU run).
 #
 # 32-member ensemble, full held-out test period (2023-01-01 .. 2024-01-04),
-# global 1deg, via gantry + torchrun DDP on ai2/titan (4x B200). Reads data
-# and writes the output zarr on weka (climate-default); reads the trained
-# checkpoint from its Beaker result dataset.
+# global 1deg, via gantry + torchrun DDP on ai2/jupiter (4x H100), workspace
+# ai2/ace (matches the other recent video-pmd inference launchers on this
+# branch). Reads data and writes the output zarr on weka (climate-default);
+# reads the trained checkpoint from its Beaker result dataset.
 #
 # Checkpoint dataset (SECOND job under training experiment
 # 01KY0SQW5SFS5KEYZR94T6WDTZ; contains checkpoints/best.ckpt written
@@ -28,10 +29,11 @@ set -e
 
 JOB_NAME="video-pmd-5ch-flat-global-1degree-24to3-v1-test-inference-bestckpt"
 CONFIG_FILENAME="video_inference.yaml"
-WORKSPACE="ai2/climate-titan"
-CLUSTER="ai2/titan"
+WORKSPACE="ai2/ace"
+CLUSTER="ai2/jupiter"  # h100
 N_GPUS=4
 CHECKPOINT_DATASET="01KY0V8ZNN763G59S8QBY4304B"
+# No WANDB_API_KEY secret in ai2/ace -- fine, this config has log_to_wandb: false.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -42,7 +44,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run --allow-dirty \
     --name "$JOB_NAME" \
-    --description 'Video PMD test-set inference from best.ckpt (32-member ensemble, flat/independent noise, 5 channels incl. T2m), global 1deg 24h->3h, 4x B200 DDP. Training-matched-checkpoint rerun of the 2026-07-22 latest.ckpt flat inference.' \
+    --description 'Video PMD test-set inference from best.ckpt (32-member ensemble, flat/independent noise, 5 channels incl. T2m), global 1deg 24h->3h, 4x H100 DDP on jupiter. Training-matched-checkpoint rerun of the 2026-07-22 latest.ckpt flat inference.' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
