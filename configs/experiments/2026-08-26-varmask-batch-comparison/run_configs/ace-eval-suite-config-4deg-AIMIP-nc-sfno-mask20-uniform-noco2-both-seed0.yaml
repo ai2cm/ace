@@ -1,5 +1,5 @@
 # source_run: ace2-var-mask-nc-sfno-mask20-uniform-noco2-both-seed0
-# source_dataset: PENDING
+# source_dataset: 01M1DTT855J107X9VSJDHY4RMW
 experiment_dir: /results
 logging:
   log_to_screen: true
