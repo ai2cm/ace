@@ -118,20 +118,20 @@ def main() -> None:
     )
     parser.add_argument(
         "--beaker-workspace",
-        default="ai2/climate-titan",
-        help="Beaker workspace to submit jobs to (default: ai2/climate-titan).",
+        default="ai2/ace",
+        help="Beaker workspace to submit jobs to (default: ai2/ace).",
     )
     parser.add_argument(
         "--beaker-cluster",
         nargs="+",
-        default=["ai2/titan"],
+        default=["ai2/titan", "ai2/jupiter"],
         metavar="CLUSTER",
-        help="Beaker cluster(s) to target (default: ai2/titan).",
+        help="Beaker cluster(s) to target (default: ai2/titan ai2/jupiter).",
     )
     parser.add_argument(
         "--beaker-priority",
-        default="urgent",
-        help="Beaker job priority (default: urgent).",
+        default="high",
+        help="Beaker job priority (default: high).",
     )
     parser.add_argument(
         "--version",

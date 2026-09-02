@@ -13,9 +13,13 @@ CONFIG_PATH=$SCRIPT_PATH/run_configs/$CONFIG_FILENAME  # generated configs live 
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 WANDB_PROJECT=${WANDB_PROJECT:-VarMasking8}
-BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/climate-titan}
-BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan"}
-BEAKER_PRIORITY=${BEAKER_PRIORITY:-normal}
+BEAKER_WORKSPACE=${BEAKER_WORKSPACE:-ai2/ace}
+BEAKER_CLUSTER=${BEAKER_CLUSTER:-"ai2/titan ai2/jupiter"}
+BEAKER_PRIORITY=${BEAKER_PRIORITY:-high}
+# Guaranteed runtime before Beaker may preempt the job. The v3 shared-mask
+# training jobs were preempted two to three times each, and an eval restarted
+# from scratch loses the whole suite, so buy enough runtime to finish one.
+BEAKER_MIN_RUNTIME=${BEAKER_MIN_RUNTIME:-4h}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
@@ -36,6 +40,7 @@ cd $REPO_ROOT && gantry run \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace "$BEAKER_WORKSPACE" \
     --priority "$BEAKER_PRIORITY" \
+    --min-runtime "$BEAKER_MIN_RUNTIME" \
     "${cluster_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$JOB_NAME" \
