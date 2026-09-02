@@ -277,7 +277,7 @@ optimization:
     kwargs:
       start_factor: 0.01
       end_factor: 1.0
-      total_iters: 34675  # ~1 epoch
+      total_iters: 34675 # ~1 epoch
 stepper_training:
   parameter_init:
     weights_path: /ckpt.tar
