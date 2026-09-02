@@ -3,7 +3,7 @@ import pathlib
 import tempfile
 import unittest
 import unittest.mock
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 import dacite
 import pytest
@@ -523,7 +523,7 @@ HAS_NEXT_STEP_FORCING_NAME_CASES = [
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, int], n_samples: int
+    names: Collection[str], img_shape: tuple[int, int], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -1130,6 +1130,34 @@ def test_secondary_module_output_names_residual_on_input_only():
     )
     assert "a" in config.output_names
     assert "b" in config.output_names
+
+
+def test_loss_names_sorted_regardless_of_input_order():
+    """loss_names must be deterministic (sorted) regardless of out_names order.
+
+    On main, output_names was list(set(...)) whose iteration order depends on
+    PYTHONHASHSEED. loss_names derived from output_names, so the Packer received
+    a different channel ordering in each new process. This test verifies the
+    fix: loss_names is always alphabetically sorted.
+    """
+    names_a = ["z_var", "a_var", "m_var"]
+    names_b = list(reversed(names_a))
+    normalization_a = get_network_and_loss_normalization_config(names=names_a)
+    normalization_b = get_network_and_loss_normalization_config(names=names_b)
+    config_a = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=names_a,
+        out_names=names_a,
+        normalization=normalization_a,
+    )
+    config_b = SingleModuleStepConfig(
+        builder=ModuleSelector(type="MLP", config={}),
+        in_names=names_b,
+        out_names=names_b,
+        normalization=normalization_b,
+    )
+    assert config_a.loss_names == config_b.loss_names
+    assert config_a.loss_names == sorted(names_a)
 
 
 @pytest.mark.parallel

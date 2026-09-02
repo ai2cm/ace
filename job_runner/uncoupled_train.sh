@@ -96,7 +96,6 @@ while read TRAINING; do
 
     # Build cluster and stats args
     build_cluster_args "$CLUSTER" "$WORKSPACE"
-    build_cm_priority_args "$PRIORITY"
     build_stats_dataset_args
 
     # No checkpoints for uncoupled training
@@ -116,7 +115,6 @@ while read TRAINING; do
         echo " - Job name: ${JOB_NAME}"
         echo " - Config: ${CONFIG_PATH_REL}"
         echo " - Priority: ${PRIORITY}"
-        echo " - CM_PRIORITY: ${JOB_CM_PRIORITY}"
         echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
         echo " - GPUs: ${N_GPUS}"
         echo " - Shared memory: ${SHARED_MEM}"
