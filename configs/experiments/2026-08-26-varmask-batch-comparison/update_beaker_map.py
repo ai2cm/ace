@@ -2,6 +2,7 @@
 
 Resolution path for each run:
   wandb run name
+    -> the finished wandb run of that name
     -> run.notes  (a https://beaker.org/ex/<experiment_id> link)
     -> beaker experiment  (may contain several retried jobs)
     -> latest job with exitCode 0  -> its result dataset ID
@@ -9,6 +10,10 @@ Resolution path for each run:
 A stale map happens when a training job is preempted and retried: the
 preempted job's result dataset holds partial checkpoints, while the succeeded
 retry writes a *new* result dataset. The map must point at the succeeded job.
+
+A resubmitted run also leaves *two* wandb runs of the same name - the crashed
+attempt and the finished retry - so the run state, not the name alone, picks
+the attempt whose beaker link is worth following.
 
 Usage:
     python update_beaker_map.py [--dry-run] [--map PATH]
@@ -34,6 +39,10 @@ SKIP_SUFFIXES = ("-bestinf", "-besttrain", "-lastepoch")
 # The wandb project also holds the earlier co2-bearing comparison runs; only
 # this sweep's runs belong in the map.
 RUN_NAME_INFIX = "-mask20-uniform-noco2-"
+
+# Only a run that reached this state ran to completion; a preempted attempt is
+# left "crashed" and its checkpoints are partial.
+FINISHED_STATE = "finished"
 
 
 def _experiment_id_from_notes(notes: str | None) -> str | None:
@@ -65,12 +74,34 @@ def _succeeded_dataset_id(experiment_id: str) -> str | None:
     return succeeded[-1].get("result", {}).get("beaker")
 
 
+def _is_training_run(run_name: str) -> bool:
+    """True for a training run of this sweep, excluding its eval/export runs."""
+    return RUN_NAME_INFIX in run_name and not run_name.endswith(SKIP_SUFFIXES)
+
+
 def _fetch_run_notes() -> dict[str, str | None]:
+    """Map each sweep training run name to the notes of its finished run."""
     import wandb  # lazy import: keeps the module importable without wandb
 
     api = wandb.Api()
-    runs = api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}")
-    return {run.name: run.notes for run in runs}
+    finished: dict[str, str | None] = {}
+    seen: set[str] = set()
+    for run in api.runs(f"{WANDB_ENTITY}/{WANDB_PROJECT}"):
+        if not _is_training_run(run.name):
+            continue
+        seen.add(run.name)
+        if run.state != FINISHED_STATE:
+            continue
+        if run.name in finished:
+            raise ValueError(
+                f"{run.name!r} has more than one finished wandb run, so the "
+                "result dataset to evaluate is ambiguous; delete the "
+                "duplicate run or map this name by hand."
+            )
+        finished[run.name] = run.notes
+    for run_name in sorted(seen - set(finished)):
+        print(f"  skip {run_name}: no finished wandb run")
+    return finished
 
 
 def main() -> None:
@@ -96,10 +127,6 @@ def main() -> None:
 
     new_map = dict(old_map)
     for run_name, notes in sorted(run_notes.items()):
-        if run_name.endswith(SKIP_SUFFIXES):
-            continue
-        if RUN_NAME_INFIX not in run_name:
-            continue
         experiment_id = _experiment_id_from_notes(notes)
         if experiment_id is None:
             print(f"  skip {run_name}: no beaker link in notes")
