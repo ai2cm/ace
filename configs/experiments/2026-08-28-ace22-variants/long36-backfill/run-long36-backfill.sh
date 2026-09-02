@@ -186,8 +186,12 @@ run_eval "p2-rs0" "01M1A95R5J7J54GANKMG4GFJB8"
 # fields (`additional_diagnostic_names`, `additional_diagnostic_hidden_dim`) later
 # restructured into a nested `secondary_decoder` block. The dataset below is that checkpoint
 # translated to the current schema -- a config rewrite plus stripping the `module.net.`
-# prefix from four weight tensors, with depth=2 read off the saved layer count.
-run_eval "ace21-plevft" "01M1HA749GEG5P5KDTRAWYA29Q"
+# prefix from four weight tensors, with depth=2 read off the saved layer count. Only the
+# `net.` component comes out: the runtime wraps the decoder in DistributedDataParallel, which
+# contributes the surviving `module.` prefix. The translation script verifies the result
+# loads into a DDP-wrapped MLP before writing it, since a prefix error otherwise surfaces
+# only after the job has started.
+run_eval "ace21-plevft" "01M1HEMPDZ4WMR3DQY8HEQT9F9"
 
 # P2 stage 3 (experiment 01M1EXEGPJ4PVSNPYA1WM1XGJP, job 01M1EXEGT6MSMGT306E0EJYVG1).
 # Still running at time of writing -- CONFIRM exit 0 and a committed dataset before
