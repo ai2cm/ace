@@ -167,7 +167,7 @@ def main() -> None:
     )
     add_beaker_args(
         parser,
-        default_workspace="ai2/climate-titan",
+        default_workspace="ai2/ace",
         default_cluster=["ai2/titan"],
         default_priority="urgent",
     )
