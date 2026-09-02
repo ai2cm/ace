@@ -143,5 +143,9 @@
   "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed1-v3": "01M0N99EDWZ7BGKKZXW6G4GCJE",
   "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed2-v3": "01M0M2Y75D9DEFA86BYX03WW9Y",
   "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed3-v3": "01M0NMDJ0YCPMMHK0VFFYBBMKM",
-  "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed4-v3": "01M0KQV9AG9ZNY67MP1FY3A3T1"
+  "ace2-var-mask-nc-sfno-era5-gmron-bern10-co2default-seed4-v3": "01M0KQV9AG9ZNY67MP1FY3A3T1",
+  "ace2-var-mask-nc-sfno-era5-gmron-mask10-maskbatch-seed0-v3": "01M1E1HEMM54DWHZV66RQ2MG3C",
+  "ace2-var-mask-nc-sfno-era5-gmron-mask10-masksample-seed0-v3": "01M1E1HG4XJJYPMMN2Y6BWNY9A",
+  "ace2-var-mask-nc-sfno-era5-gmron-mask20-maskbatch-seed0-v3": "01M1D4DNNYFB726M71T8N1TW4F",
+  "ace2-var-mask-nc-sfno-era5-gmron-mask20-masksample-seed0-v3": "01M1EQFAVRW3HJFEF0EH3Q9JSX"
 }
