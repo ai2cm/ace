@@ -5,8 +5,10 @@ the corresponding training result dataset:
 
   - training_checkpoints/best_inference_ckpt.tar -> -bestinf
 
-Requires wandb_to_beaker_map.json to name a Beaker result dataset for every
-training run; run update_beaker_map.py after the training jobs finish.
+A config whose training run has no Beaker result dataset in
+wandb_to_beaker_map.json is skipped, so the sweep can be evaluated in waves as
+its training jobs finish: run update_beaker_map.py, then this script, and the
+runs that finished since get their evaluators submitted.
 """
 
 import argparse
@@ -43,14 +45,24 @@ def validate_configs(config_filenames: list[str]) -> None:
             run_eval_suite(str(RUN_CONFIGS_DIR / config_filename), validate_only=True)
 
 
+def submittable_configs(config_filenames: list[str]) -> list[str]:
+    """Configs whose training run already has a Beaker result dataset."""
+    submittable = []
+    for config_filename in config_filenames:
+        run_name = eval_suite_config_to_run_name(config_filename)
+        if run_name not in TRAINING_RESULT_DATASETS:
+            print(
+                f"Skipping {config_filename}: no Beaker result dataset for "
+                f"{run_name!r} in wandb_to_beaker_map.json - run "
+                "update_beaker_map.py once the training job has finished."
+            )
+            continue
+        submittable.append(config_filename)
+    return submittable
+
+
 def config_to_jobs(config_filename: str) -> list[tuple[str, str, str]]:
     run_name = eval_suite_config_to_run_name(config_filename)
-    if run_name not in TRAINING_RESULT_DATASETS:
-        raise KeyError(
-            f"No Beaker result dataset for {run_name!r} in "
-            "wandb_to_beaker_map.json - run update_beaker_map.py once the "
-            "training job has finished."
-        )
     source_dataset_id = TRAINING_RESULT_DATASETS[run_name]
     return [
         (f"{run_name}{name_suffix}", source_dataset_id, checkpoint_path)
@@ -97,10 +109,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.dry_run:
-        validate_configs(CONFIGS)
+    configs = submittable_configs(CONFIGS)
+    if not configs:
+        print("No config has a Beaker result dataset yet; nothing to submit.")
+        return
 
-    for config_filename in CONFIGS:
+    if not args.dry_run:
+        validate_configs(configs)
+
+    for config_filename in configs:
         config_path = RUN_CONFIGS_DIR / config_filename
         if not config_path.exists():
             raise FileNotFoundError(
