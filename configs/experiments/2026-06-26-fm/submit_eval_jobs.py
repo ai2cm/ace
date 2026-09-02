@@ -7,8 +7,9 @@ against three checkpoints from the corresponding training result dataset:
   - training_checkpoints/best_inference_ckpt.tar -> -bestinf
   - training_checkpoints/ckpt.tar -> -lastepoch
 
-Orography-swap eval suites (generate_orography_configs.py output) are
-submitted separately by submit_orography_jobs.py.
+Orography-swap and fixed-variable eval suites (the output of
+generate_orography_configs.py and generate_fixed_var_configs.py) are submitted
+separately by submit_orography_jobs.py and submit_fixed_var_jobs.py.
 """
 
 import argparse
@@ -23,6 +24,7 @@ from generate_eval_configs import (
     WANDB_PROJECT,
     eval_suite_config_to_run_name,
 )
+from generate_fixed_var_configs import FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX
 from generate_orography_configs import OROGRAPHY_EVAL_SUITE_CONFIG_PREFIX
 from run_eval_suite import run_eval_suite
 
@@ -50,6 +52,8 @@ def configs_for_version(version: str | None) -> list[str]:
         if not path.name.startswith(EVAL_SUITE_CONFIG_PREFIX):
             continue
         if path.name.startswith(OROGRAPHY_EVAL_SUITE_CONFIG_PREFIX):
+            continue
+        if path.name.startswith(FIXED_VAR_EVAL_SUITE_CONFIG_PREFIX):
             continue
         if not stem_matches_version(path.stem, version):
             continue
