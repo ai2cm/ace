@@ -113,14 +113,15 @@ def config_to_jobs(config_filename: str) -> list[tuple[str, str, str]]:
 def _pending_jobs(
     config_filenames: list[str],
     wandb_finished_summaries: dict[str, list[set[str]]] | None,
-) -> list[tuple[str, list[tuple[str, str, str]]]]:
-    """The jobs still to run, per suite, dropping suites with none left.
+) -> tuple[list[tuple[str, list[tuple[str, str, str]]]], int]:
+    """The jobs still to run, per suite, and how many were already done.
 
     A checkpoint's job is dropped when a single finished wandb run of its name
     logged every inference entry in the suite, so a suite whose three
     checkpoints are all done contributes nothing.
     """
     pending = []
+    n_skipped = 0
     for config_filename in config_filenames:
         config_path = RUN_CONFIGS_DIR / config_filename
         if not config_path.exists():
@@ -136,12 +137,13 @@ def _pending_jobs(
                 job_name = job[0]
                 if all_inferences_succeeded(cfg, [job_name], wandb_finished_summaries):
                     print(f"Skipping (already finished in wandb): {job_name}")
+                    n_skipped += 1
                 else:
                     remaining.append(job)
             jobs = remaining
         if jobs:
             pending.append((config_filename, jobs))
-    return pending
+    return pending, n_skipped
 
 
 def main() -> None:
@@ -190,7 +192,7 @@ def main() -> None:
         wandb_finished_summaries = fetch_wandb_finished_summaries()
         print(f"Found {len(wandb_finished_summaries)} finished run names.")
 
-    pending = _pending_jobs(configs, wandb_finished_summaries)
+    pending, n_skipped = _pending_jobs(configs, wandb_finished_summaries)
     if not pending:
         print("Nothing to submit.")
         return
@@ -198,8 +200,11 @@ def main() -> None:
     if not args.dry_run:
         validate_configs([config_filename for config_filename, _ in pending])
 
+    n_submitted = 0
     for config_filename, jobs in pending:
         for job_name, source_dataset_id, checkpoint_path in jobs:
+            # submit_job raises on the first gantry failure, so this total is
+            # only ever printed once every job went out.
             submit_job(
                 RUN_SCRIPT,
                 [
@@ -214,6 +219,12 @@ def main() -> None:
                 cwd=HERE,
                 extra_env={"SKIP_VALIDATE": "1"},
             )
+            n_submitted += 1
+
+    noun = "job" if n_submitted == 1 else "jobs"
+    verb = "would be submitted" if args.dry_run else "submitted"
+    skipped = f" ({n_skipped} skipped, already finished in wandb)" if n_skipped else ""
+    print(f"{n_submitted} {noun} {verb}{skipped}")
 
 
 if __name__ == "__main__":
