@@ -1,0 +1,133 @@
+# Test-set inference for video-pmd-5ch-flat-global-1degree-24to3-v1, this time
+# from checkpoints/best.ckpt instead of latest.ckpt.
+#
+# Why: the flat vs. per-channel-OU comparison
+# (toy/stage1_ou_vs_flat_results.md) uses latest.ckpt for both models. The
+# wandb curves (run 0v0lpbt0) show flat's validation DSM loss bottomed at
+# ~0.0862 near epoch 160 and then drifted UP to ~0.0949 by epoch 200, while
+# per-channel-kernel (px536hmc) ended at its own best (~0.0866). So the
+# latest.ckpt flat inference is from weights ~0.009 worse than flat's own
+# best -- best.ckpt (Beaker dataset 01KY0V8ZNN763G59S8QBY4304B, written
+# 2026-07-21, the "Saving best checkpoint" snapshot from ~epoch 150-160) is
+# the fair checkpoint. This run regenerates the flat ens32 test output from
+# it so the comparison can be redone on training-matched checkpoints.
+#
+# EVERYTHING else is identical to
+# ../2026-07-22-video-pmd-5ch-flat-test-inference/video_inference.yaml
+# (model:/data: blocks pasted verbatim from
+# ../2026-07-20-video-pmd-5ch-flat/video_train.yaml) -- only checkpoint_path,
+# output_path and the logging name differ. Do not hand-edit model:/data: out
+# of sync with the training config.
+#
+# Output (sibling of the latest.ckpt run's zarr, suffixed -bestckpt):
+#   /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-5ch-flat-global-1degree-24to3-v1/test-2023-2024-ens32-bestckpt.zarr
+checkpoint_path: /checkpoint/checkpoints/best.ckpt
+experiment_dir: /results
+output_path: /climate-default/2026-06-25-temporal-diffusion/inference/video-pmd-5ch-flat-global-1degree-24to3-v1/test-2023-2024-ens32-bestckpt.zarr
+n_ensemble: 32
+# Known-safe value from the pcn-v1 inference run (int32 grouped-conv overflow
+# at higher effective batch -- same architecture family here).
+ensemble_chunk_size: 1
+use_ema: true
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-temporal-interp
+  name: video-pmd-5ch-flat-global-1degree-24to3-v1-test-inference-bestckpt
+  entity: ai2cm
+data:
+  n_timesteps: 9
+  fine:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  coarse:
+    - data_path: /climate-default/2026-06-25-temporal-diffusion
+      file_pattern: 2025-07-25-X-SHiELD-AMIP-FME-3h.zarr
+      engine: zarr
+      subset:
+        start_time: "2023-01-01"
+        stop_time: "2024-01-04"
+  batch_size: 8  # global across ranks
+  num_data_workers: 4
+  strict_ensemble: false
+  lat_extent:
+    start: -88
+    stop: 88
+  lon_extent:
+    start: 0
+    stop: 360
+model:
+  n_timesteps: 9
+  model_channels: 128
+  n_heads: 8
+  num_freqs: 4
+  backbone: simple
+  noise_embedding_type: positional
+  channel_mult: [1, 2, 2, 2, 2]
+  num_blocks: 2
+  attention_levels: [3, 4]
+  sigma_min: 0.002
+  sigma_max: 150.0
+  churn: 0.0
+  num_diffusion_generation_steps: 50
+  temporal_noise_correlation: independent
+  log_transform_channels:
+    PRATEsfc: 86400.0  # precip modeled in log1p(mm/day) space
+  training_noise_distributions:
+    eastward_wind_at_ten_meters:
+      p_mean: -1.04
+      p_std: 1.2
+    northward_wind_at_ten_meters:
+      p_mean: -0.72
+      p_std: 1.2
+    PRMSL:
+      p_mean: -1.61
+      p_std: 1.2
+    PRATEsfc:
+      p_mean: -0.25
+      p_std: 1.2
+    air_temperature_at_two_meters:
+      p_mean: -1.96
+      p_std: 1.2
+  sigma_data_by_channel:
+    eastward_wind_at_ten_meters: 0.354
+    northward_wind_at_ten_meters: 0.487
+    PRMSL: 0.200
+    PRATEsfc: 0.782
+    air_temperature_at_two_meters: 0.1403
+  sigma_min_by_channel:
+    eastward_wind_at_ten_meters: 0.002
+    northward_wind_at_ten_meters: 0.002
+    PRMSL: 0.002
+    PRATEsfc: 0.002
+    air_temperature_at_two_meters: 0.002
+  sigma_max_by_channel:
+    eastward_wind_at_ten_meters: 57.0
+    northward_wind_at_ten_meters: 78.0
+    PRMSL: 32.0
+    PRATEsfc: 125.0
+    air_temperature_at_two_meters: 22.4
+  out_names:
+    - eastward_wind_at_ten_meters
+    - northward_wind_at_ten_meters
+    - PRMSL
+    - PRATEsfc
+    - air_temperature_at_two_meters
+  normalization:  # train-only, global domain -- must match training exactly
+    means:
+      eastward_wind_at_ten_meters: -0.036135
+      northward_wind_at_ten_meters: 0.186555
+      PRMSL: 1008.281106
+      PRATEsfc: 0.557112
+      air_temperature_at_two_meters: 279.3386
+    stds:
+      eastward_wind_at_ten_meters: 5.548626
+      northward_wind_at_ten_meters: 4.603089
+      PRMSL: 14.908773
+      PRATEsfc: 0.871331
+      air_temperature_at_two_meters: 20.2363
