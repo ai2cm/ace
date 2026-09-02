@@ -40,3 +40,12 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs1|01M0TXA8XR
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall|rs2|01M0TXAH2TN3X37F43F45EMM1Y|training|best_inference_ckpt|normal|--min-runtime 8h
 
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|training|best_inference_ckpt|normal|--min-runtime 8h
+
+# Arm D (per-channel fill: mean at the surface, 0.0 for deptho/hfgeou and the
+# four depth-resolved families) finished 75 epochs 2026-08-28, exit 0, selected
+# epoch 74. Both standalone rollouts, against the shared cm4_eval ocean configs
+# so this arm is scored by the same evaluation as every other arm on this
+# dataset. Read against ..._fillmean_maskall rs0/1/2, identical apart from the
+# per-channel overrides.
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
