@@ -15,6 +15,13 @@
 # The checkpoint is mounted at /ckpt.tar by the launcher, once per seed.
 checkpoint_path: /ckpt.tar
 experiment_dir: /results
+# NOT seeded, deliberately. `InferenceEvaluatorConfig` has a `seed` field that threads the
+# random state through the rollout; leaving it unset means these noise-conditioned models
+# draw different noise each run, so two runs of the same weights differ -- 2.7% median over
+# the 30 fields P2's stage-2 and stage-3 runs share. Setting it now would make this config
+# stop reproducing the numbers already reported, and a single seeded draw is no better than
+# a single unseeded one for a one-off comparison. Set it for any future set of runs that is
+# generated together, and re-run the whole set if so.
 n_forward_steps: 52566
 forward_steps_in_memory: 40
 logging:

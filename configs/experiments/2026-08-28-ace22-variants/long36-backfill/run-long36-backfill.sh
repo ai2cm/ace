@@ -171,12 +171,23 @@ run_eval "p1-rs2" "01M19ZTGKSNXXT7GPFGKDGT654"
 run_eval "p2-rs0" "01M1A95R5J7J54GANKMG4GFJB8"
 
 # Stage-3 checkpoints, for the two models whose near-surface fields exist only after the
-# plev fine-tune. P1 and ACE2.2 need no stage-3 equivalent: their near-surface fields are
-# prognostic, so the stage-2 backfills above already carry them, and the stage-3 trunk is
-# frozen. ACE2.1's plev-FT is decoder seed 0 on the RS3 trunk, from
-# ACE2.1-ERA5-AIMIP/scripts/run-ace-evaluator-seed-selection-single.sh; the `ace21-` prefix
+# plev fine-tune. P1 and ACE2.2 carry theirs already: those fields are prognostic there, so
+# the stage-2 backfills above include them. (Note their stage-3 runs would still differ
+# somewhat -- `clip_latent_global_means: true` tracks the latent global-mean envelope in a
+# BUFFER that `frozen: include: ["*"]` cannot freeze, so stage-3 training re-estimates it and
+# the trunk's eval behaviour is not identical even though its weights are.)
+#
+# ACE2.1's plev-FT is decoder seed 0 on the RS3 trunk, per
+# ACE2.1-ERA5-AIMIP/scripts/run-ace-evaluator-seed-selection-single.sh. The `ace21-` prefix
 # routes it to the 2024 ERA5 config.
-run_eval "ace21-plevft" "01KAKXY0EK24K7BZK2N8SPJ5SJ"
+#
+# The original checkpoint (01KAKXY0EK24K7BZK2N8SPJ5SJ) will not load under current fme: it
+# was written at ace ref 70c966ed5, when the separate decoder was configured by two flat
+# fields (`additional_diagnostic_names`, `additional_diagnostic_hidden_dim`) later
+# restructured into a nested `secondary_decoder` block. The dataset below is that checkpoint
+# translated to the current schema -- a config rewrite plus stripping the `module.net.`
+# prefix from four weight tensors, with depth=2 read off the saved layer count.
+run_eval "ace21-plevft" "01M1HA749GEG5P5KDTRAWYA29Q"
 
 # P2 stage 3 (experiment 01M1EXEGPJ4PVSNPYA1WM1XGJP, job 01M1EXEGT6MSMGT306E0EJYVG1).
 # Still running at time of writing -- CONFIRM exit 0 and a committed dataset before
