@@ -63,3 +63,5 @@ ft-v20260717-E3SMv3-piControl-6las62fy-3l67zckr-ace2s|rs0|01KYQFMJ9S2RA162YE4795
 ft-v20260717-E3SMv3-piControl-6las62fy-3l67zckr-ace2s|rs0|01KYQFMJ9S2RA162YE4795DRT2|inprogress|best_inference_ckpt_0027|urgent|--min-runtime 8h|experiment_dir=/climate-default/home/elynn/fme-output/01KYQFMJ9S2RA162YE4795DRT2/epoch27/ICx1-400yr coupled_steps_in_memory=20|01KYSSNSS9B1F5R5YK1FDGJVAZ|ai2/climate-titan|b200
 
 fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15-short-run|rs0|01KY0JAC3GAG0P0BRKJ0QZ4Z8E|run_inf_ICx3-train-40yr|best_inference_ckpt_0012|high|--min-runtime 8h|n_coupled_steps=140||ai2/ace|h100
+
+fix-ak-ft-v20260602-E3SMv3-piControl-zltomfxg-ayopj5jx-ace2s-ep-15|rs0|01KXVPBN5ZZ8BF5XEZ8YT0DHRF|run_ICx1-105yr-prescribed-tau|best_inference_ckpt_0012|high|--min-runtime 8h||01KY1Z5N8PE9VE61CR3NCECT09|ai2/ace|b200|||40GiB
