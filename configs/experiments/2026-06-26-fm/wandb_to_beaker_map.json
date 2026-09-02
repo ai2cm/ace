@@ -56,5 +56,19 @@
   "ace2-fm-nc-sfno-v3-sst-era5-p4k": "01KYAVXVK2CT5NAHHESJPG2QNX",
   "ace2-fm-nc-sfno-fm-random-v3-bestinfcooldown": "01KYAX93SCDNRX6HH7C173X21B",
   "ace2-fm-nc-sfno-fm-random-v3-cooldown": "01KYAX9B3H5VBBWBTE5TH74H07",
-  "ace2-fm-nc-sfno-v2-mask10-q0-50": "01KYQJKBAA0B4CCWB361WEY15N"
+  "ace2-fm-nc-sfno-v2-mask10-q0-50": "01KYQJKBAA0B4CCWB361WEY15N",
+  "ace2-fm-nc-sfno-c96-a1": "01M11FKTJ6H2HJ61S3HAWXKQ25",
+  "ace2-fm-nc-sfno-c96-a1-cond": "01M1C8KRXX9TTSJ2D02Q3HJEYA",
+  "ace2-fm-nc-sfno-c96-a3": "01M0NJQ5WQV5581KKKCNZ2BF82",
+  "ace2-fm-nc-sfno-c96-a3-cond": "01M120S4TC3FCX5KSSQ9N3JPND",
+  "ace2-fm-nc-sfno-era5-a1": "01M0ZHY0XK03PKWZ5PVVRAGP7W",
+  "ace2-fm-nc-sfno-fm-a1": "01M168G5YSNQ6S8MKMFJAP4B8R",
+  "ace2-fm-nc-sfno-fm-a1-cond": "01M14HH8WY9A20TATWQVBASM7D",
+  "ace2-fm-nc-sfno-fm-a2": "01M1EX15MJDM2FXW2T2XGBZ7EB",
+  "ace2-fm-nc-sfno-fm-a2-cond": "01M13B36FHZZJQX0A1HW5YJVYC",
+  "ace2-fm-nc-sfno-fm-a3": "01M0ZHYCR6DCJC72J20AVFYMC9",
+  "ace2-fm-nc-sfno-fm-a3-cond": "01M13A1144PMK8CD6Q2RTR96C6",
+  "ace2-fm-nc-sfno-fm-random-v2-mask10": "01KYX7QNQCVKQ5XCMR3SPWG3YC",
+  "ace2-fm-nc-swin-v2-c96-a1-cond": "01M1CEVJA2Z3CHV21XYBHWH6HN",
+  "ace2-fm-nc-swin-v2-era5-a1": "01M0YYRBXQ0K8XW6ZASXH7172Q"
 }
