@@ -3,12 +3,17 @@
 Each suite config contains all inline inference entries from the corresponding
 training config.  submit_eval_jobs.py submits one job per checkpoint, and that
 job runs all entries in the suite under one WandB run.
+
+Source training configs are read from both base_configs (the hand-written FM
+runs) and run_configs (the generated norm-ablation cells), and can be narrowed
+to one architecture with --arch.
 """
 
 import argparse
 import copy
 import json
 import pathlib
+from collections.abc import Sequence
 
 import yaml
 from _version_select import add_version_arg, stem_matches_version
@@ -36,6 +41,12 @@ HERE = pathlib.Path(__file__).parent
 BASE_CONFIGS_DIR = HERE / "base_configs"
 RUN_CONFIGS_DIR = HERE / "run_configs"
 EVAL_SUITE_CONFIG_PREFIX = "ace-eval-suite-config-4deg-AIMIP-"
+
+# Architecture tags appearing in the training config filenames, and the
+# vocabulary of --arch here and in submit_eval_jobs.py. A config belongs to an
+# architecture when its filename contains that tag; every config which has an
+# eval suite carries exactly one of them.
+ARCHITECTURES = ("nc-sfno", "nc-swin-v2")
 DEFAULT_CHECKPOINT_PATH = "/ckpt.tar"
 DEFAULT_SOURCE_MAP = str(HERE / "wandb_to_beaker_map.json")
 
@@ -150,7 +161,7 @@ def _fetch_wandb_run_names() -> set[str]:
     return {run.name for run in runs}
 
 
-def _fetch_wandb_finished_summaries() -> dict[str, list[set[str]]]:
+def fetch_wandb_finished_summaries() -> dict[str, list[set[str]]]:
     """Map run name -> summary key sets of that name's finished wandb runs.
 
     One key set per run, so a suite is only considered done if a *single* run
@@ -168,7 +179,7 @@ def _fetch_wandb_finished_summaries() -> dict[str, list[set[str]]]:
     return summaries
 
 
-def _all_inferences_succeeded(
+def all_inferences_succeeded(
     cfg: dict,
     eval_run_names: list[str],
     wandb_finished_summaries: dict[str, list[set[str]]],
@@ -217,7 +228,7 @@ def _write_config(
             _delete_or_skip(out_path, "all eval runs exist in wandb")
             return
     if wandb_finished_summaries is not None:
-        if _all_inferences_succeeded(cfg, eval_run_names, wandb_finished_summaries):
+        if all_inferences_succeeded(cfg, eval_run_names, wandb_finished_summaries):
             _delete_or_skip(out_path, "all inferences succeeded in wandb")
             return
     if existing_only and not out_path.exists():
@@ -270,22 +281,46 @@ def generate_eval_config(
     )
 
 
-def discover_source_configs(version: str | None) -> list[pathlib.Path]:
-    return sorted(
-        p
-        for p in BASE_CONFIGS_DIR.glob("*.yaml")
-        if p.name.startswith(CONFIG_PREFIX)
-        and "nc-sfno" in p.name
-        and stem_matches_version(p.stem, version)
-        and not p.name.endswith("-finetune.yaml")
-        and not p.name.endswith("-cooldown.yaml")
-        and not p.name.endswith("-bestinfcooldown.yaml")
-    )
+def discover_source_configs(
+    version: str | None,
+    architectures: Sequence[str] = ("nc-sfno",),
+    source_dirs: Sequence[pathlib.Path] = (BASE_CONFIGS_DIR,),
+) -> list[pathlib.Path]:
+    """Training configs to build eval suites from, at most one per filename.
+
+    The defaults are the scope the orography, fixed-variable and SST
+    generators want: the nc-sfno configs in base_configs. main() below widens
+    both, because the norm-ablation training configs are generated into
+    run_configs and cover nc-swin-v2 as well. An earlier source dir wins a
+    filename clash.
+    """
+    by_name: dict[str, pathlib.Path] = {}
+    for source_dir in source_dirs:
+        for path in sorted(source_dir.glob("*.yaml")):
+            if not path.name.startswith(CONFIG_PREFIX):
+                continue
+            if not any(arch in path.name for arch in architectures):
+                continue
+            if not stem_matches_version(path.stem, version):
+                continue
+            if path.name.endswith(
+                ("-finetune.yaml", "-cooldown.yaml", "-bestinfcooldown.yaml")
+            ):
+                continue
+            by_name.setdefault(path.name, path)
+    return [by_name[name] for name in sorted(by_name)]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     add_version_arg(parser)
+    parser.add_argument(
+        "--arch",
+        nargs="+",
+        choices=ARCHITECTURES,
+        default=None,
+        help="Only generate suites for these architectures (default: all).",
+    )
     parser.add_argument(
         "--inference-name",
         nargs="+",
@@ -343,10 +378,14 @@ def main() -> None:
     wandb_finished_summaries: dict[str, list[set[str]]] | None = None
     if args.skip_if_in_wandb:
         print(f"Fetching finished runs from {WANDB_ENTITY}/{WANDB_PROJECT}...")
-        wandb_finished_summaries = _fetch_wandb_finished_summaries()
+        wandb_finished_summaries = fetch_wandb_finished_summaries()
         print(f"Found {len(wandb_finished_summaries)} finished run names.")
 
-    source_configs = discover_source_configs(args.version)
+    source_configs = discover_source_configs(
+        args.version,
+        architectures=args.arch or ARCHITECTURES,
+        source_dirs=(BASE_CONFIGS_DIR, RUN_CONFIGS_DIR),
+    )
 
     for source_path in source_configs:
         generate_eval_config(

@@ -66,11 +66,11 @@ from generate_eval_configs import (
     RUN_CONFIGS_DIR,
     WANDB_PREFIX,
     _build_eval_suite_config,
-    _fetch_wandb_finished_summaries,
     _fetch_wandb_run_names,
     _write_config,
     discover_source_configs,
     eval_suite_config_to_run_name,
+    fetch_wandb_finished_summaries,
     source_config_to_run_name,
 )
 from generate_eval_configs import EVAL_SUITE_CONFIG_PREFIX as _EVAL_SUITE_CONFIG_PREFIX
@@ -362,7 +362,7 @@ def main() -> None:
     wandb_finished_summaries: dict[str, list[set[str]]] | None = None
     if args.skip_if_in_wandb:
         print("Fetching finished runs from wandb...")
-        wandb_finished_summaries = _fetch_wandb_finished_summaries()
+        wandb_finished_summaries = fetch_wandb_finished_summaries()
         print(f"Found {len(wandb_finished_summaries)} finished run names.")
 
     source_configs = select_source_configs(args.version, args.base_config)
