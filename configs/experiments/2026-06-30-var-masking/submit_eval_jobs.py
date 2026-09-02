@@ -17,6 +17,13 @@ checkpoints rather than all three.
 is of interest. Pass the same flag to generate_eval_configs.py's
 ``--delete-if-in-wandb`` so config cleanup does not wait on variants that were
 never submitted.
+
+``--match`` restricts submission to configs whose filename contains a given
+substring. ``run_configs/`` accumulates eval configs for arms that were already
+evaluated (only ``--delete-if-in-wandb`` prunes them, and configs are kept
+while their eval jobs are in flight), and nothing downstream notices a
+duplicate submission, so a sweep of one arm needs a narrower filter than
+``--version``. Repeat the flag to submit several arms.
 """
 
 import argparse
@@ -151,6 +158,16 @@ def main() -> None:
             "regardless."
         ),
     )
+    parser.add_argument(
+        "--match",
+        nargs="+",
+        default=None,
+        metavar="SUBSTRING",
+        help=(
+            "Restrict to configs whose filename contains any of these "
+            "substrings (ex: --match maskbatch masksample). Default: all."
+        ),
+    )
     add_checkpoint_argument(parser)
     args = parser.parse_args()
     checkpoints_to_run = checkpoints_for_names(args.checkpoint)
@@ -160,11 +177,13 @@ def main() -> None:
         for path in RUN_CONFIGS_DIR.glob("*.yaml")
         if path.name.startswith(EVAL_SUITE_CONFIG_PREFIX)
         and (args.version is None or stem_has_version(path.stem, args.version))
+        and (args.match is None or any(m in path.name for m in args.match))
     )
     if not configs:
         raise FileNotFoundError(
-            f"no eval suite configs in {RUN_CONFIGS_DIR}"
-            " — run generate_eval_configs.py first"
+            f"no eval suite configs in {RUN_CONFIGS_DIR} matching the given "
+            "filters — run generate_eval_configs.py first, or widen "
+            "--version/--match"
         )
 
     for config_filename in configs:
