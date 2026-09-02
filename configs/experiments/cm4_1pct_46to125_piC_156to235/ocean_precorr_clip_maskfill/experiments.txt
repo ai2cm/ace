@@ -47,5 +47,5 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|0
 # so this arm is scored by the same evaluation as every other arm on this
 # dataset. Read against ..._fillmean_maskall rs0/1/2, identical apart from the
 # per-channel overrides.
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
-cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|01M0VS90EMFSZHNF8DYYS1BNYY|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h|||ai2/ace|jupiter|||30GiB
