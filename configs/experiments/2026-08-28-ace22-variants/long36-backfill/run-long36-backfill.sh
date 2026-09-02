@@ -169,3 +169,16 @@ run_eval "p1-rs0" "01M19ZTFCEAKE8ZP8SGXP8KBZN"
 run_eval "p1-rs1" "01M19ZTFGBA97R0Z2RX3VHSEFY"
 run_eval "p1-rs2" "01M19ZTGKSNXXT7GPFGKDGT654"
 run_eval "p2-rs0" "01M1A95R5J7J54GANKMG4GFJB8"
+
+# Stage-3 checkpoints, for the two models whose near-surface fields exist only after the
+# plev fine-tune. P1 and ACE2.2 need no stage-3 equivalent: their near-surface fields are
+# prognostic, so the stage-2 backfills above already carry them, and the stage-3 trunk is
+# frozen. ACE2.1's plev-FT is decoder seed 0 on the RS3 trunk, from
+# ACE2.1-ERA5-AIMIP/scripts/run-ace-evaluator-seed-selection-single.sh; the `ace21-` prefix
+# routes it to the 2024 ERA5 config.
+run_eval "ace21-plevft" "01KAKXY0EK24K7BZK2N8SPJ5SJ"
+
+# P2 stage 3 (experiment 01M1EXEGPJ4PVSNPYA1WM1XGJP, job 01M1EXEGT6MSMGT306E0EJYVG1).
+# Still running at time of writing -- CONFIRM exit 0 and a committed dataset before
+# launching, since a restart would issue a new id.
+run_eval "p2-stage3" "01M1EXEGPV085WQVT9EMY87PQ7"
