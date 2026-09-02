@@ -12,7 +12,7 @@ set -e
 JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-coarse-endpoints-flat-test-inference-global-smoke"
 CONFIG_FILENAME="video_inference_smoke.yaml"
 WORKSPACE="ai2/ace"
-CLUSTER="ai2/jupiter"  # h100
+CLUSTER="ai2/neptune"  # l40s -- jupiter was starved at 0-2/984 free for 1.5h+
 N_GPUS=1
 CHECKPOINT_DATASET="01M100MWQDFSZHWAQW1ZTJZFJ4"
 
