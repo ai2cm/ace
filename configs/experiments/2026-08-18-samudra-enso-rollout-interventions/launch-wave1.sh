@@ -41,6 +41,8 @@ STATS_BUNDLE_DATASET="${STATS_BUNDLE_DATASET:-01KHGYVHSX504ZBHJC223S63F0}"
 FT_OCEAN_STATS_DATASET="${FT_OCEAN_STATS_DATASET:-01KXH6AFMYSRYSV6PA230Q3JG7}"
 # Ocean stats extended with the all-in-one arm's 8 atmosphere variables.
 ALLINONE_STATS_DATASET="${ALLINONE_STATS_DATASET:-01M1CQCZDDMH9HN0VVTF1WVKRR}"
+# residfix pretrain snapshot (best_ckpt.tar at epoch ~102) for its coupled FT.
+RESIDFIX_SNAPSHOT_DATASET="${RESIDFIX_SNAPSHOT_DATASET:-01M1J3J05KRZEDE1XFH8R5MPFV}"
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -65,6 +67,12 @@ launch() {
                 --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
                 --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
 
+  if [[ "$arm" == "residfixft" ]]; then
+    mounts=(--dataset "${ATMOS_CKPT_DATASET}:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar"
+            --dataset "${RESIDFIX_SNAPSHOT_DATASET}:best_ckpt.tar:/ocean_ckpt.tar"
+            --dataset "${STATS_BUNDLE_DATASET}:coupled_atmosphere:/atmos_stats"
+            --dataset "${FT_OCEAN_STATS_DATASET}:/ocean_stats")
+  fi
   if [[ "$arm" == "resid" ]]; then
     config="${CONFIG_DIR}/resid-pretrain.yaml"
     module="fme.ace.train"

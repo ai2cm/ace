@@ -239,12 +239,36 @@ def arm_noohc(c: dict) -> dict:
     return c
 
 
+def arm_residfixft(c: dict) -> dict:
+    """Coupled FT of the tendency-forward residual pretrain (residfix).
+
+    The ocean stepper mirrors the residfix pretraining exactly: residual
+    prediction with the forward path in residual-normalized units
+    (residual_normalized_prediction) and the tendency-scaled loss via the
+    residual normalization block. Weights come from the residfix pretrain
+    snapshot mounted at /ocean_ckpt.tar; everything else matches the shared
+    coupled-FT base.
+    """
+    step = c["stepper"]["ocean"]["stepper"]["step"]["config"]
+    assert not step.get("residual_prediction")
+    step["residual_prediction"] = True
+    step["residual_normalized_prediction"] = True
+    norm = step["normalization"]
+    assert "residual" not in norm and "loss" not in norm
+    norm["residual"] = {
+        "global_means_path": "/ocean_stats/ocean/centering.nc",
+        "global_stds_path": "/ocean_stats/ocean/scaling-residual.nc",
+    }
+    return c
+
+
 ARMS = {
     "wint5": arm_wint5,
     "wint20": arm_wint20,
     "hzn12": arm_hzn12,
     "noohc": arm_noohc,
     "tendloss": arm_tendloss,
+    "residfixft": arm_residfixft,
 }
 
 
