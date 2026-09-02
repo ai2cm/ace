@@ -239,10 +239,98 @@ class PairedRegionalIndexAggregator:
         self._target_aggregator.record_batch(target_data)
         self._prediction_aggregator.record_batch(prediction_data)
 
+    N_ACC_LEADS = 12
+
+    def _get_acc_logs(self) -> dict[str, Any]:
+        """Nino3.4 anomaly correlation by forecast lead month, across samples.
+
+        Both series are anomalized against the TARGET's per-calendar-month
+        climatology over the inference window, so model drift cannot leak
+        into the anomaly baseline. Raw monthly means: no running mean and no
+        drift correction, so values are slightly pessimistic relative to
+        hindcast-style scoring but monotone with it.
+        """
+
+        def monthly_by_sample(raw: torch.Tensor, times: xr.DataArray):
+            years = times.dt.year.values
+            months = times.dt.month.values
+            ym = years * 12 + (months - 1)
+            out = []
+            arr = raw.detach().cpu().numpy()
+            for s in range(arr.shape[0]):
+                d = {}
+                for key in np.unique(ym[s]):
+                    sel = arr[s][ym[s] == key]
+                    sel = sel[np.isfinite(sel)]
+                    d[int(key)] = float(sel.mean()) if sel.size else float("nan")
+                out.append(d)
+            return out
+
+        logs: dict[str, Any] = {}
+        dist = Distributed.get_instance()
+        n_leads = self.N_ACC_LEADS
+        for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
+            p_raw = self._prediction_aggregator._raw_indices.get(sst_name)
+            t_raw = self._target_aggregator._raw_indices.get(sst_name)
+            p_times = self._prediction_aggregator._raw_index_times
+            t_times = self._target_aggregator._raw_index_times
+            if p_raw is None or t_raw is None or p_times is None or t_times is None:
+                continue
+            pred_monthly = monthly_by_sample(p_raw, p_times)
+            targ_monthly = monthly_by_sample(t_raw, t_times)
+            climo_values: dict[int, list[float]] = {m: [] for m in range(1, 13)}
+            for d in targ_monthly:
+                for key, v in d.items():
+                    if np.isfinite(v):
+                        climo_values[key % 12 + 1].append(v)
+            climo = {
+                m: float(np.mean(v)) if v else float("nan")
+                for m, v in climo_values.items()
+            }
+            n_samples = len(pred_monthly)
+            pred_anom = np.full((n_samples, n_leads), np.nan)
+            targ_anom = np.full((n_samples, n_leads), np.nan)
+            for s in range(n_samples):
+                if not pred_monthly[s]:
+                    continue
+                init = min(pred_monthly[s])
+                for k in range(1, n_leads + 1):
+                    key = init + k
+                    c = climo[key % 12 + 1]
+                    if key in pred_monthly[s]:
+                        pred_anom[s, k - 1] = pred_monthly[s][key] - c
+                    if key in targ_monthly[s]:
+                        targ_anom[s, k - 1] = targ_monthly[s][key] - c
+            gathered_p = dist.gather_irregular(
+                torch.as_tensor(pred_anom, dtype=torch.float32)
+            )
+            gathered_t = dist.gather_irregular(
+                torch.as_tensor(targ_anom, dtype=torch.float32)
+            )
+            if gathered_p is None or gathered_t is None:
+                continue
+            p_all = torch.cat(gathered_p, dim=0).numpy()
+            t_all = torch.cat(gathered_t, dim=0).numpy()
+            accs = np.full(n_leads, np.nan)
+            for k in range(n_leads):
+                a, b = p_all[:, k], t_all[:, k]
+                m = np.isfinite(a) & np.isfinite(b)
+                if m.sum() >= 3 and np.std(a[m]) > 0 and np.std(b[m]) > 0:
+                    a2, b2 = a[m] - a[m].mean(), b[m] - b[m].mean()
+                    accs[k] = float(
+                        (a2 * b2).sum() / np.sqrt((a2**2).sum() * (b2**2).sum())
+                    )
+            for k in (3, 6, 9, 12):
+                logs[f"{sst_name}_nino34_acc_lead{k}"] = float(accs[k - 1])
+            with np.errstate(all="ignore"):
+                logs[f"{sst_name}_nino34_acc_mean_lead1_12"] = float(np.nanmean(accs))
+        return logs
+
     def get_logs(self, label: str) -> dict[str, Any]:
         target_indices = self._target_aggregator.get_indices()
         prediction_indices = self._prediction_aggregator.get_indices()
         logs = {}
+        logs.update(self._get_acc_logs())
         for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
             if (
                 sst_name in prediction_indices

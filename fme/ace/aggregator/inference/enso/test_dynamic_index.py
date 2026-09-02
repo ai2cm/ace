@@ -440,6 +440,64 @@ def test_regional_index_aggregator(variable_name):
     assert isinstance(logs[metric_name], float)
 
 
+def _make_paired_agg(lat, lon):
+    lat_lon_coordinates = LatLonCoordinates(lat=lat, lon=lon)
+    region = LatLonRegion(
+        lat=lat_lon_coordinates.lat,
+        lon=lat_lon_coordinates.lon,
+        lat_bounds=(4.5, 6.5),
+        lon_bounds=(9.5, 11.5),
+    )
+    ops = lat_lon_coordinates.get_gridded_operations()
+    return PairedRegionalIndexAggregator(
+        target_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=ops.regional_area_weighted_mean,
+        ),
+        prediction_aggregator=RegionalIndexAggregator(
+            regional_weights=region.regional_weights,
+            regional_mean=ops.regional_area_weighted_mean,
+        ),
+    )
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+def test_paired_aggregator_acc_by_lead(sign):
+    """Prediction equal to (or the negative of) the target must score an
+    anomaly correlation of +1 (or -1) at every lead."""
+    n_lat, n_lon, n_sample = 10, 20, 4
+    n_times = 365 * 4 * 2  # two years at 6-hourly
+    time = _get_windowed_times((2000, 1, 1, 0, 0, 0), n_sample, n_times)
+    # target: sample-dependent amplitude times a slow oscillation, uniform in
+    # space, so cross-sample variance exists at every lead month
+    hours = torch.arange(n_times, dtype=torch.float32) * 6
+    signal = torch.sin(2 * torch.pi * hours / (24 * 365 * 1.7))
+    amp = torch.tensor([0.5, 1.0, -1.5, 2.0])[:, None]
+    series = amp * signal[None, :]
+    field = series[:, :, None, None].expand(n_sample, n_times, n_lat, n_lon)
+    coords = {
+        "lat": torch.arange(n_lat, dtype=torch.float32),
+        "lon": torch.arange(n_lon, dtype=torch.float32),
+    }
+    target_data = {"sst": field.clone(), **coords}
+    prediction_data = {"sst": sign * field.clone(), **coords}
+    agg = _make_paired_agg(coords["lat"], coords["lon"])
+    agg.record_batch(
+        InferenceBatchData(
+            prediction=prediction_data,
+            prediction_norm={},
+            target=target_data,
+            target_norm=None,
+            time=time,
+            i_time_start=0,
+        )
+    )
+    logs = agg._get_acc_logs()
+    for k in (3, 6, 9, 12):
+        assert logs[f"sst_nino34_acc_lead{k}"] == pytest.approx(sign, abs=1e-3)
+    assert logs["sst_nino34_acc_mean_lead1_12"] == pytest.approx(sign, abs=1e-3)
+
+
 @pytest.mark.parametrize(
     "variable_name",
     [
