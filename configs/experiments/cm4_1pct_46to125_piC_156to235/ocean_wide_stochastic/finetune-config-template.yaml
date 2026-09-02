@@ -25,7 +25,9 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 10 # matches the deterministic recipe's finetune stage
+max_epochs: 40 # ERA5 stochastic-ACE's stage-2 length, not the
+# deterministic recipe's 10. 160 yr x 73/yr / bs 16 = 730 iter/epoch
+# -> ~29,200 iterations.
 inference:
   - name: inference_1pct
     weight: 1.0
@@ -217,5 +219,20 @@ stepper_training:
       - steps: 20
         probability: 0.05
   optimize_last_step_only: true
+  # The stage-1 objective, restated. create_finetune_config.sh merges only
+  # .stepper from the pretraining config, so stepper_training carries nothing
+  # over: stage 1 passed these as override_args, and without them here stage 2
+  # trains MSE and discards the calibration stage 1 bought. n_ensemble would
+  # default to 2 under EnsembleLoss; stated so the ensemble size is visible.
+  n_ensemble: 2
   loss:
-    type: MSE
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.0
+      patch_energy_score_weight: 0.1
+      patch_energy_score_size: 3
+  # Loads the stage-1 best_ckpt mounted at /ckpt.tar by uncoupled_finetune.sh.
+  # Without it the finetune trains from random init.
+  parameter_init:
+    weights_path: /ckpt.tar

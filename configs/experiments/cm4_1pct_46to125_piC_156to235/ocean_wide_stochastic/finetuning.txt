@@ -1,0 +1,46 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# STAGE 2 of the stochastic Samudra protocol at 1deg: sampled-rollout finetune
+# from each stage-1 run's own best_ckpt (best validation checkpoint), against
+# finetune-config-template.yaml in this directory.
+#
+# The recipe changes relative to stage 1 are all in the template
+# (n_forward_steps 1 -> the sampled schedule, optimize_last_step_only,
+# max_epochs 75 -> 40, evaluate_before_training, parameter_init from
+# /ckpt.tar). The loss and n_ensemble stage 1 passed as override_args are
+# restated in the template too: create_finetune_config.sh merges only
+# .stepper from the pretraining config, so stepper_training does not carry
+# over. Everything under .stepper -- injection point, noise_embed_dim,
+# norm: layer, checkpoint_strategy: all, the ocean corrector -- does carry
+# over from the checkpoint's config, so no row restates it.
+#
+# Only the seed is per-row. max_grad_norm and the OHC method are in the
+# template rather than here (unlike ../ocean_wide/finetuning.txt, which
+# inherits them from override_args of the arm it finetunes).
+#
+# min_runtime set on every row -- the Beaker scheduler has required one since
+# 2026-08-28 and uncoupled_finetune.sh otherwise defaults it to 0.
+#
+# Four of six seeds armed. allblocks rs2 is still pretraining (beaker
+# 01M1CPGMQYR8V23H3XDA9HYW31, epoch 63/75 as of 2026-09-02), so bottleneck rs2
+# is held to keep the two arms seed-balanced: comparing a 3-seed arm against a
+# 2-seed one would confound the injection point with sampling noise. Both rs2
+# rows arm together once allblocks rs2 finishes.
+#
+# Stage-1 finish state (wandb id / final val_piC/mean/loss at epoch 75):
+#   allblocks  rs0 0yk7nnr7 0.04254 | rs1 ifui1igf 0.04261 | rs2 uajyh7lf running
+#   bottleneck rs0 c4wgztd9 0.04266 | rs1 nxvtysb5 0.04238 | rs2 cupqztpv 0.04294
+# Seed spread within an arm is 7e-5 / 2.8e-4, and the two arms are
+# indistinguishable at stage 1 -- the seed agreement stage 1 is watched on.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ft|rs0|ace-samudra-cm4|0yk7nnr7|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ft|rs1|ace-samudra-cm4|ifui1igf|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ft|rs2|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ft|rs0|ace-samudra-cm4|c4wgztd9|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ft|rs1|ace-samudra-cm4|nxvtysb5|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ft|rs2|ace-samudra-cm4|cupqztpv|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2||3h
