@@ -20,7 +20,11 @@ set -e
 JOB_NAME="video-pmd-spatiotemporal-25km-100km-global-5ch-two-block-coarse-endpoints-flat-test-inference-global"
 CONFIG_FILENAME="video_inference.yaml"
 WORKSPACE="ai2/ace"
-CLUSTER="ai2/jupiter"  # h100
+CLUSTER="ai2/neptune"  # l40s -- jupiter (h100) has been starved at ~0-2/984 free
+# for 2+ hours; this is a multi-day job (~19min per batch*ensemble-member
+# unit measured on a single L40s smoke test x 368 batches x 4 ensemble
+# members / 4 GPUs =~ 4.9 GPU-days/rank), so starting now on available
+# hardware beats queuing indefinitely for faster hardware.
 N_GPUS=4
 CHECKPOINT_DATASET="01M100MWQDFSZHWAQW1ZTJZFJ4"
 # No WANDB_API_KEY secret in ai2/ace -- fine, this config has log_to_wandb: false.
@@ -34,7 +38,7 @@ DEPS_ONLY_IMAGE="$(cat latest_deps_only_image.txt)"
 
 gantry run --allow-dirty \
     --name "$JOB_NAME" \
-    --description 'Video PMD spatiotemporal TWO-BLOCK (pinned coarse-temporal r + unpinned fine-detail d, fixed kernels) test-set inference, GLOBAL DOMAIN in one job via patch-tiled divide_generation, 4-member ensemble, coarse-endpoints-only input, 5 channels, 25km/100km. Checkpoint from a manually stopped run at epoch ~54/200 -- see yaml header. 4x GPU DDP on jupiter (h100).' \
+    --description 'Video PMD spatiotemporal TWO-BLOCK (pinned coarse-temporal r + unpinned fine-detail d, fixed kernels) test-set inference, GLOBAL DOMAIN in one job via patch-tiled divide_generation, 4-member ensemble, coarse-endpoints-only input, 5 channels, 25km/100km. Checkpoint from a manually stopped run at epoch ~54/200 -- see yaml header. Multi-day job (~4.9 GPU-days/rank measured via smoke test); 4x GPU DDP on neptune (l40s, available now vs. jupiter starved).' \
     --workspace "$WORKSPACE" \
     --priority urgent \
     --cluster "$CLUSTER" \
