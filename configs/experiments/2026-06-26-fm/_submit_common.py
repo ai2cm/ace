@@ -9,6 +9,7 @@ import argparse
 import os
 import pathlib
 import subprocess
+from collections.abc import Sequence
 
 #: Accepted values of the CM_PRIORITY label read by
 #: scripts/beaker_balancer/balance.py. `immediate` is deliberately absent: Beaker
@@ -93,3 +94,41 @@ def submit_job(
         **(extra_env or {}),
     }
     subprocess.run(cmd, check=True, cwd=cwd, env=env)
+
+
+def check_configs_at_head(config_paths: Sequence[pathlib.Path]) -> None:
+    """Fail unless each config is committed, with no local edits, at HEAD.
+
+    Gantry clones the repo from GitHub at HEAD instead of uploading the working
+    tree, so an untracked or locally-modified config never reaches the job as
+    written. Untracked, that surfaces only once the job has started, as a
+    FileNotFoundError from prepare_config; modified, it silently runs the
+    committed version instead. Both are fixed by committing (and pushing) the
+    configs, so check before spending a submission on them.
+    """
+    missing = []
+    modified = []
+    for path in config_paths:
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", path.name],
+            cwd=path.parent,
+            capture_output=True,
+        )
+        if tracked.returncode != 0:
+            missing.append(path.name)
+            continue
+        dirty = subprocess.run(
+            ["git", "diff", "HEAD", "--quiet", "--", path.name],
+            cwd=path.parent,
+        )
+        if dirty.returncode != 0:
+            modified.append(path.name)
+    if missing or modified:
+        lines = ["Configs must be committed before submitting; gantry clones HEAD."]
+        if missing:
+            lines.append("Not tracked by git:")
+            lines.extend(f"  {name}" for name in missing)
+        if modified:
+            lines.append("Tracked but modified locally (HEAD version would run):")
+            lines.extend(f"  {name}" for name in modified)
+        raise SystemExit("\n".join(lines))

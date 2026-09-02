@@ -25,7 +25,7 @@ import pathlib
 from collections.abc import Sequence
 
 import yaml
-from _submit_common import add_beaker_args, submit_job
+from _submit_common import add_beaker_args, check_configs_at_head, submit_job
 from _version_select import add_version_arg, stem_matches_version
 from generate_eval_configs import (
     ARCHITECTURES,
@@ -169,7 +169,7 @@ def main() -> None:
         parser,
         default_workspace="ai2/ace",
         default_cluster=["ai2/titan"],
-        default_priority="urgent",
+        default_priority="high",
     )
     args = parser.parse_args()
 
@@ -196,6 +196,10 @@ def main() -> None:
     if not pending:
         print("Nothing to submit.")
         return
+
+    check_configs_at_head(
+        [RUN_CONFIGS_DIR / config_filename for config_filename, _ in pending]
+    )
 
     if not args.dry_run:
         validate_configs([config_filename for config_filename, _ in pending])
