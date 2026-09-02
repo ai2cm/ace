@@ -9,7 +9,8 @@ CONFIG_PATH=${4}
 
 beaker dataset fetch ${EXISTING_RESULTS_ATMOS_DATASET} --prefix config.yaml
 mv ./config.yaml ./atmos-config.yaml
-sed -i '' 's/statsdata/atmos_stats/g' ./atmos-config.yaml
+sed -i.bak 's/statsdata/atmos_stats/g' ./atmos-config.yaml
+rm atmos-config.yaml.bak
 yq -i '.stepper.step.config.normalization.network.global_means_path = "/atmos_stats/centering.nc"' ./atmos-config.yaml
 yq -i '.stepper.step.config.normalization.network.global_stds_path = "/atmos_stats/scaling-full-field.nc"' ./atmos-config.yaml
 yq -i '.stepper.step.config.normalization.residual.global_means_path = "/atmos_stats/centering.nc"' ./atmos-config.yaml
@@ -17,7 +18,8 @@ yq -i '.stepper.step.config.normalization.residual.global_stds_path = "/atmos_st
 
 beaker dataset fetch ${EXISTING_RESULTS_OCEAN_DATASET} --prefix config.yaml
 mv ./config.yaml ./ocean-config.yaml
-sed -i '' 's/statsdata/ocean_stats/g' ./ocean-config.yaml
+sed -i.bak 's/statsdata/ocean_stats/g' ./ocean-config.yaml
+rm ocean-config.yaml.bak
 yq -i '.stepper.step.config.normalization.network.global_means_path = "/ocean_stats/centering.nc"' ./ocean-config.yaml
 yq -i '.stepper.step.config.normalization.network.global_stds_path = "/ocean_stats/scaling-full-field.nc"' ./ocean-config.yaml
 

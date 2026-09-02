@@ -108,6 +108,10 @@ class ModelTorchDistributed(DistributedBackend):
             self._data_rank = self._rank // spatial_size
             return
 
+        # Keep the NCCL watchdog from std::terminate-ing the rank on a CUDA
+        # error observed off the main thread; see the same setting in
+        # TorchDistributed.__init__ for the full rationale.
+        os.environ.setdefault("TORCH_NCCL_RETHROW_CUDA_ERRORS", "0")
         # Initialize PhysicsNeMo DistributedManager.
         DistributedManager.initialize()
         self._dm = DistributedManager()
@@ -313,7 +317,7 @@ class ModelTorchDistributed(DistributedBackend):
 
     def scatter_object(self, obj: T | None) -> T:
         """Scatter a picklable object from the root process to all processes."""
-        if self._data_rank == 0:
+        if self._rank == 0:
             if obj is None:
                 raise ValueError("Root process must provide an object to scatter")
             object_list = [obj for _ in range(self.total_ranks)]
@@ -471,3 +475,11 @@ class ModelTorchDistributed(DistributedBackend):
         if torch.distributed.is_initialized():
             logger.info("Shutting down rank %d", self._rank)
         DistributedManager.cleanup()
+
+    def abort(self):
+        if not torch.distributed.is_initialized():
+            return
+        # covers the manager's mesh subgroups too: passing no group aborts
+        # every registered process group. The manager's own state is left
+        # behind, but the process is about to exit.
+        torch.distributed.distributed_c10d._abort_process_group()

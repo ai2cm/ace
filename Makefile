@@ -18,6 +18,9 @@ else
 	CONDA_PACKAGES=pip
 endif
 
+help:	## Show this help.
+	@sed -ne '/@sed/!s/## //p' $(MAKEFILE_LIST)
+
 build_docker_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) --target production .
 
@@ -37,9 +40,6 @@ migrate_podman_image: build_podman_image
 enter_docker_image: build_docker_image
 	docker run -it --rm $(IMAGE):$(VERSION) bash
 
-launch_beaker_session:
-	./launch-beaker-session.sh $(USERNAME)/$(IMAGE)-$(VERSION)
-
 build_deps_only_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-deps-only:$(VERSION) --target deps-only .
 	beaker image create $(IMAGE)-deps-only:$(VERSION) --name $(IMAGE)-deps-only-$(VERSION) --workspace ai2/ace-ci-tests
@@ -50,7 +50,7 @@ build_nsight_image:
 
 # recommended to deactivate current conda environment before running this
 create_environment:
-	conda create -n $(ENVIRONMENT_NAME) python=3.11 $(CONDA_PACKAGES)
+	conda create -n $(ENVIRONMENT_NAME) python=3.12 $(CONDA_PACKAGES)
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs,graphcast]
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install --no-build-isolation -c constraints.txt -r requirements-healpix.txt
@@ -111,3 +111,9 @@ deploy_pypi: build_pypi
 
 deploy_test_pypi: DEPLOY_TARGET = testpypi
 deploy_test_pypi: deploy_pypi
+
+# job_runner
+
+jr_changelog:	## Interactively update job_runner/CHANGELOG.md
+	@job_runner/bin/changelog.sh
+

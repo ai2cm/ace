@@ -1,6 +1,6 @@
 #!/bin/bash
 # Wrapper script for evaluation jobs
-# Usage: evaluate.sh <experiment_dir> <config_subdirectory> [--dry-run]
+# Usage: evaluate.sh <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>]
 
 set -e
 
@@ -11,10 +11,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 if [[ "$#" -lt 2 ]]; then
-  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run]"
+  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--dry-run] [--config-dir <path>]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/coupled or experiments/2025-08-08-jamesd/uncoupled)"
   echo "  - <config_subdirectory>: Subdirectory containing the evaluator config files (evaluator-config-*.yaml)"
   echo "  - --dry-run: Preview actions without launching jobs"
+  echo "  - --config-dir <path>: Read the evaluator config files from this directory instead of"
+  echo "      <experiment_dir>/<config_subdirectory>/. Absolute, or relative to the repo root,"
+  echo "      and must resolve inside it. experiments.txt is read from <experiment_dir>/<config_subdirectory>/ either way."
   exit 1
 fi
 
@@ -25,6 +28,9 @@ shift 2
 
 # Parse dry-run flag
 parse_dry_run_flag "$@"
+
+# Parse --config-dir flag
+parse_config_dir_arg "$@"
 
 # Initialize script environment
 init_script_environment
@@ -42,6 +48,10 @@ fi
 FULL_EXPERIMENT_DIR="$REPO_ROOT/$EXPERIMENT_DIR"
 INPUT_PATH="$FULL_EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments.txt"
 
+# Directory the config yaml files are read from; --config-dir redirects it.
+# INPUT_PATH above is unaffected: experiments.txt always comes from the experiment directory.
+CONFIG_DIR=$(resolve_config_dir "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$CONFIG_DIR_OVERRIDE")
+
 # Print dry-run header (no stats for evaluator)
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "========================================"
@@ -52,6 +62,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
     echo "  Repository Root: $REPO_ROOT"
     echo "  Git Branch: $GIT_BRANCH"
     echo "  Beaker Username: $BEAKER_USERNAME"
+    echo "  Config Directory: $CONFIG_DIR"
     echo
 fi
 
@@ -79,6 +90,7 @@ while read TRAIN_EXPER; do
     CLUSTER=$(echo "$TRAIN_EXPER" | cut -d"|" -f11)
     EXISTING_RESULTS_OCEAN_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f12)
     EXISTING_RESULTS_ATMOS_DATASET=$(echo "$TRAIN_EXPER" | cut -d"|" -f13)
+    SHARED_MEM=$(echo "$TRAIN_EXPER" | cut -d"|" -f14)
 
     # Check if STATUS starts with "run_" (but not "run_inf_", which is for inference)
     if [[ ! "$STATUS" =~ ^run_ ]] || [[ "$STATUS" =~ ^run_inf_ ]]; then
@@ -104,11 +116,11 @@ while read TRAIN_EXPER; do
         JOB_NAME="${JOB_GROUP}"
     fi
 
-    # Construct absolute path for file operations
-    CONFIG_PATH="${FULL_EXPERIMENT_DIR}/${CONFIG_SUBDIR}/${CURRENT_CONFIG_FILENAME}"
-
     # Construct relative path for gantry/python commands
-    CONFIG_PATH_REL="${EXPERIMENT_DIR}/${CONFIG_SUBDIR}/${CURRENT_CONFIG_FILENAME}"
+    CONFIG_PATH_REL="${CONFIG_DIR}/${CURRENT_CONFIG_FILENAME}"
+
+    # Construct absolute path for file operations
+    CONFIG_PATH="${REPO_ROOT}/${CONFIG_PATH_REL}"
 
     if [[ ! -f "$CONFIG_PATH" ]]; then
         echo "Error: Config file not found at ${CONFIG_PATH} for JOB_NAME: ${JOB_NAME}. Skipping."
@@ -147,19 +159,13 @@ while read TRAIN_EXPER; do
         )
     fi
 
-
-    if [[ -z "$WORKSPACE" ]]; then
-        WORKSPACE=ai2/ace
-    fi
-
-    if [[ -z "$CLUSTER" ]]; then
-        CLUSTER="a100+h100"
+    if [[ -z $SHARED_MEM ]]; then
+        SHARED_MEM="20GiB"
     fi
 
     # Set dummy variables for print functions
     GROUP="$JOB_GROUP"
     N_GPUS=1
-    SHARED_MEM="20GiB"
     FME_MODULE="$FME_MODULE_EVALUATOR"
 
     build_cluster_args "$CLUSTER" "$WORKSPACE"
@@ -188,7 +194,11 @@ while read TRAIN_EXPER; do
     fi
 
     # Validate config (use relative path)
-    python -m $FME_MODULE_VALIDATE --config_type evaluator "$CONFIG_PATH_REL" --override $OVERRIDE_ARGS
+    # Re-tokenize OVERRIDE_ARGS via eval so single quotes in the input file group
+    # list/dict values with spaces into single argv elements (literal quotes read
+    # from the file are otherwise ignored by word-splitting).
+    eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
+    python -m $FME_MODULE_VALIDATE --config_type evaluator "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}"
 
     # Run gantry command unless in dry-run mode
     if [[ "$DRY_RUN" != "true" ]]; then
@@ -201,7 +211,6 @@ while read TRAIN_EXPER; do
             $MIN_RUNTIME \
             --no-auto-resume \
             "${CLUSTER_ARGS[@]}" \
-            --workspace "$WORKSPACE" \
             --weka climate-default:/climate-default \
             --env WANDB_USERNAME="$WANDB_USERNAME" \
             --env WANDB_NAME="$JOB_NAME" \
@@ -212,11 +221,11 @@ while read TRAIN_EXPER; do
             --dataset-secret google-credentials:/tmp/google_application_credentials.json \
             "${CHECKPOINT_DATASET_ARGS[@]}" \
             --gpus 1 \
-            --shared-memory 40GiB \
+            --shared-memory $SHARED_MEM \
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
-            -- python -I -m $FME_MODULE_EVALUATOR "$CONFIG_PATH_REL" --override $OVERRIDE_ARGS
+            -- python -I -m $FME_MODULE_EVALUATOR "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}"
         echo
     fi
 done <"$INPUT_PATH"

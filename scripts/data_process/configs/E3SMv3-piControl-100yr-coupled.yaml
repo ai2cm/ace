@@ -32,6 +32,7 @@ coupled_datasets:
       first_timestamp: "0425-01-01T00:00:00"
       shift_timestamps_to_avg_interval_midpoint: true
     include_ts: true
+    use_atmosphere_sea_ice_fraction_fallback: true
   output_writer:
     n_dask_workers: 32
   input_field_names:

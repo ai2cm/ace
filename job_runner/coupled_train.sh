@@ -165,13 +165,18 @@ while read PRETRAINING; do
         echo " - Ocean checkpoint type: ${OCEAN_CKPT}"
         echo " - Priority: ${PRIORITY}"
         echo " - Cluster: ${CLUSTER} (${RETRIES} retries)"
+        echo " - Workspace: ${WORKSPACE}"
         echo " - GPUs: ${N_GPUS}"
         echo " - Shared memory: ${SHARED_MEM}"
         echo " - Override: ${OVERRIDE_ARGS}"
     fi
 
     # Validate config (use relative path)
-    python -m fme.coupled.validate_config "$CONFIG_PATH_REL" --config_type train --override $OVERRIDE_ARGS
+    # Re-tokenize OVERRIDE_ARGS via eval so single quotes in the input file group
+    # list/dict values with spaces into single argv elements (literal quotes read
+    # from the file are otherwise ignored by word-splitting).
+    eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
+    python -m fme.coupled.validate_config "$CONFIG_PATH_REL" --config_type train --override "${OVERRIDE_ARGV[@]}"
 
     # Commit config if changed (use absolute path)
     git_commit_and_push_with_dry_run "$CONFIG_PATH" "${JOB_NAME}" "$GIT_BRANCH"

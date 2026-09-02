@@ -5,6 +5,7 @@ import pathlib
 import shutil
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 import torch
 import xarray as xr
@@ -15,6 +16,7 @@ from fme.ace.stepper import StepperOverrideConfig
 from fme.ace.stepper.derived_forcings import DerivedForcingsConfig
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
+from fme.core.registry.module import ModuleSelector
 from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.config import CoupledDatasetWithOptionalOceanConfig
 from fme.coupled.data_loading.inference import (
@@ -36,7 +38,11 @@ from fme.coupled.inference.evaluator import (
     main,
 )
 from fme.coupled.stepper import CoupledStepperConfig
-from fme.coupled.test_stepper import CoupledDatasetInfoBuilder, get_stepper_config
+from fme.coupled.test_stepper import (
+    AddOneWithNoise,
+    CoupledDatasetInfoBuilder,
+    get_stepper_config,
+)
 
 DIR = pathlib.Path(__file__).parent
 
@@ -116,6 +122,8 @@ def save_coupled_stepper(
     save_standalone_component_checkpoints: bool = False,
     ocean_timedelta: str = "2D",
     atmosphere_timedelta: str = "1D",
+    ocean_builder: ModuleSelector | None = None,
+    atmosphere_builder: ModuleSelector | None = None,
 ) -> str | StandaloneComponentCheckpointsConfig:
     config = get_stepper_config(
         ocean_in_names=ocean_in_names,
@@ -127,6 +135,8 @@ def save_coupled_stepper(
         ocean_fraction_name=ocean_fraction_name,
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
+        ocean_builder=ocean_builder,
+        atmosphere_builder=atmosphere_builder,
     )
     if save_standalone_component_checkpoints:
         ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)
@@ -544,3 +554,119 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         checkpoint_path=str(stepper_path),
         mock_data=mock_data,
     )
+
+
+# names shared by the seeded-reproducibility helpers below
+_SEED_OCEAN_IN_NAMES = ["o_prog", "sst", "mask_0", "a_diag"]
+_SEED_OCEAN_OUT_NAMES = ["o_prog", "sst", "o_diag"]
+_SEED_ATMOS_IN_NAMES = ["a_prog", "surface_temperature", "ocean_fraction"]
+_SEED_ATMOS_OUT_NAMES = ["a_prog", "surface_temperature", "a_diag"]
+_SEED_N_COUPLED_STEPS = 2
+
+
+def _save_stochastic_coupled_stepper(
+    tmp_path: pathlib.Path,
+) -> tuple[str, MockCoupledData]:
+    """A coupled checkpoint whose atmosphere draws noise, and its mock data.
+
+    The noise is what makes the seed observable in the output. The ocean stays
+    deterministic, as in the coupled configurations run today.
+    """
+    dataset_info, mock_data = _create_dataset_info_for_stepper(
+        ocean_in_names=_SEED_OCEAN_IN_NAMES,
+        ocean_out_names=_SEED_OCEAN_OUT_NAMES,
+        atmos_in_names=_SEED_ATMOS_IN_NAMES,
+        atmos_out_names=_SEED_ATMOS_OUT_NAMES,
+        n_coupled_steps=_SEED_N_COUPLED_STEPS,
+        n_initial_conditions=1,
+        data_dir=tmp_path / "data",
+    )
+    checkpoint_path = save_coupled_stepper(
+        tmp_path,
+        ocean_in_names=_SEED_OCEAN_IN_NAMES,
+        ocean_out_names=_SEED_OCEAN_OUT_NAMES,
+        atmos_in_names=_SEED_ATMOS_IN_NAMES,
+        atmos_out_names=_SEED_ATMOS_OUT_NAMES,
+        dataset_info=dataset_info,
+        ocean_timedelta=mock_data.ocean.timedelta,
+        atmosphere_timedelta=mock_data.atmosphere.timedelta,
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt", config={"module": AddOneWithNoise()}
+        ),
+    )
+    assert isinstance(checkpoint_path, str)
+    return checkpoint_path, mock_data
+
+
+def _run_seeded_evaluator(
+    run_dir: pathlib.Path,
+    checkpoint_path: str,
+    mock_data: MockCoupledData,
+    seed: int | None,
+    coupled_steps_in_memory: int = 1,
+) -> np.ndarray:
+    """Run the coupled evaluator entrypoint, returning the atmosphere prognostic."""
+    run_dir.mkdir()
+    config = InferenceEvaluatorConfig(
+        experiment_dir=str(run_dir),
+        n_coupled_steps=_SEED_N_COUPLED_STEPS,
+        coupled_steps_in_memory=coupled_steps_in_memory,
+        checkpoint_path=checkpoint_path,
+        logging=LoggingConfig(
+            log_to_screen=False, log_to_file=False, log_to_wandb=True
+        ),
+        loader=InferenceDataLoaderConfig(
+            dataset=CoupledDatasetWithOptionalOceanConfig(
+                ocean=XarrayDataConfig(data_path=mock_data.ocean.data_dir),
+                atmosphere=XarrayDataConfig(data_path=mock_data.atmosphere.data_dir),
+            ),
+            start_indices=InferenceInitialConditionIndices(
+                first=0, n_initial_conditions=1, interval=1
+            ),
+        ),
+        data_writer=CoupledDataWriterConfig(
+            ocean=DataWriterConfig(
+                save_prediction_files=False, save_monthly_files=False
+            ),
+            atmosphere=DataWriterConfig(
+                save_prediction_files=True, save_monthly_files=False
+            ),
+        ),
+        seed=seed,
+    )
+    config_filename = run_dir / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+    ds = xr.open_dataset(
+        run_dir / "atmosphere" / "autoregressive_predictions.nc",
+        decode_timedelta=False,
+    )
+    return ds["a_prog"].values
+
+
+@pytest.mark.slow
+def test_evaluator_seed_reproducible(tmp_path: pathlib.Path):
+    """A seeded run is reproducible end-to-end and independent of
+    ``coupled_steps_in_memory``, and a different seed gives a different answer
+    (confirming the noise is active, so the reproducibility is not vacuous).
+    """
+    checkpoint_path, mock_data = _save_stochastic_coupled_stepper(tmp_path)
+    seed0 = _run_seeded_evaluator(tmp_path / "s0", checkpoint_path, mock_data, 0)
+    seed0_again = _run_seeded_evaluator(
+        tmp_path / "s0_again", checkpoint_path, mock_data, 0
+    )
+    seed0_chunked = _run_seeded_evaluator(
+        tmp_path / "s0_chunked",
+        checkpoint_path,
+        mock_data,
+        0,
+        coupled_steps_in_memory=_SEED_N_COUPLED_STEPS,
+    )
+    seed1 = _run_seeded_evaluator(tmp_path / "s1", checkpoint_path, mock_data, 1)
+
+    np.testing.assert_array_equal(seed0, seed0_again)
+    np.testing.assert_array_equal(seed0, seed0_chunked)
+    assert not np.allclose(seed0, seed1)

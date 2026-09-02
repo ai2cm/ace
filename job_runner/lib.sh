@@ -50,14 +50,10 @@ build_cluster_args() {
     local CLUSTER="$1"
     local WORKSPACE="${2:-}"
 
-    # Track whether a workspace was explicitly provided before applying defaults,
-    # so cluster-specific defaults only kick in when none was given.
-    local WORKSPACE_PROVIDED=true
-    if [[ -z "$WORKSPACE" ]]; then
-        WORKSPACE_PROVIDED=false
-        WORKSPACE=ai2/ace
-    fi
     if [[ "$CLUSTER" == "a100+h100" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/ace
+        fi
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
             --cluster ceres
@@ -65,14 +61,15 @@ build_cluster_args() {
             --cluster saturn
         )
     elif [[ "$CLUSTER" == "a100" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/ace
+        fi
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
             --cluster saturn
         )
     elif [[ "$CLUSTER" == "b200" ]]; then
-        # Default b200 jobs to the titan workspace, but honor an explicitly
-        # provided workspace (e.g. ai2/ace).
-        if [[ "$WORKSPACE_PROVIDED" != "true" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
             WORKSPACE=ai2/climate-titan
         fi
         CLUSTER_ARGS=(
@@ -80,6 +77,9 @@ build_cluster_args() {
             --cluster titan
         )
     elif [[ -z "$CLUSTER" || "$CLUSTER" == "h100" ]]; then
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/ace
+        fi
         # Default: h100
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
@@ -87,6 +87,9 @@ build_cluster_args() {
             --cluster jupiter
         )
     else
+        if [[ -z "$WORKSPACE" ]]; then
+            WORKSPACE=ai2/ace
+        fi
         # Specific cluster provided
         CLUSTER_ARGS=(
             --workspace "$WORKSPACE"
@@ -172,10 +175,14 @@ run_gantry_training_job() {
     local DESCRIPTION="${1:-Training job}"
     local MIN_RUNTIME="${MIN_RUNTIME:-0}"
 
-    # Build override string
-    local OVERRIDE=""
+    # Build override argv. Re-tokenize via eval so single quotes in finetuning.txt
+    # group list/dict values with spaces into single argv elements (literal quotes
+    # read from the file are otherwise ignored by word-splitting).
+    local OVERRIDE=()
     if [[ -n "${OVERRIDE_ARGS:-}" ]]; then
-        OVERRIDE="--override ${OVERRIDE_ARGS}"
+        local OVERRIDE_ARGV
+        eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
+        OVERRIDE=(--override "${OVERRIDE_ARGV[@]}")
     fi
 
     # Initialize checkpoint args if not set
@@ -209,7 +216,7 @@ run_gantry_training_job() {
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
-            -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE "$CONFIG_PATH" $OVERRIDE |
+            -- torchrun --nproc_per_node "$N_GPUS" -m $FME_MODULE "$CONFIG_PATH" "${OVERRIDE[@]}" |
             tee /dev/tty |
             sed -n 's|.*https://beaker\.org/ex/\([A-Z0-9]*\).*|\1|p'
     )
@@ -321,6 +328,75 @@ parse_dry_run_flag() {
         fi
     done
     export DRY_RUN
+}
+
+# Parse --config-dir argument from arguments
+# Sets global CONFIG_DIR_OVERRIDE variable (empty when the flag is absent)
+# Usage: parse_config_dir_arg "$@"
+parse_config_dir_arg() {
+    CONFIG_DIR_OVERRIDE=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --config-dir)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --config-dir requires a path argument" >&2
+                    exit 1
+                fi
+                CONFIG_DIR_OVERRIDE="$2"
+                shift 2
+                ;;
+            *)
+                # Unknown option - let the caller handle it
+                shift
+                ;;
+        esac
+    done
+    export CONFIG_DIR_OVERRIDE
+}
+
+# Resolve the repo-root-relative directory the config yaml is read from
+# Args: $1 = EXPERIMENT_DIR, $2 = CONFIG_SUBDIR, $3 = CONFIG_DIR_OVERRIDE (may be empty)
+# Requires REPO_ROOT, so call after init_script_environment
+# Outputs: repo-root-relative directory to stdout
+#
+# An absolute override is taken as given, a relative one is resolved against
+# REPO_ROOT, matching how <experiment_dir> is already interpreted. gantry uploads
+# the repository and runs the job from its root, so a config directory outside
+# REPO_ROOT is invisible to the job and is rejected here instead of failing on
+# the cluster.
+resolve_config_dir() {
+    local EXPERIMENT_DIR="$1"
+    local CONFIG_SUBDIR="$2"
+    local OVERRIDE="${3:-}"
+
+    if [[ -z "$OVERRIDE" ]]; then
+        echo "${EXPERIMENT_DIR}/${CONFIG_SUBDIR}"
+        return
+    fi
+
+    local CANDIDATE="$OVERRIDE"
+    if [[ "$CANDIDATE" != /* ]]; then
+        CANDIDATE="$REPO_ROOT/$CANDIDATE"
+    fi
+
+    if [[ ! -d "$CANDIDATE" ]]; then
+        echo "Error: --config-dir is not a directory: $OVERRIDE" >&2
+        exit 1
+    fi
+
+    # `cd ... && pwd -P` rather than `realpath`, which is absent on stock macOS.
+    # It also collapses ../ segments, so an override climbing out of the
+    # repository is caught by the containment check below.
+    local RESOLVED ROOT_RESOLVED
+    RESOLVED=$(cd "$CANDIDATE" && pwd -P)
+    ROOT_RESOLVED=$(cd "$REPO_ROOT" && pwd -P)
+
+    if [[ "$RESOLVED" != "$ROOT_RESOLVED"/* ]]; then
+        echo "Error: --config-dir must be inside the repository root ${ROOT_RESOLVED}; ${OVERRIDE} resolves to ${RESOLVED}" >&2
+        exit 1
+    fi
+
+    echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
 }
 
 # Print dry-run header
