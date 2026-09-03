@@ -1,0 +1,46 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# STAGE 2 LONG-TAIL VARIANT: the same four stage-1 best_ckpts as
+# ../ocean_wide_stochastic/finetuning.txt, refinetuned on a schedule with mass
+# moved off depth 1 onto 12 and 20 (mean optimised depth 3.0 -> 7.5), for 12
+# epochs instead of 40. See finetune-config-template.yaml for why.
+#
+# Runs in PARALLEL with that wave, not after it: both read the stage-1 result
+# datasets, which are finalised and immutable, so nothing here depends on the
+# ERA5-schedule jobs finishing. The variant needs its own config directory
+# because uncoupled_finetune.sh writes finetune-config.yaml into the directory
+# it reads -- launching two waves from one directory would have them clobber
+# each other's config mid-launch.
+#
+# Same four seeds as the ERA5 wave, deliberately: with the schedule as the only
+# difference and the same checkpoints underneath, the two waves are a paired
+# comparison rather than two independent screens. The ERA5 wave's plateau is
+# seed-consistent across all four, so two seeds per injection point is enough
+# to tell a real schedule effect from seed noise.
+#
+# Both rs2 seeds stay held, as in the ERA5 wave -- allblocks rs2 is still
+# pretraining, and holding bottleneck rs2 with it keeps the arms seed-balanced.
+#
+# Read on inference_piC/time_mean_norm/rmse/channel_mean, against the ERA5
+# wave's 0.077-0.098 and the deterministic ocean_wide_ohc_clip-ft baseline's
+# 0.0357-0.0372. NOT on val_piC/mean_norm/weighted_rmse/channel_mean, which is
+# single-member one-step RMSE and structurally penalises a CRPS-trained model.
+#
+# min_runtime set on every row -- the Beaker scheduler has required one since
+# 2026-08-28 and uncoupled_finetune.sh otherwise defaults it to 0.
+#
+# Stage-1 wandb ids and their final val_piC/mean/loss at epoch 75:
+#   allblocks  rs0 0yk7nnr7 0.04254 | rs1 ifui1igf 0.04261 | rs2 uajyh7lf running
+#   bottleneck rs0 c4wgztd9 0.04266 | rs1 nxvtysb5 0.04238 | rs2 cupqztpv 0.04294
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs0|ace-samudra-cm4|0yk7nnr7|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs1|ace-samudra-cm4|ifui1igf|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs2|ace-samudra-cm4||best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftlt|rs0|ace-samudra-cm4|c4wgztd9|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftlt|rs1|ace-samudra-cm4|nxvtysb5|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-bottleneck-ftlt|rs2|ace-samudra-cm4|cupqztpv|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2||3h

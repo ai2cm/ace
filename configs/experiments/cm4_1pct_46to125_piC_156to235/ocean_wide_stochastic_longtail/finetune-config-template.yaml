@@ -1,0 +1,265 @@
+# STAGE 2 LONG-TAIL VARIANT of the stochastic Samudra protocol at 1 degree.
+#
+# Identical to ../ocean_wide_stochastic in every respect except the rollout
+# schedule and max_epochs. Resumes the SAME stage-1 best_ckpts, so it reads
+# directly against that wave with the schedule as the only difference.
+#
+# Why: on the ERA5 schedule (60% 1 step) the inline-inference time-mean RMSE
+# improves 4x in epoch 1 and then flatlines for 30 epochs at ~2.3x the
+# deterministic ocean_wide_ohc_clip-ft baseline (0.083 against 0.036). Under
+# optimize_last_step_only the gradient sees ONE step's error, at the sampled
+# depth, so the model is never penalised for error accumulated ACROSS steps --
+# unlike the deterministic finetune, which backpropagates through 8 optimised
+# steps. With 60% of batches at depth 1, most updates carry no rollout
+# information at all. This variant tests whether depth is what the residual
+# time-mean bias is short of.
+#
+# Mass moves off depth 1 onto 12 and 20 ONLY; depths 2 and 4 are untouched, so
+# the comparison is single-axis. Not onto depth 4: at 5-daily stepping that is
+# 20 days, far below the timescale a 20-year time mean is sensitive to.
+#
+# optimize_last_step_only runs every non-optimized step inside torch.no_grad
+# (fme/ace/stepper/single_module.py), so peak memory is one step's backward
+# whatever the rollout length, and the gradient is TRUNCATED: the model learns
+# a calibrated one-step distribution from states its own rollout reached rather
+# than backpropagating through the rollout.
+#
+# So depth costs wall clock, not memory, and the deeper schedule needs no new
+# memory headroom: peak memory is one step's backward either way, and the ERA5
+# wave already runs depth-20 batches at 1deg (5% of them) on 4 GPUs without
+# OOM -- raising that to 20% changes the frequency, not the peak.
+#
+# Wall-clock cost, measured on this protocol's own 1deg runs (median min/epoch,
+# 4 GPUs): 32.8 at a fixed depth of 1, 50.0 on the ERA5 schedule (mean depth
+# 3.0), 79.8 for the deterministic fixed-8 finetune. Fitting the first two as
+# fixed + per-depth gives ~24 min fixed + ~8.6 min per unit of mean depth, so
+# mean depth 7.5 projects to ~89 min/epoch: ~1.8x the ERA5 schedule per epoch,
+# and at max_epochs 12 about 18 h per run against that wave's 28 h.
+#
+# As in ../ocean_wide_stochastic the stepper block is dropped:
+# uncoupled_finetune.sh merges it in from the pretraining run's saved config,
+# so masking, corrector and variable lists carry over verbatim.
+#
+# job_runner/uncoupled_finetune.sh \
+#   configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_wide_stochastic_longtail . \
+#   --coupled_stats jamesd/2026-07-15-om4-1pctco2-1deg-coupled-stats
+
+experiment_dir: /results
+evaluate_before_training: true # epoch-0 reference for the pretrained checkpoint
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 12 # not 40. On the ERA5 schedule this metric is flat from
+# epoch ~2 and 40 bought nothing after ~10, so 12 reads the schedule
+# change at ~2.5x the per-batch rollout depth for less wall clock.
+inference:
+  - name: inference_1pct
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+        # 8 ICs at 10-year spacing, 20-year rollouts tiling years 41-130
+        # (validation + training), never entering the 131-140 holdout
+        - '0041-01-01T00:00:00'
+        - '0051-01-01T00:00:00'
+        - '0061-01-01T00:00:00'
+        - '0071-01-01T00:00:00'
+        - '0081-01-01T00:00:00'
+        - '0091-01-01T00:00:00'
+        - '0101-01-01T00:00:00'
+        - '0111-01-01T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+  - name: inference_piC
+    weight: 1.0
+    n_forward_steps: 1460 # exactly 20 noleap years
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+        # 8 ICs at 10-year spacing, 20-year rollouts tiling relative years
+        # 1-90, never entering the relative-year-91+ holdout. The first IC
+        # is the store's first 5-daily snapshot.
+        - '0151-01-06T00:00:00'
+        - '0161-01-01T00:00:00'
+        - '0171-01-01T00:00:00'
+        - '0181-01-01T00:00:00'
+        - '0191-01-01T00:00:00'
+        - '0201-01-01T00:00:00'
+        - '0211-01-01T00:00:00'
+        - '0221-01-01T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+  metrics_log_dir: /results/metrics
+train_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235: 80
+    # years each, 160 total. Neither window enters its run's validation years
+    # (1pctCO2 0041-0045 and 0126-0130, piControl 0236-0240) or holdout (1pctCO2
+    # 0131-0140, piControl 0241-0350). One concat list per store, both in the
+    # same simulation order so the merged members share sample start times.
+    merge:
+    - concat:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-06T00:00:00'
+          stop_time: '0126-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+        engine: zarr
+        subset:
+          start_time: '0156-01-06T00:00:00'
+          stop_time: '0236-01-01T00:00:00'
+    - concat:
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+        engine: zarr
+        subset:
+          start_time: '0046-01-06T00:00:00'
+          stop_time: '0126-01-01T00:00:00'
+      - data_path: /climate-default
+        file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+        engine: zarr
+        subset:
+          start_time: '0156-01-06T00:00:00'
+          stop_time: '0236-01-01T00:00:00'
+validation:
+  - name: val_1pct_early
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0041-01-06T00:00:00'
+            stop_time: '0046-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0041-01-06T00:00:00'
+            stop_time: '0046-01-01T00:00:00'
+  - name: val_1pct_late
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0126-01-06T00:00:00'
+            stop_time: '0131-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0126-01-06T00:00:00'
+            stop_time: '0131-01-01T00:00:00'
+  - name: val_piC
+    evaluate_all_steps: false
+    weight: 1.0
+    loader:
+      batch_size: 16
+      num_data_workers: 8
+      dataset:
+        merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-ocean.zarr
+          engine: zarr
+          subset:
+            start_time: '0236-01-06T00:00:00'
+            stop_time: '0241-01-01T00:00:00'
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+          engine: zarr
+          subset:
+            start_time: '0236-01-06T00:00:00'
+            stop_time: '0241-01-01T00:00:00'
+optimization:
+  # The "clip" of the ocean_wide_ohc_clip arm, which passes it as an
+  # override_arg. Stated here so every arm inherits it. This is not
+  # optional at 1deg: unclipped, these runs diverge (see the report
+  # 'Gradient clipping fixes the 1deg mean-fill training failure').
+  max_grad_norm: 1.0
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  # Long-tail schedule. Mean optimised depth 7.5, against 3.0 for the ERA5
+  # schedule this forks and 2.5 for the deterministic 4-step pretrain. 0.3 is
+  # kept at depth 1 rather than 0 so the one-step distribution stage 1
+  # optimised still has an anchor.
+  n_forward_steps:
+    outcomes:
+      - steps: 1
+        probability: 0.3   # ERA5: 0.6
+      - steps: 2
+        probability: 0.2   # unchanged
+      - steps: 4
+        probability: 0.1   # unchanged
+      - steps: 12
+        probability: 0.2   # ERA5: 0.05
+      - steps: 20
+        probability: 0.2   # ERA5: 0.05
+  optimize_last_step_only: true
+  # The stage-1 objective, restated. create_finetune_config.sh merges only
+  # .stepper from the pretraining config, so stepper_training carries nothing
+  # over: stage 1 passed these as override_args, and without them here stage 2
+  # trains MSE and discards the calibration stage 1 bought. n_ensemble would
+  # default to 2 under EnsembleLoss; stated so the ensemble size is visible.
+  n_ensemble: 2
+  loss:
+    type: EnsembleLoss
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.0
+      patch_energy_score_weight: 0.1
+      patch_energy_score_size: 3
+  # Loads the stage-1 best_ckpt mounted at /ckpt.tar by uncoupled_finetune.sh.
+  # Without it the finetune trains from random init.
+  parameter_init:
+    weights_path: /ckpt.tar
