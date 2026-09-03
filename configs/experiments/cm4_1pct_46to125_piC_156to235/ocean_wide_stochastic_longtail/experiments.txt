@@ -1,0 +1,2 @@
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_stoch2-allblocks-ftlt|rs0|01M1MNA041N2KCWSN52AMH0FY6|training|best_inference_ckpt|normal|--min-runtime 8h
