@@ -46,6 +46,9 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        *,
+        in_names: list[str] | None = None,
+        out_names: list[str] | None = None,
     ):
         if len(dataset_info.all_labels) > 0:
             raise ValueError(
@@ -95,6 +98,9 @@ class SFNO_V0_1_0(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        *,
+        in_names: list[str] | None = None,
+        out_names: list[str] | None = None,
     ):
         img_shape = dataset_info.img_shape
         if len(dataset_info.all_labels) > 0:

@@ -387,6 +387,17 @@ class StepABC(abc.ABC):
         """
         pass
 
+    @property
+    def requires_time_fraction(self) -> bool:
+        """Whether this step needs the calendar position of each timestep.
+
+        Steps which condition a module on the time of year override this so
+        that the stepper computes ``StepArgs.time_fraction``. Deriving it is
+        only possible from real calendar data, so it is not computed unless a
+        step asks for it.
+        """
+        return False
+
     def set_epoch(self, epoch: int) -> None:
         """Called by the stepper at the start of each training epoch.
 

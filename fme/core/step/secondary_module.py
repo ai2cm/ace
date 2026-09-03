@@ -303,6 +303,8 @@ class SecondaryModuleStep(StepABC):
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
+            in_names=list(config.in_names),
+            out_names=list(config.out_names),
         )
         self.module = module.to(get_device())
 
@@ -315,6 +317,8 @@ class SecondaryModuleStep(StepABC):
             n_in_channels=n_in_channels,
             n_out_channels=len(all_secondary_names),
             dataset_info=dataset_info,
+            in_names=list(config.in_names),
+            out_names=list(all_secondary_names),
         )
         self.secondary_module: Module = secondary_module.to(get_device())
         self.secondary_out_packer: Packer = Packer(all_secondary_names)
@@ -327,6 +331,7 @@ class SecondaryModuleStep(StepABC):
                 config.secondary_decoder.build(
                     n_in_channels=secondary_decoder_n_in,
                     dataset_info=dataset_info,
+                    in_names=list(config.out_names),
                 ).to(get_device())
             )
         else:
@@ -445,6 +450,18 @@ class SecondaryModuleStep(StepABC):
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
+
+    @property
+    def requires_time_fraction(self) -> bool:
+        if self.module.requires_time_fraction or (
+            self.secondary_module.requires_time_fraction
+        ):
+            raise NotImplementedError(
+                "SecondaryModuleStep does not pass time_fraction to its "
+                "modules, so time-of-year conditioning is not supported here. "
+                "Use the single_module step type instead."
+            )
+        return False
 
     def train(self, mode: bool = True) -> StepABC:
         super().train(mode)

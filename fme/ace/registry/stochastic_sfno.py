@@ -47,6 +47,50 @@ def isotropic_noise(
     return isht(alm)
 
 
+class TimestepEmbedder(torch.nn.Module):
+    """Embeds a scalar into a vector with sinusoidal features and an MLP.
+
+    The DiT/GLIDE timestep embedder, used by ArchesWeather to embed calendar
+    quantities for adaptive normalization. Note that the geometric frequency
+    ladder is not periodic in the input, so a day-of-year fraction has a
+    discontinuity at the year boundary; this matches ArchesWeather.
+
+    Args:
+        hidden_size: Output dimension.
+        frequency_embedding_size: Width of the intermediate sinusoidal
+            features.
+        max_period: Longest period in the frequency ladder.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        frequency_embedding_size: int = 256,
+        max_period: int = 10000,
+    ):
+        super().__init__()
+        self.frequency_embedding_size = frequency_embedding_size
+        self.max_period = max_period
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(frequency_embedding_size, hidden_size),
+            torch.nn.SiLU(),
+            torch.nn.Linear(hidden_size, hidden_size),
+        )
+
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        half = self.frequency_embedding_size // 2
+        freqs = torch.exp(
+            -math.log(self.max_period)
+            * torch.arange(start=0, end=half, dtype=torch.float32, device=t.device)
+            / half
+        )
+        args = t[:, None].float() * freqs[None]
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        if self.frequency_embedding_size % 2:
+            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], -1)
+        return self.mlp(embedding.to(t.dtype))
+
+
 class NoiseConditionedModel(torch.nn.Module):
     """Wraps a context-based module with noise and optional label conditioning.
 
@@ -69,6 +113,10 @@ class NoiseConditionedModel(torch.nn.Module):
         inverse_sht: Optional inverse spherical harmonic transform callable.
             If provided, isotropic noise is generated via SHT; otherwise
             gaussian noise is used.
+        time_embed_dim: Dimension of the day-of-year embedding. When > 0 the
+            wrapped module is conditioned on the calendar position of the
+            step, and ``time_fraction`` becomes a required forward argument.
+            0 (default) disables calendar conditioning.
     """
 
     def __init__(
@@ -82,6 +130,7 @@ class NoiseConditionedModel(torch.nn.Module):
         inverse_sht: Callable[[torch.Tensor], torch.Tensor] | None = None,
         lmax: int = 0,
         mmax: int = 0,
+        time_embed_dim: int = 0,
     ):
         super().__init__()
         self.conditional_model = conditional_model
@@ -90,6 +139,9 @@ class NoiseConditionedModel(torch.nn.Module):
         self._inverse_sht = inverse_sht
         self._lmax = lmax
         self._mmax = mmax
+        self.time_embedder: TimestepEmbedder | None = (
+            TimestepEmbedder(time_embed_dim) if time_embed_dim > 0 else None
+        )
 
         if label_embed_dim > 0 and n_labels == 0:
             raise ValueError("label_embed_dim > 0 requires n_labels > 0")
@@ -126,9 +178,25 @@ class NoiseConditionedModel(torch.nn.Module):
             self.pos_embed = None
 
     def forward(
-        self, x: torch.Tensor, labels: torch.Tensor | None = None
+        self,
+        x: torch.Tensor,
+        labels: torch.Tensor | None = None,
+        time_fraction: torch.Tensor | None = None,
     ) -> torch.Tensor:
         x = x.reshape(-1, *x.shape[-3:])
+        if self.time_embedder is not None:
+            if time_fraction is None:
+                # Silently skipping would leave the calendar conditioning as a
+                # no-op that is invisible in the loss, so fail immediately.
+                raise ValueError(
+                    "time_fraction is required for a time-conditioned model but "
+                    "was not provided; check that the step type threads it through."
+                )
+            embedding_scalar: torch.Tensor | None = self.time_embedder(
+                time_fraction.to(device=x.device).reshape(-1)
+            )
+        else:
+            embedding_scalar = None
         if self._inverse_sht is not None:
             noise = isotropic_noise(
                 (x.shape[0], self.embed_dim),
@@ -164,7 +232,7 @@ class NoiseConditionedModel(torch.nn.Module):
         return self.conditional_model(
             x,
             Context(
-                embedding_scalar=None,
+                embedding_scalar=embedding_scalar,
                 embedding_pos=embedding_pos,
                 labels=labels,
                 noise=noise,
@@ -330,6 +398,9 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        *,
+        in_names: list[str] | None = None,
+        out_names: list[str] | None = None,
     ):
         n_labels = len(dataset_info.all_labels)
         if self.label_embed_dim > 0:

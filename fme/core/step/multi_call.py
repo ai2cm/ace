@@ -303,6 +303,10 @@ class MultiCallStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
 
+    @property
+    def requires_time_fraction(self) -> bool:
+        return self._wrapped_step.requires_time_fraction
+
     def train(self, mode: bool = True) -> StepABC:
         super().train(mode)
         self._wrapped_step.train(mode)

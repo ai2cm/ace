@@ -39,6 +39,9 @@ class SamudraBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        *,
+        in_names: list[str] | None = None,
+        out_names: list[str] | None = None,
     ):
         if len(dataset_info.all_labels) > 0:
             raise ValueError("Samudra does not support labels")
@@ -80,6 +83,9 @@ class FloeNetBuilder(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         dataset_info: DatasetInfo,
+        *,
+        in_names: list[str] | None = None,
+        out_names: list[str] | None = None,
     ):
         if not GRAPHCAST_AVAIL:
             raise ImportError("GraphCast dependencies (trimesh, rtree) not available.")
