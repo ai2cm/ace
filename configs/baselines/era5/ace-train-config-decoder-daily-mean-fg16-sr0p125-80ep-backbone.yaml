@@ -1,0 +1,396 @@
+# arg: --dataset 01M1FAC2CXBCB12S3XJC2WP2YY:/weights
+#
+# Diurnal-mean decoder stage of the stochastic ACE paper recipe: trains a
+# small secondary decoder to predict daily-mean (*_mean) surface fields --
+# time averages that evenly sample the diurnal cycle, unlike the 00Z
+# snapshots -- on top of the FROZEN paper-recipe backbone.
+#
+# Backbone: the 3-step BPTT fine-tune c8hp09jm resumed to 80 epochs (beaker
+# 01M1FAC2CDAB5SA3E7QY35FMF6, a pure resume of the BPTT stage with the whole
+# network unfrozen; best_inference_error 0.03911 -> 0.03847), restored from its
+# best_inference_ckpt.tar (the /weights dataset header above is the result
+# dataset of that resume job) via parameter_init and fully
+# frozen; the secondary decoder keeps its random init and is the only thing
+# trained. stepper.checkpoint_path cannot be used here because the model
+# gains a module relative to the donor.
+#
+# Supersedes ace-train-config-decoder-daily-mean-fg16-sr0p125.yaml (wandb
+# r6jvjl5l), which was trained on the 40-epoch backbone checkpoint
+# (01M0DVJG77ND6N2ENP8CPZ758Z); the decoder config itself is unchanged.
+#
+# The decoder (secondary_decoder) sees the backbone's outputs plus the input
+# timestep's channels (include_input_step: true, ace PR #1437), so the mean
+# over (T-24h, T] is conditioned on both bracketing states. Architecture
+# matches the backbone except embed_dim 512->128 and filter_num_groups
+# 16->4 (same 32 channels per group), and noise_embed_dim 0 (deterministic
+# decoder; ensemble spread comes from the backbone's noise).
+#
+# Loss: EnsembleLoss 0.9/0.1 CRPS/ES with weight 0 on every primary output.
+# The frozen backbone contributes no gradient anyway; zeroing keeps the
+# val-loss checkpoint selection tracking only the *_mean fields.
+#
+# Data: every loader merges two stores with identical 00Z daily time axes
+# (both 31410 steps from 1940-01-03): the 2026-08-13 regenerated store
+# supplies everything it has (including the *_mean channels), and the
+# 2026-07-24 store supplies only PRMSL and the surface stresses, which the
+# 2026-08-13 regeneration is missing (main's pipeline never carried them;
+# run 01M0GF89PP6QFJHQJR7BCM3VB4 crashed on exactly this). The 84 common
+# channels and their stats are bit-identical between the stores, so the
+# frozen backbone sees unchanged normalization. Stats are the merged
+# 2026-08-21 files (2026-08-13 stats + the 3 channels from the 2026-07-24
+# stats), read from weka directly rather than a beaker /statsdata mount.
+seed: 0
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 40
+ema:
+  decay: 0.999
+inference:
+  - n_forward_steps: 1825
+    forward_steps_in_memory: 40
+    loader:
+      start_indices:
+        times:
+          - '1996-01-01T00:00:00'
+          - '1996-02-15T00:00:00'
+          - '1996-04-01T00:00:00'
+          - '1996-05-15T00:00:00'
+          - '1996-07-01T00:00:00'
+          - '1996-08-15T00:00:00'
+          - '1996-10-01T00:00:00'
+          - '1996-11-15T00:00:00'
+      dataset:
+        merge:
+        - data_path: /climate-default/
+          file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+          engine: zarr
+        - data_path: /climate-default/
+          file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+          engine: zarr
+      num_data_workers: 4
+    aggregator:
+      histogram:
+        enabled: true
+      time_mean_reference_data: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 4
+  prefetch_factor: 2
+  dataset:
+    merge:
+    - concat:
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          stop_time: '1995-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2011-01-01'
+          stop_time: '2019-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2021-01-01'
+    - concat:
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          stop_time: '1995-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2011-01-01'
+          stop_time: '2019-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '2021-01-01'
+validation:
+  loader:
+    batch_size: 64
+    num_data_workers: 4
+    prefetch_factor: 2
+    dataset:
+      merge:
+      - data_path: /climate-default/
+        file_pattern: 2026-08-13-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '1996-01-01'
+          stop_time: '1997-12-31'
+      - data_path: /climate-default/
+        file_pattern: 2026-07-24-era5-1deg-8layer-daily-1940-2025.zarr
+        engine: zarr
+        subset:
+          start_time: '1996-01-01'
+          stop_time: '1997-12-31'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: AdamW
+  kwargs:
+    fused: true
+    weight_decay: 0.01
+stepper_training:
+  n_ensemble: 2
+  n_forward_steps: 1
+  parameter_init:
+    weights_path: /weights/training_checkpoints/best_inference_ckpt.tar
+    parameters:
+    - frozen:
+        include: ["*"]
+  loss:
+    type: EnsembleLoss
+    weights:
+      PRESsfc: 0.0
+      surface_temperature: 0.0
+      air_temperature_0: 0.0
+      air_temperature_1: 0.0
+      air_temperature_2: 0.0
+      air_temperature_3: 0.0
+      air_temperature_4: 0.0
+      air_temperature_5: 0.0
+      air_temperature_6: 0.0
+      air_temperature_7: 0.0
+      specific_total_water_0: 0.0
+      specific_total_water_1: 0.0
+      specific_total_water_2: 0.0
+      specific_total_water_3: 0.0
+      specific_total_water_4: 0.0
+      specific_total_water_5: 0.0
+      specific_total_water_6: 0.0
+      specific_total_water_7: 0.0
+      eastward_wind_0: 0.0
+      eastward_wind_1: 0.0
+      eastward_wind_2: 0.0
+      eastward_wind_3: 0.0
+      eastward_wind_4: 0.0
+      eastward_wind_5: 0.0
+      eastward_wind_6: 0.0
+      eastward_wind_7: 0.0
+      northward_wind_0: 0.0
+      northward_wind_1: 0.0
+      northward_wind_2: 0.0
+      northward_wind_3: 0.0
+      northward_wind_4: 0.0
+      northward_wind_5: 0.0
+      northward_wind_6: 0.0
+      northward_wind_7: 0.0
+      TMP2m: 0.0
+      Q2m: 0.0
+      UGRD10m: 0.0
+      VGRD10m: 0.0
+      LHTFLsfc: 0.0
+      SHTFLsfc: 0.0
+      PRATEsfc: 0.0
+      ULWRFsfc: 0.0
+      ULWRFtoa: 0.0
+      DLWRFsfc: 0.0
+      DSWRFsfc: 0.0
+      USWRFsfc: 0.0
+      USWRFtoa: 0.0
+      tendency_of_total_water_path_due_to_advection: 0.0
+      TMP850: 0.0
+      h500: 0.0
+      total_frozen_precipitation_rate: 0.0
+      PRMSL: 0.0
+      eastward_surface_stress: 0.0
+      northward_surface_stress: 0.0
+    kwargs:
+      crps_weight: 0.9
+      energy_score_weight: 0.1
+stepper:
+  step:
+    type: single_module
+    config:
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 512
+          noise_embed_dim: 32
+          noise_type: isotropic
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+          affine_norms: true
+          normalize_big_skip: true
+          filter_num_groups: 16
+          spectral_ratio: 0.125
+      secondary_decoder:
+        secondary_diagnostic_names:
+        - surface_temperature_mean
+        - TMP2m_mean
+        - Q2m_mean
+        - UGRD10m_mean
+        - VGRD10m_mean
+        - WIND10m_mean
+        - PRESsfc_mean
+        include_input_step: true
+        network:
+          type: NoiseConditionedSFNO
+          config:
+            embed_dim: 128
+            noise_embed_dim: 0
+            filter_type: linear
+            use_mlp: true
+            num_layers: 8
+            operator_type: dhconv
+            separable: false
+            spectral_layers: 3
+            spectral_transform: sht
+            affine_norms: true
+            normalize_big_skip: true
+            filter_num_groups: 4
+            spectral_ratio: 0.125
+      normalization:
+        network:
+          global_means_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/centering.nc
+          global_stds_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/scaling-full-field.nc
+        residual:
+          global_means_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/centering.nc
+          global_stds_path: /climate-default/2026-08-21-era5-1deg-8layer-daily-stats-1990-2019-merged/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        clip_frozen_precipitation: true
+        total_energy_budget_correction:
+          method: constant_temperature
+        force_positive_names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - Q2m
+        - PRATEsfc
+        - total_frozen_precipitation_rate
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+      next_step_forcing_names:
+      - DSWRFtoa
+      - global_mean_co2
+      in_names:
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      - DSWRFtoa
+      - HGTsfc
+      - global_mean_co2
+      - PRESsfc
+      - surface_temperature
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      out_names:
+      - PRESsfc
+      - surface_temperature
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+      - tendency_of_total_water_path_due_to_advection
+      - TMP850
+      - h500
+      - total_frozen_precipitation_rate
+      - PRMSL
+      - eastward_surface_stress
+      - northward_surface_stress

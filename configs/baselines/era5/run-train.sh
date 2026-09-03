@@ -243,6 +243,14 @@ run_training "ace-train-config-1-step-pretrain-daily-fg16-sr0p125-gan.yaml" \
 run_training "ace-train-config-decoder-daily-mean-fg16-sr0p125.yaml" \
   "ace2s-era5-daily-fg16-sr0p125-mean-decoder-training-rs0-v2" 4
 
+# Same decoder stage on the 80-epoch backbone (added 2026-09-03): c8hp09jm was
+# resumed 40 -> 80 epochs (beaker 01M1FAC2CDAB5SA3E7QY35FMF6, whole network
+# unfrozen), so the decoder trained on the 40-epoch checkpoint (r6jvjl5l) is
+# retrained on the new best_inference_ckpt. Launch alone:
+#   ./run-train.sh decoder-daily-mean-fg16-sr0p125-80ep
+run_training "ace-train-config-decoder-daily-mean-fg16-sr0p125-80ep-backbone.yaml" \
+  "ace2s-era5-daily-fg16-sr0p125-mean-decoder-training-80ep-backbone-rs0" 4
+
 # GAN discriminator 3-step BPTT fine-tune (added 2026-08-24): introduces
 # the discriminator at fine-tune time from the r95iprjt pretrain checkpoint
 # (no GAN during pretrain). The pretrained generator narrows the real/fake
