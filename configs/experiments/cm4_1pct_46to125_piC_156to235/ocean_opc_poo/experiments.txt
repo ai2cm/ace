@@ -6,3 +6,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # called from job_runner/uncoupled_train.sh and job_runner/uncoupled_finetune.sh).
 
 cm4_1pct_46to125_piC_156to235-ocean_opc_poo|rs0|01M1JX84G3H442MHE91VY0N802|training|best_inference_ckpt|normal|--min-runtime 8h
+
+cm4_1pct_46to125_piC_156to235-ocean_opc_poo|rs1|01M1KYGZW25NM79960W6XBJANP|training|best_inference_ckpt|normal|--min-runtime 8h
