@@ -1,4 +1,4 @@
-group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
 # Multi-step fine-tune of the ocean_wide_ohc_clip pretraining: identical recipe
 # except stepper_training.n_forward_steps 4 -> 8 and max_epochs 75 -> 10, from
@@ -13,14 +13,34 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # arm's name and would otherwise revert to unclipped), and the OHC method is
 # belt-and-braces -- it is already in the checkpoint config.
 #
-# uncoupled_finetune.sh acts only on rows whose status is exactly "train"; all
-# three seeds below are armed.
+# uncoupled_finetune.sh acts only on rows whose status is exactly "train". The
+# three MSE seeds finished 2026-08-26 and are retired to "skip"; the armed rows
+# are the L1 arm at the bottom of this file.
 
 # ocean_wide_ohc_clip -- pretraining finished at 75 epochs 2026-08-24
 # (beaker 01M0FY1SAKMGARA9QG2QE03868 / 01M0FY25WAPMPER8G4N1Y1EESP / 01M0FY2JC8QWR61KBKXY57B0J4)
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|ace-samudra-cm4|7w9qf9aj|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs0|ace-samudra-cm4|7w9qf9aj|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|ace-samudra-cm4|07fcva1p|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs1|ace-samudra-cm4|07fcva1p|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
 
-cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|ace-samudra-cm4|pjxiw906|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip-ft|rs2|ace-samudra-cm4|pjxiw906|best_ckpt|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0
+
+
+# ocean_wide_ohc_clip_mae -- the L1 arm of
+# tasks/2026-09-03-1deg-mae-finetune-ohc-clip. Identical to the MSE rows above
+# in every respect -- same three pretrained best_ckpt checkpoints, same
+# finetune-config-template.yaml, same 10 epochs at n_forward_steps 8, same
+# footprint -- except stepper_training.loss.type MSE -> L1. Reads against the
+# MSE seeds (wandb 59hmnwgv / 2mk9qcno / pxz4q8hw); evaluate_before_training
+# puts the shared pretrained epoch 0 inside each run, so the two arms have a
+# bit-identical baseline.
+#
+# min_runtime 3h (column 15, empty results_dataset in column 14): beaker has
+# required a minimum runtime since 2026-08-28 and the runner defaults it to 0.
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs0|ace-samudra-cm4|7w9qf9aj|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs1|ace-samudra-cm4|07fcva1p|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
+
+cm4_1pct_46to125_piC_156to235-ocean_wide_ohc_clip_mae-ft|rs2|ace-samudra-cm4|pjxiw906|best_ckpt|train|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.step.config.corrector.config.ocean_heat_content_correction.method='scaled_temperature' optimization.max_grad_norm=1.0 stepper_training.loss.type=L1||3h
