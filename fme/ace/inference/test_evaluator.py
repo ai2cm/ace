@@ -49,6 +49,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
@@ -85,6 +86,7 @@ def save_plus_one_stepper(
     ocean=None,
     multi_call: MultiCallConfig | None = None,
     derived_forcings: DerivedForcingsConfig | None = None,
+    corrector: AtmosphereCorrectorConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -94,6 +96,8 @@ def save_plus_one_stepper(
         normalization_names = all_names
     if derived_forcings is None:
         derived_forcings = DerivedForcingsConfig()
+    if corrector is None:
+        corrector = AtmosphereCorrectorConfig()
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -129,6 +133,7 @@ def save_plus_one_stepper(
                                         ),
                                     ),
                                     ocean=ocean,
+                                    corrector=corrector,
                                 ),
                             ),
                         ),

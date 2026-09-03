@@ -2205,6 +2205,91 @@ def test_load_stepper_with_prescribed_prognostic_override(tmp_path: pathlib.Path
     torch.testing.assert_close(output.data["var"], expected_var)
 
 
+def _predict_one_step(stepper: Stepper, value: float) -> torch.Tensor:
+    """Run one step from a constant input and return the predicted "var"."""
+    index = xr.date_range("2000", freq="6h", periods=2, use_cftime=True)
+    time = xr.DataArray(np.stack([index]), dims=["sample", "time"])
+    input_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 1, 4, 8), value).to(DEVICE)},
+        time=time.isel(time=[0]),
+        labels=None,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=1)
+    forcing_data = BatchData.new_on_device(
+        data={"var": torch.full((1, 2, 4, 8), value).to(DEVICE)},
+        time=time,
+        labels=None,
+    )
+    output, _ = stepper.predict(input_data, forcing_data)
+    return output.data["var"]
+
+
+@pytest.mark.medium_duration
+def test_load_stepper_with_disable_corrections_override(tmp_path: pathlib.Path):
+    """StepperOverrideConfig(disable_corrections=...) ablates a correction of a
+    trained checkpoint, whose corrector options are otherwise fixed.
+
+    Uses the force-positive clamp as the correction, so the effect is visible in
+    the prediction: the saved stepper adds one, so an input of -3 predicts -2,
+    which the clamp turns into 0.
+    """
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=[DimSize("grid_yt", 4), DimSize("grid_xt", 8)],
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names=["var"],
+        out_names=["var"],
+        normalization_names={"var"},
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["var"]),
+    )
+
+    stepper = load_stepper(stepper_path)
+    clamped = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(clamped, torch.zeros_like(clamped))
+
+    stepper = load_stepper(
+        stepper_path,
+        StepperOverrideConfig(disable_corrections=["force_positive_names"]),
+    )
+    unclamped = _predict_one_step(stepper, -3.0)
+    torch.testing.assert_close(unclamped, torch.full_like(unclamped, -2.0))
+    config = _get_inner_single_module_config(stepper)
+    assert config.corrector.force_positive_names == []
+
+
+@pytest.mark.medium_duration
+def test_disable_corrections_override_rejects_a_name_that_is_not_a_correction(
+    tmp_path: pathlib.Path,
+):
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=9,
+        horizontal=[DimSize("grid_yt", 4), DimSize("grid_xt", 8)],
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names=["var"],
+        out_names=["var"],
+        normalization_names={"var"},
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        corrector=AtmosphereCorrectorConfig(force_positive_names=["var"]),
+    )
+    with pytest.raises(ValueError, match="not a correction"):
+        load_stepper(
+            stepper_path,
+            StepperOverrideConfig(disable_corrections=["conserve_moisture"]),
+        )
+
+
 class _LargeLinear(torch.nn.Module):
     """Module defined at module scope so it can be pickled by torch.save."""
 

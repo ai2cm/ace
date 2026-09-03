@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, ClassVar, Self, TypeVar, final
 
 import dacite
@@ -119,6 +119,16 @@ class StepConfigABC(abc.ABC):
         step configs (e.g. multi-call) delegate to the wrapped config.
         """
 
+    @abc.abstractmethod
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        """Disable the named corrections on this step's corrector, in place.
+
+        Used for inference-time ablation of a trained checkpoint, whose corrector
+        options are otherwise fixed at training time. A step type with no
+        corrector must raise, so that naming a correction fails loudly rather
+        than silently leaving the corrections on.
+        """
+
     @property
     @abc.abstractmethod
     def allow_missing_variables(self) -> bool:
@@ -229,6 +239,10 @@ class StepSelector(StepConfigABC):
 
     def get_prescribed_prognostic_names(self) -> list[str]:
         return self._step_config_instance.get_prescribed_prognostic_names()
+
+    def disable_corrections(self, names: Sequence[str]) -> None:
+        self._step_config_instance.disable_corrections(names)
+        self.config = dataclasses.asdict(self._step_config_instance)
 
     @property
     def allow_missing_variables(self) -> bool:
