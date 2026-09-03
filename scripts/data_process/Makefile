@@ -294,10 +294,6 @@ create_ocean_data_proc_env:
 	conda run --no-capture-output -n ocean_preprocess uv pip install -r requirements-ocean.txt
 	conda run --no-capture-output -n ocean_preprocess bash ./install_ocean_emulators.sh
 
-.PHONY: cm4_trial_run_ocean_dataset_and_stats
-cm4_trial_run_ocean_dataset_and_stats:
-	./compute_ocean_dataset.sh --config configs/pre-industrial-CM4-1deg-ocean.yaml
-
 .PHONY: shield_som_c96_abrupt_4xCO2_ensemble_dataset
 shield_som_c96_abrupt4xCO2_ensemble_dataset:
 	./compute_dataset.sh --config configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-$(LAYERS).yaml
@@ -342,19 +338,27 @@ build_healpix_processing_image:
 push_healpix_image_to_beaker:
 	beaker image create --name $(HEALPIX_PROCESSING_IMAGE)-$(HEALPIX_PROCESSING_IMAGE_VERSION) $(HEALPIX_PROCESSING_IMAGE):$(HEALPIX_PROCESSING_IMAGE_VERSION)
 
+.PHONY: cm4_piControl_ocean_stats
+cm4_piControl_ocean_stats:
+	./compute_stats.sh --config configs/CM4-piControl-ocean-$(RESOLUTION)-200yr.yaml
+
+.PHONY: cm4_1pctCO2_ocean_stats
+cm4_1pctCO2_ocean_stats:
+	./compute_stats.sh --config configs/CM4-1pctCO2-ocean-$(RESOLUTION)-140yr.yaml
+
 .PHONY: create_coupled_datasets_env
 create_coupled_datasets_env:
 	conda create -y -n create_coupled_datasets python=3.11 pip
 	conda run --no-capture-output -n create_coupled_datasets python -m pip install uv
 	conda run --no-capture-output -n create_coupled_datasets uv pip install -r requirements-coupled.txt
 
-.PHONY: cm4_piControl_200yr_coupled_no_smoothing
-cm4_piControl_200yr_coupled_no_smoothing:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-200yr-coupled.yaml
+.PHONY: cm4_piControl_coupled
+cm4_piControl_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-piControl-coupled-$(RESOLUTION)-200yr.yaml
 
-.PHONY: cm4_1pctCO2_140yr_coupled_no_smoothing
-cm4_1pctCO2_140yr_coupled_no_smoothing:
-	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-140yr-coupled.yaml
+.PHONY: cm4_1pctCO2_coupled
+cm4_1pctCO2_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml configs/CM4-1pctCO2-coupled-$(RESOLUTION)-140yr.yaml
 
 .PHONY: e3smv3_piControl_100yr_coupled
 e3smv3_piControl_100yr_coupled:
