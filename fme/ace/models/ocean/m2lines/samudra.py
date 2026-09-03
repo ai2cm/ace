@@ -53,12 +53,8 @@ class Samudra(torch.nn.Module):
         is supported so far; scalar, label, and positional embeddings are not.
     conditioned_blocks : {"bottleneck", "all_blocks"}, optional
         Which ConvNeXt blocks are conditioned. ``"bottleneck"`` conditions only
-        the block at the coarsest resolution, DLESyM-Ocean's choice; note that
-        after the encoder's AvgPools that grid is 1/16 of the input, so on a
-        45x90 domain it is 2x5 cells and can only perturb the largest scales.
-        ``"all_blocks"`` conditions every block, the pattern the ACE SFNO uses,
-        which also reaches the finest scales. Required when ``context_config``
-        is given.
+        the block at the coarsest resolution. ``"all_blocks"`` conditions every block.
+        Required when ``context_config`` is given.
 
     Example:
     --------

@@ -23,22 +23,19 @@ class SamudraBuilder(ModuleConfig):
     Parameters:
         noise_embed_dim: Number of noise channels drawn and projected onto each
             conditioned block's scale and bias. Zero (the default) builds the
-            deterministic network; DLESyM-Ocean uses 32.
+            deterministic network.
         conditioned_blocks: Which ConvNeXt blocks are conditioned. Required when
             ``noise_embed_dim`` is non-zero, and must be left None (the default)
             when it is zero, where there is nothing to condition on.
-            "bottleneck" conditions only the block at the coarsest resolution;
-            after the encoder's AvgPools that grid is 1/16 of the input, so on a
-            45x90 domain it is 2x5 cells and only the largest scales can be
-            perturbed. "all_blocks" conditions every block, the pattern the ACE
-            SFNO uses, which also reaches the finest scales.
+            "bottleneck" conditions only the block at the coarsest resolution.
+            "all_blocks" conditions every block and reaches the finest scales.
         norm: Normalization used inside each ConvNeXt block. This choice
             interacts with noise conditioning, which is applied as a FiLM scale
             and bias after the norm: after "layer" norm the network can modulate
             the conditioning strength per sample, while after "instance" norm
             that strength is a learned constant, identical for every sample on
             every step. "layer" is the principled choice for a conditioned
-            network, and is the SFNO's ConditionalLayerNorm construction.
+            network.
     """
 
     ch_width: list[int] = dataclasses.field(
