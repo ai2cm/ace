@@ -173,3 +173,63 @@ cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskfw_keepssf|rs2|ski
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs0|training|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
 cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "thetao_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
+
+# ARM E -- Troy's physically-motivated fill. STAGED AT `skip`, NOT LAUNCHED.
+#
+# Arm D with thetao_ dropped from fill_value_overrides, so it falls back to
+# fill_value: mean. Requires ace PR #1458 exactly as Arm D does. ONE change from
+# Arm D, nothing else moves.
+#
+# WHY. Troy's reading of what land cells should hold, in the un-normalized space
+# the fill is applied in (input_masking.build takes step.normalizer.means, and
+# apply_input_process_func runs before the step normalizes -- so a fill value is
+# a physical value, not a normalized one):
+#   - land velocity is 0 m/s        -> uo_, vo_ at 0.0   (Arm D already does this)
+#   - land salinity is 0 psu        -> so_ at 0.0        (Arm D already does this)
+#   - land temperature is climatology -> thetao_ at mean (Arm D has 0.0: THE CHANGE)
+# sst is already mean-filled in Arm D, so this is also the consistency fix: sst
+# (in K) and thetao_0 (in degC) cover a bit-identical mask -- mask_0 IS mask_2d --
+# and Arm D fills them differently, mean for one and 0.0 for the other. thetao_0
+# is the level-0 surface temperature; sst is the surface temperature. After this
+# change all temperature is filled with its own climatology regardless of unit.
+#
+# WHAT THE EVIDENCE SAYS, AND WHERE IT CUTS AGAINST THIS ARM. At 75 epochs Arm D
+# beat 3-seed ..._fillmean_maskall on the 19-level thetao family mean by 1.7x
+# (0.0163 vs 0.0277-0.0296 on 1pct time_mean_norm/rmse), so zero-fill measurably
+# wins for thetao and this arm gives that up. Two reasons to run it anyway:
+#   - The "out-of-range marker" rationale in Arm D's block above does not hold for
+#     thetao. It is in degC, range -2.2 to 31.5 at level 0 and -0.15 to 4.33 at
+#     level 18, so 0.0 is an ORDINARY in-range ocean temperature -- at depth it is
+#     nearly the climatological mean already. Whatever zero-fill buys for thetao,
+#     it is not dryness marking, and the two options are physically much closer
+#     than the config makes them look.
+#   - Arm D's cost landed on sst: it fell back to the fill-0.0 level (1pct
+#     time_mean/rmse 0.1203 against 0.0899-0.0929 for mean-fill) even though sst
+#     itself is mean-filled in Arm D. The sst/thetao_0 fill inconsistency is the
+#     leading candidate for that, and this arm is its direct test.
+#
+# READ IT AS: against Arm D (thetao_ 0.0) and against ..._fillmean_maskall rs0/1/2
+# (everything mean). If sst recovers toward 0.090 while so_/uo_/vo_ hold their
+# Arm D gains, the physically-motivated fill is the recipe and the sst regression
+# was the inconsistency. If sst stays at 0.120 and thetao degrades to 0.028, the
+# interior wants zero-fill on its own terms and Arm D stands.
+#
+# FLUX SCOPE UNCHANGED, DELIBERATELY. Troy also suggests leaving the flux channels
+# unfilled since they are valid over land. That is a second variable and it is
+# already being measured separately: Arm C (..._fillmean_maskfw_keepssf, masks
+# only the freshwater trio and leaves radiation, sensible heat and wind stress
+# unmasked) trained to 75 epochs and its two standalone rollouts launched
+# 2026-09-03. This arm keeps maskall's scope -- all ten forcings mean-filled --
+# because maskall is the only recipe with a verified 200-yr no-collapse record and
+# an arm should fork from that changing one thing. Note the flux intuition is
+# already refuted for the freshwater trio specifically: ..._fillmean leaves all
+# ten unmasked and its 1pct so_0 was 0.758 against 0.093 for masking just the
+# trio.
+#
+# SEEDING. rs0 only; rs1/rs2 staged at `skip`, same caveat as every arm above --
+# one seed reads a ~40-60% so_0 effect and no smaller. The primary readouts here
+# (sst, the thetao family mean) have 3-5% seed CV, so they are readable at rs0.
+
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs0|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=0 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs1|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=1 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
+cm4_1pct_46to125_piC_156to235-ocean_precorr_clip_fillmean_maskall_zerodeep_meanthetao|rs2|skip|high|jupiter|4|500GiB|3|ai2/ace|seed=2 stepper.input_masking.fill_value=mean stepper.input_masking.exclude_names_and_prefixes='[land_fraction,sea_surface_fraction]' stepper.input_masking.fill_value_overrides='{"so_": 0.0, "uo_": 0.0, "vo_": 0.0, "deptho": 0.0, "hfgeou": 0.0}'
