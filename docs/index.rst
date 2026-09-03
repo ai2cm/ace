@@ -69,13 +69,13 @@ Table of contents
 
 .. toctree::
    :maxdepth: 1
-   :caption: Coupled (e.g. SamudrACE)
+   :caption: Coupled (e.g. SamudrACE):
 
    Inference <coupled>
 
 .. toctree::
    :maxdepth: 1
-   :caption: Downscaling (e.g. HiRO)
+   :caption: Downscaling (e.g. HiRO):
 
    Inference <downscaling_inference>
 
