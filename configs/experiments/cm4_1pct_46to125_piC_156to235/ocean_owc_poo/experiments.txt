@@ -4,3 +4,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # Beaker id that exists only after submission, and the job runner appends one
 # row per launched job (see append_to_experiments_file in job_runner/lib.sh,
 # called from job_runner/uncoupled_train.sh and job_runner/uncoupled_finetune.sh).
+
+cm4_1pct_46to125_piC_156to235-ocean_owc_poo|rs0|01M1JX8R8VYSAFW376757HKJM6|training|best_inference_ckpt|normal|--min-runtime 8h
