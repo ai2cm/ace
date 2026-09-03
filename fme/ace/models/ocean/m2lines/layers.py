@@ -67,40 +67,20 @@ class AvgPool(torch.nn.Module):
 class MultiResolutionFiLM(torch.nn.Module):
     """Zero-initialized conditional scale and bias driven by a conditioning field.
 
-    A FiLM layer (https://arxiv.org/abs/1709.07871) that resolves the
-    multi-resolution mismatch of a U-Net. Applied immediately after a
-    normalization layer it turns that norm into a conditional one, the same
+    A FiLM layer (https://arxiv.org/abs/1709.07871) applied immediately after a
+    normalization layer, turning that norm into a conditional one, the same
     construction ``ConditionalLayerNorm`` uses for the SFNO:
     ``x -> x * (1 + W_scale(c)) + W_bias(c)``. Both convolutions are
     zero-initialized, so an untrained model is exactly deterministic and any
-    dependence on ``c`` is learned.
-
-    Nothing here is specific to noise: ``c`` is any per-sample conditioning
-    field carried on the ``Context``. Samudra passes the noise field today.
+    dependence on ``c`` is learned. Nothing here is specific to noise: ``c`` is
+    any per-sample conditioning field carried on the ``Context``, and Samudra
+    passes the noise field today.
 
     Resolution handling is this module's other responsibility. The conditioning
-    field is supplied at the model's input resolution, while a conditioned block
-    may run at a coarser resolution inside the U-Net, so the field is
-    area-averaged onto the block's grid before projection. Area-averaging is the
-    faithful coarsening of an arbitrary field -- a subsample would take one
-    representative cell per coarse cell and discard the rest, which for a smooth
-    field simply loses information and for a noise field ties the coarse value to
-    an arbitrary corner of the fine patch.
-
-    Averaging attenuates a spatially-uncorrelated field, though: block-averaging
-    iid noise over a k-by-k window divides its standard deviation by k, which on
-    a 45x90 grid would hand the bottleneck block noise of std 0.06 and spread the
-    amplitude 17-fold across the depths that ``all_blocks`` conditions. The
-    reference implementations have no such gradient in amplitude -- the SFNO's
-    latent never changes resolution, so ``ConditionalLayerNorm`` always sees
-    std-1 noise, and DLESyM-Ocean draws its bottleneck noise at bottleneck
-    resolution. ``preserve_variance`` restores that by scaling each averaged cell
-    back up by the square root of the number of cells that went into it, exact
-    for an iid field. (The count is per cell rather than a single area ratio
-    because adaptive pooling on a non-divisible ratio builds ragged windows;
-    those windows also overlap slightly, so neighbouring coarse cells are weakly
-    correlated -- inherent to coarsening 45 rows onto 22, and far milder than
-    the corner artifact a subsample would leave.)
+    field arrives at the model's input resolution while a conditioned block may
+    run coarser inside the U-Net, so it is area-averaged onto the block's grid.
+    Under ``preserve_variance`` that average is rescaled so an iid field has the
+    same expected variance at every resolution.
 
     Parameters:
         n_channels: Width of the block being conditioned.
@@ -131,21 +111,17 @@ class MultiResolutionFiLM(torch.nn.Module):
             return conditioning
         if source[0] < target[0] or source[1] < target[1]:
             # Coarsening is well defined; refining is not, and Samudra never
-            # asks for it (the field is supplied at input resolution and every
-            # block is at or below it), so this is an invariant, not a case to
-            # handle.
+            # asks for it.
             raise ValueError(
                 f"conditioning field {source} is coarser than the block grid "
                 f"{target}; it must be at least as fine."
             )
         coarse = torch.nn.functional.adaptive_avg_pool2d(conditioning, target)
         if self.preserve_variance:
-            # Averaging n iid cells divides the standard deviation by sqrt(n),
-            # so multiplying by sqrt(n) restores it. n has to be counted per
-            # output cell, not taken as the overall area ratio: adaptive pooling
-            # on a non-divisible ratio (45 -> 22, the 4-degree grid's first
-            # AvgPool) builds ragged windows, so a single global factor leaves
-            # the field at ~0.83 of unit variance.
+            # Averaging n iid cells divides the standard deviation by sqrt(n).
+            # n is counted per output cell rather than as the overall area
+            # ratio because adaptive pooling on a non-divisible ratio builds
+            # ragged windows, so no single factor is exact everywhere.
             counts = self._window_counts(source, target, conditioning)
             coarse = coarse * torch.sqrt(counts)
         return coarse
@@ -180,18 +156,6 @@ class ConvNeXtBlock(torch.nn.Module):
     read off the ``Context`` passed to ``forward``, making the block's norms
     conditional, so it requires a normalization layer to condition (``norm`` not
     None).
-
-    Which norm it is matters. FiLM after a ``layer`` norm is the construction
-    ``ConditionalLayerNorm`` implements for the SFNO, and it is the one that
-    behaves: LayerNorm normalizes across channels, and the 1x1 projection is
-    constant per channel, so a preceding layer can raise one channel's relative
-    magnitude to make the conditioning smaller relative to the signal for that
-    sample. After ``instance`` norm -- which normalizes each channel over the
-    horizontal domain -- that escape hatch is gone: the conditioning magnitude
-    relative to the normalized signal is a learned constant, identical for every
-    sample on every step, so the block cannot modulate how strongly it is
-    conditioned. ``instance`` remains permitted, because ranking the two is an
-    open experimental question, but ``layer`` is the principled choice.
     """
 
     def __init__(

@@ -178,26 +178,19 @@ def test_released_checkpoint_still_loads():
 
     Checked against a committed manifest of the SamudrACE-E3SMv3 ocean
     checkpoint -- its builder config and the name and shape of every parameter
-    it contains -- rather than the 327 MB artifact itself. Rebuilding from the
-    recorded config and matching the resulting state_dict against the recorded
-    parameters is exactly the condition ``load_state_dict(strict=True)`` needs,
-    and it is the property that structural edits to ``ConvNeXtBlock`` (layer
-    order, container type, new submodules) break. Numerics are pinned
-    separately by ``test_samudra_output_is_unchanged``.
-
-    Unlike the ``validate_tensor`` regression files, this manifest is never
-    written by the test suite: it is derived only from the released artifact,
-    so it cannot be quietly re-derived from the code it constrains. See its
-    ``_comment`` for how to regenerate it when a new checkpoint is released.
+    -- rather than the 327 MB artifact. Matching the rebuilt state_dict against
+    the recorded parameters is the condition ``load_state_dict(strict=True)``
+    needs, and is the property structural edits to ``ConvNeXtBlock`` break;
+    numerics are pinned separately by ``test_samudra_output_is_unchanged``.
+    See the manifest's ``_comment`` for how to regenerate it.
     """
     path = os.path.join(DIR, "testdata/samudrace_e3smv3_ocean_manifest.json")
     with open(path) as f:
         manifest = json.load(f)
 
-    # goes through ModuleSelector rather than the builder directly: the
-    # checkpoint stores this config as a dict and it is deserialized with
-    # dacite(strict=True), which is its own compatibility surface -- a renamed
-    # or removed field fails here before any state dict is involved
+    # via ModuleSelector rather than the builder directly, so the
+    # dacite(strict=True) deserialization of the stored config dict -- its own
+    # compatibility surface -- is covered too
     selector = ModuleSelector(**manifest["builder"])
     module = selector.build(
         manifest["n_in_channels"],

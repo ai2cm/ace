@@ -17,28 +17,28 @@ class SamudraBuilder(ModuleConfig):
     """
     Configuration for the M2Lines Samudra architecture.
 
-    Setting ``noise_embed_dim`` above zero makes the network noise-conditioned:
-    a noise field is drawn on every forward call and supplied as conditioning
-    input to the ConvNeXt blocks named by ``conditioned_blocks``, so an ensemble
-    of members can be drawn from one input and trained against a proper scoring
-    rule. The conditioning weights are zero-initialized, so an untrained
-    noise-conditioned model is exactly deterministic and identical to the
-    unconditioned one.
+    Setting ``noise_embed_dim`` above zero makes the network noise-conditioned,
+    zero makes it deterministic.
 
     Parameters:
         noise_embed_dim: Number of noise channels drawn and projected onto each
             conditioned block's scale and bias. Zero (the default) builds the
             deterministic network; DLESyM-Ocean uses 32.
-        conditioned_blocks: Which ConvNeXt blocks are conditioned, required
-            when ``noise_embed_dim`` is non-zero and rejected otherwise.
+        conditioned_blocks: Which ConvNeXt blocks are conditioned. Required when
+            ``noise_embed_dim`` is non-zero, and must be left None (the default)
+            when it is zero, where there is nothing to condition on.
             "bottleneck" conditions only the block at the coarsest resolution;
             after the encoder's AvgPools that grid is 1/16 of the input, so on a
             45x90 domain it is 2x5 cells and only the largest scales can be
             perturbed. "all_blocks" conditions every block, the pattern the ACE
             SFNO uses, which also reaches the finest scales.
-        norm: Note that conditioning is applied as a FiLM layer after the norm,
-            which is principled after "layer" (the SFNO's ConditionalLayerNorm
-            construction) and degenerate after "instance" -- see ConvNeXtBlock.
+        norm: Normalization used inside each ConvNeXt block. This choice
+            interacts with noise conditioning, which is applied as a FiLM scale
+            and bias after the norm: after "layer" norm the network can modulate
+            the conditioning strength per sample, while after "instance" norm
+            that strength is a learned constant, identical for every sample on
+            every step. "layer" is the principled choice for a conditioned
+            network, and is the SFNO's ConditionalLayerNorm construction.
     """
 
     ch_width: list[int] = dataclasses.field(
@@ -47,7 +47,7 @@ class SamudraBuilder(ModuleConfig):
     n_layers: list[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1])
     dilation: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
     pad: str = "circular"
-    norm: str = "instance"
+    norm: Literal["batch", "instance", "layer"] = "instance"
     norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     upscale_factor: int = 4
     checkpoint_strategy: Literal["all", "simple"] | None = None

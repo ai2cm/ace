@@ -136,10 +136,8 @@ class Samudra(torch.nn.Module):
             raise ValueError("conditioned_blocks requires context_config to be set")
         self.conditioned_blocks = conditioned_blocks
 
-        # Blocks are built in this order: the num_steps encoder blocks, the
-        # bottleneck block, then the num_steps decoder blocks. `block_context`
-        # is called once per block, in that order, and hands back the context
-        # for the blocks this injection variant conditions.
+        # Called once per block in construction order: num_steps encoder
+        # blocks, the bottleneck, then num_steps decoder blocks.
         num_steps = len(self.ch_width)
         n_built = 0
 
@@ -224,8 +222,6 @@ class Samudra(torch.nn.Module):
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
 
         if n_built != 2 * num_steps + 1:
-            # a bare assert would vanish under `python -O`, and miscounting
-            # silently moves which block "bottleneck" conditions
             raise AssertionError(
                 f"built {n_built} ConvNeXt blocks, expected {2 * num_steps + 1}"
             )
